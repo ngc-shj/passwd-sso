@@ -54,49 +54,26 @@
 # Seeded via (R42 refresh, re-run at implementation start, 2026-07-04):
 #   grep -rlE '\$(queryRaw|executeRaw)(Unsafe)?\b' src scripts --include='*.ts' --include='*.tsx' \
 #     | grep -vE '\.test\.|__tests__|manual-tests|/e2e/' | sort
-# → 45 files (29 original + 6 advisory-lock TOCTOU fixes: api-keys, bridge-code,
-#   sends/file, auth-adapter, extension-token, mobile-token + 4 per-tenant
-#   advisory-lock TOCTOU fixes: operator-tokens, service-accounts, scim-tokens,
-#   mcp-clients + 6 per-scope cap advisory-lock TOCTOU fixes: tenant/webhooks,
-#   team/webhooks, audit-delivery-targets, team-attachments, reset-vault,
-#   mcp/register — see bypass-rls-tx-callback-form plan).
+# → 23 files. The 22 advisory-lock call sites that formerly inlined
+#   `pg_advisory_xact_lock` now call the shared `advisoryXactLock()` helper in
+#   src/lib/tenant-rls.ts, so those files no longer emit raw SQL and were dropped
+#   from this allowlist (the helper's raw SQL is covered by the tenant-rls.ts
+#   entry below). See bypass-rls-tx-callback-form plan.
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
-src/app/api/api-keys/route.ts # advisory lock serializing API-key creation against the per-user key cap (TOCTOU close)
-src/app/api/extension/bridge-code/route.ts # advisory lock serializing bridge-code issuance against the per-user active cap (TOCTOU close)
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
 src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw
 src/app/api/maintenance/audit-outbox-purge-failed/route.ts # operator-gated purge of FAILED outbox rows, tagged-template $queryRaw
 src/app/api/maintenance/purge-audit-logs/route.ts # operator-gated system-wide audit log purge via audit_log_purge() definer fn
-src/app/api/mcp/register/route.ts # advisory lock serializing DCR registration against the global unclaimed-client cap (TOCTOU close)
-src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts # advisory lock serializing attachment CEK rewrap against key rotation
-src/app/api/passwords/[id]/attachments/route.ts # advisory lock serializing attachment upload against key rotation
 src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
-src/app/api/sends/file/route.ts # advisory lock serializing file-send creation against the per-user active byte-quota (TOCTOU close)
-src/app/api/teams/[teamId]/passwords/[id]/attachments/route.ts # advisory lock serializing team attachment upload against the per-entry cap (TOCTOU close)
-src/app/api/teams/[teamId]/webhooks/route.ts # advisory lock serializing team webhook creation against the per-team cap (TOCTOU close)
-src/app/api/tenant/access-requests/[id]/approve/route.ts # advisory lock serializing SA token issuance against per-account token cap
-src/app/api/tenant/audit-delivery-targets/route.ts # advisory lock serializing audit-delivery-target creation against the per-tenant cap (TOCTOU close)
-src/app/api/tenant/mcp-clients/route.ts # advisory lock serializing MCP-client creation against the per-tenant cap (TOCTOU close)
-src/app/api/tenant/members/[userId]/reset-vault/route.ts # advisory lock serializing admin vault-reset creation against the per-target pending-reset cap (TOCTOU close)
-src/app/api/tenant/operator-tokens/route.ts # advisory lock serializing operator-token creation against the per-tenant cap (TOCTOU close)
-src/app/api/tenant/scim-tokens/route.ts # advisory lock serializing SCIM-token creation against the per-tenant cap (TOCTOU close)
-src/app/api/tenant/service-accounts/[id]/tokens/route.ts # advisory lock serializing SA token issuance against per-account token cap
-src/app/api/tenant/service-accounts/route.ts # advisory lock serializing service-account creation against the per-tenant cap (TOCTOU close)
-src/app/api/tenant/webhooks/route.ts # advisory lock serializing tenant webhook creation against the per-tenant cap (TOCTOU close)
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
-src/app/api/vault/rotate-key/route.ts # advisory lock preventing concurrent vault key rotations for the same user
-src/app/api/webauthn/credentials/[id]/prf/route.ts # advisory lock serializing PRF rebootstrap against key rotation
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)
 src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge
 src/lib/audit/audit-outbox.ts # bypass_rls GUC set/verify + tenant-existence check before enqueueing audit outbox rows
 src/lib/auth/policy/account-lockout.ts # row lock (FOR UPDATE) + lock_timeout for atomic failed-login counter update
-src/lib/auth/session/auth-adapter.ts # advisory lock serializing session creation against the per-user concurrent-session cap (TOCTOU close)
-src/lib/auth/tokens/extension-token.ts # advisory lock serializing extension-token issuance against the per-user active cap (TOCTOU close)
-src/lib/auth/tokens/mobile-token.ts # advisory lock serializing mobile-token issuance against the per-user active cap (TOCTOU close)
 src/lib/auth/webauthn/webauthn-authorize.ts # CAS counter update on WebAuthn credential to prevent replay/clone
 src/lib/auth/webauthn/webauthn-server.ts # CAS counter update on WebAuthn credential within caller's tx
 src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding concurrent directory sync runs

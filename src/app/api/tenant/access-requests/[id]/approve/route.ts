@@ -7,7 +7,7 @@ import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { transition, AR_STATUS, AR_ACTOR } from "@/lib/access-request/access-request-state";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -139,7 +139,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // AND the direct token-create route share this lock key) so the
       // count→create limit check cannot be raced past MAX_SA_TOKENS_PER_ACCOUNT
       // under READ COMMITTED.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${request.serviceAccountId}::text))`;
+      await advisoryXactLock(tx, request.serviceAccountId);
 
       // Enforce token limit per SA. "Active" = not revoked AND not expired,
       // matching extension/operator/SCIM token limit checks — expired-but-not-

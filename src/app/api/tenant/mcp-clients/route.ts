@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { randomBytes } from "node:crypto";
 import { hashToken } from "@/lib/crypto/crypto-server";
@@ -146,7 +146,7 @@ async function handlePOST(req: NextRequest) {
   let client;
   try {
     client = await withTenantRls(prisma, actor.tenantId, async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      await advisoryXactLock(tx, actor.tenantId);
       const count = await tx.mcpClient.count({ where: { tenantId: actor.tenantId } });
       if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
         throw new McpClientLimitError();

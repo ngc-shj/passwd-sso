@@ -71,6 +71,8 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
   BYPASS_PURPOSE: { TOKEN_LIFECYCLE: "TOKEN_LIFECYCLE" },
+  advisoryXactLock: (client: { $executeRaw: (...args: unknown[]) => unknown }, key: string) =>
+    client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}::text))`,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,

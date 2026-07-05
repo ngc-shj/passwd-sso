@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
@@ -112,7 +113,7 @@ async function handlePOST(req: NextRequest) {
   let key: { id: string; expiresAt: Date | null; createdAt: Date };
   try {
     key = await withUserTenantRls(userId, async (tenantId) => {
-      await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+      await advisoryXactLock(prisma, userId);
       const existingCount = await prisma.apiKey.count({
         where: { userId: userId, revokedAt: null },
       });

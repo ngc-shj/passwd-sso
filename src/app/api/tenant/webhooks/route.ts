@@ -10,7 +10,7 @@ import {
   AUDIT_ACTION,
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
 } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
@@ -140,7 +140,7 @@ async function handlePOST(req: NextRequest) {
   let webhook;
   try {
     webhook = await withTenantRls(prisma, actor.tenantId, async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      await advisoryXactLock(tx, actor.tenantId);
       const existingCount = await tx.tenantWebhook.count({
         where: { tenantId: actor.tenantId },
       });

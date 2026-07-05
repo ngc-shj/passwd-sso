@@ -9,7 +9,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { errorResponse, errorResponseWithMessage, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
@@ -138,7 +138,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       // Serialize concurrent token issuance for the same SA so the count→create
       // limit check cannot be raced past MAX_SA_TOKENS_PER_ACCOUNT under
       // READ COMMITTED (two issuers seeing the same pre-insert count).
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}::text))`;
+      await advisoryXactLock(tx, id);
 
       // "Active" = not revoked AND not expired, matching extension/operator/
       // SCIM token limit checks — expired-but-not-revoked tokens are unusable

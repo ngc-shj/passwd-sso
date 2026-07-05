@@ -13,7 +13,7 @@ import {
   isTenantRoleAbove,
 } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
@@ -159,7 +159,7 @@ async function handlePOST(
   let resetRecord;
   try {
     resetRecord = await withTenantRls(prisma, actor.tenantId, async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      await advisoryXactLock(tx, actor.tenantId);
       const pendingCount = await tx.adminVaultReset.count({
         where: {
           targetUserId,

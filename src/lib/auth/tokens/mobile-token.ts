@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import {
@@ -142,7 +142,7 @@ export async function issueIosToken(
   const accessRow = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
       // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+      await advisoryXactLock(tx, userId);
       // Enforce per-user active-token cap (covers BROWSER_EXTENSION + IOS_APP
       // rows; an iOS pair counts as 2 active rows). The cap is a defence
       // against issuance abuse — the host app's "one active token per device"

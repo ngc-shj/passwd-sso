@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -177,7 +178,7 @@ async function handlePOST(request: NextRequest) {
     txResult = await withUserTenantRls(userId, async () =>
       prisma.$transaction(async (tx) => {
         // Advisory lock prevents concurrent key rotations for the same user (S-17 equivalent)
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+        await advisoryXactLock(tx, userId);
 
         return applyVaultRotation(
           tx,

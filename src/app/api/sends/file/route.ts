@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import {
   createSendFileMetaSchema,
   SEND_MAX_FILE_SIZE,
@@ -210,7 +211,7 @@ async function handlePOST(req: NextRequest) {
   try {
     share = await withUserTenantRls(session.user.id, async () => {
       // Serialize concurrent file-send creation for this user (aggregate-then-create byte-quota race).
-      await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${session.user.id}::text))`;
+      await advisoryXactLock(prisma, session.user.id);
 
       const activeTotal = await prisma.passwordShare.aggregate({
         where: {

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
@@ -279,7 +279,7 @@ export function createCustomAdapter(): Adapter {
         // session cap (two concurrent sign-ins both reading count < max).
         // Advisory lock is transaction-scoped; matches the codebase idiom
         // (attachments, vault rotate-key).
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${session.userId}::text))`;
+        await advisoryXactLock(tx, session.userId);
 
         // Check tenant's concurrent session limit
         const tenant = await tx.tenant.findUnique({

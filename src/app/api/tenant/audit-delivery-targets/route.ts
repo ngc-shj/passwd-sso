@@ -8,7 +8,7 @@ import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
 } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
@@ -182,7 +182,7 @@ async function handlePOST(req: NextRequest) {
   let target;
   try {
     target = await withTenantRls(prisma, actor.tenantId, async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      await advisoryXactLock(tx, actor.tenantId);
       const existingCount = await tx.auditDeliveryTarget.count({
         where: { tenantId: actor.tenantId },
       });

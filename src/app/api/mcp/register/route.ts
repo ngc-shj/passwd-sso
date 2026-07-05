@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
@@ -143,7 +143,7 @@ async function handlePOST(req: NextRequest) {
       // read count < MAX and both create, blowing past MAX_UNCLAIMED_DCR_CLIENTS
       // (TOCTOU). A fixed key serializes all DCR registrations globally —
       // acceptable for this rate-limited anti-DoS pre-auth endpoint.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mcp-dcr-register'))`;
+      await advisoryXactLock(tx, "mcp-dcr-register");
       // Lazy cleanup: remove expired unclaimed DCR clients before counting.
       // Removes the hard dependency on dcr-cleanup-worker for cap recovery.
       await tx.mcpClient.deleteMany({

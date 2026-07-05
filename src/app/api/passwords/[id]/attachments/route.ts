@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import {
   ALLOWED_EXTENSIONS,
@@ -270,7 +271,7 @@ async function handlePOST(
         // user.keyVersion read AND attachment.create closes the TOCTOU
         // window — a rotation that commits between our read and create
         // can no longer land a stale-cekKeyVersion mode-2 row.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${session.user.id}::text))`;
+        await advisoryXactLock(tx, session.user.id);
 
         // Re-check the per-entry attachment cap under the same lock so
         // concurrent uploads cannot both pass count < MAX and both create.

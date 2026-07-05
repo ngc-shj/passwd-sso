@@ -47,7 +47,7 @@ const CAP_COMPARISON_RE =
   />=?\s*(MAX_(?!LENGTH|FILE_SIZE|BYTES|JSON|DAYS|AGE|DEPTH|EXPIRY|EXPIRES|DIMENSION|IMPORT_FOLDERS|CIDRS|BULK|ATTEMPTS|CONCURRENT_SESSIONS_(?:MIN|MAX))[A-Z_]*|[A-Z_]+_LIMIT(?:_PER_[A-Z]+)?|TOKEN_LIMIT[A-Z_]*)\b/;
 const COUNT_RE = /\.(count|aggregate)\s*\(/;
 const CREATE_RE = /\.create\s*\(/;
-const LOCK_RE = /pg_advisory_xact_lock/;
+const LOCK_RE = /pg_advisory_xact_lock|advisoryXactLock\s*\(/;
 const RLS_WRAPPER_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls\s*\(/;
 
 function walk(dir) {

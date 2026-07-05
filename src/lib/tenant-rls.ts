@@ -69,3 +69,25 @@ export async function withBypassRls<T>(
     return tenantRlsStorage.run({ tx, tenantId: null, bypass: true }, () => fn(tx));
   });
 }
+
+/**
+ * Acquire a transaction-scoped PostgreSQL advisory lock keyed by an arbitrary
+ * string. MUST be called inside an open transaction (withTenantRls /
+ * withBypassRls / prisma.$transaction) — the lock auto-releases at tx end. Used
+ * to serialize concurrent "count/aggregate → check cap → create" sequences for
+ * the same key so two requests cannot both read count < cap and both create
+ * (TOCTOU). See scripts/checks/check-count-then-create-lock.mjs.
+ *
+ * SECURITY: `key` is bound as a Prisma tagged-template parameter, so the emitted
+ * SQL is `SELECT pg_advisory_xact_lock(hashtext($1::text))` — `key` is NEVER
+ * string-concatenated into SQL and cannot inject. Extracting this single verbatim
+ * statement (previously inlined at every call site) keeps the injection-safety
+ * reasoning in one reviewed place; the emitted SQL and thus the lock identity are
+ * byte-identical to the inlined form.
+ */
+export async function advisoryXactLock(
+  client: Pick<Prisma.TransactionClient, "$executeRaw">,
+  key: string,
+): Promise<void> {
+  await client.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}::text))`;
+}

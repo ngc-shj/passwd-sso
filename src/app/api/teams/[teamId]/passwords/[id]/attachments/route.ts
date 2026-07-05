@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -226,7 +227,7 @@ async function handlePOST(
   let attachment;
   try {
     attachment = await withTeamTenantRls(teamId, async () => {
-      await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}::text))`;
+      await advisoryXactLock(prisma, id);
       const count = await prisma.attachment.count({
         where: { teamPasswordEntryId: id },
       });

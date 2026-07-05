@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
@@ -116,7 +117,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let webhook;
   try {
     webhook = await withTeamTenantRls(teamId, async (tenantId) => {
-      await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${teamId}::text))`;
+      await advisoryXactLock(prisma, teamId);
       const existingCount = await prisma.teamWebhook.count({
         where: { teamId },
       });
