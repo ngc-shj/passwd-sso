@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.65](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.64...passwd-sso-v0.4.65) (2026-07-05)
+
+
+### Features
+
+* **security:** route-policy & raw-SQL specification with CI guards ([#632](https://github.com/ngc-shj/passwd-sso/issues/632)) ([4029314](https://github.com/ngc-shj/passwd-sso/commit/40293142ad1ec7ebbf0cd56b9f7c146b6a53ae5d))
+
+
+### Bug Fixes
+
+* **docker:** patch npm-bundled sigstore to 4.1.1 (CVE-2026-48815) ([#630](https://github.com/ngc-shj/passwd-sso/issues/630)) ([1c93fd3](https://github.com/ngc-shj/passwd-sso/commit/1c93fd3dae1b6df0549d5adc5072e024634532f2))
+* **ios:** heal biometric unlock on stale cache + collapse concurrent token refreshes ([#633](https://github.com/ngc-shj/passwd-sso/issues/633)) ([bf728ef](https://github.com/ngc-shj/passwd-sso/commit/bf728ef5bcad150deb54194c3fa21aabf9441a01))
+* **maintenance:** fail-closed tenant-scoped rate limits, canonical OpenAPI host, bounded rate-limit eviction ([#629](https://github.com/ngc-shj/passwd-sso/issues/629)) ([289b5be](https://github.com/ngc-shj/passwd-sso/commit/289b5be9e6de53a5330d2b08ae7c6316a4a2638f))
+* **security:** lock DCR-consent tenant cap + broaden TOCTOU guard to findMany/updateMany/byte shapes ([#638](https://github.com/ngc-shj/passwd-sso/issues/638)) ([c279005](https://github.com/ngc-shj/passwd-sso/commit/c279005fced3540663459a0a9b41557c560654b1))
+
+
+### Code Refactoring
+
+* **security:** promote operator-gated route guards from lexical to AST matching ([#636](https://github.com/ngc-shj/passwd-sso/issues/636)) ([05d96c2](https://github.com/ngc-shj/passwd-sso/commit/05d96c2aab6f2c0e442ac9f4ba48df3ceb7196e7))
+
 ## [0.4.64](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.63...passwd-sso-v0.4.64) (2026-07-01)
 
 
