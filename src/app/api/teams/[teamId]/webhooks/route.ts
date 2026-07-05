@@ -30,6 +30,11 @@ import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE, maskUrlForDisplay } 
 
 type Params = { params: Promise<{ teamId: string }> };
 
+// Sentinel thrown inside the locked transaction when the re-checked team
+// webhook count is at the cap. Mapped to the MAX_WEBHOOKS validation error
+// outside the tx.
+class WebhookLimitError extends Error {}
+
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
     isSsrfSafeWebhookUrl,
@@ -96,47 +101,59 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   if (!result.ok) return result.response;
   const { data } = result;
 
-  // Check webhook count limit
-  const existingCount = await withTeamTenantRls(teamId, async () =>
-    prisma.teamWebhook.count({ where: { teamId } }),
-  );
-  if (existingCount >= MAX_WEBHOOKS) {
-    return validationError({
-      limit: `Maximum ${MAX_WEBHOOKS} webhooks per team`,
-    });
-  }
-
   // Pre-allocate the webhook id so the AAD can bind to it BEFORE the row is
-  // written (see C9 design — AAD includes webhookId).
+  // written (see C9 design — AAD includes webhookId). Crypto stays OUTSIDE the
+  // locked tx below.
   const webhookId = randomUUID();
   const plainSecret = randomBytes(32).toString("hex");
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
 
-  const webhook = await withTeamTenantRls(teamId, async (tenantId) => {
-    const aad = buildWebhookSecretAAD({
-      tableName: "TeamWebhook",
-      version: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
-      webhookId,
-      tenantId,
-      teamId,
-    });
-    const encrypted = encryptServerData(plainSecret, masterKey, aad);
-    return prisma.teamWebhook.create({
-      data: {
-        id: webhookId,
-        teamId,
+  // Serialize the cap check with the create under a per-team advisory lock so
+  // two concurrent POSTs cannot both read count < MAX and both create, blowing
+  // past MAX_WEBHOOKS (TOCTOU). The lock, count, and create fold into one team
+  // tenant tx via the proxy; over-limit throws a sentinel mapped outside.
+  let webhook;
+  try {
+    webhook = await withTeamTenantRls(teamId, async (tenantId) => {
+      await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${teamId}::text))`;
+      const existingCount = await prisma.teamWebhook.count({
+        where: { teamId },
+      });
+      if (existingCount >= MAX_WEBHOOKS) {
+        throw new WebhookLimitError();
+      }
+      const aad = buildWebhookSecretAAD({
+        tableName: "TeamWebhook",
+        version: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+        webhookId,
         tenantId,
-        url: data.url,
-        secretEncrypted: encrypted.ciphertext,
-        secretIv: encrypted.iv,
-        secretAuthTag: encrypted.authTag,
-        masterKeyVersion: version,
-        secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
-        events: data.events,
-      },
+        teamId,
+      });
+      const encrypted = encryptServerData(plainSecret, masterKey, aad);
+      return prisma.teamWebhook.create({
+        data: {
+          id: webhookId,
+          teamId,
+          tenantId,
+          url: data.url,
+          secretEncrypted: encrypted.ciphertext,
+          secretIv: encrypted.iv,
+          secretAuthTag: encrypted.authTag,
+          masterKeyVersion: version,
+          secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+          events: data.events,
+        },
+      });
     });
-  });
+  } catch (e) {
+    if (e instanceof WebhookLimitError) {
+      return validationError({
+        limit: `Maximum ${MAX_WEBHOOKS} webhooks per team`,
+      });
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),

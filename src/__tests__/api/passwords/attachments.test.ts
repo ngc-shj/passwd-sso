@@ -30,11 +30,14 @@ const {
   mockRateLimitCheck: vi.fn(),
 }));
 
-// Tx mock — upload now wraps user.findUnique + attachment.create in a tx.
+// Tx mock — upload now wraps the advisory lock + attachment.count cap-check +
+// user.findUnique + attachment.create in a single tx. Point the tx surface at
+// the same hoists the pre-tx setup used so existing per-test .mockResolvedValue
+// calls keep driving behavior.
 const txMock = {
   $executeRaw: mockExecuteRaw,
   user: { findUnique: mockUserFindUnique },
-  attachment: { create: mockAttachmentCreate },
+  attachment: { count: mockAttachmentCount, create: mockAttachmentCreate },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -98,6 +101,14 @@ vi.mock("@/lib/quota/resource-quotas", () => ({
 
 function createParams(id: string) {
   return { params: Promise.resolve({ id }) };
+}
+
+// Asserts the per-user advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired inside the upload tx.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
 }
 
 vi.mock("@/lib/quota/resource-quotas", () => ({
@@ -423,6 +434,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.filename).toBe("test.pdf");
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("rejects upload with malformed base64 in cekEncrypted (R19 mirror of route.test.ts) → 400", async () => {

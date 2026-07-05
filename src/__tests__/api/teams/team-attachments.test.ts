@@ -9,6 +9,7 @@ const {
   mockAttachmentFindMany,
   mockAttachmentCount,
   mockAttachmentCreate,
+  mockExecuteRaw,
   mockPutObject,
   mockDeleteObject,
   mockWithTeamTenantRls,
@@ -20,6 +21,7 @@ const {
   mockAttachmentFindMany: vi.fn(),
   mockAttachmentCount: vi.fn(),
   mockAttachmentCreate: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
@@ -47,6 +49,10 @@ vi.mock("@/lib/prisma", () => ({
       count: mockAttachmentCount,
       create: mockAttachmentCreate,
     },
+    // The cap-check + create now run under a per-entry advisory lock inside one
+    // withTeamTenantRls callback (TOCTOU fix); the route calls prisma.$executeRaw
+    // for the lock before count/create.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -116,6 +122,14 @@ function validFormFields(): Record<string, string | Blob> {
 
 const TEAM_ENTRY = { teamId: "o1", itemKeyVersion: 1, teamKeyVersion: 1, tenantId: "t1" };
 
+// Asserts the per-entry advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired inside the upload callback.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
+
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -174,6 +188,10 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
+    // Blob is stored before the locked cap-check + create; on tx failure the
+    // route calls deleteObject(...).catch(...), so deleteObject must be a Promise.
+    mockPutObject.mockResolvedValue(Buffer.from("stored"));
+    mockDeleteObject.mockResolvedValue(undefined);
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -356,6 +374,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(201);
     expect(json.filename).toBe("test.pdf");
+    expectAdvisoryLockAcquired(mockExecuteRaw);
     expect(mockAttachmentCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

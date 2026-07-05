@@ -23,6 +23,11 @@ import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
 
+// Sentinel thrown inside the locked transaction when the re-checked per-entry
+// attachment count is at the cap. Mapped to ATTACHMENT_LIMIT_EXCEEDED outside
+// the tx.
+class AttachmentLimitError extends Error {}
+
 const teamAttachmentUploadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
 function getExtension(filename: string): string {
@@ -113,15 +118,10 @@ async function handlePOST(
     return errorResponse(API_ERROR.ITEM_KEY_REQUIRED);
   }
 
-  // Check attachment count limit
-  const count = await withTeamTenantRls(teamId, async () =>
-    prisma.attachment.count({
-      where: { teamPasswordEntryId: id },
-    }),
-  );
-  if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
-    return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
-  }
+  // The per-entry attachment cap is re-checked INSIDE the advisory-locked tx
+  // below (keyed on the entry id), so two concurrent uploads to the same entry
+  // cannot both read count < MAX and both create, blowing past
+  // MAX_ATTACHMENTS_PER_ENTRY (TOCTOU).
 
   // Early rejection before buffering the multipart body into memory. Requires a
   // declared Content-Length and caps it — fail-closed on a missing header so a
@@ -219,10 +219,21 @@ async function handlePOST(
   const blobContext = { attachmentId, entryId: id, teamId };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
 
+  // Serialize the cap check with the create under a per-entry advisory lock
+  // (keyed on the entry id) so concurrent uploads to the same entry cannot both
+  // read count < MAX and both create. Blob storage above stays OUTSIDE the lock;
+  // over-limit throws a sentinel mapped to ATTACHMENT_LIMIT_EXCEEDED outside.
   let attachment;
   try {
-    attachment = await withTeamTenantRls(teamId, async () =>
-      prisma.attachment.create({
+    attachment = await withTeamTenantRls(teamId, async () => {
+      await prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${id}::text))`;
+      const count = await prisma.attachment.count({
+        where: { teamPasswordEntryId: id },
+      });
+      if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
+        throw new AttachmentLimitError();
+      }
+      return prisma.attachment.create({
         data: {
           id: attachmentId,
           filename: sanitizedFilename,
@@ -245,10 +256,13 @@ async function handlePOST(
           sizeBytes: true,
           createdAt: true,
         },
-      }),
-    );
+      });
+    });
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    if (error instanceof AttachmentLimitError) {
+      return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
+    }
     throw error;
   }
 

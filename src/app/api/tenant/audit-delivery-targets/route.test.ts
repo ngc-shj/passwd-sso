@@ -10,6 +10,7 @@ const {
   mockAuditDeliveryTargetFindMany,
   mockAuditDeliveryTargetCount,
   mockAuditDeliveryTargetCreate,
+  mockExecuteRaw,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
   mockEncryptServerData,
@@ -23,6 +24,7 @@ const {
   mockAuditDeliveryTargetFindMany: vi.fn(),
   mockAuditDeliveryTargetCount: vi.fn(),
   mockAuditDeliveryTargetCreate: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockGetCurrentMasterKeyVersion: vi.fn().mockReturnValue(1),
   mockGetMasterKeyByVersion: vi.fn(() => Buffer.alloc(32)),
   mockEncryptServerData: vi.fn().mockReturnValue({
@@ -57,6 +59,10 @@ vi.mock("@/lib/prisma", () => ({
       count: mockAuditDeliveryTargetCount,
       create: mockAuditDeliveryTargetCreate,
     },
+    // The cap-check + create now run under an advisory lock inside one
+    // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
+    // lock before count/create. The mock passes prisma as tx.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -91,6 +97,15 @@ import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { AUDIT_ACTION } from "@/lib/constants";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
+
+// Asserts the advisory lock ($executeRaw with pg_advisory_xact_lock) was
+// acquired inside the count-then-create tx. Mutation-kill: deleting the lock
+// line from the production path leaves $executeRaw uncalled with that SQL.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 const makeTargetSelectResult = (overrides: Record<string, unknown> = {}) => ({
   id: "adt-1",
@@ -371,6 +386,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     expect(json.target).not.toHaveProperty("configAuthTag");
     expect(json.target).not.toHaveProperty("masterKeyVersion");
     expect(json).not.toHaveProperty("secret");
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("calls logAuditAsync with AUDIT_DELIVERY_TARGET_CREATE", async () => {

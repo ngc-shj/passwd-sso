@@ -7,6 +7,7 @@ const {
   mockPrismaTeamPasswordEntry,
   mockPrismaAttachment,
   mockPrismaTeam,
+  mockExecuteRaw,
   MockTeamAuthError,
   mockWithTeamTenantRls,
   mockRateLimitCheck,
@@ -24,6 +25,7 @@ const {
   mockPrismaTeam: {
     findUnique: vi.fn(),
   },
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   MockTeamAuthError: class MockTeamAuthError extends Error {
     status: number;
@@ -49,6 +51,10 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
     attachment: mockPrismaAttachment,
     team: mockPrismaTeam,
+    // The cap-check + create now run under a per-entry advisory lock inside one
+    // withTeamTenantRls callback (TOCTOU fix); the route calls prisma.$executeRaw
+    // for the lock before count/create.
+    $executeRaw: mockExecuteRaw,
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
@@ -92,6 +98,15 @@ async function createFormDataRequest(
 // Valid hex strings for client-encrypted fields
 const VALID_IV = "a".repeat(24);
 const VALID_AUTH_TAG = "b".repeat(32);
+
+// Asserts the per-entry advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired inside the upload callback. Mutation-kill: deleting the lock line
+// from the production locked path leaves $executeRaw uncalled with that SQL.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => {
@@ -253,6 +268,9 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
   });
 
   it("returns 400 when attachment limit is exceeded", async () => {
+    // The cap check now runs INSIDE the advisory-locked callback, after all
+    // request validation and the blob store put — so the request must be fully
+    // valid (encryptionMode included) to reach it.
     mockPrismaAttachment.count.mockResolvedValue(20);
     const res = await POST(
       await createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
@@ -262,6 +280,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         iv: VALID_IV,
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
+        aadVersion: "1",
+        encryptionMode: "1",
       }),
       createParams("team-1", "pw-1"),
     );
@@ -393,6 +413,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       createParams("team-1", "pw-1"),
     );
     expect(res.status).toBe(201);
+    expectAdvisoryLockAcquired(mockExecuteRaw);
     expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

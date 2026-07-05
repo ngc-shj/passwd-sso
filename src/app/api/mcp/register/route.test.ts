@@ -7,6 +7,7 @@ const {
   mockPrismaDeleteMany,
   mockTxDeleteMany,
   mockWithBypassRls,
+  mockExecuteRaw,
   mockRateLimiterCheck,
   mockExtractClientIp,
   mockRateLimitKeyFromIp,
@@ -23,6 +24,7 @@ const {
     mockPrismaDeleteMany: mockDeleteMany,
     mockTxDeleteMany,
     mockWithBypassRls,
+    mockExecuteRaw: vi.fn().mockResolvedValue(1),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockExtractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
     mockRateLimitKeyFromIp: vi.fn((ip: string) => ip),
@@ -37,6 +39,10 @@ vi.mock("@/lib/prisma", () => ({
       create: mockPrismaCreate,
       deleteMany: mockPrismaDeleteMany,
     },
+    // The DCR-registration tx now acquires a fixed-key advisory lock as its
+    // first statement (tx.$executeRaw); mockWithBypassRls passes this prisma
+    // object through as tx.
+    $executeRaw: mockExecuteRaw,
     $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
       fn({
         mcpClient: {
@@ -44,6 +50,7 @@ vi.mock("@/lib/prisma", () => ({
           create: mockPrismaCreate,
           deleteMany: mockTxDeleteMany,
         },
+        $executeRaw: mockExecuteRaw,
       }),
     ),
   },
@@ -82,6 +89,16 @@ const MOCK_CREATED_CLIENT = {
   clientId: "mcpc_abcdef1234567890abcdef1234567890",
   createdAt: new Date("2024-01-01T00:00:00Z"),
 };
+
+// Asserts the fixed-key advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired. Mutation-kill: deleting the lock line from the production
+// deleteMany-count-create tx leaves $executeRaw uncalled with that SQL, so
+// this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 describe("POST /api/mcp/register", () => {
   beforeEach(() => {
@@ -126,6 +143,9 @@ describe("POST /api/mcp/register", () => {
       | undefined;
     expect(createCall?.data.clientSecretHash).toBe("");
     expect(createCall?.data.isDcr).toBe(true);
+
+    // Lock acquired before the deleteMany + count-cap-check + create (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("returns 400 with invalid_client_metadata when client_name is missing", async () => {

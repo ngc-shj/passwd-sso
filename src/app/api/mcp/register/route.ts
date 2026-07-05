@@ -138,6 +138,12 @@ async function handlePOST(req: NextRequest) {
   let client: { id: string; clientId: string; createdAt: Date };
   try {
     client = await withBypassRls(prisma, async (tx) => {
+      // Serialize the global unclaimed-DCR-client cap check with the create
+      // under a fixed-key advisory lock so concurrent registrations cannot both
+      // read count < MAX and both create, blowing past MAX_UNCLAIMED_DCR_CLIENTS
+      // (TOCTOU). A fixed key serializes all DCR registrations globally —
+      // acceptable for this rate-limited anti-DoS pre-auth endpoint.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('mcp-dcr-register'))`;
       // Lazy cleanup: remove expired unclaimed DCR clients before counting.
       // Removes the hard dependency on dcr-cleanup-worker for cap recovery.
       await tx.mcpClient.deleteMany({

@@ -89,6 +89,15 @@ function createParams(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
+// Asserts the per-user advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired inside the upload tx. Mutation-kill: deleting the lock line from
+// the production locked-tx path leaves $executeRaw uncalled with that SQL.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
+
 vi.mock("@/lib/quota/resource-quotas", () => ({
   assertQuotaAvailable: vi.fn().mockResolvedValue(undefined),
   QuotaExceededError: class extends Error {},
@@ -386,6 +395,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
       createParams("pw-1")
     );
     expect(res.status).toBe(201);
+    expectAdvisoryLockAcquired(txMock.$executeRaw);
     expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({

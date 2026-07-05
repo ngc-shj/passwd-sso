@@ -33,6 +33,11 @@ import {
 
 import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage, maskUrlForDisplay } from "@/lib/url/url-validation";
 
+// Sentinel thrown inside the locked transaction when the re-checked audit
+// delivery target count is at the cap. Mapped to the MAX_AUDIT_DELIVERY_TARGETS
+// validation error outside the tx.
+class AuditDeliveryTargetLimitError extends Error {}
+
 const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.WEBHOOK),
@@ -153,16 +158,6 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
   const { data } = result;
 
-  // Check delivery target count limit (all targets, regardless of isActive)
-  const existingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.auditDeliveryTarget.count({ where: { tenantId: actor.tenantId } }),
-  );
-  if (existingCount >= MAX_AUDIT_DELIVERY_TARGETS) {
-    return validationError({
-      limit: `Maximum ${MAX_AUDIT_DELIVERY_TARGETS} audit delivery targets per tenant`,
-    });
-  }
-
   // Pre-generate UUID so we can build AAD before DB insert
   const targetId = randomUUID();
 
@@ -170,7 +165,8 @@ async function handlePOST(req: NextRequest) {
   const { kind: _kind, ...configFields } = data;
   const configJson = JSON.stringify(configFields);
 
-  // Encrypt with AAD = targetId + tenantId (must match worker decryption)
+  // Encrypt with AAD = targetId + tenantId (must match worker decryption).
+  // Crypto stays OUTSIDE the locked tx below.
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
   const aad = Buffer.concat([
@@ -179,19 +175,40 @@ async function handlePOST(req: NextRequest) {
   ]);
   const encrypted = encryptServerData(configJson, masterKey, aad);
 
-  const target = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.auditDeliveryTarget.create({
-      data: {
-        id: targetId,
-        tenantId: actor.tenantId,
-        kind: data.kind,
-        configEncrypted: encrypted.ciphertext,
-        configIv: encrypted.iv,
-        configAuthTag: encrypted.authTag,
-        masterKeyVersion: version,
-      },
-    }),
-  );
+  // Serialize the cap check with the create under a per-tenant advisory lock so
+  // two concurrent POSTs cannot both read count < MAX and both create, blowing
+  // past MAX_AUDIT_DELIVERY_TARGETS (TOCTOU). Lock, count, and create fold into
+  // one tenant tx; over-limit throws a sentinel mapped outside.
+  let target;
+  try {
+    target = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      const existingCount = await tx.auditDeliveryTarget.count({
+        where: { tenantId: actor.tenantId },
+      });
+      if (existingCount >= MAX_AUDIT_DELIVERY_TARGETS) {
+        throw new AuditDeliveryTargetLimitError();
+      }
+      return tx.auditDeliveryTarget.create({
+        data: {
+          id: targetId,
+          tenantId: actor.tenantId,
+          kind: data.kind,
+          configEncrypted: encrypted.ciphertext,
+          configIv: encrypted.iv,
+          configAuthTag: encrypted.authTag,
+          masterKeyVersion: version,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof AuditDeliveryTargetLimitError) {
+      return validationError({
+        limit: `Maximum ${MAX_AUDIT_DELIVERY_TARGETS} audit delivery targets per tenant`,
+      });
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
