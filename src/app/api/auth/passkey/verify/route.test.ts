@@ -219,7 +219,11 @@ describe("POST /api/auth/passkey/verify", () => {
     });
     await POST(req);
 
-    expect(mockPrismaTransaction).toHaveBeenCalledOnce();
+    // Session eviction + creation now run directly on the withBypassRls
+    // callback's tx (the redundant inner $transaction was removed).
+    // Atomicity is preserved by the single bypass-RLS scope: the SSO tenant
+    // guard read plus the session mutation are the two bypass scopes.
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(2);
     expect(mockPrismaSessionDeleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
     });
@@ -534,7 +538,11 @@ describe("POST /api/auth/passkey/verify", () => {
     mockPrismaSessionFindMany.mockResolvedValue([
       { sessionToken: "old-tok-1" },
     ]);
-    mockPrismaTransaction.mockRejectedValue(new Error("tx rolled back"));
+    // The session mutation now runs directly on the withBypassRls callback's
+    // tx (inner $transaction removed). A failing tx body is simulated by a
+    // rejecting model method; the invariant is unchanged: cache invalidation
+    // must NOT run when the bypass-RLS scope throws.
+    mockPrismaSessionCreate.mockRejectedValue(new Error("tx rolled back"));
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,

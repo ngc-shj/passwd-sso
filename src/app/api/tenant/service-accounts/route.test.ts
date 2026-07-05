@@ -11,6 +11,7 @@ const {
   mockServiceAccountFindMany,
   mockServiceAccountCount,
   mockServiceAccountCreate,
+  mockExecuteRaw,
   mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -21,6 +22,7 @@ const {
   mockServiceAccountFindMany: vi.fn(),
   mockServiceAccountCount: vi.fn(),
   mockServiceAccountCreate: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockDispatchTenantWebhook: vi.fn(),
 }));
 
@@ -46,6 +48,10 @@ vi.mock("@/lib/prisma", () => ({
       count: mockServiceAccountCount,
       create: mockServiceAccountCreate,
     },
+    // The cap-check + create now run under an advisory lock inside one
+    // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
+    // lock before count/create. The withTenantRls mock passes prisma as tx.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -77,6 +83,15 @@ import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
+
+// Asserts the per-tenant advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired. Mutation-kill: deleting the lock line from the production
+// count-then-create path leaves $executeRaw uncalled with that SQL, so this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 const makeSA = (overrides: Record<string, unknown> = {}) => ({
   id: "sa-1",
@@ -158,6 +173,8 @@ describe("POST /api/tenant/service-accounts", () => {
         tenantId: "tenant-1",
       }),
     );
+    // The count-then-create runs under a per-tenant advisory lock (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("rejects when limit exceeded (MAX_SERVICE_ACCOUNTS_PER_TENANT)", async () => {

@@ -54,7 +54,11 @@
 # Seeded via (R42 refresh, re-run at implementation start, 2026-07-04):
 #   grep -rlE '\$(queryRaw|executeRaw)(Unsafe)?\b' src scripts --include='*.ts' --include='*.tsx' \
 #     | grep -vE '\.test\.|__tests__|manual-tests|/e2e/' | sort
-# → 29 files (matches plan's R42 count).
+# → 23 files. The 22 advisory-lock call sites that formerly inlined
+#   `pg_advisory_xact_lock` now call the shared `advisoryXactLock()` helper in
+#   src/lib/tenant-rls.ts, so those files no longer emit raw SQL and were dropped
+#   from this allowlist (the helper's raw SQL is covered by the tenant-rls.ts
+#   entry below). See bypass-rls-tx-callback-form plan.
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
@@ -62,15 +66,9 @@ src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verif
 src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw
 src/app/api/maintenance/audit-outbox-purge-failed/route.ts # operator-gated purge of FAILED outbox rows, tagged-template $queryRaw
 src/app/api/maintenance/purge-audit-logs/route.ts # operator-gated system-wide audit log purge via audit_log_purge() definer fn
-src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts # advisory lock serializing attachment CEK rewrap against key rotation
-src/app/api/passwords/[id]/attachments/route.ts # advisory lock serializing attachment upload against key rotation
 src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
-src/app/api/tenant/access-requests/[id]/approve/route.ts # advisory lock serializing SA token issuance against per-account token cap
-src/app/api/tenant/service-accounts/[id]/tokens/route.ts # advisory lock serializing SA token issuance against per-account token cap
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
-src/app/api/vault/rotate-key/route.ts # advisory lock preventing concurrent vault key rotations for the same user
-src/app/api/webauthn/credentials/[id]/prf/route.ts # advisory lock serializing PRF rebootstrap against key rotation
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)
 src/auth.ts # SECURITY DEFINER call to migrate audit_logs rows during tenant merge

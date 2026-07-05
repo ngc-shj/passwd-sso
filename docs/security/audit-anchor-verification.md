@@ -1,5 +1,7 @@
 # Audit Anchor Verification
 
+## Overview
+
 This document explains how customers and external auditors can independently verify the integrity
 of their audit log chain using the externally-committed anchor manifests. The design is specified
 in `docs/archive/review/audit-anchor-external-commitment-plan.md` (ADR). The manifest mechanism

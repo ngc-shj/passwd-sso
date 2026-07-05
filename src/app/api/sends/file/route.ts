@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import {
   createSendFileMetaSchema,
   SEND_MAX_FILE_SIZE,
@@ -33,6 +34,11 @@ import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 const sendFileLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 5 });
+
+// Sentinel thrown inside the locked transaction when the re-checked active
+// byte-quota would be exceeded. Mapped to SEND_STORAGE_LIMIT_EXCEEDED outside
+// the tx so the over-limit path returns a proper error response, not a 500.
+class SendStorageLimitError extends Error {}
 
 // POST /api/sends/file — Create a file Send
 async function handlePOST(req: NextRequest) {
@@ -153,33 +159,15 @@ async function handlePOST(req: NextRequest) {
   // If detected is undefined (plain-text .txt/.csv/.json with no signature),
   // we already enforced the active-content extension denylist above.
 
-  // Storage limit check and actor (tenantId) lookup are independent — run in parallel
-  const now = new Date();
-  const [activeTotal, actor] = await Promise.all([
-    withUserTenantRls(session.user.id, async () =>
-      prisma.passwordShare.aggregate({
-        where: {
-          createdById: session.user.id,
-          shareType: SHARE_TYPE.FILE,
-          revokedAt: null,
-          expiresAt: { gt: now },
-          sendSizeBytes: { not: null },
-        },
-        _sum: { sendSizeBytes: true },
-      }),
-    ),
-    withUserTenantRls(session.user.id, async () =>
-      prisma.user.findUnique({
-        where: { id: session.user.id },
-        select: { tenantId: true },
-      }),
-    ),
-  ]);
-
-  const currentTotal = activeTotal._sum.sendSizeBytes ?? 0;
-  if (currentTotal + file.size > SEND_MAX_ACTIVE_TOTAL_BYTES) {
-    return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED);
-  }
+  // Resolve the actor's tenantId first — needed as AAD for the (expensive)
+  // encryption below, which we keep OUTSIDE the locked transaction so the
+  // advisory lock is held only across aggregate+create, not crypto.
+  const actor = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenantId: true },
+    }),
+  );
   if (!actor) {
     return unauthorized();
   }
@@ -213,32 +201,65 @@ async function handlePOST(req: NextRequest) {
   // application/octet-stream anyway, so this is only used for UI display.
   const contentType = detected?.mime ?? "application/octet-stream";
 
-  const share = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordShare.create({
-      data: {
-        tokenHash,
-        shareType: SHARE_TYPE.FILE,
-        entryType: null,
-        sendName: meta.name,
-        sendFilename: filename,
-        sendContentType: contentType,
-        sendSizeBytes: file.size,
-        encryptedData: encryptedMeta.ciphertext,
-        dataIv: encryptedMeta.iv,
-        dataAuthTag: encryptedMeta.authTag,
-        encryptedFile: new Uint8Array(encryptedFile.ciphertext),
-        fileIv: encryptedFile.iv,
-        fileAuthTag: encryptedFile.authTag,
-        masterKeyVersion: encryptedMeta.masterKeyVersion,
-        expiresAt,
-        maxViews: meta.maxViews ?? null,
-        accessPasswordHash,
-        accessPasswordHashVersion,
-        createdById: session.user.id,
-        tenantId: actor.tenantId,
-      },
-    }),
-  );
+  // Serialize the byte-quota check with the create under a per-user advisory
+  // lock so two concurrent uploads cannot both read `currentTotal + size <=
+  // limit` and both create, blowing past SEND_MAX_ACTIVE_TOTAL_BYTES. The
+  // aggregate is (re-)run inside the locked tx immediately before the create;
+  // the expensive encryption above stays outside so the lock is held only
+  // across aggregate+create.
+  let share: { id: string; expiresAt: Date };
+  try {
+    share = await withUserTenantRls(session.user.id, async () => {
+      // Serialize concurrent file-send creation for this user (aggregate-then-create byte-quota race).
+      await advisoryXactLock(prisma, session.user.id);
+
+      const activeTotal = await prisma.passwordShare.aggregate({
+        where: {
+          createdById: session.user.id,
+          shareType: SHARE_TYPE.FILE,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+          sendSizeBytes: { not: null },
+        },
+        _sum: { sendSizeBytes: true },
+      });
+      const currentTotal = activeTotal._sum.sendSizeBytes ?? 0;
+      if (currentTotal + file.size > SEND_MAX_ACTIVE_TOTAL_BYTES) {
+        throw new SendStorageLimitError();
+      }
+
+      return prisma.passwordShare.create({
+        data: {
+          tokenHash,
+          shareType: SHARE_TYPE.FILE,
+          entryType: null,
+          sendName: meta.name,
+          sendFilename: filename,
+          sendContentType: contentType,
+          sendSizeBytes: file.size,
+          encryptedData: encryptedMeta.ciphertext,
+          dataIv: encryptedMeta.iv,
+          dataAuthTag: encryptedMeta.authTag,
+          encryptedFile: new Uint8Array(encryptedFile.ciphertext),
+          fileIv: encryptedFile.iv,
+          fileAuthTag: encryptedFile.authTag,
+          masterKeyVersion: encryptedMeta.masterKeyVersion,
+          expiresAt,
+          maxViews: meta.maxViews ?? null,
+          accessPasswordHash,
+          accessPasswordHashVersion,
+          createdById: session.user.id,
+          tenantId: actor.tenantId,
+        },
+        select: { id: true, expiresAt: true },
+      });
+    });
+  } catch (e) {
+    if (e instanceof SendStorageLimitError) {
+      return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED);
+    }
+    throw e;
+  }
 
   // Audit log
   await logAuditAsync({

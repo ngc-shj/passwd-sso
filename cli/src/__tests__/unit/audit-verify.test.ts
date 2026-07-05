@@ -95,14 +95,21 @@ const {
 
 describe("auditVerifyCommand", () => {
   let tmpDir: string;
+  let stderrSilence: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), "audit-verify-test-"));
+    // Silence the intentional "--tag-secret on the command line" runtime WARN
+    // by default: several tests exercise the CLI tag-secret path only to reach
+    // downstream validation, and would otherwise leak that warning to the test
+    // console. Tests that assert ON the warning install their own spy, which
+    // shadows this one for their scope.
+    stderrSilence = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     vi.clearAllMocks();
   });
 
   afterEach(() => {
-    // Cleanup temp files created during tests
+    stderrSilence.mockRestore();
   });
 
   describe("tag-secret-file mode 0644 rejected (closes TF4)", () => {

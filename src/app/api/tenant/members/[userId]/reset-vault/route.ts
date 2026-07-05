@@ -13,7 +13,7 @@ import {
   isTenantRoleAbove,
 } from "@/lib/auth/access/tenant-auth";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
@@ -32,6 +32,10 @@ import {
 } from "@/lib/vault/admin-reset-eligibility";
 
 export const runtime = "nodejs";
+
+// Sentinel thrown inside the locked transaction when the re-checked pending
+// reset count is at the cap. Mapped to a 429 outside the tx.
+class PendingResetLimitError extends Error {}
 
 const adminResetLimiter = createRateLimiter({
   windowMs: MS_PER_DAY,
@@ -134,24 +138,9 @@ async function handlePOST(
     return rateLimited(retryAfterMs);
   }
 
-  // Check pending resets limit
-  const pendingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.adminVaultReset.count({
-      where: {
-        targetUserId,
-        executedAt: null,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-    }),
-  );
-
-  if (pendingCount >= MAX_PENDING_RESETS) {
-    return rateLimited();
-  }
-
   // Pre-allocate the reset id so it can be bound into the encrypted token's
-  // AAD before insert.
+  // AAD before insert. Token generation + encryption stay OUTSIDE the locked
+  // tx below.
   const id = randomUUID();
   const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -163,21 +152,45 @@ async function handlePOST(
     targetEmailAtInitiate,
   });
 
-  const resetRecord = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.adminVaultReset.create({
-      data: {
-        id,
-        tenantId: actor.tenantId,
-        teamId: null,
-        targetUserId,
-        initiatedById: session.user.id,
-        tokenHash,
-        encryptedToken,
-        targetEmailAtInitiate,
-        expiresAt,
-      },
-    }),
-  );
+  // Serialize the pending-count check with the create under a per-tenant
+  // advisory lock so two concurrent POSTs cannot both read count < MAX and both
+  // create, blowing past MAX_PENDING_RESETS (TOCTOU). Lock, count, and create
+  // fold into one tenant tx; over-limit throws a sentinel mapped to 429 outside.
+  let resetRecord;
+  try {
+    resetRecord = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await advisoryXactLock(tx, actor.tenantId);
+      const pendingCount = await tx.adminVaultReset.count({
+        where: {
+          targetUserId,
+          executedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      });
+      if (pendingCount >= MAX_PENDING_RESETS) {
+        throw new PendingResetLimitError();
+      }
+      return tx.adminVaultReset.create({
+        data: {
+          id,
+          tenantId: actor.tenantId,
+          teamId: null,
+          targetUserId,
+          initiatedById: session.user.id,
+          tokenHash,
+          encryptedToken,
+          targetEmailAtInitiate,
+          expiresAt,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof PendingResetLimitError) {
+      return rateLimited();
+    }
+    throw e;
+  }
 
   // Audit log — keep `expiresAt` so the audit row is self-contained for
   // compliance queries (F23). State (`pending_approval`) is implicit in

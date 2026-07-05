@@ -224,7 +224,10 @@ describe("DELETE /api/user/mcp-tokens", () => {
 
     expect(status).toBe(200);
     expect(json.revokedCount).toBe(0);
-    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    // The revoke body now runs directly inside the withBypassRls scope
+    // (redundant inner $transaction removed); atomicity is still asserted
+    // by requiring exactly one bypass-RLS scope.
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
     expect(mockMcpAccessTokenUpdateMany).not.toHaveBeenCalled();
   });
 

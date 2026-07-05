@@ -181,7 +181,7 @@ export async function runDirectorySync(
       preCheck.lastSyncAt < staleThreshold;
 
     const updated = await withTenantRls(prisma, tenantId, (tx) =>
-      prisma.$executeRaw`
+      tx.$executeRaw`
         UPDATE "directory_sync_configs"
         SET status = 'RUNNING'::"DirectorySyncStatus",
             "last_sync_at" = ${startedAt}
@@ -409,134 +409,132 @@ export async function runDirectorySync(
 
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
-      await withTenantRls(prisma, tenantId, (tx) =>
-        prisma.$transaction(async (tx) => {
-          // Create new users
-          // Batch pre-fetch: all users by email for toCreate
-          const createEmails = toCreate.map((pu) => pu.email.toLowerCase());
-          const existingUsers = await tx.user.findMany({
-            where: { email: { in: createEmails, mode: "insensitive" } },
-            select: { id: true, email: true },
-          });
-          const userByEmail = new Map(existingUsers.map((u) => [u.email!.toLowerCase(), u]));
+      await withTenantRls(prisma, tenantId, async (tx) => {
+        // Create new users
+        // Batch pre-fetch: all users by email for toCreate
+        const createEmails = toCreate.map((pu) => pu.email.toLowerCase());
+        const existingUsers = await tx.user.findMany({
+          where: { email: { in: createEmails, mode: "insensitive" } },
+          select: { id: true, email: true },
+        });
+        const userByEmail = new Map(existingUsers.map((u) => [u.email!.toLowerCase(), u]));
 
-          // Create missing users individually (need IDs back)
-          for (const pu of toCreate) {
-            const emailKey = pu.email.toLowerCase();
-            if (!userByEmail.has(emailKey)) {
-              const newUser = await tx.user.create({
-                data: { tenantId, email: pu.email, name: pu.displayName },
-              });
-              userByEmail.set(emailKey, newUser);
-            }
-          }
-
-          // Batch pre-fetch: tenantMembers for all users in toCreate
-          const allUserIds = toCreate.map((pu) => userByEmail.get(pu.email.toLowerCase())!.id);
-          const existingTenantMembers = await tx.tenantMember.findMany({
-            where: { tenantId, userId: { in: allUserIds } },
-            select: { id: true, userId: true, deactivatedAt: true },
-          });
-          const tmByUserId = new Map(existingTenantMembers.map((m) => [m.userId, m]));
-
-          // Process each user: create/reactivate tenantMember + upsert mapping
-          for (const pu of toCreate) {
-            const user = userByEmail.get(pu.email.toLowerCase())!;
-            const existing = tmByUserId.get(user.id);
-
-            if (!existing) {
-              await tx.tenantMember.create({
-                data: {
-                  tenantId,
-                  userId: user.id,
-                  role: TENANT_ROLE.MEMBER,
-                  deactivatedAt: pu.active ? null : new Date(),
-                  scimManaged: true,
-                  provisioningSource: "SCIM",
-                  lastScimSyncedAt: new Date(),
-                },
-              });
-            } else if (existing.deactivatedAt && pu.active) {
-              // Reactivate
-              await tx.tenantMember.update({
-                where: { id: existing.id },
-                data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
-              });
-            }
-
-            // Create or update external mapping
-            await tx.scimExternalMapping.upsert({
-              where: {
-                tenantId_externalId_resourceType: {
-                  tenantId,
-                  externalId: pu.externalId,
-                  resourceType: "User",
-                },
-              },
-              create: {
-                tenantId,
-                externalId: pu.externalId,
-                resourceType: "User",
-                internalId: user.id,
-              },
-              update: {
-                internalId: user.id,
-              },
+        // Create missing users individually (need IDs back)
+        for (const pu of toCreate) {
+          const emailKey = pu.email.toLowerCase();
+          if (!userByEmail.has(emailKey)) {
+            const newUser = await tx.user.create({
+              data: { tenantId, email: pu.email, name: pu.displayName },
             });
-
-            usersCreated++;
+            userByEmail.set(emailKey, newUser);
           }
+        }
 
-          // Update existing users
-          for (const { user: pu, internalId } of toUpdate) {
-            const member = memberByUserId.get(internalId);
-            if (!member) continue;
+        // Batch pre-fetch: tenantMembers for all users in toCreate
+        const allUserIds = toCreate.map((pu) => userByEmail.get(pu.email.toLowerCase())!.id);
+        const existingTenantMembers = await tx.tenantMember.findMany({
+          where: { tenantId, userId: { in: allUserIds } },
+          select: { id: true, userId: true, deactivatedAt: true },
+        });
+        const tmByUserId = new Map(existingTenantMembers.map((m) => [m.userId, m]));
 
-            await tx.user.update({
-              where: { id: internalId },
-              data: { name: pu.displayName },
-            });
+        // Process each user: create/reactivate tenantMember + upsert mapping
+        for (const pu of toCreate) {
+          const user = userByEmail.get(pu.email.toLowerCase())!;
+          const existing = tmByUserId.get(user.id);
 
-            // OWNER protection: skip deactivation for OWNER role
-            if (member.role === TENANT_ROLE.OWNER && !pu.active) {
-              usersUpdated++;
-              continue;
-            }
-
-            await tx.tenantMember.update({
-              where: { id: member.id },
+          if (!existing) {
+            await tx.tenantMember.create({
               data: {
+                tenantId,
+                userId: user.id,
+                role: TENANT_ROLE.MEMBER,
                 deactivatedAt: pu.active ? null : new Date(),
+                scimManaged: true,
+                provisioningSource: "SCIM",
                 lastScimSyncedAt: new Date(),
               },
             });
+          } else if (existing.deactivatedAt && pu.active) {
+            // Reactivate
+            await tx.tenantMember.update({
+              where: { id: existing.id },
+              data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
+            });
+          }
 
+          // Create or update external mapping
+          await tx.scimExternalMapping.upsert({
+            where: {
+              tenantId_externalId_resourceType: {
+                tenantId,
+                externalId: pu.externalId,
+                resourceType: "User",
+              },
+            },
+            create: {
+              tenantId,
+              externalId: pu.externalId,
+              resourceType: "User",
+              internalId: user.id,
+            },
+            update: {
+              internalId: user.id,
+            },
+          });
+
+          usersCreated++;
+        }
+
+        // Update existing users
+        for (const { user: pu, internalId } of toUpdate) {
+          const member = memberByUserId.get(internalId);
+          if (!member) continue;
+
+          await tx.user.update({
+            where: { id: internalId },
+            data: { name: pu.displayName },
+          });
+
+          // OWNER protection: skip deactivation for OWNER role
+          if (member.role === TENANT_ROLE.OWNER && !pu.active) {
             usersUpdated++;
+            continue;
           }
 
-          // Deactivate users no longer in provider (batch, OWNER-safe)
-          if (toDeactivate.length > 0) {
-            const memberIds = toDeactivate
-              .map((userId) => memberByUserId.get(userId)?.id)
-              .filter((id): id is string => id != null);
+          await tx.tenantMember.update({
+            where: { id: member.id },
+            data: {
+              deactivatedAt: pu.active ? null : new Date(),
+              lastScimSyncedAt: new Date(),
+            },
+          });
 
-            if (memberIds.length > 0) {
-              const result = await tx.tenantMember.updateMany({
-                where: {
-                  id: { in: memberIds },
-                  tenantId,
-                  role: { not: TENANT_ROLE.OWNER },
-                },
-                data: {
-                  deactivatedAt: new Date(),
-                  lastScimSyncedAt: new Date(),
-                },
-              });
-              usersDeactivated = result.count;
-            }
+          usersUpdated++;
+        }
+
+        // Deactivate users no longer in provider (batch, OWNER-safe)
+        if (toDeactivate.length > 0) {
+          const memberIds = toDeactivate
+            .map((userId) => memberByUserId.get(userId)?.id)
+            .filter((id): id is string => id != null);
+
+          if (memberIds.length > 0) {
+            const result = await tx.tenantMember.updateMany({
+              where: {
+                id: { in: memberIds },
+                tenantId,
+                role: { not: TENANT_ROLE.OWNER },
+              },
+              data: {
+                deactivatedAt: new Date(),
+                lastScimSyncedAt: new Date(),
+              },
+            });
+            usersDeactivated = result.count;
           }
-        }),
-      );
+        }
+      });
     } else {
       // Dry run: count what would happen
       usersCreated = toCreate.length;

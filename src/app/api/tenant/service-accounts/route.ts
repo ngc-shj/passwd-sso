@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -22,6 +22,11 @@ const saCreateLimiter = createRateLimiter({
   max: 10,
   failClosedOnRedisError: true,
 });
+
+// Sentinel thrown inside the locked transaction when the re-checked active
+// service-account count is at the cap. Mapped to SA_LIMIT_EXCEEDED outside
+// the tx.
+class ServiceAccountLimitError extends Error {}
 
 export const runtime = "nodejs";
 
@@ -100,19 +105,23 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, serviceAccountCreateSchema);
   if (!result.ok) return result.response;
 
-  const count = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.serviceAccount.count({
-      where: { tenantId: actor.tenantId, isActive: true },
-    }),
-  );
-  if (count >= MAX_SERVICE_ACCOUNTS_PER_TENANT) {
-    return errorResponse(API_ERROR.SA_LIMIT_EXCEEDED);
-  }
-
+  // Serialize the cap check with the create under a per-tenant advisory lock so
+  // two concurrent POSTs cannot both read count < MAX and both create, blowing
+  // past MAX_SERVICE_ACCOUNTS_PER_TENANT (TOCTOU). Lock, count, and create fold
+  // into one tenant tx; over-limit throws a sentinel mapped outside. The lock
+  // guards the count cap only — the (tenantId, name) unique constraint is
+  // orthogonal and still surfaces as P2002 → SA_NAME_CONFLICT below.
   let sa;
   try {
-    sa = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-      tx.serviceAccount.create({
+    sa = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await advisoryXactLock(tx, actor.tenantId);
+      const count = await tx.serviceAccount.count({
+        where: { tenantId: actor.tenantId, isActive: true },
+      });
+      if (count >= MAX_SERVICE_ACCOUNTS_PER_TENANT) {
+        throw new ServiceAccountLimitError();
+      }
+      return tx.serviceAccount.create({
         data: {
           tenantId: actor.tenantId,
           name: result.data.name,
@@ -131,9 +140,12 @@ async function handlePOST(req: NextRequest) {
           updatedAt: true,
           createdBy: { select: { id: true, name: true, email: true } },
         },
-      }),
-    );
+      });
+    });
   } catch (err) {
+    if (err instanceof ServiceAccountLimitError) {
+      return errorResponse(API_ERROR.SA_LIMIT_EXCEEDED);
+    }
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"

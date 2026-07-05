@@ -42,7 +42,7 @@ async function handlePOST(
   // Atomic compare-and-swap: only transitions a still-PENDING row.
   const transitionResult = await withBypassRls(prisma, async (tx) =>
     transition({
-      db: prisma,
+      db: tx,
       where: { id, granteeEmail: grant.granteeEmail },
       to: EA_STATUS.REJECTED,
       actor: EA_ACTOR.GRANTEE,

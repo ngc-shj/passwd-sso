@@ -67,34 +67,32 @@ async function handlePOST(
   // creates the escrow key pair if the transition actually fired. Wrapping
   // both writes in $transaction ensures the key pair never exists for a
   // grant whose status was already moved by a concurrent request.
-  const txResult = await withBypassRls(prisma, async (tx) =>
-    prisma.$transaction(async (tx) => {
-      // C6 (early-return variant): if transition() reports !ok, the surrounding
-      // tx commits but nothing follows the early return inside this callback,
-      // so the post-CAS keyPair.create is correctly gated. Equivalent to throw
-      // for atomicity purposes — see deviation log §C6 alternative pattern.
-      const transitionResult = await transition({
-        db: tx,
-        where: { id, granteeEmail: grant.granteeEmail },
-        to: EA_STATUS.ACCEPTED,
-        actor: EA_ACTOR.GRANTEE,
-        extraData: { granteeId: session.user.id, granteePublicKey },
-      });
-      if (!transitionResult.ok) {
-        return { ok: false as const };
-      }
-      await tx.emergencyAccessKeyPair.create({
-        data: {
-          grantId: id,
-          tenantId: grant.tenantId,
-          encryptedPrivateKey: encryptedPrivateKey.ciphertext,
-          privateKeyIv: encryptedPrivateKey.iv,
-          privateKeyAuthTag: encryptedPrivateKey.authTag,
-        },
-      });
-      return { ok: true as const };
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  const txResult = await withBypassRls(prisma, async (tx) => {
+    // C6 (early-return variant): if transition() reports !ok, the surrounding
+    // tx commits but nothing follows the early return inside this callback,
+    // so the post-CAS keyPair.create is correctly gated. Equivalent to throw
+    // for atomicity purposes — see deviation log §C6 alternative pattern.
+    const transitionResult = await transition({
+      db: tx,
+      where: { id, granteeEmail: grant.granteeEmail },
+      to: EA_STATUS.ACCEPTED,
+      actor: EA_ACTOR.GRANTEE,
+      extraData: { granteeId: session.user.id, granteePublicKey },
+    });
+    if (!transitionResult.ok) {
+      return { ok: false as const };
+    }
+    await tx.emergencyAccessKeyPair.create({
+      data: {
+        grantId: id,
+        tenantId: grant.tenantId,
+        encryptedPrivateKey: encryptedPrivateKey.ciphertext,
+        privateKeyIv: encryptedPrivateKey.iv,
+        privateKeyAuthTag: encryptedPrivateKey.authTag,
+      },
+    });
+    return { ok: true as const };
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!txResult.ok) {
     return errorResponse(API_ERROR.GRANT_NOT_PENDING);

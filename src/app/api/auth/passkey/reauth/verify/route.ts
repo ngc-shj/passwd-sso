@@ -69,26 +69,25 @@ async function handlePOST(req: NextRequest) {
   const verifiedAt = new Date();
   const verification = await withBypassRls(
     prisma,
-    (tx) =>
-      prisma.$transaction(async (tx) => {
-        const assertion = await verifyAuthenticationAssertion(
-          tx,
-          session.user.id,
-          response,
-          `webauthn:challenge:reauth:${session.user.id}:${result.data.challengeId}`,
-        );
+    async (tx) => {
+      const assertion = await verifyAuthenticationAssertion(
+        tx,
+        session.user.id,
+        response,
+        `webauthn:challenge:reauth:${session.user.id}:${result.data.challengeId}`,
+      );
 
-        if (!assertion.ok) {
-          return assertion;
-        }
-
-        await tx.session.update({
-          where: { sessionToken },
-          data: { passkeyVerifiedAt: verifiedAt },
-        });
-
+      if (!assertion.ok) {
         return assertion;
-      }),
+      }
+
+      await tx.session.update({
+        where: { sessionToken },
+        data: { passkeyVerifiedAt: verifiedAt },
+      });
+
+      return assertion;
+    },
     BYPASS_PURPOSE.AUTH_FLOW,
   );
 

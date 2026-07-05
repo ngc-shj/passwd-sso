@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import {
@@ -218,6 +218,8 @@ export async function issueExtensionToken(params: {
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
+      // Serialize concurrent token issuance for this user (count-then-evict-then-create cap race).
+      await advisoryXactLock(tx, userId);
       // Find active tokens (non-revoked, non-expired)
       const active = await tx.extensionToken.findMany({
         where: { userId, revokedAt: null, expiresAt: { gt: now } },

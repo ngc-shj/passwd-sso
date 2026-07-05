@@ -12,6 +12,7 @@ const {
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
   mockRequireRecentSession,
+  mockExecuteRaw,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaTeamWebhook: {
@@ -22,6 +23,7 @@ const {
   mockPrismaTeam: {
     findUniqueOrThrow: vi.fn(),
   },
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(
     async (_teamId: string, fn: (tenantId: string) => unknown) => fn("22222222-2222-4222-8222-222222222222"),
@@ -42,6 +44,10 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamWebhook: mockPrismaTeamWebhook,
     team: mockPrismaTeam,
+    // The cap-check + create now run under an advisory lock inside one
+    // withTeamTenantRls tx (TOCTOU fix); the route calls prisma.$executeRaw
+    // for the lock before count/create.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/auth/access/team-auth", () => ({
@@ -85,6 +91,15 @@ type Params = { params: Promise<{ teamId: string }> };
 
 function teamParams(teamId: string = "33333333-3333-4333-8333-333333333333"): Params {
   return createParams({ teamId });
+}
+
+// Asserts the advisory lock ($executeRaw with pg_advisory_xact_lock) was
+// acquired inside the count-then-create tx. Mutation-kill: deleting the lock
+// line from the production path leaves $executeRaw uncalled with that SQL.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
 }
 
 describe("GET /api/teams/[teamId]/webhooks", () => {
@@ -163,6 +178,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     expect(json.secret).toBeDefined();
     expect(typeof json.secret).toBe("string");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("returns 400 on invalid URL", async () => {

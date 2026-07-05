@@ -9,8 +9,8 @@ const {
   mockTenantMember,
   mockUser,
   mockScimExternalMapping,
-  mockTransaction,
   mockWithTenantRls,
+  applyTxHolder,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
@@ -18,9 +18,20 @@ const {
   mockTenantMember: { findMany: vi.fn(), count: vi.fn(), findUnique: vi.fn(), create: vi.fn() },
   mockUser: { findUnique: vi.fn(), create: vi.fn() },
   mockScimExternalMapping: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-  mockTransaction: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // Holds the rich POST tx (formerly the inner prisma.$transaction tx, now the
+  // withTenantRls callback's tx directly), or a rejection to simulate a DB
+  // constraint violation surfacing from the tx.
+  applyTxHolder: { current: null as Record<string, unknown> | null, reject: null as unknown },
+  mockWithTenantRls: vi.fn(),
 }));
+
+// withTenantRls now runs the POST body directly on its callback tx (the inner
+// prisma.$transaction fold was removed). Route the test-configured rich tx (or
+// rejection) through it; GET callbacks fall back to the top-level prisma mock.
+mockWithTenantRls.mockImplementation(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => {
+  if (applyTxHolder.reject) throw applyTxHolder.reject;
+  return fn(applyTxHolder.current ?? prisma);
+});
 
 vi.mock("@/lib/auth/tokens/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
@@ -35,7 +46,6 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: mockTenantMember,
     user: mockUser,
     scimExternalMapping: mockScimExternalMapping,
-    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
@@ -69,6 +79,8 @@ describe("GET /api/scim/v2/Users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    applyTxHolder.current = null;
+    applyTxHolder.reject = null;
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
@@ -188,29 +200,28 @@ describe("POST /api/scim/v2/Users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    applyTxHolder.current = null;
+    applyTxHolder.reject = null;
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("creates tenant member", async () => {
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockResolvedValue({ id: "new-user", tenantId: "tenant-1", email: "new@example.com", name: "New" }),
-        },
-        tenantMember: {
-          findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
-        },
-        scimExternalMapping: {
-          findFirst: vi.fn().mockResolvedValue(null),
-          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-          create: vi.fn().mockResolvedValue({}),
-        },
-      };
-      return fn(tx);
-    });
+    applyTxHolder.current = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "new-user", tenantId: "tenant-1", email: "new@example.com", name: "New" }),
+      },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
+      },
+      scimExternalMapping: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({}),
+      },
+    };
 
     const res = await POST(
       makeReq({
@@ -228,13 +239,10 @@ describe("POST /api/scim/v2/Users", () => {
   });
 
   it("returns 409 when user already exists in tenant", async () => {
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com" }) },
-        tenantMember: { findUnique: vi.fn().mockResolvedValue({ id: "tm1" }) },
-      };
-      return fn(tx);
-    });
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com" }) },
+      tenantMember: { findUnique: vi.fn().mockResolvedValue({ id: "tm1" }) },
+    };
 
     const res = await POST(
       makeReq({
@@ -260,26 +268,23 @@ describe("POST /api/scim/v2/Users", () => {
   });
 
   it("returns 409 when externalId is already mapped to another user", async () => {
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com", name: "Dup" }) },
-        tenantMember: {
-          findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
-        },
-        scimExternalMapping: {
-          findFirst: vi.fn().mockResolvedValue({
-            tenantId: "tenant-1",
-            externalId: "ext-1",
-            internalId: "other-user",
-            resourceType: "User",
-          }),
-          deleteMany: vi.fn(),
-          create: vi.fn(),
-        },
-      };
-      return fn(tx);
-    });
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com", name: "Dup" }) },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
+      },
+      scimExternalMapping: {
+        findFirst: vi.fn().mockResolvedValue({
+          tenantId: "tenant-1",
+          externalId: "ext-1",
+          internalId: "other-user",
+          resourceType: "User",
+        }),
+        deleteMany: vi.fn(),
+        create: vi.fn(),
+      },
+    };
 
     const res = await POST(
       makeReq({
@@ -336,26 +341,23 @@ describe("POST /api/scim/v2/Users", () => {
 
   it("creates a deactivated member when active is false", async () => {
     let createdMemberData: Record<string, unknown> | undefined;
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        user: {
-          findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "inactive@example.com", name: "Inactive" }),
-        },
-        tenantMember: {
-          findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockImplementation(({ data }) => {
-            createdMemberData = data;
-            return { id: "tm1", deactivatedAt: data.deactivatedAt };
-          }),
-        },
-        scimExternalMapping: {
-          findFirst: vi.fn().mockResolvedValue(null),
-          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-          create: vi.fn().mockResolvedValue({}),
-        },
-      };
-      return fn(tx);
-    });
+    applyTxHolder.current = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "inactive@example.com", name: "Inactive" }),
+      },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockImplementation(({ data }) => {
+          createdMemberData = data;
+          return { id: "tm1", deactivatedAt: data.deactivatedAt };
+        }),
+      },
+      scimExternalMapping: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        create: vi.fn().mockResolvedValue({}),
+      },
+    };
 
     const res = await POST(
       makeReq({
@@ -374,26 +376,23 @@ describe("POST /api/scim/v2/Users", () => {
   it("reuses an existing externalId mapping for the same user", async () => {
     const deleteMany = vi.fn();
     const create = vi.fn();
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
-      const tx = {
-        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "same@example.com", name: "Same" }) },
-        tenantMember: {
-          findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
-        },
-        scimExternalMapping: {
-          findFirst: vi.fn().mockResolvedValue({
-            tenantId: "tenant-1",
-            externalId: "ext-1",
-            internalId: "user-1",
-            resourceType: "User",
-          }),
-          deleteMany,
-          create,
-        },
-      };
-      return fn(tx);
-    });
+    applyTxHolder.current = {
+      user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "same@example.com", name: "Same" }) },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
+      },
+      scimExternalMapping: {
+        findFirst: vi.fn().mockResolvedValue({
+          tenantId: "tenant-1",
+          externalId: "ext-1",
+          internalId: "user-1",
+          resourceType: "User",
+        }),
+        deleteMany,
+        create,
+      },
+    };
 
     const res = await POST(
       makeReq({
@@ -415,7 +414,7 @@ describe("POST /api/scim/v2/Users", () => {
       code: "P2002",
       clientVersion: "test",
     });
-    mockTransaction.mockRejectedValue(error);
+    applyTxHolder.reject = error;
 
     const res = await POST(
       makeReq({
@@ -435,7 +434,7 @@ describe("POST /api/scim/v2/Users", () => {
       clientVersion: "test",
       meta: { modelName: "ScimExternalMapping" },
     });
-    mockTransaction.mockRejectedValue(error);
+    applyTxHolder.reject = error;
 
     const res = await POST(
       makeReq({

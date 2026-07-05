@@ -14,7 +14,7 @@
  * review boundary — see scripts/checks/check-bypass-rls.mjs ALLOWED_USAGE.
  */
 
-import { prisma } from "@/lib/prisma";
+import type { TxOrPrisma } from "@/lib/prisma";
 import { transition } from "./emergency-access-state";
 import { logAuditAsync, type AuditLogParams } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/constants";
@@ -70,6 +70,7 @@ export type AutoPromoteResult =
  * "not_eligible" and the route falls through to the NOT_ACTIVATED 403 check.
  */
 export async function autoPromoteIfElapsed(args: {
+  db: TxOrPrisma;
   granteeId: string;
   grantId: string;
   now: Date;
@@ -77,13 +78,12 @@ export async function autoPromoteIfElapsed(args: {
   // Matches the shape returned by personalAuditBase(req, userId).
   auditBase: Omit<AuditLogParams, "action" | "targetType" | "targetId" | "metadata" | "actorType">;
 }): Promise<AutoPromoteResult> {
-  const { granteeId, grantId, now, auditBase } = args;
+  const { db, granteeId, grantId, now, auditBase } = args;
 
-  // Caller MUST wrap in withBypassRls — see file header. The prisma proxy
-  // re-targets all queries below to the active bypass-tx via AsyncLocalStorage.
+  // Caller MUST wrap in withBypassRls and pass its tx as `db` — see file header.
 
   // Step 1: fetch current grant state to check eligibility
-  const current = await prisma.emergencyAccessGrant.findUnique({
+  const current = await db.emergencyAccessGrant.findUnique({
     where: { id: grantId },
     select: { status: true, waitExpiresAt: true, granteeId: true },
   });
@@ -101,7 +101,7 @@ export async function autoPromoteIfElapsed(args: {
 
   // Step 3: CAS-protected transition (closes race window)
   const promoted = await transition({
-    db: prisma,
+    db,
     where: { id: grantId, granteeId },
     to: EA_STATUS.ACTIVATED,
     actor: EA_ACTOR.SYSTEM,
@@ -114,7 +114,7 @@ export async function autoPromoteIfElapsed(args: {
   }
 
   // Step 4: re-fetch to get the authoritative post-promotion state
-  const updated = await prisma.emergencyAccessGrant.findUnique({
+  const updated = await db.emergencyAccessGrant.findUnique({
     where: { id: grantId },
     include: {
       granteeKeyPair: true,

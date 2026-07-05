@@ -194,6 +194,22 @@ const BYPASS_PURPOSE_RE = /BYPASS_PURPOSE\.\w+/;
 const TX_LESS_CALLBACK_RE =
   /with(?:Bypass|Tenant)Rls\([\s\S]*?,\s*(?:async\s+)?\(\)\s*=>/m;
 
+// F3 anti-drift: the ONLY sanctioned `(tx) => ...` callbacks that leave `tx`
+// unused (suppressed with `eslint-disable-next-line ...no-unused-vars`) are the
+// two thin wrappers in tenant-context.ts that delegate to a caller-supplied
+// `fn(tenantId)` public contract (SC1 deferral — threading tx would change that
+// contract). Any NEW such disable elsewhere is a silent reintroduction of the
+// Proxy/ALS-dependent form the guard exists to prevent — it must instead use the
+// real (tx) => tx.x form, or be added here after review. Keyed by file only
+// (the two lines within tenant-context.ts are the accepted pair).
+const F3_UNUSED_TX_DISABLE_ALLOWLIST = new Set([
+  "src/lib/tenant-context.ts",
+]);
+// An eslint-disable-next-line for no-unused-vars that guards a with*Rls (tx) =>
+// callback (i.e. suppresses an unused `tx` param on an RLS callback).
+const RLS_UNUSED_TX_DISABLE_RE =
+  /eslint-disable-next-line[^\n]*no-unused-vars[\s\S]{0,120}?with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls\([\s\S]*?,\s*(?:async\s+)?\(\s*tx\s*\)\s*=>/m;
+
 function getSourceFiles() {
   const files = [];
   for (const entry of readdirSync("src", { recursive: true, withFileTypes: true })) {
@@ -281,7 +297,39 @@ for (const file of getSourceFiles()) {
   }
 }
 
+// F3 anti-drift scan: flag any file (outside the allowlist) that suppresses an
+// unused `tx` on a with*Rls callback with eslint-disable-next-line no-unused-vars.
+const f3DisableViolations = [];
+for (const file of getSourceFiles()) {
+  if (file.includes(".test.") || file.includes("__tests__")) continue;
+  const relFromRepo = file.replace(/\\/g, "/");
+  if ([...F3_UNUSED_TX_DISABLE_ALLOWLIST].some((a) => relFromRepo.endsWith(a))) continue;
+  const content = readFileSync(file, "utf8");
+  if (RLS_UNUSED_TX_DISABLE_RE.test(content)) {
+    f3DisableViolations.push(relFromRepo);
+  }
+}
+
 let failed = false;
+
+if (f3DisableViolations.length > 0) {
+  failed = true;
+  console.error(
+    "eslint-disable(no-unused-vars) on an unused `tx` in a with*Rls callback,",
+  );
+  console.error(
+    "outside the F3 allowlist. Use the (tx) => tx.x form (the guard's prescribed",
+  );
+  console.error(
+    "shape), or — only if the callback delegates to a client-less fn(tenantId)",
+  );
+  console.error(
+    "public contract — add the file to F3_UNUSED_TX_DISABLE_ALLOWLIST after review.",
+  );
+  console.error("");
+  for (const v of f3DisableViolations) console.error(`  ${v}`);
+  console.error("");
+}
 
 if (fileViolations.length > 0) {
   failed = true;

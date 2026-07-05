@@ -50,82 +50,80 @@ export async function executeVaultReset(
   );
 
   // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
-  const attachmentRefs = await withBypassRls(prisma, async (tx) =>
-    prisma.$transaction(async (tx) => {
-      // Attachments: rows are bytea in DB, but external blob backends store the
-      // ciphertext out-of-band — capture refs before delete so they aren't
-      // orphaned, then purge after the transaction commits.
-      const refs = await collectAttachmentRefsByCreator(tx, targetUserId);
-      await tx.attachment.deleteMany({ where: { createdById: targetUserId } });
-      // Share links
-      await tx.passwordShare.deleteMany({ where: { createdById: targetUserId } });
-      // Password entries
-      await tx.passwordEntry.deleteMany({ where: { userId: targetUserId } });
-      // Vault keys
-      await tx.vaultKey.deleteMany({ where: { userId: targetUserId } });
-      // Tags (all entries deleted, tags are now orphaned)
-      await tx.tag.deleteMany({ where: { userId: targetUserId } });
-      // Folders (user-owned, not cascade-deleted by PasswordEntry removal)
-      await tx.folder.deleteMany({ where: { userId: targetUserId } });
-      // Emergency access grants (revoke as owner — matrix-validated via bulkTransition).
-      // actor: "OWNER" because the matrix models vault-reset as the owner's own revocation
-      // (the user's grants as owner are wiped; SYSTEM has no REVOKED matrix entry).
-      await bulkTransition({
-        db: tx,
-        where: { ownerId: targetUserId },
-        to: EA_STATUS.REVOKED,
-        actor: EA_ACTOR.OWNER,
-        extraData: { revokedAt: new Date() },
-      });
-      // Team E2E: delete all TeamMemberKey records for this user
-      await tx.teamMemberKey.deleteMany({ where: { userId: targetUserId } });
-      // Team E2E: reset keyDistributed on all TeamMember records for this user
-      await tx.teamMember.updateMany({
-        where: { userId: targetUserId },
-        data: { keyDistributed: false },
-      });
-      // Null out vault + recovery + lockout + ECDH fields on User
-      await tx.user.update({
-        where: { id: targetUserId },
-        data: {
-          vaultSetupAt: null,
-          accountSalt: null,
-          encryptedSecretKey: null,
-          secretKeyIv: null,
-          secretKeyAuthTag: null,
-          masterPasswordServerHash: null,
-          masterPasswordServerSalt: null,
-          keyVersion: 0,
-          passphraseVerifierHmac: null,
-          passphraseVerifierVersion: VERIFIER_VERSION,
-          // Recovery key fields
-          recoveryEncryptedSecretKey: null,
-          recoverySecretKeyIv: null,
-          recoverySecretKeyAuthTag: null,
-          recoveryHkdfSalt: null,
-          recoveryVerifierHmac: null,
-          recoveryVerifierVersion: VERIFIER_VERSION,
-          recoveryKeySetAt: null,
-          // Lockout fields
-          failedUnlockAttempts: 0,
-          lastFailedUnlockAt: null,
-          accountLockedUntil: null,
-          // ECDH key pair (team E2E)
-          ecdhPublicKey: null,
-          encryptedEcdhPrivateKey: null,
-          ecdhPrivateKeyIv: null,
-          ecdhPrivateKeyAuthTag: null,
-        },
-      });
+  const attachmentRefs = await withBypassRls(prisma, async (tx) => {
+    // Attachments: rows are bytea in DB, but external blob backends store the
+    // ciphertext out-of-band — capture refs before delete so they aren't
+    // orphaned, then purge after the transaction commits.
+    const refs = await collectAttachmentRefsByCreator(tx, targetUserId);
+    await tx.attachment.deleteMany({ where: { createdById: targetUserId } });
+    // Share links
+    await tx.passwordShare.deleteMany({ where: { createdById: targetUserId } });
+    // Password entries
+    await tx.passwordEntry.deleteMany({ where: { userId: targetUserId } });
+    // Vault keys
+    await tx.vaultKey.deleteMany({ where: { userId: targetUserId } });
+    // Tags (all entries deleted, tags are now orphaned)
+    await tx.tag.deleteMany({ where: { userId: targetUserId } });
+    // Folders (user-owned, not cascade-deleted by PasswordEntry removal)
+    await tx.folder.deleteMany({ where: { userId: targetUserId } });
+    // Emergency access grants (revoke as owner — matrix-validated via bulkTransition).
+    // actor: "OWNER" because the matrix models vault-reset as the owner's own revocation
+    // (the user's grants as owner are wiped; SYSTEM has no REVOKED matrix entry).
+    await bulkTransition({
+      db: tx,
+      where: { ownerId: targetUserId },
+      to: EA_STATUS.REVOKED,
+      actor: EA_ACTOR.OWNER,
+      extraData: { revokedAt: new Date() },
+    });
+    // Team E2E: delete all TeamMemberKey records for this user
+    await tx.teamMemberKey.deleteMany({ where: { userId: targetUserId } });
+    // Team E2E: reset keyDistributed on all TeamMember records for this user
+    await tx.teamMember.updateMany({
+      where: { userId: targetUserId },
+      data: { keyDistributed: false },
+    });
+    // Null out vault + recovery + lockout + ECDH fields on User
+    await tx.user.update({
+      where: { id: targetUserId },
+      data: {
+        vaultSetupAt: null,
+        accountSalt: null,
+        encryptedSecretKey: null,
+        secretKeyIv: null,
+        secretKeyAuthTag: null,
+        masterPasswordServerHash: null,
+        masterPasswordServerSalt: null,
+        keyVersion: 0,
+        passphraseVerifierHmac: null,
+        passphraseVerifierVersion: VERIFIER_VERSION,
+        // Recovery key fields
+        recoveryEncryptedSecretKey: null,
+        recoverySecretKeyIv: null,
+        recoverySecretKeyAuthTag: null,
+        recoveryHkdfSalt: null,
+        recoveryVerifierHmac: null,
+        recoveryVerifierVersion: VERIFIER_VERSION,
+        recoveryKeySetAt: null,
+        // Lockout fields
+        failedUnlockAttempts: 0,
+        lastFailedUnlockAt: null,
+        accountLockedUntil: null,
+        // ECDH key pair (team E2E)
+        ecdhPublicKey: null,
+        encryptedEcdhPrivateKey: null,
+        ecdhPrivateKeyIv: null,
+        ecdhPrivateKeyAuthTag: null,
+      },
+    });
 
-      // TEST-ONLY: failure-injection hook (T16 / S4 atomicity). Never runs in production.
-      if (process.env.NODE_ENV === "test" && __testHook) {
-        await __testHook(tx);
-      }
+    // TEST-ONLY: failure-injection hook (T16 / S4 atomicity). Never runs in production.
+    if (process.env.NODE_ENV === "test" && __testHook) {
+      await __testHook(tx);
+    }
 
-      return refs;
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+    return refs;
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Purge external blob objects only after the DB transaction commits
   // (best-effort; no-op on the DB backend).

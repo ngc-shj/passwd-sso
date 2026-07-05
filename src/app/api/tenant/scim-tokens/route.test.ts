@@ -5,6 +5,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const {
   mockAuth,
   mockPrismaScimToken,
+  mockExecuteRaw,
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockLogAudit,
@@ -29,6 +30,7 @@ const {
       count: vi.fn(),
       create: vi.fn(),
     },
+    mockExecuteRaw: vi.fn().mockResolvedValue(1),
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn((p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
@@ -42,7 +44,13 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { scimToken: mockPrismaScimToken },
+  prisma: {
+    scimToken: mockPrismaScimToken,
+    // The cap-check + create now run under an advisory lock inside one
+    // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
+    // lock before count/create. The withTenantRls mock passes prisma as tx.
+    $executeRaw: mockExecuteRaw,
+  },
 }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
@@ -82,6 +90,15 @@ import { GET, POST } from "./route";
 
 const TENANT_ID = "tenant-1";
 const ACTOR = { id: "membership-1", tenantId: TENANT_ID, userId: "user-1", role: "OWNER" };
+
+// Asserts the per-tenant advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired. Mutation-kill: deleting the lock line from the production
+// count-then-create path leaves $executeRaw uncalled with that SQL, so this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 describe("GET /api/tenant/scim-tokens", () => {
   beforeEach(() => {
@@ -231,6 +248,8 @@ describe("POST /api/tenant/scim-tokens", () => {
         action: "SCIM_TOKEN_CREATE",
       }),
     );
+    // The count-then-create runs under a per-tenant advisory lock (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("returns 400 for invalid expiresInDays (below minimum)", async () => {

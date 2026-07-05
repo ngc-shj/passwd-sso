@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
@@ -27,6 +28,10 @@ const apiKeyCreateLimiter = createRateLimiter({
   max: 5,
   failClosedOnRedisError: true,
 });
+
+// Sentinel thrown inside the locked transaction when the re-checked per-user key
+// count is at the cap. Mapped to API_KEY_LIMIT_EXCEEDED outside the tx.
+class ApiKeyLimitError extends Error {}
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
@@ -87,16 +92,6 @@ async function handlePOST(req: NextRequest) {
 
   const { name, scope: scopes, expiresAt } = result.data;
 
-  // Check key limit
-  const existingCount = await withUserTenantRls(userId, async () =>
-    prisma.apiKey.count({
-      where: { userId: userId, revokedAt: null },
-    }),
-  );
-  if (existingCount >= MAX_API_KEYS_PER_USER) {
-    return errorResponse(API_ERROR.API_KEY_LIMIT_EXCEEDED);
-  }
-
   // Generate token: api_ + 43 chars base62 (256-bit entropy)
   // Use 48 bytes to ensure enough chars remain after stripping _ and -
   const rawBytes = randomBytes(48);
@@ -111,19 +106,39 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(plaintext);
   const prefix = plaintext.slice(0, API_KEY_PREFIX_LENGTH); // "api_XXXX"
 
-  const key = await withUserTenantRls(userId, async (tenantId) =>
-    prisma.apiKey.create({
-      data: {
-        userId: userId,
-        tenantId,
-        tokenHash,
-        prefix,
-        name,
-        scope: scopes.join(","),
-        expiresAt,
-      },
-    }),
-  );
+  // Serialize the cap check with the create under a per-user advisory lock so
+  // two concurrent POSTs cannot both read count < MAX and both create, blowing
+  // past MAX_API_KEYS_PER_USER (TOCTOU). The lock, count, and create fold into
+  // one tenant tx via the proxy; over-limit throws a sentinel mapped outside.
+  let key: { id: string; expiresAt: Date | null; createdAt: Date };
+  try {
+    key = await withUserTenantRls(userId, async (tenantId) => {
+      await advisoryXactLock(prisma, userId);
+      const existingCount = await prisma.apiKey.count({
+        where: { userId: userId, revokedAt: null },
+      });
+      if (existingCount >= MAX_API_KEYS_PER_USER) {
+        throw new ApiKeyLimitError();
+      }
+      return prisma.apiKey.create({
+        data: {
+          userId: userId,
+          tenantId,
+          tokenHash,
+          prefix,
+          name,
+          scope: scopes.join(","),
+          expiresAt,
+        },
+        select: { id: true, expiresAt: true, createdAt: true },
+      });
+    });
+  } catch (e) {
+    if (e instanceof ApiKeyLimitError) {
+      return errorResponse(API_ERROR.API_KEY_LIMIT_EXCEEDED);
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...personalAuditBase(req, userId),

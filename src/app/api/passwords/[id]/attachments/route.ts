@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import {
   ALLOWED_EXTENSIONS,
@@ -25,6 +26,11 @@ import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { LegacyAttachmentInconsistentVersionError } from "@/lib/vault/rotate-key-server";
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+// Sentinel thrown inside the locked transaction when the re-checked per-entry
+// attachment count is at the cap. Mapped to ATTACHMENT_LIMIT_EXCEEDED outside
+// the tx.
+class AttachmentLimitError extends Error {}
 
 const attachmentUploadLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: 30 });
 
@@ -106,15 +112,10 @@ async function handlePOST(
   const rl = await attachmentUploadLimiter.check(`rl:attachment_upload:${session.user.id}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  // Check attachment count limit
-  const count = await withUserTenantRls(session.user.id, async () =>
-    prisma.attachment.count({
-      where: { passwordEntryId: id },
-    }),
-  );
-  if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
-    return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
-  }
+  // The per-entry attachment cap is re-checked INSIDE the advisory-locked tx
+  // below (under the existing per-user lock), so two concurrent uploads cannot
+  // both read count < MAX and both create, blowing past
+  // MAX_ATTACHMENTS_PER_ENTRY (TOCTOU).
 
   // Early rejection before buffering the multipart body into memory. Requires a
   // declared Content-Length and caps it — fail-closed on a missing header so a
@@ -270,7 +271,16 @@ async function handlePOST(
         // user.keyVersion read AND attachment.create closes the TOCTOU
         // window — a rotation that commits between our read and create
         // can no longer land a stale-cekKeyVersion mode-2 row.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${session.user.id}::text))`;
+        await advisoryXactLock(tx, session.user.id);
+
+        // Re-check the per-entry attachment cap under the same lock so
+        // concurrent uploads cannot both pass count < MAX and both create.
+        const count = await tx.attachment.count({
+          where: { passwordEntryId: id },
+        });
+        if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
+          throw new AttachmentLimitError();
+        }
 
         const currentUser = await tx.user.findUnique({
           where: { id: session.user.id },
@@ -316,6 +326,9 @@ async function handlePOST(
     );
   } catch (error) {
     await blobStore.deleteObject(storedBlob, blobContext).catch(() => {});
+    if (error instanceof AttachmentLimitError) {
+      return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED);
+    }
     if (error instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }

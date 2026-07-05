@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -121,7 +122,7 @@ async function handlePOST(
     outcome = await withUserTenantRls(userId, async () =>
       prisma.$transaction(async (tx) => {
         // Serialize concurrent PRF rebootstrap + rotation for the same user.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+        await advisoryXactLock(tx, userId);
 
         // Step-up auth + counter CAS. Helper reads challenge from the
         // PRF-dedicated Redis key, performs verifyAuthentication, and runs the

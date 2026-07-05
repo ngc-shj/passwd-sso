@@ -4,7 +4,7 @@ const {
   mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction,
+  mockPrismaTransaction, mockWithBypassRls,
 } = vi.hoisted(() => {
   // Shared tx client mock — used inside the $transaction callback
   const txClient = {
@@ -34,6 +34,9 @@ const {
     // Execute the callback with the tx client so individual model mocks are invoked
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockPrismaTransaction: vi.fn((cb: any) => cb(txClient)),
+    // withBypassRls invokes the callback directly with the passed-in tx (the prisma mock),
+    // which carries all the model-method mocks the reset body calls.
+    mockWithBypassRls: vi.fn((prismaArg: unknown, fn: (tx: unknown) => unknown) => fn(prismaArg)),
   };
 });
 
@@ -53,7 +56,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: vi.fn((prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -79,6 +82,10 @@ describe("executeVaultReset", () => {
     mockPrismaTeamMemberKey.deleteMany.mockResolvedValue({ count: 1 });
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
+    // Re-bind withBypassRls to invoke its callback (cleared by clearAllMocks)
+    mockWithBypassRls.mockImplementation(
+      (prismaArg: unknown, fn: (tx: unknown) => unknown) => fn(prismaArg),
+    );
     // Re-bind the transaction mock to execute the callback (cleared by clearAllMocks)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockPrismaTransaction.mockImplementation((cb: any) => cb({
@@ -103,10 +110,14 @@ describe("executeVaultReset", () => {
 
   it("runs a single transaction", async () => {
     await executeVaultReset("user-1");
-    expect(mockPrismaTransaction).toHaveBeenCalledTimes(1);
-    // Callback form: the argument is a function, not an array
-    const txArg = mockPrismaTransaction.mock.calls[0][0];
-    expect(typeof txArg).toBe("function");
+    // Atomicity is now provided by the outer withBypassRls callback (the redundant
+    // inner prisma.$transaction was folded away). The mutating body runs in a single
+    // withBypassRls call: one count pass + one delete/update pass = 2 invocations,
+    // and the delete/update body must be driven via the callback form (required for
+    // bulkTransition — S4).
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(2);
+    const bodyCallback = mockWithBypassRls.mock.calls[1][1];
+    expect(typeof bodyCallback).toBe("function");
   });
 
   it("deletes attachments for the target user", async () => {
@@ -216,6 +227,9 @@ describe("executeVaultReset", () => {
     mockPrismaTeamMemberKey.deleteMany.mockResolvedValue({ count: 1 });
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
+    mockWithBypassRls.mockImplementation(
+      (prismaArg: unknown, fn: (tx: unknown) => unknown) => fn(prismaArg),
+    );
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockPrismaTransaction.mockImplementation((cb: any) => cb({
         attachment: mockPrismaAttachment,
@@ -234,8 +248,9 @@ describe("executeVaultReset", () => {
     const resultB = await executeVaultReset("admin-target-user");
     expect(resultB).toEqual({ deletedEntries: 10, deletedAttachments: 3 });
 
-    // Callback form: argument is a function
-    const txArg = mockPrismaTransaction.mock.calls[0][0];
-    expect(typeof txArg).toBe("function");
+    // Same atomicity path regardless of caller: mutating body driven via the
+    // withBypassRls callback form (the second withBypassRls call).
+    const bodyCallback = mockWithBypassRls.mock.calls[1][1];
+    expect(typeof bodyCallback).toBe("function");
   });
 });

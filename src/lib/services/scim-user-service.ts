@@ -5,7 +5,7 @@
  */
 
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { userToScimUser, type ScimUserInput, type ScimUserResource } from "@/lib/scim/serializers";
@@ -82,16 +82,20 @@ export class ScimDeleteConflictError extends Error {
  *
  * Returns `null` if the user cannot be found.
  */
-export async function resolveUserId(tenantId: string, scimId: string): Promise<string | null> {
+export async function resolveUserId(
+  tenantId: string,
+  scimId: string,
+  db: TxOrPrisma = prisma,
+): Promise<string | null> {
   if (scimId.length > 255) return null;
 
-  const member = await prisma.tenantMember.findUnique({
+  const member = await db.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId: scimId } },
     select: { userId: true },
   });
   if (member) return member.userId;
 
-  const mapping = await prisma.scimExternalMapping.findFirst({
+  const mapping = await db.scimExternalMapping.findFirst({
     where: {
       tenantId,
       externalId: scimId,

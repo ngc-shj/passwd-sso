@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { advisoryXactLock } from "@/lib/tenant-rls";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -135,7 +136,7 @@ async function handlePUT(
         // keyVersion equality check is not racy against a concurrent
         // rotation that bumped the keyVersion between request boundary and
         // lock acquisition.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+        await advisoryXactLock(tx, userId);
 
         const u = await tx.user.findUnique({
           where: { id: userId },

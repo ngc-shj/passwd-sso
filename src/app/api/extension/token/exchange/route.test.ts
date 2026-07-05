@@ -119,6 +119,9 @@ describe("POST /api/extension/token/exchange", () => {
     // Provide a default that runs the callback against the mocked Prisma surface.
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({
+        // issueExtensionToken acquires a pg_advisory_xact_lock via
+        // tx.$executeRaw before the count-then-create cap enforcement.
+        $executeRaw: vi.fn().mockResolvedValue(1),
         extensionToken: {
           findMany: mockExtensionTokenFindMany,
           create: mockExtensionTokenCreate,

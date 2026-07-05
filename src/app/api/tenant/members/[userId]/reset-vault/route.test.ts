@@ -17,6 +17,7 @@ const {
   mockRequireTenantPermission,
   mockIsTenantRoleAbove,
   mockWithTenantRls,
+  mockExecuteRaw,
   mockNotificationTitle,
   mockNotificationBody,
   mockEncryptResetToken,
@@ -53,6 +54,7 @@ const {
     mockWithTenantRls: vi.fn(
       (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p),
     ),
+    mockExecuteRaw: vi.fn().mockResolvedValue(1),
     mockNotificationTitle: vi.fn(),
     mockNotificationBody: vi.fn(),
     mockEncryptResetToken: vi.fn(),
@@ -76,6 +78,10 @@ vi.mock("@/lib/prisma", () => ({
       create: mockPrismaAdminVaultResetCreate,
       findMany: mockPrismaAdminVaultResetFindMany,
     },
+    // The pending-reset count + create now run under an advisory lock inside one
+    // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the lock
+    // before count/create. mockWithTenantRls passes this prisma object as tx.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -152,6 +158,16 @@ const TARGET_MEMBER = {
     locale: null,
   },
 };
+
+// Asserts the per-tenant advisory lock ($executeRaw with
+// pg_advisory_xact_lock) was acquired. Mutation-kill: deleting the lock line
+// from the production count-then-create path leaves $executeRaw uncalled with
+// that SQL, so this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 describe("POST /api/tenant/members/[userId]/reset-vault", () => {
   beforeEach(() => {
@@ -422,6 +438,9 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
       TENANT_ID,
       expect.any(Function),
     );
+
+    // Lock acquired before the count-cap-check + create (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("notifies zero approvers when no other admins exist (T10)", async () => {

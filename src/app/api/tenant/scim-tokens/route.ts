@@ -9,7 +9,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -30,6 +30,13 @@ const scimTokenCreateLimiter = createRateLimiter({
   max: 5,
   failClosedOnRedisError: true,
 });
+
+// Sentinel thrown inside the locked transaction when the re-checked active
+// SCIM-token count is at the cap. Mapped to SCIM_TOKEN_LIMIT_EXCEEDED outside
+// the tx.
+class ScimTokenLimitError extends Error {}
+
+const SCIM_TOKEN_LIMIT_PER_TENANT = 10;
 
 export const runtime = "nodejs";
 
@@ -110,20 +117,7 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, createTokenSchema);
   if (!result.ok) return result.response;
 
-  // Limit active (non-revoked, non-expired) tokens per tenant (max 10)
-  const tokenCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.scimToken.count({
-      where: {
-        tenantId: actor.tenantId,
-        revokedAt: null,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      },
-    }),
-  );
-  if (tokenCount >= 10) {
-    return errorResponse(API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED);
-  }
-
+  // Token generation + hashing are done outside the locked tx (like api-keys).
   const plaintext = generateScimToken();
   const tokenHash = hashToken(plaintext);
 
@@ -131,17 +125,40 @@ async function handlePOST(req: NextRequest) {
     ? new Date(Date.now() + result.data.expiresInDays * MS_PER_DAY)
     : null;
 
-  const token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.scimToken.create({
-      data: {
-        tenantId: actor.tenantId,
-        tokenHash,
-        description: result.data.description ?? null,
-        expiresAt,
-        createdById: session.user.id,
-      },
-    }),
-  );
+  // Serialize the cap check with the create under a per-tenant advisory lock so
+  // two concurrent POSTs cannot both read count < LIMIT and both create, blowing
+  // past the active-token cap (TOCTOU). Lock, count, and create fold into one
+  // tenant tx; over-limit throws a sentinel mapped to a 409 outside the tx.
+  let token;
+  try {
+    token = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await advisoryXactLock(tx, actor.tenantId);
+      const tokenCount = await tx.scimToken.count({
+        where: {
+          tenantId: actor.tenantId,
+          revokedAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+      });
+      if (tokenCount >= SCIM_TOKEN_LIMIT_PER_TENANT) {
+        throw new ScimTokenLimitError();
+      }
+      return tx.scimToken.create({
+        data: {
+          tenantId: actor.tenantId,
+          tokenHash,
+          description: result.data.description ?? null,
+          expiresAt,
+          createdById: session.user.id,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof ScimTokenLimitError) {
+      return errorResponse(API_ERROR.SCIM_TOKEN_LIMIT_EXCEEDED);
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),

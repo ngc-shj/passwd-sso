@@ -16,12 +16,14 @@ const {
   mockCreate,
   mockUpdateMany,
   mockTransaction,
+  mockTxExecuteRaw,
   mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockFindMany: vi.fn(),
   mockCreate: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockTransaction: vi.fn(),
+  mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
@@ -605,8 +607,10 @@ describe("issueExtensionToken", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
+    mockTxExecuteRaw.mockClear();
     mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
       cb({
+        $executeRaw: mockTxExecuteRaw,
         extensionToken: {
           findMany: mockFindMany,
           create: mockCreate,
@@ -633,6 +637,14 @@ describe("issueExtensionToken", () => {
     expect(result.expiresAt).toBeInstanceOf(Date);
     expect(result.scopeCsv).toBe("passwords:read,vault:unlock-data");
     expect(result.cnfJkt).toBe(VALID_CNF_JKT);
+    // The count-then-evict-then-create runs under a per-user advisory lock
+    // (TOCTOU cap race). Mutation-kill: removing the tx.$executeRaw lock line
+    // leaves $executeRaw uncalled with this SQL.
+    expect(
+      mockTxExecuteRaw.mock.calls.some((c) =>
+        String(c[0]).includes("pg_advisory_xact_lock"),
+      ),
+    ).toBe(true);
   });
 
   it("creates the token via prisma.extensionToken.create with the hashed token and cnfJkt", async () => {

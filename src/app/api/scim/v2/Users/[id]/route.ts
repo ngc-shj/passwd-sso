@@ -37,7 +37,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   return withTenantRls(prisma, tenantId, async (tx) => {
     const { id } = await params;
-    const userId = await resolveUserId(tenantId, id);
+    const userId = await resolveUserId(tenantId, id, tx);
     if (!userId) {
       return scimError(404, "User not found");
     }
@@ -66,7 +66,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   let serviceResult;
   try {
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
-      resolveUserId(tenantId, id).then((userId) => {
+      resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
         return replaceScimUser(tenantId, userId, { active, externalId, name }, getScimBaseUrl());
       }),
@@ -136,7 +136,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   let serviceResult;
   try {
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
-      resolveUserId(tenantId, id).then((userId) => {
+      resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
         return patchScimUser(tenantId, userId, patchOps, getScimBaseUrl());
       }),
@@ -189,7 +189,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   let serviceResult;
   try {
     serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
-      resolveUserId(tenantId, id).then((userId) => {
+      resolveUserId(tenantId, id, tx).then((userId) => {
         if (!userId) throw new ScimUserNotFoundError();
         return deactivateScimUser(tenantId, userId);
       }),

@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
@@ -137,37 +137,41 @@ async function handlePOST(req: NextRequest) {
   // Count + create atomically with bypass RLS (no tenant context for DCR)
   let client: { id: string; clientId: string; createdAt: Date };
   try {
-    client = await withBypassRls(prisma, async (tx) =>
-      prisma.$transaction(async (tx) => {
-        // Lazy cleanup: remove expired unclaimed DCR clients before counting.
-        // Removes the hard dependency on dcr-cleanup-worker for cap recovery.
-        await tx.mcpClient.deleteMany({
-          where: { isDcr: true, tenantId: null, dcrExpiresAt: { lt: new Date() } },
-        });
-        // Global cap: reject if too many unclaimed DCR clients exist
-        const unclaimedCount = await tx.mcpClient.count({
-          where: { isDcr: true, tenantId: null },
-        });
-        if (unclaimedCount >= MAX_UNCLAIMED_DCR_CLIENTS) {
-          throw new CapExceededError();
-        }
+    client = await withBypassRls(prisma, async (tx) => {
+      // Serialize the global unclaimed-DCR-client cap check with the create
+      // under a fixed-key advisory lock so concurrent registrations cannot both
+      // read count < MAX and both create, blowing past MAX_UNCLAIMED_DCR_CLIENTS
+      // (TOCTOU). A fixed key serializes all DCR registrations globally —
+      // acceptable for this rate-limited anti-DoS pre-auth endpoint.
+      await advisoryXactLock(tx, "mcp-dcr-register");
+      // Lazy cleanup: remove expired unclaimed DCR clients before counting.
+      // Removes the hard dependency on dcr-cleanup-worker for cap recovery.
+      await tx.mcpClient.deleteMany({
+        where: { isDcr: true, tenantId: null, dcrExpiresAt: { lt: new Date() } },
+      });
+      // Global cap: reject if too many unclaimed DCR clients exist
+      const unclaimedCount = await tx.mcpClient.count({
+        where: { isDcr: true, tenantId: null },
+      });
+      if (unclaimedCount >= MAX_UNCLAIMED_DCR_CLIENTS) {
+        throw new CapExceededError();
+      }
 
-        return tx.mcpClient.create({
-          data: {
-            clientId,
-            clientSecretHash,
-            name: body.client_name,
-            redirectUris: validatedUris,
-            allowedScopes: MCP_SCOPES.join(","),
-            isDcr: true,
-            dcrExpiresAt,
-            // tenantId: null (omitted)
-            // createdById: null (omitted)
-          },
-          select: { id: true, clientId: true, createdAt: true },
-        });
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+      return tx.mcpClient.create({
+        data: {
+          clientId,
+          clientSecretHash,
+          name: body.client_name,
+          redirectUris: validatedUris,
+          allowedScopes: MCP_SCOPES.join(","),
+          isDcr: true,
+          dcrExpiresAt,
+          // tenantId: null (omitted)
+          // createdById: null (omitted)
+        },
+        select: { id: true, clientId: true, createdAt: true },
+      });
+    }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   } catch (err) {
     if (err instanceof CapExceededError) {
       return NextResponse.json(

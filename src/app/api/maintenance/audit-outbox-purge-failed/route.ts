@@ -80,7 +80,7 @@ async function handlePOST(req: NextRequest) {
   const rows = await withBypassRls(
     prisma,
     async (tx) =>
-      prisma.$queryRaw<{ purged: bigint }[]>`
+      tx.$queryRaw<{ purged: bigint }[]>`
         WITH deleted AS (
           DELETE FROM audit_outbox
           WHERE status = 'FAILED'

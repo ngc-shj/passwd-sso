@@ -21,7 +21,7 @@ export async function resolveUserTenantIdFromClient(
 
 export async function resolveUserTenantId(userId: string): Promise<string | null> {
   return withBypassRls(prisma, async (tx) =>
-    resolveUserTenantIdFromClient(prisma, userId),
+    resolveUserTenantIdFromClient(tx, userId),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
@@ -51,6 +51,12 @@ export async function withUserTenantRls<T>(
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
+  // check-bypass-rls requires the (tx) callback form, but this thin wrapper
+  // delegates to a caller-supplied fn(tenantId) that takes no client — fn's own
+  // queries run inside this tenant tx via the ambient ALS/proxy. tx is therefore
+  // structurally required yet genuinely unused here. Threading tx would change
+  // the public withUserTenantRls contract (SC1 deferral, bypass-rls-tx plan).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }
 
@@ -70,5 +76,8 @@ export async function withTeamTenantRls<T>(
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
+  // See withUserTenantRls above: same fn(tenantId) delegation, tx unthreadable
+  // without a public-contract change (SC1 deferral).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }

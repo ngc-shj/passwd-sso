@@ -19,6 +19,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { create: mockCreate, aggregate: mockAggregate },
     user: { findUnique: mockUserFindUnique },
+    // The aggregate+create run inside a withUserTenantRls callback that first
+    // acquires a pg_advisory_xact_lock via prisma.$executeRaw.
+    $executeRaw: vi.fn().mockResolvedValue(1),
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

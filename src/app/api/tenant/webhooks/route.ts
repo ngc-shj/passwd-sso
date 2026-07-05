@@ -10,7 +10,7 @@ import {
   AUDIT_ACTION,
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
 } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, advisoryXactLock } from "@/lib/tenant-rls";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
@@ -29,6 +29,11 @@ import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-q
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE, maskUrlForDisplay } from "@/lib/url/url-validation";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
+
+// Sentinel thrown inside the locked transaction when the re-checked tenant
+// webhook count is at the cap. Mapped to the MAX_WEBHOOKS validation error
+// outside the tx.
+class WebhookLimitError extends Error {}
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
@@ -112,19 +117,10 @@ async function handlePOST(req: NextRequest) {
     throw err;
   }
 
-  // Check webhook count limit
-  const existingCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
-  );
-  if (existingCount >= MAX_WEBHOOKS) {
-    return validationError({
-      limit: `Maximum ${MAX_WEBHOOKS} webhooks per tenant`,
-    });
-  }
-
   // Pre-allocate the webhook id so the AAD can bind to it BEFORE the row is
   // written. Without this, AAD construction would have a chicken-and-egg
-  // dependency on the create() call's returned id.
+  // dependency on the create() call's returned id. Crypto stays OUTSIDE the
+  // locked tx below.
   const webhookId = randomUUID();
   const plainSecret = randomBytes(32).toString("hex");
   const version = getCurrentMasterKeyVersion();
@@ -137,21 +133,42 @@ async function handlePOST(req: NextRequest) {
   });
   const encrypted = encryptServerData(plainSecret, masterKey, aad);
 
-  const webhook = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.tenantWebhook.create({
-      data: {
-        id: webhookId,
-        tenantId: actor.tenantId,
-        url: data.url,
-        secretEncrypted: encrypted.ciphertext,
-        secretIv: encrypted.iv,
-        secretAuthTag: encrypted.authTag,
-        masterKeyVersion: version,
-        secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
-        events: data.events,
-      },
-    }),
-  );
+  // Serialize the cap check with the create under a per-tenant advisory lock so
+  // two concurrent POSTs cannot both read count < MAX and both create, blowing
+  // past MAX_WEBHOOKS (TOCTOU). Lock, count, and create fold into one tenant tx;
+  // over-limit throws a sentinel mapped to the validation error outside the tx.
+  let webhook;
+  try {
+    webhook = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await advisoryXactLock(tx, actor.tenantId);
+      const existingCount = await tx.tenantWebhook.count({
+        where: { tenantId: actor.tenantId },
+      });
+      if (existingCount >= MAX_WEBHOOKS) {
+        throw new WebhookLimitError();
+      }
+      return tx.tenantWebhook.create({
+        data: {
+          id: webhookId,
+          tenantId: actor.tenantId,
+          url: data.url,
+          secretEncrypted: encrypted.ciphertext,
+          secretIv: encrypted.iv,
+          secretAuthTag: encrypted.authTag,
+          masterKeyVersion: version,
+          secretAadVersion: WEBHOOK_SECRET_AAD_VERSION_CURRENT,
+          events: data.events,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof WebhookLimitError) {
+      return validationError({
+        limit: `Maximum ${MAX_WEBHOOKS} webhooks per tenant`,
+      });
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),
