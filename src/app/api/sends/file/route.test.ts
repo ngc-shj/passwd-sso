@@ -10,6 +10,7 @@ const {
   mockCheck,
   mockLogAudit,
   mockFileTypeFromBuffer,
+  mockExecuteRaw,
   mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockFileTypeFromBuffer: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
@@ -29,7 +31,7 @@ vi.mock("@/lib/prisma", () => ({
     user: { findUnique: mockUserFindUnique },
     // The aggregate+create run inside a withUserTenantRls callback that first
     // acquires a pg_advisory_xact_lock via prisma.$executeRaw.
-    $executeRaw: vi.fn().mockResolvedValue(1),
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -207,6 +209,15 @@ describe("POST /api/sends/file", () => {
         metadata: expect.objectContaining({ sendType: "FILE" }),
       }),
     );
+
+    // The aggregate-then-create byte-quota check runs under a per-user advisory
+    // lock (TOCTOU fix). Mutation-kill: removing the prisma.$executeRaw lock
+    // line would leave $executeRaw uncalled with this SQL.
+    expect(
+      mockExecuteRaw.mock.calls.some((c) =>
+        String(c[0]).includes("pg_advisory_xact_lock"),
+      ),
+    ).toBe(true);
   });
 
   it("includes accessPassword in response when requirePassword is set", async () => {

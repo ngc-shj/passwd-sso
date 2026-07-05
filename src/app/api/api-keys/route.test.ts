@@ -6,6 +6,7 @@ const {
   mockCheckAuth,
   mockPrismaApiKey,
   mockPrismaUser,
+  mockExecuteRaw,
   mockWithUserTenantRls,
   mockRateLimitCheck,
   mockRequireRecentSession,
@@ -17,6 +18,7 @@ const {
     count: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
@@ -32,6 +34,10 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     apiKey: mockPrismaApiKey,
     user: mockPrismaUser,
+    // The cap-check + create now run under an advisory lock inside one
+    // withUserTenantRls tx (TOCTOU fix); the route calls prisma.$executeRaw
+    // for the lock before count/create.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -69,6 +75,16 @@ function authFail(status = 401) {
     ok: false,
     response: NextResponse.json({ error: "UNAUTHORIZED" }, { status }),
   };
+}
+
+// Asserts the per-user advisory lock ($executeRaw with
+// pg_advisory_xact_lock) was acquired. Mutation-kill: deleting the lock line
+// from the production count-then-create path leaves $executeRaw uncalled with
+// that SQL, so this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
 }
 
 describe("GET /api/api-keys", () => {
@@ -139,6 +155,7 @@ describe("POST /api/api-keys", () => {
     mockPrismaApiKey.count.mockReset();
     mockPrismaApiKey.create.mockReset();
     mockPrismaUser.findUnique.mockReset();
+    mockExecuteRaw.mockClear();
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockRequireRecentSession.mockResolvedValue(null);
   });
@@ -301,5 +318,7 @@ describe("POST /api/api-keys", () => {
     expect(json.id).toBe("new-key");
     expect(json.token).toMatch(/^api_/);
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+    // The count-then-create runs under a per-user advisory lock (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 });

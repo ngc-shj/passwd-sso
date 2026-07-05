@@ -10,6 +10,7 @@ const {
   mockExtUpdate,
   mockExtUpdateMany,
   mockTransaction,
+  mockTxExecuteRaw,
   mockWithBypassRls,
   mockWithUserTenantRls,
 } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ const {
   mockExtUpdate: vi.fn(),
   mockExtUpdateMany: vi.fn(),
   mockTransaction: vi.fn(),
+  mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockWithUserTenantRls: vi.fn(async (_u: string, fn: () => unknown) => fn()),
 }));
@@ -125,7 +127,7 @@ const CNF_JKT = DEVICE_JKT;
 function setupTransactionPassthrough() {
   mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
     cb({
-      $executeRaw: vi.fn().mockResolvedValue(1),
+      $executeRaw: mockTxExecuteRaw,
       extensionToken: {
         findMany: mockExtFindMany,
         create: mockExtCreate,
@@ -203,6 +205,15 @@ describe("issueIosToken", () => {
     const refreshCall = mockExtCreate.mock.calls[1][0];
     expect(refreshCall.data.clientKind).toBe("IOS_APP");
     expect(refreshCall.data.tokenHash).not.toBe(accessCall.data.tokenHash);
+
+    // The count-then-evict-then-create runs under a per-user advisory lock
+    // (TOCTOU cap race). Mutation-kill: removing the tx.$executeRaw lock line
+    // leaves $executeRaw uncalled with this SQL.
+    expect(
+      mockTxExecuteRaw.mock.calls.some((c) =>
+        String(c[0]).includes("pg_advisory_xact_lock"),
+      ),
+    ).toBe(true);
   });
 
   it("generates a new familyId when none is provided", async () => {

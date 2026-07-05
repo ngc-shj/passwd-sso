@@ -156,50 +156,49 @@ export function createCustomAdapter(): Adapter {
       const pendingClaim = tenantClaimStorage.getStore()?.tenantClaim ?? null;
 
       const created = await withBypassRls(prisma, async (tx) => {
-        // Resolve SSO tenant inside withBypassRls (no nesting)
+        // Resolve SSO tenant, then create tenant/user/member — all on the single
+        // withBypassRls tx (no redundant inner $transaction).
         let ssoTenant: { id: string } | null = null;
         if (pendingClaim) {
           ssoTenant = await findOrCreateSsoTenant(pendingClaim, tx);
         }
 
-        return prisma.$transaction(async (tx) => {
-          const tenant = ssoTenant
-            ?? await tx.tenant.create({
-                data: {
-                  name: user.email ?? user.name ?? "User",
-                  slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, BOOTSTRAP_SLUG_HASH_LENGTH)}`,
-                  isBootstrap: true,
-                },
-                select: { id: true },
-              });
+        const tenant = ssoTenant
+          ?? await tx.tenant.create({
+              data: {
+                name: user.email ?? user.name ?? "User",
+                slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, BOOTSTRAP_SLUG_HASH_LENGTH)}`,
+                isBootstrap: true,
+              },
+              select: { id: true },
+            });
 
-          const createdUser = await tx.user.create({
-            data: {
-              name: user.name,
-              email: user.email,
-              image: user.image,
-              emailVerified: user.emailVerified,
-              tenantId: tenant.id,
-            },
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-              emailVerified: true,
-            },
-          });
-
-          await tx.tenantMember.create({
-            data: {
-              tenantId: tenant.id,
-              userId: createdUser.id,
-              role: ssoTenant ? "MEMBER" : "OWNER",
-            },
-          });
-
-          return createdUser;
+        const createdUser = await tx.user.create({
+          data: {
+            name: user.name,
+            email: user.email,
+            image: user.image,
+            emailVerified: user.emailVerified,
+            tenantId: tenant.id,
+          },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+            emailVerified: true,
+          },
         });
+
+        await tx.tenantMember.create({
+          data: {
+            tenantId: tenant.id,
+            userId: createdUser.id,
+            role: ssoTenant ? "MEMBER" : "OWNER",
+          },
+        });
+
+        return createdUser;
       }, BYPASS_PURPOSE.AUTH_FLOW);
       if (!created.email) {
         throw new Error("USER_EMAIL_MISSING");

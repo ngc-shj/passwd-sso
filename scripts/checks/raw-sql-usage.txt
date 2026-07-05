@@ -54,11 +54,13 @@
 # Seeded via (R42 refresh, re-run at implementation start, 2026-07-04):
 #   grep -rlE '\$(queryRaw|executeRaw)(Unsafe)?\b' src scripts --include='*.ts' --include='*.tsx' \
 #     | grep -vE '\.test\.|__tests__|manual-tests|/e2e/' | sort
-# → 34 files (29 original + 5 advisory-lock TOCTOU fixes: bridge-code, sends/file,
-#   auth-adapter, extension-token, mobile-token — see bypass-rls-tx-callback-form plan).
+# → 35 files (29 original + 6 advisory-lock TOCTOU fixes: api-keys, bridge-code,
+#   sends/file, auth-adapter, extension-token, mobile-token — see
+#   bypass-rls-tx-callback-form plan).
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
+src/app/api/api-keys/route.ts # advisory lock serializing API-key creation against the per-user key cap (TOCTOU close)
 src/app/api/extension/bridge-code/route.ts # advisory lock serializing bridge-code issuance against the per-user active cap (TOCTOU close)
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
 src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw

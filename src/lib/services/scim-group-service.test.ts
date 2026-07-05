@@ -56,6 +56,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+import type { TxOrPrisma } from "@/lib/prisma";
 import {
   replaceScimGroup,
   patchScimGroup,
@@ -64,6 +65,11 @@ import {
   ScimNoSuchMemberError,
   ScimDisplayNameMismatchError,
 } from "./scim-group-service";
+
+// A plain client with no `$transaction` — the production tenant-tx shape that
+// drives the flatten (else) branch. Cast at construction so call sites read
+// clean; the service only touches scimGroupMapping/teamMember/tenantMember.
+type FlattenDb = TxOrPrisma;
 
 const BASE_URL = "http://localhost:3000/api/scim/v2";
 const TENANT_ID = "tenant-1";
@@ -567,5 +573,172 @@ describe("patchScimGroup", () => {
     expect(createCall.data[0].teamId).toBe(TEAM_ID);
     expect(createCall.data[0].role).toBe("ADMIN");
     expect(mockTeamMemberUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+// ── Flatten branch: db WITHOUT $transaction (production tenant-tx path) ───────
+//
+// Production ALWAYS calls these with a tenant `tx` that has no `$transaction`,
+// so `"$transaction" in db` is false and the else branch (`await run(db)`)
+// runs. The tests above pass/default a client that HAS `$transaction`, only
+// exercising the `db.$transaction(run)` branch. These tests inject an explicit
+// db mock with no `$transaction` and assert the add/remove happen directly on
+// it — no nested transaction opened.
+describe("replaceScimGroup — flatten branch (db has no $transaction)", () => {
+  beforeEach(() => {
+    // Prior describes called mockTransaction; clear so the "flatten branch did
+    // NOT open a nested tx" assertion below is meaningful.
+    mockTransaction.mockClear();
+  });
+
+  function makeFlattenDb() {
+    const findMany = vi.fn();
+    const createMany = vi.fn().mockResolvedValue({ count: 0 });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const tenantMemberFindMany = vi.fn().mockResolvedValue([]);
+    const scimGroupMappingFindUnique = vi.fn();
+    const db = {
+      scimGroupMapping: { findUnique: scimGroupMappingFindUnique },
+      teamMember: { findMany, createMany, updateMany },
+      tenantMember: { findMany: tenantMemberFindMany },
+    } as unknown as FlattenDb;
+    return { db, findMany, createMany, updateMany, tenantMemberFindMany, scimGroupMappingFindUnique };
+  }
+
+  it("adds members directly on the passed db (no nested $transaction)", async () => {
+    const { db, findMany, createMany, tenantMemberFindMany, scimGroupMappingFindUnique } =
+      makeFlattenDb();
+    scimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    findMany
+      .mockResolvedValueOnce([]) // currentMembers (runReplace)
+      .mockResolvedValueOnce([]) // existingMembers (applyAddOperations)
+      .mockResolvedValueOnce([]); // loadGroupMembers (after run, on db)
+    tenantMemberFindMany.mockResolvedValue([{ userId: "user-a" }, { userId: "user-b" }]);
+    createMany.mockResolvedValue({ count: 2 });
+
+    const result = await replaceScimGroup(
+      TENANT_ID,
+      SCIM_ID,
+      { displayName: "core:ADMIN", memberUserIds: ["user-a", "user-b"] },
+      BASE_URL,
+      db,
+    );
+
+    // The batch createMany fired on the passed db, not via a nested tx.
+    expect(createMany).toHaveBeenCalledOnce();
+    expect(createMany.mock.calls[0][0].data).toHaveLength(2);
+    // No $transaction on this db → the flatten (else) branch ran.
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(result.added).toBe(2);
+    expect(result.removed).toBe(0);
+  });
+
+  it("removes members directly on the passed db and returns correct counts", async () => {
+    const { db, findMany, updateMany, scimGroupMappingFindUnique } = makeFlattenDb();
+    scimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    const currentMembers = [
+      { id: "m-1", userId: "user-a", role: "ADMIN" },
+      { id: "m-2", userId: "user-b", role: "ADMIN" },
+    ];
+    findMany
+      .mockResolvedValueOnce(currentMembers) // currentMembers (runReplace)
+      .mockResolvedValueOnce(currentMembers) // freshMembers (applyRemoveOperations)
+      .mockResolvedValueOnce([]); // loadGroupMembers (after run, on db)
+    updateMany.mockResolvedValue({ count: 2 });
+
+    const result = await replaceScimGroup(
+      TENANT_ID,
+      SCIM_ID,
+      { displayName: "core:ADMIN", memberUserIds: [] },
+      BASE_URL,
+      db,
+    );
+
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(updateMany.mock.calls[0][0].where.id.in).toEqual(
+      expect.arrayContaining(["m-1", "m-2"]),
+    );
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(result.removed).toBe(2);
+    expect(result.added).toBe(0);
+  });
+});
+
+describe("patchScimGroup — flatten branch (db has no $transaction)", () => {
+  beforeEach(() => {
+    mockTransaction.mockClear();
+  });
+
+  function makeFlattenDb() {
+    const findMany = vi.fn();
+    const createMany = vi.fn().mockResolvedValue({ count: 0 });
+    const updateMany = vi.fn().mockResolvedValue({ count: 0 });
+    const tenantMemberFindMany = vi.fn().mockResolvedValue([]);
+    const scimGroupMappingFindUnique = vi.fn();
+    const db = {
+      scimGroupMapping: { findUnique: scimGroupMappingFindUnique },
+      teamMember: { findMany, createMany, updateMany },
+      tenantMember: { findMany: tenantMemberFindMany },
+    } as unknown as FlattenDb;
+    return { db, findMany, createMany, updateMany, tenantMemberFindMany, scimGroupMappingFindUnique };
+  }
+
+  it("adds members directly on the passed db (no nested $transaction)", async () => {
+    const { db, findMany, createMany, tenantMemberFindMany, scimGroupMappingFindUnique } =
+      makeFlattenDb();
+    scimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    findMany
+      .mockResolvedValueOnce([]) // existingMembers (applyAddOperations)
+      .mockResolvedValueOnce([]); // loadGroupMembers (after run, on db)
+    tenantMemberFindMany.mockResolvedValue([{ userId: "user-a" }, { userId: "user-b" }]);
+    createMany.mockResolvedValue({ count: 2 });
+
+    const result = await patchScimGroup(
+      TENANT_ID,
+      SCIM_ID,
+      [
+        { op: "add", userId: "user-a" },
+        { op: "add", userId: "user-b" },
+      ],
+      BASE_URL,
+      db,
+    );
+
+    expect(createMany).toHaveBeenCalledOnce();
+    expect(createMany.mock.calls[0][0].data).toHaveLength(2);
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(result.teamId).toBe(TEAM_ID);
+    expect(result.role).toBe("ADMIN");
+  });
+
+  it("removes members directly on the passed db (no nested $transaction)", async () => {
+    const { db, findMany, updateMany, scimGroupMappingFindUnique } = makeFlattenDb();
+    scimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    const existingMembers = [
+      { id: "m-1", userId: "user-a", role: "ADMIN" },
+      { id: "m-2", userId: "user-b", role: "ADMIN" },
+    ];
+    findMany
+      .mockResolvedValueOnce(existingMembers) // validate existence (runPatch)
+      .mockResolvedValueOnce(existingMembers) // freshMembers (applyRemoveOperations)
+      .mockResolvedValueOnce([]); // loadGroupMembers (after run, on db)
+    updateMany.mockResolvedValue({ count: 2 });
+
+    await patchScimGroup(
+      TENANT_ID,
+      SCIM_ID,
+      [
+        { op: "remove", userId: "user-a" },
+        { op: "remove", userId: "user-b" },
+      ],
+      BASE_URL,
+      db,
+    );
+
+    expect(updateMany).toHaveBeenCalledOnce();
+    expect(updateMany.mock.calls[0][0].where.id.in).toEqual(
+      expect.arrayContaining(["m-1", "m-2"]),
+    );
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

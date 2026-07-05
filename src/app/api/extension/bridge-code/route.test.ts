@@ -10,6 +10,7 @@ const {
   mockBridgeCodeFindMany,
   mockBridgeCodeUpdateMany,
   mockUserFindUnique,
+  mockExecuteRaw,
   mockCheck,
   mockCheckIpRateLimit,
   mockCheckRateLimitOrFail,
@@ -27,6 +28,7 @@ const {
   mockBridgeCodeFindMany: vi.fn(),
   mockBridgeCodeUpdateMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockCheckIpRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
   mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
@@ -53,7 +55,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     // withBypassRls passes `prisma` as the tx; the route acquires a
     // pg_advisory_xact_lock via tx.$executeRaw before the count-then-create.
-    $executeRaw: vi.fn().mockResolvedValue(1),
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -376,6 +378,15 @@ describe("POST /api/extension/bridge-code", () => {
     expect(mockLogAudit).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: "EXTENSION_BRIDGE_CODE_ISSUE_FAILURE" }),
     );
+
+    // The count-then-create runs under a per-user advisory lock (TOCTOU fix).
+    // Mutation-kill: removing the tx.$executeRaw lock line would leave
+    // $executeRaw uncalled with this SQL.
+    expect(
+      mockExecuteRaw.mock.calls.some((c) =>
+        String(c[0]).includes("pg_advisory_xact_lock"),
+      ),
+    ).toBe(true);
   });
 
   it("revokes oldest unused codes when BRIDGE_CODE_MAX_ACTIVE is exceeded", async () => {
