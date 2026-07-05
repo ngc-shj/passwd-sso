@@ -12,6 +12,7 @@ const {
   mockMcpClientCount,
   mockMcpClientFindFirst,
   mockMcpClientCreate,
+  mockExecuteRaw,
   mockHashToken,
   mockUserFindMany,
   mockRequireRecentSession,
@@ -25,6 +26,7 @@ const {
   mockMcpClientCount: vi.fn(),
   mockMcpClientFindFirst: vi.fn(),
   mockMcpClientCreate: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockUserFindMany: vi.fn().mockResolvedValue([]),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
@@ -56,6 +58,10 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findMany: mockUserFindMany,
     },
+    // The cap-check + name-check + create now run under an advisory lock inside
+    // one withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
+    // lock before count/create. The withTenantRls mock passes prisma as tx.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -88,6 +94,16 @@ import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/auth/mcp";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
+
+// Asserts the per-tenant advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired. Mutation-kill: deleting the lock line from the production
+// count/name-check/create path leaves $executeRaw uncalled with that SQL, so
+// this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 const makeClient = (overrides: Record<string, unknown> = {}) => ({
   id: "client-1",
@@ -206,6 +222,8 @@ describe("POST /api/tenant/mcp-clients", () => {
         tenantId: "tenant-1",
       }),
     );
+    // The count/name-check/create runs under a per-tenant advisory lock (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it.each([

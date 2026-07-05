@@ -18,6 +18,12 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 
+// Sentinels thrown inside the locked transaction. Mapped outside the tx:
+// the limit error to MCP_CLIENT_LIMIT_EXCEEDED, the name conflict to
+// MCP_CLIENT_NAME_CONFLICT.
+class McpClientLimitError extends Error {}
+class McpClientNameConflictError extends Error {}
+
 const createSchema = z.object({
   name: z.string().min(1).max(100),
   redirectUris: z.array(
@@ -127,50 +133,59 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
   const { name, redirectUris, allowedScopes } = result.data;
 
-  // Enforce tenant limit
-  const count = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.mcpClient.count({ where: { tenantId: actor.tenantId } }),
-  );
-  if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
-    return errorResponseWithMessage(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant`);
-  }
-
-  // Check name uniqueness
-  const existing = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } }),
-  );
-  if (existing) {
-    return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT);
-  }
-
-  // Generate client credentials
+  // Generate client credentials outside the locked tx (like api-keys).
   const clientId = MCP_CLIENT_ID_PREFIX + randomBytes(16).toString("hex");
   const clientSecret = randomBytes(32).toString("base64url");
   const clientSecretHash = hashToken(clientSecret);
 
-  const client = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.mcpClient.create({
-      data: {
-        tenantId: actor.tenantId,
-        clientId,
-        clientSecretHash,
-        name,
-        redirectUris,
-        allowedScopes: allowedScopes.join(","),
-        createdById: session.user.id,
-      },
-      select: {
-        id: true,
-        clientId: true,
-        name: true,
-        redirectUris: true,
-        allowedScopes: true,
-        isActive: true,
-        isDcr: true,
-        createdAt: true,
-      },
-    }),
-  );
+  // Serialize the cap check + name-uniqueness check + create under a per-tenant
+  // advisory lock so two concurrent POSTs cannot both read count < MAX (or both
+  // see no name conflict) and both create, blowing past MAX_MCP_CLIENTS_PER_TENANT
+  // (TOCTOU). Lock, count, existing-check, and create fold into one tenant tx;
+  // over-limit / name-conflict throw sentinels mapped outside the tx.
+  let client;
+  try {
+    client = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      const count = await tx.mcpClient.count({ where: { tenantId: actor.tenantId } });
+      if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
+        throw new McpClientLimitError();
+      }
+      const existing = await tx.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } });
+      if (existing) {
+        throw new McpClientNameConflictError();
+      }
+      return tx.mcpClient.create({
+        data: {
+          tenantId: actor.tenantId,
+          clientId,
+          clientSecretHash,
+          name,
+          redirectUris,
+          allowedScopes: allowedScopes.join(","),
+          createdById: session.user.id,
+        },
+        select: {
+          id: true,
+          clientId: true,
+          name: true,
+          redirectUris: true,
+          allowedScopes: true,
+          isActive: true,
+          isDcr: true,
+          createdAt: true,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof McpClientLimitError) {
+      return errorResponseWithMessage(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant`);
+    }
+    if (e instanceof McpClientNameConflictError) {
+      return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT);
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),

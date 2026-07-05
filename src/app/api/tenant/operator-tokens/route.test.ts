@@ -5,6 +5,7 @@ const {
   mockAuth,
   mockRequireTenantPermission,
   mockPrismaOperatorToken,
+  mockExecuteRaw,
   mockWithTenantRls,
   mockLogAudit,
   mockHashToken,
@@ -28,6 +29,7 @@ const {
       count: vi.fn(),
       create: vi.fn(),
     },
+    mockExecuteRaw: vi.fn().mockResolvedValue(1),
     mockWithTenantRls: vi.fn(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
@@ -41,6 +43,10 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     operatorToken: mockPrismaOperatorToken,
+    // The cap-check + create now run under an advisory lock inside one
+    // withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw for the
+    // lock before count/create. The withTenantRls mock passes prisma as tx.
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/auth/access/tenant-auth", () => ({
@@ -76,6 +82,15 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, POST } from "./route";
+
+// Asserts the per-tenant advisory lock ($executeRaw with pg_advisory_xact_lock)
+// was acquired. Mutation-kill: deleting the lock line from the production
+// count-then-create path leaves $executeRaw uncalled with that SQL, so this fails.
+function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
+  expect(
+    mock.mock.calls.some((c) => String(c[0]).includes("pg_advisory_xact_lock")),
+  ).toBe(true);
+}
 
 const TENANT_ID = "tenant-1";
 const USER_ID = "user-1";
@@ -303,6 +318,8 @@ describe("POST /api/tenant/operator-tokens", () => {
         action: "OPERATOR_TOKEN_CREATE",
       }),
     );
+    // The count-then-create runs under a per-tenant advisory lock (TOCTOU fix).
+    expectAdvisoryLockAcquired(mockExecuteRaw);
   });
 
   it("emits audit OPERATOR_TOKEN_CREATE with tokenId and scope", async () => {

@@ -97,6 +97,9 @@ vi.mock("@/lib/auth/access/tenant-auth", () => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     $transaction: mockPrismaTransaction,
+    // MCP-client creation runs count+existing-check+create under an advisory
+    // lock in one withTenantRls tx (TOCTOU fix); the route calls tx.$executeRaw.
+    $executeRaw: vi.fn().mockResolvedValue(1),
     mcpClient: {
       findMany: mockMcpClientFindMany,
       count: mockMcpClientCount,

@@ -37,6 +37,11 @@ export const runtime = "nodejs";
 
 const TOKEN_LIMIT_PER_TENANT = 50;
 
+// Sentinel thrown inside the locked transaction when the re-checked active
+// operator-token count is at the cap. Mapped to OPERATOR_TOKEN_LIMIT_EXCEEDED
+// outside the tx.
+class OperatorTokenLimitError extends Error {}
+
 const createTokenLimiter = createRateLimiter({
   windowMs: RATE_WINDOW_MS,
   max: 5,
@@ -149,20 +154,7 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, createTokenSchema);
   if (!result.ok) return result.response;
 
-  // Cap active tokens per tenant
-  const tokenCount = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.operatorToken.count({
-      where: {
-        tenantId: actor.tenantId,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-    }),
-  );
-  if (tokenCount >= TOKEN_LIMIT_PER_TENANT) {
-    return errorResponse(API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED);
-  }
-
+  // Token generation + hashing are done outside the locked tx (like api-keys).
   const plaintext = generateOperatorToken();
   const tokenHash = hashToken(plaintext);
   const prefix = plaintext.slice(0, 8);
@@ -170,31 +162,55 @@ async function handlePOST(req: NextRequest) {
     Date.now() + result.data.expiresInDays * MS_PER_DAY,
   );
 
+  // Serialize the cap check with the create under a per-tenant advisory lock so
+  // two concurrent POSTs cannot both read count < LIMIT and both create, blowing
+  // past TOKEN_LIMIT_PER_TENANT (TOCTOU). Lock, count, and create fold into one
+  // tenant tx; over-limit throws a sentinel mapped to a 409 outside the tx.
+  //
   // Server hard-codes subjectUserId = createdByUserId = session.userId.
   // The Zod schema is `.strict()` so a body-injected subjectUserId is rejected
   // before reaching this point.
-  const token = await withTenantRls(prisma, actor.tenantId, async (tx) =>
-    tx.operatorToken.create({
-      data: {
-        tenantId: actor.tenantId,
-        tokenHash,
-        prefix,
-        name: result.data.name,
-        subjectUserId: session.user.id,
-        createdByUserId: session.user.id,
-        scope: result.data.scope,
-        expiresAt,
-      },
-      select: {
-        id: true,
-        prefix: true,
-        name: true,
-        scope: true,
-        expiresAt: true,
-        createdAt: true,
-      },
-    }),
-  );
+  let token;
+  try {
+    token = await withTenantRls(prisma, actor.tenantId, async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${actor.tenantId}::text))`;
+      const tokenCount = await tx.operatorToken.count({
+        where: {
+          tenantId: actor.tenantId,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+      });
+      if (tokenCount >= TOKEN_LIMIT_PER_TENANT) {
+        throw new OperatorTokenLimitError();
+      }
+      return tx.operatorToken.create({
+        data: {
+          tenantId: actor.tenantId,
+          tokenHash,
+          prefix,
+          name: result.data.name,
+          subjectUserId: session.user.id,
+          createdByUserId: session.user.id,
+          scope: result.data.scope,
+          expiresAt,
+        },
+        select: {
+          id: true,
+          prefix: true,
+          name: true,
+          scope: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+      });
+    });
+  } catch (e) {
+    if (e instanceof OperatorTokenLimitError) {
+      return errorResponse(API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED);
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, actor.tenantId),

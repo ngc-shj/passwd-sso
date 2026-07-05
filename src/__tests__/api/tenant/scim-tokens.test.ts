@@ -58,6 +58,9 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: mockScimTokenFindUnique,
       update: mockScimTokenUpdate,
     },
+    // The cap check + create run under an advisory lock in one withTenantRls tx
+    // (TOCTOU fix); the route calls tx.$executeRaw for the lock.
+    $executeRaw: vi.fn().mockResolvedValue(1),
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
