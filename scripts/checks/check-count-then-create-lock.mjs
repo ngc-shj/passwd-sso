@@ -10,10 +10,21 @@
  *
  * Detection is lexical-with-context (no AST dependency needed — cheap, runs in
  * the static-checks job): a file is a "cap-then-create site" when it contains ALL
- * of: (a) a `.count(` or `.aggregate(` call, (b) a cap comparison against a MAX_*
- * / *_LIMIT* constant (`>= MAX_…`, `> …_LIMIT`, etc.), and (c) a `.create(` call.
- * Every such file MUST also contain `pg_advisory_xact_lock`, OR appear in
- * SOFT_CAP_EXEMPTIONS with a reviewed reason.
+ * of: (a) a per-scope READ — `.count(`, `.aggregate(`, or `.findMany(` (the
+ * "evict-oldest" family reads with findMany then compares `.length`), (b) a cap
+ * comparison — either a MAX_* / *_LIMIT* / *_TOTAL_BYTES constant threshold, a
+ * `.length … > /`>=` overflow check, or a `maxConcurrentSessions`/`maxSessions`
+ * dynamic cap, and (c) a WRITE that bumps the counted set — `.create(`,
+ * `.createMany(`, `.upsert(`, or a claim-style `.updateMany(` (flips a scoping FK
+ * on an existing row, e.g. DCR claim `tenantId: null → tenantId`). Every such file
+ * MUST also contain `pg_advisory_xact_lock`, OR appear in SOFT_CAP_EXEMPTIONS.
+ *
+ * The read/cap/write alternations are deliberately broad because the class's real
+ * defining primitive is "read a per-scope table → gate on a cap → write it", NOT
+ * the `.count()+MAX_` spelling. Keying on that spelling let bridge-code / token /
+ * session caps (findMany().length), the byte-quota send cap (_TOTAL_BYTES), and
+ * the DCR-consent claim (updateMany, no .create) ship or mutate without the guard
+ * seeing them. See the triangulate review pr637-toctou-cap-*.
  *
  * This is a floor, not a proof of correctness — it cannot verify the lock is in
  * the SAME tx as the count+create (that's review-enforced, and pinned by the
@@ -39,14 +50,41 @@ const SOFT_CAP_EXEMPTIONS = new Map([
   ],
 ]);
 
-// A cap comparison: a >= or > against a MAX_* / *_LIMIT* / LIMIT_PER_* constant,
-// or a bare numeric cap next to such a name. Deliberately excludes length/size
-// guards (MAX_LENGTH, MAX_FILE_SIZE, MAX_BYTES, MAX_DAYS, …) which are validation
-// bounds, not count caps — those never pair a count() with a create() on a cap.
-const CAP_COMPARISON_RE =
-  />=?\s*(MAX_(?!LENGTH|FILE_SIZE|BYTES|JSON|DAYS|AGE|DEPTH|EXPIRY|EXPIRES|DIMENSION|IMPORT_FOLDERS|CIDRS|BULK|ATTEMPTS|CONCURRENT_SESSIONS_(?:MIN|MAX))[A-Z_]*|[A-Z_]+_LIMIT(?:_PER_[A-Z]+)?|TOKEN_LIMIT[A-Z_]*)\b/;
-const COUNT_RE = /\.(count|aggregate)\s*\(/;
-const CREATE_RE = /\.create\s*\(/;
+// A cap comparison. Three shapes are accepted (the class uses all three):
+//  1. A >= / > against a named UPPER_SNAKE cap constant: MAX_* / *_LIMIT* /
+//     *_TOTAL_BYTES. Length/size VALIDATION bounds (MAX_LENGTH, MAX_FILE_SIZE,
+//     MAX_BYTES, MAX_DAYS, …) are excluded — they never gate a table count.
+//     *_TOTAL_BYTES is the one _BYTES form that IS a count cap (a byte-quota over
+//     an aggregated table, e.g. SEND_MAX_ACTIVE_TOTAL_BYTES), so it is allowed
+//     while the generic _BYTES / _FILE_SIZE validation bounds stay excluded.
+//  2. A `.length`-based overflow check in the findMany().length "evict-oldest"
+//     family. Matched narrowly as `<name>.length + N - CAP_CONSTANT` (the exact
+//     shape used by the bridge-code / extension-token / mobile-token caps) so a
+//     bare `xs.length > 0` / `> limit` / `> 20` pagination or presence check is
+//     NOT mistaken for a cap.
+//  3. A dynamic per-tenant session cap held in a lowercase var
+//     (maxSessions / maxConcurrentSessions), which matches no naming convention.
+// Excluded MAX_ forms are not per-scope DB caps: validation length/size bounds
+// (LENGTH, FILE_SIZE, BYTES, DIMENSION, …), time/interval constants (…_THROTTLE_MS
+// and other THROTTLE intervals, AGE, DAYS, EXPIRY/EXPIRES), traversal bounds
+// (DEPTH), and the in-memory Map size cap (CACHE_ENTRIES) used by per-process
+// throttle caches. *_TOTAL_BYTES is re-admitted below — it IS a byte-quota cap.
+const CAP_NAMED_RE =
+  />=?\s*(MAX_(?!LENGTH|FILE_SIZE|BYTES|JSON|DAYS|AGE|DEPTH|EXPIRY|EXPIRES|DIMENSION|IMPORT_FOLDERS|CIDRS|BULK|ATTEMPTS|CACHE_ENTRIES|[A-Z_]*THROTTLE[A-Z_]*|CONCURRENT_SESSIONS_(?:MIN|MAX))[A-Z_]*|[A-Z_]+_TOTAL_BYTES|[A-Z_]+_LIMIT(?:_PER_[A-Z]+)?|TOKEN_LIMIT[A-Z_]*)\b/;
+// `active.length + 1 - BRIDGE_CODE_MAX_ACTIVE` — length, then arithmetic against
+// an UPPER_SNAKE cap constant. Anchored on the `- CONSTANT` so presence checks
+// (`xs.length > 0`) and numeric-literal bounds (`all.length > 20`) do not match.
+const CAP_LENGTH_OVERFLOW_RE = /\.length\s*[-+][^;\n]*?[-+]\s*[A-Z][A-Z0-9_]*[A-Z0-9]\b/;
+const CAP_DYNAMIC_SESSION_RE = /\.length\s*>=?\s*maxSessions\b|>=?\s*maxConcurrentSessions\b/;
+const CAP_COMPARISON_RE = new RegExp(
+  `${CAP_NAMED_RE.source}|${CAP_LENGTH_OVERFLOW_RE.source}|${CAP_DYNAMIC_SESSION_RE.source}`,
+);
+// A per-scope read that establishes the current count.
+const COUNT_RE = /\.(count|aggregate|findMany)\s*\(/;
+// A write that bumps the counted set: a plain create, or a claim/CAS updateMany
+// (flips a scoping FK on an existing row — the DCR-consent claim increments a
+// tenant's client count with no `.create` at all), or upsert.
+const CREATE_RE = /\.(create|createMany|updateMany|upsert)\s*\(/;
 const LOCK_RE = /pg_advisory_xact_lock|advisoryXactLock\s*\(/;
 const RLS_WRAPPER_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls\s*\(/;
 

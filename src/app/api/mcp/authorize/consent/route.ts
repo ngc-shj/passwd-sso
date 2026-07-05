@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/auth/mcp";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
@@ -128,6 +128,15 @@ export async function POST(req: NextRequest) {
       claimResult = await withBypassRls(
         prisma,
         async (tx) => {
+          // Serialize count → cap-check → claim under a per-tenant advisory
+          // lock. The claim below is a create-equivalent (it flips an unclaimed
+          // client's tenantId null → userTenantId, bumping this tenant's client
+          // count), so without the lock two concurrent Allow POSTs can both read
+          // count < MAX and both claim, exceeding MAX_MCP_CLIENTS_PER_TENANT.
+          // Keyed on userTenantId so it shares lock identity with the admin-create
+          // mirror in api/tenant/mcp-clients (locks on actor.tenantId) — the two
+          // surfaces enforce the same per-tenant cap and must serialize together.
+          await advisoryXactLock(tx, userTenantId);
           const tenantClientCount = await tx.mcpClient.count({
             where: { tenantId: userTenantId },
           });

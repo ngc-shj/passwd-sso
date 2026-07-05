@@ -12,6 +12,7 @@ const {
   mockMcpClientFindUnique,
   mockTxFindFirst,
   mockTxDelete,
+  mockExecuteRaw,
   mockRequireRecentSession,
   mockDerivePasskeyState,
 } = vi.hoisted(() => ({
@@ -26,6 +27,7 @@ const {
   mockMcpClientFindUnique: vi.fn(),
   mockTxFindFirst: vi.fn().mockResolvedValue(null),
   mockTxDelete: vi.fn().mockResolvedValue({}),
+  mockExecuteRaw: vi.fn().mockResolvedValue(0),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
   mockDerivePasskeyState: vi.fn(),
 }));
@@ -66,6 +68,10 @@ vi.mock("@/lib/prisma", () => ({
 // because vi.clearAllMocks() wipes mock implementations between tests).
 function bypassRlsImpl(_p: unknown, fn: (tx: unknown) => unknown) {
   return fn({
+    // The claim callback acquires a per-tenant advisory lock (advisoryXactLock)
+    // before the count → cap → updateMany-claim sequence, so the bypass tx must
+    // serve $executeRaw. Captured by mockExecuteRaw to assert the lock is taken.
+    $executeRaw: mockExecuteRaw,
     mcpClient: {
       // The route issues two distinct findFirst shapes on the bypass tx: the
       // initial client lookup keys on `clientId`; the DCR claim-exclusion
@@ -420,6 +426,20 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(res.status).toBe(302);
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("code=");
+
+    // S1: the claim must serialize under a per-tenant advisory lock, taken
+    // BEFORE the count→cap→updateMany-claim, keyed on the user's tenantId (so it
+    // shares lock identity with the admin-create mirror). Without this ordering
+    // two concurrent Allow POSTs can both read count < MAX and both claim.
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const lockArgs = mockExecuteRaw.mock.calls[0];
+    expect(lockArgs.slice(1)).toContain(VALID_USER.tenantId);
+    expect(mockExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mockMcpClientCount.mock.invocationCallOrder[0],
+    );
+    expect(mockExecuteRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mockMcpClientUpdateMany.mock.invocationCallOrder[0],
+    );
   });
 
   it("redirects with error=access_denied and calls logAuditAsync on deny action", async () => {
