@@ -35,13 +35,18 @@ These are residual-key protections for process teardown/freeze, not away-detecti
 
 1. Remove: `DEFAULT_HIDDEN_TIMEOUT_MS` constant, `hiddenAtRef`, `hiddenLockMsRef`.
 2. Timeout-update `useEffect` (line 31-36): drop the `hiddenLockMsRef` assignment; update only `autoLockMsRef`.
-3. `handleVisibility` (line 53-60): remove the `document.hidden` branch. Call `updateActivity()` only when the tab **returns from hidden to visible**.
+3. `handleVisibility` (line 53-60): on return from hidden, evaluate the timeout FIRST, then either lock or treat the return as fresh activity.
 
-   This keeps "hidden → visible return counts as activity" so the timer treats the return moment as recent activity. Without it, the vault could lock instantly on return if the old `lastActivity` already exceeded the threshold, so we keep it.
+   Background tabs have their `setInterval` throttled or suspended, so `checkInactivity` may never fire while hidden even past the threshold. Blindly resetting activity on return would let an aged-out session escape the lock (fail-open). So on return we re-evaluate `now - lastActivity > autoLockMs`: if exceeded, `lock()`; otherwise `updateActivity()` (the return is genuine activity and the session is still fresh).
 
    ```ts
    const handleVisibility = () => {
-     if (!document.hidden) updateActivity();
+     if (document.hidden) return;
+     if (Date.now() - lastActivityRef.current > autoLockMsRef.current) {
+       lock();
+     } else {
+       updateActivity();
+     }
    };
    ```
 
@@ -55,9 +60,9 @@ These are residual-key protections for process teardown/freeze, not away-detecti
    };
    ```
 
-5. Keep the `visibilitychange` listener registration/cleanup (used for the on-return activity reset).
+5. Keep the `visibilitychange` listener registration/cleanup (used for the on-return timeout re-evaluation).
 
-Note: `setInterval` is throttled in background tabs (browsers coalesce background-tab timers to ~1 min), but the check compares absolute timestamps (`Date.now() - lastActivity`), so the threshold is evaluated correctly once the tab returns to the foreground and the interval fires normally. The single-timeout intent (lock exactly at the configured minutes) is preserved.
+Note: `setInterval` is throttled or suspended in background tabs, so the interval alone cannot be relied on to lock a hidden tab that ages out. The check compares absolute timestamps (`Date.now() - lastActivity`), and `handleVisibility` re-evaluates that difference on the return-to-visible edge — so an aged-out hidden session locks on return (fail-safe) rather than being reset to "just active" (fail-open). The single-timeout intent (lock at or before the configured minutes elapse) is preserved in both the interval path and the visibility-return path.
 
 ## User-facing strings / Docs
 

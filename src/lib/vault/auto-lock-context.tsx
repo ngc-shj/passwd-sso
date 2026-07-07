@@ -46,17 +46,25 @@ export function AutoLockProvider({
       lastActivityRef.current = Date.now();
     };
 
-    // Returning from a hidden tab counts as activity, so we don't lock
-    // immediately on return when the pre-hidden timestamp already aged out.
-    const handleVisibility = () => {
-      if (!document.hidden) updateActivity();
-    };
-
     // Single idle timeout regardless of tab visibility. What we protect is
     // "the user walked away", measured by activity — not by which tab is front.
     const checkInactivity = () => {
       if (Date.now() - lastActivityRef.current > autoLockMsRef.current) {
         lock();
+      }
+    };
+
+    // On return from a hidden tab, evaluate the timeout FIRST. Background tabs
+    // have their setInterval throttled/suspended, so checkInactivity may never
+    // fire while hidden past the threshold. If we blindly reset activity on
+    // return, an aged-out session would escape the lock (fail-open). Only treat
+    // the return as fresh activity when the threshold has not been exceeded.
+    const handleVisibility = () => {
+      if (document.hidden) return;
+      if (Date.now() - lastActivityRef.current > autoLockMsRef.current) {
+        lock();
+      } else {
+        updateActivity();
       }
     };
 
