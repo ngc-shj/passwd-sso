@@ -355,3 +355,49 @@ Phase 2 obligation: re-run the grep, diff against this list, and for each **pers
 | C10 | Localization strings (en/ja)                                  | locked |
 
 All contracts are `locked` after Round-1 plan review: the Round-1 findings (F1/F2 web-parity + nil/empty semantics, F6/S5/T5 ISO parser reuse, T1 version seam, T2 injected store, T3 per-key favorites, T4 stability + both-key nil-last, T7 e2e date test, S1 screen-recording gate, F4 sort-menu location) were all reflected into the contracts above.
+
+## Implementation Checklist
+
+### Files to create
+- `ios/Shared/ISO8601.swift` — free func `parseISO8601(_:) -> Date?` (relocated dual-variant parser).
+- `ios/Shared/Models/EntrySortOption.swift` — enum + `sorted(_:)` (C1).
+- `ios/Shared/AppVersion.swift` — string-seam version provider (C9).
+- `ios/PasswdSSOTests/EntrySortOptionTests.swift` — T-SORT.
+- `ios/PasswdSSOTests/AppVersionTests.swift` — T-VERSION.
+
+### Files to modify
+- `ios/PasswdSSOApp/Auth/AutofillTokenRefresher.swift` — replace body of `parseISO8601` with forwarding shim to `Shared.parseISO8601` (R2-T1; keep the static method so `Self.parseISO8601` @ line 41 and tests @ 86/114/115/116 still compile).
+- `ios/Shared/Models/VaultEntrySummary.swift` — add `createdAt/updatedAt: Date?` + defaulted init params (C2).
+- `ios/Shared/AutoFill/CredentialResolver.swift` — `CacheEntry`: add optional `createdAt/updatedAt` + defaulted init params (C3).
+- `ios/PasswdSSOApp/Vault/EntryFetcher.swift` — `EncryptedEntry`: add optional date `String` wire fields + `CodingKeys` + convert in `toPersonalCacheEntry()` via `Shared.parseISO8601` (C4). Team `toCacheEntry` passes nil (SC3).
+- `ios/Shared/Models/EntryBlobDecoder.swift` — `summary(...)`: add `createdAt/updatedAt: Date? = nil` params, set on returned `VaultEntrySummary` (C5).
+- `ios/PasswdSSOApp/Views/Vault/VaultViewModel.swift` — `init(settings:)`, `sortOption` property (read/write AppSettingsStore), `filteredSummaries` final sort step, `decryptOverview` passes `entry.createdAt/updatedAt` to `summary` (C6).
+- `ios/Shared/Storage/AppSettingsStore.swift` — `entrySortOption` fail-closed getter/setter + `entrySortOptionKey` (C7).
+- `ios/PasswdSSOApp/Views/Vault/VaultCategoryLanding.swift` — `.searchable()` on outer container of `VaultCategoryListView`; rows stay in `!isScreenRecording` else branch (C8).
+- `ios/PasswdSSOApp/Views/Vault/VaultListView.swift` — Sort menu in top-level toolbar setting `viewModel.sortOption` (C6/F4).
+- `ios/PasswdSSOApp/Views/SettingsView.swift` — Version `LabeledContent` row (C9).
+- `ios/PasswdSSOApp/Localizable.xcstrings` — new keys: `Sort`, `Title`, `Created date`, `Updated date`, `Website`, `Version` (en+ja) (C10).
+- Test extensions: `VaultFilterTests.swift` (T-VM-SORT), `AppSettingsStoreTests.swift` (T-PERSIST), `CacheEntryPropagationTests.swift` (T-DATE, T-DATE-COMPAT), `VaultViewModelTests.swift` (T-DATE-E2E), `EntryBlobDecoderTests.swift` (T-BLOB).
+
+### Reusable code (MUST reuse, do not reimplement)
+- `AutofillTokenRefresher.parseISO8601` dual-variant parse (`AutofillTokenRefresher.swift:57-64`) → relocate to Shared, reuse everywhere.
+- `AppSettingsStore` fail-closed getter pattern (`appLanguage`/`vaultTimeoutAction`, lines 190-200) → mirror for `entrySortOption`.
+- `AppSettingsStore(defaults:)` injection (line 80) + `AppSettingsStoreTests` per-suite pattern → reuse for T-PERSIST.
+- `injectSummaries` (VaultViewModelTests.swift:838) + `makeCacheData` (line 849) → reuse for sort/e2e tests.
+- `EntryBlobDecoder.summary`/`toPersonalCacheEntry` established metadata-on-cache-row pattern (entryType/isFavorite) → dates follow the same shape.
+
+### Member-set (R42) — CacheEntry( sites, verified
+- Personal sync: `HostSyncService.swift:95` → `toPersonalCacheEntry()` (MUST carry dates).
+- Team: `EntryFetcher.swift:129 toCacheEntry` (nil — SC3).
+- Passkey registration append: `CredentialProviderViewController.swift:449` (nil — new local entry, no server date; next host sync backfills).
+- Debug/Demo: `DebugVaultLoader.swift:237`, `DemoVaultFactory.swift:449` (nil ok; may set for realism).
+
+### Test-tree enumeration (R19) — symbols with changed signatures
+- `EntryBlobDecoder.summary`: tests in `CacheEntryPropagationTests`, `EntryBlobDecoderTests`, `PasskeyEntryBlobBuilderTests` — all use defaulted params, no update needed unless asserting dates.
+- `VaultEntrySummary.init`: constructed in `EntryBlobDecoder.swift` + 7 test files — defaulted params, no update needed.
+- `VaultViewModel.init`: 22 call sites all zero-arg — `init(settings:)` default arg keeps them compiling; keep `@MainActor`.
+- `parseISO8601`: `AutofillTokenRefresher.swift:41` + `AutofillTokenRefresherTests.swift:86/114/115/116` — forwarding shim preserves all.
+
+### Mandatory checks (memory)
+- `xcodegen generate` (commit regenerated pbxproj — new files must be added to targets via project.yml/xcodegen).
+- `xcodebuild test -scheme PasswdSSOApp -destination 'id=<sim udid>'` — all tests pass + build succeeds.
