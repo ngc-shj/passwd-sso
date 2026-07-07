@@ -160,8 +160,13 @@ export function useBulkAction({
       });
 
       if (!res.ok) {
-        if (pendingAction === "deletePermanently") {
-          if (await handleStepUpError(res, async () => { await onStepUpRequired?.(); })) {
+        // Only the permanent-purge action is step-up-gated. Route the 403 to
+        // reauth ONLY when a handler is wired; otherwise fall through to the
+        // generic error toast rather than silently closing the dialog — an
+        // omitted onStepUpRequired must not swallow the mutation.
+        if (pendingAction === "deletePermanently" && onStepUpRequired) {
+          const reauth = onStepUpRequired;
+          if (await handleStepUpError(res, async () => { await reauth(); })) {
             setDialogOpen(false);
             return;
           }

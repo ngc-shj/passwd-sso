@@ -56,6 +56,7 @@ vi.mock("@/hooks/use-travel-mode", () => ({
 
 import { renderHook } from "@testing-library/react";
 import { decryptPersonalOverview, usePersonalVaultListAdapter } from "./personal-vault-list-adapter";
+import { isStepUpRequiredError } from "@/lib/http/handle-step-up-error";
 import type { DisplayEntry } from "@/types/display-entry";
 
 const STABLE_KEY = {} as CryptoKey;
@@ -404,6 +405,52 @@ describe("usePersonalVaultListAdapter", () => {
     await expect(result.current.restore(entry)).rejects.toThrow("restore failed");
     await expect(result.current.deletePermanently(entry)).rejects.toThrow("deletePermanently failed");
     await expect(result.current.emptyTrash()).rejects.toThrow("emptyTrash failed");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Step-up (SESSION_STEP_UP_REQUIRED) handling — deletePermanently/emptyTrash only
+  // ---------------------------------------------------------------------------
+  it("deletePermanently rejects with StepUpRequiredError on a 403 SESSION_STEP_UP_REQUIRED", async () => {
+    mockFetchApi.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+
+    const { result } = renderHook(() => usePersonalVaultListAdapter());
+    const entry = { id: "e1" } as DisplayEntry;
+
+    const caught = await result.current.deletePermanently(entry).catch((e: unknown) => e);
+    expect(isStepUpRequiredError(caught)).toBe(true);
+  });
+
+  it("emptyTrash rejects with StepUpRequiredError on a 403 SESSION_STEP_UP_REQUIRED", async () => {
+    mockFetchApi.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+
+    const { result } = renderHook(() => usePersonalVaultListAdapter());
+
+    const caught = await result.current.emptyTrash().catch((e: unknown) => e);
+    expect(isStepUpRequiredError(caught)).toBe(true);
+  });
+
+  it("an ungated mutation (restore) rejects with a plain Error (not StepUpRequiredError) on the same 403 body", async () => {
+    mockFetchApi.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+
+    const { result } = renderHook(() => usePersonalVaultListAdapter());
+    const entry = { id: "e1" } as DisplayEntry;
+
+    const caught = await result.current.restore(entry).catch((e: unknown) => e);
+    expect(caught).toBeInstanceOf(Error);
+    expect(isStepUpRequiredError(caught)).toBe(false);
+    expect((caught as Error).message).toBe("restore failed");
   });
 
   it("notifyDataChanged calls notifyVaultDataChanged (personal event)", () => {
