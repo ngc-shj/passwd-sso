@@ -79,7 +79,10 @@ describe("buildPersonalEntryPayload", () => {
       },
       customFields: [
         { label: "env", value: "prod", type: "text" },
+        // Label-less value field: touched, so kept (previously dropped).
         { label: "", value: "skip", type: "text" },
+        // Fully-empty row: untouched, dropped.
+        { label: "", value: "", type: "text" },
       ],
       totp: null,
       requireReprompt: true,
@@ -93,11 +96,40 @@ describe("buildPersonalEntryPayload", () => {
     expect(full.url).toBe("https://example.com/path");
     expect(full.notes).toBeNull();
     expect(Array.isArray(full.customFields)).toBe(true);
-    expect((full.customFields as unknown[]).length).toBe(1);
+    // "env"/"prod" and label-less "skip" survive; the fully-empty row is dropped.
+    expect((full.customFields as unknown[]).length).toBe(2);
     expect(overview.urlHost).toBe("example.com");
     expect(overview.requireReprompt).toBe(true);
     // No TOTP → marker absent from overview (iOS reads absent as hasTOTP=false).
     expect(overview).not.toHaveProperty("hasTOTP");
+  });
+
+  it("keeps a label-less URL custom field and derives its host into additionalUrlHosts", () => {
+    const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
+      title: "Repro",
+      username: "u",
+      password: "pw",
+      // Main URL host differs from the custom-field host so the custom host is
+      // not deduped away (personal-entry-payload excludes hosts equal to urlHost).
+      url: "https://main.example.com",
+      notes: "",
+      selectedTags: [],
+      generatorSettings: BASE_GENERATOR_SETTINGS,
+      customFields: [
+        { label: "", value: "https://extra.example.org", type: "url" },
+      ],
+      totp: null,
+      requireReprompt: false,
+      existingHistory: [],
+    });
+
+    const full = JSON.parse(fullBlob) as Record<string, unknown>;
+    const overview = JSON.parse(overviewBlob) as Record<string, unknown>;
+
+    expect(full.customFields).toEqual([
+      { label: "", value: "https://extra.example.org", type: "url" },
+    ]);
+    expect(overview.additionalUrlHosts).toEqual(["extra.example.org"]);
   });
 
   it("marks the overview blob with hasTOTP when a TOTP secret is present", () => {

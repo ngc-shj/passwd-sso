@@ -3,7 +3,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { buildTeamEntryPayload } from "@/lib/team/team-entry-payload";
 
 describe("buildTeamEntryPayload", () => {
-  it("builds login blobs with totp null and non-empty custom fields only", () => {
+  it("builds login blobs with totp null, keeping touched custom fields (incl. label-less)", () => {
     const { fullBlob, overviewBlob } = buildTeamEntryPayload({
       entryType: ENTRY_TYPE.LOGIN,
       title: "  A  ",
@@ -13,7 +13,10 @@ describe("buildTeamEntryPayload", () => {
       url: " https://example.com ",
       customFields: [
         { label: "a", value: "b", type: "text" },
+        // Label-less value field: touched, so kept (previously dropped).
         { label: "", value: "c", type: "text" },
+        // Fully-empty row: untouched, dropped.
+        { label: "", value: "", type: "text" },
       ],
       totp: null,
       tagNames: [{ name: "t1", color: "#f00" }],
@@ -24,7 +27,10 @@ describe("buildTeamEntryPayload", () => {
     expect(blob.username).toBe("user");
     expect(blob.password).toBe("pw");
     expect(blob.url).toBe("https://example.com");
-    expect(blob.customFields).toHaveLength(1);
+    expect(blob.customFields).toEqual([
+      { label: "a", value: "b", type: "text" },
+      { label: "", value: "c", type: "text" },
+    ]);
     expect(blob.notes).toBeNull();
 
     const overview = JSON.parse(overviewBlob);

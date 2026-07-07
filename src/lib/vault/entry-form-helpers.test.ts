@@ -49,47 +49,84 @@ describe("toTagNameColor", () => {
 // ─── filterNonEmptyCustomFields ──────────────────────────────
 
 describe("filterNonEmptyCustomFields", () => {
-  it("keeps fields with non-empty label and value", () => {
-    const fields = [
-      { label: "api_key", value: "123" },
-      { label: "", value: "456" },
-      { label: "name", value: "" },
-      { label: "  ", value: "trimmed" },
-    ];
-    expect(filterNonEmptyCustomFields(fields)).toEqual([
-      { label: "api_key", value: "123" },
-    ]);
+  // Keep any touched field (label OR value present); drop only untouched rows.
+
+  it("keeps a label-less URL field (reported repro — was silently dropped)", () => {
+    const fields = [{ label: "", value: "https://example.com", type: "url" as const }];
+    expect(filterNonEmptyCustomFields(fields)).toEqual(fields);
   });
 
-  it("returns empty array when all fields are empty", () => {
-    expect(filterNonEmptyCustomFields([{ label: "", value: "" }])).toEqual([]);
+  it("keeps a value-only text field regardless of label", () => {
+    const fields = [{ label: "", value: "456", type: "text" as const }];
+    expect(filterNonEmptyCustomFields(fields)).toEqual(fields);
+  });
+
+  it("keeps a label-only field with empty value (no silent loss of a titled row)", () => {
+    const fields = [{ label: "note", value: "", type: "text" as const }];
+    expect(filterNonEmptyCustomFields(fields)).toEqual(fields);
+  });
+
+  it("keeps a HIDDEN field with a value and no label", () => {
+    const fields = [{ label: "", value: "secret", type: "hidden" as const }];
+    expect(filterNonEmptyCustomFields(fields)).toEqual(fields);
+  });
+
+  it("keeps DATE and MONTH_YEAR fields with values and no label", () => {
+    const fields = [
+      { label: "", value: "2026-01-01", type: "date" as const },
+      { label: "", value: "2026-03", type: "monthYear" as const },
+    ];
+    expect(filterNonEmptyCustomFields(fields)).toHaveLength(2);
+  });
+
+  it("drops a fully-empty row (untouched)", () => {
+    expect(
+      filterNonEmptyCustomFields([{ label: "", value: "", type: "text" as const }])
+    ).toEqual([]);
+  });
+
+  it("drops a whitespace-only label + whitespace-only value row (untouched)", () => {
+    expect(
+      filterNonEmptyCustomFields([{ label: "   ", value: "   ", type: "text" as const }])
+    ).toEqual([]);
+  });
+
+  it("drops a whitespace-only value with no label (guards value.trim not value !== '')", () => {
+    expect(
+      filterNonEmptyCustomFields([{ label: "", value: "   ", type: "text" as const }])
+    ).toEqual([]);
+  });
+
+  it("keeps a turned-on boolean with no label", () => {
+    const fields = [{ label: "", value: "true", type: "boolean" as const }];
+    expect(filterNonEmptyCustomFields(fields)).toEqual(fields);
+  });
+
+  it("drops an untouched (off, unlabelled) boolean", () => {
+    expect(
+      filterNonEmptyCustomFields([{ label: "", value: "false", type: "boolean" as const }])
+    ).toEqual([]);
+  });
+
+  it("keeps a labelled off boolean", () => {
+    const fields = [{ label: "agreed", value: "false", type: "boolean" as const }];
+    expect(filterNonEmptyCustomFields(fields)).toEqual(fields);
+  });
+
+  it("preserves the order of surviving fields in a mixed keep/drop array", () => {
+    const fields = [
+      { label: "a", value: "1", type: "text" as const },
+      { label: "", value: "", type: "text" as const },
+      { label: "", value: "2", type: "url" as const },
+    ];
+    expect(filterNonEmptyCustomFields(fields)).toEqual([
+      { label: "a", value: "1", type: "text" },
+      { label: "", value: "2", type: "url" },
+    ]);
   });
 
   it("returns empty array for empty input", () => {
     expect(filterNonEmptyCustomFields([])).toEqual([]);
-  });
-
-  it("keeps BOOLEAN field with value 'false' (non-empty)", () => {
-    const fields = [
-      { label: "toggle", value: "false", type: "boolean" },
-    ];
-    expect(filterNonEmptyCustomFields(fields)).toHaveLength(1);
-    expect(filterNonEmptyCustomFields(fields)[0].value).toBe("false");
-  });
-
-  it("filters out BOOLEAN field with empty value", () => {
-    const fields = [
-      { label: "toggle", value: "", type: "boolean" },
-    ];
-    expect(filterNonEmptyCustomFields(fields)).toHaveLength(0);
-  });
-
-  it("keeps DATE and MONTH_YEAR fields with values", () => {
-    const fields = [
-      { label: "birthday", value: "2000-01-01", type: "date" },
-      { label: "expiry", value: "2026-03", type: "monthYear" },
-    ];
-    expect(filterNonEmptyCustomFields(fields)).toHaveLength(2);
   });
 });
 
@@ -114,5 +151,13 @@ describe("parseUrlHost", () => {
 
   it("extracts hostname from URL with subdomain", () => {
     expect(parseUrlHost("https://app.example.com")).toBe("app.example.com");
+  });
+
+  it("returns null for authority-less schemes whose hostname is empty", () => {
+    // javascript:/data:/mailto: parse successfully but have an empty hostname;
+    // normalize to null so "" never lands in a urlHost field.
+    expect(parseUrlHost("javascript:alert(1)")).toBeNull();
+    expect(parseUrlHost("data:text/plain,hi")).toBeNull();
+    expect(parseUrlHost("mailto:a@b.com")).toBeNull();
   });
 });
