@@ -75,16 +75,19 @@ final class CacheEntryPropagationTests: XCTestCase {
     return try JSONDecoder().decode(EncryptedEntry.self, from: Data(json.utf8))
   }
 
+  // 2024-01-02T03:04:05Z == 1704164645 epoch seconds. Assert the exact instant
+  // so a wrong-but-non-nil parse (bad TZ, wrong component) is caught, not just
+  // "some Date".
+  private let expectedInstant = Date(timeIntervalSince1970: 1_704_164_645)
+
   func testEncryptedEntryDecodesFractionalISODate() throws {
     let entry = try decodeEncryptedEntry(createdAt: "2024-01-02T03:04:05.000Z", updatedAt: nil)
-    let cache = entry.toPersonalCacheEntry()
-    XCTAssertNotNil(cache.createdAt)
+    XCTAssertEqual(entry.toPersonalCacheEntry().createdAt, expectedInstant)
   }
 
   func testEncryptedEntryDecodesNonFractionalISODate() throws {
     let entry = try decodeEncryptedEntry(createdAt: "2024-01-02T03:04:05Z", updatedAt: nil)
-    let cache = entry.toPersonalCacheEntry()
-    XCTAssertNotNil(cache.createdAt)
+    XCTAssertEqual(entry.toPersonalCacheEntry().createdAt, expectedInstant)
   }
 
   func testEncryptedEntryGarbageOrAbsentDateYieldsNilWithoutThrow() throws {

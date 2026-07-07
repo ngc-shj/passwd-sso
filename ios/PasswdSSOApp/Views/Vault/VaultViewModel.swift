@@ -59,8 +59,17 @@ public enum VaultScope: Hashable, Sendable {
   /// preserving the demo isolation contract without `DemoVaultView` naming
   /// `AppSettingsStore` (see DemoModeStateTests grep gate).
   public static func makeEphemeral() -> VaultViewModel {
-    let suite = UserDefaults(suiteName: "demo.ephemeral") ?? .standard
-    suite.removePersistentDomain(forName: "demo.ephemeral")
+    // Per-instance suite name so two concurrent demo VMs never share or wipe
+    // each other's store, and never fall back to `.standard` (which would leak
+    // the demo sort key into the app's real defaults, defeating "ephemeral").
+    let suiteName = "demo.ephemeral.\(UUID().uuidString)"
+    guard let suite = UserDefaults(suiteName: suiteName) else {
+      // A fresh, unique suite name does not collide with the bundle id, so this
+      // is unreachable in practice; if it ever happens, prefer an in-memory
+      // volatile store over `.standard` so nothing persists to real defaults.
+      return VaultViewModel(settings: AppSettingsStore(defaults: UserDefaults()))
+    }
+    suite.removePersistentDomain(forName: suiteName)
     return VaultViewModel(settings: AppSettingsStore(defaults: suite))
   }
 

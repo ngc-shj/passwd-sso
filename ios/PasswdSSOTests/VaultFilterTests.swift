@@ -57,15 +57,17 @@ final class VaultFilterTests: XCTestCase {
 
   func testChangingSortOptionReordersFilteredSummaries() {
     let vm = VaultViewModel(settings: AppSettingsStore(defaults: makeSuiteDefaults()))
+    // Distinct hosts so .website produces a genuine host-based reorder that is
+    // the INVERSE of the title order — proving the VM applies the website key,
+    // not merely preserving input order via stability.
     vm.injectSummaries([
-      s("b", title: "Beta"),
-      s("a", title: "Alpha"),
+      s("b", title: "Beta", urlHost: "alpha.com"),
+      s("a", title: "Alpha", urlHost: "zeta.com"),
     ])
     vm.sortOption = .title
-    XCTAssertEqual(vm.filteredSummaries.map(\.id), ["a", "b"])
+    XCTAssertEqual(vm.filteredSummaries.map(\.id), ["a", "b"])  // Alpha < Beta
 
     vm.sortOption = .website
-    // Both entries default to urlHost "x.com" (equal keys) → stable, input order.
-    XCTAssertEqual(vm.filteredSummaries.map(\.id), ["b", "a"])
+    XCTAssertEqual(vm.filteredSummaries.map(\.id), ["b", "a"])  // alpha.com < zeta.com
   }
 }
