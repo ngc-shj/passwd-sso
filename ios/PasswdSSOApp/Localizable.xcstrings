@@ -219,6 +219,23 @@
         }
       }
     },
+    "Ascending" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ascending"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昇順"
+          }
+        }
+      }
+    },
     "Auto-Clear" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -805,6 +822,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "デモモード"
+          }
+        }
+      }
+    },
+    "Descending" : {
+      "extractionState" : "translated",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descending"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "降順"
           }
         }
       }

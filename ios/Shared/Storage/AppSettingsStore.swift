@@ -69,6 +69,7 @@ public struct AppSettingsStore {
     static let fetchFaviconsCached = "fetchFaviconsCached"
     static let autoCopyCustomField = "autoCopyCustomField"
     static let entrySortOption = "entrySortOption"
+    static let entrySortDirection = "entrySortDirection"
   }
 
   /// Public key constant for `fetchFaviconsCached` so tests (which import Shared
@@ -76,6 +77,7 @@ public struct AppSettingsStore {
   public static let fetchFaviconsCachedKey = Key.fetchFaviconsCached
   public static let autoCopyCustomFieldKey = Key.autoCopyCustomField
   public static let entrySortOptionKey = Key.entrySortOption
+  public static let entrySortDirectionKey = Key.entrySortDirection
 
   private let defaults: UserDefaults
 
@@ -230,6 +232,22 @@ public struct AppSettingsStore {
     }
     nonmutating set {
       defaults.set(newValue.rawValue, forKey: Key.entrySortOption)
+    }
+  }
+
+  /// Selected sort direction, persisted across launches. When never set, falls
+  /// back to the current key's natural direction (`title`/`website` ascending,
+  /// dates descending) so the first display reads naturally. Garbage → same
+  /// fallback (fail-closed).
+  public var entrySortDirection: EntrySortDirection {
+    get {
+      guard let raw = defaults.string(forKey: Key.entrySortDirection),
+        let direction = EntrySortDirection(rawValue: raw)
+      else { return entrySortOption.defaultDirection }
+      return direction
+    }
+    nonmutating set {
+      defaults.set(newValue.rawValue, forKey: Key.entrySortDirection)
     }
   }
 

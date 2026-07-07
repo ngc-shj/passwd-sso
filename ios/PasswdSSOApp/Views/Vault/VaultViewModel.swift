@@ -41,16 +41,20 @@ public enum VaultScope: Hashable, Sendable {
   /// Injected so tests use a clean per-test suite, not the shared App Group.
   private let settings: AppSettingsStore
 
-  /// Selected sort key (FR2/FR3), read from `settings` at init and written
-  /// back to it on every change. Presented via the top-level toolbar only
-  /// (SC5); category screens inherit it through `filteredSummaries`.
+  /// Selected sort key + direction, read from `settings` at init and written
+  /// back on every change. The sort control lives on the category screens'
+  /// bottom bar; all screens reflect the same choice through `filteredSummaries`.
   public var sortOption: EntrySortOption {
     didSet { settings.entrySortOption = sortOption }
+  }
+  public var sortDirection: EntrySortDirection {
+    didSet { settings.entrySortDirection = sortDirection }
   }
 
   public init(settings: AppSettingsStore = AppSettingsStore()) {
     self.settings = settings
     self.sortOption = settings.entrySortOption
+    self.sortDirection = settings.entrySortDirection
   }
 
   /// A view-model whose settings are backed by a throwaway in-memory suite,
@@ -102,7 +106,7 @@ public enum VaultScope: Hashable, Sendable {
     // Sort is the LAST transform (after scope + search) so search results are
     // also sorted, and every screen (top-level + category) reflects the same
     // globally-chosen key (single sort point — C6 forbidden pattern).
-    return sortOption.sorted(result)
+    return sortOption.sorted(result, direction: sortDirection)
   }
 
   /// True when the currently selected scope is a team vault (create is disabled).

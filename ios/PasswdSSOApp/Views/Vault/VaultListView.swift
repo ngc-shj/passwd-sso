@@ -65,14 +65,6 @@ struct VaultListView: View {
               Label("Sync now", systemImage: "arrow.clockwise")
             }
             .disabled(isSyncing)
-            Picker(selection: $viewModel.sortOption) {
-              Text("Title").tag(EntrySortOption.title)
-              Text("Created date").tag(EntrySortOption.createdAt)
-              Text("Updated date").tag(EntrySortOption.updatedAt)
-              Text("Website").tag(EntrySortOption.website)
-            } label: {
-              Label("Sort", systemImage: "arrow.up.arrow.down")
-            }
             Button {
               autoLockService.recordActivity()
               isShowingSettings = true

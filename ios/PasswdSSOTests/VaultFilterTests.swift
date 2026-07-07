@@ -70,4 +70,24 @@ final class VaultFilterTests: XCTestCase {
     vm.sortOption = .website
     XCTAssertEqual(vm.filteredSummaries.map(\.id), ["b", "a"])  // alpha.com < zeta.com
   }
+
+  func testChangingSortDirectionReordersFilteredSummaries() {
+    let vm = VaultViewModel(settings: AppSettingsStore(defaults: makeSuiteDefaults()))
+    vm.injectSummaries([
+      s("b", title: "Beta"),
+      s("a", title: "Alpha"),
+    ])
+    vm.sortOption = .title
+    vm.sortDirection = .ascending
+    XCTAssertEqual(vm.filteredSummaries.map(\.id), ["a", "b"])
+
+    vm.sortDirection = .descending
+    XCTAssertEqual(vm.filteredSummaries.map(\.id), ["b", "a"])
+  }
+
+  func testDefaultSortDirectionFollowsKey() {
+    let vm = VaultViewModel(settings: AppSettingsStore(defaults: makeSuiteDefaults()))
+    // Default key .title → natural ascending direction.
+    XCTAssertEqual(vm.sortDirection, .ascending)
+  }
 }
