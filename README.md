@@ -327,7 +327,7 @@ Zero-knowledge architecture — the server stores only ciphertext and cannot dec
 - **Domain separation** — Secret key → HKDF → separate encryption key + auth key
 - **Secret Key** — Account-specific salt for defense against server compromise
 - **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs (E2E vault); server-side share links / Sends bind ciphertext to the owning tenant
-- **Session security** — Database sessions (not JWT), tenant/team-policy-driven absolute timeout (default 30 days, configurable down to 5 minutes per policy), auto-lock after 15 min idle or 5 min tab hidden
+- **Session security** — Database sessions (not JWT), tenant/team-policy-driven absolute timeout (default 30 days, configurable down to 5 minutes per policy), auto-lock after a single idle timeout (default 15 min, configurable) regardless of tab visibility
 - **Clipboard clear** — Copied passwords auto-clear after 30 seconds
 - **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation against configured `APP_URL` / `AUTH_URL` (fail-closed if unset)
 
