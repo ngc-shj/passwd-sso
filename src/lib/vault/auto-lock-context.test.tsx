@@ -7,7 +7,6 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000;
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * MS_PER_MINUTE;
-const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * MS_PER_MINUTE;
 
 describe("AutoLockProvider", () => {
   beforeEach(() => {
@@ -197,7 +196,7 @@ describe("AutoLockProvider", () => {
     clearIntervalSpy.mockRestore();
   });
 
-  it("locks when tab stays hidden longer than the hidden-timeout (5 min default)", () => {
+  it("does not lock while hidden if below the inactivity threshold", () => {
     const lock = vi.fn();
     render(
       <AutoLockProvider
@@ -209,19 +208,86 @@ describe("AutoLockProvider", () => {
       </AutoLockProvider>,
     );
 
-    // Mark document hidden
     Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
 
-    // Advance past 5-minute hidden timeout
+    // Well past the former 5-minute hidden cap, but under the 15-min inactivity
+    // threshold — a hidden tab must no longer relock early.
     act(() => {
-      vi.advanceTimersByTime(DEFAULT_HIDDEN_TIMEOUT_MS + ACTIVITY_CHECK_INTERVAL_MS);
+      vi.advanceTimersByTime(6 * MS_PER_MINUTE);
+    });
+    expect(lock).not.toHaveBeenCalled();
+
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+  });
+
+  it("locks while hidden once the inactivity threshold (15 min) is exceeded", () => {
+    const lock = vi.fn();
+    render(
+      <AutoLockProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        lock={lock}
+        autoLockMinutes={null}
+      >
+        <div />
+      </AutoLockProvider>,
+    );
+
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(DEFAULT_INACTIVITY_TIMEOUT_MS + ACTIVITY_CHECK_INTERVAL_MS);
     });
     expect(lock).toHaveBeenCalled();
 
-    // Restore visibility for other tests
     Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+  });
+
+  it("resets activity on hidden → visible return, so it does not lock immediately", () => {
+    const lock = vi.fn();
+    render(
+      <AutoLockProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        lock={lock}
+        autoLockMinutes={1} // 1 minute
+      >
+        <div />
+      </AutoLockProvider>,
+    );
+
+    // Hide, then let almost the full 1-minute threshold pass while hidden
+    // (under 60s so it has not locked yet at the point of return).
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(50_000); // 50s < 60s
+    });
+    expect(lock).not.toHaveBeenCalled();
+
+    // Return to visible: handleVisibility resets lastActivity.
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => false });
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    // 50s more: without the reset this would be 100s (>60s) and lock;
+    // with the reset it is only 50s since return, so it must not lock.
+    act(() => {
+      vi.advanceTimersByTime(50_000);
+    });
+    expect(lock).not.toHaveBeenCalled();
+
+    // Past the full threshold measured from the return, it locks.
+    act(() => {
+      vi.advanceTimersByTime(20_000); // 70s since return > 60s
+    });
+    expect(lock).toHaveBeenCalled();
   });
 });
