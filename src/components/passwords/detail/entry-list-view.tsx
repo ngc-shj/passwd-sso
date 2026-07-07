@@ -38,6 +38,10 @@ import { usePasswordEntryDetail } from "@/hooks/vault/use-password-entry-detail"
 import { useEntryActions } from "@/hooks/vault/use-entry-actions";
 import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
 import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { isStepUpRequiredError } from "@/lib/http/handle-step-up-error";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { MasterDetailShell } from "@/components/passwords/detail/master-detail-shell";
 import type { EntryCardData } from "@/types/entry-card";
 import { PasswordDetailPane } from "@/components/passwords/detail/password-detail-pane";
@@ -58,6 +62,18 @@ export interface EntryListHandle {
   exitSelectionMode(): void;
   toggleSelectAll(checked: boolean): void;
 }
+
+// ---------------------------------------------------------------------------
+// C4 — step-up reauth retry target
+//
+// Three distinct mutations are step-up-gated: single-entry permanent delete,
+// empty-trash, and bulk-purge. The retry arg records which one to replay
+// after a successful reauth.
+// ---------------------------------------------------------------------------
+type StepUpRetryTarget<E> =
+  | { type: "permanentDelete"; entry: E }
+  | { type: "emptyTrash" }
+  | { type: "bulkPurge" };
 
 // ---------------------------------------------------------------------------
 // EntryListView props
@@ -314,6 +330,30 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
     [toggleSelectAll],
   );
 
+  // C4 — inline step-up reauth for permanent-delete / empty-trash / bulk-purge.
+  // The retry arg records which of the three gated mutations to replay after
+  // a successful reauth. `executeActionRef` breaks the circular dependency
+  // between this hook and useBulkAction below (bulk-purge retry needs
+  // executeAction; useBulkAction's onStepUpRequired needs inlineReauth).
+  const executeActionRef = useRef<() => Promise<void>>(async () => {});
+  const inlineReauth = useInlineReauth<StepUpRetryTarget<E>>(async (retry) => {
+    if (retry.type === "permanentDelete") {
+      await adapter.deletePermanently(retry.entry);
+      // Success after reauth: commit the removal for real (the initial
+      // optimistic remove was rolled back by reload() when step-up fired).
+      onEntryRemoved?.(retry.entry.id);
+      adapter.notifyDataChanged();
+      onDataChange?.();
+    } else if (retry.type === "emptyTrash") {
+      await adapter.emptyTrash();
+      adapter.notifyDataChanged();
+      onDataChange?.();
+      reload();
+    } else if (retry.type === "bulkPurge") {
+      await executeActionRef.current();
+    }
+  });
+
   // Bulk action hook.
   const {
     dialogOpen: bulkDialogOpen,
@@ -331,7 +371,9 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       reload();
       onDataChange?.();
     },
+    onStepUpRequired: () => inlineReauth.triggerOnStaleError({ type: "bulkPurge" }),
   });
+  executeActionRef.current = executeAction;
 
   // ── Single-entry mutation handlers (INV-C1.4) ──────────────────────────────
   // Each: (1) optimistic remove, (2) adapter call, (3) rollback on reject, (4) notify on success.
@@ -418,10 +460,20 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       await adapter.deletePermanently(entry);
       adapter.notifyDataChanged();
       onDataChange?.();
-    } catch {
+    } catch (e) {
+      if (isStepUpRequiredError(e)) {
+        // The row was optimistically removed above, but the server rejected the
+        // purge (stale step-up window) — the entry is still ALIVE. Roll back the
+        // optimistic removal so it does not falsely read as permanently deleted,
+        // THEN open the reauth prompt. On reauth success the retry handler
+        // commits the removal for real.
+        reload();
+        await inlineReauth.triggerOnStaleError({ type: "permanentDelete", entry });
+        return;
+      }
       reload();
     }
-  }, [adapter, deletePermanentlyPending, onDataChange, onEntryRemoved, reload]);
+  }, [adapter, deletePermanentlyPending, inlineReauth, onDataChange, onEntryRemoved, reload]);
 
   // Empty-trash: clears all trash entries; gated by descriptor.showEmptyTrashButton + canDelete.
   const handleEmptyTrashConfirmed = useCallback(async () => {
@@ -432,13 +484,18 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       adapter.notifyDataChanged();
       onDataChange?.();
       reload();
-    } catch {
+    } catch (e) {
+      if (isStepUpRequiredError(e)) {
+        setEmptyTrashConfirmOpen(false);
+        await inlineReauth.triggerOnStaleError({ type: "emptyTrash" });
+        return;
+      }
       // Reload to show remaining entries on failure.
       reload();
     } finally {
       setIsEmptyingTrash(false);
     }
-  }, [adapter, onDataChange, reload]);
+  }, [adapter, inlineReauth, onDataChange, reload]);
 
   // ── Accordion toggle callbacks (legacy PasswordCard interface) ─────────────
 
@@ -875,6 +932,9 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
           teamId={adapter.teamId}
         />
       )}
+      {/* C4 — inline step-up reauth dialogs for permanent-delete / empty-trash / bulk-purge. */}
+      <RecentSessionRequiredDialog {...inlineReauth.recentSessionDialogProps} cancelLabel={tc("cancel")} />
+      <PasskeyReauthDialog {...inlineReauth.reauthDialogProps} cancelLabel={tc("cancel")} />
     </>
   );
 }

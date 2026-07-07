@@ -191,6 +191,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // 5) Step-up gate.
+  // @stepup id:ext-bridge-code-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {
     await emitBridgeCodeIssueFailure({

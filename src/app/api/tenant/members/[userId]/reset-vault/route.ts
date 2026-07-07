@@ -113,6 +113,7 @@ async function handlePOST(
     return notFound();
   }
 
+  // @stepup id:reset-vault-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

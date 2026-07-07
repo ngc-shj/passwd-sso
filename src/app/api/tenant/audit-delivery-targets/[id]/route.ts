@@ -47,6 +47,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // @stepup id:audit-delivery-target-id-patch method:PATCH
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

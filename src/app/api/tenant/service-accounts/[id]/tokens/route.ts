@@ -94,6 +94,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return handleAuthError(err);
   }
 
+  // @stepup id:sa-token-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

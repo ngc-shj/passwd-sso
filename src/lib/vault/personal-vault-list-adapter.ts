@@ -6,6 +6,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { buildPersonalGetDetail } from "@/lib/vault/build-personal-get-detail";
 import { fetchApi } from "@/lib/url-helpers";
+import { throwIfStepUp } from "@/lib/http/handle-step-up-error";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { filterTravelSafe } from "@/lib/auth/policy/travel-mode";
@@ -213,14 +214,18 @@ export function usePersonalVaultListAdapter(): VaultListAdapter<DisplayEntry> {
     },
 
     async deletePermanently(entry: DisplayEntry): Promise<void> {
+      // @stepup id:passwords-id-delete-permanent
       const res = await fetchApi(`${apiPath.passwordById(entry.id)}?permanent=true`, {
         method: "DELETE",
       });
+      await throwIfStepUp(res);
       if (!res.ok) throw new Error("deletePermanently failed");
     },
 
     async emptyTrash(): Promise<void> {
+      // @stepup id:passwords-empty-trash
       const res = await fetchApi(API_PATH.PASSWORDS_EMPTY_TRASH, { method: "POST" });
+      await throwIfStepUp(res);
       if (!res.ok) throw new Error("emptyTrash failed");
     },
 

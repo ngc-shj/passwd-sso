@@ -99,6 +99,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // @stepup id:service-account-id-put method:PUT
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
@@ -179,6 +180,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // @stepup id:service-account-id-delete method:DELETE
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

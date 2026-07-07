@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
@@ -11,21 +11,36 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { success: vi.fn(), error: vi.fn() },
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () =>
     (key: string, params?: Record<string, string | number>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+  // RecentSessionRequiredDialog (step-up reauth flow) calls useLocale.
+  useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/lib/format/format-datetime", () => ({
@@ -36,6 +51,32 @@ vi.mock("@/components/passwords/shared/copy-button", () => ({
   CopyButton: ({ getValue }: { getValue: () => string }) => (
     <button type="button" data-testid="copy-button" data-value={getValue()}>
       copy
+    </button>
+  ),
+}));
+
+vi.mock("@/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogTrigger: ({ children }: { children: React.ReactNode; asChild?: boolean }) => (
+    <div data-testid="alert-trigger">{children}</div>
+  ),
+  AlertDialogContent: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="alert-content">{children}</div>
+  ),
+  AlertDialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
+  AlertDialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
+  AlertDialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertDialogCancel: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  AlertDialogAction: ({
+    children,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+  }) => (
+    <button data-testid="alert-action" onClick={onClick}>
+      {children}
     </button>
   ),
 }));
@@ -82,6 +123,9 @@ function setupList(webhooks: Array<Record<string, unknown>>) {
 describe("BaseWebhookCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey → the recent-session dialog opens.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("renders the empty state when no webhooks", async () => {
@@ -146,9 +190,96 @@ describe("BaseWebhookCard", () => {
     render(<BaseWebhookCard config={config} />);
     await waitFor(() => {
       expect(
-        screen.getByText("https://example.com/hook"),
-      ).toBeInTheDocument();
+        screen.getAllByText("https://example.com/hook").length,
+      ).toBeGreaterThanOrEqual(1);
     });
     expect(screen.getByText("active")).toBeInTheDocument();
+  });
+
+  it("create — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ webhooks: [] }),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    render(<BaseWebhookCard config={config} />);
+    await waitFor(() =>
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /addWebhook/ }));
+    fireEvent.change(screen.getByPlaceholderText("urlPlaceholder"), {
+      target: { value: "https://example.com/hook" },
+    });
+    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+
+    const buttons = screen.getAllByRole("button", { name: /addWebhook/ });
+    const submitBtn = buttons[buttons.length - 1];
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("delete — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            webhooks: [
+              {
+                id: "w1",
+                url: "https://example.com/hook",
+                events: ["a.action.1"],
+                isActive: true,
+                failCount: 0,
+                lastDeliveredAt: null,
+                lastFailedAt: null,
+                lastError: null,
+                createdAt: new Date().toISOString(),
+              },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    render(<BaseWebhookCard config={config} />);
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("https://example.com/hook").length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    const alertActions = screen.getAllByTestId("alert-action");
+    await act(async () => {
+      fireEvent.click(alertActions[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 });

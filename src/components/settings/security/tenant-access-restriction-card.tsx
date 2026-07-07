@@ -27,10 +27,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { TAILNET_NAME_MAX_LENGTH, MAX_CIDRS } from "@/lib/validations";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const CIDR_REGEX = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
 const CIDR_V6_REGEX = /^[0-9a-fA-F:]*:[0-9a-fA-F:]*\/\d{1,3}$/;
@@ -110,6 +115,11 @@ export function TenantAccessRestrictionCard() {
     return null;
   };
 
+  // Discriminator carries `confirmLockout` so a step-up interruption on
+  // either the initial save or the self-lockout confirm replays the same
+  // request shape after reauth.
+  const inlineReauth = useInlineReauth<boolean>((confirmLockout) => doSave(confirmLockout));
+
   const doSave = async (confirmLockout: boolean) => {
     const validationError = validate();
     if (validationError) {
@@ -128,6 +138,7 @@ export function TenantAccessRestrictionCard() {
       if (confirmLockout) {
         body.confirmLockout = true;
       }
+      // @stepup id:tenant-policy-patch
       const res = await fetchApi(API_PATH.TENANT_POLICY, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -138,8 +149,12 @@ export function TenantAccessRestrictionCard() {
         setInitialRestriction({ ...currentRestriction });
         setShowLockoutDialog(false);
       } else {
-        const data = await res.json().catch(() => null);
-        if (res.status === 409 && data?.error === "SELF_LOCKOUT") {
+        // Single read of the response body — shared between the step-up
+        // check and the SELF_LOCKOUT check below (res.json() is one-shot).
+        const data = await readApiErrorBody(res);
+        if (data?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError(confirmLockout);
+        } else if (res.status === 409 && data?.error === "SELF_LOCKOUT") {
           setShowLockoutDialog(true);
         } else {
           toast.error(t("accessRestrictionSaveFailed"));
@@ -262,6 +277,15 @@ export function TenantAccessRestrictionCard() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
     </>
   );
 }

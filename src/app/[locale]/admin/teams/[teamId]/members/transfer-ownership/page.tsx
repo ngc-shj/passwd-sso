@@ -19,12 +19,16 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { MemberInfo } from "@/components/member-info";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { Link } from "@/i18n/navigation";
 import { Crown, Search } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
 interface TeamInfo {
@@ -43,6 +47,7 @@ export default function TeamTransferOwnershipPage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("Team");
+  const tCommon = useTranslations("Common");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -88,14 +93,23 @@ export default function TeamTransferOwnershipPage({
 
   const isOwner = team?.role === TEAM_ROLE.OWNER;
 
+  // Inline step-up reauth — ownership transfer is server-side step-up-gated.
+  // The retry arg records the target memberId so the post-reauth retry
+  // replays the transfer for the same member.
+  const inlineReauth = useInlineReauth<string>((memberId) => handleTransferOwnership(memberId));
+
   const handleTransferOwnership = async (memberId: string) => {
     try {
+      // @stepup id:team-member-put
       const res = await fetchApi(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: TEAM_ROLE.OWNER }),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, memberId)) return;
+        throw new Error("Failed");
+      }
       toast.success(t("ownershipTransferred"));
       fetchAll();
     } catch {
@@ -137,69 +151,80 @@ export default function TeamTransferOwnershipPage({
   }
 
   return (
-    <Card>
-      <SectionCardHeader icon={Crown} title={t("transferTitle")} description={t("transferDescription")} />
-      <CardContent className="space-y-4">
-        {members.length > 1 && (
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder={t("searchMembers")}
-              value={transferSearch}
-              onChange={(e) => setTransferSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-        )}
-        {transferCandidates.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">
-            {transferSearch.trim()
-              ? t("noMatchingMembers")
-              : t("noTransferCandidates")}
-          </p>
-        ) : (
-          <div className="max-h-96 space-y-2 overflow-y-auto">
-            {transferCandidates.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
-              >
-                <MemberInfo
-                  name={m.name}
-                  email={m.email}
-                  image={m.image}
-                  tenantName={m.tenantName}
-                  viewerTenantName={viewerTenantName}
+    <>
+      <Card>
+        <SectionCardHeader icon={Crown} title={t("transferTitle")} description={t("transferDescription")} />
+        <CardContent className="space-y-4">
+          {members.length > 1 && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={t("searchMembers")}
+                value={transferSearch}
+                onChange={(e) => setTransferSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          )}
+          {transferCandidates.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              {transferSearch.trim()
+                ? t("noMatchingMembers")
+                : t("noTransferCandidates")}
+            </p>
+          ) : (
+            <div className="max-h-96 space-y-2 overflow-y-auto">
+              {transferCandidates.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                 >
-                  <TeamRoleBadge role={m.role} />
-                </MemberInfo>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      <Crown className="h-3.5 w-3.5 mr-1" />
-                      {t("transferButton")}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("transferOwnership")}</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {t("transferOwnershipConfirm", { name: m.name ?? m.email ?? "" })}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => handleTransferOwnership(m.id)}>
+                  <MemberInfo
+                    name={m.name}
+                    email={m.email}
+                    image={m.image}
+                    tenantName={m.tenantName}
+                    viewerTenantName={viewerTenantName}
+                  >
+                    <TeamRoleBadge role={m.role} />
+                  </MemberInfo>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Crown className="h-3.5 w-3.5 mr-1" />
                         {t("transferButton")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("transferOwnership")}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t("transferOwnershipConfirm", { name: m.name ?? m.email ?? "" })}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                        <AlertDialogAction onClick={() => handleTransferOwnership(m.id)}>
+                          {t("transferButton")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+    </>
   );
 }

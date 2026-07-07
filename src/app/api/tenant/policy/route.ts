@@ -190,6 +190,7 @@ async function handlePATCH(req: NextRequest) {
     return handleAuthError(e);
   }
 
+  // @stepup id:tenant-policy-patch method:PATCH
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

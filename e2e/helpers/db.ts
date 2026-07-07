@@ -313,6 +313,19 @@ export async function refreshSessionRecency(sessionToken: string): Promise<void>
   );
 }
 
+/**
+ * Force a session outside the step-up recency window so a gated mutation returns
+ * SESSION_STEP_UP_REQUIRED. Inverse of refreshSessionRecency; the interval is far
+ * past the 15-minute window so the test is robust to clock jitter.
+ */
+export async function makeSessionStale(sessionToken: string): Promise<void> {
+  const p = getPool();
+  await p.query(
+    `UPDATE sessions SET created_at = now() - interval '1 hour' WHERE session_token = $1`,
+    [sessionToken]
+  );
+}
+
 export async function seedVaultKey(
   userId: string,
   verificationArtifact: {

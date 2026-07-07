@@ -212,6 +212,7 @@ export function DirectorySyncCard() {
         if (Object.keys(formCredentials).some((k) => formCredentials[k])) {
           body.credentials = formCredentials;
         }
+        // @stepup id:directory-sync-id-put
         const res = await fetchApi(apiPath.directorySyncById(editingConfig.id), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -236,6 +237,7 @@ export function DirectorySyncCard() {
         }
       } else {
         // Create
+        // @stepup id:directory-sync-post
         const res = await fetchApi(API_PATH.DIRECTORY_SYNC, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -277,6 +279,7 @@ export function DirectorySyncCard() {
 
   async function handleDelete(id: string) {
     try {
+      // @stepup id:directory-sync-id-delete
       const res = await fetchApi(apiPath.directorySyncById(id), {
         method: "DELETE",
       });

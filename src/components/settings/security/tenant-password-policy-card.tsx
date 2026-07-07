@@ -28,6 +28,10 @@ import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 import { bindRangeInput } from "@/lib/ui/input-range";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 
 export function TenantPasswordPolicyCard() {
   const t = useTranslations("TenantAdmin");
@@ -129,6 +133,8 @@ export function TenantPasswordPolicyCard() {
     return null;
   };
 
+  const inlineReauth = useInlineReauth(() => handleSave());
+
   const handleSave = async () => {
     const validationError = validate();
     if (validationError) {
@@ -147,6 +153,7 @@ export function TenantPasswordPolicyCard() {
         passwordMaxAgeDays: passwordMaxAgeEnabled ? Number(passwordMaxAgeDays) : null,
         passwordExpiryWarningDays: passwordExpiryWarningDays !== "" ? Number(passwordExpiryWarningDays) : null,
       };
+      // @stepup id:tenant-policy-patch
       const res = await fetchApi(API_PATH.TENANT_POLICY, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -156,6 +163,7 @@ export function TenantPasswordPolicyCard() {
         toast.success(t("passwordPolicySaved"));
         setInitialPolicy({ ...currentPolicy });
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError)) return;
         toast.error(t("passwordPolicySaveFailed"));
       }
     } catch {
@@ -308,6 +316,15 @@ export function TenantPasswordPolicyCard() {
             {t("passwordPolicySave")}
           </Button>
         </div>
+
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
       </CardContent>
     </Card>
   );

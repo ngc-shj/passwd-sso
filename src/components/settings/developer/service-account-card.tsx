@@ -52,6 +52,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
 interface ServiceAccount {
@@ -120,7 +121,20 @@ export function ServiceAccountCard() {
   const [tokenNameError, setTokenNameError] = useState("");
   const [tokenScopeError, setTokenScopeError] = useState("");
   const [newTokenSecret, setNewTokenSecret] = useState<string | null>(null);
-  const inlineReauth = useInlineReauth(() => handleCreateToken());
+  // Inline step-up reauth — SA edit/delete and token create/revoke are all
+  // server-side step-up-gated. The retry arg (owned by the hook) records
+  // which mutation was in flight so the post-reauth retry replays the same one.
+  type ReauthRetry =
+    | { type: "edit" }
+    | { type: "delete"; saId: string }
+    | { type: "createToken" }
+    | { type: "revokeToken"; saId: string; tokenId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "edit") await handleEdit();
+    else if (retry.type === "delete") await handleDelete(retry.saId);
+    else if (retry.type === "createToken") await handleCreateToken();
+    else if (retry.type === "revokeToken") await handleRevokeToken(retry.saId, retry.tokenId);
+  });
 
   const fetchAccounts = useCallback(async () => {
     try {
@@ -247,6 +261,7 @@ export function ServiceAccountCard() {
     setEditing(true);
     setEditNameError("");
     try {
+      // @stepup id:service-account-id-put
       const res = await fetchApi(apiPath.tenantServiceAccountById(editSa.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -261,6 +276,7 @@ export function ServiceAccountCard() {
         return;
       }
       if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "edit" })) return;
         toast.error(t("saUpdateFailed"));
         return;
       }
@@ -277,6 +293,7 @@ export function ServiceAccountCard() {
 
   const handleDelete = async (saId: string) => {
     try {
+      // @stepup id:service-account-id-delete
       const res = await fetchApi(apiPath.tenantServiceAccountById(saId), {
         method: "DELETE",
       });
@@ -284,6 +301,7 @@ export function ServiceAccountCard() {
         toast.success(t("saDeleted"));
         fetchAccounts();
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "delete", saId })) return;
         toast.error(t("saDeleteFailed"));
       }
     } catch {
@@ -328,6 +346,7 @@ export function ServiceAccountCard() {
         scope: Array.from(tokenSelectedScopes),
         expiresAt: expiryDate.toISOString(),
       };
+      // @stepup id:sa-token-post
       const res = await fetchApi(
         apiPath.tenantServiceAccountTokens(tokenForSaId),
         {
@@ -340,7 +359,7 @@ export function ServiceAccountCard() {
         const body = await readApiErrorBody(res);
         const code = body?.error;
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError({ type: "createToken" });
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("tokenLimitReached"));
         } else if (res.status === 409) {
@@ -366,6 +385,7 @@ export function ServiceAccountCard() {
 
   const handleRevokeToken = async (saId: string, tokenId: string) => {
     try {
+      // @stepup id:sa-token-id-delete
       const res = await fetchApi(
         apiPath.tenantServiceAccountTokenById(saId, tokenId),
         { method: "DELETE" }
@@ -374,6 +394,7 @@ export function ServiceAccountCard() {
         toast.success(t("tokenRevoked2"));
         fetchTokens(saId);
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "revokeToken", saId, tokenId })) return;
         toast.error(t("tokenRevokeFailed"));
       }
     } catch {

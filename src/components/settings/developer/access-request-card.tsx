@@ -49,6 +49,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 import type { AccessRequestStatus } from "@prisma/client";
@@ -91,9 +92,13 @@ export function AccessRequestCard() {
   const [approving, setApproving] = useState<string | null>(null);
   const [jitToken, setJitToken] = useState<string | null>(null);
   const [jitTokenOpen, setJitTokenOpen] = useState(false);
-  // The retry arg (owned by the hook) carries the request id so the post-reauth
-  // retry approves the same request the operator was acting on.
-  const inlineReauth = useInlineReauth<string>((requestId) => handleApprove(requestId));
+  // The retry arg (owned by the hook) carries which mutation and request id so
+  // the post-reauth retry replays the same action on the same request.
+  type ReauthRetry = { type: "approve"; requestId: string } | { type: "deny"; requestId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "approve") await handleApprove(retry.requestId);
+    else if (retry.type === "deny") await handleDeny(retry.requestId);
+  });
 
   // Create dialog state
   const [createOpen, setCreateOpen] = useState(false);
@@ -189,6 +194,7 @@ export function AccessRequestCard() {
   const handleApprove = async (requestId: string) => {
     setApproving(requestId);
     try {
+      // @stepup id:access-request-approve
       const res = await fetchApi(apiPath.tenantAccessRequestApprove(requestId), {
         method: "POST",
         cache: "no-store",
@@ -198,7 +204,7 @@ export function AccessRequestCard() {
         const code = body?.error ?? "";
         if (code === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           // Pass the request id so the post-reauth retry approves the same one.
-          await inlineReauth.triggerOnStaleError(requestId);
+          await inlineReauth.triggerOnStaleError({ type: "approve", requestId });
         } else if (res.status === 409 && code === API_ERROR.SA_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("arTokenLimitExceeded"));
         } else if (res.status === 409 && code === API_ERROR.SA_INACTIVE) {
@@ -233,6 +239,7 @@ export function AccessRequestCard() {
 
   const handleDeny = async (requestId: string) => {
     try {
+      // @stepup id:access-request-deny
       const res = await fetchApi(apiPath.tenantAccessRequestDeny(requestId), {
         method: "POST",
       });
@@ -240,6 +247,7 @@ export function AccessRequestCard() {
         toast.success(t("arDenied"));
         fetchRequests();
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "deny", requestId })) return;
         toast.error(t("arDenyFailed"));
       }
     } catch {

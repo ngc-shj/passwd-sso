@@ -304,3 +304,95 @@ route families with one edit.)
 | C3 | Admin full-page callers | locked |
 | C4 | Vault permanent-delete / empty-trash / bulk-purge | locked (F4 typed-error contract) |
 | C5 | Base-webhook shared wiring | locked (F3 base owns fetchApi) |
+
+## Implementation Checklist (Phase 2 — derived from code, R42)
+
+### Member-set derivation (authoritative, from the defining primitive)
+`grep -rnE '(^|[^A-Za-z0-9_])requireRecentCurrentAuthMethod\(' src/app --include=route.ts`
+yields **45 gated (route, method) server call sites** across 35 route files — nearly
+**2× the plan's ~24 estimate**. This is the expected R42 expansion; the guard-first
+marker scheme is exactly the convergence artifact for it (no re-scope needed — the
+plan anticipated ≥2× expansion). Full classification below. `id` is the stable slug
+placed in `// @stepup id:<id> method:<M>`.
+
+**Legend**: FIX = client currently unhandled → needs branch + client marker.
+HANDLED = client already branches → marker-only (1 comment each). EXEMPT = allowlisted.
+
+| id | route:line | method | client consumer | disposition |
+|----|-----------|--------|-----------------|-------------|
+| api-keys-post | api-keys/route.ts:77 | POST | api-key-manager.tsx | HANDLED |
+| api-keys-id-delete | api-keys/[id]/route.ts:21 | DELETE | api-key-manager.tsx (handleRevoke) | **FIX** |
+| directory-sync-post | directory-sync/route.ts:104 | POST | directory-sync-card.tsx | HANDLED |
+| directory-sync-id-put | directory-sync/[id]/route.ts:119 | PUT | directory-sync-card.tsx | HANDLED |
+| directory-sync-id-delete | directory-sync/[id]/route.ts:201 | DELETE | directory-sync-card.tsx | HANDLED |
+| ext-bridge-code-post | extension/bridge-code/route.ts:194 | POST | auto-extension-connect.tsx | EXEMPT (EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED) |
+| passwords-id-delete-permanent | passwords/[id]/route.ts:301 | DELETE(?permanent) | entry-list-view via personal adapter | **FIX (C4)** |
+| passwords-bulk-purge | passwords/bulk-purge/route.ts:29 | POST | use-bulk-action.ts | **FIX (C4)** |
+| passwords-empty-trash | passwords/empty-trash/route.ts:26 | POST | entry-list-view via personal adapter | **FIX (C4)** |
+| team-confirm-key-post | teams/[teamId]/members/[memberId]/confirm-key/route.ts:39 | POST | team-vault-core.tsx (setInterval poller) | EXEMPT (SC3 background poller) |
+| team-member-put | teams/[teamId]/members/[memberId]/route.ts:66 | PUT | admin members/list/page.tsx | **FIX (C3)** |
+| team-member-delete | teams/[teamId]/members/[memberId]/route.ts:177 | DELETE | admin members/list/page.tsx | **FIX (C3)** |
+| team-members-post | teams/[teamId]/members/route.ts:64 | POST | team-add-from-tenant-section.tsx | HANDLED |
+| team-password-id-delete-permanent | teams/[teamId]/passwords/[id]/route.ts:181 | DELETE(?permanent) | entry-list-view via team adapter | **FIX (C4)** |
+| team-password-bulk-purge | teams/[teamId]/passwords/bulk-purge/route.ts:42 | POST | use-bulk-action.ts (team) | **FIX (C4)** |
+| team-password-empty-trash | teams/[teamId]/passwords/empty-trash/route.ts:39 | POST | entry-list-view via team adapter | **FIX (C4)** |
+| team-policy-put | teams/[teamId]/policy/route.ts:89 | PUT | team-policy-settings.tsx | **FIX** |
+| team-rotate-key-post | teams/[teamId]/rotate-key/route.ts:83 | POST | team-rotate-key-button.tsx | HANDLED |
+| team-delete | teams/[teamId]/route.ts:150 | DELETE | admin general/delete/page.tsx | **FIX (C3)** |
+| team-webhook-delete | teams/[teamId]/webhooks/[webhookId]/route.ts:44 | DELETE | base-webhook-card.tsx (team) | **FIX (C5)** |
+| team-webhook-post | teams/[teamId]/webhooks/route.ts:98 | POST | base-webhook-card.tsx (team) | **FIX (C5)** |
+| access-request-approve | tenant/access-requests/[id]/approve/route.ts:52 | POST | access-request-card.tsx | HANDLED |
+| access-request-deny | tenant/access-requests/[id]/deny/route.ts:45 | POST | access-request-card.tsx | **FIX** |
+| audit-delivery-target-id-patch | tenant/audit-delivery-targets/[id]/route.ts:50 | PATCH | audit-delivery-target-card.tsx | HANDLED |
+| audit-delivery-target-post | tenant/audit-delivery-targets/route.ts:154 | POST | audit-delivery-target-card.tsx | HANDLED |
+| breakglass-id-delete | tenant/breakglass/[id]/route.ts:53 | DELETE | breakglass-grant-list.tsx | HANDLED |
+| breakglass-post | tenant/breakglass/route.ts:52 | POST | breakglass-dialog.tsx | HANDLED |
+| mcp-client-id-put | tenant/mcp-clients/[id]/route.ts:92 | PUT | mcp-client-card.tsx | **FIX** |
+| mcp-client-id-delete | tenant/mcp-clients/[id]/route.ts:161 | DELETE | mcp-client-card.tsx | **FIX** |
+| mcp-client-post | tenant/mcp-clients/route.ts:129 | POST | mcp-client-card.tsx | HANDLED |
+| reset-vault-approve | tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts:157 | POST | tenant-reset-history-dialog.tsx | HANDLED |
+| reset-vault-post | tenant/members/[userId]/reset-vault/route.ts:116 | POST | tenant-vault-reset-button.tsx | HANDLED |
+| tenant-member-put | tenant/members/[userId]/route.ts:46 | PUT | tenant-members-card.tsx | **FIX** |
+| operator-tokens-post | tenant/operator-tokens/route.ts:139 | POST | operator-token-card.tsx | EXEMPT (OPERATOR_TOKEN_STALE_SESSION, SC4) |
+| tenant-policy-patch | tenant/policy/route.ts:193 | PATCH | 8 policy cards (session/passkey/token/lockout/access-restriction/password/delegation/retention) | **FIX** (8 cards, one shared route id) |
+| scim-token-id-delete | tenant/scim-tokens/[tokenId]/route.ts:48 | DELETE | team-scim-token-manager.tsx | **FIX** |
+| scim-token-post | tenant/scim-tokens/route.ts:104 | POST | team-scim-token-manager.tsx | HANDLED |
+| service-account-id-put | tenant/service-accounts/[id]/route.ts:102 | PUT | service-account-card.tsx | **FIX** |
+| service-account-id-delete | tenant/service-accounts/[id]/route.ts:182 | DELETE | service-account-card.tsx | **FIX** |
+| sa-token-id-delete | tenant/service-accounts/[id]/tokens/[tokenId]/route.ts:59 | DELETE | service-account-card.tsx | **FIX** |
+| sa-token-post | tenant/service-accounts/[id]/tokens/route.ts:97 | POST | service-account-card.tsx | HANDLED |
+| tenant-webhook-delete | tenant/webhooks/[webhookId]/route.ts:45 | DELETE | base-webhook-card.tsx (tenant) | **FIX (C5)** |
+| tenant-webhook-post | tenant/webhooks/route.ts:97 | POST | base-webhook-card.tsx (tenant) | **FIX (C5)** |
+| vault-reset-post | vault/reset/route.ts:57 | POST | vault-reset/page.tsx | HANDLED |
+| webauthn-credential-delete | webauthn/credentials/[id]/route.ts:38 | DELETE | passkey-credentials-card.tsx | HANDLED |
+
+**Tally**: 45 sites = 3 EXEMPT + ~19 HANDLED (marker-only) + 23 FIX (client work).
+The tenant-policy-patch id is shared by 8 client cards (all `fetchApi(API_PATH.TENANT_POLICY, {method:PATCH})` — the F7 helper-token case), so the client-side marker+branch obligation is per-card even though the server id is one.
+
+### Shared-helper commonization (user steer 2026-07-08: 共通処理にできる箇所は意識)
+Every consumer today inlines `const body = await readApiErrorBody(res); if (body?.error
+=== API_ERROR.SESSION_STEP_UP_REQUIRED) { await inlineReauth.triggerOnStaleError(arg); return; }`.
+Extract a single helper in `src/lib/http/` — `handleStepUpError(res, trigger, arg?): Promise<boolean>`
+(reads body, if step-up calls trigger and returns true; else false). Collapses the 3–4 line
+block to one line at ~23 FIX sites AND the ~19 HANDLED sites (refactor those too for uniformity).
+**Guard interaction**: extracting the helper removes the literal `SESSION_STEP_UP_REQUIRED`
+from call sites. The C1 client-side adjacency check MUST therefore accept EITHER the raw
+constant OR the helper-call token (`handleStepUpError`) as the "branch present" signal.
+Document the accepted token set in the guard header. The helper's own definition file is the
+one place the constant literal still lives.
+
+### C1 guard files
+- `scripts/checks/check-step-up-client-coverage.sh` (model: check-permanent-delete-stepup.sh)
+- `scripts/checks/stepup-client-exempt.txt` (3 entries: ext-bridge-code-post, team-confirm-key-post, operator-tokens-post — each names its custom recovery marker)
+- `scripts/__tests__/check-step-up-client-coverage.test.mjs` (7 fixtures i–vii)
+- Wire: pre-pr.sh next to permanent-delete-stepup (line ~165) + CI static-checks job
+
+### All-test-tree enumeration (R19)
+Each FIXed component has a co-located `*.test.tsx`. base-webhook shared → BOTH
+tenant-webhook-card.test.tsx AND team-webhook-card.test.tsx. C4 → entry-list-view.test.tsx.
+E2E: e2e/tests/trash.spec.ts (existing) + new stale-window spec.
+
+### CI gate parity
+Guard must run under static-checks CI job WITHOUT `prisma generate` — no `@prisma/client`
+import (pure text/fs scan, per project_static_check_ci_no_prisma_generate). Verify by
+displacing node_modules/.prisma/client before running.

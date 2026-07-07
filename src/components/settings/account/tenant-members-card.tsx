@@ -22,6 +22,10 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { TenantVaultResetButton } from "../security/tenant-vault-reset-button";
 import { TenantResetHistoryDialog } from "../security/tenant-reset-history-dialog";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 
 interface TenantMember {
   id: string;
@@ -56,6 +60,7 @@ const ROLE_LEVEL: Record<string, number> = {
 
 export function TenantMembersCard() {
   const t = useTranslations("TenantAdmin");
+  const tCommon = useTranslations("Common");
   const { role: myRole, isAdmin, loading: roleLoading } = useTenantRole();
   const isOwner = myRole === "OWNER";
   const [members, setMembers] = useState<TenantMember[]>([]);
@@ -98,14 +103,24 @@ export function TenantMembersCard() {
     }
   }, [isAdmin, fetchMembers]);
 
-  const handleChangeRole = useCallback(async (userId: string, newRole: string) => {
+  // Retry target carries (userId, newRole) so a step-up interruption replays
+  // the same role change after reauth.
+  const inlineReauth = useInlineReauth<{ userId: string; newRole: string }>(
+    async ({ userId, newRole }): Promise<void> => {
+      await handleChangeRole(userId, newRole);
+    },
+  );
+
+  const handleChangeRole = useCallback(async (userId: string, newRole: string): Promise<void> => {
     try {
+      // @stepup id:tenant-member-put
       const res = await fetchApi(apiPath.tenantMemberById(userId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: newRole }),
       });
       if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { userId, newRole })) return;
         if (res.status === 409) {
           toast.error(t("scimManagedRoleError"));
         } else {
@@ -118,7 +133,7 @@ export function TenantMembersCard() {
     } catch {
       toast.error(t("roleChangeFailed"));
     }
-  }, [t, fetchMembers]);
+  }, [t, fetchMembers, inlineReauth]);
 
   if (roleLoading || loading) {
     return (
@@ -230,6 +245,15 @@ export function TenantMembersCard() {
             )}
           </>
         )}
+
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
       </CardContent>
     </Card>
   );

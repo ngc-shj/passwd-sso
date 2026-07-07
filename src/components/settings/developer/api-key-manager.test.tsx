@@ -188,6 +188,51 @@ describe("ApiKeyManager", () => {
     expect(mockToast.error).not.toHaveBeenCalled();
   });
 
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on revoke", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (
+        String(url).includes("/api/api-keys") &&
+        (!init || init.method === undefined || init.method === "GET")
+      ) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve([
+            {
+              id: "k1",
+              prefix: "abc1",
+              name: "ProdKey",
+              scopes: ["passwords:read"],
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+              createdAt: new Date().toISOString(),
+              revokedAt: null,
+              lastUsedAt: null,
+            },
+          ]),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    render(<ApiKeyManager />);
+    await waitFor(() => {
+      expect(screen.getByText("ProdKey")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /revoke/ }));
+    const confirmButtons = screen.getAllByRole("button", { name: /revoke/ });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("falls back to local createError for an unrecognized API error code", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (

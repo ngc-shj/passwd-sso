@@ -39,6 +39,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   // Irreversible bulk permanent delete — require a recent session (step-up).
+  // @stepup id:team-password-bulk-purge method:POST
   const stepUp = await requireRecentCurrentAuthMethod(req);
   if (stepUp) return stepUp;
 

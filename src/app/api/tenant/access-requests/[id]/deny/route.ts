@@ -42,6 +42,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return handleAuthError(err);
   }
 
+  // @stepup id:access-request-deny method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

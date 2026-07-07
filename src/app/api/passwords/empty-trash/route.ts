@@ -23,6 +23,7 @@ async function handlePOST(req: NextRequest) {
   // Irreversible bulk permanent delete — require a recent session (step-up),
   // matching DELETE /api/passwords/[id]?permanent=true. A leaked session cookie
   // alone must not wipe trash.
+  // @stepup id:passwords-empty-trash method:POST
   const stepUp = await requireRecentCurrentAuthMethod(req);
   if (stepUp) return stepUp;
 

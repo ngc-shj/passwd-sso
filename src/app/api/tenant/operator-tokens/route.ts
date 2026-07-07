@@ -136,6 +136,7 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(err);
   }
 
+  // @stepup id:operator-tokens-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req, {
     errorCode: API_ERROR.OPERATOR_TOKEN_STALE_SESSION,
   });

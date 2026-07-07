@@ -394,7 +394,7 @@ describe("usePersonalVaultListAdapter", () => {
   });
 
   it("throws when a mutation returns non-ok response", async () => {
-    mockFetchApi.mockResolvedValue({ ok: false });
+    mockFetchApi.mockResolvedValue({ ok: false, json: () => Promise.resolve(null) });
 
     const { result } = renderHook(() => usePersonalVaultListAdapter());
     const entry = { id: "e1" } as DisplayEntry;

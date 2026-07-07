@@ -90,6 +90,7 @@ export function TeamAddFromTenantSection({ teamId, onSuccess, teamTenantName }: 
   const handleAddMember = async (userId: string) => {
     setAdding(userId);
     try {
+      // @stepup id:team-members-post
       const res = await fetchApi(apiPath.teamMembers(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },

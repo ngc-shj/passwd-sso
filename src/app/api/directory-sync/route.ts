@@ -101,6 +101,7 @@ async function handlePOST(req: NextRequest) {
   }
   const tenantId = member.tenantId;
 
+  // @stepup id:directory-sync-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

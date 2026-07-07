@@ -7,6 +7,7 @@ import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
 import { fetchApi } from "@/lib/url-helpers";
+import { throwIfStepUp } from "@/lib/http/handle-step-up-error";
 import { apiPath, ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { notifyTeamDataChanged } from "@/lib/events";
@@ -250,14 +251,18 @@ export function useTeamVaultListAdapter(teamId: string, role: string): VaultList
       },
 
       async deletePermanently(entry: TeamDisplayEntry): Promise<void> {
+        // @stepup id:team-password-id-delete-permanent
         const res = await fetchApi(`${apiPath.teamPasswordById(teamId, entry.id)}?permanent=true`, {
           method: "DELETE",
         });
+        await throwIfStepUp(res);
         if (!res.ok) throw new Error("deletePermanently failed");
       },
 
       async emptyTrash(): Promise<void> {
+        // @stepup id:team-password-empty-trash
         const res = await fetchApi(apiPath.teamPasswordsEmptyTrash(teamId), { method: "POST" });
+        await throwIfStepUp(res);
         if (!res.ok) throw new Error("emptyTrash failed");
       },
 

@@ -630,6 +630,46 @@ describe("AccessRequestCard", () => {
     });
   });
 
+  it("opens RecentSessionRequiredDialog on 403 SESSION_STEP_UP_REQUIRED deny response", async () => {
+    setupFetchRequests();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ requests: sampleRequests }),
+        });
+      }
+      if (init.method === "POST" && String(url).includes("/deny")) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<AccessRequestCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    const alertActions = screen.getAllByTestId("alert-action");
+    expect(alertActions.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(alertActions[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("opens create dialog and submits POST to access requests endpoint", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {

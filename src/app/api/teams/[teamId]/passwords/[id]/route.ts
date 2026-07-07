@@ -178,6 +178,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   // Soft-delete (trash) stays frictionless. No token-type guard needed: this
   // handler is auth()-only (no Bearer path).
   if (permanent) {
+    // @stepup id:team-password-id-delete-permanent method:DELETE
     const stepUp = await requireRecentCurrentAuthMethod(req);
     if (stepUp) return stepUp;
   }

@@ -705,6 +705,169 @@ describe("ServiceAccountCard", () => {
     });
   });
 
+  it("edits SA — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ serviceAccounts: sampleAccounts }),
+        });
+      }
+      if (init.method === "PUT") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    // Pencil (edit) button is the first icon-only button per SA row.
+    const allButtons = screen.getAllByRole("button");
+    const editButtons = allButtons.filter((b) => {
+      const testId = b.getAttribute("data-testid");
+      return !testId && b.closest("[data-testid='alert-trigger']") === null &&
+        !b.textContent?.includes("createServiceAccount") &&
+        !b.textContent?.includes("cancel") &&
+        !b.textContent?.includes("delete") &&
+        b.textContent?.trim() === "";
+    });
+    expect(editButtons.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(editButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("editServiceAccount")).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByDisplayValue("deploy-bot");
+    fireEvent.change(nameInput, { target: { value: "renamed-bot" } });
+
+    const saveBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("save")
+    );
+    expect(saveBtn).toBeDefined();
+    await act(async () => {
+      fireEvent.click(saveBtn!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("deletes SA — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ serviceAccounts: sampleAccounts }),
+        });
+      }
+      if (init.method === "DELETE") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("deploy-bot")).toBeInTheDocument();
+    });
+
+    const alertActions = screen.getAllByTestId("alert-action");
+    expect(alertActions.length).toBeGreaterThan(0);
+    await act(async () => {
+      fireEvent.click(alertActions[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("revokes token — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        if (url.includes("/tokens")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ tokens: sampleTokens }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            serviceAccounts: [
+              {
+                id: "sa-active",
+                name: "active-sa",
+                description: null,
+                isActive: true,
+                createdAt: "2025-01-01T00:00:00Z",
+              },
+            ],
+          }),
+        });
+      }
+      if (init.method === "DELETE" && url.includes("/tokens/")) {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("active-sa")).toBeInTheDocument();
+    });
+
+    await expandSa("active-sa");
+
+    await waitFor(() => {
+      expect(screen.getByText("prod-token")).toBeInTheDocument();
+    });
+
+    // The revoke-token AlertDialogAction is the confirm button inside the
+    // token row's own AlertDialog (distinct from the SA-level delete one).
+    const alertActions = screen.getAllByTestId("alert-action");
+    expect(alertActions.length).toBeGreaterThan(0);
+    await act(async () => {
+      fireEvent.click(alertActions[alertActions.length - 1]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("deletes SA — click delete, confirm in AlertDialog, verifies DELETE call", async () => {
     setupFetchAccounts();
 

@@ -298,6 +298,7 @@ async function handleDELETE(
         "Permanent deletion requires step-up authentication and is not available via token.",
       );
     }
+    // @stepup id:passwords-id-delete-permanent method:DELETE
     const stepUp = await requireRecentCurrentAuthMethod(req);
     if (stepUp) return stepUp;
   }

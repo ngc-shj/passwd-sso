@@ -154,6 +154,7 @@ async function handlePOST(
   // self-approval attempt still 403s without prompting reauth, and BEFORE the
   // rate-limit block so a stale session is rejected without burning the
   // per-target limiter (a low cap that would otherwise be a griefing lever).
+  // @stepup id:reset-vault-approve method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

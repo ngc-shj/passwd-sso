@@ -26,6 +26,7 @@ let capturedBulkOnSuccess: (() => void) | undefined;
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("@/lib/vault/vault-context", () => ({

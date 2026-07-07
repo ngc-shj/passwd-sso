@@ -46,6 +46,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 interface ApiKeyEntry {
@@ -88,7 +89,14 @@ export function ApiKeyManager() {
     new Set([API_KEY_SCOPE.PASSWORDS_READ]),
   );
   const [expiryDays, setExpiryDays] = useState("90");
-  const inlineReauth = useInlineReauth(() => handleCreate());
+  // Inline step-up reauth — creating a key and revoking one are both
+  // server-side step-up-gated. The retry arg (owned by the hook) records
+  // which mutation was in flight so the post-reauth retry replays the same one.
+  type ReauthRetry = { type: "create" } | { type: "revoke"; keyId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "create") await handleCreate();
+    else if (retry.type === "revoke") await handleRevoke(retry.keyId);
+  });
 
   const fetchKeys = useCallback(async () => {
     try {
@@ -136,6 +144,7 @@ export function ApiKeyManager() {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + parseInt(expiryDays, 10));
 
+      // @stepup id:api-keys-post
       const res = await fetchApi("/api/api-keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -157,7 +166,7 @@ export function ApiKeyManager() {
       } else {
         const err = await res.json().catch(() => ({}));
         if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError({ type: "create" });
         } else if (err.error === API_ERROR.API_KEY_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
         } else if (res.status === 400) {
@@ -176,6 +185,7 @@ export function ApiKeyManager() {
 
   const handleRevoke = async (keyId: string) => {
     try {
+      // @stepup id:api-keys-id-delete
       const res = await fetchApi(`/api/api-keys/${keyId}`, {
         method: "DELETE",
       });
@@ -183,6 +193,7 @@ export function ApiKeyManager() {
         toast.success(t("revoked_toast"));
         fetchKeys();
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "revoke", keyId })) return;
         toast.error(t("revokeError"));
       }
     } catch {
