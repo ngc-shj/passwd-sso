@@ -38,4 +38,43 @@ final class PasswdSSOUITests: XCTestCase {
       XCTAssertTrue(signInButton.isHittable, "Sign-in primary button is not hittable")
     }
   }
+
+  /// Drives Demo Mode → a category screen → confirms the new bottom-bar sort
+  /// control is present and hittable. Verifies the search+sort UI wiring
+  /// end-to-end (unit tests cover the comparator; this covers the SwiftUI
+  /// surface). Captures a screenshot attachment for visual review.
+  func testCategoryScreenHasSortControl() {
+    let app = XCUIApplication()
+    app.launch()
+    XCTAssertTrue(app.staticTexts["passwd-sso"].waitForExistence(timeout: 5))
+
+    // Enter Demo Mode (available from either the server-setup or sign-in screen).
+    let demoFromSetup = app.buttons["server-setup-demo-button"]
+    let demoFromSignIn = app.buttons["sign-in-demo-button"]
+    if demoFromSetup.waitForExistence(timeout: 2) {
+      demoFromSetup.tap()
+    } else if demoFromSignIn.waitForExistence(timeout: 2) {
+      demoFromSignIn.tap()
+    } else {
+      XCTFail("No demo entry point found")
+      return
+    }
+
+    // The demo landing shows category cards; tap the first tappable card to push
+    // the category list (which owns the new sort bottom bar).
+    let card = app.buttons.element(boundBy: 1)
+    XCTAssertTrue(card.waitForExistence(timeout: 5), "No category card to tap")
+    card.tap()
+
+    // The sort control must exist on the category screen. Matched by a stable
+    // identifier (the visible label is localized, e.g. "並び替え" in Japanese).
+    let sortButton = app.buttons["category-sort-button"]
+    XCTAssertTrue(sortButton.waitForExistence(timeout: 5), "Sort control missing on category screen")
+    XCTAssertTrue(sortButton.isHittable, "Sort control not hittable")
+
+    let shot = XCTAttachment(screenshot: app.screenshot())
+    shot.name = "category-screen-with-sort-bar"
+    shot.lifetime = .keepAlways
+    add(shot)
+  }
 }

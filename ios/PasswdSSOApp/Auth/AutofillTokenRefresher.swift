@@ -54,12 +54,20 @@ public struct AutofillTokenRefresher: Sendable {
     }
   }
 
-  /// Server emits `Date.toISOString()` (fractional seconds); a plain
-  /// ISO8601DateFormatter does NOT parse those, so try both variants.
+  /// Forwards to the relocated `parseISO8601(_:)` free function in `Shared`
+  /// (dual fractional/plain ISO-8601 parse). Kept as a static method so
+  /// existing call sites (`Self.parseISO8601` above, and tests) don't need to
+  /// change; delegates to the file-scope `callSharedParseISO8601` shim below
+  /// because a same-named static method shadows the free function for
+  /// unqualified lookup within its own body, and `Shared` also declares a
+  /// type named `Shared` that shadows the module name for qualified lookup.
   static func parseISO8601(_ string: String) -> Date? {
-    let fractional = ISO8601DateFormatter()
-    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    if let date = fractional.date(from: string) { return date }
-    return ISO8601DateFormatter().date(from: string)
+    callSharedParseISO8601(string)
   }
+}
+
+/// File-scope shim resolving the `Shared` module's free function unambiguously
+/// (see comment on `AutofillTokenRefresher.parseISO8601` above).
+private func callSharedParseISO8601(_ string: String) -> Date? {
+  parseISO8601(string)
 }

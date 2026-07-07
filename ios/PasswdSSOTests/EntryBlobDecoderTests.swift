@@ -551,4 +551,39 @@ final class EntryBlobDecoderTests: XCTestCase {
     let entry = try JSONDecoder().decode(CacheEntry.self, from: data(json))
     XCTAssertEqual(entry.entryType, "PASSKEY")
   }
+
+  // MARK: - summary() createdAt/updatedAt (T-BLOB)
+
+  func testSummarySetsCreatedAtAndUpdatedAtWhenPassed() throws {
+    let json = #"{"title":"T","tags":[]}"#
+    let created = Date(timeIntervalSince1970: 1000)
+    let updated = Date(timeIntervalSince1970: 2000)
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(
+        plaintext: data(json), entryId: "d1", teamId: nil,
+        createdAt: created, updatedAt: updated
+      )
+    )
+    XCTAssertEqual(summary.createdAt, created)
+    XCTAssertEqual(summary.updatedAt, updated)
+  }
+
+  func testSummaryDatesDefaultToNilWhenNotPassed() throws {
+    let json = #"{"title":"T","tags":[]}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "d2", teamId: nil)
+    )
+    XCTAssertNil(summary.createdAt)
+    XCTAssertNil(summary.updatedAt)
+  }
+
+  func testSummaryDoesNotReadDatesFromBlobPayload() throws {
+    // Even if the blob JSON happened to carry createdAt/updatedAt-looking keys,
+    // they must be ignored — dates are cache-row metadata only.
+    let json = #"{"title":"T","tags":[],"createdAt":"2024-01-01T00:00:00.000Z"}"#
+    let summary = try XCTUnwrap(
+      EntryBlobDecoder.summary(plaintext: data(json), entryId: "d3", teamId: nil)
+    )
+    XCTAssertNil(summary.createdAt)
+  }
 }

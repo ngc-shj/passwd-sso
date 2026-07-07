@@ -68,12 +68,16 @@ public struct AppSettingsStore {
     static let appLanguage = "appLanguage"
     static let fetchFaviconsCached = "fetchFaviconsCached"
     static let autoCopyCustomField = "autoCopyCustomField"
+    static let entrySortOption = "entrySortOption"
+    static let entrySortDirection = "entrySortDirection"
   }
 
   /// Public key constant for `fetchFaviconsCached` so tests (which import Shared
   /// without @testable) can verify the raw UserDefaults key (T5/T11).
   public static let fetchFaviconsCachedKey = Key.fetchFaviconsCached
   public static let autoCopyCustomFieldKey = Key.autoCopyCustomField
+  public static let entrySortOptionKey = Key.entrySortOption
+  public static let entrySortDirectionKey = Key.entrySortDirection
 
   private let defaults: UserDefaults
 
@@ -213,6 +217,38 @@ public struct AppSettingsStore {
   public var autoCopyCustomField: Bool {
     get { defaults.bool(forKey: Key.autoCopyCustomField) }
     nonmutating set { defaults.set(newValue, forKey: Key.autoCopyCustomField) }
+  }
+
+  /// Selected vault list sort key, persisted across launches (FR3). Absent/
+  /// garbage → `.title` (fail-closed): it is the one key with data present on
+  /// every entry — date keys are nil for team/legacy entries until backfilled
+  /// by a sync, so defaulting to a date key would look unsorted on first launch.
+  public var entrySortOption: EntrySortOption {
+    get {
+      guard let raw = defaults.string(forKey: Key.entrySortOption),
+        let option = EntrySortOption(rawValue: raw)
+      else { return .title }
+      return option
+    }
+    nonmutating set {
+      defaults.set(newValue.rawValue, forKey: Key.entrySortOption)
+    }
+  }
+
+  /// Selected sort direction, persisted across launches. When never set, falls
+  /// back to the current key's natural direction (`title`/`website` ascending,
+  /// dates descending) so the first display reads naturally. Garbage → same
+  /// fallback (fail-closed).
+  public var entrySortDirection: EntrySortDirection {
+    get {
+      guard let raw = defaults.string(forKey: Key.entrySortDirection),
+        let direction = EntrySortDirection(rawValue: raw)
+      else { return entrySortOption.defaultDirection }
+      return direction
+    }
+    nonmutating set {
+      defaults.set(newValue.rawValue, forKey: Key.entrySortDirection)
+    }
   }
 
   /// Apply the persisted language to the process's string lookup via

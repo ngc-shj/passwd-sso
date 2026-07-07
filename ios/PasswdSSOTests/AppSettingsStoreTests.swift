@@ -425,4 +425,63 @@ final class AppSettingsStoreTests: XCTestCase {
       defaults.bool(forKey: "autoCopyCustomField"),
       "setter must write to the literal key the public constant names")
   }
+
+  // MARK: - Entry sort option (T-PERSIST)
+
+  func testEntrySortOptionAbsentReturnsTitle() {
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortOption, .title)
+  }
+
+  func testEntrySortOptionRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortOption = .updatedAt
+    // Re-read via a fresh AppSettingsStore instance over the same suite.
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortOption, .updatedAt)
+  }
+
+  func testEntrySortOptionInvalidRawValueReturnsTitle() {
+    defaults.set("garbage", forKey: "entrySortOption")
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortOption, .title)
+  }
+
+  func testEntrySortOptionKeyConsistency() {
+    XCTAssertEqual(AppSettingsStore.entrySortOptionKey, "entrySortOption")
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortOption = .website
+    XCTAssertEqual(
+      defaults.string(forKey: "entrySortOption"), "website",
+      "setter must write to the literal key the public constant names")
+  }
+
+  // MARK: - Entry sort direction (T-PERSIST)
+
+  func testEntrySortDirectionAbsentFollowsKeyDefault() {
+    let store = AppSettingsStore(defaults: defaults)
+    // Default key is .title → ascending; a date key → descending.
+    store.entrySortOption = .title
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortDirection, .ascending)
+    store.entrySortOption = .updatedAt
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortDirection, .descending)
+  }
+
+  func testEntrySortDirectionRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortOption = .title  // natural default ascending
+    store.entrySortDirection = .descending  // explicit override
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortDirection, .descending)
+  }
+
+  func testEntrySortDirectionInvalidRawValueFollowsKeyDefault() {
+    defaults.set("garbage", forKey: "entrySortDirection")
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortOption = .title
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortDirection, .ascending)
+  }
+
+  func testEntrySortDirectionKeyConsistency() {
+    XCTAssertEqual(AppSettingsStore.entrySortDirectionKey, "entrySortDirection")
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortDirection = .ascending
+    XCTAssertEqual(defaults.string(forKey: "entrySortDirection"), "ascending")
+  }
 }

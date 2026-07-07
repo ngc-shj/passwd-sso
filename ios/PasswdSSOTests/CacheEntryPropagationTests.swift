@@ -58,4 +58,66 @@ final class CacheEntryPropagationTests: XCTestCase {
     XCTAssertNil(summary.entryType)
     XCTAssertFalse(summary.isFavorite)
   }
+
+  // MARK: - T-DATE: EncryptedEntry decodes ISO dates, toPersonalCacheEntry carries them
+
+  private func decodeEncryptedEntry(createdAt: String?, updatedAt: String?) throws -> EncryptedEntry {
+    func field(_ name: String, _ value: String?) -> String {
+      guard let value else { return "" }
+      return #","\#(name)":"\#(value)""#
+    }
+    let json = """
+    {"id":"e10","encryptedOverview":{"ciphertext":"aa","iv":"aabbccddeeff001122334455","authTag":"00112233445566778899aabbccddeeff"},
+     "encryptedBlob":{"ciphertext":"aa","iv":"aabbccddeeff001122334455","authTag":"00112233445566778899aabbccddeeff"},
+     "keyVersion":1,"aadVersion":1,"entryType":"LOGIN","isFavorite":false,"isArchived":false\
+    \(field("createdAt", createdAt))\(field("updatedAt", updatedAt))}
+    """
+    return try JSONDecoder().decode(EncryptedEntry.self, from: Data(json.utf8))
+  }
+
+  // 2024-01-02T03:04:05Z == 1704164645 epoch seconds. Assert the exact instant
+  // so a wrong-but-non-nil parse (bad TZ, wrong component) is caught, not just
+  // "some Date".
+  private let expectedInstant = Date(timeIntervalSince1970: 1_704_164_645)
+
+  func testEncryptedEntryDecodesFractionalISODate() throws {
+    let entry = try decodeEncryptedEntry(createdAt: "2024-01-02T03:04:05.000Z", updatedAt: nil)
+    XCTAssertEqual(entry.toPersonalCacheEntry().createdAt, expectedInstant)
+  }
+
+  func testEncryptedEntryDecodesNonFractionalISODate() throws {
+    let entry = try decodeEncryptedEntry(createdAt: "2024-01-02T03:04:05Z", updatedAt: nil)
+    XCTAssertEqual(entry.toPersonalCacheEntry().createdAt, expectedInstant)
+  }
+
+  func testEncryptedEntryGarbageOrAbsentDateYieldsNilWithoutThrow() throws {
+    let garbage = try decodeEncryptedEntry(createdAt: "not-a-date", updatedAt: nil)
+    XCTAssertNil(garbage.toPersonalCacheEntry().createdAt)
+
+    let absent = try decodeEncryptedEntry(createdAt: nil, updatedAt: nil)
+    XCTAssertNil(absent.toPersonalCacheEntry().createdAt)
+    XCTAssertNil(absent.toPersonalCacheEntry().updatedAt)
+  }
+
+  func testToPersonalCacheEntryCarriesBothDates() throws {
+    let entry = try decodeEncryptedEntry(
+      createdAt: "2024-01-02T03:04:05.000Z", updatedAt: "2024-06-07T08:09:10.000Z")
+    let cache = entry.toPersonalCacheEntry()
+    XCTAssertNotNil(cache.createdAt)
+    XCTAssertNotNil(cache.updatedAt)
+    XCTAssertNotEqual(cache.createdAt, cache.updatedAt)
+  }
+
+  // MARK: - T-DATE-COMPAT: CacheEntry JSON omitting dates decodes with nil
+
+  func testCacheEntryDecodesNilDatesFromLegacyJSON() throws {
+    let json = #"""
+    {"id":"e11","aadVersion":0,"keyVersion":0,
+     "encryptedBlob":{"ciphertext":"aa","iv":"bb","authTag":"cc"},
+     "encryptedOverview":{"ciphertext":"aa","iv":"bb","authTag":"cc"}}
+    """#
+    let entry = try JSONDecoder().decode(CacheEntry.self, from: Data(json.utf8))
+    XCTAssertNil(entry.createdAt)
+    XCTAssertNil(entry.updatedAt)
+  }
 }

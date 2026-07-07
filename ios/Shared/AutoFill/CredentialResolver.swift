@@ -780,6 +780,11 @@ public struct CacheEntry: Codable, Sendable {
   /// nil-tolerant: caches written before this field existed, and team rows,
   /// decode to nil → treated as not-favorite.
   public let isFavorite: Bool?
+  /// Server-side creation/update timestamps (non-secret metadata, like
+  /// `entryType`/`isFavorite`). Optional/nil-tolerant: caches written before
+  /// this field existed, and all team rows (SC3), decode to nil.
+  public let createdAt: Date?
+  public let updatedAt: Date?
 
   public init(
     id: String,
@@ -792,7 +797,9 @@ public struct CacheEntry: Codable, Sendable {
     encryptedBlob: EncryptedData,
     encryptedOverview: EncryptedData,
     entryType: String? = nil,
-    isFavorite: Bool? = nil
+    isFavorite: Bool? = nil,
+    createdAt: Date? = nil,
+    updatedAt: Date? = nil
   ) {
     self.id = id
     self.teamId = teamId
@@ -805,5 +812,7 @@ public struct CacheEntry: Codable, Sendable {
     self.encryptedOverview = encryptedOverview
     self.entryType = entryType
     self.isFavorite = isFavorite
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
   }
 }

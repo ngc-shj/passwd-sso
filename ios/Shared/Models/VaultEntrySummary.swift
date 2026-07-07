@@ -33,6 +33,11 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
   public let entryType: String?
   /// Server favorite flag (cache-row metadata, not in the encrypted blob).
   public let isFavorite: Bool
+  /// Server-side creation/update timestamps (cache-row metadata, not in the
+  /// encrypted blob — same pattern as entryType/isFavorite). nil for team/
+  /// legacy entries (see EncryptedEntry/CacheEntry); drives date-key sort.
+  public let createdAt: Date?
+  public let updatedAt: Date?
 
   public init(
     id: String,
@@ -49,7 +54,9 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     relyingPartyId: String? = nil,
     credentialId: String? = nil,
     entryType: String? = nil,
-    isFavorite: Bool = false
+    isFavorite: Bool = false,
+    createdAt: Date? = nil,
+    updatedAt: Date? = nil
   ) {
     self.id = id
     self.title = title
@@ -66,5 +73,7 @@ public struct VaultEntrySummary: Codable, Sendable, Equatable, Identifiable {
     self.credentialId = credentialId
     self.entryType = entryType
     self.isFavorite = isFavorite
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
   }
 }

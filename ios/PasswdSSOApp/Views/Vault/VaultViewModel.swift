@@ -38,6 +38,45 @@ public enum VaultScope: Hashable, Sendable {
 
   var allSummaries: [VaultEntrySummary] = []
 
+  /// Injected so tests use a clean per-test suite, not the shared App Group.
+  private let settings: AppSettingsStore
+
+  /// Selected sort key + direction, read from `settings` at init and written
+  /// back on every change. The sort control lives on the category screens'
+  /// bottom bar; all screens reflect the same choice through `filteredSummaries`.
+  public var sortOption: EntrySortOption {
+    didSet { settings.entrySortOption = sortOption }
+  }
+  public var sortDirection: EntrySortDirection {
+    didSet { settings.entrySortDirection = sortDirection }
+  }
+
+  public init(settings: AppSettingsStore = AppSettingsStore()) {
+    self.settings = settings
+    self.sortOption = settings.entrySortOption
+    self.sortDirection = settings.entrySortDirection
+  }
+
+  /// A view-model whose settings are backed by a throwaway in-memory suite,
+  /// touching NO shared App Group state. Demo Mode uses this so browsing the
+  /// demo vault never reads or writes the real persisted sort preference —
+  /// preserving the demo isolation contract without `DemoVaultView` naming
+  /// `AppSettingsStore` (see DemoModeStateTests grep gate).
+  public static func makeEphemeral() -> VaultViewModel {
+    // Per-instance suite name so two concurrent demo VMs never share or wipe
+    // each other's store, and never fall back to `.standard` (which would leak
+    // the demo sort key into the app's real defaults, defeating "ephemeral").
+    let suiteName = "demo.ephemeral.\(UUID().uuidString)"
+    guard let suite = UserDefaults(suiteName: suiteName) else {
+      // A fresh, unique suite name does not collide with the bundle id, so this
+      // is unreachable in practice; if it ever happens, prefer an in-memory
+      // volatile store over `.standard` so nothing persists to real defaults.
+      return VaultViewModel(settings: AppSettingsStore(defaults: UserDefaults()))
+    }
+    suite.removePersistentDomain(forName: suiteName)
+    return VaultViewModel(settings: AppSettingsStore(defaults: suite))
+  }
+
   /// cacheKey from the last `loadFromCache`, retained so `loadDetail` can decrypt
   /// team entries without re-threading it from every call site.
   private var loadedCacheKey: SymmetricKey?
@@ -64,7 +103,10 @@ public enum VaultScope: Hashable, Sendable {
         $0.urlHost.lowercased().contains(q)
       }
     }
-    return result
+    // Sort is the LAST transform (after scope + search) so search results are
+    // also sorted, and every screen (top-level + category) reflects the same
+    // globally-chosen key (single sort point — C6 forbidden pattern).
+    return sortOption.sorted(result, direction: sortDirection)
   }
 
   /// True when the currently selected scope is a team vault (create is disabled).
@@ -185,7 +227,9 @@ public enum VaultScope: Hashable, Sendable {
         entryId: entry.id,
         teamId: entry.teamId,
         entryType: entry.entryType,
-        isFavorite: entry.isFavorite ?? false
+        isFavorite: entry.isFavorite ?? false,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt
       )
     } catch {
       return nil

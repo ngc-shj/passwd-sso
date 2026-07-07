@@ -250,7 +250,9 @@ public enum EntryBlobDecoder {
     entryId: String,
     teamId: String?,
     entryType: String? = nil,
-    isFavorite: Bool = false
+    isFavorite: Bool = false,
+    createdAt: Date? = nil,
+    updatedAt: Date? = nil
   ) -> VaultEntrySummary? {
     guard let p = try? JSONDecoder().decode(OverviewBlobPayload.self, from: plaintext) else {
       return nil
@@ -271,7 +273,11 @@ public enum EntryBlobDecoder {
       relyingPartyId: p.relyingPartyId,
       credentialId: p.credentialId,
       entryType: entryType,
-      isFavorite: isFavorite
+      isFavorite: isFavorite,
+      // createdAt/updatedAt are cache-row metadata (like entryType/isFavorite),
+      // NOT read from the overview blob — the blob never carries them.
+      createdAt: createdAt,
+      updatedAt: updatedAt
     )
   }
 

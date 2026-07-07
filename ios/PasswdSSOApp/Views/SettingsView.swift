@@ -234,6 +234,13 @@ struct SettingsView: View {
         } footer: {
           Text("To use a different server, sign out and set up again.")
         }
+
+        Section {
+          LabeledContent("Version") {
+            Text(AppVersion.display())
+              .foregroundStyle(.secondary)
+          }
+        }
       }
       .navigationTitle("Settings")
       .navigationBarTitleDisplayMode(.inline)

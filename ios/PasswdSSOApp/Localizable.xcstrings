@@ -219,6 +219,23 @@
         }
       }
     },
+    "Ascending": {
+      "extractionState": "translated",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ascending"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "昇順"
+          }
+        }
+      }
+    },
     "Auto-Clear": {
       "extractionState": "stale",
       "localizations": {
@@ -657,6 +674,23 @@
         }
       }
     },
+    "Created date": {
+      "extractionState": "translated",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created date"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作成日"
+          }
+        }
+      }
+    },
     "Creation Date": {
       "extractionState": "stale",
       "localizations": {
@@ -771,6 +805,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "デモモード"
+          }
+        }
+      }
+    },
+    "Descending": {
+      "extractionState": "translated",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Descending"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "降順"
           }
         }
       }
@@ -2178,6 +2229,23 @@
         }
       }
     },
+    "Sort": {
+      "extractionState": "translated",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sort"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "並び替え"
+          }
+        }
+      }
+    },
     "State": {
       "extractionState": "stale",
       "localizations": {
@@ -2514,6 +2582,23 @@
         }
       }
     },
+    "Updated date": {
+      "extractionState": "translated",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updated date"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新日"
+          }
+        }
+      }
+    },
     "Username": {
       "extractionState": "stale",
       "localizations": {
@@ -2561,6 +2646,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "バージョン"
+          }
+        }
+      }
+    },
+    "Website": {
+      "extractionState": "translated",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Website"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webサイト"
           }
         }
       }
