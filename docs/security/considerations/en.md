@@ -191,7 +191,7 @@ Client(on valid):
 
 - Web app:
   - Vault decryption key is handled in runtime memory during unlock windows
-  - Auto-lock: 15 min inactivity / 5 min hidden tab
+  - Auto-lock: single idle timeout (default 15 min, tenant-configurable), regardless of tab visibility
 - Web Crypto API constraints:
   - `CryptoKey` objects are created with `extractable: false` where possible
   - Key material lifetime is managed by the JavaScript garbage collector after reference clearing

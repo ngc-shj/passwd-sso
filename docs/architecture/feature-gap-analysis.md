@@ -27,7 +27,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - E2E encryption (PBKDF2 600k -> HKDF -> AES-256-GCM)
 - Team vault E2E encryption (ECDH-P256 key distribution)
 - Multi-tenant isolation (FORCE ROW LEVEL SECURITY on 50+ tables)
-- Auto-lock (15 min idle / 5 min hidden tab)
+- Auto-lock (single idle timeout, default 15 min, tenant-configurable, regardless of tab visibility)
 - Concurrent session management (list/revoke, device detection, rate limited)
 - Account lockout (progressive: 5 -> 15 min, 10 -> 1h, 15 -> 24h)
 - Rate limiting (Redis + in-memory fallback)

@@ -31,7 +31,7 @@ Because competitor capabilities vary by plan and deployment model, always verify
 |---|---|---|---|---|
 | E2E encryption | Done | Yes | Yes | Personal vault is E2E |
 | Server-side encryption (team) | Done | Yes | Yes | For sharing use cases |
-| Auto-lock | Done | Yes | Yes | 15 min idle / 5 min hidden tab |
+| Auto-lock | Done | Yes | Yes | Single idle timeout (default 15 min, tenant-configurable) regardless of tab visibility |
 | Key rotation | Done | Yes | No | Personal vault + team vault + share master key |
 | Multiple vaults | --- | Yes | Yes | |
 | Travel Mode | Done | Yes | No | Hide selected vaults while traveling |

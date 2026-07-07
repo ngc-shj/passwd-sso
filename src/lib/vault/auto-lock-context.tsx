@@ -6,7 +6,6 @@ import type { VaultStatus } from "@/lib/constants";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 
 const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * MS_PER_MINUTE;
-const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * MS_PER_MINUTE;
 const ACTIVITY_CHECK_INTERVAL_MS = 30 * MS_PER_SECOND;
 
 interface AutoLockProviderProps {
@@ -23,15 +22,12 @@ export function AutoLockProvider({
   children,
 }: AutoLockProviderProps) {
   const lastActivityRef = useRef(0);
-  const hiddenAtRef = useRef<number | null>(null);
   const autoLockMsRef = useRef(DEFAULT_INACTIVITY_TIMEOUT_MS);
-  const hiddenLockMsRef = useRef(DEFAULT_HIDDEN_TIMEOUT_MS);
 
-  // Update timeout values when prop changes
+  // Update timeout value when prop changes
   useEffect(() => {
     if (autoLockMinutes != null && autoLockMinutes > 0) {
       autoLockMsRef.current = autoLockMinutes * MS_PER_MINUTE;
-      hiddenLockMsRef.current = Math.min(autoLockMinutes * MS_PER_MINUTE, DEFAULT_HIDDEN_TIMEOUT_MS);
     }
   }, [autoLockMinutes]);
 
@@ -50,31 +46,25 @@ export function AutoLockProvider({
       lastActivityRef.current = Date.now();
     };
 
-    const handleVisibility = () => {
-      if (document.hidden) {
-        hiddenAtRef.current = Date.now();
-      } else {
-        hiddenAtRef.current = null;
-        updateActivity();
+    // Single idle timeout regardless of tab visibility. What we protect is
+    // "the user walked away", measured by activity — not by which tab is front.
+    const checkInactivity = () => {
+      if (Date.now() - lastActivityRef.current > autoLockMsRef.current) {
+        lock();
       }
     };
 
-    const checkInactivity = () => {
-      const now = Date.now();
-
-      // When tab is hidden, only check hidden timeout (not inactivity).
-      // The user may be active in other tabs — that's not "inactivity".
-      if (document.hidden) {
-        if (hiddenAtRef.current && now - hiddenAtRef.current > hiddenLockMsRef.current) {
-          lock();
-        }
-        return;
-      }
-
-      // Tab is visible — check inactivity timeout
-      const sinceActivity = now - lastActivityRef.current;
-      if (sinceActivity > autoLockMsRef.current) {
+    // On return from a hidden tab, evaluate the timeout FIRST. Background tabs
+    // have their setInterval throttled/suspended, so checkInactivity may never
+    // fire while hidden past the threshold. If we blindly reset activity on
+    // return, an aged-out session would escape the lock (fail-open). Only treat
+    // the return as fresh activity when the threshold has not been exceeded.
+    const handleVisibility = () => {
+      if (document.hidden) return;
+      if (Date.now() - lastActivityRef.current > autoLockMsRef.current) {
         lock();
+      } else {
+        updateActivity();
       }
     };
 
