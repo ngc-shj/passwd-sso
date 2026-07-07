@@ -566,6 +566,35 @@ final class VaultViewModelTests: XCTestCase {
       "Personal entry must still appear in allSummaries")
   }
 
+  // MARK: - T-DATE-E2E: decryptOverview threads CacheEntry dates into the summary
+
+  /// Proves `decryptOverview` actually passes `entry.createdAt`/`updatedAt` to
+  /// `EntryBlobDecoder.summary` (not merely that the two seams work in
+  /// isolation) — runs the real loadFromCache path over a seeded CacheEntry.
+  func testLoadFromCache_threadsCreatedAtAndUpdatedAtIntoSummary() async throws {
+    let blobJSON = #"{"title":"T","username":"u","password":"p","url":"","notes":"","tags":[]}"#
+    let overviewJSON = #"{"title":"T","username":"u","urlHost":"example.com"}"#
+    let expectedCreated = Date(timeIntervalSince1970: 1_700_000_000)
+    let expectedUpdated = Date(timeIntervalSince1970: 1_800_000_000)
+
+    let vm = await VaultViewModel()
+    let localVaultKey = vaultKey
+    let localUserId = userId
+    let seedData = try makeCacheData(
+      entryId: entryId, userId: userId, vaultKey: vaultKey,
+      blobJSON: blobJSON, overviewJSON: overviewJSON, aadVersion: 1,
+      createdAt: expectedCreated, updatedAt: expectedUpdated
+    )
+    await MainActor.run {
+      vm.loadFromCache(cacheData: seedData, vaultKey: localVaultKey, userId: localUserId)
+    }
+
+    let first = await MainActor.run { vm.allSummaries.first }
+    let summary = try XCTUnwrap(first)
+    XCTAssertEqual(summary.createdAt, expectedCreated)
+    XCTAssertEqual(summary.updatedAt, expectedUpdated)
+  }
+
   // MARK: - VaultScope filtering
 
   func testLoadFromCache_personalScopeFiltersToTeamIdNil() async throws {
@@ -852,7 +881,9 @@ func makeCacheData(
   vaultKey: SymmetricKey,
   blobJSON: String,
   overviewJSON: String,
-  aadVersion: Int
+  aadVersion: Int,
+  createdAt: Date? = nil,
+  updatedAt: Date? = nil
 ) throws -> CacheData {
   let blobData = Data(blobJSON.utf8)
   let overviewData = Data(overviewJSON.utf8)
@@ -877,7 +908,9 @@ func makeCacheData(
     aadVersion: aadVersion,
     keyVersion: 1,
     encryptedBlob: encBlob,
-    encryptedOverview: encOverview
+    encryptedOverview: encOverview,
+    createdAt: createdAt,
+    updatedAt: updatedAt
   )
 
   let entriesData = try JSONEncoder().encode([entry])

@@ -38,6 +38,32 @@ public enum VaultScope: Hashable, Sendable {
 
   var allSummaries: [VaultEntrySummary] = []
 
+  /// Injected so tests use a clean per-test suite, not the shared App Group.
+  private let settings: AppSettingsStore
+
+  /// Selected sort key (FR2/FR3), read from `settings` at init and written
+  /// back to it on every change. Presented via the top-level toolbar only
+  /// (SC5); category screens inherit it through `filteredSummaries`.
+  public var sortOption: EntrySortOption {
+    didSet { settings.entrySortOption = sortOption }
+  }
+
+  public init(settings: AppSettingsStore = AppSettingsStore()) {
+    self.settings = settings
+    self.sortOption = settings.entrySortOption
+  }
+
+  /// A view-model whose settings are backed by a throwaway in-memory suite,
+  /// touching NO shared App Group state. Demo Mode uses this so browsing the
+  /// demo vault never reads or writes the real persisted sort preference —
+  /// preserving the demo isolation contract without `DemoVaultView` naming
+  /// `AppSettingsStore` (see DemoModeStateTests grep gate).
+  public static func makeEphemeral() -> VaultViewModel {
+    let suite = UserDefaults(suiteName: "demo.ephemeral") ?? .standard
+    suite.removePersistentDomain(forName: "demo.ephemeral")
+    return VaultViewModel(settings: AppSettingsStore(defaults: suite))
+  }
+
   /// cacheKey from the last `loadFromCache`, retained so `loadDetail` can decrypt
   /// team entries without re-threading it from every call site.
   private var loadedCacheKey: SymmetricKey?
@@ -64,7 +90,10 @@ public enum VaultScope: Hashable, Sendable {
         $0.urlHost.lowercased().contains(q)
       }
     }
-    return result
+    // Sort is the LAST transform (after scope + search) so search results are
+    // also sorted, and every screen (top-level + category) reflects the same
+    // globally-chosen key (single sort point — C6 forbidden pattern).
+    return sortOption.sorted(result)
   }
 
   /// True when the currently selected scope is a team vault (create is disabled).
@@ -185,7 +214,9 @@ public enum VaultScope: Hashable, Sendable {
         entryId: entry.id,
         teamId: entry.teamId,
         entryType: entry.entryType,
-        isFavorite: entry.isFavorite ?? false
+        isFavorite: entry.isFavorite ?? false,
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt
       )
     } catch {
       return nil

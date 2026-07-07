@@ -425,4 +425,31 @@ final class AppSettingsStoreTests: XCTestCase {
       defaults.bool(forKey: "autoCopyCustomField"),
       "setter must write to the literal key the public constant names")
   }
+
+  // MARK: - Entry sort option (T-PERSIST)
+
+  func testEntrySortOptionAbsentReturnsTitle() {
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortOption, .title)
+  }
+
+  func testEntrySortOptionRoundTrip() {
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortOption = .updatedAt
+    // Re-read via a fresh AppSettingsStore instance over the same suite.
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortOption, .updatedAt)
+  }
+
+  func testEntrySortOptionInvalidRawValueReturnsTitle() {
+    defaults.set("garbage", forKey: "entrySortOption")
+    XCTAssertEqual(AppSettingsStore(defaults: defaults).entrySortOption, .title)
+  }
+
+  func testEntrySortOptionKeyConsistency() {
+    XCTAssertEqual(AppSettingsStore.entrySortOptionKey, "entrySortOption")
+    let store = AppSettingsStore(defaults: defaults)
+    store.entrySortOption = .website
+    XCTAssertEqual(
+      defaults.string(forKey: "entrySortOption"), "website",
+      "setter must write to the literal key the public constant names")
+  }
 }

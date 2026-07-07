@@ -17,6 +17,13 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
   public let tagIds: [String]?
   public let folderId: String?
   public let requireReprompt: Bool?
+  /// ISO-8601 strings on the wire (server `Date.toISOString()`); converted to
+  /// `Date` locally in `toPersonalCacheEntry()` via `Shared`'s `parseISO8601`
+  /// free function — the shared `fetchEntries` `JSONDecoder` global strategy
+  /// is NOT changed (a global change risks other fields; see plan C4/C1
+  /// forbidden pattern).
+  public let createdAt: String?
+  public let updatedAt: String?
 
   public init(
     id: String,
@@ -30,7 +37,9 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
     teamId: String? = nil,
     tagIds: [String]? = nil,
     folderId: String? = nil,
-    requireReprompt: Bool? = nil
+    requireReprompt: Bool? = nil,
+    createdAt: String? = nil,
+    updatedAt: String? = nil
   ) {
     self.id = id
     self.encryptedOverview = encryptedOverview
@@ -44,6 +53,8 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
     self.tagIds = tagIds
     self.folderId = folderId
     self.requireReprompt = requireReprompt
+    self.createdAt = createdAt
+    self.updatedAt = updatedAt
   }
 
   enum CodingKeys: String, CodingKey {
@@ -59,6 +70,8 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
     case tagIds
     case folderId
     case requireReprompt
+    case createdAt
+    case updatedAt
   }
 
   /// Convert a personal entry to a CacheEntry for the App Group cache. Single
@@ -76,7 +89,9 @@ public struct EncryptedEntry: Sendable, Codable, Equatable {
       encryptedBlob: encryptedBlob,
       encryptedOverview: encryptedOverview,
       entryType: entryType,
-      isFavorite: isFavorite
+      isFavorite: isFavorite,
+      createdAt: createdAt.flatMap(parseISO8601),
+      updatedAt: updatedAt.flatMap(parseISO8601)
     )
   }
 }

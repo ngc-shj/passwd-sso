@@ -25,7 +25,9 @@ struct DemoVaultView: View {
   let demo: DemoVault
   let onExit: () -> Void
 
-  @State private var viewModel = VaultViewModel()
+  // Ephemeral settings-backed VM: Demo Mode must not read/write the real
+  // App Group sort preference (isolation contract — see DemoModeStateTests).
+  @State private var viewModel = VaultViewModel.makeEphemeral()
   @State private var isScreenRecording: Bool = UIScreen.main.isCaptured
 
   private let presentation = DemoVaultPresentation()

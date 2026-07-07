@@ -657,6 +657,22 @@
         }
       }
     },
+    "Created date": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Created date"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "作成日"
+          }
+        }
+      }
+    },
     "Creation Date": {
       "extractionState": "stale",
       "localizations": {
@@ -1940,6 +1956,22 @@
         }
       }
     },
+    "Sort": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sort"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "並び替え"
+          }
+        }
+      }
+    },
     "Secure Notes": {
       "extractionState": "translated",
       "localizations": {
@@ -2531,6 +2563,22 @@
         }
       }
     },
+    "Updated date": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updated date"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新日"
+          }
+        }
+      }
+    },
     "Vault": {
       "extractionState": "manual",
       "localizations": {
@@ -2697,6 +2745,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "セッション情報が古くなっています。パスフレーズを入力して解錠してください。"
+          }
+        }
+      }
+    },
+    "Website": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Website"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Webサイト"
           }
         }
       }

@@ -126,6 +126,7 @@ struct VaultCategoryListView: View {
     }
     .navigationTitle(navigationTitle)
     .navigationBarTitleDisplayMode(.inline)
+    .searchable(text: $viewModel.searchQuery, prompt: Text("Search"))
     .onAppear { isScreenRecording = UIScreen.main.isCaptured }
     .onReceive(
       NotificationCenter.default.publisher(for: UIScreen.capturedDidChangeNotification)

@@ -77,6 +77,32 @@ final class DemoModeStateTests: XCTestCase {
     }
   }
 
+  // MARK: - Demo settings isolation (behavioral, complements the grep gate)
+
+  /// The grep gate forbids the `AppSettingsStore` token in DemoVaultView.swift,
+  /// but `VaultViewModel()`'s default arg would bind the real App Group suite
+  /// transitively. `makeEphemeral()` is the isolation seam; this test proves it
+  /// neither reads nor writes the shared persisted sort preference.
+  ///
+  /// Prove-red (RT7): change `makeEphemeral()` to `VaultViewModel()` → this fails
+  /// (the ephemeral VM would then reflect and pollute the shared suite).
+  func testDemoViewModelDoesNotTouchSharedSortPreference() {
+    let shared = AppSettingsStore()
+    let original = shared.entrySortOption
+    defer { shared.entrySortOption = original }
+
+    // A value the ephemeral VM must NOT observe.
+    shared.entrySortOption = .website
+
+    let demoVM = VaultViewModel.makeEphemeral()
+    // Ephemeral VM starts at the fail-closed default, not the shared .website.
+    XCTAssertEqual(demoVM.sortOption, .title)
+
+    // Mutating the demo VM must not leak into the shared suite.
+    demoVM.sortOption = .createdAt
+    XCTAssertEqual(shared.entrySortOption, .website)
+  }
+
   /// Prove-red (RT7): temporarily add `MobileAPIClient` to DemoVaultView.swift → test fails.
   // See the #filePath rationale on testForbiddenPatternsAbsent_inDemoVaultFactory.
   func testForbiddenPatternsAbsent_inDemoVaultView() throws {
