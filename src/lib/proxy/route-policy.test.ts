@@ -56,6 +56,11 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
     { pathname: "/api/mcp/authorize/consent", description: "mcp consent exact path" },
     { pathname: "/api/user/favicon", description: "favicon proxy — session gate + tenant IP" },
     { pathname: "/api/user/favicon-pref", description: "favicon pref toggle — session gate + tenant IP" },
+    // Regression: passkey-status was misclassified api-default, so the proxy's
+    // tenant IP-access enforcement (allowedCidrs / Tailscale, applied only in the
+    // API_SESSION_REQUIRED branch) was skipped — a session-cookie route reachable
+    // from a blocked network. It self-checks auth but did NOT self-enforce IP.
+    { pathname: "/api/user/passkey-status", description: "passkey enforcement status — session gate + tenant IP" },
   ],
   [ROUTE_POLICY_KIND.API_DEFAULT]: [
     { pathname: "/api/mobile/authorize", description: "mobile authorize — self-authenticated, redirects to sign-in when unauthenticated" },

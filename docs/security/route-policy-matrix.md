@@ -310,7 +310,7 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/user/locale/route.ts` | api-session-required | PUT | session | - | - | - |
 | `src/app/api/user/mcp-tokens/[id]/route.ts` | api-session-required | DELETE | session | - | - | - |
 | `src/app/api/user/mcp-tokens/route.ts` | api-session-required | GET, DELETE | session | - | - | - |
-| `src/app/api/user/passkey-status/route.ts` | api-default | GET | session | - | - | The handler explicitly self-checks auth via checkAuth(request) with no scope option, which takes the session-only path and returns unauthorized() if there is no session, so despite not being in the proxy's SESSION_REQUIRED_EXACT_PATHS list it is still session-gated at the handler level rather than genuinely public. |
+| `src/app/api/user/passkey-status/route.ts` | api-session-required | GET | session | - | - | - |
 
 ## v1
 

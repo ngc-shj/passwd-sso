@@ -1798,14 +1798,13 @@
       ]
     },
     "src/app/api/user/passkey-status/route.ts": {
-      "kind": "api-default",
+      "kind": "api-session-required",
       "methods": [
         "GET"
       ],
       "auth": [
         "session"
-      ],
-      "handlerAuthReason": "The handler explicitly self-checks auth via checkAuth(request) with no scope option, which takes the session-only path and returns unauthorized() if there is no session, so despite not being in the proxy's SESSION_REQUIRED_EXACT_PATHS list it is still session-gated at the handler level rather than genuinely public."
+      ]
     },
     "src/app/api/v1/openapi.json/route.ts": {
       "kind": "api-v1",
