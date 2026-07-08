@@ -369,6 +369,143 @@ describe("PATCH /api/tenant/policy", () => {
     expect(String(json.details?.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
   });
 
+  // ── Null-effective-default cross-bound (VAULT_AUTO_LOCK_DEFAULT) ──
+  //   When vaultAutoLockMinutes resolves to null (neither request nor DB
+  //   supplies a value), the client still runs a VAULT_AUTO_LOCK_DEFAULT (15)
+  //   auto-lock, so the server must validate the effective 15 against the idle
+  //   timeouts — not skip the check. EC1/EC2/EC2b are the previously-fail-open
+  //   cases; EC6 proves the RHS legacy-null-idle skip is intentional.
+
+  // EC1: explicit null in request + sub-15 sessionIdle → 400 (whole-ternary
+  // placement proof: a DB-branch-only ?? would leave this at 200).
+  it("returns 400 when vaultAutoLockMinutes is explicitly null and sessionIdle < default", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 5,
+      extensionTokenIdleTimeoutMinutes: EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: null, sessionIdleTimeoutMinutes: 5 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.details?.message ?? "")).toMatch(/sessionIdleTimeoutMinutes/);
+  });
+
+  // EC2: vaultAutoLock absent from request, DB null, request lowers sessionIdle
+  // below the default → 400. This is the exact reported bug (red pre-fix: 200).
+  it("returns 400 when vaultAutoLockMinutes is absent (DB null) and request sets sessionIdle < default", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 480,
+      extensionTokenIdleTimeoutMinutes: EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { sessionIdleTimeoutMinutes: 5 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.details?.message ?? "")).toMatch(/sessionIdleTimeoutMinutes/);
+  });
+
+  // EC2b: same bug, extension-token variant.
+  it("returns 400 when vaultAutoLockMinutes is absent (DB null) and request sets extensionTokenIdle < default", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 480,
+      extensionTokenIdleTimeoutMinutes: EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { extensionTokenIdleTimeoutMinutes: 5 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.details?.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
+  });
+
+  // EC2c: explicit null in request + sub-15 extensionTokenIdle → 400. Completes
+  // the (explicit-null | absent) × (sessionIdle | extIdle) matrix (EC1 covers
+  // explicit-null × sessionIdle; EC2b covers absent × extIdle).
+  it("returns 400 when vaultAutoLockMinutes is explicitly null and extensionTokenIdle < default", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 480,
+      extensionTokenIdleTimeoutMinutes: 5,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: null, extensionTokenIdleTimeoutMinutes: 5 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.details?.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
+  });
+
+  // EC3: explicit non-null vaultAutoLock below sessionIdle → 200 (unchanged).
+  it("succeeds when vaultAutoLockMinutes (10) is below sessionIdle (20)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 20,
+      extensionTokenIdleTimeoutMinutes: EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT,
+      vaultAutoLockMinutes: null,
+    });
+    mockUpdateReturn({ vaultAutoLockMinutes: 10, sessionIdleTimeoutMinutes: 20 });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: 10, sessionIdleTimeoutMinutes: 20 },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(200);
+  });
+
+  // EC6: legacy DB row with null sessionIdle, explicit vaultAutoLock in request
+  // → 200. The RHS ?? null intentionally skips the comparison when the idle
+  // operand is null (conservative). Proves the LHS/RHS asymmetry is deliberate.
+  it("succeeds (skips check) when sessionIdle is null in DB (legacy row) and vaultAutoLock is set", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: null,
+      extensionTokenIdleTimeoutMinutes: null,
+      vaultAutoLockMinutes: null,
+    });
+    mockUpdateReturn({ vaultAutoLockMinutes: 10 });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: 10 },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(200);
+  });
+
   it("successfully updates all policy fields including access restriction", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });

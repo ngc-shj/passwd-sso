@@ -4,8 +4,9 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
+import { VAULT_AUTO_LOCK_DEFAULT } from "@/lib/validations/common";
 
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * MS_PER_MINUTE;
+const DEFAULT_INACTIVITY_TIMEOUT_MS = VAULT_AUTO_LOCK_DEFAULT * MS_PER_MINUTE;
 const ACTIVITY_CHECK_INTERVAL_MS = 30 * MS_PER_SECOND;
 
 interface AutoLockProviderProps {
@@ -24,11 +25,18 @@ export function AutoLockProvider({
   const lastActivityRef = useRef(0);
   const autoLockMsRef = useRef(DEFAULT_INACTIVITY_TIMEOUT_MS);
 
-  // Update timeout value when prop changes
+  // Update timeout value when prop changes. Falling back to the default on
+  // null/non-positive is required, not cosmetic: when a tenant clears an
+  // explicit longer value (e.g. 60 → null) the effective lock must drop back to
+  // DEFAULT_INACTIVITY_TIMEOUT_MS immediately, otherwise a mounted client keeps
+  // enforcing the stale longer timer past the (possibly lowered) session idle
+  // boundary — the exact inconsistency the server's null⇒default validation
+  // assumes cannot happen client-side.
   useEffect(() => {
-    if (autoLockMinutes != null && autoLockMinutes > 0) {
-      autoLockMsRef.current = autoLockMinutes * MS_PER_MINUTE;
-    }
+    autoLockMsRef.current =
+      autoLockMinutes != null && autoLockMinutes > 0
+        ? autoLockMinutes * MS_PER_MINUTE
+        : DEFAULT_INACTIVITY_TIMEOUT_MS;
   }, [autoLockMinutes]);
 
   // Reset activity timestamp when vault becomes unlocked

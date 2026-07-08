@@ -206,6 +206,11 @@ export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT = 30 * MIN_PER_DAY;
 //   vaultAutoLockMinutes <= min(sessionIdleTimeoutMinutes, extensionTokenIdleTimeoutMinutes)
 export const VAULT_AUTO_LOCK_MIN = 5;
 export const VAULT_AUTO_LOCK_MAX = MIN_PER_DAY;
+// Effective auto-lock when the tenant sets no explicit value (null). The client
+// applies this default (auto-lock-context.tsx), so the server cross-bound check
+// must validate against it — otherwise a null value silently bypasses the
+// vaultAutoLock <= idle invariant while the client still runs a 15-min lock.
+export const VAULT_AUTO_LOCK_DEFAULT = 15;
 
 // ─── Lockout Policy ──────────────────────────────────────────
 export const LOCKOUT_THRESHOLD_MIN = 1;

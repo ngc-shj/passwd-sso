@@ -208,10 +208,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         const data = await res.json();
         setHasRecoveryKey(!!data.hasRecoveryKey);
         setRecoveryKeyInvalidated(!!data.recoveryKeyInvalidated);
-        // Apply tenant-configured vault auto-lock timeout
-        if (data.vaultAutoLockMinutes != null && data.vaultAutoLockMinutes > 0) {
-          setAutoLockMinutes(data.vaultAutoLockMinutes);
-        }
+        // Apply tenant-configured vault auto-lock timeout. Propagate null too
+        // (not only positive values) so that clearing an explicit value resets
+        // the provider to its default timer — otherwise a longer stale value
+        // would keep enforcing past the intended boundary after the tenant
+        // switches back to the default.
+        setAutoLockMinutes(
+          data.vaultAutoLockMinutes != null && data.vaultAutoLockMinutes > 0
+            ? data.vaultAutoLockMinutes
+            : null,
+        );
         // Store tenant password policy for enforcement in personal vault forms
         setTenantPolicy({
           minPasswordLength: data.tenantMinPasswordLength ?? 0,

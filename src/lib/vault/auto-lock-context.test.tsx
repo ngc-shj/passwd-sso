@@ -4,9 +4,12 @@ import { render, act } from "@testing-library/react";
 import { AutoLockProvider } from "./auto-lock-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { VAULT_AUTO_LOCK_DEFAULT } from "@/lib/validations/common";
 
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000;
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * MS_PER_MINUTE;
+// Derived from the shared constant (not a re-hardcoded literal) so a wrong
+// value in the source extraction is caught here, not masked by a duplicate.
+const DEFAULT_INACTIVITY_TIMEOUT_MS = VAULT_AUTO_LOCK_DEFAULT * MS_PER_MINUTE;
 
 function setHidden(hidden: boolean) {
   Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
@@ -23,6 +26,13 @@ describe("AutoLockProvider", () => {
     // Reset here (not in test bodies) so a failing assertion cannot leak
     // document.hidden=true into the next test — teardown runs even on throw.
     setHidden(false);
+  });
+
+  it("keeps the shared auto-lock default at 15 minutes (900000ms)", () => {
+    // Guards INV-C1b / INV-C2a: the extraction to a shared constant must not
+    // change the value the client applies when the tenant sets no override.
+    expect(VAULT_AUTO_LOCK_DEFAULT).toBe(15);
+    expect(DEFAULT_INACTIVITY_TIMEOUT_MS).toBe(900_000);
   });
 
   it("does not call lock before the inactivity threshold", () => {
@@ -368,6 +378,47 @@ describe("AutoLockProvider", () => {
     // Now 3 min of total inactivity exceeds the new 1-min threshold.
     act(() => {
       vi.advanceTimersByTime(1 * MS_PER_MINUTE);
+    });
+    expect(lock).toHaveBeenCalled();
+  });
+
+  it("resets to the 15-min default when autoLockMinutes changes from a longer value to null", () => {
+    // Regression: clearing an explicit longer value (60 → null) must drop the
+    // effective timer back to the default. A stale 60-min timer would leave the
+    // vault decrypted past the tenant's (possibly lowered) session idle boundary.
+    const lock = vi.fn();
+    const { rerender } = render(
+      <AutoLockProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        lock={lock}
+        autoLockMinutes={60}
+      >
+        <div />
+      </AutoLockProvider>,
+    );
+
+    // Tenant clears the explicit value; effective lock must become the default.
+    rerender(
+      <AutoLockProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        lock={lock}
+        autoLockMinutes={null}
+      >
+        <div />
+      </AutoLockProvider>,
+    );
+
+    // Just under the 15-min default — must NOT have locked (would already have
+    // fired if the timer were incorrectly reset to something shorter).
+    act(() => {
+      vi.advanceTimersByTime(DEFAULT_INACTIVITY_TIMEOUT_MS - ACTIVITY_CHECK_INTERVAL_MS);
+    });
+    expect(lock).not.toHaveBeenCalled();
+
+    // Cross the 15-min default — must lock now (proves it did NOT keep the
+    // stale 60-min timer, which would still be far from firing).
+    act(() => {
+      vi.advanceTimersByTime(2 * ACTIVITY_CHECK_INTERVAL_MS);
     });
     expect(lock).toHaveBeenCalled();
   });
