@@ -7,7 +7,7 @@ import {
   exchangeCodeForToken,
   exchangeRefreshToken,
   resolveCodeTenantId,
-  resolveRefreshTokenTenantId,
+  resolveRefreshTokenGate,
 } from "@/lib/mcp/oauth-server";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
@@ -203,9 +203,15 @@ async function handlePOST(req: NextRequest) {
     // would strand a legitimate client whose chain was already advanced). Resolve
     // the token's tenantId read-only; an unknown token resolves to null and the
     // exchange produces the authoritative invalid_grant. The gate only restricts.
-    const refreshTenantId = await resolveRefreshTokenTenantId(refreshTokenValue);
-    if (refreshTenantId) {
-      const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, refreshTenantId, ACTOR_TYPE.MCP_AGENT);
+    //
+    // EXCEPTION: a replayed (already-rotated) token skips the IP gate and falls
+    // through to exchangeRefreshToken, which revokes the whole family on replay.
+    // Gating a replay on IP would 403 before that revocation runs, suppressing the
+    // theft alarm for an off-network attacker — the same suppression the mint-point
+    // ordering inside exchangeRefreshToken is written to avoid.
+    const refreshGate = await resolveRefreshTokenGate(refreshTokenValue);
+    if (refreshGate && !refreshGate.alreadyRotated) {
+      const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, refreshGate.tenantId, ACTOR_TYPE.MCP_AGENT);
       if (denied) return denied;
     }
 

@@ -12,7 +12,7 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
-import { serverAppUrl } from "@/lib/url-helpers";
+import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import {
   derivePasskeyState,
@@ -84,6 +84,10 @@ export async function POST(req: NextRequest) {
   // browser back to the authorize GET (which re-runs auth + step-up and redirects
   // to sign-in). The callback is a self-origin app path, not the client redirect_uri.
   if (stepUpStale) {
+    // serverAppUrl yields a relative path when no origin env is configured, which
+    // new URL(relative) would throw on. Guard for parity with mobile/authorize's
+    // redirectToSignIn: an unconfigured origin surfaces as a controlled 500.
+    if (!getAppOrigin()) return errorResponse(API_ERROR.INTERNAL_ERROR);
     const authorizeUrl = new URL(serverAppUrl(API_PATH.MCP_AUTHORIZE));
     authorizeUrl.searchParams.set("client_id", clientId);
     authorizeUrl.searchParams.set("redirect_uri", redirectUri);

@@ -113,6 +113,7 @@ vi.mock("@/lib/auth/session/step-up", () => ({
 
 vi.mock("@/lib/url-helpers", () => ({
   serverAppUrl: (path: string) => `https://example.test${path}`,
+  getAppOrigin: () => "https://example.test",
 }));
 
 vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {

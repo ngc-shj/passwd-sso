@@ -187,18 +187,33 @@ export async function resolveCodeTenantId(code: string): Promise<string | null> 
   );
 }
 
-export async function resolveRefreshTokenTenantId(
+export interface RefreshTokenGate {
+  tenantId: string;
+  /**
+   * True when the presented token was already rotated (a replay). The caller MUST
+   * NOT apply the IP gate to a replayed token: replay is a strong theft signal, and
+   * exchangeRefreshToken revokes the whole family on replay. Gating a replay on IP
+   * would short-circuit before that family revocation runs, suppressing the alarm
+   * for an off-network attacker — the exact suppression the mint-point passkey
+   * ordering (see exchangeRefreshToken) is written to avoid. Live-rotation requests
+   * (alreadyRotated === false) are still IP-gated before their rotation.
+   */
+  alreadyRotated: boolean;
+}
+
+export async function resolveRefreshTokenGate(
   refreshToken: string,
-): Promise<string | null> {
+): Promise<RefreshTokenGate | null> {
   const tokenHash = hashToken(refreshToken);
   return withBypassRls(
     prisma,
     async (tx) => {
       const row = await tx.mcpRefreshToken.findUnique({
         where: { tokenHash },
-        select: { tenantId: true },
+        select: { tenantId: true, rotatedAt: true },
       });
-      return row?.tenantId ?? null;
+      if (!row) return null;
+      return { tenantId: row.tenantId, alreadyRotated: row.rotatedAt !== null };
     },
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,
   );

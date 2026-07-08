@@ -7,7 +7,7 @@ import {
   validateMcpToken,
   exchangeRefreshToken,
   resolveCodeTenantId,
-  resolveRefreshTokenTenantId,
+  resolveRefreshTokenGate,
 } from "./oauth-server";
 
 // ─── Mock Prisma ──────────────────────────────────────────────
@@ -1430,19 +1430,30 @@ describe("resolveCodeTenantId", () => {
   });
 });
 
-describe("resolveRefreshTokenTenantId", () => {
-  it("returns the refresh token's tenantId (looked up by token hash)", async () => {
+describe("resolveRefreshTokenGate", () => {
+  it("returns tenantId + alreadyRotated:false for a live (not-yet-rotated) token", async () => {
     const { prisma } = await import("@/lib/prisma");
-    const mockFindUnique = vi.fn().mockResolvedValue({ tenantId: "tenant-xyz" });
+    const mockFindUnique = vi.fn().mockResolvedValue({ tenantId: "tenant-xyz", rotatedAt: null });
     mockDelegates(prisma).mcpRefreshToken = { findUnique: mockFindUnique };
 
-    const tenantId = await resolveRefreshTokenTenantId("the-refresh-token");
+    const gate = await resolveRefreshTokenGate("the-refresh-token");
 
-    expect(tenantId).toBe("tenant-xyz");
+    expect(gate).toEqual({ tenantId: "tenant-xyz", alreadyRotated: false });
     expect(mockFindUnique).toHaveBeenCalledWith({
       where: { tokenHash: "hashed:the-refresh-token" },
-      select: { tenantId: true },
+      select: { tenantId: true, rotatedAt: true },
     });
+  });
+
+  it("returns alreadyRotated:true for a replayed token so the caller skips the IP gate", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue({ tenantId: "tenant-xyz", rotatedAt: new Date() }),
+    };
+
+    const gate = await resolveRefreshTokenGate("replayed-token");
+
+    expect(gate).toEqual({ tenantId: "tenant-xyz", alreadyRotated: true });
   });
 
   it("returns null when the refresh token does not exist", async () => {
@@ -1451,6 +1462,6 @@ describe("resolveRefreshTokenTenantId", () => {
       findUnique: vi.fn().mockResolvedValue(null),
     };
 
-    expect(await resolveRefreshTokenTenantId("missing")).toBeNull();
+    expect(await resolveRefreshTokenGate("missing")).toBeNull();
   });
 });

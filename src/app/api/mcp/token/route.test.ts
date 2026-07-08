@@ -13,16 +13,18 @@ const {
   mockDerivePasskeyState,
   mockRecordPasskeyAuditEmit,
   mockResolveCodeTenantId,
-  mockResolveRefreshTokenTenantId,
+  mockResolveRefreshTokenGate,
   mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockExchangeCodeForToken: vi.fn(),
   mockCreateRefreshToken: vi.fn().mockResolvedValue({ refreshToken: "mcp_rt_refreshtoken", expiresAt: new Date() }),
   mockExchangeRefreshToken: vi.fn(),
   // IP-access gate resolvers (read-only tenant lookup) + enforcement. Default:
-  // resolve a tenant and ALLOW (enforce returns null). Deny tests override.
+  // resolve a tenant, live (not replayed), and ALLOW (enforce returns null).
+  // Deny tests override; the refresh gate carries alreadyRotated so a replayed
+  // token can skip the IP gate and fall through to family-revoking exchange.
   mockResolveCodeTenantId: vi.fn().mockResolvedValue("tenant-1"),
-  mockResolveRefreshTokenTenantId: vi.fn().mockResolvedValue("tenant-1"),
+  mockResolveRefreshTokenGate: vi.fn().mockResolvedValue({ tenantId: "tenant-1", alreadyRotated: false }),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
@@ -46,7 +48,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
   createRefreshToken: mockCreateRefreshToken,
   exchangeRefreshToken: mockExchangeRefreshToken,
   resolveCodeTenantId: mockResolveCodeTenantId,
-  resolveRefreshTokenTenantId: mockResolveRefreshTokenTenantId,
+  resolveRefreshTokenGate: mockResolveRefreshTokenGate,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
@@ -138,9 +140,10 @@ describe("POST /api/mcp/token", () => {
     });
     mockRecordPasskeyAuditEmit.mockReturnValue(true);
     mockLogAudit.mockResolvedValue(undefined);
-    // IP-access gate defaults: resolve a tenant and ALLOW. Deny tests override.
+    // IP-access gate defaults: resolve a tenant, live (not replayed), and ALLOW.
+    // Deny tests override.
     mockResolveCodeTenantId.mockResolvedValue(TENANT_ID);
-    mockResolveRefreshTokenTenantId.mockResolvedValue(TENANT_ID);
+    mockResolveRefreshTokenGate.mockResolvedValue({ tenantId: TENANT_ID, alreadyRotated: false });
     mockEnforceAccessRestriction.mockResolvedValue(null);
   });
 
@@ -339,6 +342,24 @@ describe("POST /api/mcp/token", () => {
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
+  it("authorization_code: an UNKNOWN code resolves to null tenant, skips enforcement, and falls through to invalid_grant", async () => {
+    // A code that resolves to no row must not be IP-gated; the real exchange
+    // produces the authoritative error rather than the gate masking it.
+    mockResolveCodeTenantId.mockResolvedValue(null);
+    mockExchangeCodeForToken.mockResolvedValue({ ok: false, error: "invalid_grant" });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).toHaveBeenCalled();
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_grant");
+  });
+
   // ─── refresh_token grant tests ────────────────────────────────
 
   it("refresh_token: returns new access_token and refresh_token on success", async () => {
@@ -375,7 +396,8 @@ describe("POST /api/mcp/token", () => {
     // Critical for refresh: enforcement must precede exchangeRefreshToken so a
     // stolen refresh token cannot be rotated from a blocked IP — a post-rotation
     // denial would strand the legitimate client whose chain was already advanced.
-    mockResolveRefreshTokenTenantId.mockResolvedValue(TENANT_ID);
+    // A LIVE (not-yet-rotated) token is the gated case.
+    mockResolveRefreshTokenGate.mockResolvedValue({ tenantId: TENANT_ID, alreadyRotated: false });
     mockEnforceAccessRestriction.mockResolvedValue(
       Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
     );
@@ -389,6 +411,55 @@ describe("POST /api/mcp/token", () => {
     expect(status).toBe(403);
     expect(json.error).toBe("ACCESS_DENIED");
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token: a REPLAYED (already-rotated) token SKIPS the IP gate and falls through to exchange (family revocation must not be suppressed)", async () => {
+    // A replayed token is a theft signal; exchangeRefreshToken revokes the whole
+    // family on replay. If the IP gate 403'd a replay before the exchange ran, an
+    // off-network attacker's replay would silently evade family revocation. So a
+    // replayed token must reach the exchange regardless of IP — the gate is skipped.
+    mockResolveRefreshTokenGate.mockResolvedValue({ tenantId: TENANT_ID, alreadyRotated: true });
+    // Even if the IP would deny, it must not be consulted for a replay.
+    mockEnforceAccessRestriction.mockResolvedValue(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+    mockExchangeRefreshToken.mockResolvedValue({
+      ok: false,
+      error: "invalid_grant",
+      reason: "replay",
+      tenantId: TENANT_ID,
+      familyId: "fam_replay",
+    });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_REFRESH_BODY,
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    // Reaches the exchange (which handles replay: revokes family + audits), and
+    // the IP gate is NOT consulted for the replayed token.
+    expect(mockExchangeRefreshToken).toHaveBeenCalled();
+    expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
+    expect(status).toBe(400);
+  });
+
+  it("refresh_token: an UNKNOWN token resolves to null gate, skips enforcement, and falls through to invalid_grant", async () => {
+    // A token that resolves to no row must not be IP-gated (there is no tenant to
+    // resolve a policy for); the real exchange produces the authoritative error.
+    mockResolveRefreshTokenGate.mockResolvedValue(null);
+    mockExchangeRefreshToken.mockResolvedValue({ ok: false, error: "invalid_grant" });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_REFRESH_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(mockEnforceAccessRestriction).not.toHaveBeenCalled();
+    expect(mockExchangeRefreshToken).toHaveBeenCalled();
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_grant");
   });
 
   it("refresh_token: returns 400 when exchangeRefreshToken returns invalid_grant", async () => {
