@@ -65,14 +65,21 @@ test.describe("Step-up reauth on stale window", () => {
     // Push the session outside the step-up window so empty-trash returns 403.
     await makeSessionStale(vaultReady.sessionToken);
 
-    // Click "Empty Trash" and confirm; the mutation now 403s.
+    // Click "Empty Trash" and confirm; the mutation now 403s. The confirm
+    // dialog is a plain Dialog (role='dialog'); the reauth prompt below is an
+    // AlertDialog (role='alertdialog').
     await trashPage.emptyTrashButton.click();
     await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
     await trashPage.emptyTrashConfirmButton.click();
 
-    // The reauth prompt (sign-in-again) must appear — NOT a silent reload.
+    // A reauth prompt must appear — NOT a silent reload. Which reauth dialog
+    // opens depends on canUsePasskeyRecovery() (PasskeyReauthDialog vs
+    // RecentSessionRequiredDialog), but BOTH are AlertDialogs (role=alertdialog)
+    // while the empty-trash confirm above is a plain Dialog (role=dialog) — so
+    // asserting on the alertdialog role is robust to which dialog opens and to
+    // i18n text rendering.
     await expect(
-      page.getByText(/Sign in again to continue|続行するには再サインインが必要です/),
+      page.locator("[role='alertdialog']"),
     ).toBeVisible({ timeout: 10_000 });
 
     // And the trashed entry must still be present (the purge was blocked).
