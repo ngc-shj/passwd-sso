@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${loginUrl}?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   }
 
+  // @stepup id:mcp-authorize-get method:GET
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
 

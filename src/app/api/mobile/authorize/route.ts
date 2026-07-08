@@ -122,6 +122,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
     return redirectToSignIn(req);
   }
 
+  // @stepup id:mobile-authorize-get method:GET
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
 

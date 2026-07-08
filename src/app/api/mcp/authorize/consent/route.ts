@@ -37,6 +37,7 @@ export async function POST(req: NextRequest) {
     return unauthorized();
   }
 
+  // @stepup id:mcp-authorize-consent-post method:POST
   const stepUpError = await requireRecentSession(req);
   if (stepUpError) return stepUpError;
 

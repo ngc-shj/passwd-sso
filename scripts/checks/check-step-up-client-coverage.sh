@@ -44,8 +44,8 @@
 #      strictly line-adjacency, parser-free, failing in the SAFE direction.
 #   3. Anti-orphan (client→server): every client id must match a server id
 #      (`C \ S` with no exempt) → FAIL (client marks a stale/renamed id).
-#   4. Server marker completeness (LINE-BOUND, per call): every
-#      requireRecentCurrentAuthMethod( call on line H must carry a
+#   4. Server marker completeness (LINE-BOUND, per call): every step-up gate call
+#      (any primitive in STEPUP_PRIMITIVE_RE) on line H must carry a
 #      `@stepup id:… method:…` marker on line H or H-1. Per-file id uniqueness is
 #      required so a two-gated-call file (e.g. mcp-clients/[id] PUT+DELETE) needs
 #      two distinct-id markers, not one shared marker. (A commented-out call still
@@ -95,6 +95,21 @@ ADJACENCY_WINDOW="${STEPUP_CLIENT_GUARD_WINDOW:-40}"
 #                              typed StepUpRequiredError for a component to catch
 #   isStepUpRequiredError(   — component consumer catching that typed error
 BRANCH_TOKEN_RE='SESSION_STEP_UP_REQUIRED|handleStepUpError[(]|throwIfStepUp[(]|isStepUpRequiredError[(]'
+
+# Server-side step-up GATE PRIMITIVES that emit a SESSION_STEP_UP_REQUIRED 403.
+# The class this guard polices is "route returns SESSION_STEP_UP_REQUIRED", NOT
+# "route calls requireRecentCurrentAuthMethod" — anchoring on one function name
+# misses the other primitives whose default errorCode is SESSION_STEP_UP_REQUIRED
+# (src/lib/auth/session/step-up.ts, src/lib/auth/webauthn/recent-passkey-verification.ts).
+# A gated route reached by a fetch-based UI caller must still recover client-side;
+# a route reached only by browser redirect is exempted via the @browser-redirect
+# sentinel (see stepup-client-exempt.txt).
+#   requireRecentCurrentAuthMethod( — reauth with the session's current method
+#   requireRecentSession(           — recent-session gate (default errorCode = 403 code)
+#   requireRecentPasskeyVerification( — recent passkey gate (same default)
+# ERE with a leading boundary group; used both to LIST gated files and to find
+# each gated CALL line. Keep in sync with the primitives above.
+STEPUP_PRIMITIVE_RE='(^|[^A-Za-z0-9_])(requireRecentCurrentAuthMethod|requireRecentSession|requireRecentPasskeyVerification)\('
 
 fail=0
 
@@ -167,7 +182,7 @@ while IFS= read -r route; do
       | grep -oE '@stepup[[:space:]]+id:[A-Za-z0-9_-]+[[:space:]]+method:[A-Za-z]+' \
       | head -n1 || true)"
     if [ -z "$marker_line" ]; then
-      echo "SERVER_MARKER_MISSING: $route:$H — requireRecentCurrentAuthMethod call has no '// @stepup id:… method:…' marker on its line or the line above."
+      echo "SERVER_MARKER_MISSING: $route:$H — step-up gate call has no '// @stepup id:… method:…' marker on its line or the line above."
       fail=1
       continue
     fi
@@ -191,10 +206,10 @@ while IFS= read -r route; do
 
     SERVER_IDS="${SERVER_IDS}${sid}
 "
-  done < <(grep -nE '(^|[^A-Za-z0-9_])requireRecentCurrentAuthMethod\(' "$abs" | cut -d: -f1)
+  done < <(grep -nE "$STEPUP_PRIMITIVE_RE" "$abs" | cut -d: -f1)
 
 done < <(
-  grep -rlE '(^|[^A-Za-z0-9_])requireRecentCurrentAuthMethod\(' "$API_DIR" --include='route.ts' 2>/dev/null \
+  grep -rlE "$STEPUP_PRIMITIVE_RE" "$API_DIR" --include='route.ts' 2>/dev/null \
     | sed "s|^$PATH_ROOT/||" \
     | sort
 )
@@ -290,6 +305,15 @@ while IFS= read -r line; do
   if ! printf '%s' "$SERVER_IDS" | grep -qxF "$eid"; then
     echo "STALE_EXEMPT: exempt id '$eid' has no matching server @stepup marker — remove it from stepup-client-exempt.txt."
     fail=1
+    continue
+  fi
+  # Sentinel exemption: a route reached ONLY by browser navigation/redirect has
+  # no fetch-based UI caller to carry a client marker — its stale-session recovery
+  # IS the server's own NextResponse.redirect to sign-in. Such an entry names the
+  # literal marker `@browser-redirect` and is NOT held to the client-tree
+  # anti-drift check (there is deliberately no client token). Guarded so a real
+  # interactive route cannot silently opt out of client coverage with it.
+  if [ "$emarker" = "@browser-redirect" ]; then
     continue
   fi
   # The named custom recovery marker must still appear in the client tree.

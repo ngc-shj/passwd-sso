@@ -7,7 +7,18 @@
 # custom or non-interactive. The named <custom-marker-token> must still appear
 # somewhere in the client tree — the guard fails (EXEMPT_MARKER_ABSENT) if it
 # disappears, so the exemption cannot silently rot into a real coverage gap.
+#
+# SENTINEL `@browser-redirect`: a route reached ONLY by browser navigation
+# (OAuth/mobile authorize GET, consent POST) has no fetch-based UI caller to carry
+# a client marker — its stale-session recovery IS the server's own
+# NextResponse.redirect back to sign-in. Such entries name `@browser-redirect` and
+# are exempt from the client-tree anti-drift check (there is deliberately no client
+# token). Do NOT use this sentinel for a route reached by fetchApi from the UI —
+# that route must recover via handleStepUpError, not this escape hatch.
 
 ext-bridge-code-post   EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED  # auto-extension-connect.tsx surfaces step-up via the extension-connect error channel, not the standard API error body
+mcp-authorize-get              @browser-redirect  # OAuth authorize GET reached by browser navigation; 403 self-recovers via NextResponse.redirect to sign-in, no fetch UI caller
+mcp-authorize-consent-post     @browser-redirect  # OAuth consent POST is a browser form submit; stale session redirects to sign-in, no fetch UI caller
+mobile-authorize-get           @browser-redirect  # mobile OAuth authorize GET reached by ASWebAuthenticationSession browser navigation; 403 redirects to sign-in, no fetch UI caller
 team-confirm-key-post  KEY_DISTRIBUTE_INTERVAL_MS  # team-vault-core.tsx background setInterval poller; no awaiting user gesture, retries on next poll (SC3)
 operator-tokens-post   OPERATOR_TOKEN_STALE_SESSION  # operator-token-card.tsx has a bespoke multi-state reauth flow (limit-exceeded vs stale vs generic retry) and does not use the shared inline-reauth hook (SC4)
