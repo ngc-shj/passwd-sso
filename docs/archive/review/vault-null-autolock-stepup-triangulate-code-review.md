@@ -205,3 +205,29 @@ Functionality and Testing findings: none — no action required.
   NOT called (mutation-verified RED without the guard); 4 resolver unit tests in oauth-server.test.ts.
 - **Docs**: threat-model D5a now lists `/api/mcp/token` with the pre-mint rationale; manifest
   `handlerAuthReason` + regenerated route-policy-matrix updated.
+
+### S5 [Medium] R42 横展開 of S4: other credential-issuing Bearer routes also skipped IP restriction — FIXED
+- **Trigger**: S4 was one instance of a class (Bearer/token-issuing routes that skip proxy IP
+  enforcement because they're `api-default`). Per the R42 discipline, swept the full member-set from
+  the primitive (all Bearer/non-session routes under v1/extension/mcp/mobile/scim) rather than
+  trusting S4 was the only member.
+- **Sweep result**:
+  - `/api/scim/v2/*` — ✅ already enforces IP inside `authorizeScim` (`with-scim-auth.ts:28`). Not a gap.
+  - `/api/mcp/revoke` — intentionally NOT gated (RFC 7009 revocation must work from any network so a
+    compromised token can always be killed). Documented as an exception in D5a. Not a gap.
+  - `/api/mobile/autofill-token` — **GAP**: mints a `passwords:write` DPoP-bound AutoFill token from an
+    IOS_APP bearer token; had `tenantId` in hand but no `enforceAccessRestriction`. A stolen IOS_APP
+    token could mint off-network. FIXED: enforce on the authenticated tenantId before the mint.
+  - `/api/extension/token/exchange` — **GAP**: mints an extension token from a bridge code; no IP
+    enforcement (its companion `token/refresh` already enforces). FIXED: enforce on the resolved
+    tenantId after the read-only bridge-code lookup, BEFORE DPoP/CAS-consume — so an off-network
+    attempt neither consumes the code nor mints.
+- **Tests**: 1 deny regression test each (mutation-verified RED without the guard); both assert the
+  mint/consume primitive is NOT called on deny.
+- **Docs**: D5a mechanism text enumerates all credential-issuing endpoints now covered + the revoke
+  exception.
+- **Class closure note**: the class is "credential-issuing Bearer endpoint that resolves a tenantId";
+  the enforcement point is uniformly "before the side-effecting mint/rotate/consume." No CI guard
+  mechanizes this class yet — a future `check-bearer-issue-ip-coverage` (enumerate routes that call a
+  token-issuing primitive AND lack an enforceAccessRestriction call) would lock it; tracked, not built
+  this round. TODO(network-boundary): mechanize the Bearer-issue IP-coverage class.
