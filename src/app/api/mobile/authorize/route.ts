@@ -122,9 +122,16 @@ async function handleGET(req: NextRequest): Promise<Response> {
     return redirectToSignIn(req);
   }
 
+  // A stale session needs re-authentication, not a JSON 403 the ephemeral
+  // ASWebAuthenticationSession browser would strand on. Bounce through sign-in
+  // exactly like the no-session path above; the callbackUrl returns here and the
+  // second pass has a fresh (recent-enough) session. requireRecentSession still
+  // fails closed on the unauthorized() paths (no/absent session row).
   // @stepup id:mobile-authorize-get method:GET
   const stepUpError = await requireRecentSession(req);
-  if (stepUpError) return stepUpError;
+  if (stepUpError) {
+    return stepUpError.status === 403 ? redirectToSignIn(req) : stepUpError;
+  }
 
   // 2. Validate query params.
   const url = new URL(req.url);

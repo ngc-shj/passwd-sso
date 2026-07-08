@@ -219,14 +219,20 @@ describe("GET /api/mobile/authorize", () => {
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
-  it("returns 403 when session step-up is required", async () => {
+  it("redirects to sign-in when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
     mockRequireRecentSession.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },
       { status: 403 },
     ));
 
     const res = await GET(createRequest("GET", buildUrl(VALID)));
-    expect(res.status).toBe(403);
+    // A stale session bounces through sign-in exactly like the no-session path
+    // (the ephemeral ASWebAuthenticationSession browser follows the redirect and
+    // returns here on the second pass) — not a JSON 403 dead-end.
+    expect(res.status).toBe(302);
+    const u = new URL(res.headers.get("location") ?? "");
+    expect(u.pathname).toBe("/ja/auth/signin");
+    expect(u.searchParams.get("callbackUrl")).toContain("/api/mobile/authorize");
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 

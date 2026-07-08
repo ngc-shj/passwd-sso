@@ -196,7 +196,7 @@ describe("GET /api/mcp/authorize", () => {
     expect(json).toEqual({ error: "invalid_request" });
   });
 
-  it("returns 403 when session step-up is required", async () => {
+  it("redirects to sign-in when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
     mockRequireRecentSession.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },
       { status: 403 },
@@ -207,9 +207,14 @@ describe("GET /api/mcp/authorize", () => {
     );
     const res = await GET(req as unknown as import("next/server").NextRequest);
 
-    expect(res.status).toBe(403);
-    const json = await res.json();
-    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    // A stale (but authenticated) session must re-auth via a browser redirect to
+    // sign-in with a callbackUrl back here, matching the no-session path — not a
+    // JSON 403 the browser would strand on.
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location");
+    expect(location).toContain("/api/auth/signin");
+    expect(location).toContain("callbackUrl=");
+    // The credential-issuance work below the gate never runs on a stale session.
     expect(mockFindFirst).not.toHaveBeenCalled();
   });
 

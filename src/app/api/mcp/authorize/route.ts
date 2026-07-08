@@ -73,9 +73,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(`${loginUrl}?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   }
 
+  // A stale session needs re-authentication, not a JSON 403 the browser would
+  // strand on. Bounce through sign-in like the no-session path above; the
+  // callbackUrl returns here and the second pass has a recent-enough session.
+  // requireRecentSession still fails closed on its unauthorized() paths.
   // @stepup id:mcp-authorize-get method:GET
   const stepUpError = await requireRecentSession(req);
-  if (stepUpError) return stepUpError;
+  if (stepUpError) {
+    if (stepUpError.status !== 403) return stepUpError;
+    const loginUrl = serverAppUrl("/api/auth/signin");
+    const callbackUrl = serverAppUrl(req.nextUrl.pathname + req.nextUrl.search);
+    return NextResponse.redirect(`${loginUrl}?callbackUrl=${encodeURIComponent(callbackUrl)}`);
+  }
 
   // Passkey enforcement gate — UX early-reject. Resolve tenantId first (not on
   // session.user), then re-derive state from DB (fail-closed; a throw propagates).
