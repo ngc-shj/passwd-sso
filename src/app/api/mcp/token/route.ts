@@ -6,7 +6,11 @@ import {
   createRefreshToken,
   exchangeCodeForToken,
   exchangeRefreshToken,
+  resolveCodeTenantId,
+  resolveRefreshTokenTenantId,
 } from "@/lib/mcp/oauth-server";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
@@ -108,6 +112,17 @@ async function handlePOST(req: NextRequest) {
     });
     if (blocked) return blocked;
 
+    // Tenant network access restriction (allowedCidrs / Tailscale) — enforced
+    // BEFORE the exchange mints, matching the MCP gateway's rule that a leaked
+    // credential must still honor the tenant's IP policy. Resolve the code's
+    // tenantId read-only; a bad code resolves to null and the exchange below
+    // produces the authoritative invalid_grant. The gate only ever restricts.
+    const codeTenantId = await resolveCodeTenantId(code);
+    if (codeTenantId) {
+      const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, codeTenantId, ACTOR_TYPE.MCP_AGENT);
+      if (denied) return denied;
+    }
+
     const clientSecretHash = client_secret ? hashToken(client_secret) : "";
 
     const result = await exchangeCodeForToken({
@@ -182,6 +197,17 @@ async function handlePOST(req: NextRequest) {
         ),
     });
     if (blocked) return blocked;
+
+    // Tenant network access restriction — enforced BEFORE rotation so a stolen
+    // refresh token cannot be rotated from an off-network IP (post-rotation denial
+    // would strand a legitimate client whose chain was already advanced). Resolve
+    // the token's tenantId read-only; an unknown token resolves to null and the
+    // exchange produces the authoritative invalid_grant. The gate only restricts.
+    const refreshTenantId = await resolveRefreshTokenTenantId(refreshTokenValue);
+    if (refreshTenantId) {
+      const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, refreshTenantId, ACTOR_TYPE.MCP_AGENT);
+      if (denied) return denied;
+    }
 
     const result = await exchangeRefreshToken({
       refreshToken: refreshTokenValue,
