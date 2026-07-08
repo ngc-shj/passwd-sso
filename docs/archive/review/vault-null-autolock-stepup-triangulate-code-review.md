@@ -121,3 +121,74 @@ exactly the invariant it advertises (RT7 shape b) for the 2 uncovered primitives
   SERVER_MARKER_MISSING; drop exempt entry → MISSING_CLIENT_MARKER), wired in scripts/pre-pr.sh:166.`
 
 Functionality and Testing findings: none — no action required.
+
+### S2 [Medium] `/api/user/passkey-status` bypassed tenant IP access restriction — FIXED
+- **Finding source**: user-supplied security review (post-triangulate), independently verified.
+- **Evidence**: `/api/user/passkey-status` was classified `api-default` (route-policy-manifest.json),
+  not `api-session-required`. The proxy applies tenant IP restriction
+  (`checkAccessRestrictionWithAudit`) ONLY in the `API_SESSION_REQUIRED` branch
+  (`src/lib/proxy/api-route.ts:126-140`). The handler (`route.ts:21-24`) self-checks *authentication*
+  via `checkAuth` but does NOT self-enforce IP restriction — so a logged-in user from a blocked
+  network (outside `allowedCidrs` / Tailscale) could read tenant passkey-enforcement policy. This
+  contradicts the documented boundary (`docs/security/policy-enforcement.md`: "Session-cookie routes
+  are blocked in proxy (`API_SESSION_REQUIRED`)").
+- **Root cause / blind spot**: the manifest's `handlerAuthReason` for this route reasoned only about
+  the *authentication* dimension ("still session-gated at the handler level") and missed the
+  *IP-restriction* consequence of `api-default`. Every other `/api/user/*` route is
+  `api-session-required`; passkey-status was the lone outlier.
+- **Fix** (chosen: reclassify, not in-handler enforcement — matches the sibling SSoT pattern):
+  Added `API_PATH.USER_PASSKEY_STATUS` to `SESSION_REQUIRED_PREFIXES`
+  (`src/lib/proxy/route-policy.ts`), updated the manifest entry `kind` → `api-session-required` and
+  dropped the now-stale `handlerAuthReason`. The route now gets proxy IP enforcement like its
+  siblings. Verified safe: passkey-status is a dashboard-only session-cookie route (grace-period
+  banner), no extension/mobile/bearer caller, and already 401s cookieless requests — so proxy
+  session-gating is behavior-compatible.
+- **Regression test**: added `/api/user/passkey-status` to the `API_SESSION_REQUIRED` positive-case
+  table in `src/lib/proxy/route-policy.test.ts`; mutation-verified RED pre-fix
+  (`expected 'api-default' to be 'api-session-required'`). The generic IP-enforcement assertions in
+  `api-route.test.ts` (ACCESS_DENIED) now cover this route via its classification. Manifest
+  assertion 2 mechanically ties classification↔handler.
+- **Impact**: Medium — limited data (boolean enforcement flags + grace-period days), but a real hole
+  in the network-boundary model. Not a step-up-guard issue; bundled into this branch per user
+  decision (single PR).
+
+### S3 [Medium] `@browser-redirect` exemption justification was false (stale session returned JSON 403, not a redirect) — FIXED
+- **Finding source**: user-supplied review of the S1 fix; a defect in my own S1 change.
+- **Evidence**: The `@browser-redirect` exempt sentinel (added for S1) claimed the 3 authorize routes
+  "recover via NextResponse.redirect to sign-in." But `requireRecentSession` returns
+  `errorResponse(SESSION_STEP_UP_REQUIRED, 403)` (`src/lib/auth/session/step-up.ts:48`) — a JSON 403,
+  NOT a redirect. All 3 routes returned it raw on the stale-session path, stranding the browser on a
+  JSON 403 page. Existing tests pinned the JSON 403. So the exemption recorded a false recovery and
+  the sentinel became an RT7-shape-b false-assurance escape hatch that could mask future gaps.
+- **Not an auth bypass**: credential issuance still failed closed (403 blocks the mint). The defect
+  was the false justification + UX dead-end, not a security bypass.
+- **Fix** (chosen: make the routes genuinely redirect — path A, matching each route's own no-session
+  redirect and design intent):
+  - `mcp/authorize` GET (`route.ts`): stale 403 → 307 redirect to `/api/auth/signin?callbackUrl=<self>`.
+  - `mobile/authorize` GET: stale 403 → reuse `redirectToSignIn(req)` (302), identical to no-session.
+  - `mcp/authorize/consent` POST (native form POST): step-up gated at entry, but the redirect is
+    deferred until after `client_id`/`redirect_uri` are validated (avoiding an open-redirect in the
+    callback), then 303 (POST→GET) to the authorize GET with OAuth params reconstructed from the
+    validated form fields; the authorize GET re-runs auth+step-up → sign-in. `unauthorized()` (no/
+    absent session) paths still fail closed immediately.
+- **Guard markers**: kept the 3 `@stepup id:… method:…` server markers (moved to line H-1 of the
+  gate call after inserting explanatory comments, so the guard's line-adjacency completeness check
+  still binds them). Rewrote the exempt-file `@browser-redirect` header + per-entry reasons to
+  describe the ACTUAL redirect mechanism (307/302/303) and to require a route-level redirect test.
+- **Regression tests**: rewrote the 3 "returns 403 when session step-up is required" tests to assert
+  the redirect (mcp GET 307 → signin+callbackUrl; mobile 302 → /ja/auth/signin+callbackUrl; consent
+  303 → /api/mcp/authorize with reconstructed client_id/redirect_uri/code_challenge/state). Added the
+  `url-helpers` mock to the consent test so `serverAppUrl` yields an absolute URL. All 3 assert the
+  credential-issuance mock is NOT called on the stale path (still fails closed). 354 affected tests pass.
+- **Impact**: Medium — closes the UX dead-end AND makes the CI exemption honest (removes the
+  false-assurance). Guard green; `@browser-redirect` justification is now true.
+
+### Finding-2 (MEDIUM / policy) `/api/mcp/token` exchange+refresh skip tenant IP restriction — PENDING USER DECISION
+- User-supplied finding: the MCP gateway (`/api/mcp`) enforces `enforceAccessRestriction` (rationale:
+  "a leaked mcp_ token must still honor allowed-CIDR"), but `/api/mcp/token` (auth-code exchange at
+  `route.ts:113` and refresh at `route.ts:186`) does NOT — so a stolen refresh token can be rotated
+  from an off-network IP, even though the resulting access token can't be USED at the gateway
+  off-network. Docs (threat-model D5a, policy-enforcement) assert Bearer/non-session flows enforce
+  `allowedCidrs` in handlers. Either enforce it on the token endpoint (post-validation, pre-mint) or
+  document the OAuth-token-endpoint exception. Separate subsystem (MCP OAuth lifecycle); awaiting user
+  decision on intended boundary. TODO(network-boundary): mcp/token IP enforcement decision.
