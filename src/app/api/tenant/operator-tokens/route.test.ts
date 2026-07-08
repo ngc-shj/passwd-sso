@@ -219,6 +219,12 @@ describe("POST /api/tenant/operator-tokens", () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.error).toBe("OPERATOR_TOKEN_STALE_SESSION");
+    // End-to-end half of the errorCode contract: the route must actually PASS
+    // the custom code to the gate — the client branches on this exact code.
+    expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledWith(
+      expect.anything(),
+      { errorCode: "OPERATOR_TOKEN_STALE_SESSION" },
+    );
   });
 
   it("returns 400 when body contains subjectUserId (strict schema rejection)", async () => {

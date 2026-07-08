@@ -1,6 +1,29 @@
 # Plan Review: fix-mcp-oauth-stepup-recovery
 Date: 2026-07-09
-Review rounds: 2
+Review rounds: 2 (plan) + 1 (code, Phase 3)
+
+## Phase 3 Code Review (implemented diff, 3 experts)
+
+**Verdict: no Critical. 1 Major + 2 Low + 2 Minor, all fixed in-branch; 4 Info recorded.**
+Verified clean: C1-C4 contract conformance, forbidden patterns absent, gate ordering
+unchanged at all 3 routes, fail-closed mappings byte-match the pre-refactor contract,
+no token logging, cookie-name SSoT preserved (no legacy-name fallback), `tsc --noEmit`
+exit 0, step-up guard exit 0, full suite + build green.
+
+| ID | Sev | Finding | Resolution |
+|----|-----|---------|------------|
+| F-P3-1 | Major | Panel handlers lacked try/finally — a network-level rejection stranded both recovery buttons disabled (violates I6 liveness) | FIXED: try/catch/finally in both handlers + regression test (ceremony rejects → buttons re-enabled) |
+| S-P3-1 | Low | Panel S1 regex allowed `/\host` (browsers normalize `\`→`/` → protocol-relative); unreachable through the only caller today, but S1's own drift rationale demands it | FIXED: `/^\/(?![/\\])/` + refusal test |
+| S-P3-3 | Info→hardening | `canRecoverSessionWithPasskey` didn't bind sessionToken↔userId | FIXED: row.userId comparison + mismatch test |
+| T-P3-1 | Minor | Page tests didn't assert argument plumbing across the mocked token seam | FIXED: `toHaveBeenCalledWith("sess-1")` / `("sess-1","u1")` in fresh+stale cases (both files) |
+| T-P3-2 | Minor | F4 errorCode contract pinned only wrapper-side | FIXED: operator-tokens route test now asserts the gate is CALLED WITH `{ errorCode: OPERATOR_TOKEN_STALE_SESSION }` |
+| S-P3-2 | Low (pre-existing) | `resolveCallbackUrl` can emit `//host` for `/.//host` inputs — verified NOT exploitable through any sink in this diff | Deferred: already tracked as plan `SC3`; fix recommendation recorded (reject `pathname.startsWith("//")` on output) |
+| F-P3-2 | Info | `requireRecentSession` / `requireRecentPasskeyVerification` are now production-dead exports (constants/types still live; guard still watches the names) | Accepted: kept deliberately — the guard regex references them and removal is churn without behavior value. TODO(fix-mcp-oauth-stepup-recovery): delete or repoint `src/__tests__/db-integration/require-recent-session.integration.test.ts` to the live chooser path in a cleanup PR |
+| T-P3-3 | Info | Panel test replaces window.location without restore (per-file jsdom isolation makes it safe) | Accepted as-is |
+| T-P3-4 | Info | provider-null fresh case omitted (same branch as google); route tests pin arity not identity (arity is the load-bearing part) | Accepted as-is |
+
+Post-fix verification: targeted 70 tests green, full suite 12,159 passed / 1 skipped,
+`npx next build` exit 0 (0 type errors), step-up coverage guard exit 0.
 
 ## Changes from Previous Round
 

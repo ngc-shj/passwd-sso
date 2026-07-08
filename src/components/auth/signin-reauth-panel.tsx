@@ -12,11 +12,12 @@ import { withBasePath } from "@/lib/url-helpers";
 
 /**
  * Server-computed callback paths must be same-origin root-relative: exactly
- * one leading slash. A protocol-relative value (`//host`) would turn the
- * post-reauth navigation into an open redirect — refuse it outright rather
- * than trusting upstream validation alone.
+ * one leading slash. A protocol-relative value (`//host` — or `/\host`,
+ * which browsers normalize to `//host`) would turn the post-reauth
+ * navigation into an open redirect — refuse it outright rather than
+ * trusting upstream validation alone.
  */
-const SAFE_CALLBACK_HREF_RE = /^\/(?!\/)/;
+const SAFE_CALLBACK_HREF_RE = /^\/(?![/\\])/;
 
 type SignInReauthPanelLabels = {
   title: string;
@@ -60,17 +61,25 @@ export function SignInReauthPanel({
     if (!safeHref) return;
     setBusy("passkey");
     setError(null);
-    const result = await reauthenticateWithPasskey();
-    if (result.ok) {
-      window.location.assign(safeHref);
-      return;
+    // try/finally: a network-level rejection (fetchApi throw, malformed body)
+    // must not strand the panel with both buttons permanently disabled —
+    // recovery-liveness is the whole point of this component.
+    try {
+      const result = await reauthenticateWithPasskey();
+      if (result.ok) {
+        window.location.assign(safeHref);
+        return;
+      }
+      setError(
+        result.error === "AUTHENTICATION_CANCELLED"
+          ? labels.passkeyCancelled
+          : labels.passkeyFailed,
+      );
+    } catch {
+      setError(labels.passkeyFailed);
+    } finally {
+      setBusy(null);
     }
-    setError(
-      result.error === "AUTHENTICATION_CANCELLED"
-        ? labels.passkeyCancelled
-        : labels.passkeyFailed,
-    );
-    setBusy(null);
   };
 
   const handleSignInAgain = async () => {
@@ -78,7 +87,12 @@ export function SignInReauthPanel({
     const signInPath = `${withBasePath(`/${locale}/auth/signin`)}${
       safeHref ? `?callbackUrl=${encodeURIComponent(safeHref)}` : ""
     }`;
-    await signOut({ callbackUrl: signInPath });
+    try {
+      await signOut({ callbackUrl: signInPath });
+    } catch {
+      // Success navigates away; only a failure needs the buttons back.
+      setBusy(null);
+    }
   };
 
   const showPasskey = canUsePasskey && safeHref !== null;

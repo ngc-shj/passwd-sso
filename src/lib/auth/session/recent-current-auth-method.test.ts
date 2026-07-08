@@ -205,7 +205,10 @@ describe("requireRecentCurrentAuthMethod", () => {
 
 describe("canRecoverSessionWithPasskey", () => {
   it("returns true for a webauthn session with at least one credential", async () => {
-    mockSessionFindUnique.mockResolvedValue({ provider: "webauthn" });
+    mockSessionFindUnique.mockResolvedValue({
+      provider: "webauthn",
+      userId: "user-1",
+    });
     mockCredentialCount.mockResolvedValue(2);
 
     await expect(
@@ -214,7 +217,10 @@ describe("canRecoverSessionWithPasskey", () => {
   });
 
   it("returns false for a webauthn session whose credentials were all deleted", async () => {
-    mockSessionFindUnique.mockResolvedValue({ provider: "webauthn" });
+    mockSessionFindUnique.mockResolvedValue({
+      provider: "webauthn",
+      userId: "user-1",
+    });
     mockCredentialCount.mockResolvedValue(0);
 
     await expect(
@@ -222,8 +228,24 @@ describe("canRecoverSessionWithPasskey", () => {
     ).resolves.toBe(false);
   });
 
+  it("returns false when the session row belongs to a different user (parameter binding)", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      provider: "webauthn",
+      userId: "someone-else",
+    });
+    mockCredentialCount.mockResolvedValue(2);
+
+    await expect(
+      canRecoverSessionWithPasskey("sess-1", "user-1"),
+    ).resolves.toBe(false);
+    expect(mockCredentialCount).not.toHaveBeenCalled();
+  });
+
   it("returns false for a non-webauthn session without counting credentials", async () => {
-    mockSessionFindUnique.mockResolvedValue({ provider: "google" });
+    mockSessionFindUnique.mockResolvedValue({
+      provider: "google",
+      userId: "user-1",
+    });
 
     await expect(
       canRecoverSessionWithPasskey("sess-1", "user-1"),

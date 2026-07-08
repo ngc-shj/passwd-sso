@@ -225,6 +225,8 @@ describe("SignInPage", () => {
         "/api/mcp/authorize?client_id=c&x=1",
       );
       expect(mockRedirect).not.toHaveBeenCalled();
+      // Token plumbing: the freshness core receives the cookie-store token.
+      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
     });
 
     it("renders the reauth panel (no redirect) when the session is stale", async () => {
@@ -247,6 +249,12 @@ describe("SignInPage", () => {
             el.props.canUsePasskey === true,
         ),
       ).toBe(true);
+      // Token plumbing: token + authenticated user id, in that order.
+      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+      expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
+        "sess-1",
+        "u1",
+      );
     });
 
     it("passes canUsePasskey=false to the panel when the session cannot recover via passkey", async () => {

@@ -168,6 +168,12 @@ describe("SignInPage under BASE_PATH=/passwd-sso", () => {
       ),
     ).toBe(true);
     expect(mockNextRedirect).not.toHaveBeenCalled();
+    // Token plumbing: token + authenticated user id, in that order.
+    expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+    expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
+      "sess-1",
+      "u1",
+    );
   });
 
   it("still strips basePath+locale for the non-API intl redirect (I2)", async () => {

@@ -137,6 +137,32 @@ describe("SignInReauthPanel", () => {
     ).toBeEnabled();
   });
 
+  it("re-enables recovery when the ceremony rejects at the network level (no stranded panel)", async () => {
+    mockReauthenticateWithPasskey.mockRejectedValue(new Error("network down"));
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "reauthAction" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthFailed")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole("button", { name: "reauthAction" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "recentSessionAction" }),
+    ).toBeEnabled();
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
+  it("refuses a backslash protocol-relative callbackHref (browsers normalize \\ to /)", () => {
+    renderPanel({ callbackHref: "/\\evil.example/phish" });
+
+    expect(
+      screen.queryByRole("button", { name: "reauthAction" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the cancelled label when the user aborts the ceremony", async () => {
     mockReauthenticateWithPasskey.mockResolvedValue({
       ok: false,

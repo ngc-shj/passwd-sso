@@ -79,9 +79,11 @@ export async function canRecoverSessionWithPasskey(
     async (tx) => {
       const row = await tx.session.findUnique({
         where: { sessionToken },
-        select: { provider: true },
+        select: { provider: true, userId: true },
       });
-      if (row?.provider !== "webauthn") return false;
+      // Bind the two parameters: a caller passing a userId that does not own
+      // this session must not learn whether that user has credentials.
+      if (row?.provider !== "webauthn" || row.userId !== userId) return false;
       const credentialCount = await tx.webAuthnCredential.count({
         where: { userId },
       });
