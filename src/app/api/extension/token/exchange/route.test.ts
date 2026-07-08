@@ -18,6 +18,7 @@ const {
   mockError,
   mockExtractClientIp,
   mockVerifyDpop,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockBridgeCodeUpdateMany: vi.fn(),
   mockBridgeCodeFindUnique: vi.fn(),
@@ -33,6 +34,7 @@ const {
   mockError: vi.fn(),
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
   mockVerifyDpop: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/auth/dpop/verify", () => ({
@@ -90,6 +92,9 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { warn: mockWarn, error: mockError, info: vi.fn() },
   getLogger: () => ({ warn: mockWarn, error: mockError, info: vi.fn() }),
@@ -111,6 +116,8 @@ describe("POST /api/extension/token/exchange", () => {
     // Re-establish defaults that vi.clearAllMocks resets
     mockCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
+    // Tenant IP access restriction allows by default (helper returns null).
+    mockEnforceAccessRestriction.mockResolvedValue(null);
     mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
     mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
     // DPoP proof passes by default
@@ -165,6 +172,36 @@ describe("POST /api/extension/token/exchange", () => {
         tenantId: "22222222-2222-2222-2222-222222222222",
       }),
     );
+  });
+
+  // ── 1b. Tenant IP restriction — denied before DPoP/consume ──
+  it("denies an off-network IP before consuming the code or minting", async () => {
+    mockBridgeCodeFindUnique.mockResolvedValueOnce({
+      userId: "11111111-1111-1111-1111-111111111111",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      scope: "passwords:read,vault:unlock-data",
+      cnfJkt: VALID_CNF_JKT,
+    });
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
+    // Enforced on the resolved tenantId BEFORE DPoP verification and the
+    // CAS-consume, so an off-network attempt neither consumes nor mints.
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      "11111111-1111-1111-1111-111111111111",
+      "22222222-2222-2222-2222-222222222222",
+      "HUMAN",
+    );
+    expect(mockVerifyDpop).not.toHaveBeenCalled();
+    expect(mockBridgeCodeUpdateMany).not.toHaveBeenCalled();
+    expect(mockExtensionTokenCreate).not.toHaveBeenCalled();
   });
 
   // ── 2. Code unknown — fast-fail at SELECT step ──

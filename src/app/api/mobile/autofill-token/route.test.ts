@@ -3,15 +3,17 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
-const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheckRateLimitOrFail } = vi.hoisted(() => ({
+const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheckRateLimitOrFail, mockEnforceAccessRestriction } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockIssueAutofill: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWarn: vi.fn(),
   mockError: vi.fn(),
   mockCheckRateLimitOrFail: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn(),
 }));
 
+vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/auth/tokens/mobile-token", () => ({ issueAutofillToken: mockIssueAutofill }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -40,6 +42,8 @@ describe("POST /api/mobile/autofill-token", () => {
     mockLogAudit.mockResolvedValue(undefined);
     // Default: rate limit allows the request through (helper returns null).
     mockCheckRateLimitOrFail.mockResolvedValue(null);
+    // Default: tenant IP access restriction allows (helper returns null).
+    mockEnforceAccessRestriction.mockResolvedValue(null);
   });
 
   it("mints a token bound to the supplied jwk for an authenticated host token", async () => {
@@ -95,6 +99,27 @@ describe("POST /api/mobile/autofill-token", () => {
     });
     const res = await POST(post({ jwk: VALID_JWK }));
     expect(res.status).toBe(401);
+    expect(mockIssueAutofill).not.toHaveBeenCalled();
+  });
+
+  it("denies an off-network IP before minting (tenant IP restriction)", async () => {
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "u1", tenantId: "t1", clientKind: "IOS_APP" } });
+    mockEnforceAccessRestriction.mockResolvedValue(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+
+    const res = await POST(post({ jwk: VALID_JWK }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
+    // Enforced on the authenticated tenantId, and NO token is minted off-network.
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      "u1",
+      "t1",
+      "HUMAN",
+    );
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 

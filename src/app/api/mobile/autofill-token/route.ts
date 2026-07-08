@@ -14,6 +14,8 @@ import { jwkThumbprint } from "@/lib/auth/dpop/verify";
 import { issueAutofillToken } from "@/lib/auth/tokens/mobile-token";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 
 export const runtime = "nodejs";
 
@@ -64,6 +66,13 @@ export const POST = withRequestLog(async (req: NextRequest) => {
     return unauthorized();
   }
   const { userId, tenantId } = authed.auth;
+
+  // Tenant network access restriction — a stolen IOS_APP bearer token must not
+  // mint a passwords:write AutoFill token from an off-network IP. Enforced on the
+  // authenticated tenantId before the mint, matching the MCP gateway / token
+  // endpoint and the D5a control.
+  const denied = await enforceAccessRestriction(req, userId, tenantId, ACTOR_TYPE.HUMAN);
+  if (denied) return denied;
 
   // Rate-limit per user, after auth (the bucket key is the authenticated
   // identity) and before the mint/audit work.
