@@ -17,9 +17,28 @@ const { mockAuth, mockRedirect, mockGetTranslations, mockSetRequestLocale } =
     mockGetTranslations: vi.fn(),
     mockSetRequestLocale: vi.fn(),
   }));
+const {
+  mockNextRedirect,
+  mockEvaluateStepUpFreshness,
+  mockCanRecoverSessionWithPasskey,
+  mockGetSessionTokenFromCookieStore,
+  mockSignInReauthPanel,
+} = vi.hoisted(() => ({
+  // Non-throwing spy: the real next/navigation redirect throws NEXT_REDIRECT,
+  // which would make pre/post-fix behavior indistinguishable in assertions.
+  mockNextRedirect: vi.fn(),
+  mockEvaluateStepUpFreshness: vi.fn(),
+  mockCanRecoverSessionWithPasskey: vi.fn(),
+  mockGetSessionTokenFromCookieStore: vi.fn(),
+  mockSignInReauthPanel: vi.fn(() => null),
+}));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/i18n/navigation", () => ({ redirect: mockRedirect }));
+vi.mock("next/navigation", () => ({ redirect: mockNextRedirect }));
+vi.mock("next/headers", () => ({
+  cookies: () => Promise.resolve({ get: () => undefined }),
+}));
 vi.mock("next-intl/server", () => ({
   getTranslations: mockGetTranslations,
   setRequestLocale: mockSetRequestLocale,
@@ -27,6 +46,16 @@ vi.mock("next-intl/server", () => ({
 vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
   getAppOrigin: () => "https://example.com",
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  evaluateStepUpFreshness: mockEvaluateStepUpFreshness,
+  canRecoverSessionWithPasskey: mockCanRecoverSessionWithPasskey,
+}));
+vi.mock("@/app/api/sessions/helpers", () => ({
+  getSessionTokenFromCookieStore: mockGetSessionTokenFromCookieStore,
+}));
+vi.mock("@/components/auth/signin-reauth-panel", () => ({
+  SignInReauthPanel: mockSignInReauthPanel,
 }));
 const { mockParseAllowedGoogleDomains } = vi.hoisted(() => ({
   mockParseAllowedGoogleDomains: vi.fn<() => string[]>(() => []),
@@ -88,9 +117,14 @@ function hasElement(
 
 describe("SignInPage", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockGetTranslations.mockResolvedValue(fakeT);
     mockSetRequestLocale.mockReturnValue(undefined);
     mockRedirect.mockReturnValue(undefined);
+    mockGetSessionTokenFromCookieStore.mockReturnValue("sess-1");
+    mockEvaluateStepUpFreshness.mockResolvedValue("fresh");
+    mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
+    mockSignInReauthPanel.mockReturnValue(null);
   });
 
   it("redirects to /dashboard when user is authenticated", async () => {
@@ -168,6 +202,99 @@ describe("SignInPage", () => {
     expect(mockRedirect).toHaveBeenCalledWith({
       href: "/dashboard",
       locale: "en",
+    });
+  });
+
+  describe("step-up-gated API callback (MCP / mobile OAuth)", () => {
+    const API_CALLBACK = "https://example.com/api/mcp/authorize?client_id=c&x=1";
+
+    beforeEach(() => {
+      mockAuth.mockResolvedValue({ user: { id: "u1" } });
+    });
+
+    it("redirects with the basePath/locale-stripped path when the session is fresh", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("fresh");
+
+      await SignInPage({
+        params: makeParams("ja"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      // Plain Next redirect (no locale injection); Next re-prepends basePath.
+      expect(mockNextRedirect).toHaveBeenCalledWith(
+        "/api/mcp/authorize?client_id=c&x=1",
+      );
+      expect(mockRedirect).not.toHaveBeenCalled();
+    });
+
+    it("renders the reauth panel (no redirect) when the session is stale", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("stale");
+      mockCanRecoverSessionWithPasskey.mockResolvedValue(true);
+
+      const result = await SignInPage({
+        params: makeParams("ja"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expect(
+        hasElement(
+          result,
+          (el) =>
+            el.type === mockSignInReauthPanel &&
+            el.props.callbackHref === "/api/mcp/authorize?client_id=c&x=1" &&
+            el.props.canUsePasskey === true,
+        ),
+      ).toBe(true);
+    });
+
+    it("passes canUsePasskey=false to the panel when the session cannot recover via passkey", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("stale");
+      mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
+
+      const result = await SignInPage({
+        params: makeParams("en"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(
+        hasElement(
+          result,
+          (el) =>
+            el.type === mockSignInReauthPanel &&
+            el.props.canUsePasskey === false,
+        ),
+      ).toBe(true);
+    });
+
+    it("falls through to the sign-in form when the session row is gone (invalid)", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("invalid");
+
+      const result = await SignInPage({
+        params: makeParams("en"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expect(
+        hasElement(result, (el) => el.type === mockSignInReauthPanel),
+      ).toBe(false);
+      expect(result).toBeDefined();
+    });
+
+    it("treats a missing session cookie as invalid (form, no freshness query)", async () => {
+      mockGetSessionTokenFromCookieStore.mockReturnValue(null);
+
+      const result = await SignInPage({
+        params: makeParams("en"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(mockEvaluateStepUpFreshness).not.toHaveBeenCalled();
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(result).toBeDefined();
     });
   });
 

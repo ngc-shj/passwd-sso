@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentSession, mockEmitFailClosed, mockCheckRateLimitOrFail, mockDerivePasskeyState } =
+const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentCurrentAuthMethod, mockEmitFailClosed, mockCheckRateLimitOrFail, mockDerivePasskeyState } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
@@ -11,7 +11,7 @@ const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls,
     mockServerAppUrl: vi.fn((path: string) => `http://localhost:3000${path}`),
     mockDetectLocale: vi.fn(() => "en"),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+    mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
     mockEmitFailClosed: vi.fn(),
     // Default: helper returns null → route proceeds. Per-test overrides set
     // it to return a response when the test exercises the rate-limited path.
@@ -20,8 +20,8 @@ const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls,
   }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {

@@ -107,9 +107,12 @@ BRANCH_TOKEN_RE='SESSION_STEP_UP_REQUIRED|handleStepUpError[(]|throwIfStepUp[(]|
 #   requireRecentCurrentAuthMethod( — reauth with the session's current method
 #   requireRecentSession(           — recent-session gate (default errorCode = 403 code)
 #   requireRecentPasskeyVerification( — recent passkey gate (same default)
+#   evaluateStepUpFreshness(        — token-parameterized freshness core; a route
+#                                     calling it directly and hand-rolling the 403
+#                                     must not be invisible to this guard
 # ERE with a leading boundary group; used both to LIST gated files and to find
 # each gated CALL line. Keep in sync with the primitives above.
-STEPUP_PRIMITIVE_RE='(^|[^A-Za-z0-9_])(requireRecentCurrentAuthMethod|requireRecentSession|requireRecentPasskeyVerification)\('
+STEPUP_PRIMITIVE_RE='(^|[^A-Za-z0-9_])(requireRecentCurrentAuthMethod|requireRecentSession|requireRecentPasskeyVerification|evaluateStepUpFreshness)\('
 
 fail=0
 

@@ -42,7 +42,7 @@ import { DEFAULT_LOCALE } from "@/i18n/locales";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { BRIDGE_CODE_TTL_MS, MS_PER_MINUTE } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import {
@@ -124,11 +124,12 @@ async function handleGET(req: NextRequest): Promise<Response> {
 
   // A stale session needs re-authentication, not a JSON 403 the ephemeral
   // ASWebAuthenticationSession browser would strand on. Bounce through sign-in
-  // exactly like the no-session path above; the callbackUrl returns here and the
-  // second pass has a fresh (recent-enough) session. requireRecentSession still
-  // fails closed on the unauthorized() paths (no/absent session row).
+  // exactly like the no-session path above; the sign-in page's reauth panel
+  // refreshes the provider-appropriate freshness (passkey ceremony or
+  // re-sign-in) and returns here via callbackUrl. The chooser still fails
+  // closed on the unauthorized() paths (no/absent session row).
   // @stepup id:mobile-authorize-get method:GET
-  const stepUpError = await requireRecentSession(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {
     return stepUpError.status === 403 ? redirectToSignIn(req) : stepUpError;
   }

@@ -1,6 +1,13 @@
 import { redirect } from "@/i18n/navigation";
 import { redirect as nextRedirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { auth } from "@/auth";
+import {
+  evaluateStepUpFreshness,
+  canRecoverSessionWithPasskey,
+} from "@/lib/auth/session/recent-current-auth-method";
+import { getSessionTokenFromCookieStore } from "@/app/api/sessions/helpers";
+import { SignInReauthPanel } from "@/components/auth/signin-reauth-panel";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
 import {
@@ -52,15 +59,48 @@ export default async function SignInPage({
     }
     const resolved = resolveCallbackUrl(rawCallbackUrl ?? null, origin);
     if (isApiCallbackUrl(resolved)) {
-      // API routes (e.g. the iOS /api/mobile/authorize OAuth handler) live
-      // outside the [locale] segment. next-intl's redirect() would inject the
-      // active locale (→ /<locale>/api/... → 404), so use the plain redirect
-      // with the basePath-qualified path as-is (no locale prefix).
-      nextRedirect(resolved);
+      // API callbacks (/api/mcp/authorize, /api/mobile/authorize OAuth
+      // handlers) live outside the [locale] segment and are step-up gated.
+      // Evaluate the same freshness core the gate applies: bouncing a stale
+      // session straight back would 403 again and loop forever.
+      const sessionToken = getSessionTokenFromCookieStore(await cookies());
+      const verdict = sessionToken
+        ? await evaluateStepUpFreshness(sessionToken)
+        : "invalid";
+      if (verdict === "fresh") {
+        // Strip basePath + locale: Next's redirect() re-prepends basePath,
+        // so passing the basePath-qualified path as-is would double it
+        // (/base/base/api/...). next-intl's redirect() is still wrong here —
+        // it would inject the locale (→ /<locale>/api/... → 404).
+        nextRedirect(callbackUrlToHref(resolved));
+      }
+      if (verdict === "stale" && sessionToken) {
+        const canUsePasskey = await canRecoverSessionWithPasskey(
+          sessionToken,
+          session.user.id,
+        );
+        return (
+          <SignInReauthPanel
+            callbackHref={resolved}
+            canUsePasskey={canUsePasskey}
+            labels={{
+              title: t("reauthPanelTitle"),
+              description: t("reauthPanelDescription"),
+              passkeyAction: t("reauthAction"),
+              passkeyFailed: t("reauthFailed"),
+              passkeyCancelled: t("reauthCancelled"),
+              signInAgainAction: t("recentSessionAction"),
+            }}
+          />
+        );
+      }
+      // "invalid" (session row vanished mid-flight): fall through to the
+      // sign-in form below.
+    } else {
+      // Strip basePath + locale: next-intl redirect() re-adds both
+      const href = callbackUrlToHref(resolved);
+      redirect({ href, locale });
     }
-    // Strip basePath + locale: next-intl redirect() re-adds both
-    const href = callbackUrlToHref(resolved);
-    redirect({ href, locale });
   }
 
   const hasGoogle = !!(

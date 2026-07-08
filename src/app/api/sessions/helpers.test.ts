@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
-import { getSessionToken } from "./helpers";
+import { getSessionToken, getSessionTokenFromCookieStore } from "./helpers";
 
 describe("getSessionToken", () => {
   beforeEach(() => {
@@ -61,5 +61,55 @@ describe("getSessionToken", () => {
       headers: { Cookie: "__Host-authjs.session-token=next123" },
     });
     expect(getSessionToken(req)).toBe("next123");
+  });
+});
+
+describe("getSessionTokenFromCookieStore (server-component cookies() variant)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  function storeWith(entries: Record<string, string>) {
+    return {
+      get: (name: string) =>
+        name in entries ? { value: entries[name] } : undefined,
+    };
+  }
+
+  it("resolves the __Secure- name on https + basePath (production shape)", () => {
+    vi.stubEnv("AUTH_URL", "https://app.example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+
+    const token = getSessionTokenFromCookieStore(
+      storeWith({ "__Secure-authjs.session-token": "sec-1" }),
+    );
+
+    expect(token).toBe("sec-1");
+  });
+
+  it("resolves the plain name on http (dev shape)", () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+
+    const token = getSessionTokenFromCookieStore(
+      storeWith({ "authjs.session-token": "dev-1" }),
+    );
+
+    expect(token).toBe("dev-1");
+  });
+
+  it("returns null when the deployment-shaped cookie is absent", () => {
+    vi.stubEnv("AUTH_URL", "https://app.example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+
+    // A dev-shaped cookie must NOT satisfy a production-shaped deployment.
+    const token = getSessionTokenFromCookieStore(
+      storeWith({ "authjs.session-token": "wrong-shape" }),
+    );
+
+    expect(token).toBeNull();
   });
 });
