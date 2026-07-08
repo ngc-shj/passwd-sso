@@ -103,6 +103,46 @@ claims were empirically reproduced (revert-and-rerun), not asserted.
 N/A — no environment constraints declared in Phase 1 (all paths `verifiable-local`;
 route unit tests and client unit test executed locally and pass).
 
+## Round 2 — user-reported Major (client-side null-reset)
+
+**M1 (Major, user-reported) — resolved. Essence shift.**
+The Phase 1-3 review scoped the fix to the SERVER cross-bound validation plus the
+client DEFAULT *constant* extraction, and missed that the client never RESETS its
+active timer to the default when the effective value transitions to null.
+
+- Evidence: `auto-lock-context.tsx:29-33` (old) only wrote `autoLockMsRef.current`
+  for positive numbers — on `60 → null` the ref kept the stale 60-min value.
+  `vault-context.tsx:212-214` (old) only called `setAutoLockMinutes` for positive
+  numbers — a status API `null` never propagated, so the provider never saw the
+  change.
+- Impact: a tenant switching from an explicit longer value (e.g. 60) to null while
+  lowering session idle (e.g. to 20) is accepted server-side (null ⇒ 15 ≤ 20), but
+  a mounted/unlocked client keeps enforcing 60 until remount/reload — decrypted
+  vault material stays readable past the intended session idle boundary. The server
+  invariant `effective(vaultAutoLock=null) = 15` is only true if the client actually
+  applies 15; the client did not on the null-transition path.
+- Root cause of the miss: the invariant "null's effective value is 15" was treated
+  as a server-validation property, but it is a **distributed contract** that every
+  layer applying the effective value must honor — including the client's dynamic
+  update path, not just its initial-mount default. This is the essence shift: the
+  task was framed as "server null-case validation" but the real class is
+  "null ⇒ default consistency across all effective-value appliers."
+- Fix:
+  - `auto-lock-context.tsx` — the prop-change effect now sets `autoLockMsRef.current`
+    to `DEFAULT_INACTIVITY_TIMEOUT_MS` on null/non-positive (was: skip).
+  - `vault-context.tsx` — the status-API handler now propagates `null` into
+    `setAutoLockMinutes` (was: only positive), so the provider resets.
+  - Regression test in `auto-lock-context.test.tsx`: `60 → null` must NOT lock
+    before the 15-min default and MUST lock after it. Verified red-before on a
+    temporary in-place revert (restored via git, no residue), green-after.
+- Member-set of the null-reset class (derived by grepping the effective-value
+  appliers): web client had exactly 2 sites (both fixed). The browser extension
+  re-resolves per alarm via `getEffectiveAutoLockMinutes()`
+  (`extension/src/background/index.ts:177-183, 543, 2042`) so it falls back to the
+  local setting on null — no stale-ref bug. iOS uses a separate storage model.
+  Neither is in the affected member-set.
+- Verification: full suite 12107 pass; pre-pr.sh 44/44 pass (incl. build).
+
 ## Resolution Status
 
 ### T1 (Low) Coverage gap: explicit-null vaultAutoLock × ext-idle untested
@@ -111,4 +151,15 @@ route unit tests and client unit test executed locally and pass).
 - Verification: `npx vitest run src/__tests__/api/tenant/tenant-policy.test.ts`
   → 36 passed. pre-pr.sh → 44/44 pass.
 
-All Critical/Major/Minor findings resolved. One Low finding fixed in-round.
+### M1 (Major) Client keeps stale timer when tenant clears vaultAutoLockMinutes
+- Action: reset `autoLockMsRef` to default on null in the provider; propagate null
+  from the status API into state.
+- Modified files: `src/lib/vault/auto-lock-context.tsx:28-40`,
+  `src/lib/vault/vault-context.tsx:211-221`,
+  `src/lib/vault/auto-lock-context.test.tsx` (60→null regression).
+- Verification: red-before proven (temporary revert), green-after; full suite +
+  pre-pr pass.
+
+All Critical/Major/Minor findings resolved. The Major surfaced from user review
+after the automated triangulate rounds missed the client-side leg of the
+distributed null⇒default invariant — recorded as an essence-shift lesson.
