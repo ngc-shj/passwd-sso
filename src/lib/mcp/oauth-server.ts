@@ -174,26 +174,34 @@ export type TokenExchangeOutcome =
  */
 export async function resolveCodeTenantId(code: string): Promise<string | null> {
   const codeHash = hashToken(code);
-  return withBypassRls(prisma, async (tx) => {
-    const row = await tx.mcpAuthorizationCode.findUnique({
-      where: { codeHash },
-      select: { tenantId: true },
-    });
-    return row?.tenantId ?? null;
-  });
+  return withBypassRls(
+    prisma,
+    async (tx) => {
+      const row = await tx.mcpAuthorizationCode.findUnique({
+        where: { codeHash },
+        select: { tenantId: true },
+      });
+      return row?.tenantId ?? null;
+    },
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
 }
 
 export async function resolveRefreshTokenTenantId(
   refreshToken: string,
 ): Promise<string | null> {
   const tokenHash = hashToken(refreshToken);
-  return withBypassRls(prisma, async (tx) => {
-    const row = await tx.mcpRefreshToken.findUnique({
-      where: { tokenHash },
-      select: { tenantId: true },
-    });
-    return row?.tenantId ?? null;
-  });
+  return withBypassRls(
+    prisma,
+    async (tx) => {
+      const row = await tx.mcpRefreshToken.findUnique({
+        where: { tokenHash },
+        select: { tenantId: true },
+      });
+      return row?.tenantId ?? null;
+    },
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE,
+  );
 }
 
 export async function exchangeCodeForToken(
