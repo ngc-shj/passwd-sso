@@ -69,6 +69,16 @@ Three Minor findings were confirmed and fixed on the follow-up branch.
 - S3 (`@browser-redirect` mechanical proof): residual process gap, bounded by required human-reviewed exempt-list edits + per-route redirect tests; optional guard hardening noted for a future PR.
 - F2 (annotation looseness): documentation-only, guard does not assert status codes.
 
+### N1 [Nit] replay audit `metadata.clientId` is the self-asserted request-body value — Accepted, no change
+- Source: second-opinion external review (post-merge follow-up on this branch).
+- Detail: `route.ts` replay branch fires `MCP_REFRESH_TOKEN_REPLAY` before client validation, so `metadata.clientId` = `clientIdValue` (request body). `familyId` and `tenantId` are stored-row-derived and correct; `clientId` is auxiliary metadata only, and family revocation fires correctly regardless of the asserted client_id. Attacker must already hold a high-entropy refresh token.
+- Anti-Deferral check: acceptable risk. Worst case: forensic metadata shows an attacker-chosen client_id string on a replay event (family/tenant still accurate). Likelihood: low (requires a stolen rotated token). Cost to fix: the `replay`/`race_lost` outcome in `exchangeRefreshToken` (`oauth-server.ts:652-666`) would need to carry the stored public `mcpClientId` (`mcpc_xxx`) — `rt` selects only the internal `clientId` FK UUID, so an extra client lookup/join on the replay path (+1 DB read on the theft-detection path) is required. Not worth the forensic-only gain now.
+- TODO(mcp-refresh-replay-revocation-followup): surface stored `mcpClientId` in the replay/race_lost outcome and use it for the replay audit metadata instead of the request-body client_id.
+
+### N2, N3 — Accepted (Nit), no change
+- N2 (live-token off-network denial does rotation-prevention, not family theft-revocation): deliberate — off-network ≠ theft; auto-revoking a live family on every off-network hit would DoS legitimate users.
+- N3 (theoretical TOCTOU between `resolveRefreshTokenGate` and `exchangeRefreshToken`): a token that flips live→rotated in the gap is handled safely — the subsequent replay attempt triggers family revocation; the momentary "resolved live, then off-network 403" leaves the family intact, which is the correct outcome for a live token.
+
 ## Environment Verification Report
 
 N/A — no environment constraints declared in a Phase 1 (this was a review-only triangulate on a merged branch). All mandatory checks executed and passed on this developer machine:
