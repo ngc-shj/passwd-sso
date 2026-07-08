@@ -381,4 +381,45 @@ describe("AutoLockProvider", () => {
     });
     expect(lock).toHaveBeenCalled();
   });
+
+  it("resets to the 15-min default when autoLockMinutes changes from a longer value to null", () => {
+    // Regression: clearing an explicit longer value (60 → null) must drop the
+    // effective timer back to the default. A stale 60-min timer would leave the
+    // vault decrypted past the tenant's (possibly lowered) session idle boundary.
+    const lock = vi.fn();
+    const { rerender } = render(
+      <AutoLockProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        lock={lock}
+        autoLockMinutes={60}
+      >
+        <div />
+      </AutoLockProvider>,
+    );
+
+    // Tenant clears the explicit value; effective lock must become the default.
+    rerender(
+      <AutoLockProvider
+        vaultStatus={VAULT_STATUS.UNLOCKED}
+        lock={lock}
+        autoLockMinutes={null}
+      >
+        <div />
+      </AutoLockProvider>,
+    );
+
+    // Just under the 15-min default — must NOT have locked (would already have
+    // fired if the timer were incorrectly reset to something shorter).
+    act(() => {
+      vi.advanceTimersByTime(DEFAULT_INACTIVITY_TIMEOUT_MS - ACTIVITY_CHECK_INTERVAL_MS);
+    });
+    expect(lock).not.toHaveBeenCalled();
+
+    // Cross the 15-min default — must lock now (proves it did NOT keep the
+    // stale 60-min timer, which would still be far from firing).
+    act(() => {
+      vi.advanceTimersByTime(2 * ACTIVITY_CHECK_INTERVAL_MS);
+    });
+    expect(lock).toHaveBeenCalled();
+  });
 });
