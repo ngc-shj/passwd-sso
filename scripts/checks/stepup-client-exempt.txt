@@ -7,7 +7,24 @@
 # custom or non-interactive. The named <custom-marker-token> must still appear
 # somewhere in the client tree — the guard fails (EXEMPT_MARKER_ABSENT) if it
 # disappears, so the exemption cannot silently rot into a real coverage gap.
+#
+# SENTINEL `@browser-redirect`: a route reached ONLY by browser navigation
+# (OAuth/mobile authorize GET, consent form POST) has no fetch-based UI caller to
+# carry a client marker. Its stale-session recovery is a SERVER-SIDE redirect: the
+# handler converts requireRecentSession's 403 into a redirect back through sign-in
+# (GET routes → 307/302 to /api/auth/signin or /{locale}/auth/signin; consent POST
+# → 303 to the authorize GET, which then redirects to sign-in), so the browser
+# re-authenticates and returns on the second pass instead of stranding on a JSON
+# 403. Each such handler MUST actually perform that redirect on the 403 path — a
+# route-level test pins it (see the "redirects to sign-in when session step-up is
+# required" cases). Entries name `@browser-redirect` and are exempt from the
+# client-tree anti-drift check (there is deliberately no client token). Do NOT use
+# this sentinel for a route reached by fetchApi from the UI — that route must
+# recover via handleStepUpError, not this escape hatch.
 
 ext-bridge-code-post   EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED  # auto-extension-connect.tsx surfaces step-up via the extension-connect error channel, not the standard API error body
+mcp-authorize-get              @browser-redirect  # OAuth authorize GET (browser nav); stale-session 403 redirects (307) to /api/auth/signin with callbackUrl back here, no fetch UI caller
+mcp-authorize-consent-post     @browser-redirect  # OAuth consent native form POST; stale-session 403 redirects (303) to the authorize GET which re-auths, no fetch UI caller
+mobile-authorize-get           @browser-redirect  # mobile OAuth authorize GET (ASWebAuthenticationSession browser nav); stale-session 403 redirects (302) to sign-in, no fetch UI caller
 team-confirm-key-post  KEY_DISTRIBUTE_INTERVAL_MS  # team-vault-core.tsx background setInterval poller; no awaiting user gesture, retries on next poll (SC3)
 operator-tokens-post   OPERATOR_TOKEN_STALE_SESSION  # operator-token-card.tsx has a bespoke multi-state reauth flow (limit-exceeded vs stale vs generic retry) and does not use the shared inline-reauth hook (SC4)

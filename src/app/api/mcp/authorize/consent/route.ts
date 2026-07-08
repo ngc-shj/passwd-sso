@@ -12,6 +12,8 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { serverAppUrl } from "@/lib/url-helpers";
+import { API_PATH } from "@/lib/constants/auth/api-path";
 import {
   derivePasskeyState,
   passkeyEnforcementBlocks,
@@ -37,8 +39,15 @@ export async function POST(req: NextRequest) {
     return unauthorized();
   }
 
+  // Gate now; act after params are validated. A stale session must re-auth, not
+  // land the native form-POST browser on a JSON 403 dead-end — but we can only
+  // build a safe callbackUrl once client_id/redirect_uri are validated below
+  // (an unvalidated redirect_uri in the callback would be an open-redirect vector).
+  // The unauthorized() paths (no/absent session) still fail closed immediately.
+  // @stepup id:mcp-authorize-consent-post method:POST
   const stepUpError = await requireRecentSession(req);
-  if (stepUpError) return stepUpError;
+  if (stepUpError && stepUpError.status !== 403) return stepUpError;
+  const stepUpStale = stepUpError?.status === 403;
 
   // Stream-read the consent form under the byte cap. The form is submitted as
   // application/x-www-form-urlencoded (hidden-input form POST, no file upload),
@@ -69,6 +78,24 @@ export async function POST(req: NextRequest) {
   // Validate redirect_uri (must happen before redirect to prevent open redirect)
   if (!foundClient.redirectUris.includes(redirectUri)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  // Stale-session recovery: params are now validated, so it is safe to bounce the
+  // browser back to the authorize GET (which re-runs auth + step-up and redirects
+  // to sign-in). The callback is a self-origin app path, not the client redirect_uri.
+  if (stepUpStale) {
+    const authorizeUrl = new URL(serverAppUrl(API_PATH.MCP_AUTHORIZE));
+    authorizeUrl.searchParams.set("client_id", clientId);
+    authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+    authorizeUrl.searchParams.set("response_type", "code");
+    if (state) authorizeUrl.searchParams.set("state", state);
+    const codeChallenge = formData.get("code_challenge") ?? "";
+    const codeChallengeMethod = formData.get("code_challenge_method") ?? "";
+    const scope = formData.get("scope") ?? "";
+    if (codeChallenge) authorizeUrl.searchParams.set("code_challenge", codeChallenge);
+    if (codeChallengeMethod) authorizeUrl.searchParams.set("code_challenge_method", codeChallengeMethod);
+    if (scope) authorizeUrl.searchParams.set("scope", scope);
+    return NextResponse.redirect(authorizeUrl.toString(), 303);
   }
 
   // Tenant check

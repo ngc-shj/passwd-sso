@@ -111,6 +111,10 @@ vi.mock("@/lib/auth/session/step-up", () => ({
   requireRecentSession: mockRequireRecentSession,
 }));
 
+vi.mock("@/lib/url-helpers", () => ({
+  serverAppUrl: (path: string) => `https://example.test${path}`,
+}));
+
 vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
   const real = await importOriginal<typeof import("@/lib/auth/policy/passkey-enforcement")>();
   return {
@@ -242,7 +246,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
-  it("returns 403 when session step-up is required", async () => {
+  it("redirects to the authorize entry when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
     mockRequireRecentSession.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },
       { status: 403 },
@@ -254,9 +258,19 @@ describe("POST /api/mcp/authorize/consent", () => {
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 
-    expect(res.status).toBe(403);
-    const json = await res.json();
-    expect(json.error).toBe("SESSION_STEP_UP_REQUIRED");
+    // The consent form is a native browser POST (full-page navigation), so a JSON
+    // 403 would strand the user on a raw error page. Bounce (303, POST→GET) back to
+    // the authorize entry — which re-runs auth + step-up and redirects to sign-in —
+    // with the OAuth params reconstructed from the validated form fields. The
+    // callback target is a self-origin app path, never the client redirect_uri.
+    expect(res.status).toBe(303);
+    const url = new URL(res.headers.get("location") ?? "");
+    expect(url.pathname).toBe("/api/mcp/authorize");
+    expect(url.searchParams.get("client_id")).toBe(VALID_FORM_FIELDS.client_id);
+    expect(url.searchParams.get("redirect_uri")).toBe(VALID_FORM_FIELDS.redirect_uri);
+    expect(url.searchParams.get("code_challenge")).toBe(VALID_FORM_FIELDS.code_challenge);
+    expect(url.searchParams.get("state")).toBe(VALID_FORM_FIELDS.state);
+    // No credential-issuance work runs on a stale session.
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 

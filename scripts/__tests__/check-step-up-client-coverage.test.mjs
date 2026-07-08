@@ -22,6 +22,12 @@
  *         (the ONLY fixture that passes under file-scoping and fails under
  *          adjacency-scoping — the direct regression lock for the live
  *          mcp-client-card POST-handled / DELETE-unhandled gap).
+ *   (viii) throwIfStepUp with no isStepUpRequiredError consumer      → FAIL (thrower↔catcher)
+ *   (ix)  requireRecentSession (a DIFFERENT gate primitive) is       → FAIL (server completeness)
+ *         discovered — the guard's class is "returns SESSION_STEP_UP_REQUIRED",
+ *         not "calls requireRecentCurrentAuthMethod".
+ *   (x)   `@browser-redirect` sentinel exempts a browser-only route  → PASS
+ *         with no fetch UI caller (recovery is the server's redirect).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -37,6 +43,11 @@ const GUARD = join(REPO_ROOT, "scripts/checks/check-step-up-client-coverage.sh")
 
 const STEPUP_CALL =
   "  const stepUp = await requireRecentCurrentAuthMethod(req); if (stepUp) return stepUp;";
+// A second gate primitive that also emits SESSION_STEP_UP_REQUIRED — the guard
+// must discover it the same as requireRecentCurrentAuthMethod (anti-drift: the
+// class is "returns the 403 code", not "calls one named function").
+const STEPUP_CALL_SESSION =
+  "  const stepUp = await requireRecentSession(req); if (stepUp) return stepUp;";
 
 let root;
 let apiDir;
@@ -297,5 +308,59 @@ describe("check-step-up-client-coverage.sh", () => {
     );
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
+  });
+
+  it("(ix) discovers requireRecentSession as a gate primitive (SERVER_MARKER_MISSING without a marker)", () => {
+    // A route gated by requireRecentSession — a DIFFERENT primitive that also
+    // returns SESSION_STEP_UP_REQUIRED — must be seen by the guard. Without a
+    // marker it fails server completeness, proving the primitive is in the set.
+    writeRoute("mcp/authorize", `${STEPUP_CALL_SESSION}\n`); // no marker line
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("SERVER_MARKER_MISSING");
+  });
+
+  it("(ix-coverage) requireRecentSession route with a marker but no client caller FAILS (MISSING_CLIENT_MARKER)", () => {
+    writeRoute(
+      "mcp/authorize",
+      `// @stepup id:mcp-authorize-get method:GET\n${STEPUP_CALL_SESSION}\n`,
+    );
+    // No client marker and not exempt → coverage gap surfaces on the new primitive.
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("MISSING_CLIENT_MARKER");
+    expect(stdout).toContain("mcp-authorize-get");
+  });
+
+  it("(x) PASSES: @browser-redirect sentinel exempts a browser-only route with no client token", () => {
+    writeRoute(
+      "mcp/authorize",
+      `// @stepup id:mcp-authorize-get method:GET\n${STEPUP_CALL_SESSION}\n`,
+    );
+    // Exempt via the sentinel — deliberately NO client-tree token exists.
+    writeFileSync(
+      exemptFile,
+      "mcp-authorize-get  @browser-redirect  # OAuth authorize GET reached by browser navigation, redirects to sign-in\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
+  it("(x-guard) @browser-redirect sentinel skips the client-tree anti-drift check (no EXEMPT_MARKER_ABSENT)", () => {
+    // The sentinel names no client token; the anti-drift grep must NOT fire for it
+    // (whereas a normal named marker that is absent would → fixture iv).
+    writeRoute(
+      "mobile/authorize",
+      `// @stepup id:mobile-authorize-get method:GET\n${STEPUP_CALL_SESSION}\n`,
+    );
+    writeFileSync(
+      exemptFile,
+      "mobile-authorize-get  @browser-redirect  # mobile OAuth authorize GET, redirects to sign-in\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+    expect(stdout).not.toContain("EXEMPT_MARKER_ABSENT");
   });
 });

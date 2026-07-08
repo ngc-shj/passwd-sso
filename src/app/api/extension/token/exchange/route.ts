@@ -49,6 +49,9 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
@@ -140,6 +143,19 @@ async function handlePOST(req: NextRequest) {
     );
     return unauthorized();
   }
+
+  // 3b. Tenant network access restriction — a stolen bridge code must not be
+  //     exchanged for an extension token from an off-network IP. Enforced on the
+  //     resolved tenantId BEFORE the DPoP/CAS-consume so an off-network attempt
+  //     neither consumes the code nor mints a token (matching the MCP token
+  //     endpoint and the D5a control; companion refresh route already enforces).
+  const denied = await enforceAccessRestriction(
+    req,
+    consumed.userId ?? SYSTEM_ACTOR_ID,
+    consumed.tenantId,
+    ACTOR_TYPE.HUMAN,
+  );
+  if (denied) return denied;
 
   // 4. DPoP verification — REQUIRED before any mutation. Failure here MUST
   //    NOT consume the bridge code (the prior CAS-first design did, opening

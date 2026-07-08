@@ -12,10 +12,18 @@ const {
   mockWithBypassRls,
   mockDerivePasskeyState,
   mockRecordPasskeyAuditEmit,
+  mockResolveCodeTenantId,
+  mockResolveRefreshTokenTenantId,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockExchangeCodeForToken: vi.fn(),
   mockCreateRefreshToken: vi.fn().mockResolvedValue({ refreshToken: "mcp_rt_refreshtoken", expiresAt: new Date() }),
   mockExchangeRefreshToken: vi.fn(),
+  // IP-access gate resolvers (read-only tenant lookup) + enforcement. Default:
+  // resolve a tenant and ALLOW (enforce returns null). Deny tests override.
+  mockResolveCodeTenantId: vi.fn().mockResolvedValue("tenant-1"),
+  mockResolveRefreshTokenTenantId: vi.fn().mockResolvedValue("tenant-1"),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
@@ -37,6 +45,11 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
   exchangeCodeForToken: mockExchangeCodeForToken,
   createRefreshToken: mockCreateRefreshToken,
   exchangeRefreshToken: mockExchangeRefreshToken,
+  resolveCodeTenantId: mockResolveCodeTenantId,
+  resolveRefreshTokenTenantId: mockResolveRefreshTokenTenantId,
+}));
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
@@ -125,6 +138,10 @@ describe("POST /api/mcp/token", () => {
     });
     mockRecordPasskeyAuditEmit.mockReturnValue(true);
     mockLogAudit.mockResolvedValue(undefined);
+    // IP-access gate defaults: resolve a tenant and ALLOW. Deny tests override.
+    mockResolveCodeTenantId.mockResolvedValue(TENANT_ID);
+    mockResolveRefreshTokenTenantId.mockResolvedValue(TENANT_ID);
+    mockEnforceAccessRestriction.mockResolvedValue(null);
   });
 
   it("returns access_token on successful exchange", async () => {
@@ -295,6 +312,33 @@ describe("POST /api/mcp/token", () => {
     expect(json.error).toBe("slow_down");
   });
 
+  it("authorization_code: denies off-network IP BEFORE minting (no exchange, no code consumed)", async () => {
+    // Tenant network restriction (allowedCidrs / Tailscale) must gate the token
+    // endpoint like the MCP gateway — a stolen code redeemed from a blocked IP is
+    // rejected before exchangeCodeForToken mints anything.
+    mockResolveCodeTenantId.mockResolvedValue(TENANT_ID);
+    mockEnforceAccessRestriction.mockResolvedValue(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
+    // Enforced with the resolved tenant override + MCP_AGENT actor, BEFORE mint.
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      TENANT_ID,
+      "MCP_AGENT",
+    );
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
   // ─── refresh_token grant tests ────────────────────────────────
 
   it("refresh_token: returns new access_token and refresh_token on success", async () => {
@@ -325,6 +369,26 @@ describe("POST /api/mcp/token", () => {
     expect(json.expires_in).toBe(3600);
     expect(json.scope).toBe("credentials:list credentials:use");
     expect(res.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("refresh_token: denies off-network IP BEFORE rotation (no exchange, chain not advanced)", async () => {
+    // Critical for refresh: enforcement must precede exchangeRefreshToken so a
+    // stolen refresh token cannot be rotated from a blocked IP — a post-rotation
+    // denial would strand the legitimate client whose chain was already advanced.
+    mockResolveRefreshTokenTenantId.mockResolvedValue(TENANT_ID);
+    mockEnforceAccessRestriction.mockResolvedValue(
+      Response.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_REFRESH_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("ACCESS_DENIED");
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
   });
 
   it("refresh_token: returns 400 when exchangeRefreshToken returns invalid_grant", async () => {

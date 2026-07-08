@@ -6,6 +6,8 @@ import {
   exchangeCodeForToken,
   validateMcpToken,
   exchangeRefreshToken,
+  resolveCodeTenantId,
+  resolveRefreshTokenTenantId,
 } from "./oauth-server";
 
 // ─── Mock Prisma ──────────────────────────────────────────────
@@ -1398,5 +1400,57 @@ describe("passkey enforcement in exchangeCodeForToken (lib)", () => {
 
     expect(result.ok).toBe(true);
     expect(mockTokenCreate).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── IP-access gate tenant resolvers (read-only, no mutation) ──
+
+describe("resolveCodeTenantId", () => {
+  it("returns the authorization code's tenantId (looked up by token hash)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockFindUnique = vi.fn().mockResolvedValue({ tenantId: "tenant-abc" });
+    mockDelegates(prisma).mcpAuthorizationCode = { findUnique: mockFindUnique };
+
+    const tenantId = await resolveCodeTenantId("the-code");
+
+    expect(tenantId).toBe("tenant-abc");
+    expect(mockFindUnique).toHaveBeenCalledWith({
+      where: { codeHash: "hashed:the-code" },
+      select: { tenantId: true },
+    });
+  });
+
+  it("returns null when the code does not exist (caller lets the exchange 400)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    mockDelegates(prisma).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue(null),
+    };
+
+    expect(await resolveCodeTenantId("missing")).toBeNull();
+  });
+});
+
+describe("resolveRefreshTokenTenantId", () => {
+  it("returns the refresh token's tenantId (looked up by token hash)", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockFindUnique = vi.fn().mockResolvedValue({ tenantId: "tenant-xyz" });
+    mockDelegates(prisma).mcpRefreshToken = { findUnique: mockFindUnique };
+
+    const tenantId = await resolveRefreshTokenTenantId("the-refresh-token");
+
+    expect(tenantId).toBe("tenant-xyz");
+    expect(mockFindUnique).toHaveBeenCalledWith({
+      where: { tokenHash: "hashed:the-refresh-token" },
+      select: { tenantId: true },
+    });
+  });
+
+  it("returns null when the refresh token does not exist", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(null),
+    };
+
+    expect(await resolveRefreshTokenTenantId("missing")).toBeNull();
   });
 });
