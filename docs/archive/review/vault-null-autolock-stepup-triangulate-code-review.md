@@ -183,12 +183,25 @@ Functionality and Testing findings: none — no action required.
 - **Impact**: Medium — closes the UX dead-end AND makes the CI exemption honest (removes the
   false-assurance). Guard green; `@browser-redirect` justification is now true.
 
-### Finding-2 (MEDIUM / policy) `/api/mcp/token` exchange+refresh skip tenant IP restriction — PENDING USER DECISION
-- User-supplied finding: the MCP gateway (`/api/mcp`) enforces `enforceAccessRestriction` (rationale:
-  "a leaked mcp_ token must still honor allowed-CIDR"), but `/api/mcp/token` (auth-code exchange at
-  `route.ts:113` and refresh at `route.ts:186`) does NOT — so a stolen refresh token can be rotated
-  from an off-network IP, even though the resulting access token can't be USED at the gateway
-  off-network. Docs (threat-model D5a, policy-enforcement) assert Bearer/non-session flows enforce
-  `allowedCidrs` in handlers. Either enforce it on the token endpoint (post-validation, pre-mint) or
-  document the OAuth-token-endpoint exception. Separate subsystem (MCP OAuth lifecycle); awaiting user
-  decision on intended boundary. TODO(network-boundary): mcp/token IP enforcement decision.
+### S4 [Medium] `/api/mcp/token` exchange+refresh skipped tenant IP restriction — FIXED (user decision: enforce)
+- **Finding source**: user-supplied review. The MCP gateway (`/api/mcp`) enforces
+  `enforceAccessRestriction` ("a leaked mcp_ token must still honor allowed-CIDR"), but
+  `/api/mcp/token` (auth-code exchange + refresh rotation) did NOT — a stolen refresh token could be
+  rotated from an off-network IP. Docs (threat-model D5a, policy-enforcement) assert Bearer/non-session
+  flows enforce `allowedCidrs` in handlers, so the token endpoint was out of contract.
+- **User decision**: token endpoint is INSIDE the tenant network boundary → enforce.
+- **Fix**: enforce IP restriction on the resolved tenantId BEFORE the side-effecting exchange for both
+  grant types (so no orphan token is minted and, critically for refresh, the rotation chain is not
+  advanced before a denial — post-rotation denial would strand a legitimate client). Added two
+  read-only resolvers `resolveCodeTenantId` / `resolveRefreshTokenTenantId` to `oauth-server.ts`
+  (look up the grant's tenantId without mutation); the route calls
+  `enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId, ACTOR_TYPE.MCP_AGENT)` and returns the
+  deny response before the exchange. A grant that resolves to no tenant skips the gate and the
+  exchange produces the authoritative invalid_grant (the gate only restricts, never grants).
+- **Why pre-exchange, not inside**: mirrors the existing passkey-enforcement gate's "block before
+  mint" position but keeps the exchange HTTP-agnostic; reuses the vetted `enforceAccessRestriction`
+  (incl. Tailscale WhoIs + ACCESS_DENIED audit) rather than duplicating it.
+- **Tests**: 2 route regression tests (auth-code + refresh) assert deny→403 and that the exchange is
+  NOT called (mutation-verified RED without the guard); 4 resolver unit tests in oauth-server.test.ts.
+- **Docs**: threat-model D5a now lists `/api/mcp/token` with the pre-mint rationale; manifest
+  `handlerAuthReason` + regenerated route-policy-matrix updated.
