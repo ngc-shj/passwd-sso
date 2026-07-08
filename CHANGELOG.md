@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.66](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.65...passwd-sso-v0.4.66) (2026-07-08)
+
+
+### Features
+
+* **ios:** search on category screens, sort with direction toggle, app version ([#640](https://github.com/ngc-shj/passwd-sso/issues/640)) ([98d8725](https://github.com/ngc-shj/passwd-sso/commit/98d8725c724df178d012681f9e6a244c456e0c04))
+
+
+### Bug Fixes
+
+* keep touched custom fields on save, drop only untouched rows ([#643](https://github.com/ngc-shj/passwd-sso/issues/643)) ([0a23c7f](https://github.com/ngc-shj/passwd-sso/commit/0a23c7f14112cd37087bf859ee2a1ddc634d8fc2))
+* **security:** handle SESSION_STEP_UP_REQUIRED 403 in all mutating UI callers ([#644](https://github.com/ngc-shj/passwd-sso/issues/644)) ([f08d4a6](https://github.com/ngc-shj/passwd-sso/commit/f08d4a6a18a880725dd4d84b418b1bffc0268ecc))
+* **security:** harden tenant network boundary and step-up recovery across proxy, OAuth, and Bearer routes ([#646](https://github.com/ngc-shj/passwd-sso/issues/646)) ([ee331b0](https://github.com/ngc-shj/passwd-sso/commit/ee331b0397020ad6a9bcf65910fb191cffc5153a))
+* **security:** let replayed MCP refresh tokens reach family-revocation past the IP gate ([#647](https://github.com/ngc-shj/passwd-sso/issues/647)) ([06a915a](https://github.com/ngc-shj/passwd-sso/commit/06a915a07feca147b30135df5bdd1c0d2de13af6))
+* **vault:** respect tenant timeout for vault auto-lock, remove hidden-tab 5-min cap ([#642](https://github.com/ngc-shj/passwd-sso/issues/642)) ([bc35335](https://github.com/ngc-shj/passwd-sso/commit/bc35335b1e3ce504339a154adb4cb71a0a94b201))
+* **vault:** validate null auto-lock against shared default and reset stale client timer ([#645](https://github.com/ngc-shj/passwd-sso/issues/645)) ([775e857](https://github.com/ngc-shj/passwd-sso/commit/775e857a7d2351c8129deafbc5d2ce1c80682e42))
+
 ## [0.4.65](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.64...passwd-sso-v0.4.65) (2026-07-05)
 
 
