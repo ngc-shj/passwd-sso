@@ -12,6 +12,7 @@ const {
   mockLogAuditAsync,
   mockCheckIpRateLimit,
   mockCheckRateLimitOrFail,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockVerifyDpop: vi.fn(),
   mockWithBypassRls: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockLogAuditAsync: vi.fn(),
   mockCheckIpRateLimit: vi.fn(),
   mockCheckRateLimitOrFail: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/auth/dpop/verify", () => ({
@@ -62,6 +64,9 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
 }));
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
+}));
 
 import { POST } from "@/app/api/extension/token/exchange/route";
 
@@ -86,6 +91,8 @@ describe("POST /api/extension/token/exchange — DPoP enforcement (C3)", () => {
     mockCheckRateLimitOrFail.mockResolvedValue(null);
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockIssueExtensionToken.mockResolvedValue(ISSUED_TOKEN);
+    // Tenant IP access restriction allows by default (helper returns null).
+    mockEnforceAccessRestriction.mockResolvedValue(null);
 
     // New order (C5): findUnique returns consumed record, then CAS consume
     // succeeds (count=1). DPoP verify runs between the two.
