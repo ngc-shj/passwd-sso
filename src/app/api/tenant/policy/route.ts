@@ -57,6 +57,7 @@ import {
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
+  VAULT_AUTO_LOCK_DEFAULT,
   SA_TOKEN_MAX_EXPIRY_MIN,
   SA_TOKEN_MAX_EXPIRY_MAX,
   JIT_TOKEN_TTL_MIN,
@@ -730,9 +731,15 @@ async function handlePATCH(req: NextRequest) {
   // timeout, the vault stays decrypted after the token/session dies —
   // the "logged out but locally readable" state is confusing UX and
   // extends the effective credential-material lifetime unnecessarily.
-  const mergedVaultAutoLock = vaultAutoLockMinutes !== undefined
-    ? vaultAutoLockMinutes
-    : currentTenant?.vaultAutoLockMinutes ?? null;
+  // The ?? VAULT_AUTO_LOCK_DEFAULT wraps the ENTIRE ternary, not just the
+  // DB-fallback branch: an explicit null in the request takes the first branch,
+  // so a DB-branch-only default would leave that path unvalidated (the client
+  // still runs a 15-min lock). Coalescing the whole ternary makes the effective
+  // value mirror the client for both the absent-field and explicit-null paths.
+  const mergedVaultAutoLock =
+    (vaultAutoLockMinutes !== undefined
+      ? vaultAutoLockMinutes
+      : currentTenant?.vaultAutoLockMinutes) ?? VAULT_AUTO_LOCK_DEFAULT;
   const mergedSessionIdle = sessionIdleTimeoutMinutes !== undefined
     ? sessionIdleTimeoutMinutes
     : currentTenant?.sessionIdleTimeoutMinutes ?? null;
