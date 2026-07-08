@@ -54,7 +54,7 @@ targets:
         # version would need a manual unique suffix, which normal releases never
         # hit.) Applied to every target below as well.
         CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
-        MARKETING_VERSION: "0.4.65" # x-release-please-version
+        MARKETING_VERSION: "0.4.66" # x-release-please-version
 
   PasswdSSOApp:
     type: application
@@ -124,7 +124,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso
         CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
-        MARKETING_VERSION: "0.4.65" # x-release-please-version
+        MARKETING_VERSION: "0.4.66" # x-release-please-version
         TARGETED_DEVICE_FAMILY: "1"
         # Single-size (1024) AppIcon in PasswdSSOApp/Assets.xcassets. xcodegen
         # also auto-derives this from the AppIcon.appiconset presence; the
@@ -195,7 +195,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOAutofillExtension
         APPLICATION_EXTENSION_API_ONLY: YES
         CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
-        MARKETING_VERSION: "0.4.65" # x-release-please-version
+        MARKETING_VERSION: "0.4.66" # x-release-please-version
         TARGETED_DEVICE_FAMILY: "1"
     dependencies:
       - target: Shared
@@ -228,7 +228,7 @@ targets:
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/PasswdSSOApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/PasswdSSOApp
         BUNDLE_LOADER: $(TEST_HOST)
         CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
-        MARKETING_VERSION: "0.4.65" # x-release-please-version
+        MARKETING_VERSION: "0.4.66" # x-release-please-version
     dependencies:
       - target: Shared
         link: true
@@ -250,7 +250,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: jp.jpng.passwd-sso.PasswdSSOUITests
         TEST_TARGET_NAME: PasswdSSOApp
         CURRENT_PROJECT_VERSION: $(MARKETING_VERSION)
-        MARKETING_VERSION: "0.4.65" # x-release-please-version
+        MARKETING_VERSION: "0.4.66" # x-release-please-version
     dependencies:
       - target: PasswdSSOApp
 
