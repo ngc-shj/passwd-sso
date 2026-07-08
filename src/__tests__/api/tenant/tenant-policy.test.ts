@@ -441,6 +441,29 @@ describe("PATCH /api/tenant/policy", () => {
     expect(String(json.details?.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
   });
 
+  // EC2c: explicit null in request + sub-15 extensionTokenIdle → 400. Completes
+  // the (explicit-null | absent) × (sessionIdle | extIdle) matrix (EC1 covers
+  // explicit-null × sessionIdle; EC2b covers absent × extIdle).
+  it("returns 400 when vaultAutoLockMinutes is explicitly null and extensionTokenIdle < default", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 480,
+      extensionTokenIdleTimeoutMinutes: 5,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: null, extensionTokenIdleTimeoutMinutes: 5 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.details?.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
+  });
+
   // EC3: explicit non-null vaultAutoLock below sessionIdle → 200 (unchanged).
   it("succeeds when vaultAutoLockMinutes (10) is below sessionIdle (20)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
