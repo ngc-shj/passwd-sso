@@ -54,6 +54,7 @@ async function handlePOST(request: NextRequest) {
   // checks session recency only (not the passphrase), so it is compatible with
   // the lost-passphrase/recovery-key last-resort purpose — the user still has a
   // valid recent session.
+  // @stepup id:vault-reset-post method:POST
   const stepUp = await requireRecentCurrentAuthMethod(request);
   if (stepUp) return stepUp;
 

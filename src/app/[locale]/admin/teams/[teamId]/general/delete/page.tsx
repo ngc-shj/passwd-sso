@@ -19,12 +19,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { Link } from "@/i18n/navigation";
 import { AlertTriangle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 
 interface TeamInfo {
   id: string;
@@ -39,6 +43,7 @@ export default function TeamGeneralDeletePage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("Team");
+  const tCommon = useTranslations("Common");
   const router = useRouter();
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
@@ -63,10 +68,17 @@ export default function TeamGeneralDeletePage({
 
   const isOwner = team?.role === TEAM_ROLE.OWNER;
 
+  // Inline step-up reauth — team deletion is server-side step-up-gated.
+  const inlineReauth = useInlineReauth(() => handleDeleteTeam());
+
   const handleDeleteTeam = async () => {
     try {
+      // @stepup id:team-delete
       const res = await fetchApi(apiPath.teamById(teamId), { method: "DELETE" });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError)) return;
+        throw new Error("Failed");
+      }
       toast.success(t("deleted"));
       notifyTeamDataChanged();
       router.push("/dashboard");
@@ -109,72 +121,83 @@ export default function TeamGeneralDeletePage({
   }
 
   return (
-    <Card>
-      <SectionCardHeader
-        icon={Trash2}
-        title={t("generalDeleteTitle")}
-        description={t("generalDeleteDesc")}
-      />
-      <CardContent className="space-y-4">
-        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 space-y-3">
-          <h3 className="flex items-center gap-2 text-sm font-medium text-destructive">
-            <AlertTriangle className="h-4 w-4" />
-            {t("generalDeleteWarningTitle")}
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            {t("generalDeleteWarningBody", { name: team.name })}
-          </p>
-          <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
-            <li>{t("generalDeleteImpactVault")}</li>
-            <li>{t("generalDeleteImpactMembers")}</li>
-            <li>{t("generalDeleteImpactAuditLogs")}</li>
-            <li>{t("generalDeleteImpactPolicies")}</li>
-          </ul>
-        </div>
-        <AlertDialog
-          open={deleteDialogOpen}
-          onOpenChange={(open) => {
-            setDeleteDialogOpen(open);
-            if (!open) setDeleteConfirmText("");
-          }}
-        >
-          <AlertDialogTrigger asChild>
-            <Button variant="destructive">
-              <Trash2 className="h-4 w-4 mr-2" />
-              {t("deleteTeam")}
-            </Button>
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t("deleteTeam")}</AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("deleteTeamConfirm", { name: team.name })}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <div className="space-y-2">
-              <Label htmlFor="delete-confirm-input">{t("deleteTeamTypeLabel")}</Label>
-              <Input
-                id="delete-confirm-input"
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder={t("deleteTeamTypePlaceholder", { name: team.name })}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t("deleteTeamTypeHint", { name: team.name })}
-              </p>
-            </div>
-            <AlertDialogFooter>
-              <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleDeleteTeam}
-                disabled={deleteConfirmText !== team.name}
-              >
+    <>
+      <Card>
+        <SectionCardHeader
+          icon={Trash2}
+          title={t("generalDeleteTitle")}
+          description={t("generalDeleteDesc")}
+        />
+        <CardContent className="space-y-4">
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+            <h3 className="flex items-center gap-2 text-sm font-medium text-destructive">
+              <AlertTriangle className="h-4 w-4" />
+              {t("generalDeleteWarningTitle")}
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              {t("generalDeleteWarningBody", { name: team.name })}
+            </p>
+            <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
+              <li>{t("generalDeleteImpactVault")}</li>
+              <li>{t("generalDeleteImpactMembers")}</li>
+              <li>{t("generalDeleteImpactAuditLogs")}</li>
+              <li>{t("generalDeleteImpactPolicies")}</li>
+            </ul>
+          </div>
+          <AlertDialog
+            open={deleteDialogOpen}
+            onOpenChange={(open) => {
+              setDeleteDialogOpen(open);
+              if (!open) setDeleteConfirmText("");
+            }}
+          >
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive">
+                <Trash2 className="h-4 w-4 mr-2" />
                 {t("deleteTeam")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </CardContent>
-    </Card>
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{t("deleteTeam")}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("deleteTeamConfirm", { name: team.name })}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <div className="space-y-2">
+                <Label htmlFor="delete-confirm-input">{t("deleteTeamTypeLabel")}</Label>
+                <Input
+                  id="delete-confirm-input"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder={t("deleteTeamTypePlaceholder", { name: team.name })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t("deleteTeamTypeHint", { name: team.name })}
+                </p>
+              </div>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleDeleteTeam}
+                  disabled={deleteConfirmText !== team.name}
+                >
+                  {t("deleteTeam")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </CardContent>
+      </Card>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+    </>
   );
 }

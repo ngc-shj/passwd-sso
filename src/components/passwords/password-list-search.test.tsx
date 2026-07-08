@@ -15,6 +15,7 @@ const { mockFetchApi, mockDecryptData, mockEncryptionKey } = vi.hoisted(() => ({
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }));
 
 vi.mock("@/lib/vault/vault-context", () => ({

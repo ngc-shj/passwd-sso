@@ -16,11 +16,13 @@ import type { ReactNode } from "react";
 // ---------------------------------------------------------------------------
 // Hoisted mocks
 // ---------------------------------------------------------------------------
-const { mockFetch, mockToast, mockUseTenantRole, mockFilterMembers } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockUseTenantRole, mockFilterMembers, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
   mockUseTenantRole: vi.fn(),
   mockFilterMembers: vi.fn(),
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -28,6 +30,7 @@ const { mockFetch, mockToast, mockUseTenantRole, mockFilterMembers } = vi.hoiste
 // ---------------------------------------------------------------------------
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({
@@ -40,6 +43,17 @@ vi.mock("@/lib/url-helpers", () => ({
 
 vi.mock("@/hooks/use-tenant-role", () => ({
   useTenantRole: () => mockUseTenantRole(),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 vi.mock("@/lib/filter-members", () => ({
@@ -251,6 +265,7 @@ describe("TenantMembersCard", () => {
     mockFilterMembers.mockImplementation(
       (members: unknown[], _query: string) => members,
     );
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
   });
 
   // -------------------------------------------------------------------------
@@ -529,6 +544,56 @@ describe("TenantMembersCard", () => {
   });
 
   // -------------------------------------------------------------------------
+  // 7b. Role change: SESSION_STEP_UP_REQUIRED denial
+  // -------------------------------------------------------------------------
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on role change", async () => {
+    const member = makeMember({
+      id: "mem-1",
+      userId: "user-member",
+      role: "MEMBER",
+      scimManaged: false,
+    });
+
+    mockUseTenantRole.mockReturnValue({
+      role: "OWNER",
+      isAdmin: true,
+      loading: false,
+    });
+
+    mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+      if (url === "/api/auth/session") {
+        return Promise.resolve({ json: () => Promise.resolve({ user: { id: "current-owner" } }) });
+      }
+      if (url === "/api/tenant/members" && (!init?.method || init.method === "GET")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+
+    await act(async () => {
+      render(<TenantMembersCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("member-info")).toBeInTheDocument();
+    });
+
+    const changeButton = screen.getByTestId("select-change-MEMBER");
+    await act(async () => {
+      fireEvent.click(changeButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  // -------------------------------------------------------------------------
   // 8. Role change error: 409 (scimManaged conflict)
   // -------------------------------------------------------------------------
   it("shows scimManagedRoleError toast on 409 response", async () => {
@@ -553,7 +618,7 @@ describe("TenantMembersCard", () => {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) });
       }
       // PUT returns 409
-      return Promise.resolve({ ok: false, status: 409 });
+      return Promise.resolve({ ok: false, status: 409, json: () => Promise.resolve({ error: "SCIM_MANAGED_CONFLICT" }) });
     });
 
     await act(async () => {
@@ -599,7 +664,7 @@ describe("TenantMembersCard", () => {
       if (url === "/api/tenant/members" && (!init?.method || init.method === "GET")) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([member]) });
       }
-      return Promise.resolve({ ok: false, status: 500 });
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: "INTERNAL_ERROR" }) });
     });
 
     await act(async () => {

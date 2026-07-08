@@ -52,6 +52,7 @@ export function TenantVaultResetButton({
   const handleReset = async () => {
     setLoading(true);
     try {
+      // @stepup id:reset-vault-post
       const res = await fetchApi(
         apiPath.tenantMemberResetVault(userId),
         {

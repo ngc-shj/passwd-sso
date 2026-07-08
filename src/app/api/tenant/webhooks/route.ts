@@ -94,6 +94,7 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(e);
   }
 
+  // @stepup id:tenant-webhook-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

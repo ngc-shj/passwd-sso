@@ -151,6 +151,7 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(e);
   }
 
+  // @stepup id:audit-delivery-target-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

@@ -17,6 +17,10 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchApi } from "@/lib/url-helpers";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import {
   POLICY_MIN_PW_LENGTH_MIN,
   POLICY_MIN_PW_LENGTH_MAX,
@@ -139,6 +143,10 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
   // Internal text representation for teamAllowedCidrs textarea
   const [teamCidrsText, setTeamCidrsText] = useState("");
 
+  const inlineReauth = useInlineReauth(async () => {
+    await handleSave();
+  });
+
   const hasChanges = useFormDirty(policy as unknown as Record<string, unknown>, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
 
@@ -188,6 +196,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
       const payload = { ...policy, teamAllowedCidrs };
+      // @stepup id:team-policy-put
       const res = await fetchApi(`/api/teams/${teamId}/policy`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -204,6 +213,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
       } else if (res.status === 400) {
         toast.error(t("validationError"));
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError)) return;
         toast.error(t("saveError"));
       }
     } catch {
@@ -474,6 +484,15 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
           </Button>
         </div>
       </CardContent>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
     </Card>
   );
 }

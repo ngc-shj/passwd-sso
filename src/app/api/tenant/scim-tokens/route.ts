@@ -101,6 +101,7 @@ async function handlePOST(req: NextRequest) {
     return handleAuthError(err);
   }
 
+  // @stepup id:scim-token-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

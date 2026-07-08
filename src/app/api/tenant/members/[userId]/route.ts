@@ -43,6 +43,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.OWNER_ONLY);
   }
 
+  // @stepup id:tenant-member-put method:PUT
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

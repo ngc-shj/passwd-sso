@@ -43,6 +43,10 @@ import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody, getApiErrorFieldErrors } from "@/lib/http/read-api-error-body";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { MAX_WEBHOOKS } from "@/lib/validations/common";
 
 export interface WebhookItem {
@@ -99,6 +103,15 @@ export function BaseWebhookCard({ config }: Props) {
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set());
   const [newSecret, setNewSecret] = useState<string | null>(null);
 
+  // Inline step-up reauth — create and delete are both server-side step-up-gated.
+  // The retry arg records which mutation was attempted so the post-reauth retry
+  // replays the same one.
+  type ReauthRetry = { type: "create" } | { type: "delete"; webhookId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "create") await handleCreate();
+    else if (retry.type === "delete") await handleDelete(retry.webhookId);
+  });
+
   // listEndpoint already encodes all dynamic identifiers (e.g. teamId is baked into
   // apiPath.teamWebhooks(teamId)), so depending on listEndpoint alone is sufficient.
   const fetchWebhooks = useCallback(async () => {
@@ -152,6 +165,8 @@ export function BaseWebhookCard({ config }: Props) {
     setCreating(true);
     setUrlError("");
     try {
+      // @stepup id:tenant-webhook-post
+      // @stepup id:team-webhook-post
       const res = await fetchApi(createEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -170,6 +185,7 @@ export function BaseWebhookCard({ config }: Props) {
         return;
       }
       if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "create" })) return;
         toast.error(t("createFailed"));
         return;
       }
@@ -188,6 +204,8 @@ export function BaseWebhookCard({ config }: Props) {
 
   const handleDelete = async (webhookId: string) => {
     try {
+      // @stepup id:tenant-webhook-delete
+      // @stepup id:team-webhook-delete
       const res = await fetchApi(deleteEndpointRef.current(webhookId), {
         method: "DELETE",
       });
@@ -195,6 +213,7 @@ export function BaseWebhookCard({ config }: Props) {
         toast.success(t("deleted"));
         fetchWebhooks();
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "delete", webhookId })) return;
         toast.error(t("deleteFailed"));
       }
     } catch {
@@ -468,6 +487,15 @@ export function BaseWebhookCard({ config }: Props) {
           )}
         </DialogContent>
       </Dialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
     </Card>
   );
 }

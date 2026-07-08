@@ -23,11 +23,13 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
-const { mockFetchApi, mockDecryptData, mockBuildAAD, STABLE_KEY } = vi.hoisted(() => ({
+const { mockFetchApi, mockDecryptData, mockBuildAAD, STABLE_KEY, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetchApi: vi.fn(),
   mockDecryptData: vi.fn(),
   mockBuildAAD: vi.fn(),
   STABLE_KEY: {} as CryptoKey,
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 // Per-test callbacks. C2: manage actions (restore / delete-permanently / soft-delete)
@@ -37,10 +39,12 @@ let capturedPaneRestore: (() => void) | undefined;
 let capturedPaneDeletePermanently: (() => void) | undefined;
 let capturedPaneDelete: (() => void) | undefined;
 let capturedBulkOnSuccess: (() => void) | undefined;
+let capturedBulkOnStepUpRequired: (() => Promise<void> | void) | undefined;
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string, params?: Record<string, unknown>) =>
     params ? `${key}:${JSON.stringify(params)}` : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -69,6 +73,17 @@ vi.mock("@/hooks/use-travel-mode", () => ({
 
 vi.mock("@/lib/events", () => ({
   notifyVaultDataChanged: vi.fn(),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 // Layout mode is mutable so a test can exercise the accordion (PasswordCard) path.
@@ -195,10 +210,18 @@ vi.mock("@/hooks/vault/use-entry-actions", () => ({
   }),
 }));
 
-// Capture bulk onSuccess so tests can invoke it directly.
+// Capture bulk onSuccess/onStepUpRequired so tests can invoke them directly.
 vi.mock("@/hooks/bulk/use-bulk-action", () => ({
-  useBulkAction: ({ onSuccess }: { onSuccess: () => void; scope: unknown }) => {
+  useBulkAction: ({
+    onSuccess,
+    onStepUpRequired,
+  }: {
+    onSuccess: () => void;
+    onStepUpRequired?: () => Promise<void> | void;
+    scope: unknown;
+  }) => {
     capturedBulkOnSuccess = onSuccess;
+    capturedBulkOnStepUpRequired = onStepUpRequired;
     return {
       dialogOpen: false,
       setDialogOpen: vi.fn(),
@@ -253,6 +276,10 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
     capturedPaneDeletePermanently = undefined;
     capturedPaneDelete = undefined;
     capturedBulkOnSuccess = undefined;
+    capturedBulkOnStepUpRequired = undefined;
+    // Default: user has no passkey → the recent-session dialog opens.
+    mockCanUsePasskeyRecovery.mockReset().mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockReset().mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   // ── (a) T2 migration: trash empty-state (trash-list.test.tsx line 56) ───────
@@ -334,6 +361,38 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
     });
   });
 
+  // ── (c-stepup) C4: bulk-purge denial opens the reauth dialog ────────────────
+  // useBulkAction is mocked in this file; entry-list-view wires
+  // onStepUpRequired: () => inlineReauth.triggerOnStaleError({ type: "bulkPurge" }).
+  // Precondition: bulkOnStepUpRequired was captured (proves the wiring exists).
+  // Trigger: invoke onStepUpRequired (simulates a 403 SESSION_STEP_UP_REQUIRED on
+  //   the bulk-purge fetchApi call inside the real hook).
+  // Assert: the reauth dialog opens (not a silent failure).
+  it("bulk-purge denial (onStepUpRequired) opens the reauth dialog (T2-c-stepup)", async () => {
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1")],
+    });
+    mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("GitHub"));
+
+    render(<PasswordList searchQuery="" tagId={null} refreshKey={0} trashOnly />);
+
+    await waitFor(() => { expect(screen.getByText("GitHub")).toBeInTheDocument(); });
+
+    // Precondition: entry-list-view passed onStepUpRequired to useBulkAction.
+    expect(capturedBulkOnStepUpRequired).toBeDefined();
+
+    // Trigger: invoke onStepUpRequired (simulates the hook's SESSION_STEP_UP_REQUIRED branch).
+    await act(async () => {
+      await capturedBulkOnStepUpRequired?.();
+    });
+
+    // Assert: the recent-session reauth dialog opens.
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+  });
+
   // ── (d) NET-NEW: delete-permanently confirm dialog (R30) ────────────────────
   // Precondition: trash entry rendered; PasswordRow exposes onDeletePermanently.
   // Trigger: click delete-permanently → dialog appears.
@@ -382,6 +441,58 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
         },
       );
       expect(deleteCall).toBeDefined();
+    });
+  });
+
+  // ── (d-stepup) C4: delete-permanently denial opens the reauth dialog ────────
+  // Precondition: trash entry rendered; confirm dialog opened.
+  // Trigger: confirm → adapter.deletePermanently 403s with SESSION_STEP_UP_REQUIRED
+  //   → throwIfStepUp throws StepUpRequiredError → entry-list-view catches it.
+  // Assert: recent-session reauth dialog opens (NOT a silent reload).
+  it("NET-NEW: delete-permanently denial (SESSION_STEP_UP_REQUIRED) opens the reauth dialog", async () => {
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1")],
+    });
+    mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("GitHub"));
+
+    render(<PasswordList searchQuery="" tagId={null} refreshKey={0} trashOnly />);
+
+    await waitFor(() => { expect(screen.getByText("GitHub")).toBeInTheDocument(); });
+
+    act(() => { fireEvent.click(screen.getByTestId("row-entry-1")); });
+    act(() => { capturedPaneDeletePermanently?.(); });
+
+    await waitFor(() => {
+      expect(screen.getByText("deleteConfirm:{\"title\":\"GitHub\"}")).toBeInTheDocument();
+    });
+
+    // Setup: the permanent DELETE call is denied with a step-up 403, then the
+    // rollback reload() re-fetches the (still-alive) entry.
+    mockFetchApi.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1")],
+    });
+    mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("GitHub"));
+
+    const confirmBtn = screen.getByRole("button", { name: "deletePermanently" });
+    await act(async () => { fireEvent.click(confirmBtn); });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+
+    // Regression (security-UX): the row was optimistically removed before the
+    // server call; on step-up denial the entry is still ALIVE server-side, so
+    // the UI must roll back (reload) and keep showing it — never leave a
+    // purged-looking-but-alive secret. Assert the entry is still visible.
+    await waitFor(() => {
+      expect(screen.getByText("GitHub")).toBeInTheDocument();
     });
   });
 
@@ -488,6 +599,45 @@ describe("EntryListView — TRASH_VIEW (T2 coverage migration + NET-NEW)", () =>
         return url === "/api/passwords/empty-trash" && opts?.method === "POST";
       });
       expect(postCall).toBeDefined();
+    });
+  });
+
+  // ── (e-stepup) C4: empty-trash denial opens the reauth dialog ───────────────
+  // Precondition: showEmptyTrashButton=true; confirm dialog opened.
+  // Trigger: confirm → adapter.emptyTrash 403s with SESSION_STEP_UP_REQUIRED
+  //   → throwIfStepUp throws StepUpRequiredError → entry-list-view catches it.
+  // Assert: recent-session reauth dialog opens (NOT a silent reload).
+  it("NET-NEW: empty-trash denial (SESSION_STEP_UP_REQUIRED) opens the reauth dialog", async () => {
+    mockFetchApi.mockResolvedValueOnce({
+      ok: true,
+      json: async () => [makeServerEntry("entry-1")],
+    });
+    mockDecryptData.mockResolvedValueOnce(makeDecryptedOverview("OldEntry"));
+
+    render(<PasswordList searchQuery="" tagId={null} refreshKey={0} trashOnly />);
+
+    await waitFor(() => { expect(screen.getByText("OldEntry")).toBeInTheDocument(); });
+
+    const emptyTrashBtn = screen.getByRole("button", { name: "emptyTrash" });
+    fireEvent.click(emptyTrashBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("emptyTrashConfirm")).toBeInTheDocument();
+    });
+
+    // Setup: the empty-trash POST is denied with a step-up 403.
+    mockFetchApi.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+    });
+
+    const dialogConfirmBtns = screen.getAllByRole("button", { name: "emptyTrash" });
+    const dialogConfirmBtn = dialogConfirmBtns[dialogConfirmBtns.length - 1];
+    await act(async () => { fireEvent.click(dialogConfirmBtn); });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
   });
 

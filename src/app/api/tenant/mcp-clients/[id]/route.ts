@@ -89,6 +89,7 @@ async function handlePUT(
   );
   if (!existing) return notFound();
 
+  // @stepup id:mcp-client-id-put method:PUT
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
@@ -158,6 +159,7 @@ async function handleDELETE(
   );
   if (!existing) return notFound();
 
+  // @stepup id:mcp-client-id-delete method:DELETE
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

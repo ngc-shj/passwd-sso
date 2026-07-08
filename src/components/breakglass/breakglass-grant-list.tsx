@@ -87,6 +87,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
   const handleRevoke = async (grantId: string) => {
     setRevoking(grantId);
     try {
+      // @stepup id:breakglass-id-delete
       const res = await fetchApi(apiPath.tenantBreakglassById(grantId), {
         method: "DELETE",
       });

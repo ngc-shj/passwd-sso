@@ -724,6 +724,43 @@ describe("McpClientCard", () => {
     });
   });
 
+  it("delete client — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ clients: sampleClients }),
+        });
+      }
+      if (init.method === "DELETE") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
+    });
+
+    const alertActions = screen.getAllByTestId("alert-action");
+    await act(async () => {
+      fireEvent.click(alertActions[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("delete client — confirm dialog, verify DELETE called", async () => {
     setupFetchClients();
 
@@ -803,5 +840,67 @@ describe("McpClientCard", () => {
       );
       expect(putCalls.length).toBe(1);
     });
+  });
+
+  it("edit client — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ clients: sampleClients }),
+        });
+      }
+      if (init.method === "PUT") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
+    });
+
+    const allButtons = screen.getAllByRole("button");
+    const editButtons = allButtons.filter((b) => {
+      const testId = b.getAttribute("data-testid");
+      return !testId && b.closest("[data-testid='alert-trigger']") === null &&
+        !b.textContent?.includes("registerMcpClient") &&
+        !b.textContent?.includes("cancel") &&
+        !b.textContent?.includes("delete") &&
+        b.textContent?.trim() === "";
+    });
+    expect(editButtons.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      fireEvent.click(editButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("editMcpClient")).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByDisplayValue("My MCP Agent");
+    fireEvent.change(nameInput, { target: { value: "Renamed Agent" } });
+
+    const saveBtn = screen.getAllByRole("button").find(
+      (b) => b.textContent?.includes("save")
+    );
+    expect(saveBtn).toBeDefined();
+    await act(async () => {
+      fireEvent.click(saveBtn!);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 });

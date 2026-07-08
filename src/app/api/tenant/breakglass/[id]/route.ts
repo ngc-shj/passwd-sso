@@ -50,6 +50,7 @@ async function handleDELETE(
     return notFound();
   }
 
+  // @stepup id:breakglass-id-delete method:DELETE
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

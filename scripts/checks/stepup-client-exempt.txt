@@ -1,0 +1,13 @@
+# Step-up client-coverage exempt allowlist.
+#
+# Format:  <server-id>  <custom-marker-token>  # reason (>= 10 chars)
+#
+# A server @stepup id listed here does NOT require a standard client `@stepup`
+# marker + SESSION_STEP_UP_REQUIRED branch, because its stale-session recovery is
+# custom or non-interactive. The named <custom-marker-token> must still appear
+# somewhere in the client tree — the guard fails (EXEMPT_MARKER_ABSENT) if it
+# disappears, so the exemption cannot silently rot into a real coverage gap.
+
+ext-bridge-code-post   EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED  # auto-extension-connect.tsx surfaces step-up via the extension-connect error channel, not the standard API error body
+team-confirm-key-post  KEY_DISTRIBUTE_INTERVAL_MS  # team-vault-core.tsx background setInterval poller; no awaiting user gesture, retries on next poll (SC3)
+operator-tokens-post   OPERATOR_TOKEN_STALE_SESSION  # operator-token-card.tsx has a bespoke multi-state reauth flow (limit-exceeded vs stale vs generic retry) and does not use the shared inline-reauth hook (SC4)

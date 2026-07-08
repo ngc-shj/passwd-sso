@@ -37,12 +37,16 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { MemberInfo } from "@/components/member-info";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { Link } from "@/i18n/navigation";
 import { Trash2, Users, Search, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
 interface TeamInfo {
@@ -62,6 +66,7 @@ export default function TeamMembersPage({
   const { teamId } = use(params);
   const t = useTranslations("Team");
   const tAdmin = useTranslations("AdminConsole");
+  const tCommon = useTranslations("Common");
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [loadError, setLoadError] = useState(false);
@@ -136,14 +141,29 @@ export default function TeamMembersPage({
   const isOwner = team?.role === TEAM_ROLE.OWNER;
   const isAdmin = team?.role === TEAM_ROLE.ADMIN || isOwner;
 
+  // Inline step-up reauth — both role change and member removal are
+  // server-side step-up-gated. The retry arg records which mutation was in
+  // flight so the post-reauth retry replays the same one.
+  type ReauthRetry =
+    | { type: "role"; memberId: string; role: string }
+    | { type: "remove"; memberId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "role") await handleChangeRole(retry.memberId, retry.role);
+    else if (retry.type === "remove") await handleRemoveMember(retry.memberId);
+  });
+
   const handleChangeRole = async (memberId: string, role: string) => {
     try {
+      // @stepup id:team-member-put
       const res = await fetchApi(apiPath.teamMemberById(teamId, memberId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role }),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "role", memberId, role })) return;
+        throw new Error("Failed");
+      }
       toast.success(t("roleChanged"));
       fetchAll();
     } catch {
@@ -153,10 +173,14 @@ export default function TeamMembersPage({
 
   const handleRemoveMember = async (memberId: string) => {
     try {
+      // @stepup id:team-member-delete
       const res = await fetchApi(apiPath.teamMemberById(teamId, memberId), {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "remove", memberId })) return;
+        throw new Error("Failed");
+      }
       toast.success(t("memberRemoved"));
       fetchAll();
     } catch {
@@ -308,6 +332,15 @@ export default function TeamMembersPage({
           </div>
         </DialogContent>
       </Dialog>
+
+      <RecentSessionRequiredDialog
+        {...inlineReauth.recentSessionDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
+      <PasskeyReauthDialog
+        {...inlineReauth.reauthDialogProps}
+        cancelLabel={tCommon("cancel")}
+      />
     </div>
   );
 }

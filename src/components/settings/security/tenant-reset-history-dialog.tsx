@@ -171,6 +171,7 @@ export function TenantResetHistoryDialog({
     setApproving(true);
     setApproveError(null);
     try {
+      // @stepup id:reset-vault-approve
       const res = await fetchApi(
         `${apiPath.tenantMemberResetVault(userId)}/${approveTarget.id}/approve`,
         { method: "POST", headers: { "Content-Type": "application/json" } },

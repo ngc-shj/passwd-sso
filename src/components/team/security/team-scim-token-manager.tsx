@@ -47,6 +47,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -80,7 +81,14 @@ export function ScimTokenManager({ locale }: Props) {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>("365");
-  const inlineReauth = useInlineReauth(() => handleCreate());
+  // Inline step-up reauth — creating a token and revoking one are both
+  // server-side step-up-gated. The retry arg (owned by the hook) records
+  // which mutation was in flight so the post-reauth retry replays the same one.
+  type ReauthRetry = { type: "create" } | { type: "revoke"; tokenId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "create") await handleCreate();
+    else if (retry.type === "revoke") await handleRevoke(retry.tokenId);
+  });
 
   const scimEndpoint =
     typeof window !== "undefined"
@@ -117,6 +125,7 @@ export function ScimTokenManager({ locale }: Props) {
   const handleCreate = async () => {
     setCreating(true);
     try {
+      // @stepup id:scim-token-post
       const res = await fetchApi(apiPath.tenantScimTokens(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -135,7 +144,7 @@ export function ScimTokenManager({ locale }: Props) {
       } else {
         const err = await res.json().catch(() => ({}));
         if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError({ type: "create" });
         } else {
           const apiKey = tokenMintApiErrorKey(err.error);
           toast.error(apiKey ? tApi(apiKey) : t("networkError"));
@@ -150,6 +159,7 @@ export function ScimTokenManager({ locale }: Props) {
 
   const handleRevoke = async (tokenId: string) => {
     try {
+      // @stepup id:scim-token-id-delete
       const res = await fetchApi(apiPath.tenantScimTokenById(tokenId), {
         method: "DELETE",
       });
@@ -157,6 +167,7 @@ export function ScimTokenManager({ locale }: Props) {
         toast.success(t("scimTokenRevoked"));
         fetchTokens();
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "revoke", tokenId })) return;
         toast.error(t("networkError"));
       }
     } catch {

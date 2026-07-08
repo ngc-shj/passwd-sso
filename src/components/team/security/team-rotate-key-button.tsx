@@ -246,6 +246,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
       // 6. POST rotation to server
       setPhase("submitting");
 
+      // @stepup id:team-rotate-key-post
       const res = await fetchApi(apiPath.teamRotateKey(teamId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },

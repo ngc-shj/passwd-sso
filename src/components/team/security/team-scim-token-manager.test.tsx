@@ -225,6 +225,41 @@ describe("ScimTokenManager", () => {
     expect(mockToast.error).not.toHaveBeenCalled();
   });
 
+  it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on revoke", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([ACTIVE_TOKEN]) });
+      }
+      if (init.method === "DELETE") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false });
+    });
+
+    await act(async () => {
+      render(<ScimTokenManager locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Production")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "scimTokenRevoke" }));
+    const confirmButtons = screen.getAllByRole("button", { name: "scimTokenRevoke" });
+    await act(async () => {
+      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("falls back to local networkError for an unrecognized API error code", async () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })

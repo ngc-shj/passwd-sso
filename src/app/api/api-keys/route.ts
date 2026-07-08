@@ -74,6 +74,7 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const authed = await checkAuth(req);
   if (!authed.ok) return authed.response;
+  // @stepup id:api-keys-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
   const { userId } = authed.auth;

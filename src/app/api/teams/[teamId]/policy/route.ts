@@ -86,6 +86,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
+  // @stepup id:team-policy-put method:PUT
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

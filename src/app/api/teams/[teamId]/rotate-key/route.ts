@@ -80,6 +80,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
+  // @stepup id:team-rotate-key-post method:POST
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

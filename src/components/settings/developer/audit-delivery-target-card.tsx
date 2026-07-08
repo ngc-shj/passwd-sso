@@ -194,6 +194,7 @@ export function AuditDeliveryTargetCard() {
     setCreating(true);
     setUrlError("");
     try {
+      // @stepup id:audit-delivery-target-post
       const res = await fetchApi(apiPath.tenantAuditDeliveryTargets(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -222,6 +223,7 @@ export function AuditDeliveryTargetCard() {
 
   const handleToggleActive = async (target: TargetItem) => {
     try {
+      // @stepup id:audit-delivery-target-id-patch
       const res = await fetchApi(apiPath.tenantAuditDeliveryTargetById(target.id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

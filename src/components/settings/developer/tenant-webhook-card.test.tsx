@@ -10,16 +10,19 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   } as unknown as typeof ResizeObserver;
 }
 
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { render, screen, act, waitFor, fireEvent, within } from "@testing-library/react";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 // Tenant requires useLocale in addition to useTranslations
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+  // RecentSessionRequiredDialog (step-up reauth flow) calls useLocale.
   useLocale: () => "en",
 }));
 
@@ -31,6 +34,17 @@ vi.mock("sonner", () => ({
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 import {
@@ -69,6 +83,9 @@ createWebhookCardTests(mockFetch, mockToast, {
 describe("TenantWebhookCard (tenant-specific)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user has no passkey → the recent-session dialog opens.
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: true, verifiedAt: "2026-05-10T00:00:00Z" });
   });
 
   it("excludes group:tenantWebhook actions from event selector", async () => {
@@ -171,5 +188,91 @@ describe("TenantWebhookCard (tenant-specific)", () => {
 
     // Delegation actions
     expect(screen.getByText("DELEGATION_CREATE")).toBeInTheDocument();
+  });
+
+  it("create — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ webhooks: [] }),
+        });
+      }
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<TenantWebhookCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+    });
+
+    const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+    fireEvent.change(urlInput, {
+      target: { value: "https://valid.example.com/hook" },
+    });
+
+    const checkboxes = screen.getAllByTestId("checkbox");
+    fireEvent.click(checkboxes[0]);
+
+    const submitBtn = within(screen.getByTestId("dialog-content"))
+      .getAllByRole("button")
+      .find((b) => b.textContent?.includes("addWebhook"))!;
+    await act(async () => {
+      fireEvent.click(submitBtn);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("delete — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ webhooks: sampleWebhooks }),
+        });
+      }
+      if (init.method === "DELETE") {
+        return Promise.resolve({
+          ok: false,
+          status: 403,
+          json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<TenantWebhookCard />);
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText("https://example.com/tenant-hook1").length,
+      ).toBeGreaterThanOrEqual(1);
+    });
+
+    const alertActions = screen.getAllByTestId("alert-action");
+    await act(async () => {
+      fireEvent.click(alertActions[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 });

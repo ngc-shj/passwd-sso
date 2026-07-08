@@ -25,6 +25,10 @@ import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 import { bindRangeInput } from "@/lib/ui/input-range";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
+import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
+import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 
 // The 5 generic retention fields share a single [min, max] bound and the
 // "toggle on → integer days, off → null (never auto-delete)" pattern.
@@ -161,6 +165,8 @@ export function TenantRetentionPolicyCard() {
     return null;
   };
 
+  const inlineReauth = useInlineReauth(() => handleSave());
+
   const handleSave = async () => {
     const validationError = validate();
     if (validationError) {
@@ -176,6 +182,7 @@ export function TenantRetentionPolicyCard() {
       for (const { key } of GENERIC_FIELDS) {
         body[key] = generic.enabled[key] ? Number(generic.days[key]) : null;
       }
+      // @stepup id:tenant-policy-patch
       const res = await fetchApi(API_PATH.TENANT_POLICY, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -190,6 +197,7 @@ export function TenantRetentionPolicyCard() {
           days: { ...generic.days },
         });
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError)) return;
         toast.error(t("retentionPolicySaveFailed"));
       }
     } catch {
@@ -314,6 +322,15 @@ export function TenantRetentionPolicyCard() {
             {t("retentionPolicySave")}
           </Button>
         </div>
+
+        <RecentSessionRequiredDialog
+          {...inlineReauth.recentSessionDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
+        <PasskeyReauthDialog
+          {...inlineReauth.reauthDialogProps}
+          cancelLabel={tCommon("cancel")}
+        />
       </CardContent>
     </Card>
   );

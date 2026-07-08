@@ -266,6 +266,7 @@ export function PasskeyCredentialsCard() {
 
   const handleDelete = async (credentialId: string) => {
     try {
+      // @stepup id:webauthn-credential-delete
       const res = await fetchApi(apiPath.webauthnCredentialById(credentialId), {
         method: "DELETE",
       });

@@ -47,6 +47,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 
 interface McpClient {
   id: string;
@@ -120,7 +121,18 @@ export function McpClientCard() {
   const [createUriError, setCreateUriError] = useState("");
   const [createScopeError, setCreateScopeError] = useState("");
   const [newCredentials, setNewCredentials] = useState<NewClientCredentials | null>(null);
-  const inlineReauth = useInlineReauth(() => handleCreate());
+  // Inline step-up reauth — create/edit/delete are all server-side
+  // step-up-gated. The retry arg (owned by the hook) records which mutation
+  // was in flight so the post-reauth retry replays the same one.
+  type ReauthRetry =
+    | { type: "create" }
+    | { type: "edit" }
+    | { type: "delete"; clientId: string };
+  const inlineReauth = useInlineReauth<ReauthRetry>(async (retry) => {
+    if (retry.type === "create") await handleCreate();
+    else if (retry.type === "edit") await handleEdit();
+    else if (retry.type === "delete") await handleDelete(retry.clientId);
+  });
 
   // Edit dialog
   const [editOpen, setEditOpen] = useState(false);
@@ -206,6 +218,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
 
     setCreating(true);
     try {
+      // @stepup id:mcp-client-post
       const res = await fetchApi(apiPath.tenantMcpClients(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -218,7 +231,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
       if (!res.ok) {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
-          await inlineReauth.triggerOnStaleError();
+          await inlineReauth.triggerOnStaleError({ type: "create" });
         } else if (res.status === 409 && body?.error === API_ERROR.MCP_CLIENT_NAME_CONFLICT) {
           setCreateNameError(t("mcpNameConflict"));
         } else if (res.status === 400 && body?.error === API_ERROR.VALIDATION_ERROR) {
@@ -310,6 +323,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
       if (!editClient.isDcr) {
         body.redirectUris = uris;
       }
+      // @stepup id:mcp-client-id-put
       const res = await fetchApi(apiPath.tenantMcpClientById(editClient.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -317,6 +331,10 @@ const toastUpdateApiError = (errorCode: unknown) => {
       });
       if (!res.ok) {
         const body = await readApiErrorBody(res);
+        if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+          await inlineReauth.triggerOnStaleError({ type: "edit" });
+          return;
+        }
         if (res.status === 409) {
           setEditNameError(t("mcpNameConflict"));
           return;
@@ -357,6 +375,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
 
   const handleDelete = async (clientId: string) => {
     try {
+      // @stepup id:mcp-client-id-delete
       const res = await fetchApi(apiPath.tenantMcpClientById(clientId), {
         method: "DELETE",
       });
@@ -364,6 +383,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
         toast.success(t("mcpDeleted"));
         fetchClients();
       } else {
+        if (await handleStepUpError(res, inlineReauth.triggerOnStaleError, { type: "delete", clientId })) return;
         toast.error(t("mcpDeleteFailed"));
       }
     } catch {

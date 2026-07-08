@@ -56,6 +56,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // @stepup id:sa-token-id-delete method:DELETE
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

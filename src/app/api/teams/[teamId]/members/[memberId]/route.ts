@@ -63,6 +63,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
+  // @stepup id:team-member-put method:PUT
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 
@@ -174,6 +175,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
+  // @stepup id:team-member-delete method:DELETE
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) return stepUpError;
 

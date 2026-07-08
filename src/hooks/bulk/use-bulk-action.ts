@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
+import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +32,14 @@ export interface UseBulkActionOptions {
    * after onSuccess — no manual dispatch needed.
    */
   onSuccess: () => void;
+  /**
+   * Called when the `deletePermanently` bulk action (bulk-purge) hits a
+   * `SESSION_STEP_UP_REQUIRED` 403 — only this action is step-up-gated.
+   * The caller opens its reauth dialog (typically
+   * `inlineReauth.triggerOnStaleError`); the hook closes the confirm dialog
+   * and does not surface a generic error toast for this case.
+   */
+  onStepUpRequired?: () => Promise<void> | void;
 }
 
 export interface UseBulkActionReturn {
@@ -119,6 +128,7 @@ export function useBulkAction({
   scope,
   t,
   onSuccess,
+  onStepUpRequired,
 }: UseBulkActionOptions): UseBulkActionReturn {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<BulkActionType | null>(
@@ -141,6 +151,8 @@ export function useBulkAction({
       const endpoint = resolveEndpoint(scope, pendingAction);
       const body = buildBody(pendingAction, ids);
 
+      // @stepup id:passwords-bulk-purge
+      // @stepup id:team-password-bulk-purge
       const res = await fetchApi(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -148,6 +160,17 @@ export function useBulkAction({
       });
 
       if (!res.ok) {
+        // Only the permanent-purge action is step-up-gated. Route the 403 to
+        // reauth ONLY when a handler is wired; otherwise fall through to the
+        // generic error toast rather than silently closing the dialog — an
+        // omitted onStepUpRequired must not swallow the mutation.
+        if (pendingAction === "deletePermanently" && onStepUpRequired) {
+          const reauth = onStepUpRequired;
+          if (await handleStepUpError(res, async () => { await reauth(); })) {
+            setDialogOpen(false);
+            return;
+          }
+        }
         throw new Error("bulk action failed");
       }
 
@@ -165,7 +188,7 @@ export function useBulkAction({
     } finally {
       setProcessing(false);
     }
-  }, [selectedIds, pendingAction, scope, t, onSuccess]);
+  }, [selectedIds, pendingAction, scope, t, onSuccess, onStepUpRequired]);
 
   return {
     dialogOpen,

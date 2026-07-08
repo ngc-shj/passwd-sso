@@ -42,6 +42,7 @@ export default function VaultResetPage() {
     setError("");
 
     try {
+      // @stepup id:vault-reset-post
       const res = await fetchApi(API_PATH.VAULT_RESET, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

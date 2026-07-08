@@ -7,21 +7,35 @@ import {
   POLICY_MIN_PW_LENGTH_MAX,
 } from "@/lib/validations/common";
 
-const { mockFetch, mockToast } = vi.hoisted(() => ({
+const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockToast: { success: vi.fn(), error: vi.fn() },
+  mockCanUsePasskeyRecovery: vi.fn(),
+  mockReauthenticateWithPasskey: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () =>
     (key: string, params?: Record<string, string | number>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+  useLocale: () => "en",
 }));
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
 vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
+}));
+
+import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
+setupPasskeyReauthDialogMocks();
+
+vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
+  canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
+}));
+
+vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
+  reauthenticateWithPasskey: mockReauthenticateWithPasskey,
 }));
 
 import { TenantPasswordPolicyCard } from "./tenant-password-policy-card";
@@ -46,6 +60,7 @@ function setupGet(data: Record<string, unknown>) {
 describe("TenantPasswordPolicyCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
   });
 
   it("disables save button when no changes (R26)", async () => {
@@ -114,5 +129,32 @@ describe("TenantPasswordPolicyCard", () => {
       const body = JSON.parse(String((patchCalls[0][1] as RequestInit).body));
       expect(body.tenantRequireUppercase).toBe(true);
     });
+  });
+
+  it("shows the recent-session dialog on a SESSION_STEP_UP_REQUIRED save denial, without a generic error toast", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({}),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 403,
+        json: () => Promise.resolve({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+    });
+    render(<TenantPasswordPolicyCard />);
+    const save = await screen.findByRole("button", {
+      name: "passwordPolicySave",
+    });
+
+    fireEvent.click(screen.getByLabelText("tenantRequireUppercase"));
+    fireEvent.click(save);
+
+    expect(await screen.findByTestId("recent-session-dialog")).toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 });

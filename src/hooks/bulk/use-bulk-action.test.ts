@@ -388,4 +388,72 @@ describe("useBulkAction", () => {
     expect(teamEvents).toHaveLength(0);
     dispatchSpy.mockRestore();
   });
+
+  // ---------------------------------------------------------------------------
+  // Step-up (SESSION_STEP_UP_REQUIRED) handling — bulk-purge only
+  // ---------------------------------------------------------------------------
+  describe("step-up handling", () => {
+    function setupWithStepUp(
+      onStepUpRequired: (() => Promise<void> | void) | undefined,
+      selectedIds = new Set(["a", "b"]),
+      scope: BulkScope = { type: "personal" },
+    ) {
+      return renderHook(() =>
+        useBulkAction({ selectedIds, scope, t, onSuccess, onStepUpRequired }),
+      );
+    }
+
+    it("deletePermanently + 403 SESSION_STEP_UP_REQUIRED + onStepUpRequired provided: calls onStepUpRequired, closes dialog, no error toast, no throw", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+      const onStepUpRequired = vi.fn().mockResolvedValue(undefined);
+
+      const { result } = setupWithStepUp(onStepUpRequired);
+      act(() => result.current.requestAction("deletePermanently"));
+
+      await expect(act(() => result.current.executeAction())).resolves.toBeUndefined();
+
+      expect(onStepUpRequired).toHaveBeenCalledTimes(1);
+      expect(result.current.dialogOpen).toBe(false);
+      expect(mockError).not.toHaveBeenCalled();
+      expect(onSuccess).not.toHaveBeenCalled();
+    });
+
+    it("deletePermanently + 403 SESSION_STEP_UP_REQUIRED but onStepUpRequired omitted: falls through to generic error toast (mutation not silently swallowed)", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+
+      const { result } = setupWithStepUp(undefined);
+      act(() => result.current.requestAction("deletePermanently"));
+      await act(() => result.current.executeAction());
+
+      expect(mockError).toHaveBeenCalled();
+      expect(onSuccess).not.toHaveBeenCalled();
+      // Dialog stays open on generic error so the user can retry.
+      expect(result.current.dialogOpen).toBe(true);
+    });
+
+    it("non-deletePermanently action (trash) + 403: does NOT call onStepUpRequired, falls through to error toast", async () => {
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "SESSION_STEP_UP_REQUIRED" }),
+      });
+      const onStepUpRequired = vi.fn().mockResolvedValue(undefined);
+
+      const { result } = setupWithStepUp(onStepUpRequired);
+      act(() => result.current.requestAction("trash"));
+      await act(() => result.current.executeAction());
+
+      expect(onStepUpRequired).not.toHaveBeenCalled();
+      expect(mockError).toHaveBeenCalled();
+      expect(onSuccess).not.toHaveBeenCalled();
+    });
+  });
 });
