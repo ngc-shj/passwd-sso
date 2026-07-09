@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import {
   evaluateStepUpFreshness,
   canRecoverSessionWithPasskey,
+  STEP_UP_FRESHNESS,
 } from "@/lib/auth/session/recent-current-auth-method";
 import { getSessionTokenFromCookieStore } from "@/app/api/sessions/helpers";
 import { SignInReauthPanel } from "@/components/auth/signin-reauth-panel";
@@ -66,15 +67,15 @@ export default async function SignInPage({
       const sessionToken = getSessionTokenFromCookieStore(await cookies());
       const verdict = sessionToken
         ? await evaluateStepUpFreshness(sessionToken)
-        : "invalid";
-      if (verdict === "fresh") {
+        : STEP_UP_FRESHNESS.INVALID;
+      if (verdict === STEP_UP_FRESHNESS.FRESH) {
         // Strip basePath + locale: Next's redirect() re-prepends basePath,
         // so passing the basePath-qualified path as-is would double it
         // (/base/base/api/...). next-intl's redirect() is still wrong here —
         // it would inject the locale (→ /<locale>/api/... → 404).
         nextRedirect(callbackUrlToHref(resolved));
       }
-      if (verdict === "stale" && sessionToken) {
+      if (verdict === STEP_UP_FRESHNESS.STALE && sessionToken) {
         const canUsePasskey = await canRecoverSessionWithPasskey(
           sessionToken,
           session.user.id,

@@ -101,6 +101,16 @@ describe("getSessionTokenFromCookieStore (server-component cookies() variant)", 
     expect(token).toBe("dev-1");
   });
 
+  it("resolves the __Host- name on https + empty basePath", () => {
+    vi.stubEnv("AUTH_URL", "https://app.example.com");
+
+    const token = getSessionTokenFromCookieStore(
+      storeWith({ "__Host-authjs.session-token": "host-1" }),
+    );
+
+    expect(token).toBe("host-1");
+  });
+
   it("returns null when the deployment-shaped cookie is absent", () => {
     vi.stubEnv("AUTH_URL", "https://app.example.com");
     vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");

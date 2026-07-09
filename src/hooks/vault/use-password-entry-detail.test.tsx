@@ -82,7 +82,7 @@ describe("usePasswordEntryDetail", () => {
     const deferredA = makeDeferred<InlineDetailData>();
     const deferredB = makeDeferred<InlineDetailData>();
     let callCount = 0;
-    const getDetail = vi.fn((id: string) => {
+    const getDetail = vi.fn(() => {
       callCount++;
       return callCount === 1 ? deferredA.promise : deferredB.promise;
     });
@@ -150,7 +150,7 @@ describe("usePasswordEntryDetail", () => {
     const deferredA = makeDeferred<InlineDetailData>();
     const deferredB = makeDeferred<InlineDetailData>();
     let callCount = 0;
-    const getDetail = vi.fn((id: string) => {
+    const getDetail = vi.fn(() => {
       callCount++;
       return callCount === 1 ? deferredA.promise : deferredB.promise;
     });

@@ -155,12 +155,70 @@ describe("SignInReauthPanel", () => {
     expect(mockAssign).not.toHaveBeenCalled();
   });
 
+  it("re-enables both actions when signOut rejects on the sign-in-again click", async () => {
+    mockSignOut.mockRejectedValue(new Error("network"));
+    renderPanel();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "recentSessionAction" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "reauthAction" }),
+      ).toBeEnabled();
+    });
+    expect(
+      screen.getByRole("button", { name: "recentSessionAction" }),
+    ).toBeEnabled();
+    expect(mockAssign).not.toHaveBeenCalled();
+  });
+
   it("refuses a backslash protocol-relative callbackHref (browsers normalize \\ to /)", () => {
     renderPanel({ callbackHref: "/\\evil.example/phish" });
 
     expect(
       screen.queryByRole("button", { name: "reauthAction" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("disables both actions while the passkey ceremony is in flight", async () => {
+    let resolveFn: (value: {
+      ok: boolean;
+      error?: string;
+    }) => void = () => {};
+    mockReauthenticateWithPasskey.mockImplementation(
+      () =>
+        new Promise((r) => {
+          resolveFn = r;
+        }),
+    );
+    renderPanel();
+
+    const passkeyButton = screen.getByRole("button", { name: "reauthAction" });
+    const signInAgainButton = screen.getByRole("button", {
+      name: "recentSessionAction",
+    });
+    fireEvent.click(passkeyButton);
+
+    // While busy, the passkey button's accessible name is replaced by the
+    // (unlabelled) spinner icon, so re-query by role name would fail —
+    // assert on the captured element references instead.
+    await waitFor(() => {
+      expect(passkeyButton).toBeDisabled();
+    });
+    expect(signInAgainButton).toBeDisabled();
+
+    resolveFn({ ok: false, error: "PASSKEY_REAUTH_FAILED" });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "reauthAction" }),
+      ).toBeEnabled();
+    });
+    expect(
+      screen.getByRole("button", { name: "recentSessionAction" }),
+    ).toBeEnabled();
   });
 
   it("shows the cancelled label when the user aborts the ceremony", async () => {

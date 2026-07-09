@@ -10,7 +10,14 @@ import {
 } from "@/lib/auth/session/step-up";
 import { PASSKEY_VERIFICATION_WINDOW_MS } from "@/lib/auth/webauthn/recent-passkey-verification";
 
-export type StepUpFreshness = "fresh" | "stale" | "invalid";
+export const STEP_UP_FRESHNESS = {
+  FRESH: "fresh",
+  STALE: "stale",
+  INVALID: "invalid",
+} as const;
+
+export type StepUpFreshness =
+  (typeof STEP_UP_FRESHNESS)[keyof typeof STEP_UP_FRESHNESS];
 
 /**
  * Provider-aware step-up freshness core, shared by the route-level gate
@@ -46,22 +53,22 @@ export async function evaluateStepUpFreshness(
     BYPASS_PURPOSE.AUTH_FLOW,
   );
 
-  if (!sessionRow) return "invalid";
+  if (!sessionRow) return STEP_UP_FRESHNESS.INVALID;
 
   if (sessionRow.provider === "webauthn") {
     // A live webauthn session with no verification timestamp is stale (needs
     // a ceremony), NOT invalid — matches the pre-refactor 403 semantics.
-    if (!sessionRow.passkeyVerifiedAt) return "stale";
+    if (!sessionRow.passkeyVerifiedAt) return STEP_UP_FRESHNESS.STALE;
     const maxAgeMs = options.maxAgeMs ?? PASSKEY_VERIFICATION_WINDOW_MS;
     return Date.now() - sessionRow.passkeyVerifiedAt.getTime() > maxAgeMs
-      ? "stale"
-      : "fresh";
+      ? STEP_UP_FRESHNESS.STALE
+      : STEP_UP_FRESHNESS.FRESH;
   }
 
   const maxAgeMs = options.maxAgeMs ?? STEP_UP_WINDOW_MS;
   return Date.now() - sessionRow.createdAt.getTime() > maxAgeMs
-    ? "stale"
-    : "fresh";
+    ? STEP_UP_FRESHNESS.STALE
+    : STEP_UP_FRESHNESS.FRESH;
 }
 
 /**
@@ -109,10 +116,10 @@ export async function requireRecentCurrentAuthMethod(
   }
 
   const verdict = await evaluateStepUpFreshness(sessionToken, options);
-  if (verdict === "invalid") {
+  if (verdict === STEP_UP_FRESHNESS.INVALID) {
     return unauthorized();
   }
-  if (verdict === "stale") {
+  if (verdict === STEP_UP_FRESHNESS.STALE) {
     return errorResponse(
       options.errorCode ?? API_ERROR.SESSION_STEP_UP_REQUIRED,
       403,

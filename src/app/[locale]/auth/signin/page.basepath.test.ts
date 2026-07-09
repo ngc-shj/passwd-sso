@@ -61,6 +61,7 @@ vi.mock("@/lib/url-helpers", () => ({
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   evaluateStepUpFreshness: mockEvaluateStepUpFreshness,
   canRecoverSessionWithPasskey: mockCanRecoverSessionWithPasskey,
+  STEP_UP_FRESHNESS: { FRESH: "fresh", STALE: "stale", INVALID: "invalid" },
 }));
 vi.mock("@/app/api/sessions/helpers", () => ({
   getSessionTokenFromCookieStore: mockGetSessionTokenFromCookieStore,

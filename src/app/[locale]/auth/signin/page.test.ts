@@ -50,6 +50,7 @@ vi.mock("@/lib/url-helpers", () => ({
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   evaluateStepUpFreshness: mockEvaluateStepUpFreshness,
   canRecoverSessionWithPasskey: mockCanRecoverSessionWithPasskey,
+  STEP_UP_FRESHNESS: { FRESH: "fresh", STALE: "stale", INVALID: "invalid" },
 }));
 vi.mock("@/app/api/sessions/helpers", () => ({
   getSessionTokenFromCookieStore: mockGetSessionTokenFromCookieStore,
@@ -227,6 +228,8 @@ describe("SignInPage", () => {
       expect(mockRedirect).not.toHaveBeenCalled();
       // Token plumbing: the freshness core receives the cookie-store token.
       expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+      // Fresh path must not do the passkey-recovery credential query.
+      expect(mockCanRecoverSessionWithPasskey).not.toHaveBeenCalled();
     });
 
     it("renders the reauth panel (no redirect) when the session is stale", async () => {
