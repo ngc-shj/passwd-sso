@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, lstatSync, chmodSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { apiRequest, startBackgroundRefresh } from "../lib/api-client.js";
+import { apiRequest, assertLoggedIn, startBackgroundRefresh } from "../lib/api-client.js";
 import { decryptData, hexEncode } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { getEncryptionKey, getUserId, getSecretKeyBytes, setEncryptionKey } from "../lib/vault-state.js";
@@ -231,7 +231,15 @@ export function handleConnection(socket: Socket): void {
               error: `Invalid request: ${parsed.error.issues.map((i: { message: string }) => i.message).join(", ")}`,
             };
           } else {
-            response = await handleDecryptRequest(parsed.data);
+            try {
+              response = await handleDecryptRequest(parsed.data);
+            } catch (err) {
+              // Request-layer failures (server down, revoked login) — not parse errors
+              response = {
+                ok: false,
+                error: `Request failed: ${err instanceof Error ? err.message : "unknown error"}`,
+              };
+            }
           }
         } catch (err) {
           response = {
@@ -278,6 +286,9 @@ export async function decryptAgentCommand(opts: DecryptAgentOptions): Promise<vo
     );
     process.exit(1);
   }
+
+  // Fail fast before prompting — the passphrase is useless without a login
+  assertLoggedIn();
 
   // In --eval mode, stdout is captured by the shell — write prompt to stderr
   const passphrase = await readPassphrase("Master passphrase: ", { useStderr: opts.eval });

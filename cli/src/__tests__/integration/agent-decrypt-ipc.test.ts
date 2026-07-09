@@ -87,6 +87,7 @@ vi.mock("../../lib/vault-state.js", () => ({
 }));
 vi.mock("../../lib/api-client.js", () => ({
   apiRequest: vi.fn().mockResolvedValue({ ok: false, status: 500, data: {} }),
+  assertLoggedIn: vi.fn(),
   startBackgroundRefresh: vi.fn(),
 }));
 vi.mock("../../lib/output.js", () => ({
@@ -262,5 +263,22 @@ describe("handleConnection socket protocol", () => {
     expect(responses).toHaveLength(1);
     expect(responses[0].ok).toBe(false);
     expect(responses[0].error).toMatch(/[Pp]arse error/);
+  });
+
+  // Keep this the LAST test in this describe: an unconsumed mockRejectedValueOnce
+  // survives clearAllMocks, so last position guarantees no later test can inherit it.
+  it("labels apiRequest rejections as request failures, not parse errors", async () => {
+    vi.mocked(apiRequest).mockRejectedValueOnce(new Error("fetch failed"));
+    const req = JSON.stringify({
+      entryId: "entry_abc123",
+      clientId: "mcpc_test",
+      field: "password",
+    });
+
+    const res = await sendAndReceive(req + "\n");
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/Request failed: fetch failed/);
+    expect(res.error).not.toMatch(/[Pp]arse error/);
   });
 });

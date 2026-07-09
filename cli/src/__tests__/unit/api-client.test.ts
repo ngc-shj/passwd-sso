@@ -11,8 +11,27 @@ vi.mock("../../lib/config.js", () => ({
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-const { apiRequest, setTokenCache, clearTokenCache } = await import("../../lib/api-client.js");
+const { apiRequest, setTokenCache, clearTokenCache, assertLoggedIn } = await import("../../lib/api-client.js");
 const { loadCredentials, saveCredentials } = await import("../../lib/config.js");
+
+describe("assertLoggedIn", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearTokenCache();
+  });
+
+  it("throws 'Not logged in' when no token exists", () => {
+    (loadCredentials as ReturnType<typeof vi.fn>).mockReturnValue(null);
+
+    expect(() => assertLoggedIn()).toThrow("Not logged in. Run `passwd-sso login` first.");
+  });
+
+  it("does not throw when a token is cached", () => {
+    setTokenCache("test-token-123");
+
+    expect(() => assertLoggedIn()).not.toThrow();
+  });
+});
 
 describe("apiRequest", () => {
   beforeEach(() => {

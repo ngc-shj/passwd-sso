@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // --- Mocks (must be hoisted before imports) ---
 vi.mock("../../lib/api-client.js", () => ({
   apiRequest: vi.fn(),
+  assertLoggedIn: vi.fn(),
 }));
 
 vi.mock("../../lib/crypto.js", () => ({
@@ -26,7 +27,7 @@ vi.mock("../../lib/output.js", () => ({
   warn: vi.fn(),
 }));
 
-const { apiRequest } = await import("../../lib/api-client.js");
+const { apiRequest, assertLoggedIn } = await import("../../lib/api-client.js");
 const { deriveWrappingKey, unwrapSecretKey, deriveEncryptionKey, verifyKey } =
   await import("../../lib/crypto.js");
 const { setEncryptionKey, setSecretKeyBytes, isUnlocked } =
@@ -217,7 +218,7 @@ describe("autoUnlockIfNeeded", () => {
 
   it("does not warn when vault is already unlocked even if PSSO_PASSPHRASE is set", async () => {
     vi.mocked(isUnlocked).mockReturnValue(true);
-    process.env.PSSO_PASSPHRASE = "env-passphrase";
+    vi.stubEnv("PSSO_PASSPHRASE", "env-passphrase");
 
     const result = await autoUnlockIfNeeded();
 
@@ -238,7 +239,7 @@ describe("autoUnlockIfNeeded", () => {
 
   it("calls unlockWithPassphrase when PSSO_PASSPHRASE is set and vault is locked", async () => {
     vi.mocked(isUnlocked).mockReturnValue(false);
-    process.env.PSSO_PASSPHRASE = "env-passphrase";
+    vi.stubEnv("PSSO_PASSPHRASE", "env-passphrase");
 
     vi.mocked(apiRequest).mockResolvedValue({
       ok: true,
@@ -270,7 +271,7 @@ describe("autoUnlockIfNeeded", () => {
 
   it("returns false when PSSO_PASSPHRASE is set but unlock fails", async () => {
     vi.mocked(isUnlocked).mockReturnValue(false);
-    process.env.PSSO_PASSPHRASE = "wrong-passphrase";
+    vi.stubEnv("PSSO_PASSPHRASE", "wrong-passphrase");
 
     vi.mocked(apiRequest).mockResolvedValue({ ok: false, status: 401, data: {} });
 
@@ -386,5 +387,23 @@ describe("unlockCommand", () => {
     expect(output.success).toHaveBeenCalledWith(
       expect.stringContaining("unlocked"),
     );
+  });
+
+  // Keep this the LAST test in this describe: an unconsumed mockImplementationOnce
+  // survives clearAllMocks, so last position guarantees no later test can inherit it.
+  it("rejects with 'Not logged in' before prompting when not logged in", async () => {
+    vi.mocked(isUnlocked).mockReturnValue(false);
+    vi.mocked(assertLoggedIn).mockImplementationOnce(() => {
+      throw new Error("Not logged in. Run `passwd-sso login` first.");
+    });
+
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    await expect(unlockCommand()).rejects.toThrow("Not logged in");
+
+    expect(stdoutWrite).not.toHaveBeenCalledWith(
+      expect.stringContaining("Master passphrase:"),
+    );
+    expect(apiRequest).not.toHaveBeenCalled();
   });
 });

@@ -30,6 +30,7 @@ vi.mock("../../lib/vault-state.js", () => ({
 
 vi.mock("../../lib/api-client.js", () => ({
   apiRequest: vi.fn(),
+  assertLoggedIn: vi.fn(),
 }));
 
 vi.mock("../../lib/crypto.js", () => ({
@@ -71,9 +72,9 @@ vi.mock("../../lib/output.js", () => ({
 
 const { spawn } = await import("node:child_process");
 const { decryptAgentCommand } = await import("../../commands/agent-decrypt.js");
-const { autoUnlockIfNeeded } = await import("../../commands/unlock.js");
+const { autoUnlockIfNeeded, readPassphrase } = await import("../../commands/unlock.js");
 const { getEncryptionKey, getUserId, getSecretKeyBytes } = await import("../../lib/vault-state.js");
-const { apiRequest } = await import("../../lib/api-client.js");
+const { apiRequest, assertLoggedIn } = await import("../../lib/api-client.js");
 const { decryptData } = await import("../../lib/crypto.js");
 const { loadKey } = await import("../../lib/ssh-key-agent.js");
 const output = await import("../../lib/output.js");
@@ -290,6 +291,27 @@ describe("agentCommand", () => {
       expect(autoUnlockIfNeeded).not.toHaveBeenCalled();
     } finally {
       onSpy.mockRestore();
+    }
+  });
+
+  // Keep this the LAST test in this describe: an unconsumed mockImplementationOnce
+  // survives clearAllMocks, so last position guarantees no later test can inherit it.
+  it("rejects with 'Not logged in' before prompting in --eval mode when not logged in", async () => {
+    vi.mocked(autoUnlockIfNeeded).mockResolvedValue(false);
+    const originalIsTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    vi.mocked(assertLoggedIn).mockImplementationOnce(() => {
+      throw new Error("Not logged in. Run `passwd-sso login` first.");
+    });
+
+    try {
+      await expect(agentCommand({ eval: true })).rejects.toThrow("Not logged in");
+
+      expect(readPassphrase).not.toHaveBeenCalled();
+    } finally {
+      if (originalIsTTY) {
+        Object.defineProperty(process.stdin, "isTTY", originalIsTTY);
+      }
     }
   });
 });

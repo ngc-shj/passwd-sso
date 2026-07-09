@@ -13,7 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { apiRequest } from "../lib/api-client.js";
+import { apiRequest, assertLoggedIn } from "../lib/api-client.js";
 import { decryptData, hexEncode } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import {
@@ -158,6 +158,8 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
   // Unlock the vault in this (parent / foreground) process.
   if (!(await autoUnlockIfNeeded())) {
     if (opts.eval && process.stdin.isTTY) {
+      // Fail fast before prompting — the passphrase is useless without a login
+      assertLoggedIn();
       // Prompt on stderr so stdout stays clean for `eval $(...)` capture.
       const passphrase = await readPassphrase("Master passphrase: ", { useStderr: true });
       if (!passphrase || !(await unlockWithPassphrase(passphrase))) {
