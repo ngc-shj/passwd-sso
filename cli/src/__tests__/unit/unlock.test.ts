@@ -218,7 +218,7 @@ describe("autoUnlockIfNeeded", () => {
 
   it("does not warn when vault is already unlocked even if PSSO_PASSPHRASE is set", async () => {
     vi.mocked(isUnlocked).mockReturnValue(true);
-    process.env.PSSO_PASSPHRASE = "env-passphrase";
+    vi.stubEnv("PSSO_PASSPHRASE", "env-passphrase");
 
     const result = await autoUnlockIfNeeded();
 
@@ -239,7 +239,7 @@ describe("autoUnlockIfNeeded", () => {
 
   it("calls unlockWithPassphrase when PSSO_PASSPHRASE is set and vault is locked", async () => {
     vi.mocked(isUnlocked).mockReturnValue(false);
-    process.env.PSSO_PASSPHRASE = "env-passphrase";
+    vi.stubEnv("PSSO_PASSPHRASE", "env-passphrase");
 
     vi.mocked(apiRequest).mockResolvedValue({
       ok: true,
@@ -271,7 +271,7 @@ describe("autoUnlockIfNeeded", () => {
 
   it("returns false when PSSO_PASSPHRASE is set but unlock fails", async () => {
     vi.mocked(isUnlocked).mockReturnValue(false);
-    process.env.PSSO_PASSPHRASE = "wrong-passphrase";
+    vi.stubEnv("PSSO_PASSPHRASE", "wrong-passphrase");
 
     vi.mocked(apiRequest).mockResolvedValue({ ok: false, status: 401, data: {} });
 

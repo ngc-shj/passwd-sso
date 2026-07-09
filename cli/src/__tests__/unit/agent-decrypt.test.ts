@@ -122,7 +122,7 @@ describe("decryptAgentCommand", () => {
       value: false,
       configurable: true,
     });
-    process.env.XDG_RUNTIME_DIR = "/run/user/1000";
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
 
     await expect(decryptAgentCommand({})).rejects.toThrow("process.exit(1)");
     expect(stderrOutput).toContain("No TTY available");
@@ -138,7 +138,7 @@ describe("decryptAgentCommand", () => {
       value: true,
       configurable: true,
     });
-    process.env.XDG_RUNTIME_DIR = "/run/user/1000";
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
 
     vi.mocked(readPassphrase).mockResolvedValue("");
 
@@ -156,7 +156,7 @@ describe("decryptAgentCommand", () => {
       value: true,
       configurable: true,
     });
-    process.env.XDG_RUNTIME_DIR = "/run/user/1000";
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
 
     vi.mocked(readPassphrase).mockResolvedValue("wrong-pass");
     vi.mocked(unlockWithPassphrase).mockResolvedValue(false);
@@ -176,7 +176,7 @@ describe("decryptAgentCommand", () => {
       value: true,
       configurable: true,
     });
-    process.env.XDG_RUNTIME_DIR = "/run/user/1000";
+    vi.stubEnv("XDG_RUNTIME_DIR", "/run/user/1000");
 
     vi.mocked(assertLoggedIn).mockImplementationOnce(() => {
       throw new Error("Not logged in. Run `passwd-sso login` first.");

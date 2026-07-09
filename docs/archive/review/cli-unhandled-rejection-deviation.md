@@ -47,3 +47,17 @@
 - Red-proof: reverted the inner catch (scratchpad backup) → only the new test
   failed ("Parse error: fetch failed" instead of "Request failed:"); restored
   byte-identical (diff-verified); suite 14/14 → full 312/312 green.
+
+## Phase 3 Round 2 gate fix (test-hygiene)
+
+- scripts/pre-pr.sh (36 checks) surfaced check-test-hygiene: changed test files are
+  scanned WHOLE-FILE for direct `process.env.X =` mutations. Converted all sites in
+  the two touched files to `vi.stubEnv` (unlock.test.ts: PSSO_PASSPHRASE ×3;
+  agent-decrypt.test.ts: XDG_RUNTIME_DIR ×5 incl. the new ordering test) and added
+  `unstubEnvs: true` to cli/vitest.config.ts (the cli tree had no setup.ts wiring —
+  agent.test.ts's comment referenced the root app's setup; the config flag makes
+  auto-unstub actually true for cli). Full suite 312/312 + pre-pr 36/36 green.
+- Process note: Phase 2 completion ran individual lint/test/build but deferred the
+  aggregate pre-pr.sh to Phase 3-6; the gate fired there. No code regression — the
+  violations were pre-existing lines in files this PR touched plus two new lines
+  that copied the pre-existing pattern.
