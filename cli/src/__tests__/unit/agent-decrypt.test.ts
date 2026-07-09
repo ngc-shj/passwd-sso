@@ -16,6 +16,7 @@ vi.mock("../../lib/vault-state.js", () => ({
 
 vi.mock("../../lib/api-client.js", () => ({
   apiRequest: vi.fn(),
+  assertLoggedIn: vi.fn(),
   startBackgroundRefresh: vi.fn(),
 }));
 
@@ -59,6 +60,7 @@ vi.mock("node:child_process", () => ({
 const { readPassphrase, unlockWithPassphrase } = await import(
   "../../commands/unlock.js"
 );
+const { assertLoggedIn } = await import("../../lib/api-client.js");
 const { decryptAgentCommand } = await import("../../commands/agent-decrypt.js");
 
 describe("decryptAgentCommand", () => {
@@ -161,5 +163,27 @@ describe("decryptAgentCommand", () => {
 
     await expect(decryptAgentCommand({})).rejects.toThrow("process.exit(1)");
     expect(exitCode).toBe(1);
+  });
+
+  // Keep this the LAST test in this describe: an unconsumed mockImplementationOnce
+  // survives clearAllMocks, so last position guarantees no later test can inherit it.
+  it("rejects with 'Not logged in' before prompting when not logged in", async () => {
+    Object.defineProperty(process, "platform", {
+      value: "linux",
+      configurable: true,
+    });
+    Object.defineProperty(process.stdin, "isTTY", {
+      value: true,
+      configurable: true,
+    });
+    process.env.XDG_RUNTIME_DIR = "/run/user/1000";
+
+    vi.mocked(assertLoggedIn).mockImplementationOnce(() => {
+      throw new Error("Not logged in. Run `passwd-sso login` first.");
+    });
+
+    await expect(decryptAgentCommand({})).rejects.toThrow("Not logged in");
+
+    expect(readPassphrase).not.toHaveBeenCalled();
   });
 });

@@ -87,6 +87,7 @@ vi.mock("../../lib/vault-state.js", () => ({
 }));
 vi.mock("../../lib/api-client.js", () => ({
   apiRequest: vi.fn().mockResolvedValue({ ok: false, status: 500, data: {} }),
+  assertLoggedIn: vi.fn(),
   startBackgroundRefresh: vi.fn(),
 }));
 vi.mock("../../lib/output.js", () => ({

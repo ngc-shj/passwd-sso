@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { MS_PER_SECOND } from "../../lib/time.js";
 
 // cli/src/__tests__/integration/ → cli/dist/
 const distEntry = resolve(import.meta.dirname, "../../../dist/index.js");
@@ -17,7 +18,7 @@ const STACK_FRAME_MARKERS = ["    at ", "node:internal"];
 function runCli(args: string[]): { status: number | null; stdout: string; stderr: string } {
   const { status, stdout, stderr } = spawnSync("node", [distEntry, ...args], {
     encoding: "utf8",
-    timeout: 10000,
+    timeout: 10 * MS_PER_SECOND,
     // Closed stdin: if the not-logged-in fail-fast ever regresses, readPassphrase
     // resolves immediately on EOF instead of hanging the suite at the prompt.
     input: "",

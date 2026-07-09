@@ -191,6 +191,20 @@ requirement does not apply.
   - AC2-1: with no stored credentials, `node cli/dist/index.js unlock` → exit 1, stderr contains `Not logged in`, stdout does NOT contain `Master passphrase:`, no stack-frame text.
   - AC2-2: with valid credentials, `unlock` prompts for the passphrase exactly as before (regression: existing `cli/src/__tests__/unit/unlock.test.ts` suite stays green).
   - AC2-3: `apiRequest` with no token still throws the identical message (existing `cli/src/__tests__/unit/api-client.test.ts` expectations unchanged or updated in-kind).
+- **Member-set correction (R42 clause ①b — added during Phase 2 self-R-check)**: C2's
+  fail-fast belongs to a class ("no passphrase prompt before a login check") whose
+  defining primitive is a production `readPassphrase(` call site. Derivation:
+  `grep -rn 'readPassphrase(' cli/src --include='*.ts'` (excl. tests and the
+  definition) → 3 members: `unlock.ts` (the seed), `agent.ts:162`
+  (`agentCommand` `--eval` TTY path — `autoUnlockIfNeeded()` performs no API call,
+  so nothing checks login before the prompt), and `agent-decrypt.ts:283`
+  (`decryptAgentCommand` parent path — prompts directly). Phase 1 treated C2 as a
+  single-site fix; the Phase 2 security self-R-check surfaced the two sibling
+  members, and per R42/R34 (auth-flow carve-out + 30-minute rule) both received the
+  same `assertLoggedIn()` call before their prompt, with ordering tests mirroring
+  the unlock one (readPassphrase is cross-module in these files, so the mocked
+  `readPassphrase` not-called assertion is direct). `decrypt.ts` has no
+  `readPassphrase` call site (verified) — not a member.
 - **Consumer-flow walkthrough**:
   - Consumer A (`unlock` action in `index.ts:75-80`): reads { thrown Error } via C1's handler; also reads `isUnlocked()` afterwards to decide on `interactiveMode()` — when `assertLoggedIn` throws, `parseAsync` rejects, C1 prints and exits; `interactiveMode` is never reached. Satisfiable from the locked shape.
   - Consumer B (`apiRequest` internal call path): reads nothing new — behavior and message identical to today's inline throw.
