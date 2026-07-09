@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.67](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.66...passwd-sso-v0.4.67) (2026-07-09)
+
+
+### Bug Fixes
+
+* **auth:** make MCP/iOS OAuth step-up recoverable and fix basePath-doubled signin redirect ([#648](https://github.com/ngc-shj/passwd-sso/issues/648)) ([82a5f2a](https://github.com/ngc-shj/passwd-sso/commit/82a5f2ade87df760ed35979a39e241277f2039cc))
+* **cli:** render command errors cleanly and fail fast before passphrase prompts when not logged in ([#650](https://github.com/ngc-shj/passwd-sso/issues/650)) ([1f33f48](https://github.com/ngc-shj/passwd-sso/commit/1f33f482ba5f14fa57b05c0730c0a2354c8ded29))
+
 ## [0.4.66](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.65...passwd-sso-v0.4.66) (2026-07-08)
 
 
