@@ -4,7 +4,7 @@
  * Derives the encryption key and stores it in process memory.
  */
 
-import { apiRequest } from "../lib/api-client.js";
+import { apiRequest, assertLoggedIn } from "../lib/api-client.js";
 import {
   hexDecode,
   deriveWrappingKey,
@@ -132,6 +132,9 @@ export async function unlockCommand(): Promise<void> {
     output.info("Vault is already unlocked.");
     return;
   }
+
+  // Fail fast before prompting — the passphrase is useless without a login
+  assertLoggedIn();
 
   const passphrase = await readPassphrase("Master passphrase: ");
   if (!passphrase) {

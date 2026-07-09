@@ -194,7 +194,13 @@ program
     }
   });
 
-program.parse();
+try {
+  await program.parseAsync();
+} catch (err) {
+  // Render action-handler errors as a clean one-liner — never a stack trace
+  output.error(err instanceof Error ? err.message : String(err));
+  process.exit(1);
+}
 
 // ─── Interactive REPL Mode ──────────────────────────────────────
 

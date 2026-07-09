@@ -59,6 +59,12 @@ export function clearTokenCache(): void {
   cachedClientId = null;
 }
 
+export function assertLoggedIn(): void {
+  if (!getToken()) {
+    throw new Error("Not logged in. Run `passwd-sso login` first.");
+  }
+}
+
 function getBaseUrl(): string {
   const config = loadConfig();
   if (!config.serverUrl) {
@@ -112,10 +118,8 @@ export async function apiRequest<T = unknown>(
     headers?: Record<string, string>;
   } = {},
 ): Promise<ApiResponse<T>> {
+  assertLoggedIn();
   let token = getToken();
-  if (!token) {
-    throw new Error("Not logged in. Run `passwd-sso login` first.");
-  }
 
   if (isTokenExpiringSoon()) {
     const refreshed = await refreshToken();
