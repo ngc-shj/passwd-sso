@@ -318,47 +318,18 @@ describe("SignInPage", () => {
   });
 
   describe("provider button visibility", () => {
-    // Keys checked by the page: ID + SECRET for Google, URL + ID + SECRET for SAML
-    const envKeys = [
-      "AUTH_GOOGLE_ID",
-      "AUTH_GOOGLE_SECRET",
-      "JACKSON_URL",
-      "AUTH_JACKSON_ID",
-      "AUTH_JACKSON_SECRET",
-    ] as const;
-    const saved: Record<string, string | undefined> = {};
-
-    beforeEach(() => {
-      for (const k of envKeys) saved[k] = process.env[k];
-    });
-
-    afterEach(() => {
-      for (const k of envKeys) {
-        if (saved[k] !== undefined) process.env[k] = saved[k];
-        else delete process.env[k];
-      }
-    });
-
+    // Keys checked by the page: ID + SECRET for Google, URL + ID + SECRET for
+    // SAML. vi.stubEnv with "" reads as falsy for the page's !!(...) checks;
+    // afterEach unstubs are wired globally in setup.ts.
     function setGoogle(enabled: boolean) {
-      if (enabled) {
-        process.env.AUTH_GOOGLE_ID = "test-id";
-        process.env.AUTH_GOOGLE_SECRET = "test-secret";
-      } else {
-        delete process.env.AUTH_GOOGLE_ID;
-        delete process.env.AUTH_GOOGLE_SECRET;
-      }
+      vi.stubEnv("AUTH_GOOGLE_ID", enabled ? "test-id" : "");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", enabled ? "test-secret" : "");
     }
 
     function setSaml(enabled: boolean) {
-      if (enabled) {
-        process.env.JACKSON_URL = "http://localhost:5225";
-        process.env.AUTH_JACKSON_ID = "test-jackson-id";
-        process.env.AUTH_JACKSON_SECRET = "test-jackson-secret";
-      } else {
-        delete process.env.JACKSON_URL;
-        delete process.env.AUTH_JACKSON_ID;
-        delete process.env.AUTH_JACKSON_SECRET;
-      }
+      vi.stubEnv("JACKSON_URL", enabled ? "http://localhost:5225" : "");
+      vi.stubEnv("AUTH_JACKSON_ID", enabled ? "test-jackson-id" : "");
+      vi.stubEnv("AUTH_JACKSON_SECRET", enabled ? "test-jackson-secret" : "");
     }
 
     function hasProvider(tree: unknown, provider: string) {
@@ -413,8 +384,8 @@ describe("SignInPage", () => {
     });
 
     it("hides Google button when AUTH_GOOGLE_SECRET is missing", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      delete process.env.AUTH_GOOGLE_SECRET;
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "");
       setSaml(false);
       mockAuth.mockResolvedValue(null);
 
@@ -425,9 +396,9 @@ describe("SignInPage", () => {
 
     it("hides SSO button when AUTH_JACKSON_SECRET is missing", async () => {
       setGoogle(false);
-      process.env.JACKSON_URL = "http://localhost:5225";
-      process.env.AUTH_JACKSON_ID = "test-jackson-id";
-      delete process.env.AUTH_JACKSON_SECRET;
+      vi.stubEnv("JACKSON_URL", "http://localhost:5225");
+      vi.stubEnv("AUTH_JACKSON_ID", "test-jackson-id");
+      vi.stubEnv("AUTH_JACKSON_SECRET", "");
       mockAuth.mockResolvedValue(null);
 
       const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
@@ -437,24 +408,13 @@ describe("SignInPage", () => {
   });
 
   describe("Google multi-domain hint", () => {
-    const googleEnvKeys = ["AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET"] as const;
-    const savedGoogle: Record<string, string | undefined> = {};
-
-    beforeEach(() => {
-      for (const k of googleEnvKeys) savedGoogle[k] = process.env[k];
-    });
-
     afterEach(() => {
-      for (const k of googleEnvKeys) {
-        if (savedGoogle[k] !== undefined) process.env[k] = savedGoogle[k];
-        else delete process.env[k];
-      }
       mockParseAllowedGoogleDomains.mockReturnValue([]);
     });
 
     it("shows hint when multiple Google Workspace domains are configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
       mockParseAllowedGoogleDomains.mockReturnValue(["example.com", "corp.example.com"]);
       mockAuth.mockResolvedValue(null);
 
@@ -466,8 +426,8 @@ describe("SignInPage", () => {
     });
 
     it("does not show hint when single domain is configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
       mockParseAllowedGoogleDomains.mockReturnValue(["example.com"]);
       mockAuth.mockResolvedValue(null);
 
@@ -479,8 +439,8 @@ describe("SignInPage", () => {
     });
 
     it("does not show hint when no domains are configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
       mockParseAllowedGoogleDomains.mockReturnValue([]);
       mockAuth.mockResolvedValue(null);
 
