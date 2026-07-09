@@ -9,7 +9,7 @@ const {
   mockWithBypassRls,
   mockWithUserTenantRls,
   mockGetAppOrigin,
-  mockRequireRecentSession,
+  mockRequireRecentCurrentAuthMethod,
   mockEnforceAccessRestriction,
   mockCheckRateLimitOrFail,
   mockLogAuditAsync,
@@ -23,7 +23,7 @@ const {
       fn("22222222-2222-2222-2222-222222222222"),
   ),
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
-  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
   mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
@@ -66,8 +66,8 @@ vi.mock("@/lib/redis", () => ({
   validateRedisConfig: () => {},
 }));
 
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 vi.mock("@/lib/security/rate-limit-audit", () => ({
@@ -126,7 +126,7 @@ describe("GET /api/mobile/authorize", () => {
       async (_u: string, fn: (tenantId: string) => unknown) =>
         fn("22222222-2222-2222-2222-222222222222"),
     );
-    mockRequireRecentSession.mockResolvedValue(null);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockEnforceAccessRestriction.mockResolvedValue(null);
     mockCheckRateLimitOrFail.mockResolvedValue(null);
     mockLogAuditAsync.mockResolvedValue(undefined);
@@ -220,7 +220,7 @@ describe("GET /api/mobile/authorize", () => {
   });
 
   it("redirects to sign-in when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
-    mockRequireRecentSession.mockResolvedValue(Response.json(
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },
       { status: 403 },
     ));
@@ -234,6 +234,10 @@ describe("GET /api/mobile/authorize", () => {
     expect(u.pathname).toBe("/ja/auth/signin");
     expect(u.searchParams.get("callbackUrl")).toContain("/api/mobile/authorize");
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+    // Gate called with the request ONLY — a custom maxAgeMs here would diverge
+    // from the sign-in page's freshness evaluation and re-open the loop.
+    expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(1);
   });
 
   it("returns 400 when client_kind is missing", async () => {

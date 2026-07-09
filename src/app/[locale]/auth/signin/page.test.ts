@@ -17,9 +17,28 @@ const { mockAuth, mockRedirect, mockGetTranslations, mockSetRequestLocale } =
     mockGetTranslations: vi.fn(),
     mockSetRequestLocale: vi.fn(),
   }));
+const {
+  mockNextRedirect,
+  mockEvaluateStepUpFreshness,
+  mockCanRecoverSessionWithPasskey,
+  mockGetSessionTokenFromCookieStore,
+  mockSignInReauthPanel,
+} = vi.hoisted(() => ({
+  // Non-throwing spy: the real next/navigation redirect throws NEXT_REDIRECT,
+  // which would make pre/post-fix behavior indistinguishable in assertions.
+  mockNextRedirect: vi.fn(),
+  mockEvaluateStepUpFreshness: vi.fn(),
+  mockCanRecoverSessionWithPasskey: vi.fn(),
+  mockGetSessionTokenFromCookieStore: vi.fn(),
+  mockSignInReauthPanel: vi.fn(() => null),
+}));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/i18n/navigation", () => ({ redirect: mockRedirect }));
+vi.mock("next/navigation", () => ({ redirect: mockNextRedirect }));
+vi.mock("next/headers", () => ({
+  cookies: () => Promise.resolve({ get: () => undefined }),
+}));
 vi.mock("next-intl/server", () => ({
   getTranslations: mockGetTranslations,
   setRequestLocale: mockSetRequestLocale,
@@ -27,6 +46,17 @@ vi.mock("next-intl/server", () => ({
 vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
   getAppOrigin: () => "https://example.com",
+}));
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  evaluateStepUpFreshness: mockEvaluateStepUpFreshness,
+  canRecoverSessionWithPasskey: mockCanRecoverSessionWithPasskey,
+  STEP_UP_FRESHNESS: { FRESH: "fresh", STALE: "stale", INVALID: "invalid" },
+}));
+vi.mock("@/app/api/sessions/helpers", () => ({
+  getSessionTokenFromCookieStore: mockGetSessionTokenFromCookieStore,
+}));
+vi.mock("@/components/auth/signin-reauth-panel", () => ({
+  SignInReauthPanel: mockSignInReauthPanel,
 }));
 const { mockParseAllowedGoogleDomains } = vi.hoisted(() => ({
   mockParseAllowedGoogleDomains: vi.fn<() => string[]>(() => []),
@@ -88,9 +118,14 @@ function hasElement(
 
 describe("SignInPage", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockGetTranslations.mockResolvedValue(fakeT);
     mockSetRequestLocale.mockReturnValue(undefined);
     mockRedirect.mockReturnValue(undefined);
+    mockGetSessionTokenFromCookieStore.mockReturnValue("sess-1");
+    mockEvaluateStepUpFreshness.mockResolvedValue("fresh");
+    mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
+    mockSignInReauthPanel.mockReturnValue(null);
   });
 
   it("redirects to /dashboard when user is authenticated", async () => {
@@ -171,6 +206,109 @@ describe("SignInPage", () => {
     });
   });
 
+  describe("step-up-gated API callback (MCP / mobile OAuth)", () => {
+    const API_CALLBACK = "https://example.com/api/mcp/authorize?client_id=c&x=1";
+
+    beforeEach(() => {
+      mockAuth.mockResolvedValue({ user: { id: "u1" } });
+    });
+
+    it("redirects with the basePath/locale-stripped path when the session is fresh", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("fresh");
+
+      await SignInPage({
+        params: makeParams("ja"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      // Plain Next redirect (no locale injection); Next re-prepends basePath.
+      expect(mockNextRedirect).toHaveBeenCalledWith(
+        "/api/mcp/authorize?client_id=c&x=1",
+      );
+      expect(mockRedirect).not.toHaveBeenCalled();
+      // Token plumbing: the freshness core receives the cookie-store token.
+      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+      // Fresh path must not do the passkey-recovery credential query.
+      expect(mockCanRecoverSessionWithPasskey).not.toHaveBeenCalled();
+    });
+
+    it("renders the reauth panel (no redirect) when the session is stale", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("stale");
+      mockCanRecoverSessionWithPasskey.mockResolvedValue(true);
+
+      const result = await SignInPage({
+        params: makeParams("ja"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expect(
+        hasElement(
+          result,
+          (el) =>
+            el.type === mockSignInReauthPanel &&
+            el.props.callbackHref === "/api/mcp/authorize?client_id=c&x=1" &&
+            el.props.canUsePasskey === true,
+        ),
+      ).toBe(true);
+      // Token plumbing: token + authenticated user id, in that order.
+      expect(mockEvaluateStepUpFreshness).toHaveBeenCalledWith("sess-1");
+      expect(mockCanRecoverSessionWithPasskey).toHaveBeenCalledWith(
+        "sess-1",
+        "u1",
+      );
+    });
+
+    it("passes canUsePasskey=false to the panel when the session cannot recover via passkey", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("stale");
+      mockCanRecoverSessionWithPasskey.mockResolvedValue(false);
+
+      const result = await SignInPage({
+        params: makeParams("en"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(
+        hasElement(
+          result,
+          (el) =>
+            el.type === mockSignInReauthPanel &&
+            el.props.canUsePasskey === false,
+        ),
+      ).toBe(true);
+    });
+
+    it("falls through to the sign-in form when the session row is gone (invalid)", async () => {
+      mockEvaluateStepUpFreshness.mockResolvedValue("invalid");
+
+      const result = await SignInPage({
+        params: makeParams("en"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(mockRedirect).not.toHaveBeenCalled();
+      expect(
+        hasElement(result, (el) => el.type === mockSignInReauthPanel),
+      ).toBe(false);
+      expect(result).toBeDefined();
+    });
+
+    it("treats a missing session cookie as invalid (form, no freshness query)", async () => {
+      mockGetSessionTokenFromCookieStore.mockReturnValue(null);
+
+      const result = await SignInPage({
+        params: makeParams("en"),
+        searchParams: makeSearchParams(API_CALLBACK),
+      });
+
+      expect(mockEvaluateStepUpFreshness).not.toHaveBeenCalled();
+      expect(mockNextRedirect).not.toHaveBeenCalled();
+      expect(result).toBeDefined();
+    });
+  });
+
   it("calls setRequestLocale with the correct locale", async () => {
     mockAuth.mockResolvedValue(null);
 
@@ -180,47 +318,18 @@ describe("SignInPage", () => {
   });
 
   describe("provider button visibility", () => {
-    // Keys checked by the page: ID + SECRET for Google, URL + ID + SECRET for SAML
-    const envKeys = [
-      "AUTH_GOOGLE_ID",
-      "AUTH_GOOGLE_SECRET",
-      "JACKSON_URL",
-      "AUTH_JACKSON_ID",
-      "AUTH_JACKSON_SECRET",
-    ] as const;
-    const saved: Record<string, string | undefined> = {};
-
-    beforeEach(() => {
-      for (const k of envKeys) saved[k] = process.env[k];
-    });
-
-    afterEach(() => {
-      for (const k of envKeys) {
-        if (saved[k] !== undefined) process.env[k] = saved[k];
-        else delete process.env[k];
-      }
-    });
-
+    // Keys checked by the page: ID + SECRET for Google, URL + ID + SECRET for
+    // SAML. vi.stubEnv with "" reads as falsy for the page's !!(...) checks;
+    // afterEach unstubs are wired globally in setup.ts.
     function setGoogle(enabled: boolean) {
-      if (enabled) {
-        process.env.AUTH_GOOGLE_ID = "test-id";
-        process.env.AUTH_GOOGLE_SECRET = "test-secret";
-      } else {
-        delete process.env.AUTH_GOOGLE_ID;
-        delete process.env.AUTH_GOOGLE_SECRET;
-      }
+      vi.stubEnv("AUTH_GOOGLE_ID", enabled ? "test-id" : "");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", enabled ? "test-secret" : "");
     }
 
     function setSaml(enabled: boolean) {
-      if (enabled) {
-        process.env.JACKSON_URL = "http://localhost:5225";
-        process.env.AUTH_JACKSON_ID = "test-jackson-id";
-        process.env.AUTH_JACKSON_SECRET = "test-jackson-secret";
-      } else {
-        delete process.env.JACKSON_URL;
-        delete process.env.AUTH_JACKSON_ID;
-        delete process.env.AUTH_JACKSON_SECRET;
-      }
+      vi.stubEnv("JACKSON_URL", enabled ? "http://localhost:5225" : "");
+      vi.stubEnv("AUTH_JACKSON_ID", enabled ? "test-jackson-id" : "");
+      vi.stubEnv("AUTH_JACKSON_SECRET", enabled ? "test-jackson-secret" : "");
     }
 
     function hasProvider(tree: unknown, provider: string) {
@@ -275,8 +384,8 @@ describe("SignInPage", () => {
     });
 
     it("hides Google button when AUTH_GOOGLE_SECRET is missing", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      delete process.env.AUTH_GOOGLE_SECRET;
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "");
       setSaml(false);
       mockAuth.mockResolvedValue(null);
 
@@ -287,9 +396,9 @@ describe("SignInPage", () => {
 
     it("hides SSO button when AUTH_JACKSON_SECRET is missing", async () => {
       setGoogle(false);
-      process.env.JACKSON_URL = "http://localhost:5225";
-      process.env.AUTH_JACKSON_ID = "test-jackson-id";
-      delete process.env.AUTH_JACKSON_SECRET;
+      vi.stubEnv("JACKSON_URL", "http://localhost:5225");
+      vi.stubEnv("AUTH_JACKSON_ID", "test-jackson-id");
+      vi.stubEnv("AUTH_JACKSON_SECRET", "");
       mockAuth.mockResolvedValue(null);
 
       const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
@@ -299,24 +408,13 @@ describe("SignInPage", () => {
   });
 
   describe("Google multi-domain hint", () => {
-    const googleEnvKeys = ["AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET"] as const;
-    const savedGoogle: Record<string, string | undefined> = {};
-
-    beforeEach(() => {
-      for (const k of googleEnvKeys) savedGoogle[k] = process.env[k];
-    });
-
     afterEach(() => {
-      for (const k of googleEnvKeys) {
-        if (savedGoogle[k] !== undefined) process.env[k] = savedGoogle[k];
-        else delete process.env[k];
-      }
       mockParseAllowedGoogleDomains.mockReturnValue([]);
     });
 
     it("shows hint when multiple Google Workspace domains are configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
       mockParseAllowedGoogleDomains.mockReturnValue(["example.com", "corp.example.com"]);
       mockAuth.mockResolvedValue(null);
 
@@ -328,8 +426,8 @@ describe("SignInPage", () => {
     });
 
     it("does not show hint when single domain is configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
       mockParseAllowedGoogleDomains.mockReturnValue(["example.com"]);
       mockAuth.mockResolvedValue(null);
 
@@ -341,8 +439,8 @@ describe("SignInPage", () => {
     });
 
     it("does not show hint when no domains are configured", async () => {
-      process.env.AUTH_GOOGLE_ID = "test-id";
-      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      vi.stubEnv("AUTH_GOOGLE_ID", "test-id");
+      vi.stubEnv("AUTH_GOOGLE_SECRET", "test-secret");
       mockParseAllowedGoogleDomains.mockReturnValue([]);
       mockAuth.mockResolvedValue(null);
 

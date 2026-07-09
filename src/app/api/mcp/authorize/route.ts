@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
@@ -75,10 +75,11 @@ export async function GET(req: NextRequest) {
 
   // A stale session needs re-authentication, not a JSON 403 the browser would
   // strand on. Bounce through sign-in like the no-session path above; the
-  // callbackUrl returns here and the second pass has a recent-enough session.
-  // requireRecentSession still fails closed on its unauthorized() paths.
+  // sign-in page's reauth panel refreshes the provider-appropriate freshness
+  // (passkey ceremony or re-sign-in) and returns here via callbackUrl.
+  // The chooser still fails closed on its unauthorized() paths.
   // @stepup id:mcp-authorize-get method:GET
-  const stepUpError = await requireRecentSession(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {
     if (stepUpError.status !== 403) return stepUpError;
     const loginUrl = serverAppUrl("/api/auth/signin");

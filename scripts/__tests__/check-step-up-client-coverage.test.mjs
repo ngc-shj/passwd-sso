@@ -48,6 +48,10 @@ const STEPUP_CALL =
 // class is "returns the 403 code", not "calls one named function").
 const STEPUP_CALL_SESSION =
   "  const stepUp = await requireRecentSession(req); if (stepUp) return stepUp;";
+// A third primitive: the freshness core itself, called directly rather than
+// through one of the wrapper gates above.
+const STEPUP_CALL_FRESHNESS =
+  "  const freshness = await evaluateStepUpFreshness(token); if (freshness !== \"fresh\") return stepUpResponse();";
 
 let root;
 let apiDir;
@@ -315,6 +319,17 @@ describe("check-step-up-client-coverage.sh", () => {
     // returns SESSION_STEP_UP_REQUIRED — must be seen by the guard. Without a
     // marker it fails server completeness, proving the primitive is in the set.
     writeRoute("mcp/authorize", `${STEPUP_CALL_SESSION}\n`); // no marker line
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("SERVER_MARKER_MISSING");
+  });
+
+  it("(ix-freshness) discovers evaluateStepUpFreshness as a gate primitive (SERVER_MARKER_MISSING without a marker)", () => {
+    // A route gated by evaluateStepUpFreshness — the freshness core, called
+    // directly rather than through a wrapper gate — must be seen by the guard.
+    // Without a marker it fails server completeness, proving the primitive is
+    // in the set.
+    writeRoute("mcp/authorize", `${STEPUP_CALL_FRESHNESS}\n`); // no marker line
     const { exitCode, stdout } = runGuard();
     expect(exitCode).toBe(1);
     expect(stdout).toContain("SERVER_MARKER_MISSING");

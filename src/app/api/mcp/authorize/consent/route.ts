@@ -11,7 +11,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
-import { requireRecentSession } from "@/lib/auth/session/step-up";
+import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import {
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   // (an unvalidated redirect_uri in the callback would be an open-redirect vector).
   // The unauthorized() paths (no/absent session) still fail closed immediately.
   // @stepup id:mcp-authorize-consent-post method:POST
-  const stepUpError = await requireRecentSession(req);
+  const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError && stepUpError.status !== 403) return stepUpError;
   const stepUpStale = stepUpError?.status === 403;
 

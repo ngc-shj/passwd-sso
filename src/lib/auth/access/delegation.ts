@@ -128,7 +128,7 @@ export function toAgentFacing(
  * Returns true if the string is safe. Returns false to trigger a 400 at
  * the POST /api/vault/delegation boundary.
  */
-// eslint-disable-next-line no-control-regex -- intentional rejection of control chars
+// Intentional rejection of control characters and invisible/bidi formatting.
 const UNSAFE_METADATA_CHARS_RE =
   /[\x00-\x1F\x7F\u202A-\u202E\u2066-\u2069\u2028\u2029\u200B-\u200D\u2060\uFEFF\u180E]/;
 

@@ -125,7 +125,6 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
     // without that activation. URL param removal is deferred to the click
     // handler so reload reproduces the prompt.
     setStatus(CONNECT_STATUS.AWAITING_CLICK);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Report active/idle to the parent gate so it can defer the vault lock screen

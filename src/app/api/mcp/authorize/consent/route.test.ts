@@ -13,7 +13,7 @@ const {
   mockTxFindFirst,
   mockTxDelete,
   mockExecuteRaw,
-  mockRequireRecentSession,
+  mockRequireRecentCurrentAuthMethod,
   mockDerivePasskeyState,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -28,7 +28,7 @@ const {
   mockTxFindFirst: vi.fn().mockResolvedValue(null),
   mockTxDelete: vi.fn().mockResolvedValue({}),
   mockExecuteRaw: vi.fn().mockResolvedValue(0),
-  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
   mockDerivePasskeyState: vi.fn(),
 }));
 
@@ -107,8 +107,8 @@ vi.mock("@/lib/audit/audit", () => ({
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
 }));
 
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -190,7 +190,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     mockTxDelete.mockResolvedValue({});
     mockMcpClientCount.mockResolvedValue(0);
     mockMcpClientUpdateMany.mockResolvedValue({ count: 1 });
-    mockRequireRecentSession.mockResolvedValue(null);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockCreateAuthorizationCode.mockResolvedValue({
       code: "auth-code-abc123",
       expiresAt: new Date(Date.now() + 60000),
@@ -248,7 +248,7 @@ describe("POST /api/mcp/authorize/consent", () => {
   });
 
   it("redirects to the authorize entry when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
-    mockRequireRecentSession.mockResolvedValue(Response.json(
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },
       { status: 403 },
     ));
@@ -273,6 +273,10 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(url.searchParams.get("state")).toBe(VALID_FORM_FIELDS.state);
     // No credential-issuance work runs on a stale session.
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+    // Gate called with the request ONLY — a custom maxAgeMs here would diverge
+    // from the sign-in page's freshness evaluation and re-open the loop.
+    expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(1);
   });
 
   it("returns 400 when client_id is missing", async () => {

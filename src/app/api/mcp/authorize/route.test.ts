@@ -7,7 +7,7 @@ const {
   mockWithBypassRls,
   mockExtractClientIp,
   mockCheckRateLimit,
-  mockRequireRecentSession,
+  mockRequireRecentCurrentAuthMethod,
   mockLogAuditAsync,
   mockDerivePasskeyState,
 } = vi.hoisted(() => ({
@@ -17,7 +17,7 @@ const {
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
   mockExtractClientIp: vi.fn(() => "203.0.113.10"),
   mockCheckRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
-  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
   mockDerivePasskeyState: vi.fn(),
 }));
@@ -59,8 +59,8 @@ vi.mock("@/i18n/locale-utils", () => ({
   detectBestLocaleFromAcceptLanguage: () => "en",
 }));
 
-vi.mock("@/lib/auth/session/step-up", () => ({
-  requireRecentSession: mockRequireRecentSession,
+vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
+  requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -112,7 +112,7 @@ describe("GET /api/mcp/authorize", () => {
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockCheckRateLimit.mockResolvedValue({ allowed: true });
-    mockRequireRecentSession.mockResolvedValue(null);
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockLogAuditAsync.mockResolvedValue(undefined);
     // Default: passkey enforcement off (does not block).
     mockDerivePasskeyState.mockResolvedValue({
@@ -197,7 +197,7 @@ describe("GET /api/mcp/authorize", () => {
   });
 
   it("redirects to sign-in when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
-    mockRequireRecentSession.mockResolvedValue(Response.json(
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },
       { status: 403 },
     ));
@@ -216,6 +216,10 @@ describe("GET /api/mcp/authorize", () => {
     expect(location).toContain("callbackUrl=");
     // The credential-issuance work below the gate never runs on a stale session.
     expect(mockFindFirst).not.toHaveBeenCalled();
+    // Gate called with the request ONLY — a custom maxAgeMs here would diverge
+    // from the sign-in page's freshness evaluation and re-open the loop.
+    expect(mockRequireRecentCurrentAuthMethod).toHaveBeenCalledTimes(1);
+    expect(mockRequireRecentCurrentAuthMethod.mock.calls[0]).toHaveLength(1);
   });
 
   // ── C6 (GET): Passkey enforcement gate ───────────────────────────────────
