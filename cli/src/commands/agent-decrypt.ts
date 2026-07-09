@@ -231,7 +231,15 @@ export function handleConnection(socket: Socket): void {
               error: `Invalid request: ${parsed.error.issues.map((i: { message: string }) => i.message).join(", ")}`,
             };
           } else {
-            response = await handleDecryptRequest(parsed.data);
+            try {
+              response = await handleDecryptRequest(parsed.data);
+            } catch (err) {
+              // Request-layer failures (server down, revoked login) — not parse errors
+              response = {
+                ok: false,
+                error: `Request failed: ${err instanceof Error ? err.message : "unknown error"}`,
+              };
+            }
           }
         } catch (err) {
           response = {

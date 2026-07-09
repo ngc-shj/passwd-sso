@@ -36,3 +36,14 @@
 - Behavior note: agent-decrypt's not-logged-in error now renders via C1
   (`✗ message`, exit 1) instead of that file's local `process.stderr.write` style —
   consistent with the PR's error contract.
+
+## Phase 3 Round 1 fix (F8) red-proof record
+
+- F8 (Minor, pre-existing in diff-touched file): daemon socket handler labeled
+  apiRequest failures as "Parse error:". Fixed by scoping handleDecryptRequest in
+  its own catch emitting "Request failed: <message>"; JSON.parse/schema keep the
+  "Parse error:" label. New test (last-in-describe, mockRejectedValueOnce) in
+  agent-decrypt-ipc.test.ts.
+- Red-proof: reverted the inner catch (scratchpad backup) → only the new test
+  failed ("Parse error: fetch failed" instead of "Request failed:"); restored
+  byte-identical (diff-verified); suite 14/14 → full 312/312 green.
