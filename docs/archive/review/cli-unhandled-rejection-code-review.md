@@ -1,8 +1,17 @@
 # Code Review: cli-unhandled-rejection
 Date: 2026-07-09
-Review round: 1
+Review rounds: 3 (converged — all experts "No findings")
 
-## Changes from Previous Round
+## Round Summary
+
+| Round | Functionality | Security | Testing | Fix commit |
+|-------|--------------|----------|---------|-----------|
+| 1 | F8 Minor (daemon "Parse error:" mislabel, pre-existing in touched file) | No findings | No findings (3 seed hints rejected with evidence) | `59d087ac` |
+| 2 | No findings (F8 fix verified: nesting, single-respond, shape; independent 312/312 re-run) | No findings (socket disclosure zero-delta; JSON.stringify framing safe; authz semantics unchanged, fail-closed) | No findings (once-impl consumption deterministic; no ordering hazard with T7 chains; red-proof adequate) | — |
+| 2b gate | — | — | pre-pr.sh check-test-hygiene fired (whole-file scan of touched test files): direct env mutations → vi.stubEnv + `unstubEnvs: true` in cli/vitest.config.ts | `46ce45fa` |
+| 3 (testing only) | — | — | No findings (6/6 stub/replace/delete interplay scenarios empirically verified incl. ambient worst case; no test relied on env leakage) | — |
+
+## Round 1 Detail
 Initial code review (on top of the Phase 2 self-R-check baseline, which had already
 surfaced and fixed the R42 class expansion — agent.ts / agent-decrypt.ts
 prompt-before-login — in commit `8e2eaa17`).
@@ -87,6 +96,10 @@ None (all findings carry file/line evidence and concrete fixes).
 - Action: scoped `handleDecryptRequest` in its own catch emitting `Request failed: <message>`; `Parse error:` now covers only the JSON.parse/schema block. Added last-in-describe test with `mockRejectedValueOnce` asserting `Request failed: fetch failed` and NOT `Parse error`.
 - Modified file: cli/src/commands/agent-decrypt.ts (handleConnection IIFE); cli/src/__tests__/integration/agent-decrypt-ipc.test.ts (new case).
 - Red-proof: inner catch reverted → only the new test failed; restored byte-identical; 312/312 green.
+
+### Round 2b test-hygiene gate — Fixed
+- Action: converted direct `process.env.X =` mutations in the two touched test files to `vi.stubEnv` (unlock.test.ts PSSO_PASSPHRASE ×3; agent-decrypt.test.ts XDG_RUNTIME_DIR ×5) and added `unstubEnvs: true` to cli/vitest.config.ts (cli tree previously had no auto-unstub wiring). 312/312 tests + pre-pr 36/36. Round 3 testing review empirically verified hook-interplay safety (6/6 scenarios) and confirmed no test relied on env leakage.
+- Modified files: cli/src/__tests__/unit/unlock.test.ts, cli/src/__tests__/unit/agent-decrypt.test.ts, cli/vitest.config.ts.
 
 ### Testing informational note (isTTY guarded restore) — Accepted
 - **Anti-Deferral check**: acceptable risk.
