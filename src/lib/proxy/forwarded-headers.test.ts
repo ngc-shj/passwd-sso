@@ -30,18 +30,30 @@ afterEach(() => {
 });
 
 describe("normalizeForwardedHeaders — opt-in gate", () => {
-  it("does NOT normalize when TRUST_TAILSCALE_SERVE_HEADERS is unset (fail closed)", () => {
-    vi.stubEnv("TRUST_TAILSCALE_SERVE_HEADERS", "false");
+  function makeTailscaleRequest(): NextRequest {
     vi.stubEnv("AUTH_URL", "https://app.example.com");
-    const req = makeRequest("https://localhost:3001/foo", {
+    return makeRequest("https://localhost:3001/foo", {
       host: "app.example.com",
       "x-forwarded-host": "app.example.com",
       "x-forwarded-port": "3001",
       "x-forwarded-proto": "https",
       ...TAILSCALE_HEADERS,
     });
+  }
+
+  it("does NOT normalize when TRUST_TAILSCALE_SERVE_HEADERS is \"false\" (fail closed)", () => {
+    vi.stubEnv("TRUST_TAILSCALE_SERVE_HEADERS", "false");
+    const req = makeTailscaleRequest();
     // Even with valid Tailscale headers, a forged header must not force the
     // canonical rewrite when the operator has not opted in.
+    expect(normalizeForwardedHeaders(req)).toBe(req);
+  });
+
+  it("does NOT normalize when TRUST_TAILSCALE_SERVE_HEADERS is genuinely unset (default fail closed)", () => {
+    // The file-wide beforeEach stubs "true"; delete the var so the true
+    // default-absent path (not just the "false" string) is exercised.
+    vi.stubEnv("TRUST_TAILSCALE_SERVE_HEADERS", undefined);
+    const req = makeTailscaleRequest();
     expect(normalizeForwardedHeaders(req)).toBe(req);
   });
 });

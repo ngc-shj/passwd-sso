@@ -155,6 +155,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe("UNAUTHORIZED");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("returns 403 when no tenant", async () => {
@@ -163,6 +164,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("NO_TENANT");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {
@@ -170,6 +172,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("returns 400 INVALID_JSON for malformed JSON body", async () => {
@@ -279,6 +282,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe("MCP_TOKEN_NOT_FOUND");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("returns 403 when MCP token lacks delegation scope", async () => {
@@ -323,6 +327,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("DELEGATION_ENTRIES_NOT_FOUND");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("auto-revokes existing delegation session for same token", async () => {

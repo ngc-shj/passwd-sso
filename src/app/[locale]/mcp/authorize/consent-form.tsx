@@ -160,7 +160,7 @@ export function ConsentForm({
             </p>
           </div>
           {isDcr && (
-            <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500 bg-amber-50 p-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>{t("dcrWarning")}</span>
             </div>

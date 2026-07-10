@@ -902,7 +902,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", targetHint: { id: "user" } },
-        { tab: { id: 1, url: "https://example.com/login" } },
+        { tab: { id: 1, url: "https://example.com/login" }, url: "https://example.com/login" },
         (resp) => resolve(resp),
       );
     });
@@ -983,7 +983,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "id-1" },
-        { tab: { id: 1, url: "https://any-site.example/checkout" } },
+        { tab: { id: 1, url: "https://any-site.example/checkout" }, url: "https://any-site.example/checkout" },
         (resp) => resolve(resp),
       );
     });
@@ -1006,7 +1006,9 @@ describe("background message flow", () => {
 
   // ── S4: origin re-binding for content-driven LOGIN fills ──
 
-  const stubLoginFetch = (overviewHost: string) => {
+  const stubLoginFetch = (
+    overview: Record<string, unknown> = { username: "alice", urlHost: "example.com" },
+  ) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -1048,13 +1050,17 @@ describe("background message flow", () => {
         return { ok: false, json: async () => ({}) };
       }),
     );
+    // Reset the once-queue: vi.clearAllMocks() (beforeEach) does not clear
+    // mockResolvedValueOnce values, and the sender-host fail-closed tests
+    // reject before consuming their two decrypts, leaving stale queue entries.
+    cryptoMocks.decryptData.mockReset();
     cryptoMocks.decryptData
       .mockResolvedValueOnce(JSON.stringify({ password: "secret", username: "alice" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice", urlHost: overviewHost }));
+      .mockResolvedValueOnce(JSON.stringify(overview));
   };
 
   it("rejects a content-driven LOGIN fill when the sender host does not match the entry host", async () => {
-    stubLoginFetch("example.com");
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
@@ -1062,7 +1068,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
-        { tab: { id: 1, url: "https://attacker.example/phish" } },
+        { tab: { id: 1, url: "https://attacker.example/phish" }, url: "https://attacker.example/phish" },
         (resp) => resolve(resp),
       );
     });
@@ -1078,8 +1084,8 @@ describe("background message flow", () => {
     expect(fillCall).toBeUndefined();
   });
 
-  it("rejects a content-driven fill when the sender tab has no resolvable URL", async () => {
-    stubLoginFetch("example.com");
+  it("rejects a content-driven fill when the sender frame has no resolvable URL", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
@@ -1087,7 +1093,36 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
-        { tab: { id: 1 } },
+        { tab: { id: 1, url: "https://example.com/login" } },
+        (resp) => resolve(resp),
+      );
+    });
+    // No `_sender.url` (frame origin) → fail closed even though the top tab URL
+    // matches: the fill is gated on the originating frame, not the top page.
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+  });
+
+  it("re-binds to the sender FRAME origin, not the top-tab host", async () => {
+    // Cross-origin subframe (attacker.example) embedded in a top page whose
+    // host matches the entry (example.com). Binding to the frame origin must
+    // reject even though the top-tab URL would match.
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://attacker.example/iframe",
+          frameId: 9,
+        },
         (resp) => resolve(resp),
       );
     });
@@ -1096,6 +1131,56 @@ describe("background message flow", () => {
       ok: false,
       error: "ORIGIN_MISMATCH",
     });
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+    expect(fillCall).toBeUndefined();
+  });
+
+  it("rejects a LOGIN fill when the entry overview has no host at all (fail closed)", async () => {
+    stubLoginFetch({ username: "alice" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+  });
+
+  it("accepts a content-driven LOGIN fill matched via additionalUrlHosts", async () => {
+    stubLoginFetch({
+      username: "alice",
+      urlHost: "primary.example",
+      additionalUrlHosts: ["example.com"],
+    });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
   });
 });
 

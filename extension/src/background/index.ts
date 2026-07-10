@@ -2474,14 +2474,18 @@ async function handleMessage(
         }
         // C8: deliver card/identity plaintext only to the originating frame.
         const frameId = _sender.frameId;
-        // Re-bind LOGIN password release to the sender tab's host — the entryId
-        // came from an untrusted content script (host filtering in the content
-        // dropdown is not a security boundary). Fail closed if the sender host
-        // is unknown: a content-driven fill with no resolvable origin must not
+        // Re-bind LOGIN password release to the SENDER FRAME's host — the
+        // entryId came from an untrusted content script (host filtering in the
+        // content dropdown is not a security boundary). Use `_sender.url` (the
+        // browser-set document URL of the frame identified by `_sender.frameId`)
+        // rather than `_sender.tab.url` (the top-level tab URL): content scripts
+        // run in all frames, so a cross-origin subframe's fill must be checked
+        // against that subframe's own origin, and a legitimate login form inside
+        // a cross-origin iframe (embedded SSO/payment widgets) must match on its
+        // frame host, not the top page's. Fail closed if the frame origin is
+        // unknown: a content-driven fill with no resolvable origin must not
         // release a password.
-        const senderHost = _sender.tab?.url
-          ? extractHost(_sender.tab.url)
-          : null;
+        const senderHost = _sender.url ? extractHost(_sender.url) : null;
         if (!senderHost) {
           sendResponse({
             type: EXT_MSG.AUTOFILL_FROM_CONTENT,
