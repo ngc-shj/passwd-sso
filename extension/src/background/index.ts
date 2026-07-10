@@ -1509,6 +1509,14 @@ async function performAutofillForEntry(
     additionalUrlHosts?: string[] | null;
   };
 
+  // Hosts this entry is bound to. Sent to the content script so each frame can
+  // self-verify its origin before writing the password (a popup/context-menu
+  // fill has no known frameId and is broadcast to every frame).
+  const entryHosts = [
+    overview.urlHost ?? "",
+    ...(overview.additionalUrlHosts ?? []),
+  ].filter((h): h is string => typeof h === "string" && h.length > 0);
+
   // Origin re-binding for content-driven fills: when the caller does not trust
   // the entryId's origin (content-script path), a LOGIN password must only be
   // released to a page whose host matches the entry's own host(s). This mirrors
@@ -1519,10 +1527,6 @@ async function performAutofillForEntry(
     typeof enforceSenderHost === "string" &&
     entryType === EXT_ENTRY_TYPE.LOGIN
   ) {
-    const entryHosts = [
-      overview.urlHost ?? "",
-      ...(overview.additionalUrlHosts ?? []),
-    ].filter((h): h is string => typeof h === "string" && h.length > 0);
     const matches = entryHosts.some((h) => isHostMatch(h, enforceSenderHost));
     if (!matches) {
       return { ok: false, error: "ORIGIN_MISMATCH" };
@@ -1652,6 +1656,9 @@ async function performAutofillForEntry(
       ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
+      // Frame-origin gate for the tab-wide (popup) broadcast: each frame fills
+      // only if it is the top frame or its own origin matches one of these.
+      ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
     });
     messageFillSucceeded = true;
   } catch {

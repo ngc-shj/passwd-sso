@@ -239,7 +239,44 @@ function findOtpInput(inputs) {
   );
 }
 
+// Host matching — kept byte-equivalent to src/lib/url-matching.ts. The SW
+// broadcasts AUTOFILL_FILL to every frame for popup/context-menu fills, so each
+// frame self-verifies its origin before writing the credential; this blocks a
+// cross-origin third-party iframe from ever filling the decrypted password.
+function autofillNormalizeHost(host) {
+  return host.replace(/^www\./i, "").toLowerCase();
+}
+
+function autofillExtractHost(url) {
+  try {
+    var parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return autofillNormalizeHost(parsed.hostname);
+  } catch (e) {
+    return null;
+  }
+}
+
+function autofillHostMatch(entryHost, frameHost) {
+  var e = autofillNormalizeHost(entryHost);
+  var t = autofillNormalizeHost(frameHost);
+  if (e === t) return true;
+  return t.endsWith("." + e);
+}
+
+function isFrameAllowedToFill(allowedHosts) {
+  if (window.top === window.self) return true;
+  var frameHost = autofillExtractHost(window.location.href);
+  if (!frameHost) return false;
+  return (allowedHosts || []).some(function (h) {
+    return autofillHostMatch(h, frameHost);
+  });
+}
+
 function performAutofill(payload) {
+  // Frame-origin gate: never write the credential into a cross-origin subframe.
+  if (!isFrameAllowedToFill(payload.allowedHosts)) return;
+
   var inputs = Array.from(document.querySelectorAll("input"));
   var hintedInput =
     (payload.targetHint && payload.targetHint.id

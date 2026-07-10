@@ -1209,6 +1209,69 @@ describe("background message flow", () => {
     );
     expect(fillCall).toBeDefined();
     expect(fillCall?.[2]).toEqual({ frameId: 7 });
+    // The entry's hosts ride along so the receiving frame can self-verify origin.
+    expect((fillCall?.[1] as { allowedHosts?: string[] }).allowedHosts).toEqual([
+      "example.com",
+    ]);
+  });
+
+  it("direct-injection fallback is frame-scoped for a content-driven fill", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // Force the message path to fail so the executeScript fallback runs.
+    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error("no connection"));
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+          frameId: 7,
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    // Fallback injection must target ONLY the originating frame, never all frames.
+    const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (c: unknown[]) => "args" in (c[0] as object),
+    );
+    expect(injectCall?.[0]?.target).toEqual({ tabId: 1, frameIds: [7] });
+  });
+
+  it("direct-injection fallback stays top-frame-only for a popup fill (no frameId, fail-safe)", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error("no connection"));
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      // Popup/context-menu sender: a tab + matching frame origin but no frameId.
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    // With no known frame, the decrypted credential must NOT be injected into
+    // every frame ({ allFrames: true }) — that would deliver it to a
+    // cross-origin third-party iframe. Fail safe to the top frame only.
+    const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (c: unknown[]) => "args" in (c[0] as object),
+    );
+    expect(injectCall?.[0]?.target).toEqual({ tabId: 1 });
   });
 });
 
