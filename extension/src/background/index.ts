@@ -1411,15 +1411,23 @@ async function performAutofillForEntry(
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
-  // Inline path supplies the originating frame so card/identity plaintext is
-  // delivered only to that frame. Popup/context-menu callers pass no frameId —
-  // keep tab-wide behavior (do NOT substitute frame 0, which would break
-  // same-origin-subframe popup fills).
+  // executeScript target for direct injection (CC/Identity file injection and
+  // the LOGIN fallback). When the originating frame is known (content-driven),
+  // scope to it. When it is unknown (popup/context-menu), inject into the TOP
+  // FRAME ONLY — `{ tabId }` with neither `frameIds` nor `allFrames` targets
+  // frame 0, not the whole tab. Do NOT "restore" `allFrames: true` here: that
+  // would inject the decrypted credential into every frame, including a
+  // cross-origin third-party iframe, where its page JS could read the filled
+  // value. Legitimate iframe fills go through the message path below, which the
+  // content-side per-frame origin gate (allowedHosts) makes safe.
   const hasFrameTarget = typeof frameId === "number";
   const executeTarget = hasFrameTarget
     ? { tabId, frameIds: [frameId] }
     : { tabId };
-  // chrome.tabs.sendMessage's options overload rejects `undefined`; only pass
+  // AUTOFILL_FILL message target. Frame-scoped when the frame is known; for
+  // popup/context-menu (no frameId) it broadcasts tab-wide — safe because each
+  // frame self-verifies its origin against allowedHosts before filling.
+  // chrome.tabs.sendMessage's options overload rejects `undefined`, so only pass
   // frame-targeting options when an originating frame is known.
   const sendFillMessage = (payload: unknown): Promise<unknown> =>
     hasFrameTarget
