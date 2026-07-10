@@ -50,6 +50,7 @@ export function useTeamEntryMutations<T extends { id: string }>({
     async (id: string) => {
       setEntries((prev) => prev.filter((e) => e.id !== id));
       try {
+        // @stepup-path-ok id:team-password-id-delete-permanent this is the soft-delete (trash) DELETE with no ?permanent=true suffix — not the step-up-gated permanent-delete call, which is a separate call site in team-vault-list-adapter.ts
         const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
           method: "DELETE",
         });

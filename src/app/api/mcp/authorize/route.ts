@@ -78,6 +78,7 @@ export async function GET(req: NextRequest) {
   // sign-in page's reauth panel refreshes the provider-appropriate freshness
   // (passkey ceremony or re-sign-in) and returns here via callbackUrl.
   // The chooser still fails closed on its unauthorized() paths.
+  // @browser-redirect-recovery
   // @stepup id:mcp-authorize-get method:GET
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {

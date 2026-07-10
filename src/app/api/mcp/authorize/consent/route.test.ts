@@ -247,6 +247,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
+  // @browser-redirect-recovery-test
   it("redirects to the authorize entry when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },

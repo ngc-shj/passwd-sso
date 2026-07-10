@@ -219,6 +219,7 @@ describe("GET /api/mobile/authorize", () => {
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
+  // @browser-redirect-recovery-test
   it("redirects to sign-in when session step-up is required (stale session, not a JSON 403 dead-end)", async () => {
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
       { error: "SESSION_STEP_UP_REQUIRED" },

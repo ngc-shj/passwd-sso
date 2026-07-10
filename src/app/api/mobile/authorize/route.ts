@@ -128,6 +128,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // refreshes the provider-appropriate freshness (passkey ceremony or
   // re-sign-in) and returns here via callbackUrl. The chooser still fails
   // closed on the unauthorized() paths (no/absent session row).
+  // @browser-redirect-recovery
   // @stepup id:mobile-authorize-get method:GET
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {

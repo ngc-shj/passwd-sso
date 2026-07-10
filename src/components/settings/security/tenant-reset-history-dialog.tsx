@@ -172,6 +172,7 @@ export function TenantResetHistoryDialog({
     setApproveError(null);
     try {
       // @stepup id:reset-vault-approve
+      // @stepup-path-ok id:reset-vault-post this call builds the /approve suffix onto the same base helper as reset-vault-post's bare call, but it is the reset-vault-approve route (already marked above), not the initiate-reset POST
       const res = await fetchApi(
         `${apiPath.tenantMemberResetVault(userId)}/${approveTarget.id}/approve`,
         { method: "POST", headers: { "Content-Type": "application/json" } },
