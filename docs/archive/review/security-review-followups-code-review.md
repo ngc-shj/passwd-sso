@@ -100,3 +100,34 @@ R43: PASS with delta — S1 narrows a boundary (no widening); S2 marker moves by
 
 ## Convergence
 Round 2 introduced S4 (Minor, fixed in-round). A Round 3 verifies the S4 fix.
+
+---
+
+# Round 3 (incremental — S4 fix verification + class-convergence)
+Date: 2026-07-11
+
+## Changes from Previous Round
+Reviewed the Round-2 fix (5f00a7cd). Security expert ran the guard-soundness convergence check per triangulate Step 3-8 (the browser-redirect anchor class expanded twice: S2 → S4, so "no findings" alone is not a sufficient stop — the guard itself must be sound).
+
+## Security Findings (Round 3)
+No findings. S4 fix sound: guard exit 0 on real tree (all 3 routes single-line calls 0-1 lines from marker); 29/29 self-tests incl. (xii-block-decoy). R43 clean (guard-only diff, zero production code). Two remaining theoretical bypass shapes adversarially enumerated:
+- interior line of a multi-line `/* */` block comment with no leading `*` — grep proves ZERO occurrences in any route.ts (JSDoc star-continuation is 100% consistent); documented inline in the script; backstopped by the independent `@browser-redirect-recovery-test` sibling-test contract.
+- regex substring match (`myredirect(` sharing the suffix) — grep proves ZERO such identifiers in any route.ts.
+Both accepted as out-of-scope with worst-case/likelihood/cost recorded (see the JSON residuals block in the round-3 raw output).
+
+**Guard-soundness class (S2 → S4) declared CLOSED** — no third expansion materialized under adversarial enumeration; residuals empirically absent + test-contract-backstopped.
+
+## Orchestrator convergence hardening (belt-and-suspenders)
+The round-3 optional low-cost hardening (word-boundary anchor) was applied to remove the substring-match residual structurally rather than only documenting it: the call regex is now `(^|[^A-Za-z0-9_])redirect(ToSignIn)?\(` so a foreign identifier ending in `redirect(` cannot spoof a real call (`NextResponse.redirect(` still matches — `.` is a boundary). Fixture `(xii-substring-decoy)` pins `myredirect(` as a FAIL. 30/30 self-tests, guard exit 0.
+
+## Recurring Issue Check (Round 3)
+- R43: PASS — guard-only, no production code touched.
+- R42-①b (class-expansion convergence): the twice-expanded browser-redirect anchor class is CLOSED. The guard is mutation-verified red-capable for every decoy shape encountered (// , trailing-comment, single-line /* */, foreign-substring), wired into pre-pr.sh + CI static-checks. The one remaining shape (multi-line block-comment interior) is empirically absent (grep 0) and test-contract-backstopped — documented, not silently open.
+
+## Resolution Status (Round 3)
+### Convergence hardening — substring-match residual
+- Action: added a left word-boundary to the anchor call regex; added `(xii-substring-decoy)` fixture (FAILs on `myredirect(`). Guard exit 0; self-tests 30/30.
+- Modified: `scripts/checks/check-step-up-client-coverage.sh`, `scripts/__tests__/check-step-up-client-coverage.test.mjs`
+
+## Final Convergence
+Phase 3 converged after 3 rounds: R1 (2 Minor S1/S2 fixed), R2 (1 Minor S4 fixed), R3 (0 findings, class CLOSED + belt-and-suspenders hardening). All findings resolved; guard-soundness class mechanically closed and mutation-verified.

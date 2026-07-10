@@ -595,6 +595,36 @@ describe("check-step-up-client-coverage.sh", () => {
     expect(stdout).toContain("BROWSER_REDIRECT_RECOVERY_MISSING");
   });
 
+  it("(xii-substring-decoy) FAILS (BROWSER_REDIRECT_RECOVERY_MISSING): a foreign identifier ending in 'redirect(' does not spoof a real call", () => {
+    writePathsManifest({
+      "mcp-authorize-get": { method: "GET", pathTokens: ["/api/mcp/authorize"] },
+    });
+    // `myredirect(` shares the suffix `redirect(` but is a different function;
+    // the left word-boundary must reject it (belt-and-suspenders after S4).
+    writeRoute(
+      "mcp/authorize",
+      [
+        "// @stepup id:mcp-authorize-get method:GET",
+        STEPUP_CALL_SESSION,
+        "// @browser-redirect-recovery",
+        "return myredirect(req);",
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(apiDir, "mcp/authorize", "route.test.ts"),
+      "// @browser-redirect-recovery-test\nit('redirects to sign-in', () => {});\n",
+      "utf8",
+    );
+    writeFileSync(
+      exemptFile,
+      "mcp-authorize-get  @browser-redirect  # OAuth authorize GET reached by browser navigation, redirects to sign-in\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("BROWSER_REDIRECT_RECOVERY_MISSING");
+  });
+
   it("(xii-redirectToSignIn) PASSES: marker anchored by a redirectToSignIn() call within +/-3 lines", () => {
     writePathsManifest({
       "mcp-authorize-get": { method: "GET", pathTokens: ["/api/mcp/authorize"] },

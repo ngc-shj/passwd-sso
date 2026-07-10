@@ -400,7 +400,9 @@ while IFS= read -r line; do
           if (stripped ~ /^(\/\/|\*|\/\*)/) next
           gsub(/\/\*.*\*\//,"",line)
           sub(/\/\/.*/,"",line)
-          if (line ~ /redirect(ToSignIn)?\(/) found=1
+          # Left word-boundary so a foreign identifier ending in the token
+          # (myredirect(, fooRedirectToSignIn() cannot spoof a real call.
+          if (line ~ /(^|[^A-Za-z0-9_])redirect(ToSignIn)?\(/) found=1
         }
         END{exit !found}' "$route_abs"; then
       echo "BROWSER_REDIRECT_RECOVERY_MISSING: $route_rel:$recovery_line — '@browser-redirect-recovery' marker has no redirect( / redirectToSignIn( CALL on a non-comment line within 3 lines; the marker must anchor the actual conversion, not a decoy comment mentioning the word."
