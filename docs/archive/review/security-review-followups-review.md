@@ -87,7 +87,7 @@ None flagged (merge-findings quality gate: all findings carry file/line evidence
 - R36: N/A. R37: N/A (confirmed no messages/*.json in contracts). R38: N/A. R39: N/A.
 - R40: Checked — no issue (C6 additive optional internal field; C5 manifest consumed by fs/JSON.parse test).
 - R41: N/A.
-- R42: Checked — recomputed member-sets for C2/C3 (@browser-redirect + step-up ids), C4 (CSV regex sites incl. extension/iOS absence), C5 (workers/entrypoints/definer migrations) — all matched. One numeric claim (fetchApi "181") did not reconcile → F1 (Minor).
+- R42: Checked — recomputed member-sets for C2/C3 (`@browser-redirect` + step-up ids), C4 (CSV regex sites incl. extension/iOS absence), C5 (workers/entrypoints/definer migrations) — all matched. One numeric claim (fetchApi "181") did not reconcile → F1 (Minor).
 
 ### Security expert
 - R1: Checked — no issue (C4 reuses SSoT regex via shared import; no new parallel escaper).

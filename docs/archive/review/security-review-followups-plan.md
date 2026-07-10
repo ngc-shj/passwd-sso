@@ -1,10 +1,10 @@
 # Plan: security-review-followups
 
-Branch: `fix/security-review-followups` (off main @ `baa24794`, PR #651 merged)
+Branch: `fix/security-review-followups` (off main @ `baa24794`, PR `#651` merged)
 
 One follow-up PR closing ALL remaining findings from the 2026-07 adversarial
-security review of PR #651 (reviewer priorities P1–P5 / finding ids F1, F2, F5,
-F6, F7, F8, plus operator-docs item P5). F3/F4 were accepted inside #651 and
+security review of PR `#651` (reviewer priorities P1–P5 / finding ids F1, F2, F5,
+F6, F7, F8, plus operator-docs item P5). F3/F4 were accepted inside `#651` and
 are NOT in scope.
 
 ## Project context
@@ -20,7 +20,7 @@ are NOT in scope.
 
 Close the six code findings + one docs finding in one PR, each with
 mutation-capable tests/guards, without behavior regressions to the flows fixed
-in PR #651 (CSV export→import round-trip fidelity, MCP replay revocation,
+in PR `#651` (CSV export→import round-trip fidelity, MCP replay revocation,
 step-up guard green on current tree).
 
 ## Requirements
@@ -58,7 +58,7 @@ field + audit metadata change, and docs prose.
   - I1: `cache.size <= MAX_CACHE_ENTRIES` after every insert.
   - I2: an insert at cap evicts oldest-inserted entries only; most-recently-inserted non-expired entries survive.
 - Forbidden patterns:
-  - pattern: `cache.clear()` in `src/app/api/watchtower/hibp/route.ts` — reason: the wholesale-reset class this contract removes (same class as the rate-limit memory-fallback fix in #651).
+  - pattern: `cache.clear()` in `src/app/api/watchtower/hibp/route.ts` — reason: the wholesale-reset class this contract removes (same class as the rate-limit memory-fallback fix in `#651`).
 - Acceptance criteria:
   - AC1: route test — fill the cache to the real `MAX_CACHE_ENTRIES` (5,000) by looping mocked requests (auth/rate-limit/fetch all mocked; no production test seam is added — the constant stays module-private), then insert one more entry E to trigger eviction. Assert: (a) the OLDEST filled prefix now misses (refetches upstream), AND (b) a prefix filled just BEFORE E (e.g. the 5,000th of the fill loop — a pre-capping-insert entry, NOT E itself) still hits with zero upstream `fetch` calls (RT8 negative assertion). Rationale (review T1): eviction runs before `cache.set`, so E itself survives under BOTH FIFO and `cache.clear()` — only a pre-existing entry's survival discriminates the two. If the 5k loop proves too slow in practice (>~5 s), the fallback seam is an env-var override read once at module load — decision recorded in the deviation log.
   - AC2: mutation-capable — reverting the eviction block to `cache.clear()` makes AC1's assertion (b) fail (the pre-capping entry is wiped). Prove once locally by temporary mutation; record in the review log.
@@ -68,7 +68,7 @@ field + audit metadata change, and docs prose.
 #### C2 — `@browser-redirect` exemption hardening (F1/P2)
 
 - Files: `scripts/checks/check-step-up-client-coverage.sh`, `scripts/checks/stepup-client-exempt.txt`, the 3 exempt route files + their sibling `route.test.ts`, `scripts/__tests__/check-step-up-client-coverage.test.mjs`.
-- Member-set (R42, code-derived): `grep -n '@browser-redirect' scripts/checks/stepup-client-exempt.txt` → `mcp-authorize-get` (`src/app/api/mcp/authorize/route.ts`), `mcp-authorize-consent-post` (`src/app/api/mcp/authorize/consent/route.ts`), `mobile-authorize-get` (`src/app/api/mobile/authorize/route.ts`). The guard change is generic over ANY current or future `@browser-redirect` entry — the set is re-derived by the guard at run time, not frozen to these 3. (Phase 2 confirms exact route file paths via the guard's own server-id→file mapping.)
+- Member-set (R42, code-derived): `grep -n '`@browser-redirect`' scripts/checks/stepup-client-exempt.txt` → `mcp-authorize-get` (`src/app/api/mcp/authorize/route.ts`), `mcp-authorize-consent-post` (`src/app/api/mcp/authorize/consent/route.ts`), `mobile-authorize-get` (`src/app/api/mobile/authorize/route.ts`). The guard change is generic over ANY current or future `@browser-redirect` entry — the set is re-derived by the guard at run time, not frozen to these 3. (Phase 2 confirms exact route file paths via the guard's own server-id→file mapping.)
 - Design:
   1. During the server-marker scan, record an `id → route-file` map (the guard already visits each gated call line; retain the file path).
   2. For each exempt entry whose marker is `@browser-redirect`:
@@ -104,7 +104,7 @@ field + audit metadata change, and docs prose.
 - Forbidden patterns:
   - pattern: `"pathTokens": []` in `stepup-route-paths.json` — reason: an empty binding vacuously satisfies completeness while detecting nothing.
 - Acceptance criteria:
-  - AC1: manifest covers all current server ids (guard-verified); guard green on current tree — all current call sites are already marked (45-member class wired in PR #644), so the detector must produce zero findings; any hit is either a real pre-existing gap (fix it) or a detector false positive (fix the detector or suppress with reason — decision recorded in the deviation log per case).
+  - AC1: manifest covers all current server ids (guard-verified); guard green on current tree — all current call sites are already marked (45-member class wired in PR `#644`), so the detector must produce zero findings; any hit is either a real pre-existing gap (fix it) or a detector false positive (fix the detector or suppress with reason — decision recorded in the deviation log per case).
   - AC2: fixtures — `MANIFEST_ID_MISSING`, `MANIFEST_ID_STALE`, and `UNMARKED_CALLSITE_CANDIDATE` each proven able to fire (RT7).
 - Consumer-flow walkthrough: manifest consumer is the guard (check 5/6 read `id`, `method`, `pathTokens` — all present in the locked shape). No runtime consumer.
 
@@ -215,7 +215,7 @@ field + audit metadata change, and docs prose.
 | ID  | Subject                                                        | Status |
 |-----|----------------------------------------------------------------|--------|
 | C1  | HIBP cache bounded FIFO eviction                               | locked |
-| C2  | @browser-redirect exemption hardening (guard + markers)        | locked |
+| C2  | `@browser-redirect` exemption hardening (guard + markers)        | locked |
 | C3  | Step-up id↔path manifest + new-call-site detector              | locked |
 | C4  | CSV leading-whitespace trigger (app + CLI + round-trip)        | locked |
 | C5  | Worker policy manifest + enforcement test                      | locked |
@@ -244,7 +244,7 @@ Locked 2026-07-11 after 3 review rounds (7 findings R1 → 1 R2 → 0 R3; see se
 - SC1: Full per-call-site path resolution for step-up client coverage (raw template literals, prop-indirection) — out of scope; residual documented in guard header. Owner: future escalation noted in `check-step-up-client-coverage.sh` KNOWN LIMITATIONS.
 - SC2: HIBP cache Redis migration — out of scope; existing `TODO` comment in `hibp/route.ts` owns it.
 - SC3: Runtime/behavioral enforcement of worker doc fields (idempotency proofs, retry integration tests) — out of scope; C5 governs by manifest + review, same trust level as route manifest `handlerAuthReason`.
-- SC4: Per-tenant tailnet WhoIs verification on the Edge path — out of scope (architecturally impossible in Edge runtime; accepted boundary per #651 S5); C7 documents it.
+- SC4: Per-tenant tailnet WhoIs verification on the Edge path — out of scope (architecturally impossible in Edge runtime; accepted boundary per `#651` S5); C7 documents it.
 - SC5: Audit emission for `revoked`/`expired`/`not_found` refresh outcomes — out of scope; today's route only audits replay/concurrent-rotation and this PR does not widen audit surface.
 
 ## User operation scenarios
