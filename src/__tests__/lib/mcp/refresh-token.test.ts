@@ -438,6 +438,9 @@ describe("exchangeRefreshToken", () => {
     expect(result.reason).toBe("concurrent_rotation_revoked");
     expect(result.tenantId).toBe(VALID_RT.tenantId);
     expect(result.familyId).toBe(VALID_RT.familyId);
+    // Forensic attribution: the race-lost outcome carries the token-row-derived
+    // client id (same contract as the replay outcome — F8/C6).
+    expect(result.storedClientId).toBe(VALID_RT.mcpClient.clientId);
 
     // Phase 2 family revocation fired in a separate transaction.
     expect(mockRefreshFindMany).toHaveBeenCalledWith(
