@@ -4,12 +4,13 @@ import type { CsvFormat, ParsedEntry } from "@/components/passwords/import/passw
 
 /**
  * Reverses the CSV formula-injection guard applied on export (see
- * `escapeCsvCompat`): a cell whose value begins with a trigger char is exported
- * prefixed with a single quote. Strip that quote on import so an export→import
- * round-trip preserves the original value (e.g. a password `-p@ss` is exported
- * as `'-p@ss` and must import back as `-p@ss`). The rare cost is that a value a
- * user genuinely typed as `'=x` loses its leading quote — accepted to keep
- * credential round-trips lossless.
+ * `escapeCsvCompat`): a cell whose value begins with a trigger char (optionally
+ * preceded by whitespace, e.g. `  =x` or `\n=x`) is exported prefixed with a
+ * single quote. Strip that quote on import so an export→import round-trip
+ * preserves the original value (e.g. a password `-p@ss` is exported as
+ * `'-p@ss` and must import back as `-p@ss`). The rare cost is that a value a
+ * user genuinely typed as `'=x` (or `'  =x`) loses its leading quote —
+ * accepted to keep credential round-trips lossless.
  */
 function stripCsvFormulaGuard(value: string): string {
   if (value.startsWith("'") && CSV_FORMULA_TRIGGER_RE.test(value.slice(1))) {

@@ -202,7 +202,7 @@ describe("parseCsvLine", () => {
 // ─── CSV formula-guard round-trip (F2 regression) ────────────
 
 describe("CSV export→import round-trip preserves symbol-leading values", () => {
-  it.each(["-p@ssw0rd!", "=1+1", "+15551234567", "@handle"])(
+  it.each(["-p@ssw0rd!", "=1+1", "+15551234567", "@handle", "  =2+5"])(
     "round-trips a password of %j losslessly",
     (password) => {
       const entry = {
@@ -227,6 +227,34 @@ describe("CSV export→import round-trip preserves symbol-leading values", () =>
       expect(row[pwIdx]).toBe(password);
     }
   );
+
+  it("round-trips a password with a leading newline losslessly", () => {
+    // "\n=cmd" quote-wraps with an embedded literal newline (escapeCsvCompat
+    // quotes on `includes("\n")`), so the row must be split via splitCsvRows
+    // (RFC 4180 quote-aware) rather than a naive csv.split("\n").
+    const password = "\n=cmd";
+    const entry = {
+      entryType: ENTRY_TYPE.LOGIN,
+      title: "site",
+      username: "alice",
+      password,
+      content: null,
+      url: "https://example.com",
+      notes: "",
+      totp: "",
+    } as unknown as ExportEntry;
+    const csv = formatExportCsv([entry], "compatible", {
+      includeReprompt: false,
+      includeRequireRepromptInPasswdSso: false,
+      includePasskeyType: false,
+      includePasskeyFieldsInPasswdSso: false,
+    });
+    const rows = splitCsvRows(csv);
+    const header = parseCsvLine(rows[0]);
+    const row = parseCsvLine(rows[1]);
+    const pwIdx = header.indexOf("login_password");
+    expect(row[pwIdx]).toBe(password);
+  });
 });
 
 // ─── parseCsv ────────────────────────────────────────────────

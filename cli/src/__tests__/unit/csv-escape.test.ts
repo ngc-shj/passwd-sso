@@ -44,4 +44,33 @@ describe("escapeCsvCompat (CLI)", () => {
     expect(CSV_FORMULA_TRIGGER_RE.test("=a")).toBe(true);
     expect(CSV_FORMULA_TRIGGER_RE.test("a=b")).toBe(false);
   });
+
+  it("neutralizes a formula-triggering cell with leading whitespace", () => {
+    const out = escapeCsvCompat("  =HYPERLINK(...)");
+    expect(out).toBe("\"'  =HYPERLINK(...)\"");
+  });
+
+  it("neutralizes a leading tab-space mix before a trigger char", () => {
+    const out = escapeCsvCompat("\t =cmd");
+    expect(out).toBe("\"'\t =cmd\"");
+  });
+
+  it("neutralizes a leading newline before a trigger char", () => {
+    const out = escapeCsvCompat("\n=cmd");
+    expect(out).toBe('"\'\n=cmd"');
+  });
+
+  it("leaves an interior trigger char (not leading) unprefixed and unquoted", () => {
+    expect(escapeCsvCompat("a =b")).toBe("a =b");
+  });
+
+  it("CSV_FORMULA_TRIGGER_RE matches leading whitespace before a trigger char", () => {
+    expect(CSV_FORMULA_TRIGGER_RE.test("  =a")).toBe(true);
+    expect(CSV_FORMULA_TRIGGER_RE.test("\n=a")).toBe(true);
+  });
+
+  it("CSV_FORMULA_TRIGGER_RE does not match a non-triggering leading run", () => {
+    expect(CSV_FORMULA_TRIGGER_RE.test("a=b")).toBe(false);
+    expect(CSV_FORMULA_TRIGGER_RE.test("  a")).toBe(false);
+  });
 });
