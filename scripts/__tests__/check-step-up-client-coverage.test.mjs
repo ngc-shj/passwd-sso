@@ -35,8 +35,10 @@
  *         (BROWSER_REDIRECT_RECOVERY_MISSING)
  *   (xii) @browser-redirect-recovery marker present but no redirect( call    → FAIL
  *         within +/-3 lines (BROWSER_REDIRECT_RECOVERY_MISSING, unanchored)
- *   (xii-decoy) marker anchored only by a decoy comment mentioning           → FAIL
+ *   (xii-decoy) marker anchored only by a // decoy comment mentioning         → FAIL
  *         "redirect" with no real call (the S2 bypass)
+ *   (xii-block-decoy) marker anchored only by a C-style block-comment decoy   → FAIL
+ *         mentioning redirect( with no real call (the S4 bypass)
  *   (xii-redirectToSignIn) marker anchored by a redirectToSignIn() call      → PASS
  *   (xiii) @browser-redirect exemption whose sibling route.test.ts has no    → FAIL
  *         '@browser-redirect-recovery-test' marker (BROWSER_REDIRECT_TEST_MISSING)
@@ -544,6 +546,37 @@ describe("check-step-up-client-coverage.sh", () => {
         STEPUP_CALL_SESSION,
         "// @browser-redirect-recovery",
         "// we would normally redirect the browser here, but:",
+        'return jsonError({ error: "generic" }, 403);',
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(apiDir, "mcp/authorize", "route.test.ts"),
+      "// @browser-redirect-recovery-test\nit('redirects to sign-in', () => {});\n",
+      "utf8",
+    );
+    writeFileSync(
+      exemptFile,
+      "mcp-authorize-get  @browser-redirect  # OAuth authorize GET reached by browser navigation, redirects to sign-in\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("BROWSER_REDIRECT_RECOVERY_MISSING");
+  });
+
+  it("(xii-block-decoy) FAILS (BROWSER_REDIRECT_RECOVERY_MISSING): decoy inside a single-line /* */ block comment, no real call", () => {
+    writePathsManifest({
+      "mcp-authorize-get": { method: "GET", pathTokens: ["/api/mcp/authorize"] },
+    });
+    // A /* ... */ block comment (the shape the file's JSDoc headers use)
+    // mentioning redirect( must NOT satisfy the anchor — S4 regression.
+    writeRoute(
+      "mcp/authorize",
+      [
+        "// @stepup id:mcp-authorize-get method:GET",
+        STEPUP_CALL_SESSION,
+        "// @browser-redirect-recovery",
+        "/* we would normally redirect(browser) here, but: */",
         'return jsonError({ error: "generic" }, 403);',
       ].join("\n") + "\n",
     );

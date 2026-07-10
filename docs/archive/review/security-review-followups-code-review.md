@@ -66,3 +66,37 @@ All 7 contracts verified-local (see testing expert table): C1 hibp test (11/11, 
 - Modified: `scripts/checks/check-step-up-client-coverage.sh`, `scripts/checks/stepup-client-exempt.txt`, `src/app/api/mcp/authorize/consent/route.ts`, `src/app/api/mobile/authorize/route.ts`, `scripts/__tests__/check-step-up-client-coverage.test.mjs`, `docs/archive/review/security-review-followups-plan.md`
 
 ### S3 — verified clean, no action.
+
+---
+
+# Round 2 (incremental — R1 fix verification)
+Date: 2026-07-11
+
+## Changes from Previous Round
+Reviewed the Round-1 fix commit a6928dfc (S1 client_id cap, S2 guard tightening). Security + Testing experts ran incrementally with an R43 boundary-widening check.
+
+## Security Findings (Round 2)
+
+**S1 / S2 — verified complete.** S1: all 3 refresh-grant metadata sites + the `?? auditClientId` fallback use the capped value; authorization_code grant has no equivalent site; constant matches schema VarChar(64); regression test confirmed non-vacuous (reverting the cap → `expected 20005 to be 64`). S2: marker relocations confirmed comment-only (line-filtered diff empty — R43 clean, no logic change); guard exit 0 on real tree; `//` and trailing-comment decoys correctly rejected.
+
+**S4 (new in round 2) Minor: `/* … */` block-comment shape still bypassed the browser-redirect-recovery anchor check**
+- File: `scripts/checks/check-step-up-client-coverage.sh` (awk anchor)
+- Evidence: the Round-1 comment-skip recognized only `//` and `*`-continuation lines; a single-line C-style block comment `/* … redirect(x) … */` was neither skipped nor stripped, so its literal `redirect(` satisfied the call regex and passed. Plausible because the same route files use `/** */` JSDoc headers — a future author explaining an exemption in a block comment adjacent to the marker would silently satisfy the check. No shipped route affected (guard exit 0).
+- Impact: same class/severity as S2 (latent guard-soundness gap; a future decoy-comment regression could keep CI green).
+- Fix: comment-skip now also matches `/*`-opening lines; same-line `/* … */` spans are `gsub`-stripped before the call scan (open-on-one-line/close-on-another is documented as out of scope — route files use only single-line spans or JSDoc headers, both covered). Added fixture `(xii-block-decoy)` proving the block-comment decoy FAILs.
+- escalate: false
+
+## Testing Findings (Round 2)
+No findings. S1 cap mutation-verified live (removed `.slice` → red); S2 fixtures' awk paths hand-traced; marker relocations broke no existing route.test.ts (64/64); 186/186 across all affected files. S4 fixture added and verified red-capable (29/29 guard self-tests).
+
+## Recurring Issue Check (Round 2)
+R43: PASS with delta — S1 narrows a boundary (no widening); S2 marker moves byte-identical; the delta surfaced S4 (the R1 fix closed only the `//`-decoy shape). RT7/RT8/R19 reconfirmed. S4 fixed in-round.
+
+## Resolution Status (Round 2)
+
+### S4 Minor — block-comment decoy bypass
+- Action: extended the awk comment-skip to `/^(\/\/|\*|\/\*)/` and added `gsub(/\/\*.*\*\//,"",line)` before the call scan; added `(xii-block-decoy)` fixture (FAILs on a block-comment decoy). Guard exit 0 on real tree; self-tests 29/29.
+- Modified: `scripts/checks/check-step-up-client-coverage.sh`, `scripts/__tests__/check-step-up-client-coverage.test.mjs`
+
+## Convergence
+Round 2 introduced S4 (Minor, fixed in-round). A Round 3 verifies the S4 fix.

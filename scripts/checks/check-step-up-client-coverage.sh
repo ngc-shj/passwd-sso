@@ -384,14 +384,21 @@ while IFS= read -r line; do
     # "redirect" — a decoy comment mentioning "redirect" must not satisfy it
     # (RS-review S2). Require a `redirect(` / `redirectToSignIn(` call shape on a
     # NON-comment line within ±3 of the marker (all 3 real sites sit within ±3).
-    # `sub(/\/\/.*/,"")` strips a trailing line comment before the call scan so a
-    # `// ...redirect(...` comment cannot pose as a call; a leading-`*`/`//`
-    # comment line is skipped outright.
+    # Comment stripping runs BEFORE the call scan so no decoy comment mentioning
+    # `redirect(` can pose as a real call:
+    #   - a line starting with `//`, `*`, or `/*` is skipped outright;
+    #   - same-line `/* … */` spans are removed (gsub), then a trailing `//`
+    #     comment is removed (sub) — so `foo(); /* … redirect(x) … */` and
+    #     `foo(); // … redirect(x)` both lose the decoy before matching.
+    # A block comment that OPENS on one line and closes on another is not fully
+    # handled (would need a state machine); route files use `/* */` only as
+    # single-line spans or JSDoc `/** */` headers, both covered by the skip.
     elif ! awk -v l="$recovery_line" '
         NR!=l && NR>=l-3 && NR<=l+3 {
           line=$0
           stripped=line; sub(/^[[:space:]]+/,"",stripped)
-          if (stripped ~ /^(\/\/|\*)/) next
+          if (stripped ~ /^(\/\/|\*|\/\*)/) next
+          gsub(/\/\*.*\*\//,"",line)
           sub(/\/\/.*/,"",line)
           if (line ~ /redirect(ToSignIn)?\(/) found=1
         }
