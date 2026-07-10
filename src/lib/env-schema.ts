@@ -191,6 +191,16 @@ export const envObject = z.object({
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  // Trust the `Tailscale-*` request headers to detect a tailscale-serve ingress
+  // and normalize forwarded Host/X-Forwarded-* to canonical. These headers are
+  // only unspoofable when EVERY ingress path terminates at the local tailscaled
+  // daemon; if the app process is also directly reachable (dev :3001 off-tailnet
+  // or a misconfigured prod), a client can forge them. Default false (fail
+  // closed): set true ONLY in deployments fronted exclusively by tailscale serve.
+  TRUST_TAILSCALE_SERVE_HEADERS: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 
   // --- Auth.js core ---
   AUTH_SECRET: z.string().optional(),

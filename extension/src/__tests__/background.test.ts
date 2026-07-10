@@ -884,7 +884,7 @@ describe("background message flow", () => {
   it("retries direct inject without hint when args are unserializable", async () => {
     cryptoMocks.decryptData
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice", urlHost: "example.com" }));
 
     // Message-based autofill must fail so direct fallback runs.
     chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
@@ -902,7 +902,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", targetHint: { id: "user" } },
-        { tab: { id: 1 } },
+        { tab: { id: 1, url: "https://example.com/login" } },
         (resp) => resolve(resp),
       );
     });
@@ -983,7 +983,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "id-1" },
-        { tab: { id: 1 } },
+        { tab: { id: 1, url: "https://any-site.example/checkout" } },
         (resp) => resolve(resp),
       );
     });
@@ -1002,6 +1002,100 @@ describe("background message flow", () => {
     expect(fillPayload.city).toBe("Springfield");
     expect(fillPayload.state).toBe("CA");
     expect(fillPayload.country).toBe("US");
+  });
+
+  // ── S4: origin re-binding for content-driven LOGIN fills ──
+
+  const stubLoginFetch = (overviewHost: string) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(PASSWORD_BY_ID_PREFIX)) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "pw-1",
+              encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
+              encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+              entryType: EXT_ENTRY_TYPE.LOGIN,
+              aadVersion: 1,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret", username: "alice" }))
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice", urlHost: overviewHost }));
+  };
+
+  it("rejects a content-driven LOGIN fill when the sender host does not match the entry host", async () => {
+    stubLoginFetch("example.com");
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        { tab: { id: 1, url: "https://attacker.example/phish" } },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+    // Password must never be sent to the content script on a host mismatch.
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+    expect(fillCall).toBeUndefined();
+  });
+
+  it("rejects a content-driven fill when the sender tab has no resolvable URL", async () => {
+    stubLoginFetch("example.com");
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        { tab: { id: 1 } },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
   });
 });
 

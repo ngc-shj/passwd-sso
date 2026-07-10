@@ -40,11 +40,22 @@ interface EntryBlob {
   [key: string]: unknown;
 }
 
+// Cells starting with these chars are interpreted as formulas by spreadsheet
+// apps (CSV injection). Prefix such a cell with a single quote so it stays
+// literal text. Mirrors src/lib/format/csv-escape.ts (CLI is a separate ESM
+// package and cannot import the app module).
+const CSV_FORMULA_TRIGGER_RE = /^[=+\-@\t\r]/;
+
 function escapeCSV(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
+  const needsQuote =
+    value.includes(",") ||
+    value.includes('"') ||
+    value.includes("\n") ||
+    CSV_FORMULA_TRIGGER_RE.test(value);
+  if (!needsQuote) return value;
+  const escaped = value.replace(/"/g, '""');
+  const prefixed = CSV_FORMULA_TRIGGER_RE.test(escaped) ? `'${escaped}` : escaped;
+  return `"${prefixed}"`;
 }
 
 export async function exportCommand(options: {

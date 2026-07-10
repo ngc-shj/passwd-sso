@@ -62,12 +62,10 @@ const SESSION_REQUIRED_PREFIXES: readonly string[] = [
   API_PATH.EMERGENCY_ACCESS,
   API_PATH.SESSIONS,
   API_PATH.NOTIFICATIONS,
-  API_PATH.USER_LOCALE,
-  API_PATH.USER_FAVICON,
-  API_PATH.USER_FAVICON_PREF,
-  API_PATH.USER_MCP_TOKENS,
-  API_PATH.USER_AUTH_PROVIDER,
-  API_PATH.USER_PASSKEY_STATUS,
+  // Whole /api/user subtree — a new /api/user/* route is session-gated at the
+  // proxy without needing a per-leaf entry here (was previously enumerated
+  // leaf-by-leaf, which silently dropped new siblings to api-default).
+  API_PATH.USER,
   API_PATH.EXTENSION,
   API_PATH.TENANT,
   API_PATH.API_KEYS,

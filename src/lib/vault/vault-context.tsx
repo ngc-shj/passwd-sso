@@ -13,7 +13,7 @@ import { useSession } from "next-auth/react";
 import {
   deriveWrappingKey,
   deriveEncryptionKey,
-  deriveAuthKey,
+  deriveAuthKeyBytes,
   generateSecretKey,
   generateAccountSalt,
   wrapSecretKey,
@@ -340,10 +340,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
     // 4. Derive encryption key and auth key
     const encKey = await deriveEncryptionKey(secretKey);
-    const authKey = await deriveAuthKey(secretKey);
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
 
     // 5. Compute auth hash for server verification
-    const authHash = await computeAuthHash(authKey);
+    const authHash = await computeAuthHash(authKeyBytes);
 
     // 6. Create verification artifact
     const artifact = await createVerificationArtifact(encKey);
@@ -453,8 +453,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // 5. Compute auth hash and verify with server (for logging/rate-limiting)
-      const authKey = await deriveAuthKey(secretKey);
-      const authHash = await computeAuthHash(authKey);
+      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      const authHash = await computeAuthHash(authKeyBytes);
 
       // 5b. Compute verifier for backfill if server doesn't have one yet
       const unlockBody: Record<string, string> = { authHash };
@@ -615,8 +615,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // 6. Compute auth hash and verify with server
-      const authKey = await deriveAuthKey(secretKey);
-      const authHash = await computeAuthHash(authKey);
+      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      const authHash = await computeAuthHash(authKeyBytes);
 
       const unlockRes = await fetchApi(API_PATH.VAULT_UNLOCK, {
         method: "POST",
@@ -743,8 +743,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // Compute auth hash and verify with server
-      const authKey = await deriveAuthKey(secretKey);
-      const authHash = await computeAuthHash(authKey);
+      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      const authHash = await computeAuthHash(authKeyBytes);
 
       const unlockRes = await fetchApi(API_PATH.VAULT_UNLOCK, {
         method: "POST",
@@ -885,8 +885,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const oldKeyVersion = keyVersionRef.current;
 
       // 1. Compute currentAuthHash for server-side identity verification
-      const currentAuthKey = await deriveAuthKey(secretKeyRef.current);
-      const currentAuthHash = await computeAuthHash(currentAuthKey);
+      const currentAuthKeyBytes = await deriveAuthKeyBytes(secretKeyRef.current);
+      const currentAuthHash = await computeAuthHash(currentAuthKeyBytes);
 
       // 2. Fetch rotation data (entries, history, attachment CEK data, mode-0 IDs)
       const dataRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
@@ -1207,8 +1207,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const newWrappedKey = await wrapSecretKey(newSecretKey, newWrappingKey);
 
       // 10. Compute new auth credentials, verifier, and verification artifact
-      const newAuthKey = await deriveAuthKey(newSecretKey);
-      const newAuthHash = await computeAuthHash(newAuthKey);
+      const newAuthKeyBytes = await deriveAuthKeyBytes(newSecretKey);
+      const newAuthHash = await computeAuthHash(newAuthKeyBytes);
       const newVerifierHash = await computePassphraseVerifier(passphrase, newAccountSalt);
       const verificationArtifact = await createVerificationArtifact(newEncKey);
 

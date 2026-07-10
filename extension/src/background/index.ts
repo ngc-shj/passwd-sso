@@ -1392,6 +1392,12 @@ async function performAutofillForEntry(
   targetHint?: AutofillTargetHint,
   teamId?: string,
   frameId?: number,
+  // When set (non-null), the caller does not trust the entryId's origin binding
+  // and requires a LOGIN entry's host to match this host before releasing the
+  // password. Passed by the content-message path (AUTOFILL_FROM_CONTENT), where
+  // the entryId originates from an untrusted content script; popup/context-menu
+  // callers pass undefined because the user picked the entry in trusted UI.
+  enforceSenderHost?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
@@ -1489,7 +1495,31 @@ async function performAutofillForEntry(
     nationality?: string | null;
     idNumber?: string | null;
   };
-  const overview = JSON.parse(overviewPlain) as { username?: string | null };
+  const overview = JSON.parse(overviewPlain) as {
+    username?: string | null;
+    urlHost?: string | null;
+    additionalUrlHosts?: string[] | null;
+  };
+
+  // Origin re-binding for content-driven fills: when the caller does not trust
+  // the entryId's origin (content-script path), a LOGIN password must only be
+  // released to a page whose host matches the entry's own host(s). This mirrors
+  // the passkey path's isSenderAuthorizedForRpId defense-in-depth and closes the
+  // gap where host filtering lived only in the untrusted content-side dropdown.
+  // CC/Identity are user-picked and hostless by design, so scope to LOGIN.
+  if (
+    typeof enforceSenderHost === "string" &&
+    entryType === EXT_ENTRY_TYPE.LOGIN
+  ) {
+    const entryHosts = [
+      overview.urlHost ?? "",
+      ...(overview.additionalUrlHosts ?? []),
+    ].filter((h): h is string => typeof h === "string" && h.length > 0);
+    const matches = entryHosts.some((h) => isHostMatch(h, enforceSenderHost));
+    if (!matches) {
+      return { ok: false, error: "ORIGIN_MISMATCH" };
+    }
+  }
 
   // ── Credit Card autofill path ──
   if (entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
@@ -2444,12 +2474,29 @@ async function handleMessage(
         }
         // C8: deliver card/identity plaintext only to the originating frame.
         const frameId = _sender.frameId;
+        // Re-bind LOGIN password release to the sender tab's host — the entryId
+        // came from an untrusted content script (host filtering in the content
+        // dropdown is not a security boundary). Fail closed if the sender host
+        // is unknown: a content-driven fill with no resolvable origin must not
+        // release a password.
+        const senderHost = _sender.tab?.url
+          ? extractHost(_sender.tab.url)
+          : null;
+        if (!senderHost) {
+          sendResponse({
+            type: EXT_MSG.AUTOFILL_FROM_CONTENT,
+            ok: false,
+            error: "ORIGIN_MISMATCH",
+          });
+          return;
+        }
         const result = await performAutofillForEntry(
           message.entryId,
           tabId,
           message.targetHint,
           message.teamId,
           frameId,
+          senderHost,
         );
         sendResponse({
           type: EXT_MSG.AUTOFILL_FROM_CONTENT,

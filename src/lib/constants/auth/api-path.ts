@@ -51,6 +51,13 @@ export const API_PATH = {
   WATCHTOWER_ALERT: "/api/watchtower/alert",
   CSP_REPORT: "/api/csp-report",
   SESSIONS: "/api/sessions",
+  // Subtree root for all per-user routes. The proxy classifies the whole
+  // `/api/user` subtree as session-required via this prefix, so a new
+  // `/api/user/*` route is auth-gated at the proxy without needing a manual
+  // entry in SESSION_REQUIRED_PREFIXES (a check-route-classification guard
+  // enforces this). Individual leaf constants below are kept for callers that
+  // build concrete URLs.
+  USER: "/api/user",
   USER_LOCALE: "/api/user/locale",
   USER_FAVICON: "/api/user/favicon",
   USER_FAVICON_PREF: "/api/user/favicon-pref",

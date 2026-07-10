@@ -185,24 +185,15 @@ describe("POST /api/vault/setup", () => {
     );
   });
 
-  it("accepts kdfType=1 (Argon2id) with required params", async () => {
+  it("rejects kdfType=1 (Argon2id) even with valid params — no client derives with it yet", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
     const bodyWithArgon2 = {
       ...validBody,
       kdfParams: { kdfType: 1, kdfIterations: 3, kdfMemory: 65536, kdfParallelism: 4 },
     };
     const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithArgon2 }));
-    expect(res.status).toBe(201);
-    expect(mockPrismaUser.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          kdfType: 1,
-          kdfIterations: 3,
-          kdfMemory: 65536,
-          kdfParallelism: 4,
-        }),
-      }),
-    );
+    expect(res.status).toBe(400);
+    expect(mockPrismaUser.update).not.toHaveBeenCalled();
   });
 
   it("rejects kdfType=1 without kdfMemory/kdfParallelism", async () => {

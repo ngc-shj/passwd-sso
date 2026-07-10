@@ -9,7 +9,7 @@ import {
   wrapSecretKey,
   unwrapSecretKey,
   deriveEncryptionKey,
-  deriveAuthKey,
+  deriveAuthKeyBytes,
   computeAuthHash,
   createVerificationArtifact,
   verifyKey,
@@ -383,15 +383,39 @@ describe("wrapSecretKey / unwrapSecretKey", () => {
   });
 });
 
-// ─── computeAuthHash ─────────────────────────────────────────────────────────
+// ─── deriveAuthKeyBytes / computeAuthHash ────────────────────────────────────
 
-describe("computeAuthHash", () => {
+describe("deriveAuthKeyBytes / computeAuthHash", () => {
+  // Golden vectors pin the exact output bytes for a fixed secret key.
+  // Server-stored auth hashes and cross-impl parity (extension/iOS) depend on
+  // these bytes never changing — a diff here means every stored hash breaks.
+  it("matches the golden auth-key bytes for a fixed secret key", async () => {
+    const secretKey = new Uint8Array(32).fill(0xaa);
+
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+
+    expect(hexEncode(authKeyBytes)).toBe(
+      "7d06a70d843366f75f7db101639b7caa4509b3cd0ad8a272c6873a9dcfb8b889"
+    );
+  });
+
+  it("matches the golden auth hash for a fixed secret key", async () => {
+    const secretKey = new Uint8Array(32).fill(0xaa);
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+
+    const hash = await computeAuthHash(authKeyBytes);
+
+    expect(hash).toBe(
+      "45afd70f6aeb06a70078f5253391eea780b5503a9883a98c141c4a742f45aa21"
+    );
+  });
+
   it("is deterministic: same key produces same hash", async () => {
     const secretKey = new Uint8Array(32).fill(0xaa);
-    const authKey = await deriveAuthKey(secretKey);
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
 
-    const hash1 = await computeAuthHash(authKey);
-    const hash2 = await computeAuthHash(authKey);
+    const hash1 = await computeAuthHash(authKeyBytes);
+    const hash2 = await computeAuthHash(authKeyBytes);
 
     expect(hash1).toBe(hash2);
   });
@@ -400,20 +424,20 @@ describe("computeAuthHash", () => {
     const secretKey1 = new Uint8Array(32).fill(0xaa);
     const secretKey2 = new Uint8Array(32).fill(0xbb);
 
-    const authKey1 = await deriveAuthKey(secretKey1);
-    const authKey2 = await deriveAuthKey(secretKey2);
+    const authKeyBytes1 = await deriveAuthKeyBytes(secretKey1);
+    const authKeyBytes2 = await deriveAuthKeyBytes(secretKey2);
 
-    const hash1 = await computeAuthHash(authKey1);
-    const hash2 = await computeAuthHash(authKey2);
+    const hash1 = await computeAuthHash(authKeyBytes1);
+    const hash2 = await computeAuthHash(authKeyBytes2);
 
     expect(hash1).not.toBe(hash2);
   });
 
   it("output is a 64-character lowercase hex string (SHA-256)", async () => {
     const secretKey = generateSecretKey();
-    const authKey = await deriveAuthKey(secretKey);
+    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
 
-    const hash = await computeAuthHash(authKey);
+    const hash = await computeAuthHash(authKeyBytes);
 
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });

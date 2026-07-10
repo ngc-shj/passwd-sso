@@ -61,6 +61,12 @@ const POSITIVE_CASES: Record<RoutePolicyKind, readonly ClassifyCase[]> = {
     // API_SESSION_REQUIRED branch) was skipped — a session-cookie route reachable
     // from a blocked network. It self-checks auth but did NOT self-enforce IP.
     { pathname: "/api/user/passkey-status", description: "passkey enforcement status — session gate + tenant IP" },
+    // Regression (S6): the whole /api/user subtree is session-required via a
+    // single prefix, so a NOT-YET-EXISTING /api/user/* route is auth-gated at
+    // the proxy without a per-leaf entry. Previously each leaf was enumerated,
+    // silently dropping new siblings to api-default (no session/IP gate).
+    { pathname: "/api/user/future-route", description: "hypothetical new /api/user/* — subtree-gated, not per-leaf" },
+    { pathname: "/api/user/future-route/nested", description: "hypothetical nested /api/user/* — subtree-gated" },
   ],
   [ROUTE_POLICY_KIND.API_DEFAULT]: [
     { pathname: "/api/mobile/authorize", description: "mobile authorize — self-authenticated, redirects to sign-in when unauthenticated" },

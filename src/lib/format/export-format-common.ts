@@ -1,3 +1,4 @@
+import { escapeCsvCompat as escapeCsvValue } from "./csv-escape";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue, ExportFormat } from "@/lib/constants";
 import type {
@@ -83,13 +84,10 @@ export interface ExportEntry {
 export type ExportProfile = "compatible" | "passwd-sso";
 export type { ExportFormat } from "@/lib/constants";
 
-export function escapeCsvValue(val: string | null): string {
-  if (!val) return "";
-  if (val.includes(",") || val.includes('"') || val.includes("\n")) {
-    return `"${val.replace(/"/g, '""')}"`;
-  }
-  return val;
-}
+// Re-export the shared compatibility escaper (neutralizes CSV formula
+// injection). Kept as a named export here so existing call sites and tests that
+// import escapeCsvValue from this module are unaffected.
+export { escapeCsvCompat as escapeCsvValue } from "./csv-escape";
 
 export function formatExportDate(): string {
   const d = new Date();

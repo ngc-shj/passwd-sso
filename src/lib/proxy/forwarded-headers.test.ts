@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   normalizeForwardedHeaders,
@@ -19,8 +19,31 @@ function makeRequest(
   return new NextRequest(url, { ...init, headers: new Headers(headers) });
 }
 
+beforeEach(() => {
+  // The Tailscale-header trust is opt-in (fail closed). Enable it for the
+  // behavioral tests; the opt-out gate has its own dedicated describe below.
+  vi.stubEnv("TRUST_TAILSCALE_SERVE_HEADERS", "true");
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("normalizeForwardedHeaders — opt-in gate", () => {
+  it("does NOT normalize when TRUST_TAILSCALE_SERVE_HEADERS is unset (fail closed)", () => {
+    vi.stubEnv("TRUST_TAILSCALE_SERVE_HEADERS", "false");
+    vi.stubEnv("AUTH_URL", "https://app.example.com");
+    const req = makeRequest("https://localhost:3001/foo", {
+      host: "app.example.com",
+      "x-forwarded-host": "app.example.com",
+      "x-forwarded-port": "3001",
+      "x-forwarded-proto": "https",
+      ...TAILSCALE_HEADERS,
+    });
+    // Even with valid Tailscale headers, a forged header must not force the
+    // canonical rewrite when the operator has not opted in.
+    expect(normalizeForwardedHeaders(req)).toBe(req);
+  });
 });
 
 describe("normalizeForwardedHeaders — Tailscale-detection gating", () => {

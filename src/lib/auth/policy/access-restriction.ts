@@ -144,8 +144,23 @@ export async function checkAccessRestriction(
   //
   // CGNAT is exclusively used by Tailscale and unreachable from the public
   // internet. This check runs in Edge runtime where tailscaled WhoIs (Unix
-  // socket) is unavailable. Full tailnet verification happens in
-  // enforceAccessRestriction (Node.js runtime route handlers).
+  // socket) is unavailable.
+  //
+  // SECURITY BOUNDARY (intentional): this Edge path grants access on
+  // CGNAT-range membership alone — it does NOT verify the peer belongs to the
+  // tenant's specific tailnet. Exact-tailnet verification (verifyTailscalePeer
+  // WhoIs) requires the tailscaled Unix socket and therefore only runs in the
+  // Node.js runtime via enforceAccessRestriction (token/Bearer route handlers).
+  // Consequence: for cookie/session browser flows (dashboard pages + session-
+  // authenticated API routes) that pass through the proxy, per-tenant tailnet
+  // ISOLATION is bounded to "any Tailscale peer in the CGNAT range", not "a
+  // peer in tenantId's tailnet". A host on a different tailnet whose source IP
+  // is CGNAT would pass. This is acceptable because (a) reaching this branch at
+  // all requires a CGNAT source IP, which the fail-closed IP-extraction
+  // posture (TRUST_PROXY_HEADERS unset → spoofed XFF ignored → null IP → deny)
+  // prevents an off-tailnet attacker from forging, and (b) Tailscale ACLs are
+  // the operator's primary isolation control. Tenants that need strict per-
+  // tailnet browser isolation must additionally scope allowedCidrs.
   if (policy.tailscaleEnabled && isTailscaleIp(clientIp)) {
     return { allowed: true };
   }

@@ -755,6 +755,16 @@ export const descriptions: Record<
       "Only enable when the app is behind a trusted reverse proxy.",
     example: "false",
   },
+  TRUST_TAILSCALE_SERVE_HEADERS: {
+    group: "Reverse proxy",
+    order: 3,
+    description:
+      "When true, trust Tailscale-* request headers to detect a tailscale-serve\n" +
+      "ingress and normalize forwarded Host/X-Forwarded-* headers. Default: false.\n" +
+      "Enable ONLY when every ingress path terminates at the local tailscaled\n" +
+      "daemon (app not directly reachable) — otherwise clients can forge them.",
+    example: "false",
+  },
 
   // ── Public (client-inlined) ───────────────────────────────────────────────
 

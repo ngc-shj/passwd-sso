@@ -442,7 +442,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
 
     const res = (await sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
-      { tab: { id: 7 }, frameId: 42 },
+      { tab: { id: 7, url: "https://shop.example/checkout" }, frameId: 42 },
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
@@ -462,7 +462,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     // Popup/context-menu sender has a tab but no frameId.
     const res = (await sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
-      { tab: { id: 7 } },
+      { tab: { id: 7, url: "https://shop.example/checkout" } },
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
@@ -523,7 +523,7 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     const cuid = "cjld2cjxh0000qzrmn831i7rn"; // CUID v1 shape
     const res = (await sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: cuid },
-      { tab: { id: 7 }, frameId: 1 },
+      { tab: { id: 7, url: "https://shop.example/checkout" }, frameId: 1 },
     )) as { ok: boolean; error?: string };
 
     // Not rejected by the id guard (would be INVALID_ID otherwise).

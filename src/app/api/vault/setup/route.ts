@@ -114,11 +114,25 @@ async function handlePOST(request: NextRequest) {
   if (!result.ok) return result.response;
   const data = result.data;
 
-  // Apply KDF defaults if client omits kdfParams
+  // Reject KDF types that no client's derivation path actually uses yet.
+  // Every unlock/wrap call site derives the wrapping key via the param-less
+  // deriveWrappingKey() -> PBKDF2-600k. Persisting kdfType=1 (Argon2id) while
+  // wrapping under PBKDF2 makes the stored KDF metadata disagree with the real
+  // KDF, which would lock the user out the moment a client starts honoring the
+  // stored kdfType. Until Argon2id is wired end-to-end (setup + all unlock
+  // paths pass params to deriveWrappingKeyWithParams), only PBKDF2 is accepted
+  // so the stored metadata always matches the wrapping KDF. The Argon2id schema
+  // branch above is kept for that future wiring.
+  if (data.kdfParams && data.kdfParams.kdfType !== 0) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR);
+  }
+
+  // Apply KDF defaults if client omits kdfParams. The guard above narrows
+  // kdfParams to the PBKDF2 branch, which has no memory/parallelism params.
   const kdfType = data.kdfParams?.kdfType ?? 0;
   const kdfIterations = data.kdfParams?.kdfIterations ?? PBKDF2_ITERATIONS;
-  const kdfMemory = data.kdfParams && "kdfMemory" in data.kdfParams ? data.kdfParams.kdfMemory : null;
-  const kdfParallelism = data.kdfParams && "kdfParallelism" in data.kdfParams ? data.kdfParams.kdfParallelism : null;
+  const kdfMemory = null;
+  const kdfParallelism = null;
 
   // Hash authHash with a server-side salt for storage
   // serverHash = SHA-256(authHash + serverSalt)

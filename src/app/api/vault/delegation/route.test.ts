@@ -108,7 +108,7 @@ const VALID_POST_BODY = {
 
 const VALID_MCP_TOKEN = {
   id: MCP_TOKEN_ID,
-  scope: "credentials:list",
+  scope: "credentials:use",
   clientId: MCP_CLIENT_ID,
 };
 
@@ -285,6 +285,19 @@ describe("POST /api/vault/delegation", () => {
     mockPrismaMcpAccessToken.findFirst.mockResolvedValue({
       ...VALID_MCP_TOKEN,
       scope: "vault:status",
+    });
+    const res = await POST(makePostRequest(VALID_POST_BODY));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("MCP_TOKEN_SCOPE_INSUFFICIENT");
+  });
+
+  it("returns 403 when MCP token has only credentials:list (metadata-only, no decrypt)", async () => {
+    // credentials:list is metadata-only by contract; it must NOT authorize a
+    // delegation session (which grants the agent decrypt capability).
+    mockPrismaMcpAccessToken.findFirst.mockResolvedValue({
+      ...VALID_MCP_TOKEN,
+      scope: "credentials:list",
     });
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(403);
@@ -500,7 +513,7 @@ describe("GET /api/vault/delegation", () => {
 
   const TOKEN_RECORD = {
     id: MCP_TOKEN_ID,
-    scope: "credentials:list",
+    scope: "credentials:use",
     expiresAt: EXPIRES_AT,
     mcpClient: { name: "Test Client", clientId: MCP_CLIENT_ID },
   };
@@ -540,7 +553,7 @@ describe("GET /api/vault/delegation", () => {
     expect(s.expiresAt).toBe(EXPIRES_AT.toISOString());
   });
 
-  it("returns available tokens with hasDelegationScope flag true for credentials:list", async () => {
+  it("returns available tokens with hasDelegationScope flag true for credentials:use", async () => {
     const res = await GET(makeGetRequest());
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -549,6 +562,16 @@ describe("GET /api/vault/delegation", () => {
     expect(t.id).toBe(MCP_TOKEN_ID);
     expect(t.hasDelegationScope).toBe(true);
     expect(t.mcpClientName).toBe("Test Client");
+  });
+
+  it("hasDelegationScope is false when token has only credentials:list (metadata-only)", async () => {
+    mockPrismaMcpAccessToken.findMany.mockResolvedValue([
+      { ...TOKEN_RECORD, scope: "credentials:list" },
+    ]);
+    const res = await GET(makeGetRequest());
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.availableTokens[0].hasDelegationScope).toBe(false);
   });
 
   it("hasDelegationScope is false when token has only vault:status scope", async () => {

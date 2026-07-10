@@ -25,6 +25,18 @@ export const MCP_SCOPE = {
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];
 export const MCP_SCOPES = Object.values(MCP_SCOPE) as McpScope[];
 
+// A delegation session authorizes the token's agent to DECRYPT the delegated
+// entries, so it requires the `credentials:use` capability. `credentials:list`
+// is metadata-only by contract and must NOT grant delegation. Legacy
+// `credentials:decrypt` is expanded to list+use at consent, so it retains use.
+// SSoT for both the POST authorization gate and the UI availability flag.
+export function canDelegate(scope: string): boolean {
+  return scope
+    .split(",")
+    .map((s) => s.trim())
+    .includes(MCP_SCOPE.CREDENTIALS_USE);
+}
+
 // Risk levels for consent UI badge coloring
 export type ScopeRiskLevel = "read" | "use" | "write";
 

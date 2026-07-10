@@ -753,6 +753,13 @@ describe("Scenario 6: MCP Rate Limiting via POST /api/mcp route", () => {
 // ─── Scenario 7: OAuth Discovery ─────────────────────────────
 
 describe("Scenario 7: OAuth Discovery endpoint", () => {
+  beforeEach(() => {
+    // Discovery requires a configured origin (RFC 8414 issuer). The test env
+    // sets no APP_URL/AUTH_URL, so stub one for the metadata-shape tests; the
+    // fail-closed test below clears it explicitly. setup.ts unstubs in afterEach.
+    vi.stubEnv("APP_URL", "https://sso.example.com");
+  });
+
   it("GET /api/mcp/.well-known/oauth-authorization-server returns correct metadata", async () => {
     const res = await getDiscovery();
     const { status, json } = await parseResponse(res);
@@ -776,6 +783,16 @@ describe("Scenario 7: OAuth Discovery endpoint", () => {
     expect(json.authorization_endpoint).toBe("https://sso.example.com/api/mcp/authorize");
     expect(json.token_endpoint).toBe("https://sso.example.com/api/mcp/token");
     expect(json.registration_endpoint).toBe("https://sso.example.com/api/mcp/register");
+  });
+
+  it("S9: fails closed (500) when no origin is configured, instead of empty issuer", async () => {
+    // RFC 8414 §2 requires a valid absolute issuer URL. With no APP_URL/AUTH_URL,
+    // the document would ship issuer:"" and relative endpoints — fail closed.
+    vi.stubEnv("APP_URL", "");
+    vi.stubEnv("AUTH_URL", "");
+    const res = await getDiscovery();
+
+    expect(res.status).toBe(500);
   });
 
   it("response_types_supported includes 'code' only", async () => {

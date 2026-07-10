@@ -80,6 +80,7 @@ vi.mock("lucide-react", () => ({
   ShieldCheck: () => <svg data-testid="icon-shield-check" />,
   ShieldX: () => <svg data-testid="icon-shield-x" />,
   Loader2: () => <svg data-testid="icon-loader" />,
+  AlertTriangle: () => <svg data-testid="icon-alert-triangle" />,
 }));
 
 import { ConsentForm } from "./consent-form";
