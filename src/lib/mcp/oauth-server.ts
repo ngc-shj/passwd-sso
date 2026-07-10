@@ -444,6 +444,12 @@ export async function exchangeRefreshToken(
       tenantId?: string;
       familyId?: string;
       userId?: string | null;
+      // Token-row-derived McpClient public id (mcpc_...) for replay/race_lost
+      // outcomes — the authoritative attribution for audit metadata, as
+      // opposed to the caller-supplied params.clientId which an attacker
+      // replaying a stolen token controls. Server-side audit use only; never
+      // included in the HTTP response body.
+      storedClientId?: string;
     }
 > {
   const dbClient = options.prisma ?? prisma;
@@ -489,6 +495,7 @@ export async function exchangeRefreshToken(
           tenantId: rt.tenantId,
           familyId: rt.familyId,
           accessTokenId: rt.accessTokenId,
+          storedClientId: rt.mcpClient.clientId,
         };
       }
 
@@ -563,6 +570,7 @@ export async function exchangeRefreshToken(
           tenantId: rt.tenantId,
           familyId: rt.familyId,
           accessTokenId: rt.accessTokenId,
+          storedClientId: rt.mcpClient.clientId,
         };
       }
 
@@ -665,6 +673,7 @@ export async function exchangeRefreshToken(
             : REFRESH_EXCHANGE_REASON.CONCURRENT_ROTATION_REVOKED,
         tenantId: phase1.tenantId,
         familyId: phase1.familyId,
+        storedClientId: phase1.storedClientId,
       };
     }
   }

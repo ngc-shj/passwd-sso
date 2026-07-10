@@ -516,12 +516,16 @@ describe("POST /api/mcp/token", () => {
 
   // T-13: replay detection audit log
   it("refresh_token: logs MCP_REFRESH_TOKEN_REPLAY audit on replay detection", async () => {
+    // storedClientId deliberately differs from VALID_REFRESH_BODY.client_id
+    // ("mcpc_abc") — the audit must attribute the replay to the token row's
+    // client, keeping the caller-claimed value only as presentedClientId.
     mockExchangeRefreshToken.mockResolvedValue({
       ok: false,
       error: "invalid_grant",
       reason: "replay",
       tenantId: "tenant-replay",
       familyId: "family-001",
+      storedClientId: "mcpc_stored_real",
     });
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
       body: VALID_REFRESH_BODY,
@@ -540,11 +544,16 @@ describe("POST /api/mcp/token", () => {
         ip: "127.0.0.1",
         userAgent: "test-agent",
         metadata: expect.objectContaining({
+          clientId: "mcpc_stored_real",
+          presentedClientId: "mcpc_abc",
           familyId: "family-001",
           reason: "replay",
         }),
       }),
     );
+    // The stored id is audit-only forensics — it must never leak into the
+    // OAuth error response body.
+    expect(JSON.stringify(json)).not.toContain("mcpc_stored_real");
   });
 
   // Race-loss audit log (issue #435 — fail-closed family revocation)
@@ -555,6 +564,7 @@ describe("POST /api/mcp/token", () => {
       reason: "concurrent_rotation_revoked",
       tenantId: "tenant-race",
       familyId: "family-race-001",
+      storedClientId: "mcpc_stored_real",
     });
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
       body: VALID_REFRESH_BODY,
@@ -573,6 +583,8 @@ describe("POST /api/mcp/token", () => {
         ip: "127.0.0.1",
         userAgent: "test-agent",
         metadata: expect.objectContaining({
+          clientId: "mcpc_stored_real",
+          presentedClientId: "mcpc_abc",
           familyId: "family-race-001",
           reason: "concurrent_rotation",
         }),

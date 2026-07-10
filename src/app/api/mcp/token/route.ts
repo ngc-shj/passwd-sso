@@ -242,7 +242,10 @@ async function handlePOST(req: NextRequest) {
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
           actorType: ACTOR_TYPE.SYSTEM,
           metadata: {
-            clientId: clientIdValue,
+            // Attribution must come from the token row, not the request body —
+            // an attacker replaying a stolen token controls client_id.
+            clientId: result.storedClientId ?? clientIdValue,
+            presentedClientId: clientIdValue,
             familyId: result.familyId,
             reason: FAMILY_REVOKED_REASON.REPLAY,
           },
@@ -257,7 +260,8 @@ async function handlePOST(req: NextRequest) {
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_FAMILY_REVOKED,
           actorType: ACTOR_TYPE.SYSTEM,
           metadata: {
-            clientId: clientIdValue,
+            clientId: result.storedClientId ?? clientIdValue,
+            presentedClientId: clientIdValue,
             familyId: result.familyId,
             reason: FAMILY_REVOKED_REASON.CONCURRENT_ROTATION,
           },
