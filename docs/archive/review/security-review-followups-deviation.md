@@ -27,3 +27,6 @@ Recorded manually by the orchestrator (deviations enumerated at each per-contrac
 
 ## Process note — mutation-proof mishap (orchestrator, C1)
 - The C1 AC2 revert-mutation proof used `git checkout --` to restore, which also reverted the then-uncommitted FIFO fix; the fix was immediately re-applied and re-verified green before commit. No residue (verified by diff grep). Lesson: commit first or restore from a scratch copy.
+
+## Process note 2 — piped exit codes masked a real guard failure (orchestrator)
+- Both the initial guard run and the first `pre-pr.sh` run were piped to `head`/`tail`, so the reported exit code was the pipe tail's `0`, not the check's. The step-up guard was actually failing `BROWSER_REDIRECT_RECOVERY_MISSING` on `mcp/authorize/route.ts` (marker 7 lines from the redirect, outside the ±5 anchor window) — the exact condition the C2 proximity check exists to catch, proving it fires on real code, not only fixtures. Fixed by moving the marker into the conversion block (`84e57d24`); guard and pre-pr re-run WITHOUT pipes. Lesson: never read a gate's result through a pipe; capture the command's own exit code.
