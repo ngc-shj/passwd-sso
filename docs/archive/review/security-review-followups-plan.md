@@ -256,3 +256,19 @@ Locked 2026-07-11 after 3 review rounds (7 findings R1 → 1 R2 → 0 R3; see se
 5. A developer adds a new step-up-gated route without a manifest entry, or a new UI page calling `/api/tenant/policy` PATCH without a `@stepup` marker: CI fails with an actionable message.
 6. A developer adds a new background worker without a manifest entry: `worker-policy-manifest.test.ts` fails.
 7. An operator on Tailscale reads `policy-enforcement.md` and correctly concludes they need `allowedCidrs` for strict per-tenant isolation of browser flows.
+
+## Implementation Checklist
+
+Batches (disjoint file sets; one logical commit per contract):
+- Batch A (C1): `src/app/api/watchtower/hibp/route.ts` (eviction block only), `src/app/api/watchtower/hibp/route.test.ts` (new cap tests, vi.resetModules + dynamic import).
+- Batch B (C4): `src/lib/format/csv-escape.ts` + `cli/src/lib/csv-escape.ts` (byte-identical regex), `src/lib/format/csv-escape.test.ts` + `cli/src/__tests__/unit/csv-escape.test.ts` (identical new cases), `src/components/passwords/import/password-import-parsers.ts` (comment extension only), round-trip cases in `password-import-parsers.test.ts:204` scaffold via parseCsvLine/parseCsv.
+- Batch C (C2+C3): `scripts/checks/check-step-up-client-coverage.sh`, `scripts/checks/stepup-client-exempt.txt` (header note only if needed), NEW `scripts/checks/stepup-route-paths.json`, 3 route files + 3 sibling route.test.ts (markers only), `scripts/__tests__/check-step-up-client-coverage.test.mjs` (fixtures for 5 new failure modes).
+- Batch D (C5): NEW `scripts/checks/worker-policy-manifest.json`, NEW `src/__tests__/workers/worker-policy-manifest.test.ts` (filesystem-only).
+- Batch E (C6): `src/lib/mcp/oauth-server.ts` (replay/race_lost outcomes + error shape), `src/app/api/mcp/token/route.ts` (audit metadata), `src/lib/mcp/oauth-server.test.ts` + `src/app/api/mcp/token/route.test.ts` (new adversarial cases).
+- Batch F (C7): `docs/security/policy-enforcement.md` (+ cross-ref in deployment docs if applicable).
+
+Shared assets to reuse (no reimplementation): `CSV_FORMULA_TRIGGER_RE` (SSoT, app+CLI twins), `MS_PER_*` time constants, `logAuditAsync`, existing guard fixture harness (`STEPUP_CLIENT_GUARD_*` env redirection), `route-policy-manifest.test.ts` walk/assert pattern.
+
+Test trees affected (R19): co-located route tests (hibp, mcp token, mcp/mobile authorize), `src/lib/mcp/oauth-server.test.ts`, `src/lib/format/csv-escape.test.ts`, `cli/src/__tests__/unit/csv-escape.test.ts`, `src/components/passwords/import/password-import-parsers.test.ts` (single tree each — no parallel-tree duplication found for the touched symbols; e2e references none of them).
+
+CI gate parity: all touched surfaces gate through `scripts/pre-pr.sh` (44 checks; includes the step-up guard at pre-pr.sh:166 and full vitest at :495) + CI static-checks (PRE_PR_STATIC_ONLY, no prisma generate — guard edits must stay pure text/fs). New vitest tests ride the normal test job. No new CI wiring needed. Deferred parity gaps: none.
