@@ -109,6 +109,23 @@ describe("E2E crypto helpers", () => {
       const hash = computeAuthHash(authKey);
       expect(hash).toMatch(/^[0-9a-f]{64}$/);
     });
+
+    // Golden vectors shared with the app (src/lib/crypto/crypto-client.test.ts)
+    // and CLI (cli/src/__tests__/unit/crypto.test.ts). All three independent
+    // implementations must produce byte-identical output for the same secret
+    // key — the e2e helper's auth hash is sent to the real server during test
+    // setup, so drift here surfaces as a confusing unlock failure deep in the
+    // Playwright suite instead of a clear vector mismatch here.
+    it("matches the golden auth-key bytes and hash for a fixed secret key", () => {
+      const fixedKey = Buffer.alloc(32, 0xaa);
+      const authKey = deriveAuthKey(fixedKey);
+      expect(hexEncode(authKey)).toBe(
+        "7d06a70d843366f75f7db101639b7caa4509b3cd0ad8a272c6873a9dcfb8b889"
+      );
+      expect(computeAuthHash(authKey)).toBe(
+        "45afd70f6aeb06a70078f5253391eea780b5503a9883a98c141c4a742f45aa21"
+      );
+    });
   });
 
   describe("deriveVerifierSalt", () => {

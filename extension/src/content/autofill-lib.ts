@@ -1,5 +1,22 @@
 import type { AutofillPayload } from "../types/messages";
 import { AUTOFILL_FILL } from "../lib/constants";
+import { extractHost, isHostMatch } from "../lib/url-matching";
+
+/**
+ * Whether this frame is allowed to receive the decrypted credential. The SW
+ * broadcasts AUTOFILL_FILL to every frame in the tab for popup/context-menu
+ * fills (the target frame is unknown), so each frame must self-verify: the top
+ * frame is the user-visible page and always allowed; a subframe fills only when
+ * its own origin matches one of the entry's hosts. This blocks a cross-origin
+ * third-party iframe (ad/analytics/support widget) from ever filling the
+ * password. Entries with no bound host still fill in the top frame only.
+ */
+function isFrameAllowedToFill(allowedHosts: string[] | undefined): boolean {
+  if (window.top === window.self) return true;
+  const frameHost = extractHost(window.location.href);
+  if (!frameHost) return false;
+  return (allowedHosts ?? []).some((h) => isHostMatch(h, frameHost));
+}
 
 function setInputValue(input: HTMLInputElement, value: string) {
   input.focus();
@@ -215,6 +232,9 @@ function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
 }
 
 export function performAutofill(payload: AutofillPayload) {
+  // Frame-origin gate: never write the credential into a cross-origin subframe.
+  if (!isFrameAllowedToFill(payload.allowedHosts)) return;
+
   const inputs = Array.from(
     document.querySelectorAll("input")
   ) as HTMLInputElement[];

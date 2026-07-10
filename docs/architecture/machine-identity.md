@@ -141,6 +141,16 @@ tailscale serve --bg --set-path /.well-known/oauth-authorization-server \
   $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
 ```
 
+> **Set `TRUST_TAILSCALE_SERVE_HEADERS=true`** when the app is fronted by
+> `tailscale serve`. Trust of the `Tailscale-*` request headers is opt-in and
+> defaults to `false` (fail closed): without it, the app cannot detect the
+> serve ingress and next-intl bakes the backend port into redirect URLs (e.g.
+> `https://app…:3001/…`). Enable it **only** when every ingress path terminates
+> at the local `tailscaled` daemon (the app process is not directly reachable);
+> otherwise a client can forge the headers. This is an upgrade caveat —
+> deployments upgrading from before the flag existed must add it to keep
+> redirect URLs correct.
+
 **Apache:**
 
 ```apache

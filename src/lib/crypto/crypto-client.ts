@@ -225,21 +225,27 @@ export async function deriveEncryptionKey(
 }
 
 /**
- * Derive the auth key from the secret key via HKDF.
+ * Derive the auth-key BYTES from the secret key via HKDF.
  * Domain-separated from the encryption key — cannot be used to derive it.
+ *
+ * Uses deriveBits (not deriveKey), so no extractable CryptoKey is ever created —
+ * preserving the module invariant that every CryptoKey is non-extractable. The
+ * output bytes are identical to the previous `exportKey("raw", <HMAC key>)`
+ * form (same HKDF-SHA256 salt/info and 256-bit length), so the resulting auth
+ * hash is unchanged: server-stored hashes and cross-impl parity are preserved.
  */
-export async function deriveAuthKey(
+export async function deriveAuthKeyBytes(
   secretKey: Uint8Array
-): Promise<CryptoKey> {
+): Promise<Uint8Array> {
   const hkdfKey = await crypto.subtle.importKey(
     "raw",
     toArrayBuffer(secretKey),
     "HKDF",
     false,
-    ["deriveKey"]
+    ["deriveBits"]
   );
 
-  return crypto.subtle.deriveKey(
+  const bits = await crypto.subtle.deriveBits(
     {
       name: "HKDF",
       hash: "SHA-256",
@@ -248,10 +254,10 @@ export async function deriveAuthKey(
       info: textEncode(HKDF_AUTH_INFO),
     },
     hkdfKey,
-    { name: "HMAC", hash: "SHA-256", length: AES_KEY_LENGTH },
-    true, // extractable — we need to hash it
-    ["sign"]
+    AES_KEY_LENGTH,
   );
+
+  return new Uint8Array(bits);
 }
 
 // ─── Secret Key Management ──────────────────────────────────────
@@ -324,12 +330,11 @@ export async function unwrapSecretKey(
 // ─── Auth Hash ──────────────────────────────────────────────────
 
 /**
- * Compute an auth hash from the auth key for server verification.
+ * Compute an auth hash from the derived auth-key bytes for server verification.
  * The server never sees the secret key or encryption key.
  */
-export async function computeAuthHash(authKey: CryptoKey): Promise<string> {
-  const rawKey = await crypto.subtle.exportKey("raw", authKey);
-  const hash = await crypto.subtle.digest("SHA-256", rawKey);
+export async function computeAuthHash(authKeyBytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(authKeyBytes));
   return hexEncode(hash);
 }
 

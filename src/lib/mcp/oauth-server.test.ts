@@ -1313,12 +1313,15 @@ describe("passkey enforcement in exchangeCodeForToken (lib)", () => {
     };
   }
 
-  it("passkey-blocked user ⇒ access_denied, NO mcpAccessToken.create called", async () => {
+  it("passkey-blocked user ⇒ access_denied, code NOT consumed (retryable), NO mint", async () => {
     const { prisma } = await import("@/lib/prisma");
     const mockTokenCreate = vi.fn();
+    // S8 regression: the passkey gate must run BEFORE the consume, so a blocked
+    // exchange leaves usedAt null and the user can retry within the code TTL.
+    const mockConsume = vi.fn().mockResolvedValue({ count: 1 });
     mockDelegates(prisma).mcpAuthorizationCode = {
       findUnique: vi.fn().mockResolvedValue(codeRow()),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      updateMany: mockConsume,
     };
     mockDelegates(prisma).mcpAccessToken = { create: mockTokenCreate };
     // Passkey enforcement BLOCKS. requirePasskeyEnabledAt must be a Date (Prisma returns Date).
@@ -1346,6 +1349,9 @@ describe("passkey enforcement in exchangeCodeForToken (lib)", () => {
       expect(result.tenantId).toBe(TENANT_ID);
     }
     expect(mockTokenCreate).not.toHaveBeenCalled();
+    // The code must NOT have been consumed — otherwise a legitimate retry would
+    // hit invalid_grant (usedAt non-null) instead of re-attempting the mint.
+    expect(mockConsume).not.toHaveBeenCalled();
   });
 
   it("SA-bound (userId===null) ⇒ gate skipped, mints token", async () => {

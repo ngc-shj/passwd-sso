@@ -80,6 +80,7 @@ vi.mock("lucide-react", () => ({
   ShieldCheck: () => <svg data-testid="icon-shield-check" />,
   ShieldX: () => <svg data-testid="icon-shield-x" />,
   Loader2: () => <svg data-testid="icon-loader" />,
+  AlertTriangle: () => <svg data-testid="icon-alert-triangle" />,
 }));
 
 import { ConsentForm } from "./consent-form";
@@ -149,6 +150,28 @@ describe("ConsentForm — render", () => {
   it("omits the DCR badge when isDcr is false", () => {
     render(<ConsentForm {...baseProps} isDcr={false} />);
     expect(screen.queryByText("DCR")).not.toBeInTheDocument();
+  });
+
+  it("renders the redirect destination host — the anti-phishing signal", () => {
+    render(<ConsentForm {...baseProps} />);
+    expect(screen.getByText("redirectTo")).toBeInTheDocument();
+    // http://localhost:7777/callback → host shown, not the full URL.
+    expect(screen.getByText("localhost:7777")).toBeInTheDocument();
+  });
+
+  it("falls back to the raw redirect_uri when it cannot be parsed as a URL", () => {
+    render(<ConsentForm {...baseProps} redirectUri="not a url" />);
+    expect(screen.getByText("not a url")).toBeInTheDocument();
+  });
+
+  it("renders the DCR self-registration warning when isDcr is true", () => {
+    render(<ConsentForm {...baseProps} isDcr={true} />);
+    expect(screen.getByText("dcrWarning")).toBeInTheDocument();
+  });
+
+  it("omits the DCR warning when isDcr is false", () => {
+    render(<ConsentForm {...baseProps} isDcr={false} />);
+    expect(screen.queryByText("dcrWarning")).not.toBeInTheDocument();
   });
 
   it("falls back to the scope name when no description is configured", () => {

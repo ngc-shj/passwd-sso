@@ -185,6 +185,48 @@ describe("parseCsvLine", () => {
   it("handles empty fields", () => {
     expect(parseCsvLine(",,"  )).toEqual(["", "", ""]);
   });
+
+  it("strips the export-side formula-injection guard apostrophe", () => {
+    // escapeCsvCompat exports `-p@ss` as `"'-p@ss"`; import must undo the guard.
+    expect(parseCsvLine("\"'-p@ss\"")).toEqual(["-p@ss"]);
+    expect(parseCsvLine("\"'=HYPERLINK\"")).toEqual(["=HYPERLINK"]);
+  });
+
+  it("leaves a leading apostrophe not followed by a trigger char intact", () => {
+    // Only the guard shape (' + trigger char) is stripped; a plain apostrophe
+    // value is preserved.
+    expect(parseCsvLine("'hello")).toEqual(["'hello"]);
+  });
+});
+
+// ─── CSV formula-guard round-trip (F2 regression) ────────────
+
+describe("CSV export→import round-trip preserves symbol-leading values", () => {
+  it.each(["-p@ssw0rd!", "=1+1", "+15551234567", "@handle"])(
+    "round-trips a password of %j losslessly",
+    (password) => {
+      const entry = {
+        entryType: ENTRY_TYPE.LOGIN,
+        title: "site",
+        username: "alice",
+        password,
+        content: null,
+        url: "https://example.com",
+        notes: "",
+        totp: "",
+      } as unknown as ExportEntry;
+      const csv = formatExportCsv([entry], "compatible", {
+        includeReprompt: false,
+        includeRequireRepromptInPasswdSso: false,
+        includePasskeyType: false,
+        includePasskeyFieldsInPasswdSso: false,
+      });
+      const header = parseCsvLine(csv.split("\n")[0]);
+      const row = parseCsvLine(csv.split("\n")[1]);
+      const pwIdx = header.indexOf("login_password");
+      expect(row[pwIdx]).toBe(password);
+    }
+  );
 });
 
 // ─── parseCsv ────────────────────────────────────────────────

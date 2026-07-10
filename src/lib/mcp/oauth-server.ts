@@ -261,21 +261,12 @@ export async function exchangeCodeForToken(
     if (!verifyPkceS256(authCode.codeChallenge, params.codeVerifier))
       return { error: "invalid_grant" as const };
 
-    // Mark code as used via compare-and-swap. The findUnique above takes no
-    // row lock (Read Committed), so two concurrent exchanges can both observe
-    // usedAt === null; gating the consume on `usedAt: null` makes the loser's
-    // count === 0 and aborts it, preventing double-redemption of one code into
-    // multiple independent token families. Mirrors the refresh-token CAS below.
-    const consumed = await tx.mcpAuthorizationCode.updateMany({
-      where: { id: authCode.id, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-    if (consumed.count === 0) return { error: "invalid_grant" as const };
-
     // Passkey enforcement at the auth_code → token MINT point. The code was
     // gated at consent creation, but enforcement can flip (or a passkey be
-    // removed) within the code TTL, so re-derive here before minting. AFTER
-    // code validation + consume; BEFORE the access-token create. SA-bound
+    // removed) within the code TTL, so re-derive here before minting. This runs
+    // BEFORE the consume so a blocked exchange does NOT burn the code — the user
+    // can retry within the code TTL after satisfying enforcement. (Mirrors the
+    // refresh path, which also gates passkey before its CAS claim.) SA-bound
     // (userId null) skip.
     if (authCode.userId !== null) {
       const pk = await derivePasskeyState({
@@ -291,6 +282,17 @@ export async function exchangeCodeForToken(
         };
       }
     }
+
+    // Mark code as used via compare-and-swap. The findUnique above takes no
+    // row lock (Read Committed), so two concurrent exchanges can both observe
+    // usedAt === null; gating the consume on `usedAt: null` makes the loser's
+    // count === 0 and aborts it, preventing double-redemption of one code into
+    // multiple independent token families. Mirrors the refresh-token CAS below.
+    const consumed = await tx.mcpAuthorizationCode.updateMany({
+      where: { id: authCode.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    if (consumed.count === 0) return { error: "invalid_grant" as const };
 
     // Issue access token
     const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");

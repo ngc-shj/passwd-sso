@@ -2,6 +2,8 @@
   "title": "Authorize Application",
   "description": "wants to access your vault",
   "requestedScopes": "Requested permissions",
+  "redirectTo": "Authorization code will be sent to",
+  "dcrWarning": "This application registered itself automatically — it was not added by your administrator. Verify the destination above before allowing; a malicious app can impersonate a trusted name.",
   "allow": "Allow",
   "deny": "Deny",
   "scopeDescriptions": {

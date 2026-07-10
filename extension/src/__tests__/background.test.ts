@@ -884,7 +884,7 @@ describe("background message flow", () => {
   it("retries direct inject without hint when args are unserializable", async () => {
     cryptoMocks.decryptData
       .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+      .mockResolvedValueOnce(JSON.stringify({ username: "alice", urlHost: "example.com" }));
 
     // Message-based autofill must fail so direct fallback runs.
     chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
@@ -902,7 +902,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1", targetHint: { id: "user" } },
-        { tab: { id: 1 } },
+        { tab: { id: 1, url: "https://example.com/login" }, url: "https://example.com/login" },
         (resp) => resolve(resp),
       );
     });
@@ -983,7 +983,7 @@ describe("background message flow", () => {
       const handler = messageHandlers[0];
       handler(
         { type: "AUTOFILL_FROM_CONTENT", entryId: "id-1" },
-        { tab: { id: 1 } },
+        { tab: { id: 1, url: "https://any-site.example/checkout" }, url: "https://any-site.example/checkout" },
         (resp) => resolve(resp),
       );
     });
@@ -1002,6 +1002,267 @@ describe("background message flow", () => {
     expect(fillPayload.city).toBe("Springfield");
     expect(fillPayload.state).toBe("CA");
     expect(fillPayload.country).toBe("US");
+  });
+
+  // ── S4: origin re-binding for content-driven LOGIN fills ──
+
+  const stubLoginFetch = (
+    overview: Record<string, unknown> = { username: "alice", urlHost: "example.com" },
+  ) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(PASSWORD_BY_ID_PREFIX)) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "pw-1",
+              encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
+              encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+              entryType: EXT_ENTRY_TYPE.LOGIN,
+              aadVersion: 1,
+            }),
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+    // Reset the once-queue: vi.clearAllMocks() (beforeEach) does not clear
+    // mockResolvedValueOnce values, and the sender-host fail-closed tests
+    // reject before consuming their two decrypts, leaving stale queue entries.
+    cryptoMocks.decryptData.mockReset();
+    cryptoMocks.decryptData
+      .mockResolvedValueOnce(JSON.stringify({ password: "secret", username: "alice" }))
+      .mockResolvedValueOnce(JSON.stringify(overview));
+  };
+
+  it("rejects a content-driven LOGIN fill when the sender host does not match the entry host", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        { tab: { id: 1, url: "https://attacker.example/phish" }, url: "https://attacker.example/phish" },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+    // Password must never be sent to the content script on a host mismatch.
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+    expect(fillCall).toBeUndefined();
+  });
+
+  it("rejects a content-driven fill when the sender frame has no resolvable URL", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        { tab: { id: 1, url: "https://example.com/login" } },
+        (resp) => resolve(resp),
+      );
+    });
+    // No `_sender.url` (frame origin) → fail closed even though the top tab URL
+    // matches: the fill is gated on the originating frame, not the top page.
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+  });
+
+  it("re-binds to the sender FRAME origin, not the top-tab host", async () => {
+    // Cross-origin subframe (attacker.example) embedded in a top page whose
+    // host matches the entry (example.com). Binding to the frame origin must
+    // reject even though the top-tab URL would match.
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://attacker.example/iframe",
+          frameId: 9,
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+    expect(fillCall).toBeUndefined();
+  });
+
+  it("rejects a LOGIN fill when the entry overview has no host at all (fail closed)", async () => {
+    stubLoginFetch({ username: "alice" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({
+      type: "AUTOFILL_FROM_CONTENT",
+      ok: false,
+      error: "ORIGIN_MISMATCH",
+    });
+  });
+
+  it("accepts a content-driven LOGIN fill matched via additionalUrlHosts", async () => {
+    stubLoginFetch({
+      username: "alice",
+      urlHost: "primary.example",
+      additionalUrlHosts: ["example.com"],
+    });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+  });
+
+  it("delivers a content-driven LOGIN fill only to the originating frame (not tab-wide)", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+          frameId: 7,
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    // The password must be delivered frame-scoped ({ frameId }), never broadcast
+    // tab-wide, so a cross-origin subframe cannot capture it.
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+    expect(fillCall).toBeDefined();
+    expect(fillCall?.[2]).toEqual({ frameId: 7 });
+    // The entry's hosts ride along so the receiving frame can self-verify origin.
+    expect((fillCall?.[1] as { allowedHosts?: string[] }).allowedHosts).toEqual([
+      "example.com",
+    ]);
+  });
+
+  it("direct-injection fallback is frame-scoped for a content-driven fill", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // Force the message path to fail so the executeScript fallback runs.
+    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error("no connection"));
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+          frameId: 7,
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    // Fallback injection must target ONLY the originating frame, never all frames.
+    const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (c: unknown[]) => "args" in (c[0] as object),
+    );
+    expect(injectCall?.[0]?.target).toEqual({ tabId: 1, frameIds: [7] });
+  });
+
+  it("popup AUTOFILL direct-injection fallback stays top-frame-only (no frameId, fail-safe)", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    chromeMock?.tabs.sendMessage.mockRejectedValueOnce(new Error("no connection"));
+
+    // The real popup/context-menu path: EXT_MSG.AUTOFILL carries an explicit
+    // tabId and no originating frameId (the popup is not a tab frame).
+    const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
+
+    // With no known frame, the decrypted credential must NOT be injected into
+    // every frame ({ allFrames: true }) — that would deliver it to a
+    // cross-origin third-party iframe. Fail safe to the top frame only.
+    const injectCall = chromeMock?.scripting.executeScript.mock.calls.find(
+      (c: unknown[]) => "args" in (c[0] as object),
+    );
+    expect(injectCall?.[0]?.target).toEqual({ tabId: 1 });
   });
 });
 
@@ -1918,19 +2179,23 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     // Send LOGIN_DETECTED from a URL that won't match cached entries
     // (cached entries have urlHost: "example.com" from decryptData mock).
     // Use a unique host so handleLoginDetected returns action: "save".
-    const sender = { tab: { id: tabId, url: `https://${host}/login` } };
+    // _sender.url (frame origin) drives the frameHost binding.
+    const sender = {
+      tab: { id: tabId, url: `https://${host}/login` },
+      url: `https://${host}/login`,
+    };
     await sendMessageWithSender(
       { type: "LOGIN_DETECTED", url: `https://${host}/login`, username: "alice", password: "pw" },
       sender,
     );
   }
 
-  it("returns pending data when sender host matches", async () => {
+  it("returns pending data when sender frame origin matches", async () => {
     await createPendingSave(42, "nomatch.test");
 
     const res = await sendMessageWithSender(
       { type: "CHECK_PENDING_SAVE" },
-      { tab: { id: 42, url: "https://nomatch.test/dashboard" } },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" }, url: "https://nomatch.test/dashboard" },
     );
 
     expect(res).toEqual(
@@ -1944,12 +2209,12 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     );
   });
 
-  it("returns 'none' when sender host does not match", async () => {
+  it("returns 'none' when sender frame origin does not match", async () => {
     await createPendingSave(42, "nomatch.test");
 
     const res = await sendMessageWithSender(
       { type: "CHECK_PENDING_SAVE" },
-      { tab: { id: 42, url: "https://evil.com/phishing" } },
+      { tab: { id: 42, url: "https://evil.com/phishing" }, url: "https://evil.com/phishing" },
     );
 
     expect(res).toEqual(
@@ -1960,7 +2225,36 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     );
   });
 
-  it("returns 'none' when sender has no tab URL", async () => {
+  it("does NOT release the pending credential to a cross-origin subframe of the same tab", async () => {
+    // Top frame (nomatch.test) submitted the login; a malicious subframe
+    // (attacker.example) in the same tab polls. The top-tab URL would match,
+    // but the frame origin must not — and the legit pending must survive so the
+    // real top frame can still pull it.
+    await createPendingSave(42, "nomatch.test");
+
+    const subframeRes = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" }, url: "https://attacker.example/iframe" },
+    );
+    expect(subframeRes).toEqual(
+      expect.objectContaining({ type: "CHECK_PENDING_SAVE", action: "none" }),
+    );
+
+    // The legit top frame can still retrieve it (subframe poll did not consume it).
+    const topRes = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" }, url: "https://nomatch.test/dashboard" },
+    );
+    expect(topRes).toEqual(
+      expect.objectContaining({
+        type: "CHECK_PENDING_SAVE",
+        action: "save",
+        password: "pw",
+      }),
+    );
+  });
+
+  it("returns 'none' when sender frame has no URL", async () => {
     await createPendingSave(42, "nomatch.test");
 
     const res = await sendMessageWithSender(
@@ -2066,7 +2360,7 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
   it("does not suppress login on non-app URLs", async () => {
     const res = await sendMessageWithSender(
       { type: "LOGIN_DETECTED", url: "https://external-site.com/login", username: "user", password: "pass" },
-      { tab: { id: 100, url: "https://external-site.com/login" } },
+      { tab: { id: 100, url: "https://external-site.com/login" }, url: "https://external-site.com/login" },
     );
 
     expect(res).toEqual(

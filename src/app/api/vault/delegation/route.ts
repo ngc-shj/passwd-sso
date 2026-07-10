@@ -15,7 +15,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { MCP_SCOPE } from "@/lib/constants/auth/mcp";
+import { canDelegate } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
@@ -125,11 +125,10 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.MCP_TOKEN_NOT_FOUND);
   }
 
-  const scopes = mcpToken.scope.split(",").map((s) => s.trim());
-  const hasDelegationScope =
-    scopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
-    scopes.includes(MCP_SCOPE.CREDENTIALS_USE);
-  if (!hasDelegationScope) {
+  // Creating a delegation session authorizes the token's agent to decrypt the
+  // delegated entries (delegation/check returns authorized:true on session
+  // existence), so it requires `credentials:use` — see canDelegate().
+  if (!canDelegate(mcpToken.scope)) {
     return errorResponse(API_ERROR.MCP_TOKEN_SCOPE_INSUFFICIENT);
   }
 
@@ -341,18 +340,13 @@ async function handleGET(_request: NextRequest) {
       expiresAt: s.expiresAt.toISOString(),
       createdAt: s.createdAt.toISOString(),
     })),
-    availableTokens: availableTokens.map((t) => {
-      const tokenScopes = t.scope.split(",").map((s) => s.trim());
-      return {
-        id: t.id,
-        mcpClientName: t.mcpClient.name,
-        mcpClientId: t.mcpClient.clientId,
-        hasDelegationScope:
-          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
-          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_USE),
-        expiresAt: t.expiresAt.toISOString(),
-      };
-    }),
+    availableTokens: availableTokens.map((t) => ({
+      id: t.id,
+      mcpClientName: t.mcpClient.name,
+      mcpClientId: t.mcpClient.clientId,
+      hasDelegationScope: canDelegate(t.scope),
+      expiresAt: t.expiresAt.toISOString(),
+    })),
   });
 }
 

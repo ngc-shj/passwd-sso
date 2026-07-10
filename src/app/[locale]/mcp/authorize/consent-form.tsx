@@ -12,7 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { ShieldCheck, ShieldX, Loader2 } from "lucide-react";
+import { ShieldCheck, ShieldX, Loader2, AlertTriangle } from "lucide-react";
 import { useTranslations, useMessages } from "next-intl";
 import { withBasePath } from "@/lib/url-helpers";
 import { MCP_SCOPE_RISK, type McpScope, type ScopeRiskLevel } from "@/lib/constants/auth/mcp";
@@ -43,6 +43,17 @@ export function ConsentForm({
   const messages = useMessages();
   const scopeDescriptions = (messages.McpConsent as Record<string, unknown>)?.scopeDescriptions as Record<string, string> | undefined;
   const [loading, setLoading] = useState(false);
+
+  // Show where the authorization code will be delivered. For DCR clients this
+  // URI is attacker-controllable, so displaying it is the primary signal a user
+  // has to detect a consent-phishing client impersonating a trusted name.
+  const redirectDisplay = (() => {
+    try {
+      return new URL(redirectUri).host || redirectUri;
+    } catch {
+      return redirectUri;
+    }
+  })();
 
   const scopeBadgeProps = (scope: string): {
     variant: "outline" | "destructive";
@@ -142,6 +153,18 @@ export function ConsentForm({
               );
             })}
           </div>
+          <div className="mt-4 space-y-1">
+            <p className="text-sm font-medium">{t("redirectTo")}</p>
+            <p className="break-all rounded-md border bg-muted/40 p-2 font-mono text-xs">
+              {redirectDisplay}
+            </p>
+          </div>
+          {isDcr && (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{t("dcrWarning")}</span>
+            </div>
+          )}
         </CardContent>
         <CardFooter className="flex gap-2">
           <Button

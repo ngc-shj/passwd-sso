@@ -114,18 +114,20 @@ export async function deriveEncryptionKey(
   );
 }
 
-export async function deriveAuthKey(
+// Uses deriveBits (not deriveKey) so no extractable CryptoKey is ever created.
+// Output bytes are identical to the previous exportKey("raw", <HMAC key>) form.
+export async function deriveAuthKeyBytes(
   secretKey: Uint8Array,
-): Promise<CryptoKey> {
+): Promise<Uint8Array> {
   const hkdfKey = await crypto.subtle.importKey(
     "raw",
     toArrayBuffer(secretKey),
     "HKDF",
     false,
-    ["deriveKey"],
+    ["deriveBits"],
   );
 
-  return crypto.subtle.deriveKey(
+  const bits = await crypto.subtle.deriveBits(
     {
       name: "HKDF",
       hash: "SHA-256",
@@ -134,10 +136,10 @@ export async function deriveAuthKey(
       info: textEncode(HKDF_AUTH_INFO),
     },
     hkdfKey,
-    { name: "HMAC", hash: "SHA-256", length: AES_KEY_LENGTH },
-    true,
-    ["sign"],
+    AES_KEY_LENGTH,
   );
+
+  return new Uint8Array(bits);
 }
 
 // ─── Secret Key Management ─────────────────────────────────────
@@ -165,9 +167,8 @@ export async function unwrapSecretKey(
 
 // ─── Auth Hash ────────────────────────────────────────────────
 
-export async function computeAuthHash(authKey: CryptoKey): Promise<string> {
-  const rawKey = await crypto.subtle.exportKey("raw", authKey);
-  const hash = await crypto.subtle.digest("SHA-256", rawKey);
+export async function computeAuthHash(authKeyBytes: Uint8Array): Promise<string> {
+  const hash = await crypto.subtle.digest("SHA-256", toArrayBuffer(authKeyBytes));
   return hexEncode(hash);
 }
 

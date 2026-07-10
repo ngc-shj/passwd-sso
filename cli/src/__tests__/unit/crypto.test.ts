@@ -4,6 +4,8 @@ import {
   hexDecode,
   deriveWrappingKey,
   deriveEncryptionKey,
+  deriveAuthKeyBytes,
+  computeAuthHash,
   unwrapSecretKey,
   encryptData,
   decryptData,
@@ -157,6 +159,33 @@ describe("crypto", () => {
       const artifact = await encryptData("passwd-sso-vault-verification-v1", encKey1);
       const result = await verifyKey(encKey2, artifact);
       expect(result).toBe(false);
+    });
+  });
+
+  describe("deriveAuthKeyBytes / computeAuthHash", () => {
+    // Golden vectors shared with the app implementation
+    // (src/lib/crypto/crypto-client.test.ts). Both implementations must
+    // produce byte-identical output for the same secret key — server-stored
+    // auth hashes depend on it. A diff here means the CLI drifted from the app.
+    it("matches the golden auth-key bytes for a fixed secret key", async () => {
+      const secretKey = new Uint8Array(32).fill(0xaa);
+
+      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+
+      expect(hexEncode(authKeyBytes)).toBe(
+        "7d06a70d843366f75f7db101639b7caa4509b3cd0ad8a272c6873a9dcfb8b889",
+      );
+    });
+
+    it("matches the golden auth hash for a fixed secret key", async () => {
+      const secretKey = new Uint8Array(32).fill(0xaa);
+      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+
+      const hash = await computeAuthHash(authKeyBytes);
+
+      expect(hash).toBe(
+        "45afd70f6aeb06a70078f5253391eea780b5503a9883a98c141c4a742f45aa21",
+      );
     });
   });
 

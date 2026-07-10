@@ -186,6 +186,11 @@ async function getEffectiveAutoLockMinutes(): Promise<number> {
 
 interface PendingSavePrompt {
   host: string;
+  // Origin (host) of the frame that submitted the login. A pending credential
+  // must only be released to a frame with this same origin — content scripts
+  // run in all frames, so gating on the top-tab host alone would let a
+  // cross-origin subframe pull or receive a sibling frame's password.
+  frameHost: string;
   username: string;
   password: string;
   action: "save" | "update";
@@ -770,6 +775,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             pendingSavePrompts.delete(tabId);
             return;
           }
+          // Frame-scoped to the top frame: the save banner is a top-frame UI
+          // element and the pending password must never be broadcast tab-wide,
+          // which would deliver it to a cross-origin subframe's content script.
           chrome.tabs.sendMessage(tabId, {
             type: PSSO_SHOW_SAVE_BANNER,
             host: pending.host,
@@ -778,7 +786,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             action: pending.action,
             existingEntryId: pending.existingEntryId,
             existingTitle: pending.existingTitle,
-          }).then(() => {
+          }, { frameId: 0 }).then(() => {
             // Delivered successfully — remove from pending
             pendingSavePrompts.delete(tabId);
           }).catch(() => {
@@ -1392,20 +1400,34 @@ async function performAutofillForEntry(
   targetHint?: AutofillTargetHint,
   teamId?: string,
   frameId?: number,
+  // When set (non-null), the caller does not trust the entryId's origin binding
+  // and requires a LOGIN entry's host to match this host before releasing the
+  // password. Passed by the content-message path (AUTOFILL_FROM_CONTENT), where
+  // the entryId originates from an untrusted content script; popup/context-menu
+  // callers pass undefined because the user picked the entry in trusted UI.
+  enforceSenderHost?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
-  // Inline path supplies the originating frame so card/identity plaintext is
-  // delivered only to that frame. Popup/context-menu callers pass no frameId —
-  // keep tab-wide behavior (do NOT substitute frame 0, which would break
-  // same-origin-subframe popup fills).
+  // executeScript target for direct injection (CC/Identity file injection and
+  // the LOGIN fallback). When the originating frame is known (content-driven),
+  // scope to it. When it is unknown (popup/context-menu), inject into the TOP
+  // FRAME ONLY — `{ tabId }` with neither `frameIds` nor `allFrames` targets
+  // frame 0, not the whole tab. Do NOT "restore" `allFrames: true` here: that
+  // would inject the decrypted credential into every frame, including a
+  // cross-origin third-party iframe, where its page JS could read the filled
+  // value. Legitimate iframe fills go through the message path below, which the
+  // content-side per-frame origin gate (allowedHosts) makes safe.
   const hasFrameTarget = typeof frameId === "number";
   const executeTarget = hasFrameTarget
     ? { tabId, frameIds: [frameId] }
     : { tabId };
-  // chrome.tabs.sendMessage's options overload rejects `undefined`; only pass
+  // AUTOFILL_FILL message target. Frame-scoped when the frame is known; for
+  // popup/context-menu (no frameId) it broadcasts tab-wide — safe because each
+  // frame self-verifies its origin against allowedHosts before filling.
+  // chrome.tabs.sendMessage's options overload rejects `undefined`, so only pass
   // frame-targeting options when an originating frame is known.
   const sendFillMessage = (payload: unknown): Promise<unknown> =>
     hasFrameTarget
@@ -1489,7 +1511,35 @@ async function performAutofillForEntry(
     nationality?: string | null;
     idNumber?: string | null;
   };
-  const overview = JSON.parse(overviewPlain) as { username?: string | null };
+  const overview = JSON.parse(overviewPlain) as {
+    username?: string | null;
+    urlHost?: string | null;
+    additionalUrlHosts?: string[] | null;
+  };
+
+  // Hosts this entry is bound to. Sent to the content script so each frame can
+  // self-verify its origin before writing the password (a popup/context-menu
+  // fill has no known frameId and is broadcast to every frame).
+  const entryHosts = [
+    overview.urlHost ?? "",
+    ...(overview.additionalUrlHosts ?? []),
+  ].filter((h): h is string => typeof h === "string" && h.length > 0);
+
+  // Origin re-binding for content-driven fills: when the caller does not trust
+  // the entryId's origin (content-script path), a LOGIN password must only be
+  // released to a page whose host matches the entry's own host(s). This mirrors
+  // the passkey path's isSenderAuthorizedForRpId defense-in-depth and closes the
+  // gap where host filtering lived only in the untrusted content-side dropdown.
+  // CC/Identity are user-picked and hostless by design, so scope to LOGIN.
+  if (
+    typeof enforceSenderHost === "string" &&
+    entryType === EXT_ENTRY_TYPE.LOGIN
+  ) {
+    const matches = entryHosts.some((h) => isHostMatch(h, enforceSenderHost));
+    if (!matches) {
+      return { ok: false, error: "ORIGIN_MISMATCH" };
+    }
+  }
 
   // ── Credit Card autofill path ──
   if (entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
@@ -1602,14 +1652,21 @@ async function performAutofillForEntry(
   let messageFillSucceeded = false;
   // autofill-lib.ts is bundled in form-detector.ts (manifest content_scripts),
   // so the AUTOFILL_FILL listener is already present — no executeScript needed.
+  // Frame-scoped delivery: when the originating frame is known (content-driven
+  // fill), the password goes ONLY to that frame — never broadcast tab-wide,
+  // which would leak it into a cross-origin subframe embedded in the page.
+  // Popup/context-menu callers pass no frameId and keep tab-wide behavior.
   try {
-    await chrome.tabs.sendMessage(tabId, {
+    await sendFillMessage({
       type: AUTOFILL_FILL,
       username,
       ...(password ? { password } : {}),
       ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
+      // Frame-origin gate for the tab-wide (popup) broadcast: each frame fills
+      // only if it is the top frame or its own origin matches one of these.
+      ...(entryHosts.length ? { allowedHosts: entryHosts } : {}),
     });
     messageFillSucceeded = true;
   } catch {
@@ -1617,12 +1674,13 @@ async function performAutofillForEntry(
   }
 
   // Direct fallback for pages where content-script messaging is blocked/unstable.
-  // Runs in all frames so login forms inside iframes are also covered.
+  // Scoped to the originating frame (executeTarget) so the password is not
+  // injected into sibling/subframes; popup callers (no frameId) target the tab.
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
   ) =>
     chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
+      target: executeTarget,
       args: [
         username,
         password ?? "",
@@ -2444,12 +2502,33 @@ async function handleMessage(
         }
         // C8: deliver card/identity plaintext only to the originating frame.
         const frameId = _sender.frameId;
+        // Re-bind LOGIN password release to the SENDER FRAME's host — the
+        // entryId came from an untrusted content script (host filtering in the
+        // content dropdown is not a security boundary). Use `_sender.url` (the
+        // browser-set document URL of the frame identified by `_sender.frameId`)
+        // rather than `_sender.tab.url` (the top-level tab URL): content scripts
+        // run in all frames, so a cross-origin subframe's fill must be checked
+        // against that subframe's own origin, and a legitimate login form inside
+        // a cross-origin iframe (embedded SSO/payment widgets) must match on its
+        // frame host, not the top page's. Fail closed if the frame origin is
+        // unknown: a content-driven fill with no resolvable origin must not
+        // release a password.
+        const senderHost = _sender.url ? extractHost(_sender.url) : null;
+        if (!senderHost) {
+          sendResponse({
+            type: EXT_MSG.AUTOFILL_FROM_CONTENT,
+            ok: false,
+            error: "ORIGIN_MISMATCH",
+          });
+          return;
+        }
         const result = await performAutofillForEntry(
           message.entryId,
           tabId,
           message.targetHint,
           message.teamId,
           frameId,
+          senderHost,
         );
         sendResponse({
           type: EXT_MSG.AUTOFILL_FROM_CONTENT,
@@ -2509,6 +2588,13 @@ async function handleMessage(
           } catch {
             host = senderUrl;
           }
+          // Bind the pending credential to the submitting frame's origin so a
+          // cross-origin subframe cannot later pull or receive it.
+          const frameHost = _sender.url ? extractHost(_sender.url) : null;
+          if (!frameHost) {
+            sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
+            return;
+          }
           // Evict oldest entry if at capacity
           if (pendingSavePrompts.size >= MAX_PENDING_SAVES && !pendingSavePrompts.has(senderTabId)) {
             const oldestKey = pendingSavePrompts.keys().next().value;
@@ -2516,6 +2602,7 @@ async function handleMessage(
           }
           pendingSavePrompts.set(senderTabId, {
             host,
+            frameHost,
             username: message.username,
             password: message.password,
             action: result.action,
@@ -2672,11 +2759,13 @@ async function handleMessage(
       }
       const pending = pendingSavePrompts.get(tabId);
       if (pending && Date.now() - pending.timestamp < PENDING_SAVE_TTL_MS) {
-        // Security: verify the requesting page is on the same host as the
-        // original login, mirroring the push-path check in tabs.onUpdated.
-        const senderHost = _sender.tab?.url ? extractHost(_sender.tab.url) : null;
-        if (!senderHost || !isHostMatch(pending.host, senderHost)) {
-          pendingSavePrompts.delete(tabId);
+        // Security: release the pending credential only to the SAME FRAME ORIGIN
+        // that submitted the login. Gating on the top-tab host alone would let a
+        // cross-origin subframe pull a sibling frame's freshly-typed password.
+        // A stale pending is NOT deleted on a frame-origin mismatch — a sibling
+        // frame's poll must not consume the legit frame's pending credential.
+        const senderFrameHost = _sender.url ? extractHost(_sender.url) : null;
+        if (!senderFrameHost || !isHostMatch(pending.frameHost, senderFrameHost)) {
           sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" });
           return;
         }

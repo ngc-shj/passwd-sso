@@ -185,6 +185,12 @@ export interface AutofillPayload {
   targetHint?: AutofillTargetHint;
   totpCode?: string;
   customFields?: Array<{ label: string; value: string }>;
+  // Hosts the entry is bound to (urlHost + additionalUrlHosts). A subframe must
+  // only fill when its OWN origin matches one of these — the SW broadcasts
+  // AUTOFILL_FILL to every frame for popup/context-menu fills (frame unknown),
+  // so each frame self-checks to keep a cross-origin third-party iframe from
+  // receiving the decrypted credential.
+  allowedHosts?: string[];
 }
 
 export interface AutofillTargetHint {

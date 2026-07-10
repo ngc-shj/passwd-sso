@@ -11,6 +11,7 @@ import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { writeSecretFile } from "../lib/secure-file.js";
 import * as output from "../lib/output.js";
 import { CLI_API_PATH } from "../lib/api-paths.js";
+import { escapeCsvCompat } from "../lib/csv-escape.js";
 
 interface PasswordEntry {
   id: string;
@@ -38,13 +39,6 @@ interface EntryBlob {
     period?: number;
   };
   [key: string]: unknown;
-}
-
-function escapeCSV(value: string): string {
-  if (value.includes(",") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
 }
 
 export async function exportCommand(options: {
@@ -125,9 +119,9 @@ export async function exportCommand(options: {
         headers.map((h) => {
           const val = entry[h];
           if (h === "totp" && val && typeof val === "object") {
-            return escapeCSV((val as { secret: string }).secret ?? "");
+            return escapeCsvCompat((val as { secret: string }).secret ?? "");
           }
-          return escapeCSV(String(val ?? ""));
+          return escapeCsvCompat(String(val ?? ""));
         }).join(","),
       );
     }

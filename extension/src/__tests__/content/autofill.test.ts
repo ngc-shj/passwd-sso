@@ -654,3 +654,98 @@ describe("performAutofill", () => {
     expect((document.getElementById("d1") as HTMLInputElement).value).toBe("");
   });
 });
+
+describe("performAutofill — frame-origin gate", () => {
+  // Simulate a subframe (window.top !== window.self) at a given origin.
+  function inSubframe(href: string, run: () => void) {
+    const originalLocation = window.location;
+    const originalTop = window.top;
+    Object.defineProperty(window, "top", { configurable: true, value: {} });
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL(href),
+    });
+    try {
+      run();
+    } finally {
+      Object.defineProperty(window, "top", { configurable: true, value: originalTop });
+      Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+    }
+  }
+
+  it("does NOT fill a cross-origin subframe whose host is not in allowedHosts", () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    inSubframe("https://attacker.example/iframe", () => {
+      performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        allowedHosts: ["bank.example"],
+      });
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[0] as HTMLInputElement).value).toBe("");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
+  it("fills a same-origin-family subframe whose host matches allowedHosts", () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    inSubframe("https://login.bank.example/sso", () => {
+      performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        allowedHosts: ["bank.example"],
+      });
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[0] as HTMLInputElement).value).toBe("alice");
+    expect((inputs[1] as HTMLInputElement).value).toBe("secret");
+  });
+
+  it("does NOT fill a subframe when the entry has no bound host (allowedHosts absent)", () => {
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    inSubframe("https://sub.example/x", () => {
+      performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+      });
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
+  it("always fills the top frame regardless of allowedHosts", () => {
+    // Default jsdom context is the top frame (window.top === window.self).
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    performAutofill({
+      type: "AUTOFILL_FILL",
+      username: "alice",
+      password: "secret",
+      allowedHosts: ["other.example"],
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("secret");
+  });
+});

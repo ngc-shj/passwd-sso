@@ -122,11 +122,19 @@ export function normalizeForwardedHeaders(request: NextRequest): NextRequest {
 }
 
 /**
- * The `Tailscale-*` headers are not standard / spoofable from outside the
- * tailnet because they originate after TLS termination at the local
- * `tailscaled` daemon — an external attacker would have to compromise the
- * tailnet to inject them.
+ * The `Tailscale-*` headers originate after TLS termination at the local
+ * `tailscaled` daemon, so they are unspoofable ONLY when every ingress path to
+ * the process terminates there. When the app is also directly reachable (dev
+ * server on :3001 off-tailnet, or a misconfigured prod not exclusively fronted
+ * by tailscale serve), any client can set these headers.
+ *
+ * Because trusting them lets a request force the canonical Host/X-Forwarded-*
+ * normalization below, gate it behind an explicit opt-in that operators set
+ * only in tailscale-serve-fronted deployments — mirroring the fail-closed
+ * `TRUST_PROXY_HEADERS` posture for forwarded client IPs. Default off means an
+ * attacker cannot reach the normalization path by forging the headers.
  */
 function isViaTailscaleServe(request: NextRequest): boolean {
+  if (process.env.TRUST_TAILSCALE_SERVE_HEADERS !== "true") return false;
   return TAILSCALE_DETECTION_HEADERS.some((h) => request.headers.has(h));
 }
