@@ -1,0 +1,122 @@
+{
+  "$schema-note": "Mechanically verified by src/__tests__/workers/worker-policy-manifest.test.ts: completeness (candidate module set, derived from the R42 primitive-anchored grep in the security-review-followups plan C5, vs. manifest `modules`/`entrypoint`/`$documented-exclusions`, both directions), `rawSql` (/\\$queryRaw|\\$executeRaw/ grep across an entry's modules), `destructive` (/deleteMany|DELETE FROM/i grep), `emitsAudit` (/logAudit|enqueueAudit|AUDIT_ACTION/ grep), `usesSecurityDefiner` (grep of the SECURITY DEFINER function names extracted from prisma/migrations/20260522000200_audit_log_revoke_via_definer/migration.sql: audit_log_purge, audit_log_tenant_migrate), file existence of every `entrypoint`/`modules` path. Doc fields (`tenantScoped` reason, `idempotent`, `retryPolicy`, `poisonMessageHandling`, `retentionPolicyTouched`) are presence + >=10-char-prose verified only; their accuracy is a human review concern (SC3), same trust level as route-policy-manifest.json's `handlerAuthReason`.",
+  "$documented-exclusions": {
+    "src/workers/worker-pool-config.ts": "Constants-only module: two exported pool-timeout constants (WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS), no PrismaClient/Pool construction, no DB access at all.",
+    "scripts/migrate-webhook-secrets-v1-to-v2.ts": "One-shot operator-invoked migration (v1 no-AAD -> v2 AAD-bound webhook secrets), --dry-run-capable, idempotent by design. No unattended steady-state process and no retry/poison-message surface for the manifest fields to describe; reviewed per-PR at the diff level instead (review S4 disposition (b)).",
+    "scripts/migrate-account-tokens-to-encrypted.ts": "One-shot operator-invoked migration (legacy plaintext OAuth tokens -> encrypted-at-rest), --dry-run-capable, idempotent (skips rows already carrying the psoenc1: sentinel). No unattended steady-state process; reviewed per-PR at the diff level instead (review S4 disposition (b)).",
+    "prisma/seed.ts": "Permanent no-op seed script (tags are user-created; no default data). Opens a PrismaClient only to print a completion message; writes nothing."
+  },
+  "workers": {
+    "audit-outbox-worker": {
+      "entrypoint": "scripts/audit-outbox-worker.ts",
+      "modules": [
+        "src/workers/audit-outbox-worker.ts",
+        "src/workers/audit-delivery.ts"
+      ],
+      "dbRole": "passwd_outbox_worker",
+      "tenantScoped": {
+        "value": true,
+        "reason": "Every claim/deliver/reap/purge transaction sets bypass_rls + app.tenant_id=NIL_UUID via setBypassRlsGucs (audit-outbox-worker.ts:60-64) and then operates per-row using the row's own tenant_id column (e.g. deliverRow, deliverRowWithChain) -- it is a system-wide sweep by role privilege, but every write is attributed to the row's own tenant."
+      },
+      "usesSecurityDefiner": false,
+      "rawSql": true,
+      "destructive": true,
+      "emitsAudit": true,
+      "idempotent": "claimBatch uses UPDATE ... WHERE status='PENDING' FOR UPDATE SKIP LOCKED to claim rows exactly once across concurrent workers; deliverRow/deliverRowWithChain INSERT INTO audit_logs ... ON CONFLICT (outbox_id) DO NOTHING so a re-delivered row after a crash is a no-op (audit-outbox-worker.ts:98-112, 151, 316-317).",
+      "retryPolicy": "recordError computes exponential backoff with full jitter (computeBackoffMs + withFullJitter, audit-outbox-worker.ts:448-449) and reschedules via next_retry_at; a row exceeding max_attempts transitions to FAILED (dead-letter) instead of retrying forever (audit-outbox-worker.ts:447,455-466).",
+      "poisonMessageHandling": "Rows at/over max_attempts are marked FAILED and an AUDIT_OUTBOX_DEAD_LETTER event is written directly to audit_logs (bypassing the outbox, to avoid recursion) via writeDirectAuditLog (audit-outbox-worker.ts:397-434,490-497); reapStuckRows separately reaps PROCESSING rows stuck past PROCESSING_TIMEOUT_MS, dead-lettering those already at max_attempts (audit-outbox-worker.ts:775-831).",
+      "retentionPolicyTouched": [
+        "audit_outbox",
+        "audit_deliveries"
+      ]
+    },
+    "retention-gc-worker": {
+      "entrypoint": "scripts/retention-gc-worker.ts",
+      "modules": [
+        "src/workers/retention-gc-worker/index.ts",
+        "src/workers/retention-gc-worker/sweep.ts",
+        "src/workers/retention-gc-worker/predicate.ts",
+        "src/workers/retention-gc-worker/registry.ts"
+      ],
+      "dbRole": "passwd_retention_gc_worker",
+      "tenantScoped": {
+        "value": true,
+        "reason": "The NOBYPASSRLS passwd_retention_gc_worker role sets bypass_rls in-tx per sweep entry (sweep.ts, e.g. line 168) to span all tenants under existing RLS policies, but every EXPIRY_AUDIT_PROVENANCE / PER_TENANT_FN / PER_TENANT_TRASH / PER_TENANT_AGE entry enumerates or attributes rows by their own tenant_id (sweep.ts sweepAuditLogs, sweepPerTenantAge, sweepTrashEntry) -- a deliberate all-tenant blast radius (registry.ts:47-58 globalDelete doc), never a cross-tenant write of one tenant's data into another."
+      },
+      "usesSecurityDefiner": true,
+      "rawSql": true,
+      "destructive": true,
+      "emitsAudit": true,
+      "idempotent": "Each EXPIRY/EXPIRY_GUARDED/EXPIRY_AUDIT_PROVENANCE DELETE is batch-bounded via (keys) IN (SELECT keys ... LIMIT $1) keyed off cutoffColumn < now(), so a re-run after a crash simply finds fewer (or zero) newly-expired rows -- no duplicate side effects (sweep.ts:181-189, 219-228, 278-289). sweepAuditLogs routes through the audit_log_purge SECURITY DEFINER function which is itself a plain bounded DELETE (registry.ts:475-479, sweep.ts:362-365).",
+      "retryPolicy": "No per-row retry/backoff: sweepOnce catches each registry entry's error individually (INV-C4b), logs {table, code} only, records counts[table]=-1, and continues to the next entry -- the NEXT scheduled sweep tick (fixed intervalMs, no backoff) naturally retries the same cutoff-based query (sweep.ts:602-641).",
+      "poisonMessageHandling": "There is no per-row poison-message concept (bulk cutoff-based DELETE, not a per-item queue); a systematically failing entry (e.g. a bad identifier) is caught per-tick, logged with {table, code}, and left for the next tick -- the boot-time validateRegistry() call fails closed (throws) before the loop starts if any registry entry has an invalid identifier or missing globalDelete flag, so malformed entries never reach runtime processing (index.ts:61-132,139).",
+      "retentionPolicyTouched": [
+        "mcp_clients",
+        "sessions",
+        "verification_tokens",
+        "extension_bridge_codes",
+        "mobile_bridge_codes",
+        "mcp_authorization_codes",
+        "mcp_access_tokens",
+        "api_keys",
+        "service_account_tokens",
+        "operator_tokens",
+        "extension_tokens",
+        "access_requests",
+        "admin_vault_resets",
+        "master_key_rotations",
+        "personal_log_access_grants",
+        "password_shares",
+        "team_invitations",
+        "emergency_access_grants",
+        "audit_logs",
+        "password_entries",
+        "team_password_entries",
+        "password_entry_histories",
+        "team_password_entry_histories",
+        "share_access_logs",
+        "directory_sync_logs",
+        "notifications"
+      ]
+    },
+    "audit-anchor-publisher": {
+      "entrypoint": "scripts/audit-anchor-publisher.ts",
+      "modules": [
+        "src/workers/audit-anchor-publisher.ts"
+      ],
+      "dbRole": "passwd_anchor_publisher",
+      "tenantScoped": {
+        "value": true,
+        "reason": "runCadence sets bypass_rls + app.tenant_id=SYSTEM_TENANT_ID (audit-anchor-publisher.ts:153-155) to read every auditChainEnabled tenant's anchor row in one cadence tick, but the manifest it builds and the last_published_at / publishPausedUntil updates it writes are always partitioned per tenantId (AnchorRow[] per tenant, updateMany scoped to tenantsInManifest) -- a system-wide read, never a cross-tenant data write."
+      },
+      "usesSecurityDefiner": false,
+      "rawSql": true,
+      "destructive": false,
+      "emitsAudit": true,
+      "idempotent": "runCadence is gated by pg_try_advisory_xact_lock(hashtext('audit-anchor-publish')) so only one instance publishes per cadence tick (audit-anchor-publisher.ts:158-164); ensureDeploymentIdMatch pins a single owning DEPLOYMENT_ID via INSERT ... ON CONFLICT DO NOTHING against system_settings so a second concurrent instance throws DeploymentIdMismatchError instead of double-publishing (audit-anchor-publisher.ts:100-125).",
+      "retryPolicy": "No in-process retry loop; on upload failure the whole cadence transaction is rolled back and the tenant's audit_chain_anchors.publish_paused_until is set (in a separate post-rollback tx) to LEAST(now + 1 cadence, GREATEST(anchor.updatedAt, now) + pauseCapFactor * cadence) so outbox delivery holds off chain advancement until the next scheduled cadence tick attempts again (audit-anchor-publisher.ts:292-311,363-398).",
+      "poisonMessageHandling": "There is no per-item queue to poison; a cadence tick that fails to upload to any destination emits AUDIT_ANCHOR_PUBLISH_FAILED with the failure reason and persists the pause window described above so subsequent audit-outbox delivery does not advance the (now-inconsistent) chain until the pause expires and the next cadence tick retries (audit-anchor-publisher.ts:340-424).",
+      "retentionPolicyTouched": []
+    },
+    "audit-chain-verify-worker": {
+      "entrypoint": "scripts/audit-chain-verify-worker.ts",
+      "modules": [
+        "scripts/audit-chain-verify-worker.ts"
+      ],
+      "$modules-note": "DB logic is inlined in the script itself (no src/workers counterpart) -- mechanical greps (rawSql/destructive/emitsAudit/usesSecurityDefiner) run against this file directly, per plan review S1.",
+      "dbRole": "passwd_app",
+      "tenantScoped": {
+        "value": true,
+        "reason": "runTick enumerates ALL tenants (prisma.tenant.findMany) and calls verifyTenantChain once per tenantId, and the underlying query filters WHERE tenant_id = $1 (audit-chain-verify-worker.ts:72-82,134-137) -- a system-wide read loop, but each verification pass is scoped to a single tenant's chain."
+      },
+      "usesSecurityDefiner": false,
+      "rawSql": true,
+      "destructive": false,
+      "emitsAudit": false,
+      "idempotent": "Verification is read-only (SELECT ... ORDER BY chain_seq ASC, no writes) and re-walks the same rows deterministically every tick, so re-running never mutates state and always reproduces the same ok/firstTamperedSeq result for an unchanged chain (audit-chain-verify-worker.ts:68-121).",
+      "retryPolicy": "No retry semantics: a per-tenant verify failure is caught, logged (\"tenant=%s verify threw\"), and the loop continues to the next tenant; the NEXT hourly tick (fixed TICK_INTERVAL_MS, no backoff) re-attempts the same tenant from scratch (audit-chain-verify-worker.ts:130-173,208-215).",
+      "poisonMessageHandling": "Not applicable -- there is no queue or per-row claim, only a full per-tenant re-scan every tick; a tamper finding is reported via CHAIN_VERIFY_FAILED console logging with hysteresis (re-alert only on clean-to-failed transition or every 24h while failed, audit-chain-verify-worker.ts:145-163) rather than any dead-letter mechanism.",
+      "retentionPolicyTouched": []
+    }
+  }
+}
