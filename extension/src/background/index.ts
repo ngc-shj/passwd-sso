@@ -186,6 +186,11 @@ async function getEffectiveAutoLockMinutes(): Promise<number> {
 
 interface PendingSavePrompt {
   host: string;
+  // Origin (host) of the frame that submitted the login. A pending credential
+  // must only be released to a frame with this same origin — content scripts
+  // run in all frames, so gating on the top-tab host alone would let a
+  // cross-origin subframe pull or receive a sibling frame's password.
+  frameHost: string;
   username: string;
   password: string;
   action: "save" | "update";
@@ -770,6 +775,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             pendingSavePrompts.delete(tabId);
             return;
           }
+          // Frame-scoped to the top frame: the save banner is a top-frame UI
+          // element and the pending password must never be broadcast tab-wide,
+          // which would deliver it to a cross-origin subframe's content script.
           chrome.tabs.sendMessage(tabId, {
             type: PSSO_SHOW_SAVE_BANNER,
             host: pending.host,
@@ -778,7 +786,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
             action: pending.action,
             existingEntryId: pending.existingEntryId,
             existingTitle: pending.existingTitle,
-          }).then(() => {
+          }, { frameId: 0 }).then(() => {
             // Delivered successfully — remove from pending
             pendingSavePrompts.delete(tabId);
           }).catch(() => {
@@ -1632,8 +1640,12 @@ async function performAutofillForEntry(
   let messageFillSucceeded = false;
   // autofill-lib.ts is bundled in form-detector.ts (manifest content_scripts),
   // so the AUTOFILL_FILL listener is already present — no executeScript needed.
+  // Frame-scoped delivery: when the originating frame is known (content-driven
+  // fill), the password goes ONLY to that frame — never broadcast tab-wide,
+  // which would leak it into a cross-origin subframe embedded in the page.
+  // Popup/context-menu callers pass no frameId and keep tab-wide behavior.
   try {
-    await chrome.tabs.sendMessage(tabId, {
+    await sendFillMessage({
       type: AUTOFILL_FILL,
       username,
       ...(password ? { password } : {}),
@@ -1647,12 +1659,13 @@ async function performAutofillForEntry(
   }
 
   // Direct fallback for pages where content-script messaging is blocked/unstable.
-  // Runs in all frames so login forms inside iframes are also covered.
+  // Scoped to the originating frame (executeTarget) so the password is not
+  // injected into sibling/subframes; popup callers (no frameId) target the tab.
   const injectDirectAutofill = async (
     hintArg: { id?: string; name?: string; type?: string; autocomplete?: string } | null,
   ) =>
     chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
+      target: executeTarget,
       args: [
         username,
         password ?? "",
@@ -2560,6 +2573,13 @@ async function handleMessage(
           } catch {
             host = senderUrl;
           }
+          // Bind the pending credential to the submitting frame's origin so a
+          // cross-origin subframe cannot later pull or receive it.
+          const frameHost = _sender.url ? extractHost(_sender.url) : null;
+          if (!frameHost) {
+            sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
+            return;
+          }
           // Evict oldest entry if at capacity
           if (pendingSavePrompts.size >= MAX_PENDING_SAVES && !pendingSavePrompts.has(senderTabId)) {
             const oldestKey = pendingSavePrompts.keys().next().value;
@@ -2567,6 +2587,7 @@ async function handleMessage(
           }
           pendingSavePrompts.set(senderTabId, {
             host,
+            frameHost,
             username: message.username,
             password: message.password,
             action: result.action,
@@ -2723,11 +2744,13 @@ async function handleMessage(
       }
       const pending = pendingSavePrompts.get(tabId);
       if (pending && Date.now() - pending.timestamp < PENDING_SAVE_TTL_MS) {
-        // Security: verify the requesting page is on the same host as the
-        // original login, mirroring the push-path check in tabs.onUpdated.
-        const senderHost = _sender.tab?.url ? extractHost(_sender.tab.url) : null;
-        if (!senderHost || !isHostMatch(pending.host, senderHost)) {
-          pendingSavePrompts.delete(tabId);
+        // Security: release the pending credential only to the SAME FRAME ORIGIN
+        // that submitted the login. Gating on the top-tab host alone would let a
+        // cross-origin subframe pull a sibling frame's freshly-typed password.
+        // A stale pending is NOT deleted on a frame-origin mismatch — a sibling
+        // frame's poll must not consume the legit frame's pending credential.
+        const senderFrameHost = _sender.url ? extractHost(_sender.url) : null;
+        if (!senderFrameHost || !isHostMatch(pending.frameHost, senderFrameHost)) {
           sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" });
           return;
         }

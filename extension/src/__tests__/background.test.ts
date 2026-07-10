@@ -1182,6 +1182,34 @@ describe("background message flow", () => {
     });
     expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
   });
+
+  it("delivers a content-driven LOGIN fill only to the originating frame (not tab-wide)", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    const res = await new Promise((resolve) => {
+      const handler = messageHandlers[0];
+      handler(
+        { type: "AUTOFILL_FROM_CONTENT", entryId: "pw-1" },
+        {
+          tab: { id: 1, url: "https://example.com/login" },
+          url: "https://example.com/login",
+          frameId: 7,
+        },
+        (resp) => resolve(resp),
+      );
+    });
+    expect(res).toEqual({ type: "AUTOFILL_FROM_CONTENT", ok: true, error: undefined });
+
+    // The password must be delivered frame-scoped ({ frameId }), never broadcast
+    // tab-wide, so a cross-origin subframe cannot capture it.
+    const fillCall = chromeMock?.tabs.sendMessage.mock.calls.find(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+    expect(fillCall).toBeDefined();
+    expect(fillCall?.[2]).toEqual({ frameId: 7 });
+  });
 });
 
 // ── Session persistence & token refresh ──────────────────────
@@ -2097,19 +2125,23 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     // Send LOGIN_DETECTED from a URL that won't match cached entries
     // (cached entries have urlHost: "example.com" from decryptData mock).
     // Use a unique host so handleLoginDetected returns action: "save".
-    const sender = { tab: { id: tabId, url: `https://${host}/login` } };
+    // _sender.url (frame origin) drives the frameHost binding.
+    const sender = {
+      tab: { id: tabId, url: `https://${host}/login` },
+      url: `https://${host}/login`,
+    };
     await sendMessageWithSender(
       { type: "LOGIN_DETECTED", url: `https://${host}/login`, username: "alice", password: "pw" },
       sender,
     );
   }
 
-  it("returns pending data when sender host matches", async () => {
+  it("returns pending data when sender frame origin matches", async () => {
     await createPendingSave(42, "nomatch.test");
 
     const res = await sendMessageWithSender(
       { type: "CHECK_PENDING_SAVE" },
-      { tab: { id: 42, url: "https://nomatch.test/dashboard" } },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" }, url: "https://nomatch.test/dashboard" },
     );
 
     expect(res).toEqual(
@@ -2123,12 +2155,12 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     );
   });
 
-  it("returns 'none' when sender host does not match", async () => {
+  it("returns 'none' when sender frame origin does not match", async () => {
     await createPendingSave(42, "nomatch.test");
 
     const res = await sendMessageWithSender(
       { type: "CHECK_PENDING_SAVE" },
-      { tab: { id: 42, url: "https://evil.com/phishing" } },
+      { tab: { id: 42, url: "https://evil.com/phishing" }, url: "https://evil.com/phishing" },
     );
 
     expect(res).toEqual(
@@ -2139,7 +2171,36 @@ describe("CHECK_PENDING_SAVE host validation", () => {
     );
   });
 
-  it("returns 'none' when sender has no tab URL", async () => {
+  it("does NOT release the pending credential to a cross-origin subframe of the same tab", async () => {
+    // Top frame (nomatch.test) submitted the login; a malicious subframe
+    // (attacker.example) in the same tab polls. The top-tab URL would match,
+    // but the frame origin must not — and the legit pending must survive so the
+    // real top frame can still pull it.
+    await createPendingSave(42, "nomatch.test");
+
+    const subframeRes = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" }, url: "https://attacker.example/iframe" },
+    );
+    expect(subframeRes).toEqual(
+      expect.objectContaining({ type: "CHECK_PENDING_SAVE", action: "none" }),
+    );
+
+    // The legit top frame can still retrieve it (subframe poll did not consume it).
+    const topRes = await sendMessageWithSender(
+      { type: "CHECK_PENDING_SAVE" },
+      { tab: { id: 42, url: "https://nomatch.test/dashboard" }, url: "https://nomatch.test/dashboard" },
+    );
+    expect(topRes).toEqual(
+      expect.objectContaining({
+        type: "CHECK_PENDING_SAVE",
+        action: "save",
+        password: "pw",
+      }),
+    );
+  });
+
+  it("returns 'none' when sender frame has no URL", async () => {
     await createPendingSave(42, "nomatch.test");
 
     const res = await sendMessageWithSender(
@@ -2245,7 +2306,7 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
   it("does not suppress login on non-app URLs", async () => {
     const res = await sendMessageWithSender(
       { type: "LOGIN_DETECTED", url: "https://external-site.com/login", username: "user", password: "pass" },
-      { tab: { id: 100, url: "https://external-site.com/login" } },
+      { tab: { id: 100, url: "https://external-site.com/login" }, url: "https://external-site.com/login" },
     );
 
     expect(res).toEqual(
