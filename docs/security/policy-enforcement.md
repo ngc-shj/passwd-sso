@@ -21,7 +21,7 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `src/lib/auth/tokens/extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
 | `vaultAutoLockMinutes` | Timer | Client | `auto-lock-context.tsx` | Browser inactivity timer; server cannot know vault lock state |
 | `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Session-cookie routes are blocked in proxy (`API_SESSION_REQUIRED`, including MCP/mobile authorization issuance). Bearer and other non-session flows enforce the same policy in route handlers. 60s cache |
-| `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify) |
+| `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify). The Edge stage is NOT per-tenant tailnet isolation — see [Tailscale Edge-Path Boundary](#tailscale-edge-path-boundary) |
 | `requireMinPinLength` | Blocking | Server | `webauthn/register/verify/route.ts` | Platform authenticators (Touch ID, etc.) exempt — they don't report PIN length |
 | `requirePasskey` | Blocking/Advisory | Server | `proxy.ts` middleware | After grace period: redirect (blocking) + audit via `/api/internal/audit-emit`. Within grace: advisory banner via `/api/user/passkey-status` |
 | `requirePasskeyEnabledAt` | — | Server | `proxy.ts` | Grace period start timestamp; set-once on `false→true` transition |
@@ -41,6 +41,14 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `delegationDefaultTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Default TTL for delegation sessions |
 | `delegationMaxTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Hard ceiling for delegation TTL; enforced via `Math.min(requested, max)` |
 | `saTokenMaxExpiryDays` | Blocking | Server | `tenant/service-accounts/[id]/tokens/route.ts` | Caps SA token `expiresAt` to `now + saTokenMaxExpiryDays`; null = no limit. Admin UI: Security → Machine Identity → Token |
+
+## Tailscale Edge-Path Boundary
+
+Operators enabling `tailscaleEnabled` must understand what the check does — and does not — verify (code: `src/lib/auth/policy/access-restriction.ts`, `checkAccessRestriction`):
+
+- **Edge/proxy path (browser session flows — dashboard pages and session-authenticated API routes):** access is granted when the client's source IP falls in the Tailscale CGNAT range `100.64.0.0/10`. This admits **any Tailscale peer whose traffic reaches the app with a CGNAT source IP** — it does NOT verify the peer belongs to the tenant's specific tailnet. A host on a *different* tailnet whose source IP is CGNAT would pass this stage. Exact-tailnet verification (`verifyTailscalePeer` WhoIs against the local `tailscaled` Unix socket) is only possible in the Node.js runtime and therefore only runs for Bearer/token route handlers (`enforceAccessRestriction`), not in the Edge proxy.
+- **Why this is an accepted boundary:** reaching the Edge branch at all requires a CGNAT source IP, which the fail-closed IP-extraction posture prevents an off-tailnet public-internet attacker from forging (`TRUST_PROXY_HEADERS` unset → spoofed `X-Forwarded-For` ignored → null IP → deny). Tailscale ACLs remain the operator's primary isolation control.
+- **If you need strict per-tenant isolation of browser flows:** additionally scope `allowedCidrs` to the tenant's own address ranges — the CIDR allowlist is evaluated per-tenant on every stage. Multi-tenant deployments that terminate multiple tailnets on one host should not rely on `tailscaleEnabled` alone for tenant separation.
 
 ## Credential Issuance Hardening
 
