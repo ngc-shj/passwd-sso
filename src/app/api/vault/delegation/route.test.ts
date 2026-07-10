@@ -290,6 +290,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("MCP_TOKEN_SCOPE_INSUFFICIENT");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("returns 403 when MCP token has only credentials:list (metadata-only, no decrypt)", async () => {
@@ -303,6 +304,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("MCP_TOKEN_SCOPE_INSUFFICIENT");
+    expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
   });
 
   it("accepts credentials:use scope", async () => {
