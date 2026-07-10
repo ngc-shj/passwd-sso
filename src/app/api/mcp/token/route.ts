@@ -20,6 +20,7 @@ import { resolveAuditUserId } from "@/lib/constants/app";
 import {
   REFRESH_EXCHANGE_REASON,
   FAMILY_REVOKED_REASON,
+  MCP_CLIENT_ID_MAX_LENGTH,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -171,6 +172,16 @@ async function handlePOST(req: NextRequest) {
     const refreshTokenValue = body.refresh_token;
     const clientIdValue = body.client_id;
     const clientSecretValue = body.client_secret;
+    // Length-capped copy for audit metadata only. A real McpClient.clientId is
+    // @db.VarChar(64); the raw body value is attacker-controlled and unbounded
+    // (bounded only by the 1 MB JSON body cap). Writing it uncapped lets a
+    // replay attacker pad client_id past METADATA_MAX_BYTES so truncateMetadata
+    // collapses the ENTIRE audit entry (familyId, storedClientId, reason) into
+    // a content-free stub — self-inflicted anti-forensics on the exact record
+    // this route's replay audit exists to preserve. Never used for the rate-
+    // limit key or the exchange's client match (those need the full value).
+    const auditClientId =
+      typeof clientIdValue === "string" ? clientIdValue.slice(0, MCP_CLIENT_ID_MAX_LENGTH) : clientIdValue;
 
     // client_secret is optional for public clients (token_endpoint_auth_method: "none")
     if (!refreshTokenValue || !clientIdValue) {
@@ -244,8 +255,8 @@ async function handlePOST(req: NextRequest) {
           metadata: {
             // Attribution must come from the token row, not the request body —
             // an attacker replaying a stolen token controls client_id.
-            clientId: result.storedClientId ?? clientIdValue,
-            presentedClientId: clientIdValue,
+            clientId: result.storedClientId ?? auditClientId,
+            presentedClientId: auditClientId,
             familyId: result.familyId,
             reason: FAMILY_REVOKED_REASON.REPLAY,
           },
@@ -260,8 +271,8 @@ async function handlePOST(req: NextRequest) {
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_FAMILY_REVOKED,
           actorType: ACTOR_TYPE.SYSTEM,
           metadata: {
-            clientId: result.storedClientId ?? clientIdValue,
-            presentedClientId: clientIdValue,
+            clientId: result.storedClientId ?? auditClientId,
+            presentedClientId: auditClientId,
             familyId: result.familyId,
             reason: FAMILY_REVOKED_REASON.CONCURRENT_ROTATION,
           },
@@ -277,7 +288,7 @@ async function handlePOST(req: NextRequest) {
       ...tenantAuditBase(req, resolveAuditUserId(result.userId, "system"), result.tenantId),
       action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
       actorType: result.userId ? ACTOR_TYPE.MCP_AGENT : ACTOR_TYPE.SYSTEM,
-      metadata: { clientId: clientIdValue },
+      metadata: { clientId: auditClientId },
     });
 
     return NextResponse.json({

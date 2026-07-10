@@ -33,8 +33,11 @@
  *   (xi)  @browser-redirect exemption whose route file has no                → FAIL
  *         '@browser-redirect-recovery' marker
  *         (BROWSER_REDIRECT_RECOVERY_MISSING)
- *   (xii) @browser-redirect-recovery marker present but no 'redirect' token  → FAIL
- *         within +/-5 lines (BROWSER_REDIRECT_RECOVERY_MISSING, unanchored)
+ *   (xii) @browser-redirect-recovery marker present but no redirect( call    → FAIL
+ *         within +/-3 lines (BROWSER_REDIRECT_RECOVERY_MISSING, unanchored)
+ *   (xii-decoy) marker anchored only by a decoy comment mentioning           → FAIL
+ *         "redirect" with no real call (the S2 bypass)
+ *   (xii-redirectToSignIn) marker anchored by a redirectToSignIn() call      → PASS
  *   (xiii) @browser-redirect exemption whose sibling route.test.ts has no    → FAIL
  *         '@browser-redirect-recovery-test' marker (BROWSER_REDIRECT_TEST_MISSING)
  *   (xiv) manifest missing a server id                                       → FAIL
@@ -495,12 +498,12 @@ describe("check-step-up-client-coverage.sh", () => {
     expect(stdout).toContain("BROWSER_REDIRECT_RECOVERY_MISSING");
   });
 
-  it("(xii) FAILS (BROWSER_REDIRECT_RECOVERY_MISSING): recovery marker present but unanchored (no 'redirect' token within +/-5 lines)", () => {
+  it("(xii) FAILS (BROWSER_REDIRECT_RECOVERY_MISSING): recovery marker present but unanchored (no redirect() call within +/-3 lines)", () => {
     writePathsManifest({
       "mcp-authorize-get": { method: "GET", pathTokens: ["/api/mcp/authorize"] },
     });
     // The marker sits at the top of the file, far from the actual conversion —
-    // no 'redirect' token (case-insensitive) within +/-5 lines of it.
+    // no redirect( call within +/-3 lines of it.
     const padding = Array.from({ length: 8 }, (_, i) => `// pad ${i}`).join("\n");
     writeRoute(
       "mcp/authorize",
@@ -509,7 +512,7 @@ describe("check-step-up-client-coverage.sh", () => {
         padding,
         "// @stepup id:mcp-authorize-get method:GET",
         STEPUP_CALL_SESSION,
-        "return signInBounce();", // deliberately no 'redirect' token anywhere nearby
+        "return signInBounce();", // deliberately no redirect( call anywhere nearby
       ].join("\n") + "\n",
     );
     writeFileSync(
@@ -525,6 +528,65 @@ describe("check-step-up-client-coverage.sh", () => {
     const { exitCode, stdout } = runGuard();
     expect(exitCode).toBe(1);
     expect(stdout).toContain("BROWSER_REDIRECT_RECOVERY_MISSING");
+  });
+
+  it("(xii-decoy) FAILS (BROWSER_REDIRECT_RECOVERY_MISSING): marker anchored only by a decoy comment mentioning 'redirect', no real call", () => {
+    writePathsManifest({
+      "mcp-authorize-get": { method: "GET", pathTokens: ["/api/mcp/authorize"] },
+    });
+    // A comment adjacent to the marker mentions the word "redirect" but the
+    // actual return dead-ends on a JSON 403 — the exact bypass S2 closes: a
+    // word-only proximity check would false-PASS this.
+    writeRoute(
+      "mcp/authorize",
+      [
+        "// @stepup id:mcp-authorize-get method:GET",
+        STEPUP_CALL_SESSION,
+        "// @browser-redirect-recovery",
+        "// we would normally redirect the browser here, but:",
+        'return jsonError({ error: "generic" }, 403);',
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(apiDir, "mcp/authorize", "route.test.ts"),
+      "// @browser-redirect-recovery-test\nit('redirects to sign-in', () => {});\n",
+      "utf8",
+    );
+    writeFileSync(
+      exemptFile,
+      "mcp-authorize-get  @browser-redirect  # OAuth authorize GET reached by browser navigation, redirects to sign-in\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("BROWSER_REDIRECT_RECOVERY_MISSING");
+  });
+
+  it("(xii-redirectToSignIn) PASSES: marker anchored by a redirectToSignIn() call within +/-3 lines", () => {
+    writePathsManifest({
+      "mcp-authorize-get": { method: "GET", pathTokens: ["/api/mcp/authorize"] },
+    });
+    writeRoute(
+      "mcp/authorize",
+      [
+        "// @stepup id:mcp-authorize-get method:GET",
+        STEPUP_CALL_SESSION,
+        "// @browser-redirect-recovery",
+        "return redirectToSignIn(req);",
+      ].join("\n") + "\n",
+    );
+    writeFileSync(
+      join(apiDir, "mcp/authorize", "route.test.ts"),
+      "// @browser-redirect-recovery-test\nit('redirects to sign-in', () => {});\n",
+      "utf8",
+    );
+    writeFileSync(
+      exemptFile,
+      "mcp-authorize-get  @browser-redirect  # OAuth authorize GET reached by browser navigation, redirects to sign-in\n",
+      "utf8",
+    );
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
   });
 
   it("(xiii) FAILS (BROWSER_REDIRECT_TEST_MISSING): sibling route.test.ts missing the regression-test marker", () => {

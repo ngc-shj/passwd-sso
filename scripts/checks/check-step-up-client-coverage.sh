@@ -362,7 +362,7 @@ while IFS= read -r line; do
   # redirect but forgets to remove the exemption" gap:
   #   - BROWSER_REDIRECT_RECOVERY_MISSING: the id's own route file (from
   #     SERVER_ID_FILES) must contain the literal `@browser-redirect-recovery`
-  #     marker, anchored (a case-insensitive `redirect` token within ±5 lines)
+  #     marker, anchored (a redirect( / redirectToSignIn( CALL within ±3 lines)
   #     so the marker cannot float disconnected from the real conversion.
   #   - BROWSER_REDIRECT_TEST_MISSING: the sibling route.test.ts (same directory
   #     as the route file) must exist and contain the literal
@@ -380,8 +380,23 @@ while IFS= read -r line; do
     if [ -z "$recovery_line" ]; then
       echo "BROWSER_REDIRECT_RECOVERY_MISSING: $route_rel — exempt id '$eid' is marked @browser-redirect but the route file has no '// @browser-redirect-recovery' marker on its 403→redirect conversion."
       fail=1
-    elif ! awk -v l="$recovery_line" 'NR!=l && NR>=l-5 && NR<=l+5 && tolower($0) ~ /redirect/ {found=1} END{exit !found}' "$route_abs"; then
-      echo "BROWSER_REDIRECT_RECOVERY_MISSING: $route_rel:$recovery_line — '@browser-redirect-recovery' marker has no 'redirect' token (case-insensitive) within 5 lines; the marker must anchor the actual conversion, not float disconnected from it."
+    # The marker must anchor an ACTUAL redirect CALL, not merely the word
+    # "redirect" — a decoy comment mentioning "redirect" must not satisfy it
+    # (RS-review S2). Require a `redirect(` / `redirectToSignIn(` call shape on a
+    # NON-comment line within ±3 of the marker (all 3 real sites sit within ±3).
+    # `sub(/\/\/.*/,"")` strips a trailing line comment before the call scan so a
+    # `// ...redirect(...` comment cannot pose as a call; a leading-`*`/`//`
+    # comment line is skipped outright.
+    elif ! awk -v l="$recovery_line" '
+        NR!=l && NR>=l-3 && NR<=l+3 {
+          line=$0
+          stripped=line; sub(/^[[:space:]]+/,"",stripped)
+          if (stripped ~ /^(\/\/|\*)/) next
+          sub(/\/\/.*/,"",line)
+          if (line ~ /redirect(ToSignIn)?\(/) found=1
+        }
+        END{exit !found}' "$route_abs"; then
+      echo "BROWSER_REDIRECT_RECOVERY_MISSING: $route_rel:$recovery_line — '@browser-redirect-recovery' marker has no redirect( / redirectToSignIn( CALL on a non-comment line within 3 lines; the marker must anchor the actual conversion, not a decoy comment mentioning the word."
       fail=1
     fi
 

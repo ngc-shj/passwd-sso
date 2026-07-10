@@ -83,7 +83,6 @@ export async function POST(req: NextRequest) {
   // Stale-session recovery: params are now validated, so it is safe to bounce the
   // browser back to the authorize GET (which re-runs auth + step-up and redirects
   // to sign-in). The callback is a self-origin app path, not the client redirect_uri.
-  // @browser-redirect-recovery
   if (stepUpStale) {
     // serverAppUrl yields a relative path when no origin env is configured, which
     // new URL(relative) would throw on. Guard for parity with mobile/authorize's
@@ -100,6 +99,7 @@ export async function POST(req: NextRequest) {
     if (codeChallenge) authorizeUrl.searchParams.set("code_challenge", codeChallenge);
     if (codeChallengeMethod) authorizeUrl.searchParams.set("code_challenge_method", codeChallengeMethod);
     if (scope) authorizeUrl.searchParams.set("scope", scope);
+    // @browser-redirect-recovery
     return NextResponse.redirect(authorizeUrl.toString(), 303);
   }
 

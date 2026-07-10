@@ -26,11 +26,12 @@
 # the guard verifies it against the actual recovery implementation and its
 # regression test, via two additional markers the route file / its sibling
 # route.test.ts must carry:
-#   - `// @browser-redirect-recovery` — a comment on (or within 5 lines of) the
-#     403→redirect conversion in the route handler itself. The guard requires a
-#     case-insensitive `redirect` token within that ±5-line window so the marker
-#     cannot float disconnected from the real conversion. Missing or unanchored
-#     → BROWSER_REDIRECT_RECOVERY_MISSING.
+#   - `// @browser-redirect-recovery` — a comment adjacent to the 403→redirect
+#     conversion in the route handler itself. The guard requires an actual
+#     `redirect( ` / `redirectToSignIn( ` CALL on a non-comment line within ±3
+#     lines of the marker, so a decoy comment merely mentioning the word
+#     "redirect" cannot satisfy it (place the marker directly above the return).
+#     Missing or unanchored → BROWSER_REDIRECT_RECOVERY_MISSING.
 #   - `// @browser-redirect-recovery-test` — a comment on the sibling
 #     route.test.ts's regression test that asserts the redirect status/Location
 #     for the stale-session case. Missing file or missing marker →

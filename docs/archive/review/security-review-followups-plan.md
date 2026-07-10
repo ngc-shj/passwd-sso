@@ -79,7 +79,7 @@ field + audit metadata change, and docs prose.
   - I1: an `@browser-redirect` exemption cannot pass the guard unless both the recovery code marker and the redirect regression-test marker exist.
   - I2: deleting the redirect conversion code or its regression test (which removes the marker with it) turns the guard red.
 - Forbidden patterns:
-  - pattern: `@browser-redirect-recovery` appearing in a route file with no `redirect` token (case-insensitive) within ±5 lines — reason: marker must anchor the actual conversion, not float at file top. (Guard-enforced proximity check. Helper-abstracted conversions still satisfy it: the marker sits on the call line and every recovery helper spelling contains `redirect` — `NextResponse.redirect`, `redirectToSignIn`; if a future helper drops the token, the guard fails loudly toward marker relocation, the safe direction.)
+  - pattern: `@browser-redirect-recovery` appearing in a route file with no `redirect(` / `redirectToSignIn(` CALL on a non-comment line within ±3 lines — reason: marker must anchor the ACTUAL conversion, not a decoy comment merely mentioning the word "redirect" (hardened per Phase-3 review S2; the earlier word-only ±5 check false-passed a decoy). Place the marker directly above the return. Every recovery helper spelling matches the call regex — `NextResponse.redirect(`, `redirectToSignIn(`.
 - Acceptance criteria:
   - AC1: guard passes on current tree after markers are added.
   - AC2: self-test fixtures — new fixture cases prove `BROWSER_REDIRECT_RECOVERY_MISSING` and `BROWSER_REDIRECT_TEST_MISSING` each fire (mutation-capable per RT7).

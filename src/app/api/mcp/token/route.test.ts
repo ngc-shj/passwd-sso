@@ -556,6 +556,38 @@ describe("POST /api/mcp/token", () => {
     expect(JSON.stringify(json)).not.toContain("mcpc_stored_real");
   });
 
+  it("refresh_token: caps an oversized presented client_id in replay audit metadata (anti-forensics)", async () => {
+    // A replay attacker pads client_id past METADATA_MAX_BYTES (10 KB) so the
+    // whole audit entry would collapse into a {_truncated} stub. The route caps
+    // the presented value to McpClient.clientId's VarChar(64) before it reaches
+    // audit metadata, so familyId/storedClientId/reason survive.
+    const oversized = "mcpc_" + "A".repeat(20_000);
+    mockExchangeRefreshToken.mockResolvedValue({
+      ok: false,
+      error: "invalid_grant",
+      reason: "replay",
+      tenantId: "tenant-replay",
+      familyId: "family-001",
+      storedClientId: "mcpc_stored_real",
+    });
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: { ...VALID_REFRESH_BODY, client_id: oversized },
+    });
+    await POST(req);
+
+    const replayCall = mockLogAudit.mock.calls.find(
+      ([entry]) => entry?.action === "MCP_REFRESH_TOKEN_REPLAY",
+    );
+    expect(replayCall).toBeDefined();
+    const meta = replayCall![0].metadata;
+    expect(meta.presentedClientId.length).toBe(64);
+    expect(meta.presentedClientId).toBe(oversized.slice(0, 64));
+    // The forensic fields survive alongside the capped value.
+    expect(meta.clientId).toBe("mcpc_stored_real");
+    expect(meta.familyId).toBe("family-001");
+    expect(meta.reason).toBe("replay");
+  });
+
   // Race-loss audit log (issue #435 — fail-closed family revocation)
   it("refresh_token: logs MCP_REFRESH_TOKEN_FAMILY_REVOKED audit on concurrent_rotation_revoked", async () => {
     mockExchangeRefreshToken.mockResolvedValue({
