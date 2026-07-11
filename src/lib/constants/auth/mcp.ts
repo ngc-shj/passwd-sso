@@ -9,6 +9,10 @@ import {
 export const MCP_TOKEN_PREFIX = "mcp_";
 export const MCP_CLIENT_ID_PREFIX = "mcpc_";
 
+// McpClient.clientId is @db.VarChar(64). Cap an attacker-supplied client_id to
+// this length before writing it into audit metadata (see /api/mcp/token).
+export const MCP_CLIENT_ID_MAX_LENGTH = 64;
+
 // MCP scope values (subset of SA scopes, read-only for safety)
 export const MCP_SCOPE = {
   CREDENTIALS_LIST: "credentials:list",

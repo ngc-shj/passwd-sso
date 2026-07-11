@@ -83,8 +83,14 @@ async function handleGET(request: Request) {
     for (const [k, v] of cache) {
       if (v.expiresAt < now2) cache.delete(k);
     }
-    // If still over limit after eviction, clear all
-    if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
+    // Still over limit: evict oldest-inserted entries (Map preserves insertion
+    // order) instead of clearing the whole cache — a full clear() would let a
+    // single scan wipe every co-tenant's hot prefixes at once.
+    while (cache.size >= MAX_CACHE_ENTRIES) {
+      const oldest = cache.keys().next();
+      if (oldest.done) break;
+      cache.delete(oldest.value);
+    }
   }
   cache.set(prefix, { expiresAt: now + CACHE_TTL_MS, body: text });
   return new NextResponse(text, {

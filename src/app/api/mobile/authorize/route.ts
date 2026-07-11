@@ -131,6 +131,7 @@ async function handleGET(req: NextRequest): Promise<Response> {
   // @stepup id:mobile-authorize-get method:GET
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {
+    // @browser-redirect-recovery
     return stepUpError.status === 403 ? redirectToSignIn(req) : stepUpError;
   }
 

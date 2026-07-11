@@ -50,11 +50,41 @@
 #      required so a two-gated-call file (e.g. mcp-clients/[id] PUT+DELETE) needs
 #      two distinct-id markers, not one shared marker. (A commented-out call still
 #      matches the call regex — left to code review, same as the sibling guard.)
+#   5. Manifest bijection (scripts/checks/stepup-route-paths.json, plan F2/C3):
+#      the server-id set S must exactly equal the manifest's key set — both
+#      directions. `MANIFEST_ID_MISSING`: a server id has no manifest entry (a
+#      new gated route cannot merge without binding its path). `MANIFEST_ID_STALE`:
+#      a manifest key has no matching server id (a renamed/removed route left a
+#      stale binding). The manifest is parsed with plain grep/awk (no JSON
+#      library — VE2), which is why it MUST stay one-id-per-line formatted: each
+#      entry's opening `"<id>": { "method": "<M>", "pathTokens": [...] },` on a
+#      single line. An empty `pathTokens` array is a forbidden pattern (vacuous
+#      completeness, zero detection) and fails the same check.
+#   6. Unmarked new-call-site detector (best-effort, plan F2/C3):
+#      `UNMARKED_CALLSITE_CANDIDATE`. For each client file (non-test .ts/.tsx
+#      under CLIENT_DIR, excluding API_DIR) and each `fetchApi(` occurrence at
+#      line F, if any `pathTokens` entry of some manifest id X appears within
+#      the argument window (line F through F+3) AND a mutating method literal
+#      ("POST"|"PUT"|"PATCH"|"DELETE") matching X's manifest `method` appears
+#      within F through F+10, the file must carry a `@stepup id:X` marker
+#      somewhere in it. This is a NEW-CALL-SITE tripwire, not a coverage
+#      re-check — an id already satisfying check 1 can still trip this on a
+#      SECOND, unmarked call site in a different file. Escape hatch for a
+#      confirmed false positive: `// @stepup-path-ok id:X` on or adjacent to the
+#      call line, with a reason ≥10 chars (same discipline as the exempt file).
+#      Residual (documented, unchanged from today's baseline — the detector only
+#      ADDS detection): raw template-literal paths whose static fragments are
+#      too generic, prop-indirection call sites (the path token lives in a
+#      different file than the fetchApi call), and non-fetchApi transports
+#      remain undetectable.
 #
 # EXEMPT (scripts/checks/stepup-client-exempt.txt): a server id may be exempted
 # from requiring a client marker when its recovery is custom / non-interactive.
 # Each entry names the custom marker its handler file must still contain, and the
-# guard fails (EXEMPT_MARKER_ABSENT) if that marker disappears (anti-drift).
+# guard fails (EXEMPT_MARKER_ABSENT) if that marker disappears (anti-drift). A
+# `@browser-redirect` entry is additionally checked against its route's actual
+# recovery implementation and regression test (BROWSER_REDIRECT_RECOVERY_MISSING /
+# BROWSER_REDIRECT_TEST_MISSING — see stepup-client-exempt.txt header).
 #
 # KNOWN LIMITATIONS (coverage granularity — same class as the sibling guards):
 #   - Coverage is a SET comparison of server-ids vs client-ids. When several UI
@@ -67,6 +97,7 @@
 #     consumer of a shared id becomes a real regression.
 #   - THROWER_WITHOUT_CATCHER (below) pairs `throwIfStepUp(` to a catcher only at
 #     the EXISTENCE level, not per-call-site.
+#   - Check 6's detector residual: see item 6 above (SC1, plan scope contract).
 
 set -euo pipefail
 
@@ -78,6 +109,7 @@ API_DIR="${STEPUP_CLIENT_GUARD_API_DIR:-$REPO_ROOT/src/app/api}"
 CLIENT_DIR="${STEPUP_CLIENT_GUARD_CLIENT_DIR:-$REPO_ROOT/src}"
 PATH_ROOT="${STEPUP_CLIENT_GUARD_PATH_ROOT:-$REPO_ROOT}"
 EXEMPT_FILE="${STEPUP_CLIENT_GUARD_EXEMPT_FILE:-$REPO_ROOT/scripts/checks/stepup-client-exempt.txt}"
+PATHS_FILE="${STEPUP_CLIENT_GUARD_PATHS_FILE:-$REPO_ROOT/scripts/checks/stepup-route-paths.json}"
 
 # The number of lines below a client `@stepup id:X` marker within which a branch
 # token must appear. After the helper refactor the branch sits 0–1 lines below
@@ -168,6 +200,11 @@ is_exempt() {
 # line H or H-1 carrying an id and a method:. Also collect id → S.
 SERVER_IDS=""
 declare_ids_seen=""
+# Parallel newline-delimited "id<space>route-file" map (bash 3.2 has no
+# associative arrays — same idiom as EXEMPT_MARKERS). Consumed by the
+# @browser-redirect anti-drift check below (C2) to locate each exempt id's
+# own route file without re-deriving it from scratch.
+SERVER_ID_FILES=""
 
 while IFS= read -r route; do
   [ -z "$route" ] && continue
@@ -208,6 +245,8 @@ while IFS= read -r route; do
 "
 
     SERVER_IDS="${SERVER_IDS}${sid}
+"
+    SERVER_ID_FILES="${SERVER_ID_FILES}${sid} ${route}
 "
   done < <(grep -nE "$STEPUP_PRIMITIVE_RE" "$abs" | cut -d: -f1)
 
@@ -316,7 +355,66 @@ while IFS= read -r line; do
   # literal marker `@browser-redirect` and is NOT held to the client-tree
   # anti-drift check (there is deliberately no client token). Guarded so a real
   # interactive route cannot silently opt out of client coverage with it.
+  #
+  # C2 hardening: sentinel presence in this allowlist alone used to be trusted at
+  # face value. Now the guard verifies the exemption against the ACTUAL recovery
+  # implementation and its regression test, closing the "someone deletes the
+  # redirect but forgets to remove the exemption" gap:
+  #   - BROWSER_REDIRECT_RECOVERY_MISSING: the id's own route file (from
+  #     SERVER_ID_FILES) must contain the literal `@browser-redirect-recovery`
+  #     marker, anchored (a redirect( / redirectToSignIn( CALL within ±3 lines)
+  #     so the marker cannot float disconnected from the real conversion.
+  #   - BROWSER_REDIRECT_TEST_MISSING: the sibling route.test.ts (same directory
+  #     as the route file) must exist and contain the literal
+  #     `@browser-redirect-recovery-test` marker, pinning a regression test.
   if [ "$emarker" = "@browser-redirect" ]; then
+    route_rel="$(printf '%s' "$SERVER_ID_FILES" | grep -m1 "^${eid} " | cut -d' ' -f2-)"
+    if [ -z "$route_rel" ]; then
+      echo "STALE_EXEMPT: exempt id '$eid' has no matching server route file on record — remove it from stepup-client-exempt.txt."
+      fail=1
+      continue
+    fi
+    route_abs="$PATH_ROOT/$route_rel"
+
+    recovery_line="$(grep -nF '@browser-redirect-recovery' "$route_abs" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
+    if [ -z "$recovery_line" ]; then
+      echo "BROWSER_REDIRECT_RECOVERY_MISSING: $route_rel — exempt id '$eid' is marked @browser-redirect but the route file has no '// @browser-redirect-recovery' marker on its 403→redirect conversion."
+      fail=1
+    # The marker must anchor an ACTUAL redirect CALL, not merely the word
+    # "redirect" — a decoy comment mentioning "redirect" must not satisfy it
+    # (RS-review S2). Require a `redirect(` / `redirectToSignIn(` call shape on a
+    # NON-comment line within ±3 of the marker (all 3 real sites sit within ±3).
+    # Comment stripping runs BEFORE the call scan so no decoy comment mentioning
+    # `redirect(` can pose as a real call:
+    #   - a line starting with `//`, `*`, or `/*` is skipped outright;
+    #   - same-line `/* … */` spans are removed (gsub), then a trailing `//`
+    #     comment is removed (sub) — so `foo(); /* … redirect(x) … */` and
+    #     `foo(); // … redirect(x)` both lose the decoy before matching.
+    # A block comment that OPENS on one line and closes on another is not fully
+    # handled (would need a state machine); route files use `/* */` only as
+    # single-line spans or JSDoc `/** */` headers, both covered by the skip.
+    elif ! awk -v l="$recovery_line" '
+        NR!=l && NR>=l-3 && NR<=l+3 {
+          line=$0
+          stripped=line; sub(/^[[:space:]]+/,"",stripped)
+          if (stripped ~ /^(\/\/|\*|\/\*)/) next
+          gsub(/\/\*.*\*\//,"",line)
+          sub(/\/\/.*/,"",line)
+          # Left word-boundary so a foreign identifier ending in the token
+          # (myredirect(, fooRedirectToSignIn() cannot spoof a real call.
+          if (line ~ /(^|[^A-Za-z0-9_])redirect(ToSignIn)?\(/) found=1
+        }
+        END{exit !found}' "$route_abs"; then
+      echo "BROWSER_REDIRECT_RECOVERY_MISSING: $route_rel:$recovery_line — '@browser-redirect-recovery' marker has no redirect( / redirectToSignIn( CALL on a non-comment line within 3 lines; the marker must anchor the actual conversion, not a decoy comment mentioning the word."
+      fail=1
+    fi
+
+    route_dir="$(dirname "$route_abs")"
+    test_abs="$route_dir/route.test.ts"
+    if [ ! -f "$test_abs" ] || ! grep -qF '@browser-redirect-recovery-test' "$test_abs" 2>/dev/null; then
+      echo "BROWSER_REDIRECT_TEST_MISSING: $route_rel — exempt id '$eid' is marked @browser-redirect but its sibling route.test.ts is missing, or has no '// @browser-redirect-recovery-test' marker on the redirect regression test."
+      fail=1
+    fi
     continue
   fi
   # The named custom recovery marker must still appear in the client tree.
@@ -325,6 +423,151 @@ while IFS= read -r line; do
     fail=1
   fi
 done < <(printf '%s' "$EXEMPT_MARKERS")
+
+# ── Check 5: manifest bijection (server ids ⇔ stepup-route-paths.json keys) ──
+# Parsed with plain grep/awk (no JSON library — VE2). Manifest keys are read
+# with a strict one-line-per-id regex; PATHS_FILE MUST stay one-id-per-line
+# formatted (documented in its own header) for this to work.
+MANIFEST_IDS=""
+if [ -f "$PATHS_FILE" ]; then
+  MANIFEST_IDS="$( { grep -oE '^  "[A-Za-z0-9_-]+":' "$PATHS_FILE" || true; } | sed -E 's/^  "([A-Za-z0-9_-]+)":$/\1/')"
+else
+  echo "MANIFEST_ID_MISSING: $PATHS_FILE does not exist — every gated server id must have a manifest entry."
+  fail=1
+fi
+
+# Manifest entry accessor: given an id, print its raw JSON line (empty if absent).
+manifest_line_for() {
+  grep -E "^  \"$1\": \{" "$PATHS_FILE" 2>/dev/null | head -n1 || true
+}
+
+while IFS= read -r sid; do
+  [ -z "$sid" ] && continue
+  if ! printf '%s' "$MANIFEST_IDS" | grep -qxF "$sid"; then
+    echo "MANIFEST_ID_MISSING: server id '$sid' has no entry in $PATHS_FILE — add \"$sid\": { \"method\": \"<M>\", \"pathTokens\": [...] }."
+    fail=1
+    continue
+  fi
+  mline="$(manifest_line_for "$sid")"
+  tokens_raw="$( { printf '%s' "$mline" | grep -oE '"pathTokens":[[:space:]]*\[[^]]*\]' || true; } | sed -E 's/"pathTokens":[[:space:]]*\[(.*)\]/\1/')"
+  if [ -z "$(printf '%s' "$tokens_raw" | tr -d '[:space:]')" ]; then
+    echo "MANIFEST_ID_MISSING: server id '$sid' has an empty pathTokens array in $PATHS_FILE — an empty binding vacuously satisfies completeness while detecting nothing (forbidden pattern)."
+    fail=1
+  fi
+done < <(printf '%s' "$SERVER_IDS" | sort -u)
+
+while IFS= read -r mid; do
+  [ -z "$mid" ] && continue
+  if ! printf '%s' "$SERVER_IDS" | grep -qxF "$mid"; then
+    echo "MANIFEST_ID_STALE: manifest id '$mid' (in $PATHS_FILE) has no matching server @stepup marker — remove it or the route was renamed/removed."
+    fail=1
+  fi
+done < <(printf '%s' "$MANIFEST_IDS" | sort -u)
+
+# ── Check 6: unmarked new-call-site detector (best-effort, plan F2/C3) ───────
+# For every fetchApi( call site in a client file, check whether its argument
+# window (same line .. +3) contains a pathToken belonging to some manifest id
+# X, AND whether a mutating method literal matching X's manifest method
+# appears within the options window (same line .. +10). If so, the file must
+# carry a `@stepup id:X` marker somewhere — otherwise it is an unmarked
+# candidate call site for an already-covered id.
+#
+# Suppression escape hatch: `// @stepup-path-ok id:X <reason ≥10 chars>` on or
+# immediately above the fetchApi( call line silences a confirmed false positive
+# for that id at that call site.
+MUTATING_METHOD_RE='"(POST|PUT|PATCH|DELETE)"'
+
+while IFS= read -r hit; do
+  [ -z "$hit" ] && continue
+  cfile="${hit%%:*}"
+  fline="${hit#*:}"
+  fline="${fline%%:*}"
+  rel="${cfile#"$PATH_ROOT"/}"
+
+  # Skip fetchApi( occurrences inside a comment (JSDoc `*` continuation or a
+  # `//` line comment) — a doc-example call site is not a real call site. This
+  # is a line-prefix check only (parser-free, same philosophy as the rest of
+  # this guard), not full comment-awareness.
+  call_line_content="$(awk -v l="$fline" 'NR==l' "$cfile")"
+  case "$(printf '%s' "$call_line_content" | sed -E 's/^[[:space:]]*//')" in
+    '*'*|'//'*) continue ;;
+  esac
+
+  # This file's own client @stepup ids (cache per file would be an optimization;
+  # correctness first — re-grep is cheap at this file count).
+  file_marker_ids="$( { grep -oE '@stepup[[:space:]]+id:[A-Za-z0-9_-]+' "$cfile" 2>/dev/null || true; } \
+    | sed -E 's/.*id:([A-Za-z0-9_-]+)/\1/' | sort -u)"
+
+  arg_window="$(awk -v l="$fline" 'NR>=l && NR<=l+3' "$cfile")"
+  opt_window="$(awk -v l="$fline" 'NR>=l && NR<=l+10' "$cfile")"
+
+  while IFS= read -r mid; do
+    [ -z "$mid" ] && continue
+    # Exempt ids (check 1's allowlist) never require a standard client
+    # `@stepup id:X` marker at all — their recovery is custom or non-interactive
+    # (see stepup-client-exempt.txt). Without this skip, an exempt id's own
+    # already-known, accepted call site (e.g. team-confirm-key-post's background
+    # poller, operator-tokens-post's bespoke reauth flow) would be flagged as a
+    # "new unmarked call site" even though it never carried a marker by design.
+    is_exempt "$mid" && continue
+    mline="$(manifest_line_for "$mid")"
+    method="$( { printf '%s' "$mline" | grep -oE '"method":[[:space:]]*"[A-Z]+"' || true; } | sed -E 's/.*"([A-Z]+)"$/\1/')"
+    tokens_raw="$( { printf '%s' "$mline" | grep -oE '"pathTokens":[[:space:]]*\[[^]]*\]' || true; } | sed -E 's/"pathTokens":[[:space:]]*\[(.*)\]/\1/')"
+
+    # Mutating-method literal for THIS id's method must appear in the options
+    # window — GET-only ids never trip a mutating-call-site candidate. Checked
+    # before the token scan below (cheaper short-circuit).
+    case "$method" in
+      POST|PUT|PATCH|DELETE) ;;
+      *) continue ;;
+    esac
+    printf '%s' "$opt_window" | grep -qE "\"$method\"" || continue
+
+    # Word-boundary-aware match: a token must not be immediately followed by an
+    # identifier character, so a shorter helper name (e.g. tenantMemberResetVault)
+    # does not spuriously match a longer sibling identifier that shares it as a
+    # prefix (tenantMemberResetVaultRevoke). Tokens are escaped for ERE metachars
+    # (path fragments like "/api/tenant/policy" contain none that need escaping
+    # beyond what grep -E treats literally here, but "?"/"."/"$" in a future token
+    # would not be — escape defensively).
+    token_hit=0
+    while IFS= read -r tok; do
+      [ -z "$tok" ] && continue
+      esc_tok="$(printf '%s' "$tok" | sed -E 's/[][\.^$*+?(){}|/]/\\&/g')"
+      if printf '%s' "$arg_window" | grep -qE "${esc_tok}([^A-Za-z0-9_]|\$)"; then
+        token_hit=1
+        break
+      fi
+    done < <( { printf '%s' "$tokens_raw" | grep -oE '"[^"]*"' || true; } | sed -E 's/^"(.*)"$/\1/')
+    [ "$token_hit" -eq 1 ] || continue
+
+    # Escape hatch: a suppression comment for this exact id near the call line.
+    suppress_window="$(awk -v l="$fline" 'NR>=l-3 && NR<=l' "$cfile")"
+    if printf '%s' "$suppress_window" | grep -qE "@stepup-path-ok[[:space:]]+id:${mid}([[:space:]]|$)"; then
+      # Reason discipline: require >=10 chars of trailing text on that line.
+      suppress_line="$(printf '%s' "$suppress_window" | grep -E "@stepup-path-ok[[:space:]]+id:${mid}" | head -n1)"
+      reason="$(printf '%s' "$suppress_line" | sed -E "s/.*@stepup-path-ok[[:space:]]+id:${mid}//")"
+      reason_len="$(printf '%s' "$reason" | tr -d '[:space:]' | wc -c | tr -d ' ')"
+      if [ "$reason_len" -ge 10 ]; then
+        continue
+      fi
+      echo "UNMARKED_CALLSITE_CANDIDATE: $rel:$fline — '@stepup-path-ok id:$mid' suppression has no (or too short) reason; state why this call site is not a real gap."
+      fail=1
+      continue
+    fi
+
+    if ! printf '%s' "$file_marker_ids" | grep -qxF "$mid"; then
+      echo "UNMARKED_CALLSITE_CANDIDATE: $rel:$fline — fetchApi( call site matches gated id '$mid' ($method) by path token, but this file has no '@stepup id:$mid' marker. Add the marker + step-up handling, or suppress with '// @stepup-path-ok id:$mid <reason>' if this is a confirmed false positive."
+      fail=1
+    fi
+  done < <(printf '%s' "$MANIFEST_IDS" | sort -u)
+done < <(
+  grep -rnE 'fetchApi\(' "$CLIENT_DIR" \
+    --include='*.tsx' --include='*.ts' 2>/dev/null \
+    | grep -v "$API_DIR/" \
+    | grep -vE '\.test\.(tsx?|mjs):' \
+    || true
+)
 
 if [ "$fail" -ne 0 ]; then
   echo

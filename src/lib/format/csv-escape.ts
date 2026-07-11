@@ -7,12 +7,16 @@
 // spreadsheet treats it as literal text. This is CodeQL's js/incomplete-
 // sanitization sibling and OWASP "CSV Injection".
 //
+// Leading whitespace (spaces, tabs, newlines) before the trigger char is also
+// caught (`\s*` prefix) — spreadsheets still evaluate `  =1+1` as a formula,
+// so a value with leading whitespace and a trigger char needs the same guard.
+//
 // SSoT for the trigger set so the audit-log exporter and the vault/team
 // exporter cannot drift (they historically had two independent escapers, one
 // of which lacked the guard entirely).
 
 /** Characters that make a spreadsheet interpret a cell as a formula. */
-export const CSV_FORMULA_TRIGGER_RE = /^[=+\-@\t\r]/;
+export const CSV_FORMULA_TRIGGER_RE = /^\s*[=+\-@\t\r]/;
 
 /**
  * Escapes a value for a compatibility CSV format that only quote-wraps cells

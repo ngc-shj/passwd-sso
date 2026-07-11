@@ -11,9 +11,13 @@
 // opened, enabling data exfiltration (HYPERLINK / WEBSERVICE) or command
 // execution (DDE). Prefixing such a cell with a single quote makes the
 // spreadsheet treat it as literal text.
+//
+// Leading whitespace (spaces, tabs, newlines) before the trigger char is also
+// caught (`\s*` prefix) — spreadsheets still evaluate `  =1+1` as a formula,
+// so a value with leading whitespace and a trigger char needs the same guard.
 
 /** Characters that make a spreadsheet interpret a cell as a formula. */
-export const CSV_FORMULA_TRIGGER_RE = /^[=+\-@\t\r]/;
+export const CSV_FORMULA_TRIGGER_RE = /^\s*[=+\-@\t\r]/;
 
 /**
  * Escapes a value for a compatibility CSV format that only quote-wraps cells

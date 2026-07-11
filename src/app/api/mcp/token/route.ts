@@ -20,6 +20,7 @@ import { resolveAuditUserId } from "@/lib/constants/app";
 import {
   REFRESH_EXCHANGE_REASON,
   FAMILY_REVOKED_REASON,
+  MCP_CLIENT_ID_MAX_LENGTH,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -86,8 +87,28 @@ async function handlePOST(req: NextRequest) {
   if (grantType === "authorization_code") {
     const { code, redirect_uri, client_id, client_secret, code_verifier } = body;
 
+    // Boundary type check (see the refresh_token branch): the JSON body is only
+    // cast to Record<string,string>, so reject any non-string field before it
+    // reaches the rate-limit key template or the exchange. client_secret is
+    // optional but must be a string when present. client_id is additionally
+    // length-bounded to McpClient.clientId's VarChar(64): it is concatenated
+    // into the rate-limit key below, so an unbounded value would let an
+    // attacker create arbitrarily large / numerous keys in the rate-limit
+    // backend (memory / bandwidth / log amplification).
+    if (
+      typeof code !== "string" ||
+      typeof redirect_uri !== "string" ||
+      typeof client_id !== "string" ||
+      client_id.length === 0 ||
+      client_id.length > MCP_CLIENT_ID_MAX_LENGTH ||
+      typeof code_verifier !== "string" ||
+      (client_secret !== undefined && typeof client_secret !== "string")
+    ) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+
     // client_secret is optional for public clients (token_endpoint_auth_method: "none")
-    if (!code || !redirect_uri || !client_id || !code_verifier) {
+    if (!code || !redirect_uri || !code_verifier) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
@@ -172,10 +193,36 @@ async function handlePOST(req: NextRequest) {
     const clientIdValue = body.client_id;
     const clientSecretValue = body.client_secret;
 
-    // client_secret is optional for public clients (token_endpoint_auth_method: "none")
-    if (!refreshTokenValue || !clientIdValue) {
+    // Boundary type check: the JSON body path is only cast to
+    // Record<string,string> — it is NOT actually string-typed, so an attacker
+    // can send `client_id` as a huge object/array. Reject any non-string field
+    // here (client_secret is optional but must be a string when present) BEFORE
+    // any value reaches the rate-limit key, the exchange, or audit metadata.
+    // client_id is additionally length-bounded to McpClient.clientId's
+    // VarChar(64): it is concatenated into the rate-limit key below, so an
+    // unbounded value would let an attacker create arbitrarily large / numerous
+    // keys in the rate-limit backend (memory / bandwidth / log amplification),
+    // and (before this bound) also drove the metadata-truncation anti-forensics
+    // vector on the replay audit.
+    if (
+      typeof refreshTokenValue !== "string" ||
+      refreshTokenValue.length === 0 ||
+      typeof clientIdValue !== "string" ||
+      clientIdValue.length === 0 ||
+      clientIdValue.length > MCP_CLIENT_ID_MAX_LENGTH ||
+      (clientSecretValue !== undefined && typeof clientSecretValue !== "string")
+    ) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
+
+    // client_id is already bounded to <= MCP_CLIENT_ID_MAX_LENGTH above, so this
+    // slice is a no-op guard kept for defense-in-depth: the audit metadata value
+    // can never exceed the McpClient.clientId VarChar(64) length even if the
+    // boundary check is later loosened. Because the value is rejected (not
+    // truncated) when it exceeds the bound, two distinct oversized client_ids
+    // can NOT collide onto the same truncated 64-char audit value — forensic
+    // attribution stays 1:1 with what the caller presented.
+    const auditClientId = clientIdValue.slice(0, MCP_CLIENT_ID_MAX_LENGTH);
 
     const blocked = await checkRateLimitOrFail({
       req,
@@ -242,7 +289,10 @@ async function handlePOST(req: NextRequest) {
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
           actorType: ACTOR_TYPE.SYSTEM,
           metadata: {
-            clientId: clientIdValue,
+            // Attribution must come from the token row, not the request body —
+            // an attacker replaying a stolen token controls client_id.
+            clientId: result.storedClientId ?? auditClientId,
+            presentedClientId: auditClientId,
             familyId: result.familyId,
             reason: FAMILY_REVOKED_REASON.REPLAY,
           },
@@ -257,7 +307,8 @@ async function handlePOST(req: NextRequest) {
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_FAMILY_REVOKED,
           actorType: ACTOR_TYPE.SYSTEM,
           metadata: {
-            clientId: clientIdValue,
+            clientId: result.storedClientId ?? auditClientId,
+            presentedClientId: auditClientId,
             familyId: result.familyId,
             reason: FAMILY_REVOKED_REASON.CONCURRENT_ROTATION,
           },
@@ -273,7 +324,7 @@ async function handlePOST(req: NextRequest) {
       ...tenantAuditBase(req, resolveAuditUserId(result.userId, "system"), result.tenantId),
       action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
       actorType: result.userId ? ACTOR_TYPE.MCP_AGENT : ACTOR_TYPE.SYSTEM,
-      metadata: { clientId: clientIdValue },
+      metadata: { clientId: auditClientId },
     });
 
     return NextResponse.json({

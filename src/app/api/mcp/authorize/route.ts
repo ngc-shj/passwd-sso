@@ -82,6 +82,7 @@ export async function GET(req: NextRequest) {
   const stepUpError = await requireRecentCurrentAuthMethod(req);
   if (stepUpError) {
     if (stepUpError.status !== 403) return stepUpError;
+    // @browser-redirect-recovery
     const loginUrl = serverAppUrl("/api/auth/signin");
     const callbackUrl = serverAppUrl(req.nextUrl.pathname + req.nextUrl.search);
     return NextResponse.redirect(`${loginUrl}?callbackUrl=${encodeURIComponent(callbackUrl)}`);

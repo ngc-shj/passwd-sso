@@ -144,4 +144,47 @@ describe("GET /api/watchtower/hibp", () => {
       ),
     ).rejects.toThrow("unexpected network error");
   });
+
+  it("evicts oldest entries FIFO at the cache cap instead of clearing everything", async () => {
+    // Fresh module instance so the module-scoped cache starts empty and this
+    // fill-to-cap state neither pollutes nor depends on the other tests'
+    // reserved prefixes. Hoisted vi.mock declarations re-apply on re-import.
+    vi.resetModules();
+    const { GET: freshGET } = await import("./route");
+    const MAX_CACHE_ENTRIES = 5_000; // mirrors the route's module-private constant
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      text: () => Promise.resolve("CAFE0:1"),
+    });
+
+    const prefixOf = (i: number) => i.toString(16).toUpperCase().padStart(5, "0");
+    const request = (prefix: string) =>
+      freshGET(
+        createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
+          searchParams: { prefix },
+        }),
+      );
+
+    // Fill exactly to the cap (indices 0 .. MAX-1); every request misses.
+    for (let i = 0; i < MAX_CACHE_ENTRIES; i++) {
+      await request(prefixOf(i));
+    }
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_CACHE_ENTRIES);
+
+    // One more insert triggers eviction of exactly the oldest entry.
+    await request(prefixOf(MAX_CACHE_ENTRIES));
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_CACHE_ENTRIES + 1);
+
+    // A pre-capping-insert entry (the last one of the fill loop, NOT the entry
+    // that triggered eviction) must still be served from cache: under FIFO only
+    // the oldest entry is evicted, while a cache.clear() regression would wipe
+    // it and force an upstream refetch.
+    await request(prefixOf(MAX_CACHE_ENTRIES - 1));
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_CACHE_ENTRIES + 1);
+
+    // The oldest entry was evicted and must refetch upstream.
+    await request(prefixOf(0));
+    expect(mockFetch).toHaveBeenCalledTimes(MAX_CACHE_ENTRIES + 2);
+  });
 });

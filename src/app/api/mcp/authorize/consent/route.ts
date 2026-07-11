@@ -99,6 +99,7 @@ export async function POST(req: NextRequest) {
     if (codeChallenge) authorizeUrl.searchParams.set("code_challenge", codeChallenge);
     if (codeChallengeMethod) authorizeUrl.searchParams.set("code_challenge_method", codeChallengeMethod);
     if (scope) authorizeUrl.searchParams.set("scope", scope);
+    // @browser-redirect-recovery
     return NextResponse.redirect(authorizeUrl.toString(), 303);
   }
 

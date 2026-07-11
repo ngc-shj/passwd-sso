@@ -21,6 +21,25 @@
 # client-tree anti-drift check (there is deliberately no client token). Do NOT use
 # this sentinel for a route reached by fetchApi from the UI — that route must
 # recover via handleStepUpError, not this escape hatch.
+#
+# HARDENING (C2): a `@browser-redirect` entry is no longer trusted at face value —
+# the guard verifies it against the actual recovery implementation and its
+# regression test, via two additional markers the route file / its sibling
+# route.test.ts must carry:
+#   - `// @browser-redirect-recovery` — a comment adjacent to the 403→redirect
+#     conversion in the route handler itself. The guard requires an actual
+#     `redirect( ` / `redirectToSignIn( ` CALL on a non-comment line within ±3
+#     lines of the marker, so a decoy comment merely mentioning the word
+#     "redirect" cannot satisfy it (place the marker directly above the return).
+#     Missing or unanchored → BROWSER_REDIRECT_RECOVERY_MISSING.
+#   - `// @browser-redirect-recovery-test` — a comment on the sibling
+#     route.test.ts's regression test that asserts the redirect status/Location
+#     for the stale-session case. Missing file or missing marker →
+#     BROWSER_REDIRECT_TEST_MISSING.
+# Both are re-checked on every run — deleting the redirect conversion or its
+# regression test (which removes the marker with it) turns the guard red, closing
+# the "the exemption line survives after the recovery it describes was removed"
+# gap.
 
 ext-bridge-code-post   EXTENSION_CONNECT_ERROR_CODE.SESSION_STEP_UP_REQUIRED  # auto-extension-connect.tsx surfaces step-up via the extension-connect error channel, not the standard API error body
 mcp-authorize-get              @browser-redirect  # OAuth authorize GET (browser nav); stale-session 403 redirects (307) to sign-in, whose reauth panel recovers (passkey ceremony or re-sign-in), no fetch UI caller

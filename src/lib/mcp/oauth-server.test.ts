@@ -1281,6 +1281,44 @@ describe("passkey enforcement in exchangeRefreshToken (lib)", () => {
     expect(mockAccessCreate).not.toHaveBeenCalled();
     expect(mockRefreshCreate).not.toHaveBeenCalled();
   });
+
+  // F8 forensic attribution: the replay outcome must surface the TOKEN-ROW
+  // client id (mcpc_test), not the caller-claimed one — an attacker replaying
+  // a stolen rotated token controls params.clientId. Deliberately mismatched
+  // clientId so storedClientId and the presented value cannot coincide.
+  it("replay outcome carries the stored clientId even when the presented client_id is a lie", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockRefreshUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    mockDelegates(prisma).mcpRefreshToken = {
+      findUnique: vi.fn().mockResolvedValue(makeBaseRt({ rotatedAt: new Date(Date.now() - 30_000) })),
+      updateMany: mockRefreshUpdateMany,
+      findMany: vi.fn().mockResolvedValue([{ accessTokenId: "at-pk-id" }]),
+      create: vi.fn(),
+    };
+    mockDelegates(prisma).mcpAccessToken = {
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({}),
+    };
+
+    const result = await exchangeRefreshToken(
+      { refreshToken: "rt-pk", clientId: "mcpc_ATTACKER_LIE", clientSecretHash: "" },
+      { prisma: prisma as never },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe("replay");
+      expect(result.storedClientId).toBe("mcpc_test");
+      expect(result.storedClientId).not.toBe("mcpc_ATTACKER_LIE");
+    }
+    // Defense unchanged: family revocation fires regardless of the lied clientId.
+    expect(mockRefreshUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ familyId: FAMILY_ID, revokedAt: null }),
+      }),
+    );
+  });
 });
 
 describe("passkey enforcement in exchangeCodeForToken (lib)", () => {

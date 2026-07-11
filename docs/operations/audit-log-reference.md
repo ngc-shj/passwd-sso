@@ -367,11 +367,11 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `MCP_CONSENT_GRANT` | TENANT | McpClient | `{ clientId, scopes }` | scopes |
 | `MCP_CONSENT_DENY` | TENANT | McpClient | `{ clientId }` | — |
 | `MCP_REFRESH_TOKEN_ROTATE` | TENANT | McpAccessToken | `{ clientId }` | — |
-| `MCP_REFRESH_TOKEN_REPLAY` | TENANT | McpAccessToken | `{ clientId, familyId }` | — (security event) |
+| `MCP_REFRESH_TOKEN_REPLAY` | TENANT | McpAccessToken | `{ clientId, presentedClientId, familyId, reason }` | — (security event) |
 
 **Notes:**
 - `MCP_CLIENT_DCR_REGISTER` is a system event (no user session at registration time).
-- `MCP_REFRESH_TOKEN_REPLAY` is a security event indicating potential token theft.
+- `MCP_REFRESH_TOKEN_REPLAY` is a security event indicating potential token theft. `clientId` is the token-row-derived (stored) client id — authoritative attribution; `presentedClientId` is the `client_id` the caller claimed in the request body, which an attacker replaying a stolen token controls.
 
 ---
 
