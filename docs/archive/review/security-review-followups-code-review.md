@@ -189,3 +189,6 @@ User reported that S5's fix protected the audit metadata (via `.slice`) but NOT 
 
 ## Process note
 Mutation-proof this round used a scratch `.bak` copy + `cp` restore (NOT `git checkout --`), avoiding the uncommitted-work-revert mishap from process notes 1 and the Round-4 note. Restore verified clean (both length bounds present, 98/98 green).
+
+## Round 5 test-quality follow-up (user-reported)
+The oversized-reject tests originally used `not.toHaveBeenCalledWith(objectContaining({key}))`, which does not match the limiter's real call shape — `checkRateLimitOrFail` invokes `limiter.check(<bare string>)`, so that assertion could never match and was weak. Corrected to `expect(mockRateLimiterCheck).not.toHaveBeenCalled()`: in the test env `extractClientIp` returns null, so the IP-scoped pre-check is skipped and the limiter must not fire at all when the oversized value is rejected at the boundary. Mutation-verified: removing the length bounds makes all three oversized-reject tests red (the limiter now fires with the oversized client-scoped key). Test-only change; `next build` skipped per the test-only rule.

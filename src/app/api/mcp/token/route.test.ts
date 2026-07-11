@@ -236,9 +236,11 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalledWith(
-      expect.objectContaining({ key: expect.stringContaining(oversized) }),
-    );
+    // Rejected at the boundary before either rate-limiter call. (The IP-scoped
+    // check is skipped here because the test request carries no client IP, so
+    // the limiter must not fire at all — the client-scoped
+    // `mcp:token:<client_id>` key is never built from the oversized value.)
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -596,11 +598,11 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    // Rejected at the boundary — neither the rate limiter, the exchange, nor
-    // any audit saw the oversized value.
-    expect(mockRateLimiterCheck).not.toHaveBeenCalledWith(
-      expect.objectContaining({ key: expect.stringContaining(oversized) }),
-    );
+    // Rejected at the boundary before any rate-limiter call. (The IP-scoped
+    // check is skipped here because the test request carries no client IP, so
+    // the limiter must not fire at all — the client-scoped
+    // `mcp:token:<client_id>` key is never built from the oversized value.)
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
