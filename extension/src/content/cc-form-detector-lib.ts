@@ -80,22 +80,23 @@ function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
 
 // ── Regex patterns ──
 
-const CC_NUMBER_RE = /card.?num|cc.?num|pan/i;
-const CC_NUMBER_JA_RE = /カード番号/;
+export const CC_DETECT_RE = {
+  number:      /card.?num|cc.?num|card.?no\b|ccno\b|\bpan\b/i,
+  name:        /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i,
+  expiryMonth: /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i,
+  expiryYear:  /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i,
+  cvv:         /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|conf.?num|card.?code/i,
+} as const;
 
-const CC_NAME_RE = /card.?holder|cc.?name|name.?on.?card/i;
+const CC_NUMBER_JA_RE = /カード番号/;
 const CC_NAME_JA_RE = /名義|カード名義/;
 
 const CC_EXPIRY_RE = /expir|exp.?date|valid.?thru|card.?exp/i;
 const CC_EXPIRY_JA_RE = /有効期限/;
 
-const CC_EXPIRY_MONTH_RE = /exp.?month|cc.?exp.?month|card.?month/i;
 const CC_EXPIRY_MONTH_JA_RE = /月/;
-
-const CC_EXPIRY_YEAR_RE = /exp.?year|cc.?exp.?year|card.?year/i;
 const CC_EXPIRY_YEAR_JA_RE = /年/;
 
-const CC_CVV_RE = /cvv|cvc|csc|cv2|security.?code|card.?code/i;
 const CC_CVV_JA_RE = /セキュリティコード/;
 
 // ── Autocomplete attributes (standard) ──
@@ -193,13 +194,13 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
 
   // Priority 2: name/id/label regex fallback
   if (!cardNumber) {
-    cardNumber = findFieldByRegex(visibleFields, CC_NUMBER_RE, CC_NUMBER_JA_RE) as HTMLInputElement | null;
+    cardNumber = findFieldByRegex(visibleFields, CC_DETECT_RE.number, CC_NUMBER_JA_RE) as HTMLInputElement | null;
   }
   if (!cardholderName) {
-    cardholderName = findFieldByRegex(visibleFields, CC_NAME_RE, CC_NAME_JA_RE) as HTMLInputElement | null;
+    cardholderName = findFieldByRegex(visibleFields, CC_DETECT_RE.name, CC_NAME_JA_RE) as HTMLInputElement | null;
   }
   if (!cvv) {
-    cvv = findFieldByRegex(visibleFields, CC_CVV_RE, CC_CVV_JA_RE) as HTMLInputElement | null;
+    cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE) as HTMLInputElement | null;
   }
   if (!expiryMonth && !expiryCombined) {
     // Check for combined expiry first
@@ -207,11 +208,11 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
     if (combined && combined instanceof HTMLInputElement) {
       expiryCombined = combined;
     } else {
-      expiryMonth = findFieldByRegex(visibleFields, CC_EXPIRY_MONTH_RE, CC_EXPIRY_MONTH_JA_RE);
+      expiryMonth = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryMonth, CC_EXPIRY_MONTH_JA_RE);
     }
   }
   if (!expiryYear && !expiryCombined) {
-    expiryYear = findFieldByRegex(visibleFields, CC_EXPIRY_YEAR_RE, CC_EXPIRY_YEAR_JA_RE);
+    expiryYear = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryYear, CC_EXPIRY_YEAR_JA_RE);
   }
 
   // Must have at least card number to consider this a CC form

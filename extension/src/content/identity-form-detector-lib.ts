@@ -13,6 +13,7 @@ import {
   hasVisiblePopoverOverlayNear,
   showInlineNotice,
 } from "./form-detector-lib";
+import { detectCreditCardFields } from "./cc-form-detector-lib";
 import {
   showDropdown,
   hideDropdown,
@@ -102,7 +103,7 @@ const KANA_FAMILY_RE = /セイ|姓/;
 const KANA_GIVEN_RE = /メイ|名/;
 
 const ADDRESS_RE = /\b(address|street|addr|address.?line|shipping.?address|billing.?address)\b/i;
-const ADDRESS_JA_RE = /住所|番地|丁目|番号/;
+export const ADDRESS_JA_RE = /住所|番地|丁目/;
 
 const ADDRESS_LINE2_RE = /\b(address.?line.?2|apartment|apt|suite|unit|building)\b/i;
 const ADDRESS_LINE2_JA_RE = /建物|部屋|号室|マンション/;
@@ -207,8 +208,26 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
   const selects = Array.from(root.querySelectorAll<HTMLSelectElement>("select"));
   const allFields: (HTMLInputElement | HTMLSelectElement)[] = [...inputs, ...selects];
 
+  // C4: a field already claimed by CC detection must never also be claimed by
+  // identity detection — otherwise the identity focus handler races the CC
+  // dropdown and can overwrite it on a card field.
+  const ccFields = detectCreditCardFields(root);
+  const ccClaimed = new Set<HTMLElement>();
+  if (ccFields) {
+    for (const el of [
+      ccFields.cardholderName,
+      ccFields.cardNumber,
+      ccFields.expiryMonth,
+      ccFields.expiryYear,
+      ccFields.expiryCombined,
+      ccFields.cvv,
+    ]) {
+      if (el) ccClaimed.add(el);
+    }
+  }
+
   const visibleFields = allFields.filter(
-    (f) => isElementVisible(f) && isUsableField(f),
+    (f) => isElementVisible(f) && isUsableField(f) && !ccClaimed.has(f),
   );
 
   if (visibleFields.length === 0) return null;

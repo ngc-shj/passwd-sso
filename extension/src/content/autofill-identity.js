@@ -160,7 +160,7 @@ function performIdentityAutofill(payload) {
   var kanaFamilyRe = /セイ|姓/;
   var kanaGivenRe = /メイ|名/;
   var addrRe = /\b(address|street|addr|address.?line|shipping.?address|billing.?address)\b/i;
-  var addrJa = /住所|番地|丁目|番号/;
+  var addrJa = /住所|番地|丁目/;
   var addrLine2Re = /\b(address.?line.?2|apartment|apt|suite|unit|building)\b/i;
   var addrLine2Ja = /建物|部屋|号室|マンション/;
   var cityRe = /\b(city|town|locality|suburb)\b/i;

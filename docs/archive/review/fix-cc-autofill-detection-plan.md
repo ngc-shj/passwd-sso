@@ -184,3 +184,25 @@ Assertion style (T4): all "decoy NOT claimed" checks pin element identity — `e
 | C5  | ADDRESS_JA_RE drops 番号 (lib + .js)                            | locked |
 | C6  | Regex parity pin test (.js ↔ lib)                              | locked |
 | C7  | Per-site fixture test matrix                                   | locked |
+
+## Implementation Checklist
+
+Files to modify (member-set verified by grep 2026-07-11):
+- [ ] `extension/src/content/cc-form-detector-lib.ts` — replace CC_NUMBER_RE/CC_NAME_RE/CC_EXPIRY_MONTH_RE/CC_EXPIRY_YEAR_RE/CC_CVV_RE with the exported `CC_DETECT_RE` object (C1); rewire `findFieldByRegex` call sites to `CC_DETECT_RE.*`.
+- [ ] `extension/src/content/autofill-cc.js` — mirror the 5 regex literals byte-identically (C2).
+- [ ] `extension/src/content/autofill-cc-lib.ts` — `normalizeYearValue`: `0..99 → String(2000+n)` (C3).
+- [ ] `extension/src/content/autofill-cc.js` — mirror `normalizeYearValue` (C3).
+- [ ] `extension/src/content/identity-form-detector-lib.ts` — `ADDRESS_JA_RE` drop `番号`; add `export` (C5, T13).
+- [ ] `extension/src/content/autofill-identity.js` — mirror `addrJa` (drop `番号`) (C5).
+- [ ] `extension/src/content/identity-form-detector-lib.ts` — `detectIdentityFields` runs `detectCreditCardFields(root)` first, excludes CC-claimed elements from `visibleFields` (C4). Import from `./cc-form-detector-lib` (no cycle — verified cc lib does not import identity lib).
+
+Test trees (R19 — all 4 enumerated):
+- [ ] `extension/src/__tests__/content/cc-form-detector.test.ts` — per-site detection + negative + regex matrix (C7)
+- [ ] `extension/src/__tests__/content/autofill-cc.test.ts` — year 2/4-digit fill fixtures (C3/C7)
+- [ ] `extension/src/__tests__/content/cc-identity-detector.test.ts` — T7-extension race + fieldCount boundary (C4/C7)
+- [ ] `extension/src/__tests__/content/identity-form-detector.test.ts` — verify no break from C5 (T6: none expected)
+- [ ] `extension/src/__tests__/content/cc-regex-parity.test.ts` — NEW, full-literal `.toString()` pins + negative + year-guard pin (C6)
+
+Reuse (R1/R17): none — in-place edits to existing regex tables/functions only; no new shared helper. `?raw` twin-sync precedent: `autofill-js-sync.test.ts`.
+
+CI parity: extension test+build run in BOTH CI and scripts/pre-pr.sh (verified). No parity gap.

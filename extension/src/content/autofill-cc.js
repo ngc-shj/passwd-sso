@@ -49,6 +49,7 @@ function normalizeYearValue(value) {
   var trimmed = value.trim();
   var num = parseInt(trimmed, 10);
   if (isNaN(num)) return trimmed;
+  if (num >= 0 && num <= 99) return String(2000 + num);
   return String(num);
 }
 
@@ -163,17 +164,17 @@ function performCreditCardAutofill(payload) {
     return isFieldVisible(f) && isUsableField(f);
   });
 
-  var ccNumRe = /card.?num|cc.?num|pan/i;
+  var ccNumRe = /card.?num|cc.?num|card.?no\b|ccno\b|\bpan\b/i;
   var ccNumJa = /カード番号/;
-  var ccNameRe = /card.?holder|cc.?name|name.?on.?card/i;
+  var ccNameRe = /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i;
   var ccNameJa = /名義|カード名義/;
   var ccExpRe = /expir|exp.?date|valid.?thru|card.?exp/i;
   var ccExpJa = /有効期限/;
-  var ccExpMonthRe = /exp.?month|cc.?exp.?month|card.?month/i;
+  var ccExpMonthRe = /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i;
   var ccExpMonthJa = /月/;
-  var ccExpYearRe = /exp.?year|cc.?exp.?year|card.?year/i;
+  var ccExpYearRe = /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i;
   var ccExpYearJa = /年/;
-  var ccCvvRe = /cvv|cvc|csc|cv2|security.?code|card.?code/i;
+  var ccCvvRe = /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|conf.?num|card.?code/i;
   var ccCvvJa = /セキュリティコード/;
 
   var cardNumber = findFieldByAC(visibleFields, "cc-number") || findFieldByRegex(visibleFields, ccNumRe, ccNumJa);
