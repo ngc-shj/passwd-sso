@@ -164,7 +164,7 @@ function performCreditCardAutofill(payload) {
     return isFieldVisible(f) && isUsableField(f);
   });
 
-  var ccNumRe = /card.?num|cc.?num|card.?no\b|ccno\b|\bpan\b/i;
+  var ccNumRe = /card.?num|cc.?num|\bcard.?no\b|\bccno\b|\bpan\b/i;
   var ccNumJa = /カード番号/;
   var ccNameRe = /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i;
   var ccNameJa = /名義|カード名義/;

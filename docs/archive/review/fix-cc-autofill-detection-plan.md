@@ -53,7 +53,7 @@ Replace the five English-hint regexes; JA regexes unchanged. Export the table fo
 
 ```ts
 export const CC_DETECT_RE = {
-  number:      /card.?num|cc.?num|card.?no\b|ccno\b|\bpan\b/i,
+  number:      /card.?num|cc.?num|\bcard.?no\b|\bccno\b|\bpan\b/i,
   name:        /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i,
   expiryMonth: /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i,
   expiryYear:  /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i,
@@ -63,6 +63,7 @@ export const CC_DETECT_RE = {
 
 Notes locked with rationale:
 - `pan` → `\bpan\b`: the current unanchored `pan` matches `japan`, `company`, `expand` — tightening is in-scope because the widened `card.?no` alternation raises the number-detection surface.
+- `card.?no\b` → `\bcard.?no\b` and `ccno\b` → `\bccno\b` (Phase 3 code-review, user-approved): the trailing-only boundary matched any `*_card_no` field (`loyalty_card_no`, `insurance_card_no`, `student_card_no`, member/library/point-card numbers) — a member-card-number field would surface a spurious CC-number suggestion. Same-page misfill is security-benign (user must still pick from the dropdown; SC4/S2 bound) but is a UX false-positive. Adding the leading `\b` rejects the mid-word `_card_no` class while keeping every target-site hint (`ccno`, `card_no`, `cardnumber`, `creditcardnumber`) — verified. Consistent with the `\bpan\b` tightening rationale. Decoy counter-fixture (d) + matrix rows added (C7).
 - Month/year use the bounded prefix `exp(?:ir(?:y|e|ation))?` (NOT `exp\w*`) so `export_month` / `expected_month` / `experience_month` are rejected while `expmonth`, `exp_month`, `expiry-month`, `expiration_month`, `cardexpiremonth` still match (F1). The verification matrix is **committed as a table-driven `it.each` test** against the exported `CC_DETECT_RE` (T12), not a one-off run — see C7 "regex matrix" row.
 - `expire\W{0,2}mm?\b` / `yy?\b` covers BBexcite `card_expire[m]` / `card_expire[Y]`; the literal `expire` prefix prevents `expiry` (trailing `y`) from matching the year regex.
 - `\bcard.?verif` covers ふるさとチョイス `js-card_verification_code` by name/id. The `card` prefix is required so bare OTP-style `verification_code` fields do NOT match (F2); the leading `\b` (S5) additionally rejects mid-word `card` (`discard verification`) while `js-card_…`'s hyphen still provides the boundary. 3DS/ACS OTP pages are further neutralized by the card-number gate (no card-number input on ACS pages → detection returns null). Independently, that site's CVC field also carries `label[for]` = セキュリティコード, which the unchanged `CC_CVV_JA_RE` matches — the C7 fixture asserts BOTH paths (name-based and label-based) explicitly rather than relying on either silently.

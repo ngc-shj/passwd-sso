@@ -371,6 +371,19 @@ describe("detectCreditCardFields — negative / counter-fixtures", () => {
     const legitimateExpirySelect = document.querySelector('[name="cardExpireMonthSelect"]');
     expect(fields!.expiryMonth).toBe(legitimateExpirySelect);
   });
+
+  it("(d) loyalty/insurance *_card_no fields (member-card numbers) are not claimed as a card number", () => {
+    setupForm(`
+      <input name="loyalty_card_no" type="text" />
+      <input name="insurance_card_no" type="text" />
+      <input name="student_card_no" type="text" />
+    `);
+
+    // \bcard.?no\b requires a word boundary before "card" — a member-card
+    // number field (loyalty_card_no etc.) must NOT trigger a CC-number match.
+    const fields = detectCreditCardFields(document);
+    expect(fields).toBeNull();
+  });
 });
 
 describe("CC_DETECT_RE — regex matrix (T12)", () => {
@@ -385,6 +398,9 @@ describe("CC_DETECT_RE — regex matrix (T12)", () => {
     ["japan_flag", "number", false],
     ["company_name", "number", false],
     ["expand_section", "number", false],
+    ["loyalty_card_no", "number", false],
+    ["insurance_card_no", "number", false],
+    ["student_card_no", "number", false],
     // name positives
     ["ccmeigi", "name", true],
     ["holder_name", "name", true],

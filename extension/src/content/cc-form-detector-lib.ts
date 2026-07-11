@@ -81,7 +81,7 @@ function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
 // ── Regex patterns ──
 
 export const CC_DETECT_RE = {
-  number:      /card.?num|cc.?num|card.?no\b|ccno\b|\bpan\b/i,
+  number:      /card.?num|cc.?num|\bcard.?no\b|\bccno\b|\bpan\b/i,
   name:        /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i,
   expiryMonth: /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i,
   expiryYear:  /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i,
