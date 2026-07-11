@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.68](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.67...passwd-sso-v0.4.68) (2026-07-11)
+
+
+### Bug Fixes
+
+* **security:** remediate full-repo security audit (S1-S10) and harden extension autofill frame-origin boundaries ([#651](https://github.com/ngc-shj/passwd-sso/issues/651)) ([baa2479](https://github.com/ngc-shj/passwd-sso/commit/baa247941dcf642eca83dcf86237e84d81c61aa0))
+
 ## [0.4.67](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.66...passwd-sso-v0.4.67) (2026-07-09)
 
 
