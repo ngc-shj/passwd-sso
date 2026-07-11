@@ -160,3 +160,32 @@ After push, the user reported a genuine gap in the Round-1 S1 fix: `auditClientI
 
 ## Process note (orchestrator)
 The mutation-proof for S5's test again used `git checkout --` to restore, which reverted the uncommitted S5 fix (identical to deviation-log process note 1). Re-applied immediately, re-verified 96/96 green, residue-grepped clean. Repeat lesson: commit before mutation-testing, or mutate a scratch copy.
+
+---
+
+# Round 5 (user-reported finding — post-push)
+Date: 2026-07-11
+
+## Changes from Previous Round
+User reported that S5's fix protected the audit metadata (via `.slice`) but NOT the rate-limit key: `mcp:token:${client_id}` still concatenated the raw (string-only-validated, length-unbounded) `client_id`, so an attacker could create arbitrarily large / numerous keys in the rate-limit backend (memory / bandwidth / log amplification) in both grants.
+
+## Security Finding
+
+**S6 (user-reported) Medium: attacker-controlled client_id used as an unbounded-length rate-limit key**
+- File: `src/app/api/mcp/token/route.ts` (both `authorization_code` and `refresh_token` grants)
+- Fix: added a length bound to the boundary check in BOTH grants — `client_id.length === 0 || client_id.length > MCP_CLIENT_ID_MAX_LENGTH` → `invalid_request` (a valid McpClient.clientId is VarChar(64), so a legitimate client is never rejected). This bounds the rate-limit key at `mcp:token:` + 64. Chose reject-at-boundary over hashing the key: (a) the length bound already makes the key finite, so hashing adds no DoS benefit (distinct inputs still map to distinct buckets); (b) every other rate-limit key in the codebase uses a plaintext trusted id (`userId`/`tenantId`/normalized IP via `rateLimitKeyFromIp`) with no hashing — `client_id` is a public OAuth identifier (`mcpc_` prefix), not a secret, so hashing only this one would be inconsistent (YAGNI). User confirmed the no-hash decision given no truncation-collision.
+- Truncation-collision note (user question): because oversized values are now REJECTED rather than truncated, two distinct oversized client_ids can no longer collide onto the same 64-char audit value — forensic attribution stays 1:1. The `auditClientId = clientIdValue.slice(0, 64)` is now a no-op defense-in-depth guard (documented as such).
+- Regression tests (both grants, both input paths): oversized string client_id → 400 + no rate-limiter/exchange/audit call; refresh grant at exactly the 64-char limit → accepted (boundary condition, reject is `> MAX` not `>= MAX`). Mutation-verified via scratch-backup (not `git checkout`): removing both length bounds turns the 3 oversized-reject tests red.
+- escalate: false
+
+## Recurring Issue Check (Round 5)
+- R34: length bound applied symmetrically to both grants (same class, same commit).
+- RT8: oversized-reject tests assert 400 AND that the guarded sinks (rate limiter key, exchange, audit) did not run — mutation-verified.
+
+## Resolution Status (Round 5)
+### S6 Medium — unbounded-length rate-limit key
+- Action: `client_id.length` bounded (non-empty, ≤ 64) at the boundary of both grants; removed the now-redundant `!client_id`/`!clientIdValue` truthiness checks (subsumed by `length === 0`); `auditClientId` slice re-documented as a no-op defense-in-depth guard that also rules out truncation collisions.
+- Modified: `src/app/api/mcp/token/route.ts`, `src/app/api/mcp/token/route.test.ts`
+
+## Process note
+Mutation-proof this round used a scratch `.bak` copy + `cp` restore (NOT `git checkout --`), avoiding the uncommitted-work-revert mishap from process notes 1 and the Round-4 note. Restore verified clean (both length bounds present, 98/98 green).

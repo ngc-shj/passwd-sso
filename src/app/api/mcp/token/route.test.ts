@@ -217,6 +217,31 @@ describe("POST /api/mcp/token", () => {
     expect(json.error).toBe("invalid_request");
   });
 
+  it("authorization_code: rejects an oversized client_id before the rate-limit key or exchange", async () => {
+    // Same rate-limit-key amplification guard as the refresh grant: client_id is
+    // concatenated into `mcp:token:${client_id}`, so an oversized value is
+    // rejected at the boundary rather than reaching the backend.
+    const oversized = "mcpc_" + "A".repeat(20_000);
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "authorization_code",
+        code: "auth-code-123",
+        redirect_uri: "https://client.example/cb",
+        client_id: oversized,
+        code_verifier: "a-code-verifier-value",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalledWith(
+      expect.objectContaining({ key: expect.stringContaining(oversized) }),
+    );
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized urlencoded form body with no Content-Length (chunked-TE bypass guard)", async () => {
     // If the streaming cap did NOT fire, this body parses into a complete,
     // valid authorization_code grant and would reach exchangeCodeForToken —
@@ -556,12 +581,35 @@ describe("POST /api/mcp/token", () => {
     expect(JSON.stringify(json)).not.toContain("mcpc_stored_real");
   });
 
-  it("refresh_token: caps an oversized presented client_id in replay audit metadata (anti-forensics)", async () => {
-    // A replay attacker pads client_id past METADATA_MAX_BYTES (10 KB) so the
-    // whole audit entry would collapse into a {_truncated} stub. The route caps
-    // the presented value to McpClient.clientId's VarChar(64) before it reaches
-    // audit metadata, so familyId/storedClientId/reason survive.
+  it("refresh_token: rejects an oversized (but string) client_id before the rate-limit key or exchange", async () => {
+    // A real McpClient.clientId is VarChar(64). An oversized string would (a)
+    // be concatenated raw into the rate-limit key `mcp:token:${client_id}`,
+    // letting an attacker create huge / numerous keys in the backend, and
+    // (b) reach the replay audit metadata. The boundary length bound rejects
+    // it up front rather than merely capping it downstream.
     const oversized = "mcpc_" + "A".repeat(20_000);
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: { ...VALID_REFRESH_BODY, client_id: oversized },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    // Rejected at the boundary — neither the rate limiter, the exchange, nor
+    // any audit saw the oversized value.
+    expect(mockRateLimiterCheck).not.toHaveBeenCalledWith(
+      expect.objectContaining({ key: expect.stringContaining(oversized) }),
+    );
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token: accepts a client_id at exactly the 64-char limit", async () => {
+    // Boundary condition: length === MCP_CLIENT_ID_MAX_LENGTH must pass (the
+    // reject is length > MAX, not >= MAX).
+    const atLimit = "mcpc_" + "A".repeat(64 - "mcpc_".length); // exactly 64 chars
+    expect(atLimit.length).toBe(64);
     mockExchangeRefreshToken.mockResolvedValue({
       ok: false,
       error: "invalid_grant",
@@ -571,7 +619,7 @@ describe("POST /api/mcp/token", () => {
       storedClientId: "mcpc_stored_real",
     });
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
-      body: { ...VALID_REFRESH_BODY, client_id: oversized },
+      body: { ...VALID_REFRESH_BODY, client_id: atLimit },
     });
     await POST(req);
 
@@ -580,12 +628,8 @@ describe("POST /api/mcp/token", () => {
     );
     expect(replayCall).toBeDefined();
     const meta = replayCall![0].metadata;
-    expect(meta.presentedClientId.length).toBe(64);
-    expect(meta.presentedClientId).toBe(oversized.slice(0, 64));
-    // The forensic fields survive alongside the capped value.
+    expect(meta.presentedClientId).toBe(atLimit);
     expect(meta.clientId).toBe("mcpc_stored_real");
-    expect(meta.familyId).toBe("family-001");
-    expect(meta.reason).toBe("replay");
   });
 
   it("refresh_token: rejects a non-string client_id (JSON body) before it reaches the exchange or audit", async () => {
@@ -613,19 +657,11 @@ describe("POST /api/mcp/token", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("refresh_token (form-encoded): a valid string client_id still caps at 64 in replay audit", async () => {
-    // URL-encoded form input is always string-typed, so the boundary check
-    // passes; the length cap still applies. Regression coverage for the form
-    // input path alongside the JSON path above.
+  it("refresh_token (form-encoded): an oversized client_id is rejected on the form path too", async () => {
+    // URL-encoded form input is always string-typed, so it would pass the type
+    // check — the length bound is what rejects it. Regression coverage for the
+    // form input path alongside the JSON path above.
     const oversized = "mcpc_" + "B".repeat(20_000);
-    mockExchangeRefreshToken.mockResolvedValue({
-      ok: false,
-      error: "invalid_grant",
-      reason: "replay",
-      tenantId: "tenant-replay",
-      familyId: "family-form",
-      storedClientId: "mcpc_stored_form",
-    });
     const form =
       "grant_type=refresh_token" +
       "&refresh_token=mcpr_test123" +
@@ -636,16 +672,13 @@ describe("POST /api/mcp/token", () => {
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: form,
     } as ConstructorParameters<typeof NextRequest>[1]);
-    await POST(req);
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
 
-    const replayCall = mockLogAudit.mock.calls.find(
-      ([entry]) => entry?.action === "MCP_REFRESH_TOKEN_REPLAY",
-    );
-    expect(replayCall).toBeDefined();
-    const meta = replayCall![0].metadata;
-    expect(meta.presentedClientId.length).toBe(64);
-    expect(meta.presentedClientId).toBe(oversized.slice(0, 64));
-    expect(meta.clientId).toBe("mcpc_stored_form");
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   // Race-loss audit log (issue #435 — fail-closed family revocation)

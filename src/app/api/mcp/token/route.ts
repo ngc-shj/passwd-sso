@@ -90,11 +90,17 @@ async function handlePOST(req: NextRequest) {
     // Boundary type check (see the refresh_token branch): the JSON body is only
     // cast to Record<string,string>, so reject any non-string field before it
     // reaches the rate-limit key template or the exchange. client_secret is
-    // optional but must be a string when present.
+    // optional but must be a string when present. client_id is additionally
+    // length-bounded to McpClient.clientId's VarChar(64): it is concatenated
+    // into the rate-limit key below, so an unbounded value would let an
+    // attacker create arbitrarily large / numerous keys in the rate-limit
+    // backend (memory / bandwidth / log amplification).
     if (
       typeof code !== "string" ||
       typeof redirect_uri !== "string" ||
       typeof client_id !== "string" ||
+      client_id.length === 0 ||
+      client_id.length > MCP_CLIENT_ID_MAX_LENGTH ||
       typeof code_verifier !== "string" ||
       (client_secret !== undefined && typeof client_secret !== "string")
     ) {
@@ -102,7 +108,7 @@ async function handlePOST(req: NextRequest) {
     }
 
     // client_secret is optional for public clients (token_endpoint_auth_method: "none")
-    if (!code || !redirect_uri || !client_id || !code_verifier) {
+    if (!code || !redirect_uri || !code_verifier) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
@@ -192,30 +198,31 @@ async function handlePOST(req: NextRequest) {
     // can send `client_id` as a huge object/array. Reject any non-string field
     // here (client_secret is optional but must be a string when present) BEFORE
     // any value reaches the rate-limit key, the exchange, or audit metadata.
-    // Without this a non-string client_id would bypass the audit length cap
-    // below and re-open the metadata-truncation anti-forensics vector.
+    // client_id is additionally length-bounded to McpClient.clientId's
+    // VarChar(64): it is concatenated into the rate-limit key below, so an
+    // unbounded value would let an attacker create arbitrarily large / numerous
+    // keys in the rate-limit backend (memory / bandwidth / log amplification),
+    // and (before this bound) also drove the metadata-truncation anti-forensics
+    // vector on the replay audit.
     if (
       typeof refreshTokenValue !== "string" ||
+      refreshTokenValue.length === 0 ||
       typeof clientIdValue !== "string" ||
+      clientIdValue.length === 0 ||
+      clientIdValue.length > MCP_CLIENT_ID_MAX_LENGTH ||
       (clientSecretValue !== undefined && typeof clientSecretValue !== "string")
     ) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
-    // Length-capped copy for audit metadata only. A real McpClient.clientId is
-    // @db.VarChar(64); the raw body value is attacker-controlled and unbounded
-    // (bounded only by the 1 MB JSON body cap). Writing it uncapped lets a
-    // replay attacker pad client_id past METADATA_MAX_BYTES so truncateMetadata
-    // collapses the ENTIRE audit entry (familyId, storedClientId, reason) into
-    // a content-free stub — self-inflicted anti-forensics on the exact record
-    // this route's replay audit exists to preserve. Never used for the rate-
-    // limit key or the exchange's client match (those need the full value).
+    // client_id is already bounded to <= MCP_CLIENT_ID_MAX_LENGTH above, so this
+    // slice is a no-op guard kept for defense-in-depth: the audit metadata value
+    // can never exceed the McpClient.clientId VarChar(64) length even if the
+    // boundary check is later loosened. Because the value is rejected (not
+    // truncated) when it exceeds the bound, two distinct oversized client_ids
+    // can NOT collide onto the same truncated 64-char audit value — forensic
+    // attribution stays 1:1 with what the caller presented.
     const auditClientId = clientIdValue.slice(0, MCP_CLIENT_ID_MAX_LENGTH);
-
-    // client_secret is optional for public clients (token_endpoint_auth_method: "none")
-    if (!refreshTokenValue || !clientIdValue) {
-      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-    }
 
     const blocked = await checkRateLimitOrFail({
       req,
