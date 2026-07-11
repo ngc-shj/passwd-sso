@@ -588,6 +588,66 @@ describe("POST /api/mcp/token", () => {
     expect(meta.reason).toBe("replay");
   });
 
+  it("refresh_token: rejects a non-string client_id (JSON body) before it reaches the exchange or audit", async () => {
+    // The JSON body is only cast to Record<string,string>; an attacker can send
+    // client_id as a huge object/array to bypass the audit length cap (slice is
+    // string-only) and re-open the metadata-truncation vector. The boundary type
+    // check must reject it as invalid_request before any sink sees it.
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "refresh_token",
+        refresh_token: "mcpr_test123",
+        // A non-string client_id: a nested object that JSON.stringify would
+        // serialize to well over METADATA_MAX_BYTES.
+        client_id: { padding: "A".repeat(20_000) },
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    // Neither the exchange nor any audit ran — the request never got past the
+    // boundary check.
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token (form-encoded): a valid string client_id still caps at 64 in replay audit", async () => {
+    // URL-encoded form input is always string-typed, so the boundary check
+    // passes; the length cap still applies. Regression coverage for the form
+    // input path alongside the JSON path above.
+    const oversized = "mcpc_" + "B".repeat(20_000);
+    mockExchangeRefreshToken.mockResolvedValue({
+      ok: false,
+      error: "invalid_grant",
+      reason: "replay",
+      tenantId: "tenant-replay",
+      familyId: "family-form",
+      storedClientId: "mcpc_stored_form",
+    });
+    const form =
+      "grant_type=refresh_token" +
+      "&refresh_token=mcpr_test123" +
+      "&client_id=" + encodeURIComponent(oversized);
+    const { NextRequest } = await import("next/server");
+    const req = new NextRequest("http://localhost/api/mcp/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form,
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    await POST(req);
+
+    const replayCall = mockLogAudit.mock.calls.find(
+      ([entry]) => entry?.action === "MCP_REFRESH_TOKEN_REPLAY",
+    );
+    expect(replayCall).toBeDefined();
+    const meta = replayCall![0].metadata;
+    expect(meta.presentedClientId.length).toBe(64);
+    expect(meta.presentedClientId).toBe(oversized.slice(0, 64));
+    expect(meta.clientId).toBe("mcpc_stored_form");
+  });
+
   // Race-loss audit log (issue #435 — fail-closed family revocation)
   it("refresh_token: logs MCP_REFRESH_TOKEN_FAMILY_REVOKED audit on concurrent_rotation_revoked", async () => {
     mockExchangeRefreshToken.mockResolvedValue({

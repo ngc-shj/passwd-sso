@@ -87,6 +87,20 @@ async function handlePOST(req: NextRequest) {
   if (grantType === "authorization_code") {
     const { code, redirect_uri, client_id, client_secret, code_verifier } = body;
 
+    // Boundary type check (see the refresh_token branch): the JSON body is only
+    // cast to Record<string,string>, so reject any non-string field before it
+    // reaches the rate-limit key template or the exchange. client_secret is
+    // optional but must be a string when present.
+    if (
+      typeof code !== "string" ||
+      typeof redirect_uri !== "string" ||
+      typeof client_id !== "string" ||
+      typeof code_verifier !== "string" ||
+      (client_secret !== undefined && typeof client_secret !== "string")
+    ) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+
     // client_secret is optional for public clients (token_endpoint_auth_method: "none")
     if (!code || !redirect_uri || !client_id || !code_verifier) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -172,6 +186,22 @@ async function handlePOST(req: NextRequest) {
     const refreshTokenValue = body.refresh_token;
     const clientIdValue = body.client_id;
     const clientSecretValue = body.client_secret;
+
+    // Boundary type check: the JSON body path is only cast to
+    // Record<string,string> — it is NOT actually string-typed, so an attacker
+    // can send `client_id` as a huge object/array. Reject any non-string field
+    // here (client_secret is optional but must be a string when present) BEFORE
+    // any value reaches the rate-limit key, the exchange, or audit metadata.
+    // Without this a non-string client_id would bypass the audit length cap
+    // below and re-open the metadata-truncation anti-forensics vector.
+    if (
+      typeof refreshTokenValue !== "string" ||
+      typeof clientIdValue !== "string" ||
+      (clientSecretValue !== undefined && typeof clientSecretValue !== "string")
+    ) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+
     // Length-capped copy for audit metadata only. A real McpClient.clientId is
     // @db.VarChar(64); the raw body value is attacker-controlled and unbounded
     // (bounded only by the 1 MB JSON body cap). Writing it uncapped lets a
@@ -180,8 +210,7 @@ async function handlePOST(req: NextRequest) {
     // a content-free stub — self-inflicted anti-forensics on the exact record
     // this route's replay audit exists to preserve. Never used for the rate-
     // limit key or the exchange's client match (those need the full value).
-    const auditClientId =
-      typeof clientIdValue === "string" ? clientIdValue.slice(0, MCP_CLIENT_ID_MAX_LENGTH) : clientIdValue;
+    const auditClientId = clientIdValue.slice(0, MCP_CLIENT_ID_MAX_LENGTH);
 
     // client_secret is optional for public clients (token_endpoint_auth_method: "none")
     if (!refreshTokenValue || !clientIdValue) {

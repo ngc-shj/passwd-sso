@@ -131,3 +131,32 @@ The round-3 optional low-cost hardening (word-boundary anchor) was applied to re
 
 ## Final Convergence
 Phase 3 converged after 3 rounds: R1 (2 Minor S1/S2 fixed), R2 (1 Minor S4 fixed), R3 (0 findings, class CLOSED + belt-and-suspenders hardening). All findings resolved; guard-soundness class mechanically closed and mutation-verified.
+
+---
+
+# Round 4 (user-reported finding — post-push)
+Date: 2026-07-11
+
+## Changes from Previous Round
+After push, the user reported a genuine gap in the Round-1 S1 fix: `auditClientId` only length-capped `client_id` when it was a string (`typeof clientIdValue === "string" ? slice : clientIdValue`). The JSON body is only cast to `Record<string,string>` (route.ts:57), not actually string-typed, so an attacker can send `client_id` as a huge object/array. Since replay detection runs before client matching, a replayed token + a huge non-string `client_id` puts the huge value into `presentedClientId`, re-opening the exact metadata-truncation anti-forensics vector S1 was written to close.
+
+## Security Finding
+
+**S5 (user-reported) Medium: non-string `client_id` bypasses the audit length cap**
+- File: `src/app/api/mcp/token/route.ts` (refresh_token grant; auth_code grant shares the same non-string-body class)
+- Root cause: `.slice()` is string-only, so the cap silently no-ops on a non-string value that the `Record<string,string>` cast does not actually guarantee.
+- Fix (per the user's directive): validate `refresh_token` / `client_id` / (optional) `client_secret` as strings at the boundary and return `invalid_request` for any non-string; then `auditClientId = clientIdValue.slice(0, MCP_CLIENT_ID_MAX_LENGTH)` unconditionally. The same boundary check was added symmetrically to the `authorization_code` grant (same changed file, same class — its non-string values would otherwise garble the rate-limit key / exchange).
+- Regression tests (both input paths, per the user's requirement): (1) JSON body with a non-string `client_id` (nested object serializing >10 KB) → 400 `invalid_request`, exchange and audit both never run; (2) form-encoded (always string-typed) valid path still caps at 64 in replay audit. Mutation-verified: removing the boundary check turns test (1) red.
+- escalate: false
+
+## Recurring Issue Check (Round 4)
+- R34 (same class in sibling code): the auth_code grant carried the same non-string-body exposure; fixed in the same commit rather than left half-guarded.
+- RT7/RT8: the JSON-body denial test asserts BOTH the 400 status AND that the guarded operations (exchange, audit) did not run — mutation-verified red-capable.
+
+## Resolution Status (Round 4)
+### S5 Medium — non-string client_id bypasses the audit cap
+- Action: boundary string-validation for refresh_token/client_id/client_secret (both grants) → invalid_request on non-string; unconditional `.slice(0, 64)` for `auditClientId`. Added JSON-body-rejection + form-encoded-cap regression tests.
+- Modified: `src/app/api/mcp/token/route.ts`, `src/app/api/mcp/token/route.test.ts`
+
+## Process note (orchestrator)
+The mutation-proof for S5's test again used `git checkout --` to restore, which reverted the uncommitted S5 fix (identical to deviation-log process note 1). Re-applied immediately, re-verified 96/96 green, residue-grepped clean. Repeat lesson: commit before mutation-testing, or mutate a scratch copy.
