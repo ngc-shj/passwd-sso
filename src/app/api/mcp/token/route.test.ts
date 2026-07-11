@@ -244,6 +244,108 @@ describe("POST /api/mcp/token", () => {
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
+  it("authorization_code: rejects a non-string code (JSON body) before the rate-limit key or exchange", async () => {
+    // The JSON body is only cast to Record<string,string>; a non-string `code`
+    // must be rejected by the boundary type check, parallel to the client_id
+    // non-string guard already covered for the refresh_token grant.
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "authorization_code",
+        code: { padding: "A".repeat(20_000) },
+        redirect_uri: "https://example.com/callback",
+        client_id: "mcpc_testclient",
+        code_verifier: "my-code-verifier",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it("authorization_code: rejects a non-string redirect_uri before the rate-limit key or exchange", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "authorization_code",
+        code: "auth-code-123",
+        redirect_uri: { padding: "A".repeat(20_000) },
+        client_id: "mcpc_testclient",
+        code_verifier: "my-code-verifier",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it("authorization_code: rejects a non-string code_verifier before the rate-limit key or exchange", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "authorization_code",
+        code: "auth-code-123",
+        redirect_uri: "https://example.com/callback",
+        client_id: "mcpc_testclient",
+        code_verifier: { padding: "A".repeat(20_000) },
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it("authorization_code: rejects a non-string client_secret before the rate-limit key or exchange", async () => {
+    // client_secret is optional but must be a string when present.
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "authorization_code",
+        code: "auth-code-123",
+        redirect_uri: "https://example.com/callback",
+        client_id: "mcpc_testclient",
+        client_secret: { padding: "A".repeat(20_000) },
+        code_verifier: "my-code-verifier",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it("authorization_code: rejects an empty-string client_id before the rate-limit key or exchange", async () => {
+    // length === 0 is a distinct boundary from the oversized (> MAX) case
+    // already covered above.
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "authorization_code",
+        code: "auth-code-123",
+        redirect_uri: "https://example.com/callback",
+        client_id: "",
+        code_verifier: "my-code-verifier",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
   it("rejects an oversized urlencoded form body with no Content-Length (chunked-TE bypass guard)", async () => {
     // If the streaming cap did NOT fire, this body parses into a complete,
     // valid authorization_code grant and would reach exchangeCodeForToken —
@@ -340,6 +442,8 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("slow_down");
+    // RT8: the rate-limit reject must block the code exchange from running.
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
   it("authorization_code: denies off-network IP BEFORE minting (no exchange, no code consumed)", async () => {
@@ -539,6 +643,9 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("slow_down");
+    // RT8: the rate-limit reject must block the exchange from running, not just
+    // return 429 — a status-only assertion stays green if the gate is removed.
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
   });
 
   // T-13: replay detection audit log
@@ -655,6 +762,64 @@ describe("POST /api/mcp/token", () => {
     expect(json.error).toBe("invalid_request");
     // Neither the exchange nor any audit ran — the request never got past the
     // boundary check.
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token: rejects a non-string refresh_token before the rate-limit key or exchange", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "refresh_token",
+        refresh_token: { padding: "A".repeat(20_000) },
+        client_id: "mcpc_abc",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token: rejects a non-string client_secret before the rate-limit key or exchange", async () => {
+    // client_secret is optional but must be a string when present.
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "refresh_token",
+        refresh_token: "mcpr_test123",
+        client_id: "mcpc_abc",
+        client_secret: { padding: "A".repeat(20_000) },
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token: rejects an empty-string client_id before the rate-limit key or exchange", async () => {
+    // length === 0 is a distinct boundary from the oversized (> MAX) case
+    // already covered above.
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        grant_type: "refresh_token",
+        refresh_token: "mcpr_test123",
+        client_id: "",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
