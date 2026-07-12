@@ -429,7 +429,22 @@ describe("detectCreditCardFields — conf.?num CVV scoping (security)", () => {
     expect(fields!.cvv).toBe(document.querySelector('[name="security_code"]'));
   });
 
-  it("conf_number in the SAME <form> as the card number IS claimed as CVV", () => {
+  it("conf_number in the SAME <form> (with a CVV signal) IS claimed as CVV", () => {
+    setupForm(`
+      <form>
+        <input name="card_no" type="text" />
+        <input name="conf_number" type="password" />
+      </form>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBe(document.querySelector('[name="conf_number"]'));
+  });
+
+  it("a same-form conf_number WITHOUT a CVV signal (plain text, no length cap) is NOT claimed", () => {
+    // conf.?num is generic; without type=password or a 3-4 length cap it is an
+    // ordinary confirmation-number field, not a CVV.
     setupForm(`
       <form>
         <input name="card_no" type="text" />
@@ -439,7 +454,47 @@ describe("detectCreditCardFields — conf.?num CVV scoping (security)", () => {
 
     const fields = detectCreditCardFields(document);
     expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBeNull();
+  });
+
+  it("a shared page WRAPPER (#app, main) does NOT co-locate a separate conf_number section", () => {
+    // SPA layout: payment and order-summary are distinct sections under one
+    // page wrapper. A shared #app/main ancestor must NOT count as co-location —
+    // only a same <form> or same <table> does.
+    setupForm(`
+      <div id="app">
+        <section id="payment"><input name="card_no" type="text" /></section>
+        <section id="order-summary"><input name="conf_number" type="password" maxlength="4" /></section>
+      </div>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBeNull();
+  });
+
+  it("conf_number in the SAME <table> (form-less, with a CVV signal) IS claimed", () => {
+    setupForm(`
+      <table>
+        <tr><td><input name="ccno" type="text" /></td></tr>
+        <tr><td><input name="conf_number" type="password" /></td></tr>
+      </table>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
     expect(fields!.cvv).toBe(document.querySelector('[name="conf_number"]'));
+  });
+
+  it("form-less conf_number in a DIFFERENT table is NOT claimed", () => {
+    setupForm(`
+      <table><tr><td><input name="ccno" type="text" /></td></tr></table>
+      <table><tr><td><input name="conf_number" type="password" /></td></tr></table>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBeNull();
   });
 });
 

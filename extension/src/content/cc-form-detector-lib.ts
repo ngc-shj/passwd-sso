@@ -139,37 +139,39 @@ function findFieldByRegex(
   );
 }
 
+/** A `conf_number` field only looks like a CVV if it carries a CVV-specific
+ * signal: masked input (type=password) or a 3–4 char length cap. A generic
+ * confirmation-number text field has neither. */
+function looksLikeCvvField(el: HTMLInputElement): boolean {
+  if (el.type === "password") return true;
+  return el.maxLength === 3 || el.maxLength === 4;
+}
+
 /**
  * True when the candidate is co-located with the card-number field:
  * - both belong to the same <form>, OR
- * - (for form-less pages, e.g. table-based checkout) they share
- *   a common ancestor that is NOT the <body>/document root — i.e. some real
- *   container groups them, not merely "both on the page".
- * An unrelated confirmation-number field in a different page section has its
- * nearest common ancestor at <body>, so it is rejected.
+ * - (form-less pages) both live in the SAME <table>. A page-wrapper ancestor
+ *   (#app, main, ...) is deliberately NOT enough — SPAs wrap the whole page in
+ *   one, which would re-admit an unrelated confirmation-number section. Only a
+ *   shared <table> counts as "same local group" on form-less markup.
  */
 function isCoLocatedWith(candidate: HTMLElement, cardNumber: HTMLElement): boolean {
   const cardForm = cardNumber.closest("form");
   const candForm = candidate.closest("form");
   if (cardForm || candForm) return cardForm !== null && cardForm === candForm;
 
-  // Form-less: require a shared container tighter than <body>/root.
-  const body = candidate.ownerDocument.body;
-  let ancestor: HTMLElement | null = candidate.parentElement;
-  while (ancestor) {
-    if (ancestor === body) return false;
-    if (ancestor.contains(cardNumber)) return true;
-    ancestor = ancestor.parentElement;
-  }
-  return false;
+  // Form-less: require a shared <table> (not merely any common ancestor).
+  const candTable = candidate.closest("table");
+  return candTable !== null && candTable === cardNumber.closest("table");
 }
 
 /**
  * Find a `conf.?num`-hinted CVV candidate, but ONLY when it is co-located with
- * the already-detected card-number field (same <form>, or a shared sub-<body>
- * container on form-less pages). This scopes the generic "confirmation number"
- * match to genuine card forms and prevents an unrelated order/booking
- * confirmation-number field elsewhere on the page from receiving the CVV write.
+ * the already-detected card-number field (same <form>, or same <table> on
+ * form-less pages) AND carries a CVV-specific signal (masked / length-capped).
+ * This scopes the generic "confirmation number" match to genuine card forms
+ * and prevents an unrelated order/booking confirmation-number field elsewhere
+ * on the page from receiving the CVV write.
  */
 function findConfNumCvvInForm(
   fields: (HTMLInputElement | HTMLSelectElement)[],
@@ -180,6 +182,7 @@ function findConfNumCvvInForm(
       if (!(f instanceof HTMLInputElement)) return false;
       if (!isUsableField(f)) return false;
       if (!CC_CONF_NUM_RE.test(getHintString(f))) return false;
+      if (!looksLikeCvvField(f)) return false;
       return isCoLocatedWith(f, cardNumber);
     }) as HTMLInputElement | undefined) ?? null
   );

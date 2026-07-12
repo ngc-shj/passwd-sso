@@ -93,3 +93,31 @@ Real ドスパラ markup is a `<table>` with no `<form>`, so `input.form` is nul
 
 ## Verification vs the three-perspective review
 Functionality/Security/Testing Round-1/2 had returned No findings; this finding came from the user post-review. It is a genuine miss of the Phase-3 security pass (the expert accepted the risk rather than eliminating it). Recorded as an essence-consistent tightening, fully fixed in-branch rather than deferred.
+
+---
+
+# Round 5 — user follow-up: form-less co-location was too loose
+
+Date: 2026-07-12
+
+## Finding (user-reported, [Medium])
+The Round-3 form-less co-location check ("shared ancestor tighter than `<body>`") degrades to "same page" on SPAs: `#app`/`main`/page-wrapper ancestors are always present, so a payment section and an order-summary section both under `#app` share that ancestor → an unrelated `conf_number` is re-admitted as CVV. The Round-3 negative test missed it because it placed the two sections as direct `<body>` siblings, not under a shared wrapper.
+
+## Fix
+- Form-less co-location now requires the SAME `<table>` (not any common ancestor). `#app`/`main` wrappers no longer count. `isCoLocatedWith`.
+- Added a CVV-specific signal requirement to the `conf.?num` candidate: `type="password"` OR `maxLength` 3–4 (`looksLikeCvvField`). A generic plain-text confirmation-number field is rejected even inside the same form/table.
+- Both copies (lib + .js) mirror `looksLikeCvvField` + the table-scoped `isCoLocatedWith`.
+
+## Tests (all new/updated)
+- `#app`/`main` wrapper with a separate `conf_number` section → cvv null (the exact user reproduction).
+- Different-`<table>` conf_number → null. Same-`<table>` + CVV signal → claimed.
+- Same-`<form>` + CVV signal → claimed; same-`<form>` plain-text (no signal) → null.
+- Strong-signal-wins ordering unchanged.
+- **Mutation-verified**: (A) reverting `<table>` scope to loose common-ancestor reddens the `#app` wrapper test; (B) dropping the CVV-signal requirement reddens the same-form-no-signal test.
+- Full suite: 899 passed. Build + lint clean.
+
+## Residual (accepted)
+A same-container 3–4-char confirmation field that is NOT a CVV could still match. Accepted as reasonable defense-in-depth: the combined `conf.?num` name + same-form/table placement + CVV-specific attribute is a narrow surface; user concurred.
+
+## Three-perspective status
+Rounds 1–4 returned No findings; this and the Round-3 finding both came from the user post-review — genuine misses of the Phase-3 security pass's threat-model depth on form-less DOM scoping. Both fixed in-branch, mutation-verified, user-confirmed resolved.

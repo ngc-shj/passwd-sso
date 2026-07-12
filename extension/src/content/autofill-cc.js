@@ -131,19 +131,19 @@ function findFieldByRegex(fields, regex, regexJa) {
   return null;
 }
 
+// CVV-specific signal — mirror cc-form-detector-lib.ts looksLikeCvvField.
+function looksLikeCvvField(el) {
+  if (el.type === "password") return true;
+  return el.maxLength === 3 || el.maxLength === 4;
+}
+
 // Co-location check — mirror cc-form-detector-lib.ts isCoLocatedWith.
 function isCoLocatedWith(candidate, cardNumber) {
   var cardForm = cardNumber.closest("form");
   var candForm = candidate.closest("form");
   if (cardForm || candForm) return cardForm !== null && cardForm === candForm;
-  var body = candidate.ownerDocument.body;
-  var ancestor = candidate.parentElement;
-  while (ancestor) {
-    if (ancestor === body) return false;
-    if (ancestor.contains(cardNumber)) return true;
-    ancestor = ancestor.parentElement;
-  }
-  return false;
+  var candTable = candidate.closest("table");
+  return candTable !== null && candTable === cardNumber.closest("table");
 }
 
 // Co-located `conf.?num` CVV fallback — see cc-form-detector-lib.ts.
@@ -153,6 +153,7 @@ function findConfNumCvvInForm(fields, cardNumber, confNumRe) {
     if (!(f instanceof HTMLInputElement)) continue;
     if (!isUsableField(f)) continue;
     if (!confNumRe.test(getHintString(f))) continue;
+    if (!looksLikeCvvField(f)) continue;
     if (isCoLocatedWith(f, cardNumber)) return f;
   }
   return null;
