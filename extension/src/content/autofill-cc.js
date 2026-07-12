@@ -203,7 +203,7 @@ function performCreditCardAutofill(payload) {
   var ccExpYearJa = /年/;
   var ccCvvRe = /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|card.?code/i;
   var ccCvvJa = /セキュリティコード/;
-  // `conf.?num` (ドスパラ) is scoped to the card-number field's own form —
+  // `conf.?num` is scoped to the card-number field's own form —
   // see findConfNumCvvInForm below. Must mirror cc-form-detector-lib.ts.
   var ccConfNumRe = /conf.?num/i;
 

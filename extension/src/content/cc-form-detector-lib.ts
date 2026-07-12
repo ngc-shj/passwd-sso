@@ -88,8 +88,8 @@ export const CC_DETECT_RE = {
   cvv:         /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|card.?code/i,
 } as const;
 
-// `conf.?num` (ドスパラ `conf_number`) is deliberately NOT in CC_DETECT_RE.cvv:
-// it also matches generic "confirmation number" fields (order/booking pages),
+// `conf.?num` (matches fields like `conf_number`) is deliberately NOT in
+// CC_DETECT_RE.cvv: it also matches generic "confirmation number" fields (order/booking pages),
 // and since regex fallback picks the first DOM match, an unrelated conf-number
 // field appearing before the real CVV would receive the CVV write. It is only
 // used as a CVV candidate when the field lives in the SAME form as the detected
@@ -142,7 +142,7 @@ function findFieldByRegex(
 /**
  * True when the candidate is co-located with the card-number field:
  * - both belong to the same <form>, OR
- * - (for form-less pages like table-based checkout, e.g. ドスパラ) they share
+ * - (for form-less pages, e.g. table-based checkout) they share
  *   a common ancestor that is NOT the <body>/document root — i.e. some real
  *   container groups them, not merely "both on the page".
  * An unrelated confirmation-number field in a different page section has its
@@ -256,7 +256,7 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
   if (!cvv) {
     cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE) as HTMLInputElement | null;
   }
-  // Same-form-scoped `conf.?num` fallback (ドスパラ). Only after the strong CVV
+  // Same-form-scoped `conf.?num` fallback. Only after the strong CVV
   // signals miss, and only when the candidate shares the card-number field's
   // form — never a page-wide first match.
   if (!cvv && cardNumber) {
