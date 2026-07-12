@@ -244,7 +244,7 @@ Chrome `contextMenus` API with URL-matched entry listing (max 5), debounced upda
 
 #### ~~X-4 Extension keyboard shortcuts~~ — Implemented (2026-02-28)
 
-5 Chrome `commands`: open popup (Cmd+Shift+A, Chrome-native), copy password (Cmd+Shift+P), copy username (Cmd+Shift+U), trigger autofill (Cmd+Shift+F), lock vault. Clipboard auto-clear after 30 seconds.
+5 Chrome `commands`: open popup (Cmd+Shift+X, Chrome-native), trigger autofill (Cmd+Shift+F), copy password / copy username / lock vault (no default key — the Ctrl/Cmd+Shift letter space collides with Edge built-ins). Clipboard auto-clear after 30 seconds.
 
 #### ~~X-5 New-login detection~~ — Implemented (2026-02-28)
 

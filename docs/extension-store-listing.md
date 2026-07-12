@@ -34,10 +34,9 @@ Tired of copying and pasting passwords from your passwd-sso vault? This extensio
 🏠 **Your server, your data** — The extension connects only to your self-hosted passwd-sso instance. No third-party cloud, no data collection, no tracking.
 
 **Keyboard Shortcuts:**
-- Ctrl+Shift+A (Cmd+Shift+A on Mac) — Open popup
-- Ctrl+Shift+P (Cmd+Shift+P on Mac) — Copy password
-- Ctrl+Shift+U (Cmd+Shift+U on Mac) — Copy username
+- Ctrl+Shift+X (Cmd+Shift+X on Mac) — Open popup
 - Ctrl+Shift+F (Cmd+Shift+F on Mac) — Trigger autofill
+- Copy password / Copy username / Lock vault — unbound by default; assign your own keys at chrome://extensions/shortcuts (edge://extensions/shortcuts on Edge)
 
 **Getting Started:**
 1. Install the extension
@@ -46,6 +45,43 @@ Tired of copying and pasting passwords from your passwd-sso vault? This extensio
 4. Visit any login page — the extension handles the rest
 
 This extension is fully open source: https://github.com/ngc-shj/passwd-sso
+
+## Short Description — Japanese (132 chars max)
+
+パスワードの手入力はもう不要。セルフホストの保管庫からワンクリックで自動入力 — エンドツーエンド暗号化対応。
+
+## Detailed Description — Japanese
+
+passwd-sso の保管庫からパスワードをコピー&ペーストする作業にうんざりしていませんか?この拡張機能は保管庫をブラウザに直接統合し、ワンクリックでどのサイトにもログインできるようにします。
+
+**この拡張機能をインストールする理由**
+
+🔑 **ワンクリックログイン** — ログインフォームを自動検出して認証情報を入力します。パスワードを調べるためにタブを切り替える必要はもうありません。
+
+📋 **すばやくコピー** — 右クリックメニューまたはショートカットキーで、パスワードやユーザー名をクリップボードにコピー。1 秒もかかりません。
+
+🔍 **保管庫全体を検索** — ポップアップの検索ボックスは、現在のサイトに一致する項目だけでなく保管庫内のすべての項目を横断検索。どこからでも目的の認証情報を見つけてコピーできます。
+
+🔒 **ゼロ知識セキュリティ** — マスターパスフレーズがデバイスの外に出ることはありません。すべてのデータはネットワークに送信される前に AES-256-GCM で暗号化されます。通信を傍受されても、見えるのは暗号文だけです。
+
+⏱️ **自動ロック** — 席を離れても大丈夫。設定した時間が経過すると保管庫は自動的にロックされ、認証情報が無防備なまま放置されることはありません。
+
+🔐 **パスキー自動入力** — WebAuthn リクエストを検知し、保管庫に保存されたパスキーを自動的に提案します。新しいパスキーの作成と保管庫への保存にも対応(重複時は置き換えを確認)。一致するパスキーがない場合は、プラットフォーム認証器へシームレスに引き継ぎます。
+
+🏠 **あなたのサーバー、あなたのデータ** — この拡張機能はセルフホストした passwd-sso インスタンスにのみ接続します。サードパーティのクラウドなし、データ収集なし、トラッキングなし。
+
+**キーボード ショートカット:**
+- Ctrl+Shift+X(Mac は Cmd+Shift+X)— ポップアップを開く
+- Ctrl+Shift+F(Mac は Cmd+Shift+F)— 自動入力を実行
+- パスワードをコピー / ユーザー名をコピー / 保管庫をロック — 初期状態では未割り当て。chrome://extensions/shortcuts(Edge は edge://extensions/shortcuts)で任意のキーを割り当てられます
+
+**はじめかた:**
+1. 拡張機能をインストール
+2. オプションページを開き、passwd-sso サーバーの URL を入力
+3. アカウントでログインし、保管庫のロックを解除
+4. ログインページを開くだけ — あとは拡張機能にお任せください
+
+この拡張機能は完全なオープンソースです: https://github.com/ngc-shj/passwd-sso
 
 ## Permission Justifications
 

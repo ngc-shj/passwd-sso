@@ -33,24 +33,20 @@ export default defineManifest({
   },
   commands: {
     _execute_action: {
+      // X/F are unassigned in Edge and Chrome on all platforms; the previous
+      // A/P/U defaults collided with Edge built-ins (tab search, system
+      // print, read aloud). Copy commands ship unset — users can bind them
+      // at chrome://extensions/shortcuts (edge://extensions/shortcuts).
       suggested_key: {
-        default: "Ctrl+Shift+A",
-        mac: "Command+Shift+A",
+        default: "Ctrl+Shift+X",
+        mac: "Command+Shift+X",
       },
       description: "__MSG_cmdOpenPopup__",
     },
     [CMD_COPY_PASSWORD]: {
-      suggested_key: {
-        default: "Ctrl+Shift+P",
-        mac: "Command+Shift+P",
-      },
       description: "__MSG_cmdCopyPassword__",
     },
     [CMD_COPY_USERNAME]: {
-      suggested_key: {
-        default: "Ctrl+Shift+U",
-        mac: "Command+Shift+U",
-      },
       description: "__MSG_cmdCopyUsername__",
     },
     [CMD_LOCK_VAULT]: {
