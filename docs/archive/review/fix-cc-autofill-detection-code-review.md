@@ -65,3 +65,31 @@ RS1: N/A. RS2: N/A. RS3: N/A. RS4: checked — no personal data in docs. RS5: ch
 
 ### Testing expert
 RT1-RT3: N/A. RT4: paired positive GET_CC assertion, not vacuous. RT5: N/A. RT6: satisfied (CC_DETECT_RE/ADDRESS_JA_RE exported+imported). RT7: red-provable (T7-ext, fieldCount, decoy (d), matrix). RT8: N/A. RT9: satisfied (full .toString() parity pin). R19: all 5 test trees accounted.
+
+---
+
+# Round 3 — user security finding: conf.?num CVV misfill
+
+Date: 2026-07-12
+
+## Finding (user-reported, [Medium] → accepted as Major security)
+`conf.?num` in the page-wide `CC_DETECT_RE.cvv` alternation matches generic confirmation-number fields. Because CVV regex fallback is first-match-wins over the whole document, and JP-site CVV fields often lack `autocomplete="cc-csc"`, an unrelated `conf_number` field appearing before the real CVV would receive the CVV write — the secret could be submitted to a different form or logged. The Phase-3 security expert had assessed this as accepted SC4 same-page misfill; the user's re-framing (misfill *target* is an unrelated form's field, not merely a positional slip) is the sharper and correct view. Re-classified Major.
+
+## Fix
+- Removed `conf.?num` from `CC_DETECT_RE.cvv` (both lib + .js, byte-identical).
+- Added `CC_CONF_NUM_RE = /conf.?num/i` as a **co-located-only** CVV fallback: matches a `conf_number` field ONLY when co-located with the detected card-number field — same `<form>`, or (form-less table pages like ドスパラ) a common ancestor tighter than `<body>` (`isCoLocatedWith` / `findConfNumCvvInForm`, mirrored in both copies).
+- Runs only after the strong page-wide CVV signals miss, so cvv/cvc/csc/security_code/`\bcard.?verif` still take precedence.
+
+## Design note (form-less pages)
+Real ドスパラ markup is a `<table>` with no `<form>`, so `input.form` is null. A pure same-`<form>` scope would break ドスパラ CVV detection. `isCoLocatedWith` therefore requires same-`<form>` when either field has one, else a shared sub-`<body>` container. User-approved.
+
+## Tests
+- Detection: unrelated-section conf_number → cvv null; conf_number-before-security_code → security_code wins; same-`<form>` conf_number → claimed; ドスパラ form-less table → claimed. Matrix row `conf_number → cvv` flipped to `false` (no longer page-wide).
+- Fill (autofill-cc-lib): unrelated-section conf_number stays empty; co-located table conf_number filled.
+- Production `autofill-cc.js` runtime-verified (temporary jsdom harness, discarded) — separate-section not filled, co-located filled.
+- Parity: `CC_CONF_NUM_RE` pinned; `conf` asserted absent from `CC_DETECT_RE.cvv`.
+- **Mutation-verified**: neutralizing `isCoLocatedWith` (force `return true`) reddens both the detection and the fill security tests.
+- Full suite: 895 passed. Build + lint clean.
+
+## Verification vs the three-perspective review
+Functionality/Security/Testing Round-1/2 had returned No findings; this finding came from the user post-review. It is a genuine miss of the Phase-3 security pass (the expert accepted the risk rather than eliminating it). Recorded as an essence-consistent tightening, fully fixed in-branch rather than deferred.

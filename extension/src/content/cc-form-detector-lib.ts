@@ -85,8 +85,16 @@ export const CC_DETECT_RE = {
   name:        /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i,
   expiryMonth: /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i,
   expiryYear:  /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i,
-  cvv:         /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|conf.?num|card.?code/i,
+  cvv:         /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|card.?code/i,
 } as const;
+
+// `conf.?num` (ドスパラ `conf_number`) is deliberately NOT in CC_DETECT_RE.cvv:
+// it also matches generic "confirmation number" fields (order/booking pages),
+// and since regex fallback picks the first DOM match, an unrelated conf-number
+// field appearing before the real CVV would receive the CVV write. It is only
+// used as a CVV candidate when the field lives in the SAME form as the detected
+// card-number field (see findConfNumCvvInForm).
+export const CC_CONF_NUM_RE = /conf.?num/i;
 
 const CC_NUMBER_JA_RE = /カード番号/;
 const CC_NAME_JA_RE = /名義|カード名義/;
@@ -128,6 +136,52 @@ function findFieldByRegex(
       const hint = getHintString(f);
       return regex.test(hint) || regexJa.test(hint);
     }) ?? null
+  );
+}
+
+/**
+ * True when the candidate is co-located with the card-number field:
+ * - both belong to the same <form>, OR
+ * - (for form-less pages like table-based checkout, e.g. ドスパラ) they share
+ *   a common ancestor that is NOT the <body>/document root — i.e. some real
+ *   container groups them, not merely "both on the page".
+ * An unrelated confirmation-number field in a different page section has its
+ * nearest common ancestor at <body>, so it is rejected.
+ */
+function isCoLocatedWith(candidate: HTMLElement, cardNumber: HTMLElement): boolean {
+  const cardForm = cardNumber.closest("form");
+  const candForm = candidate.closest("form");
+  if (cardForm || candForm) return cardForm !== null && cardForm === candForm;
+
+  // Form-less: require a shared container tighter than <body>/root.
+  const body = candidate.ownerDocument.body;
+  let ancestor: HTMLElement | null = candidate.parentElement;
+  while (ancestor) {
+    if (ancestor === body) return false;
+    if (ancestor.contains(cardNumber)) return true;
+    ancestor = ancestor.parentElement;
+  }
+  return false;
+}
+
+/**
+ * Find a `conf.?num`-hinted CVV candidate, but ONLY when it is co-located with
+ * the already-detected card-number field (same <form>, or a shared sub-<body>
+ * container on form-less pages). This scopes the generic "confirmation number"
+ * match to genuine card forms and prevents an unrelated order/booking
+ * confirmation-number field elsewhere on the page from receiving the CVV write.
+ */
+function findConfNumCvvInForm(
+  fields: (HTMLInputElement | HTMLSelectElement)[],
+  cardNumber: HTMLInputElement,
+): HTMLInputElement | null {
+  return (
+    (fields.find((f) => {
+      if (!(f instanceof HTMLInputElement)) return false;
+      if (!isUsableField(f)) return false;
+      if (!CC_CONF_NUM_RE.test(getHintString(f))) return false;
+      return isCoLocatedWith(f, cardNumber);
+    }) as HTMLInputElement | undefined) ?? null
   );
 }
 
@@ -201,6 +255,12 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
   }
   if (!cvv) {
     cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE) as HTMLInputElement | null;
+  }
+  // Same-form-scoped `conf.?num` fallback (ドスパラ). Only after the strong CVV
+  // signals miss, and only when the candidate shares the card-number field's
+  // form — never a page-wide first match.
+  if (!cvv && cardNumber) {
+    cvv = findConfNumCvvInForm(visibleFields, cardNumber);
   }
   if (!expiryMonth && !expiryCombined) {
     // Check for combined expiry first

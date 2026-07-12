@@ -131,6 +131,33 @@ function findFieldByRegex(fields, regex, regexJa) {
   return null;
 }
 
+// Co-location check — mirror cc-form-detector-lib.ts isCoLocatedWith.
+function isCoLocatedWith(candidate, cardNumber) {
+  var cardForm = cardNumber.closest("form");
+  var candForm = candidate.closest("form");
+  if (cardForm || candForm) return cardForm !== null && cardForm === candForm;
+  var body = candidate.ownerDocument.body;
+  var ancestor = candidate.parentElement;
+  while (ancestor) {
+    if (ancestor === body) return false;
+    if (ancestor.contains(cardNumber)) return true;
+    ancestor = ancestor.parentElement;
+  }
+  return false;
+}
+
+// Co-located `conf.?num` CVV fallback — see cc-form-detector-lib.ts.
+function findConfNumCvvInForm(fields, cardNumber, confNumRe) {
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    if (!(f instanceof HTMLInputElement)) continue;
+    if (!isUsableField(f)) continue;
+    if (!confNumRe.test(getHintString(f))) continue;
+    if (isCoLocatedWith(f, cardNumber)) return f;
+  }
+  return null;
+}
+
 function detectExpiryFormat(el) {
   var placeholder = (el.placeholder || "").toUpperCase();
   if (placeholder.indexOf("MM/YYYY") !== -1 || placeholder.indexOf("MM / YYYY") !== -1) return "MM/YYYY";
@@ -174,12 +201,18 @@ function performCreditCardAutofill(payload) {
   var ccExpMonthJa = /月/;
   var ccExpYearRe = /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i;
   var ccExpYearJa = /年/;
-  var ccCvvRe = /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|conf.?num|card.?code/i;
+  var ccCvvRe = /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|card.?code/i;
   var ccCvvJa = /セキュリティコード/;
+  // `conf.?num` (ドスパラ) is scoped to the card-number field's own form —
+  // see findConfNumCvvInForm below. Must mirror cc-form-detector-lib.ts.
+  var ccConfNumRe = /conf.?num/i;
 
   var cardNumber = findFieldByAC(visibleFields, "cc-number") || findFieldByRegex(visibleFields, ccNumRe, ccNumJa);
   var cardholderName = findFieldByAC(visibleFields, "cc-name") || findFieldByRegex(visibleFields, ccNameRe, ccNameJa);
   var cvv = findFieldByAC(visibleFields, "cc-csc") || findFieldByRegex(visibleFields, ccCvvRe, ccCvvJa);
+  if (!cvv && cardNumber) {
+    cvv = findConfNumCvvInForm(visibleFields, cardNumber, ccConfNumRe);
+  }
   var expiryCombined = findFieldByAC(visibleFields, "cc-exp");
   var expiryMonth = findFieldByAC(visibleFields, "cc-exp-month");
   var expiryYear = findFieldByAC(visibleFields, "cc-exp-year");

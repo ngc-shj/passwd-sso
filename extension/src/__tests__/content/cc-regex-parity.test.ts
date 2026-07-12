@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, expect, it } from "vitest";
-import { CC_DETECT_RE } from "../../content/cc-form-detector-lib";
+import { CC_DETECT_RE, CC_CONF_NUM_RE } from "../../content/cc-form-detector-lib";
 import { ADDRESS_JA_RE } from "../../content/identity-form-detector-lib";
 
 // autofill-cc.js / autofill-identity.js are hand-maintained plain-JS
@@ -36,6 +36,17 @@ describe("cc regex parity — .js production copy vs .ts lib", () => {
   it("ccCvvRe matches CC_DETECT_RE.cvv", async () => {
     const { default: autofillCcRaw } = await import("../../content/autofill-cc.js?raw");
     expect(autofillCcRaw).toContain(CC_DETECT_RE.cvv.toString());
+  });
+
+  it("ccConfNumRe matches CC_CONF_NUM_RE (same-form-scoped conf.?num fallback)", async () => {
+    const { default: autofillCcRaw } = await import("../../content/autofill-cc.js?raw");
+    expect(autofillCcRaw).toContain(CC_CONF_NUM_RE.toString());
+  });
+
+  it("conf.?num is NOT in the page-wide CC_DETECT_RE.cvv alternation", async () => {
+    // Regression: conf.?num must only be reachable via the same-form-scoped
+    // fallback, never the first-match-wins page-wide cvv regex.
+    expect(CC_DETECT_RE.cvv.source).not.toContain("conf");
   });
 
   it("addrJa matches ADDRESS_JA_RE", async () => {

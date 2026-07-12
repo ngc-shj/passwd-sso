@@ -182,19 +182,25 @@ describe("formatCombinedExpiry", () => {
 // ── C7: per-site detection fixtures ──────────────────────────
 
 describe("detectCreditCardFields — per-site fixtures", () => {
-  it("ドスパラ: ccno / exp_month+exp_year selects / conf_number / ccmeigi", () => {
+  it("ドスパラ: ccno / exp_month+exp_year selects / conf_number / ccmeigi (form-less <table>)", () => {
+    // Real ドスパラ markup is a <table> with NO <form>. conf_number is only
+    // claimed as CVV because it is co-located with ccno inside the same table.
     setupForm(`
-      <input name="ccno" type="text" />
-      <select name="exp_month">
-        <option value="01">01</option>
-        <option value="12">12</option>
-      </select>
-      <select name="exp_year">
-        <option value="26">26</option>
-        <option value="35">35</option>
-      </select>
-      <input name="conf_number" type="password" />
-      <input name="ccmeigi" type="text" />
+      <table>
+        <tr><td><input name="ccno" type="text" /></td></tr>
+        <tr><td>
+          <select name="exp_month">
+            <option value="01">01</option>
+            <option value="12">12</option>
+          </select>
+          <select name="exp_year">
+            <option value="26">26</option>
+            <option value="35">35</option>
+          </select>
+        </td></tr>
+        <tr><td><input name="conf_number" type="password" /></td></tr>
+        <tr><td><input name="ccmeigi" type="text" /></td></tr>
+      </table>
     `);
 
     const fields = detectCreditCardFields(document);
@@ -202,7 +208,7 @@ describe("detectCreditCardFields — per-site fixtures", () => {
     expect(fields!.cardNumber).toBeTruthy();
     expect(fields!.expiryMonth).toBeInstanceOf(HTMLSelectElement);
     expect(fields!.expiryYear).toBeInstanceOf(HTMLSelectElement);
-    expect(fields!.cvv).toBeTruthy();
+    expect(fields!.cvv).toBe(document.querySelector('[name="conf_number"]'));
     expect(fields!.cardholderName).toBeTruthy();
   });
 
@@ -386,6 +392,57 @@ describe("detectCreditCardFields — negative / counter-fixtures", () => {
   });
 });
 
+describe("detectCreditCardFields — conf.?num CVV scoping (security)", () => {
+  it("an unrelated conf_number in a SEPARATE section is NOT claimed as CVV", () => {
+    // A real card form (in its own container) plus an order-confirmation
+    // section elsewhere on the page. The conf_number belongs to neither the
+    // card form nor a shared container → must not receive the CVV write.
+    setupForm(`
+      <div id="payment">
+        <input name="card_no" type="text" />
+        <input name="cardExpireMonth" type="text" />
+      </div>
+      <div id="order-summary">
+        <input name="conf_number" type="text" />
+      </div>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBeNull();
+  });
+
+  it("conf_number appearing BEFORE the real security_code still loses to the strong signal", () => {
+    setupForm(`
+      <form>
+        <input name="conf_number" type="text" />
+        <input name="card_no" type="text" />
+        <input name="security_code" type="text" />
+      </form>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    // security_code matches CC_DETECT_RE.cvv (strong signal, page-wide) and is
+    // selected first; the co-located conf_number fallback only runs when cvv is
+    // still unset.
+    expect(fields!.cvv).toBe(document.querySelector('[name="security_code"]'));
+  });
+
+  it("conf_number in the SAME <form> as the card number IS claimed as CVV", () => {
+    setupForm(`
+      <form>
+        <input name="card_no" type="text" />
+        <input name="conf_number" type="text" />
+      </form>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBe(document.querySelector('[name="conf_number"]'));
+  });
+});
+
 describe("CC_DETECT_RE — regex matrix (T12)", () => {
   it.each([
     // number positives
@@ -422,12 +479,13 @@ describe("CC_DETECT_RE — regex matrix (T12)", () => {
     ["creditcardexpireyear", "expiryYear", true],
     ["card_expire[y]", "expiryYear", true],
     // cvv positives
-    ["conf_number", "cvv", true],
     ["security_code", "cvv", true],
     ["cardsecuritycode", "cvv", true],
     ["securitycdinput", "cvv", true],
     ["js-card_verification_code", "cvv", true],
-    // cvv decoys (must reject)
+    // cvv decoys (must reject) — conf_number is NOT a page-wide cvv match;
+    // it is only reachable via the same-container fallback (see CVV scoping tests).
+    ["conf_number", "cvv", false],
     ["verification_code", "cvv", false],
     ["discard verification", "cvv", false],
     ["card_note", "cvv", false],

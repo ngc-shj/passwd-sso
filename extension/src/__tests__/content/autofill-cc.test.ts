@@ -201,6 +201,55 @@ describe("performCreditCardAutofill", () => {
     expect(payload.cvv).toBe("");
   });
 
+  it("does NOT write cvv into an unrelated conf_number field in a separate section", () => {
+    // Security: a card form plus an order-confirmation section elsewhere. The
+    // conf_number must not receive the CVV — it is not co-located with the card
+    // number field. (No autocomplete=cc-csc, so the regex fallback path runs.)
+    setupForm(`
+      <div id="payment">
+        <input name="card_no" type="text" />
+      </div>
+      <div id="order-summary">
+        <input name="conf_number" type="text" />
+      </div>
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "321",
+    });
+
+    const conf = document.querySelector('[name="conf_number"]') as HTMLInputElement;
+    expect(conf.value).toBe("");
+    const card = document.querySelector('[name="card_no"]') as HTMLInputElement;
+    expect(card.value).toBe("4111111111111111");
+  });
+
+  it("writes cvv into a co-located conf_number (form-less table, ドスパラ)", () => {
+    setupForm(`
+      <table>
+        <tr><td><input name="ccno" type="text" /></td></tr>
+        <tr><td><input name="conf_number" type="password" /></td></tr>
+      </table>
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "321",
+    });
+
+    const conf = document.querySelector('[name="conf_number"]') as HTMLInputElement;
+    expect(conf.value).toBe("321");
+  });
+
   it("does not fill login fields when CC autofill runs (non-destructive)", () => {
     setupForm(`
       <input type="text" autocomplete="username" />
