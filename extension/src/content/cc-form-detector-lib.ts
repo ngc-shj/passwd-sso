@@ -80,22 +80,31 @@ function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
 
 // ── Regex patterns ──
 
-const CC_NUMBER_RE = /card.?num|cc.?num|pan/i;
-const CC_NUMBER_JA_RE = /カード番号/;
+export const CC_DETECT_RE = {
+  number:      /card.?num|cc.?num|\bcard.?no\b|\bccno\b|\bpan\b/i,
+  name:        /card.?holder|holder.?name|cc.?name|card.?name|name.?on.?card|meigi/i,
+  expiryMonth: /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}month|card.?month|cc.?month|expire\W{0,2}mm?\b/i,
+  expiryYear:  /exp(?:ir(?:y|e|ation))?[^a-z0-9]{0,2}year|card.?year|cc.?year|expire\W{0,2}yy?\b/i,
+  cvv:         /cvv|cvc|csc|cv2|security.?code|security.?cd|\bcard.?verif|card.?code/i,
+} as const;
 
-const CC_NAME_RE = /card.?holder|cc.?name|name.?on.?card/i;
+// `conf.?num` (matches fields like `conf_number`) is deliberately NOT in
+// CC_DETECT_RE.cvv: it also matches generic "confirmation number" fields (order/booking pages),
+// and since regex fallback picks the first DOM match, an unrelated conf-number
+// field appearing before the real CVV would receive the CVV write. It is only
+// used as a CVV candidate when the field lives in the SAME form as the detected
+// card-number field (see findConfNumCvvInForm).
+export const CC_CONF_NUM_RE = /conf.?num/i;
+
+const CC_NUMBER_JA_RE = /カード番号/;
 const CC_NAME_JA_RE = /名義|カード名義/;
 
 const CC_EXPIRY_RE = /expir|exp.?date|valid.?thru|card.?exp/i;
 const CC_EXPIRY_JA_RE = /有効期限/;
 
-const CC_EXPIRY_MONTH_RE = /exp.?month|cc.?exp.?month|card.?month/i;
 const CC_EXPIRY_MONTH_JA_RE = /月/;
-
-const CC_EXPIRY_YEAR_RE = /exp.?year|cc.?exp.?year|card.?year/i;
 const CC_EXPIRY_YEAR_JA_RE = /年/;
 
-const CC_CVV_RE = /cvv|cvc|csc|cv2|security.?code|card.?code/i;
 const CC_CVV_JA_RE = /セキュリティコード/;
 
 // ── Autocomplete attributes (standard) ──
@@ -127,6 +136,55 @@ function findFieldByRegex(
       const hint = getHintString(f);
       return regex.test(hint) || regexJa.test(hint);
     }) ?? null
+  );
+}
+
+/** A `conf_number` field only looks like a CVV if it carries a CVV-specific
+ * signal: masked input (type=password) or a 3–4 char length cap. A generic
+ * confirmation-number text field has neither. */
+function looksLikeCvvField(el: HTMLInputElement): boolean {
+  if (el.type === "password") return true;
+  return el.maxLength === 3 || el.maxLength === 4;
+}
+
+/**
+ * True when the candidate is co-located with the card-number field:
+ * - both belong to the same <form>, OR
+ * - (form-less pages) both live in the SAME <table>. A page-wrapper ancestor
+ *   (#app, main, ...) is deliberately NOT enough — SPAs wrap the whole page in
+ *   one, which would re-admit an unrelated confirmation-number section. Only a
+ *   shared <table> counts as "same local group" on form-less markup.
+ */
+function isCoLocatedWith(candidate: HTMLElement, cardNumber: HTMLElement): boolean {
+  const cardForm = cardNumber.closest("form");
+  const candForm = candidate.closest("form");
+  if (cardForm || candForm) return cardForm !== null && cardForm === candForm;
+
+  // Form-less: require a shared <table> (not merely any common ancestor).
+  const candTable = candidate.closest("table");
+  return candTable !== null && candTable === cardNumber.closest("table");
+}
+
+/**
+ * Find a `conf.?num`-hinted CVV candidate, but ONLY when it is co-located with
+ * the already-detected card-number field (same <form>, or same <table> on
+ * form-less pages) AND carries a CVV-specific signal (masked / length-capped).
+ * This scopes the generic "confirmation number" match to genuine card forms
+ * and prevents an unrelated order/booking confirmation-number field elsewhere
+ * on the page from receiving the CVV write.
+ */
+function findConfNumCvvInForm(
+  fields: (HTMLInputElement | HTMLSelectElement)[],
+  cardNumber: HTMLInputElement,
+): HTMLInputElement | null {
+  return (
+    (fields.find((f) => {
+      if (!(f instanceof HTMLInputElement)) return false;
+      if (!isUsableField(f)) return false;
+      if (!CC_CONF_NUM_RE.test(getHintString(f))) return false;
+      if (!looksLikeCvvField(f)) return false;
+      return isCoLocatedWith(f, cardNumber);
+    }) as HTMLInputElement | undefined) ?? null
   );
 }
 
@@ -193,13 +251,19 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
 
   // Priority 2: name/id/label regex fallback
   if (!cardNumber) {
-    cardNumber = findFieldByRegex(visibleFields, CC_NUMBER_RE, CC_NUMBER_JA_RE) as HTMLInputElement | null;
+    cardNumber = findFieldByRegex(visibleFields, CC_DETECT_RE.number, CC_NUMBER_JA_RE) as HTMLInputElement | null;
   }
   if (!cardholderName) {
-    cardholderName = findFieldByRegex(visibleFields, CC_NAME_RE, CC_NAME_JA_RE) as HTMLInputElement | null;
+    cardholderName = findFieldByRegex(visibleFields, CC_DETECT_RE.name, CC_NAME_JA_RE) as HTMLInputElement | null;
   }
   if (!cvv) {
-    cvv = findFieldByRegex(visibleFields, CC_CVV_RE, CC_CVV_JA_RE) as HTMLInputElement | null;
+    cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE) as HTMLInputElement | null;
+  }
+  // Same-form-scoped `conf.?num` fallback. Only after the strong CVV
+  // signals miss, and only when the candidate shares the card-number field's
+  // form — never a page-wide first match.
+  if (!cvv && cardNumber) {
+    cvv = findConfNumCvvInForm(visibleFields, cardNumber);
   }
   if (!expiryMonth && !expiryCombined) {
     // Check for combined expiry first
@@ -207,11 +271,11 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
     if (combined && combined instanceof HTMLInputElement) {
       expiryCombined = combined;
     } else {
-      expiryMonth = findFieldByRegex(visibleFields, CC_EXPIRY_MONTH_RE, CC_EXPIRY_MONTH_JA_RE);
+      expiryMonth = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryMonth, CC_EXPIRY_MONTH_JA_RE);
     }
   }
   if (!expiryYear && !expiryCombined) {
-    expiryYear = findFieldByRegex(visibleFields, CC_EXPIRY_YEAR_RE, CC_EXPIRY_YEAR_JA_RE);
+    expiryYear = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryYear, CC_EXPIRY_YEAR_JA_RE);
   }
 
   // Must have at least card number to consider this a CC form

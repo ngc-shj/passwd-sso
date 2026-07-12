@@ -201,6 +201,55 @@ describe("performCreditCardAutofill", () => {
     expect(payload.cvv).toBe("");
   });
 
+  it("does NOT write cvv into an unrelated conf_number field in a separate section", () => {
+    // Security: a card form plus an order-confirmation section elsewhere. The
+    // conf_number must not receive the CVV — it is not co-located with the card
+    // number field. (No autocomplete=cc-csc, so the regex fallback path runs.)
+    setupForm(`
+      <div id="payment">
+        <input name="card_no" type="text" />
+      </div>
+      <div id="order-summary">
+        <input name="conf_number" type="text" />
+      </div>
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "321",
+    });
+
+    const conf = document.querySelector('[name="conf_number"]') as HTMLInputElement;
+    expect(conf.value).toBe("");
+    const card = document.querySelector('[name="card_no"]') as HTMLInputElement;
+    expect(card.value).toBe("4111111111111111");
+  });
+
+  it("writes cvv into a co-located conf_number (form-less table, ドスパラ)", () => {
+    setupForm(`
+      <table>
+        <tr><td><input name="ccno" type="text" /></td></tr>
+        <tr><td><input name="conf_number" type="password" /></td></tr>
+      </table>
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "321",
+    });
+
+    const conf = document.querySelector('[name="conf_number"]') as HTMLInputElement;
+    expect(conf.value).toBe("321");
+  });
+
   it("does not fill login fields when CC autofill runs (non-destructive)", () => {
     setupForm(`
       <input type="text" autocomplete="username" />
@@ -222,5 +271,79 @@ describe("performCreditCardAutofill", () => {
     const passwordInput = document.querySelector('[autocomplete="current-password"]') as HTMLInputElement;
     expect(usernameInput.value).toBe("");
     expect(passwordInput.value).toBe("");
+  });
+
+  // ── C3/C7: year select 2-digit / 4-digit / textContent-fallback fill ──
+
+  it("ドスパラ style: stored 2030 fills a 2-digit <option value=\"30\">", () => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select name="exp_year">
+        <option value="26">26</option>
+        <option value="30">30</option>
+        <option value="35">35</option>
+      </select>
+      <input autocomplete="cc-csc" />
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "2030",
+      cvv: "",
+    });
+
+    const yearSelect = document.querySelector('[name="exp_year"]') as HTMLSelectElement;
+    expect(yearSelect.value).toBe("30");
+  });
+
+  it("さくら style: stored 2030 fills a 4-digit <option value=\"2030\">", () => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select name="expyear">
+        <option value="2026">2026</option>
+        <option value="2030">2030</option>
+        <option value="2045">2045</option>
+      </select>
+      <input autocomplete="cc-csc" />
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "2030",
+      cvv: "",
+    });
+
+    const yearSelect = document.querySelector('[name="expyear"]') as HTMLSelectElement;
+    expect(yearSelect.value).toBe("2030");
+  });
+
+  it("ふるさとチョイス style: stored 2030 fills via textContent-fallback (\"2030年\" text, no matching value)", () => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select name="expyear">
+        <option value="opt-a">2026年</option>
+        <option value="opt-b">2030年</option>
+        <option value="opt-c">2045年</option>
+      </select>
+      <input autocomplete="cc-csc" />
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "2030",
+      cvv: "",
+    });
+
+    const yearSelect = document.querySelector('[name="expyear"]') as HTMLSelectElement;
+    expect(yearSelect.value).toBe("opt-b");
   });
 });

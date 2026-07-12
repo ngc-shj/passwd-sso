@@ -118,9 +118,6 @@ docs/temp/
 # Refactor orchestration — per-developer stale-branch baseline
 .refactor-phase-verify-baseline
 
-# Local tooling command-log artifact (per-developer)
-.soma/
-
 # iOS / Xcode
 ios/build/
 ios/DerivedData/

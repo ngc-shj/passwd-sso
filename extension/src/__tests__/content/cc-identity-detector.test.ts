@@ -301,3 +301,66 @@ describe("T7: both forms on one page do not cross-trigger", () => {
     id.destroy();
   });
 });
+
+// ── C4/C7: overlap-field race (T7-extension) ──────────────────
+
+describe("T7-extension: CC-claimed overlap field never triggers identity", () => {
+  it("focus holder field → GET_CC_MATCHES only, never GET_IDENTITY_MATCHES; focus 住所 → identity still fires", async () => {
+    document.body.innerHTML = `
+      <form>
+        <label for="cno">カード番号</label>
+        <input id="cno" name="card_no" type="text" />
+        <label for="holder">カード名義人</label>
+        <input id="holder" name="holder_name" type="text" />
+        <label for="zip">郵便番号</label>
+        <input id="zip" name="zip" type="text" />
+        <label for="addr">住所</label>
+        <input id="addr" name="addr" type="text" />
+      </form>
+    `;
+    installChrome({
+      [EXT_MSG.GET_CC_MATCHES_FOR_URL]: {
+        type: EXT_MSG.GET_CC_MATCHES_FOR_URL, entries: [], vaultLocked: false, suppressInline: false,
+      },
+      [EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL]: {
+        type: EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL, entries: [], vaultLocked: false, suppressInline: false,
+      },
+    });
+    const { initCreditCardDetector } = await import("../../content/cc-form-detector-lib");
+    const { initIdentityDetector } = await import("../../content/identity-form-detector-lib");
+    const cc = initCreditCardDetector();
+    const id = initIdentityDetector();
+
+    (document.getElementById("holder") as HTMLInputElement).dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true }),
+    );
+
+    expect(matchRequests(EXT_MSG.GET_CC_MATCHES_FOR_URL)).toHaveLength(1);
+    expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(0);
+
+    (document.getElementById("addr") as HTMLInputElement).dispatchEvent(
+      new FocusEvent("focusin", { bubbles: true }),
+    );
+    expect(matchRequests(EXT_MSG.GET_IDENTITY_MATCHES_FOR_URL)).toHaveLength(1);
+
+    cc.destroy();
+    id.destroy();
+  });
+});
+
+describe("C4: fieldCount-boundary fixture", () => {
+  it("1 card_no + 1 holder overlap + exactly 1 郵便番号 → detectIdentityFields returns null (post-exclusion fieldCount 1)", async () => {
+    document.body.innerHTML = `
+      <form>
+        <label for="cno">カード番号</label>
+        <input id="cno" name="card_no" type="text" />
+        <label for="holder">カード名義人</label>
+        <input id="holder" name="holder_name" type="text" />
+        <label for="zip">郵便番号</label>
+        <input id="zip" name="zip" type="text" />
+      </form>
+    `;
+    const { detectIdentityFields } = await import("../../content/identity-form-detector-lib");
+    expect(detectIdentityFields(document)).toBeNull();
+  });
+});

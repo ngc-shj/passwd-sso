@@ -59,7 +59,8 @@ function normalizeYearValue(value: string): string {
   const trimmed = value.trim();
   const num = parseInt(trimmed, 10);
   if (Number.isNaN(num)) return trimmed;
-  // Short year: "25" stays "25", full year "2025" stays "2025"
+  // 2-digit years canonicalize to 20xx: "26" → "2026", "05" → "2005".
+  if (num >= 0 && num <= 99) return String(2000 + num);
   return String(num);
 }
 
