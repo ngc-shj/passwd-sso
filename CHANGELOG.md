@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.69](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.68...passwd-sso-v0.4.69) (2026-07-12)
+
+
+### Bug Fixes
+
+* **extension:** detect credit-card fields on major Japanese sites ([#655](https://github.com/ngc-shj/passwd-sso/issues/655)) ([74b26e9](https://github.com/ngc-shj/passwd-sso/commit/74b26e96c34558985aff62a63ad43940890d9027))
+* **extension:** replace Edge-colliding default keyboard shortcuts with minimal X/F scheme ([#657](https://github.com/ngc-shj/passwd-sso/issues/657)) ([a4858e3](https://github.com/ngc-shj/passwd-sso/commit/a4858e307fbf260f8d63b0664ab5ae1e2dc0570c))
+
 ## [0.4.68](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.67...passwd-sso-v0.4.68) (2026-07-11)
 
 
