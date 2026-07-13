@@ -312,9 +312,10 @@ describe("audit-sentinel: post-migration invariants", () => {
   it("migration backfill: all SYSTEM rows with outbox_id IS NULL have user_id = SYSTEM_ACTOR_ID", async () => {
     // Since the migration already ran and user_id is NOT NULL, we cannot re-seed NULL rows.
     // This test asserts the post-migration invariant: any SYSTEM actor row bypassing the outbox
-    // (outbox_id IS NULL) must have been written with SYSTEM_ACTOR_ID. This covers:
-    //   (a) pre-migration rows backfilled by the migration, and
-    //   (b) new rows written by writeDirectAuditLog which always uses SYSTEM_ACTOR_ID.
+    // (outbox_id IS NULL) must have been written with SYSTEM_ACTOR_ID. Scope
+    // the assertion to this test's tenant: shared developer databases can
+    // contain deliberately malformed fixtures from older migration tests, and
+    // mutating historical audit rows would invalidate their hash chain.
     //
     // To avoid a vacuous pass on clean CI databases, seed one SYSTEM row first.
     await ctx.su.prisma.$transaction(async (tx) => {
@@ -332,11 +333,13 @@ describe("audit-sentinel: post-migration invariants", () => {
       await setBypassRlsGucs(tx);
       return tx.$queryRawUnsafe<Array<{ user_id: string }>>(
         `SELECT user_id::text FROM audit_logs
-         WHERE actor_type = 'SYSTEM' AND outbox_id IS NULL
+         WHERE tenant_id = $1::uuid
+           AND actor_type = 'SYSTEM' AND outbox_id IS NULL
          LIMIT 100`,
+        tenantIdA,
       );
     });
-    // Ensure the seeded row (and any historical rows) were actually queried
+    // Ensure the seeded row was actually queried.
     expect(rows.length).toBeGreaterThanOrEqual(1);
     for (const row of rows) {
       expect(row.user_id).toBe(SYSTEM_ACTOR_ID);

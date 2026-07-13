@@ -81,11 +81,20 @@ extension SessionRestorer {
         guard let signer = try? await coordinator.currentSigner(),
           let jwk = try? await coordinator.currentJWK()
         else { return nil }
+        guard let urlSession = try? await ServerTrustService().validatedSession(
+          for: config.baseURL,
+          healthURL: config.baseURL.appending(
+            path: APIPath.healthLive,
+            directoryHint: .notDirectory
+          )
+        )
+        else { return nil }
         return MobileAPIClient(
           serverURL: config.baseURL,
           signer: signer,
           jwk: jwk,
-          tokenStore: tokenStore
+          tokenStore: tokenStore,
+          urlSession: urlSession
         )
       },
       validate: { client in

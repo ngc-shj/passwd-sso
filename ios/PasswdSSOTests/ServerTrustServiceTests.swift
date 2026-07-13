@@ -176,4 +176,41 @@ final class ServerTrustServiceTests: XCTestCase {
     XCTAssertEqual(p1, pin1)
     XCTAssertEqual(p2, pin2)
   }
+
+  func testHealthResponseRequiresExact200JSONContract() throws {
+    let url = URL(string: "https://passwd-sso.example/api/health/live")!
+    let response = try XCTUnwrap(HTTPURLResponse(
+      url: url,
+      statusCode: 200,
+      httpVersion: nil,
+      headerFields: ["Content-Type": "application/json; charset=utf-8"]
+    ))
+    XCTAssertTrue(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive"}"#.utf8),
+      response: response
+    ))
+  }
+
+  func testHealthResponseRejects404HTMLAndUnexpectedJSON() throws {
+    let url = URL(string: "https://passwd-sso.example/api/health/live")!
+    let notFound = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 404, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    ))
+    let html = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "text/html"]
+    ))
+    let json = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    ))
+
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive"}"#.utf8), response: notFound))
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data("<html>login</html>".utf8), response: html))
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive","extra":true}"#.utf8), response: json))
+  }
 }

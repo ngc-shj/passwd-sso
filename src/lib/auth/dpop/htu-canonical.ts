@@ -41,7 +41,15 @@ export function canonicalHtu(args: { route: string }): string {
   const basePath = resolveBasePath(url);
 
   const path = normalizePath(args.route);
-  return `${scheme}//${authority}${basePath}${path}`;
+  // A route derived from req.url is externally visible and already contains
+  // basePath. Keep this operation idempotent so a sub-path deployment never
+  // validates DPoP against `/base/base/api/...`. Require a path-segment
+  // boundary so `/passwd-sso-evil` is not mistaken for `/passwd-sso`.
+  const canonicalPath =
+    basePath && (path === basePath || path.startsWith(`${basePath}/`))
+      ? path
+      : `${basePath}${path}`;
+  return `${scheme}//${authority}${canonicalPath}`;
 }
 
 function normalizePath(route: string): string {

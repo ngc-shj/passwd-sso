@@ -927,19 +927,18 @@
         }
       }
     },
-    "Enter a valid https:// URL (http:// allowed for localhost).": {
-      "extractionState": "stale",
+    "Enter a valid https:// URL.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enter a valid https:// URL (http:// allowed for localhost)."
+            "value": "Enter a valid https:// URL."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "有効な https:// URL を入力してください（localhost のみ http:// が使用できます）。"
+            "value": "有効な https:// URL を入力してください。"
           }
         }
       }

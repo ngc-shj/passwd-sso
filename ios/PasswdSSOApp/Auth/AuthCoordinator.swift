@@ -19,6 +19,7 @@ public enum AuthError: Error, Equatable {
   case webAuthCancelled
   case webAuthFailed(String)
   case tokenExchangeFailed(MobileAPIError)
+  case serverTrustFailed
   case storeFailed
 }
 
@@ -42,6 +43,7 @@ public actor AuthCoordinator {
   /// filters on `kSecAttrTokenIDSecureEnclave` — invisible to the simulator
   /// software keys used in tests, so tests inject a software-key loader here.
   private let keyLoader: @Sendable (String) throws -> SecKey
+  private let trustService: ServerTrustService
   /// Custom URL scheme the server redirects the ASWebAuthenticationSession to
   /// on successful sign-in (`passwd-sso://auth/callback?code&state`). Captured
   /// by scheme, so it works against any self-hosted server host — no Universal
@@ -50,18 +52,21 @@ public actor AuthCoordinator {
   static let callbackScheme = "passwd-sso"
   /// Set after the first successful call to getOrCreateDPoPKey.
   private var loadedKey: SecKey?
+  private var trustedSession: URLSession?
 
   public init(
     serverConfig: ServerConfig,
     tokenStore: HostTokenStore = HostTokenStore(),
     dpopKeyLabel: String = "com.passwd-sso.dpop.host",
-    keyLoader: (@Sendable (String) throws -> SecKey)? = nil
+    keyLoader: (@Sendable (String) throws -> SecKey)? = nil,
+    trustService: ServerTrustService = ServerTrustService()
   ) {
     precondition(!dpopKeyLabel.isEmpty, "dpopKeyLabel must not be empty")
     self.serverConfig = serverConfig
     self.tokenStore = tokenStore
     self.dpopKeyLabel = dpopKeyLabel
     self.keyLoader = keyLoader ?? { label in try loadDPoPKey(label: label) }
+    self.trustService = trustService
   }
 
   /// Load the persisted Secure Enclave DPoP key into `loadedKey` WITHOUT
@@ -86,6 +91,19 @@ public actor AuthCoordinator {
   public func startSignIn(
     presentationContext: ASWebAuthenticationPresentationContextProviding & Sendable
   ) async throws -> TokenPair {
+    let urlSession: URLSession
+    do {
+      urlSession = try await trustService.validatedSession(
+        for: serverConfig.baseURL,
+        healthURL: serverConfig.baseURL.appending(
+          path: APIPath.healthLive,
+          directoryHint: .notDirectory
+        )
+      )
+      trustedSession = urlSession
+    } catch {
+      throw AuthError.serverTrustFailed
+    }
     let privateKey = try getOrCreateDPoPKey()
     let jwk = try exportPublicKeyJWK(key: privateKey)
     // C6 protocol switch: send the RFC 7638 JWK thumbprint (43 chars
@@ -115,7 +133,8 @@ public actor AuthCoordinator {
       serverURL: serverConfig.baseURL,
       signer: signer,
       jwk: jwk,
-      tokenStore: tokenStore
+      tokenStore: tokenStore,
+      urlSession: urlSession
     )
 
     let tokenResponse: TokenExchangeResponse
@@ -159,6 +178,12 @@ public actor AuthCoordinator {
   public func currentJWK() throws -> [String: String] {
     guard let key = loadedKey else { throw AuthError.keyGenerationFailed }
     return try exportPublicKeyJWK(key: key)
+  }
+
+  /// Session carrying the TLS identity pin established during server setup.
+  public func currentTrustedSession() throws -> URLSession {
+    guard let trustedSession else { throw AuthError.serverTrustFailed }
+    return trustedSession
   }
 
   // MARK: - Static session launcher (@MainActor-isolated)
@@ -277,5 +302,16 @@ public actor AuthCoordinator {
     }
     guard status == errSecSuccess else { throw AuthError.randomGenerationFailed }
     return data
+  }
+}
+
+extension AuthError: LocalizedError {
+  public var errorDescription: String? {
+    switch self {
+    case .serverTrustFailed:
+      return "The server identity could not be verified. Check the server URL or certificate."
+    default:
+      return "Sign-in could not be completed."
+    }
   }
 }

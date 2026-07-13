@@ -211,10 +211,13 @@ struct RootView: View {
       serverURL: config.baseURL,
       onSignedIn: { _ in
         Task { @MainActor in
-          let apiClient = await buildRealAPIClient(
+          guard let apiClient = await buildRealAPIClient(
             serverConfig: config,
             coordinator: coordinator
-          )
+          ) else {
+            appState = .signIn(serverConfig: config, coordinator: coordinator)
+            return
+          }
           appState = .signedIn(serverConfig: config, apiClient: apiClient)
         }
       },
@@ -535,7 +538,7 @@ struct RootView: View {
   private func buildRealAPIClient(
     serverConfig: ServerConfig,
     coordinator: AuthCoordinator
-  ) async -> MobileAPIClient {
+  ) async -> MobileAPIClient? {
     let signer: any DPoPSigner
     let jwk: [String: String]
     let tokenStore: HostTokenStore
@@ -548,11 +551,15 @@ struct RootView: View {
       jwk = [:]
     }
     tokenStore = coordinator.tokenStore
+    guard let urlSession = try? await coordinator.currentTrustedSession() else {
+      return nil
+    }
     return MobileAPIClient(
       serverURL: serverConfig.baseURL,
       signer: signer,
       jwk: jwk,
-      tokenStore: tokenStore
+      tokenStore: tokenStore,
+      urlSession: urlSession
     )
   }
 }

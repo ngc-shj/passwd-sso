@@ -252,9 +252,10 @@
   };
 
   /**
-   * Validate rpId is a registrable domain suffix of hostname.
-   * Rejects empty strings and public suffix entries (e.g. "co.uk") via
-   * label count heuristic — full PSL lookup not feasible in MAIN world.
+   * Structural early check only. The service worker is the security boundary
+   * and repeats this check with the full ICANN + private Public Suffix List
+   * before reading or signing any credential. This MAIN-world script cannot
+   * import the bundled PSL module.
    */
   function isValidRpId(rpId, hostname) {
     if (!rpId || rpId.length === 0) return false;

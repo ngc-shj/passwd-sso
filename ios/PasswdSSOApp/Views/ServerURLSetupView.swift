@@ -17,9 +17,14 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
   var state: State = .idle
 
   private let defaults: UserDefaults
+  private let trustService: ServerTrustService
 
-  init(defaults: UserDefaults = UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard) {
+  init(
+    defaults: UserDefaults = UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard,
+    trustService: ServerTrustService = ServerTrustService()
+  ) {
     self.defaults = defaults
+    self.trustService = trustService
     // Pre-fill the last successfully-probed server URL so it isn't re-typed
     // on every launch.
     if let config = loadServerConfig(defaults: defaults) {
@@ -31,7 +36,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
   func continueButtonTapped() async {
     let trimmed = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let url = parseAndValidate(trimmed) else {
-      state = .probeFailed(L10n.string("Enter a valid https:// URL (http:// allowed for localhost)."))
+      state = .probeFailed(L10n.string("Enter a valid https:// URL."))
       return
     }
 
@@ -55,9 +60,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
       let host = components.host
     else { return nil }
 
-    let isLocalhost = host == "localhost" || host.hasSuffix(".localhost.localdomain")
-
-    guard scheme == "https" || (scheme == "http" && isLocalhost) else { return nil }
+    guard scheme == "https" else { return nil }
     // Preserve basePath in the path component (e.g. "/passwd-sso") — every
     // API call from MobileAPIClient appends to baseURL, so a basePath-mounted
     // deployment requires the path to remain. Trailing slash trimmed for
@@ -70,48 +73,16 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     return components.url
   }
 
-  /// Probe AASA reachability (always at root) and /api/health/live (at basePath).
+  /// Validate the exact passwd-sso health contract and establish the TLS pin.
   private func probeServer(_ base: URL) async throws {
-    // AASA file MUST be served at https://<host>/.well-known/...
-    // regardless of basePath (Apple Universal-Link spec).
-    let aasaURL = aasaRootURL(for: base)
-    async let aasaCheck: Void = fetchURL(aasaURL)
-    async let healthCheck: Void = fetchURL(
-      base.appending(path: APIPath.healthLive, directoryHint: .notDirectory)
+    try await trustService.establishTrust(
+      serverURL: base,
+      healthURL: base.appending(path: APIPath.healthLive, directoryHint: .notDirectory)
     )
-    _ = try await (aasaCheck, healthCheck)
-  }
-
-  /// Strip basePath so the AASA URL points at the root domain.
-  private func aasaRootURL(for base: URL) -> URL {
-    var components = URLComponents(url: base, resolvingAgainstBaseURL: false) ?? URLComponents()
-    components.path = "/.well-known/apple-app-site-association"
-    components.query = nil
-    components.fragment = nil
-    return components.url ?? base
-  }
-
-  private func fetchURL(_ url: URL) async throws {
-    var request = URLRequest(url: url)
-    request.timeoutInterval = 10
-    let (_, response) = try await URLSession.shared.data(for: request)
-    guard let http = response as? HTTPURLResponse, http.statusCode < 500 else {
-      throw ProbeError.unreachable(url.absoluteString)
-    }
   }
 
   private func persist(_ config: ServerConfig) {
     saveServerConfig(config, defaults: defaults)
-  }
-}
-
-private enum ProbeError: LocalizedError {
-  case unreachable(String)
-
-  var errorDescription: String? {
-    switch self {
-    case .unreachable(let url): L10n.string("Could not reach \(url). Check the URL and your network.")
-    }
   }
 }
 

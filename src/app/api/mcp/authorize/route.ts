@@ -11,6 +11,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { MCP_CLIENT_ID_MAX_LENGTH } from "@/lib/constants/auth/mcp";
 import {
   derivePasskeyState,
   passkeyEnforcementBlocks,
@@ -28,7 +29,7 @@ const authorizeLimiter = createRateLimiter({
 // so revoked clients fail upfront (defense-in-depth — token endpoint already
 // gates via validateMcpToken in oauth-server.ts:170,376).
 async function validateOAuthRequest(clientId: string | null, redirectUri: string | null): Promise<boolean> {
-  if (!clientId || !redirectUri) return false;
+  if (!clientId || clientId.length > MCP_CLIENT_ID_MAX_LENGTH || !redirectUri) return false;
   const client = await withBypassRls(
     prisma,
     async (tx) =>
