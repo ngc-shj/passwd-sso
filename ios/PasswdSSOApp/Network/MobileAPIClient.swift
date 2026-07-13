@@ -176,13 +176,22 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// in the app collapses concurrent refreshes; tests inject a fresh instance to
   /// isolate the success cache per test.
   private let refreshCoordinator: TokenRefreshCoordinator
+  /// Builds a pinned session with an isolated cache for favicon fetches. `nil`
+  /// in tests (they inject a session directly into FaviconLoader). Favicon
+  /// requests carry a live bearer token to the app's own server, so they use
+  /// the same TLS pin as every other API call — never an unpinned session.
+  private let faviconSessionFactory: (@Sendable (URLCache) async throws -> URLSession)?
 
+  /// `urlSession` has no default: every authenticated call to the app's own
+  /// server must run over the pinned session established at sign-in. A `.shared`
+  /// default previously let a caller silently fall back to an unpinned session.
   public init(
     serverURL: URL,
     signer: DPoPSigner,
     jwk: [String: String],
     tokenStore: HostTokenStore,
-    urlSession: URLSession = .shared,
+    urlSession: URLSession,
+    faviconSessionFactory: (@Sendable (URLCache) async throws -> URLSession)? = nil,
     now: @Sendable @escaping () -> Date = { Date() },
     refreshCoordinator: TokenRefreshCoordinator = .shared
   ) {
@@ -191,8 +200,17 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     self.jwk = jwk
     self.tokenStore = tokenStore
     self.urlSession = urlSession
+    self.faviconSessionFactory = faviconSessionFactory
     self.now = now
     self.refreshCoordinator = refreshCoordinator
+  }
+
+  /// A pinned favicon session with the given isolated cache, or `nil` when this
+  /// client was built without a factory (tests). The caller treats `nil` as "no
+  /// favicon" and never falls back to an unpinned session.
+  public func makeFaviconSession(cache: URLCache) async -> URLSession? {
+    guard let faviconSessionFactory else { return nil }
+    return try? await faviconSessionFactory(cache)
   }
 
   // MARK: - Public API

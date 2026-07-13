@@ -10,6 +10,11 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     case idle
     case probing
     case probeFailed(String)
+    /// A pin already exists for this URL but the probe failed — the server's TLS
+    /// identity may have legitimately rotated (cert renewal) OR an attacker is
+    /// on-path. Recovery requires an explicit user action so it stays fail-closed
+    /// against a silent MITM.
+    case trustMismatch(URL)
     case ready(ServerConfig)
   }
 
@@ -21,7 +26,8 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 
   init(
     defaults: UserDefaults = UserDefaults(suiteName: AppGroupContainer.identifier) ?? .standard,
-    trustService: ServerTrustService = ServerTrustService()
+    trustService: ServerTrustService = ServerTrustService(),
+    reverifyURL: URL? = nil
   ) {
     self.defaults = defaults
     self.trustService = trustService
@@ -29,6 +35,12 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     // on every launch.
     if let config = loadServerConfig(defaults: defaults) {
       self.urlText = config.baseURL.absoluteString
+    }
+    // Launched because a pinned server's TLS identity changed: open directly on
+    // the re-verify affordance for that URL, rather than a blank setup screen.
+    if let reverifyURL {
+      self.urlText = reverifyURL.absoluteString
+      self.state = .trustMismatch(reverifyURL)
     }
   }
 
@@ -47,7 +59,36 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
       persist(config)
       state = .ready(config)
     } catch {
-      state = .probeFailed(error.localizedDescription)
+      // A probe failure with an existing pin is the TLS-rotation / MITM fork:
+      // offer explicit re-verification instead of a dead-end error.
+      if await trustService.currentPinExists(for: url) {
+        state = .trustMismatch(url)
+      } else {
+        state = .probeFailed(error.localizedDescription)
+      }
+    }
+  }
+
+  /// Re-verify a server whose stored pin no longer matches. Only reachable from
+  /// an explicit user tap on the trust-mismatch prompt. Atomic: the old pin is
+  /// replaced ONLY after the new certificate passes verification, so a failed
+  /// re-verification leaves the existing pin intact (no lockout, no unpinned
+  /// window).
+  @MainActor
+  func reverifyServerIdentity(_ url: URL) async {
+    state = .probing
+    do {
+      try await trustService.reestablishTrust(
+        serverURL: url,
+        healthURL: url.appending(path: APIPath.healthLive, directoryHint: .notDirectory)
+      )
+      let config = ServerConfig(baseURL: url)
+      persist(config)
+      state = .ready(config)
+    } catch {
+      // Old pin is still in place; keep the mismatch affordance so the user can
+      // retry rather than dropping to a dead-end error.
+      state = .trustMismatch(url)
     }
   }
 
@@ -89,9 +130,21 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
 // MARK: - View
 
 struct ServerURLSetupView: View {
-  @State private var viewModel = ServerURLSetupViewModel()
+  @State private var viewModel: ServerURLSetupViewModel
   let onReady: (ServerConfig) -> Void
-  var onEnterDemo: (() -> Void)? = nil
+  var onEnterDemo: (() -> Void)?
+
+  /// `reverifyURL` non-nil opens the screen directly in the trust-mismatch state
+  /// for a pinned server whose TLS identity changed (launch-restore routing).
+  init(
+    reverifyURL: URL? = nil,
+    onReady: @escaping (ServerConfig) -> Void,
+    onEnterDemo: (() -> Void)? = nil
+  ) {
+    _viewModel = State(wrappedValue: ServerURLSetupViewModel(reverifyURL: reverifyURL))
+    self.onReady = onReady
+    self.onEnterDemo = onEnterDemo
+  }
 
   var body: some View {
     NavigationStack {
@@ -122,6 +175,25 @@ struct ServerURLSetupView: View {
             .font(.footnote)
             .foregroundStyle(.red)
             .multilineTextAlignment(.center)
+        }
+
+        if case .trustMismatch(let url) = viewModel.state {
+          VStack(spacing: 12) {
+            Text("This server's security identity has changed since you last connected. This can happen after a certificate renewal — or it can indicate someone is intercepting the connection. Only re-verify if you expected this change.")
+              .font(.footnote)
+              .foregroundStyle(.orange)
+              .multilineTextAlignment(.center)
+
+            Button(role: .destructive) {
+              Task { await viewModel.reverifyServerIdentity(url) }
+            } label: {
+              Text("Re-verify server identity")
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityIdentifier("server-setup-reverify-button")
+          }
         }
 
         Button {

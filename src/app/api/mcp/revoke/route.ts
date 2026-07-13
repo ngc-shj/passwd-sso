@@ -91,12 +91,13 @@ export async function POST(req: NextRequest) {
   }
   const body = parsed.data;
   const token = body.token;
-  const tokenTypeHint = body.token_type_hint as "access_token" | "refresh_token" | undefined;
+  // RFC 7009 §2.1: an unsupported hint is ignored (try both token types), so
+  // map only the two known values through and drop anything else to undefined.
+  const tokenTypeHint =
+    body.token_type_hint === "access_token" || body.token_type_hint === "refresh_token"
+      ? body.token_type_hint
+      : undefined;
   const clientId = body.client_id;
-
-  if (tokenTypeHint && tokenTypeHint !== "access_token" && tokenTypeHint !== "refresh_token") {
-    // RFC 7009 §2.1: unsupported token type → ignore hint, try both
-  }
 
   const clientSecret = body.client_secret;
   const clientSecretHash = clientSecret ? hashToken(clientSecret) : undefined;

@@ -134,7 +134,8 @@ public actor AuthCoordinator {
       signer: signer,
       jwk: jwk,
       tokenStore: tokenStore,
-      urlSession: urlSession
+      urlSession: urlSession,
+      faviconSessionFactory: faviconSessionFactory()
     )
 
     let tokenResponse: TokenExchangeResponse
@@ -184,6 +185,19 @@ public actor AuthCoordinator {
   public func currentTrustedSession() throws -> URLSession {
     guard let trustedSession else { throw AuthError.serverTrustFailed }
     return trustedSession
+  }
+
+  /// A factory that builds a pinned session with an isolated favicon cache: same
+  /// TLS pin as the API session, separate URLCache so favicon traffic never
+  /// evicts API responses. Passed to `MobileAPIClient` so favicon fetches stay
+  /// pinned. Captures only `Sendable` values (`ServerTrustService` is an actor,
+  /// `URL` is Sendable), so it is safe to run off the coordinator's actor.
+  public func faviconSessionFactory() -> @Sendable (URLCache) async throws -> URLSession {
+    let trustService = self.trustService
+    let baseURL = serverConfig.baseURL
+    return { cache in
+      try await trustService.pinnedSession(for: baseURL, cache: cache)
+    }
   }
 
   // MARK: - Static session launcher (@MainActor-isolated)

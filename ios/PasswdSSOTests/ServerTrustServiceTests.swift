@@ -177,7 +177,7 @@ final class ServerTrustServiceTests: XCTestCase {
     XCTAssertEqual(p2, pin2)
   }
 
-  func testHealthResponseRequiresExact200JSONContract() throws {
+  func testHealthResponseAccepts200JSONWithStatusAlive() throws {
     let url = URL(string: "https://passwd-sso.example/api/health/live")!
     let response = try XCTUnwrap(HTTPURLResponse(
       url: url,
@@ -191,7 +191,19 @@ final class ServerTrustServiceTests: XCTestCase {
     ))
   }
 
-  func testHealthResponseRejects404HTMLAndUnexpectedJSON() throws {
+  /// Adding fields to /api/health/live must NOT lock out an older client, so an
+  /// extra key alongside `status: alive` is still accepted (cross-repo drift).
+  func testHealthResponseAcceptsExtraFieldsAlongsideStatus() throws {
+    let url = URL(string: "https://passwd-sso.example/api/health/live")!
+    let response = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    ))
+    XCTAssertTrue(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive","version":"1.2.3"}"#.utf8), response: response))
+  }
+
+  func testHealthResponseRejects404HTMLAndMissingStatus() throws {
     let url = URL(string: "https://passwd-sso.example/api/health/live")!
     let notFound = try XCTUnwrap(HTTPURLResponse(
       url: url, statusCode: 404, httpVersion: nil,
@@ -210,7 +222,145 @@ final class ServerTrustServiceTests: XCTestCase {
       data: Data(#"{"status":"alive"}"#.utf8), response: notFound))
     XCTAssertFalse(isValidPasswdSSOHealthResponse(
       data: Data("<html>login</html>".utf8), response: html))
+    // status marker absent → reject (generic 2xx JSON page).
     XCTAssertFalse(isValidPasswdSSOHealthResponse(
-      data: Data(#"{"status":"alive","extra":true}"#.utf8), response: json))
+      data: Data(#"{"ok":true}"#.utf8), response: json))
+    // wrong status value → reject.
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"degraded"}"#.utf8), response: json))
+  }
+
+  // MARK: - pinnedSession / clearPin fail-closed paths
+
+  func testPinnedSessionThrowsPinMissingWhenUnpinned() async {
+    do {
+      _ = try await service.pinnedSession(for: serverURL)
+      XCTFail("pinnedSession must throw when no pin is stored")
+    } catch let error as ServerTrustError {
+      XCTAssertEqual(error, .pinMissing)
+    } catch {
+      XCTFail("unexpected error: \(error)")
+    }
+  }
+
+  func testPinnedSessionSucceedsWhenPinned() async throws {
+    let pinSet = PinSet(
+      aasaSHA256: Data(),
+      tlsLeafKeySHA256: Data(repeating: 0xBB, count: 32)
+    )
+    try await service.pin(for: serverURL, pinSet)
+    _ = try await service.pinnedSession(for: serverURL)
+  }
+
+  func testClearPinRemovesStoredPin() async throws {
+    let pinSet = PinSet(
+      aasaSHA256: Data(),
+      tlsLeafKeySHA256: Data(repeating: 0xCD, count: 32)
+    )
+    try await service.pin(for: serverURL, pinSet)
+    XCTAssertTrue(await service.currentPinExists(for: serverURL))
+
+    try service.clearPin(for: serverURL)
+
+    XCTAssertFalse(await service.currentPinExists(for: serverURL))
+    // After clearing, pinnedSession must fail closed again.
+    do {
+      _ = try await service.pinnedSession(for: serverURL)
+      XCTFail("pinnedSession must throw after clearPin")
+    } catch let error as ServerTrustError {
+      XCTAssertEqual(error, .pinMissing)
+    }
+  }
+
+  func testClearPinOnAbsentPinIsNoOp() throws {
+    // errSecItemNotFound must not surface as an error.
+    XCTAssertNoThrow(try service.clearPin(for: serverURL))
+  }
+
+  // MARK: - reestablishTrust atomicity (re-verify must not drop the old pin on failure)
+
+  func testReestablishTrustKeepsOldPinWhenProbeFails() async throws {
+    let original = PinSet(
+      aasaSHA256: Data(),
+      tlsLeafKeySHA256: Data(repeating: 0x7A, count: 32)
+    )
+    // Pin against a routable-but-dead address so the health probe fails fast.
+    let deadURL = URL(string: "https://127.0.0.1:1")!
+    try await service.pin(for: deadURL, original)
+
+    do {
+      try await service.reestablishTrust(
+        serverURL: deadURL,
+        healthURL: deadURL.appending(path: "api/health/live", directoryHint: .notDirectory)
+      )
+      XCTFail("reestablishTrust must throw when the probe cannot reach the server")
+    } catch {
+      // expected — connection refused / TLS failure
+    }
+
+    // The OLD pin must still be intact — a failed re-verification is NOT a clear.
+    let stored = try await service.currentPin(for: deadURL)
+    XCTAssertEqual(stored, original,
+                   "a failed reestablishTrust must leave the existing pin unchanged (no lockout, no unpinned window)")
+  }
+
+  func testCurrentPinExistsReflectsStoredState() async throws {
+    XCTAssertFalse(await service.currentPinExists(for: serverURL))
+    try await service.pin(
+      for: serverURL,
+      PinSet(aasaSHA256: Data(), tlsLeafKeySHA256: Data(repeating: 0x01, count: 32))
+    )
+    XCTAssertTrue(await service.currentPinExists(for: serverURL))
+  }
+
+  // MARK: - LeafKeyPinningDelegate redirect guard (F2 — plain-value, no SecTrust)
+
+  private func makeRedirectResponse() throws -> HTTPURLResponse {
+    try XCTUnwrap(HTTPURLResponse(
+      url: URL(string: "https://passwd-sso.example/api/health/live")!,
+      statusCode: 302, httpVersion: nil, headerFields: nil
+    ))
+  }
+
+  func testRedirectAllowsSameHostHTTPS() async throws {
+    let delegate = LeafKeyPinningDelegate(expectedHost: "passwd-sso.example")
+    let response = try makeRedirectResponse()
+    let newRequest = URLRequest(url: URL(string: "https://passwd-sso.example/other")!)
+
+    let forwarded = await withCheckedContinuation { continuation in
+      delegate.urlSession(
+        URLSession.shared, task: URLSession.shared.dataTask(with: URL(string: "https://x")!),
+        willPerformHTTPRedirection: response, newRequest: newRequest
+      ) { continuation.resume(returning: $0) }
+    }
+    XCTAssertNotNil(forwarded, "same-host HTTPS redirect must be forwarded")
+  }
+
+  func testRedirectRejectsHTTPDowngrade() async throws {
+    let delegate = LeafKeyPinningDelegate(expectedHost: "passwd-sso.example")
+    let response = try makeRedirectResponse()
+    let newRequest = URLRequest(url: URL(string: "http://passwd-sso.example/other")!)
+
+    let forwarded = await withCheckedContinuation { continuation in
+      delegate.urlSession(
+        URLSession.shared, task: URLSession.shared.dataTask(with: URL(string: "https://x")!),
+        willPerformHTTPRedirection: response, newRequest: newRequest
+      ) { continuation.resume(returning: $0) }
+    }
+    XCTAssertNil(forwarded, "http:// downgrade redirect must be blocked")
+  }
+
+  func testRedirectRejectsCrossHost() async throws {
+    let delegate = LeafKeyPinningDelegate(expectedHost: "passwd-sso.example")
+    let response = try makeRedirectResponse()
+    let newRequest = URLRequest(url: URL(string: "https://evil.example/other")!)
+
+    let forwarded = await withCheckedContinuation { continuation in
+      delegate.urlSession(
+        URLSession.shared, task: URLSession.shared.dataTask(with: URL(string: "https://x")!),
+        willPerformHTTPRedirection: response, newRequest: newRequest
+      ) { continuation.resume(returning: $0) }
+    }
+    XCTAssertNil(forwarded, "cross-host redirect must be blocked")
   }
 }

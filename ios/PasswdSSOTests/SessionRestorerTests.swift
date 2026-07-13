@@ -20,7 +20,8 @@ final class SessionRestorerTests: XCTestCase {
       serverURL: URL(string: "https://dummy.example")!,
       signer: FakeSigner(),
       jwk: [:],
-      tokenStore: HostTokenStore(service: "com.test.session-restorer", keychain: FakeKeychain())
+      tokenStore: HostTokenStore(service: "com.test.session-restorer", keychain: FakeKeychain()),
+      urlSession: .shared
     )
   }
 
@@ -28,14 +29,16 @@ final class SessionRestorerTests: XCTestCase {
     loadConfig: @escaping @Sendable () -> ServerConfig?,
     hasTokens: @escaping @Sendable () -> Bool = { true },
     makeSession: (@Sendable (ServerConfig) async -> MobileAPIClient?)? = nil,
-    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation = { _ in .ok }
+    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation = { _ in .ok },
+    pinExists: @escaping @Sendable (ServerConfig) async -> Bool = { _ in false }
   ) -> SessionRestorer {
     let client = dummyClient()
     return SessionRestorer(
       loadConfig: loadConfig,
       hasTokens: hasTokens,
       makeSession: makeSession ?? { _ in client },
-      validate: validate
+      validate: validate,
+      pinExists: pinExists
     )
   }
 
@@ -68,6 +71,31 @@ final class SessionRestorerTests: XCTestCase {
       loadConfig: { [config] in config },
       hasTokens: { true },
       makeSession: signerExportFailed
+    ).restore()
+    guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
+  }
+
+  // makeSession fails (pinned probe / TLS mismatch) AND a pin exists →
+  // route to re-verify, not a plain sign-in that would silently hit the same wall.
+  func testRestore_makeSessionNil_pinExists_serverIdentityChanged() async {
+    let result = await makeRestorer(
+      loadConfig: { [config] in config },
+      hasTokens: { true },
+      makeSession: { _ in nil },
+      pinExists: { _ in true }
+    ).restore()
+    guard case .serverIdentityChanged = result else {
+      return XCTFail("expected .serverIdentityChanged, got \(result)")
+    }
+  }
+
+  // makeSession fails but NO pin exists → normal missing-credential path.
+  func testRestore_makeSessionNil_noPin_needsSignIn() async {
+    let result = await makeRestorer(
+      loadConfig: { [config] in config },
+      hasTokens: { true },
+      makeSession: { _ in nil },
+      pinExists: { _ in false }
     ).restore()
     guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
   }

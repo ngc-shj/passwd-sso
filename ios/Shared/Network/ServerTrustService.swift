@@ -1,7 +1,6 @@
 import CryptoKit
 import Foundation
 import Security
-import Shared
 
 // MARK: - Pin set
 
@@ -109,7 +108,13 @@ public actor ServerTrustService {
     let data = try JSONEncoder().encode(pinSet)
     var query = baseQuery(account: account)
     query[kSecValueData as String] = data
-    query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+    // AfterFirstUnlock (NOT WhenUnlocked): the AutoFill extension reads the pin
+    // mid-ceremony while the device may be in a locked-after-first-unlock state,
+    // exactly as UploadTokenStore does for the paired upload token. A pin is a
+    // public-key hash, not a secret, so the wider window carries no
+    // confidentiality cost — and a WhenUnlocked pin would silently fail the
+    // extension read and drop the upload the token was staged for.
+    query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
 
     let status = keychain.add(query: query)
     if status == errSecDuplicateItem {
@@ -119,11 +124,28 @@ public actor ServerTrustService {
         query: baseQuery(account: account),
         attributes: [
           kSecValueData as String: data,
-          kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+          kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
       )
       guard updateStatus == errSecSuccess else { throw ServerTrustError.keychainError(updateStatus) }
     } else if status != errSecSuccess {
+      throw ServerTrustError.keychainError(status)
+    }
+  }
+
+  /// Remove the stored pin so the next `establishTrust` re-pins on first use.
+  /// Fail-closed against silent MITM: this must only ever run behind an explicit
+  /// user action (the "server identity changed — re-verify" affordance in server
+  /// setup), never automatically on a mismatch. A legitimate server TLS-key
+  /// rotation is otherwise a permanent lockout because `establishTrust` only
+  /// pins when none is stored.
+  ///
+  /// `nonisolated`: touches only the Sendable `keychain` `let` and the
+  /// `pinService` `let` (via `baseQuery`), no isolated mutable state — so the
+  /// synchronous UI/test call sites need no `await`.
+  public nonisolated func clearPin(for serverURL: URL) throws {
+    let status = keychain.delete(query: baseQuery(account: serverURL.absoluteString))
+    guard status == errSecSuccess || status == errSecItemNotFound else {
       throw ServerTrustError.keychainError(status)
     }
   }
@@ -133,6 +155,13 @@ public actor ServerTrustService {
       return .unpinned
     }
     return stored == observed ? .match : .mismatch(stored: stored, observed: observed)
+  }
+
+  /// Whether a pin is already stored for this server. Used to distinguish a
+  /// first-time setup failure (plain unreachable) from a failure against an
+  /// already-pinned server (possible TLS-key rotation → offer re-verification).
+  public func currentPinExists(for serverURL: URL) async -> Bool {
+    (try? await currentPin(for: serverURL)) != nil
   }
 
   /// Verify the configured server's health contract using normal platform TLS,
@@ -172,9 +201,60 @@ public actor ServerTrustService {
     }
   }
 
+  /// Atomically replace the pin for a server whose TLS key legitimately rotated.
+  /// Unlike a `clearPin` + `establishTrust` sequence, the OLD pin is kept until
+  /// the new certificate has passed default trust evaluation AND the strict
+  /// health contract — so a failed re-verification leaves the existing pin
+  /// intact (no lockout, no unpinned window). The pin is overwritten only on
+  /// full success.
+  ///
+  /// Fail-closed intent unchanged: this must run only behind an explicit user
+  /// action (the "server identity changed — re-verify" affordance). It performs
+  /// NO leaf-key match against the old pin — that is the whole point of a
+  /// user-approved rotation — but it still runs `SecTrustEvaluateWithError`
+  /// (platform CA trust) and the health contract before accepting the new key.
+  public func reestablishTrust(serverURL: URL, healthURL: URL) async throws {
+    // expectedLeafKeyHash: nil → capture the newly-presented key without
+    // enforcing the old pin, but default trust evaluation + host binding still
+    // apply inside the delegate.
+    let delegate = LeafKeyPinningDelegate(
+      expectedLeafKeyHash: nil,
+      expectedHost: serverURL.host
+    )
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.waitsForConnectivity = false
+    configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    defer { session.finishTasksAndInvalidate() }
+
+    var request = URLRequest(url: healthURL)
+    request.timeoutInterval = 10
+    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    let (data, response) = try await session.data(for: request)
+    guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
+      throw ServerTrustError.invalidHealthResponse
+    }
+    guard let observedTLS = delegate.capturedLeafKeyHash else {
+      throw ServerTrustError.tlsKeyUnavailable
+    }
+
+    // Overwrite only now, after full verification succeeded.
+    try await pin(
+      for: serverURL,
+      PinSet(aasaSHA256: Data(), tlsLeafKeySHA256: observedTLS)
+    )
+  }
+
   /// Construct a URLSession that fails the TLS challenge unless the observed
-  /// leaf public key matches the pin established during server setup.
-  public func pinnedSession(for serverURL: URL) async throws -> URLSession {
+  /// leaf public key matches the pin established during server setup. Throws
+  /// `.pinMissing` when no pin is stored — callers with no way to establish one
+  /// (e.g. the AutoFill extension, which must not run the network probe) treat
+  /// that as fail-closed and skip the request.
+  ///
+  /// `cache` lets a caller (the favicon loader) attach an isolated on-disk
+  /// URLCache without losing pinning — the previous favicon path built its own
+  /// unpinned session precisely to get a separate cache.
+  public func pinnedSession(for serverURL: URL, cache: URLCache? = nil) async throws -> URLSession {
     guard let stored = try await currentPin(for: serverURL) else {
       throw ServerTrustError.pinMissing
     }
@@ -184,6 +264,9 @@ public actor ServerTrustService {
     )
     let configuration = URLSessionConfiguration.ephemeral
     configuration.waitsForConnectivity = false
+    if let cache {
+      configuration.urlCache = cache
+    }
     return URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
   }
 
@@ -197,7 +280,7 @@ public actor ServerTrustService {
 
   // MARK: - Helpers
 
-  private func baseQuery(account: String) -> [String: Any] {
+  private nonisolated func baseQuery(account: String) -> [String: Any] {
     [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: pinService,
@@ -209,13 +292,16 @@ public actor ServerTrustService {
 
 /// Strictly recognize the passwd-sso liveness response. A generic 2xx page,
 /// redirect target, proxy login page, or similarly named service is rejected.
+///
+/// Requires `status == "alive"` but does NOT pin the exact key count: the server
+/// may add fields (version, build hash) to /api/health/live without locking out
+/// clients on an older binary. The `status` marker still rejects generic pages.
 func isValidPasswdSSOHealthResponse(data: Data, response: URLResponse) -> Bool {
   guard let http = response as? HTTPURLResponse,
     http.statusCode == 200,
     http.value(forHTTPHeaderField: "Content-Type")?.lowercased().hasPrefix("application/json") == true,
     data.count <= 4_096,
     let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-    json.count == 1,
     json["status"] as? String == "alive"
   else { return false }
   return true

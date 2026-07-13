@@ -10,6 +10,12 @@ public enum RestoredSession: Sendable {
   case needsSetup
   /// No local unlock material (no tokens, or the SE signer is gone) → OAuth required.
   case needsSignIn(ServerConfig)
+  /// A pin exists but the server's TLS identity no longer matches it (or the
+  /// pinned probe failed while pinned) → route to the server-setup re-verify
+  /// affordance, NOT a plain sign-in. Signing in would silently retry the same
+  /// pinned session and fail again with no explanation. Fail-closed: the old
+  /// pin is retained until the user explicitly re-verifies.
+  case serverIdentityChanged(ServerConfig)
   /// Session usable (or offline) → auto-Face-ID unlock screen.
   case needsUnlock(ServerConfig, MobileAPIClient)
   /// Refresh failed but local vault material exists → unlock-or-resign-in screen.
@@ -33,23 +39,39 @@ public struct SessionRestorer: Sendable {
   let hasTokens: @Sendable () -> Bool
   let makeSession: @Sendable (ServerConfig) async -> MobileAPIClient?
   let validate: @Sendable (MobileAPIClient) async -> SessionValidation
+  /// Whether a TLS pin is stored for this server. Used to disambiguate a
+  /// `makeSession` failure: with a pin present, the failure is a pinned-probe /
+  /// identity-mismatch (→ `.serverIdentityChanged`); with no pin it is a plain
+  /// missing-credential case (→ `.needsSignIn`).
+  let pinExists: @Sendable (ServerConfig) async -> Bool
 
   public init(
     loadConfig: @escaping @Sendable () -> ServerConfig?,
     hasTokens: @escaping @Sendable () -> Bool,
     makeSession: @escaping @Sendable (ServerConfig) async -> MobileAPIClient?,
-    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation
+    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation,
+    pinExists: @escaping @Sendable (ServerConfig) async -> Bool = { _ in false }
   ) {
     self.loadConfig = loadConfig
     self.hasTokens = hasTokens
     self.makeSession = makeSession
     self.validate = validate
+    self.pinExists = pinExists
   }
 
   public func restore() async -> RestoredSession {
     guard let config = loadConfig() else { return .needsSetup }
     guard hasTokens() else { return .needsSignIn(config) }
-    guard let client = await makeSession(config) else { return .needsSignIn(config) }
+    guard let client = await makeSession(config) else {
+      // makeSession failed. If a pin is stored, the failure is a pinned-probe /
+      // TLS-identity mismatch — route to re-verify, not a plain sign-in that
+      // would silently hit the same wall. With no pin, it's a normal
+      // missing-credential/first-trust case.
+      if await pinExists(config) {
+        return .serverIdentityChanged(config)
+      }
+      return .needsSignIn(config)
+    }
     switch await validate(client) {
     case .ok, .offline:
       return .needsUnlock(config, client)
@@ -81,7 +103,8 @@ extension SessionRestorer {
         guard let signer = try? await coordinator.currentSigner(),
           let jwk = try? await coordinator.currentJWK()
         else { return nil }
-        guard let urlSession = try? await ServerTrustService().validatedSession(
+        let trustService = ServerTrustService()
+        guard let urlSession = try? await trustService.validatedSession(
           for: config.baseURL,
           healthURL: config.baseURL.appending(
             path: APIPath.healthLive,
@@ -89,13 +112,33 @@ extension SessionRestorer {
           )
         )
         else { return nil }
+        let baseURL = config.baseURL
         return MobileAPIClient(
           serverURL: config.baseURL,
           signer: signer,
           jwk: jwk,
           tokenStore: tokenStore,
-          urlSession: urlSession
+          urlSession: urlSession,
+          faviconSessionFactory: { cache in
+            try await trustService.pinnedSession(for: baseURL, cache: cache)
+          }
         )
+      },
+      pinExists: { config in
+        // Only treat a makeSession failure as an identity change when the local
+        // credentials ARE present (signer + jwk) — otherwise a plain
+        // missing-signer failure would be misrouted to re-verify. Combined with
+        // a stored pin, "credentials present + session build failed" is the
+        // pinned-probe / TLS-mismatch signature.
+        guard await ServerTrustService().currentPinExists(for: config.baseURL) else {
+          return false
+        }
+        let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
+        guard await coordinator.loadPersistedSigner(),
+          (try? await coordinator.currentSigner()) != nil,
+          (try? await coordinator.currentJWK()) != nil
+        else { return false }
+        return true
       },
       validate: { client in
         do {

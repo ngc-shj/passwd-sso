@@ -75,6 +75,22 @@ describe("POST /api/mcp/revoke", () => {
     );
   });
 
+  it("maps an unsupported token_type_hint to undefined (RFC 7009 §2.1 — try both)", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/revoke", {
+      body: { ...VALID_JSON_BODY, token_type_hint: "urn:ietf:params:oauth:token-type:jwt" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(mockRevokeToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "mcp_access_token_abc",
+        tokenTypeHint: undefined,
+        clientId: "mcpc_testclient",
+      }),
+    );
+  });
+
   it("returns 200 even when revokeToken would handle an unknown token (RFC 7009 §2.2)", async () => {
     // revokeToken itself handles unknown tokens gracefully; route always returns 200
     mockRevokeToken.mockResolvedValue(undefined);

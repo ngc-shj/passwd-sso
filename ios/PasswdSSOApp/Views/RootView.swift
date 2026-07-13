@@ -12,6 +12,10 @@ enum AppState {
   /// (so the URL screen never flashes on a returning launch).
   case launching
   case setup
+  /// A pin exists but the server's TLS identity no longer matches it. Opens the
+  /// server-setup screen pre-filled and in its trust-mismatch state so the user
+  /// can explicitly re-verify (or not) — never a silent sign-in retry.
+  case serverIdentityChanged(serverConfig: ServerConfig)
   case signIn(serverConfig: ServerConfig, coordinator: AuthCoordinator)
   case signedIn(serverConfig: ServerConfig, apiClient: MobileAPIClient)
   /// Transitional splash shown while handleVaultUnlocked runs its async sync,
@@ -74,6 +78,24 @@ struct RootView: View {
 
       case .setup:
         ServerURLSetupView(
+          onReady: { config in
+            let tokenStore = HostTokenStore()
+            let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
+            appState = .signIn(serverConfig: config, coordinator: coordinator)
+          },
+          onEnterDemo: {
+            if let demo = try? DemoVaultFactory.makeDemoVault() {
+              appState = .demo(demo)
+            }
+          }
+        )
+
+      case .serverIdentityChanged(let config):
+        // Open server setup already showing the trust-mismatch affordance for
+        // the pinned URL — the user re-verifies (→ sign in) or backs out. Never
+        // a silent sign-in retry against the mismatched identity.
+        ServerURLSetupView(
+          reverifyURL: config.baseURL,
           onReady: { config in
             let tokenStore = HostTokenStore()
             let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
@@ -182,6 +204,8 @@ struct RootView: View {
           serverConfig: config,
           coordinator: AuthCoordinator(serverConfig: config)
         )
+      case .serverIdentityChanged(let config):
+        appState = .serverIdentityChanged(serverConfig: config)
       case .needsUnlock(let config, let apiClient):
         appState = .signedIn(serverConfig: config, apiClient: apiClient)
       case .needsReauth(let config, let apiClient):
@@ -559,7 +583,8 @@ struct RootView: View {
       signer: signer,
       jwk: jwk,
       tokenStore: tokenStore,
-      urlSession: urlSession
+      urlSession: urlSession,
+      faviconSessionFactory: await coordinator.faviconSessionFactory()
     )
   }
 }
