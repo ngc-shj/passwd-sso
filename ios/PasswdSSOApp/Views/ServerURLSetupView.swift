@@ -57,7 +57,7 @@ final class ServerURLSetupViewModel: @unchecked Sendable {
     guard
       var components = URLComponents(string: raw),
       let scheme = components.scheme?.lowercased(),
-      let host = components.host
+      components.host?.isEmpty == false
     else { return nil }
 
     guard scheme == "https" else { return nil }
