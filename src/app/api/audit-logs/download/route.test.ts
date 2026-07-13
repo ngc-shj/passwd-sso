@@ -65,6 +65,18 @@ async function parseStreamResponse(response: Response): Promise<string> {
   return result;
 }
 
+// Drain the stream without accumulating the body. The full-MAX_ROWS test
+// streams 100k rows and only asserts the fetch stopped — accumulating that
+// into one string is O(n²) growth and pushes the test past its timeout under
+// full-suite CPU contention.
+async function drainStreamResponse(response: Response): Promise<void> {
+  const reader = response.body!.getReader();
+  let done = false;
+  while (!done) {
+    done = (await reader.read()).done;
+  }
+}
+
 const MOCK_LOGS = [
   {
     id: "log-1",
@@ -260,11 +272,14 @@ describe("GET /api/audit-logs/download", () => {
 
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
     const res = await GET(req);
-    await parseStreamResponse(res);
+    await drainStreamResponse(res);
 
     expect(callCount).toBe(maxBatches);
     expect(mockPrismaAuditLog.findMany).toHaveBeenCalledTimes(maxBatches);
-  });
+    // 30s: the route genuinely streams MAX_ROWS (100k) rows here, so it runs
+    // several seconds even drained — the default 10s timeout is flaky under
+    // full-suite CPU contention.
+  }, 30_000);
 
   it("records audit log download event", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
