@@ -50,6 +50,7 @@ final class FaviconLoaderTests: XCTestCase {
 
   // MARK: - Helpers
 
+  @MainActor
   private func makeLoader() -> FaviconLoader {
     let client = MobileAPIClient(
       serverURL: serverURL,

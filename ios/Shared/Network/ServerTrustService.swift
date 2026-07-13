@@ -81,8 +81,27 @@ public actor ServerTrustService {
   private let keychain: KeychainAccessor
   private let pinService = "com.passwd-sso.server-trust"
 
+  /// Runs the health probe over a pinning session and returns the captured
+  /// leaf-key hash (throwing `.pinMismatch` on a delegate-detected identity
+  /// rejection). Injectable so the probe→outcome routing in
+  /// `probePinnedIdentity`/`establishTrust`/`reestablishTrust` is testable
+  /// without a live TLS server. Defaults to the real network probe.
+  private let leafKeyProbe: @Sendable (URLSession, LeafKeyPinningDelegate, URL) async throws -> Data
+
   public init(keychain: KeychainAccessor = SystemKeychainAccessor()) {
     self.keychain = keychain
+    self.leafKeyProbe = Self.networkLeafKeyProbe
+  }
+
+  /// Test seam: inject a probe that simulates the delegate/network outcome
+  /// (a captured hash, `.pinMismatch`, or a connectivity `URLError`) without a
+  /// real handshake. The default `init` wires the production network probe.
+  init(
+    keychain: KeychainAccessor,
+    leafKeyProbe: @escaping @Sendable (URLSession, LeafKeyPinningDelegate, URL) async throws -> Data
+  ) {
+    self.keychain = keychain
+    self.leafKeyProbe = leafKeyProbe
   }
 
   // MARK: - Public API
@@ -204,34 +223,43 @@ public actor ServerTrustService {
     }
   }
 
-  /// Run the health probe over `session` and return the captured leaf-key hash.
-  /// Converts a delegate-detected identity rejection into an explicit
-  /// `.pinMismatch` (rather than leaking the unspecified `URLError.Code` a
-  /// cancelled challenge produces) so callers can route it deterministically.
+  /// Run the injected probe over `session` and return the captured leaf-key
+  /// hash. The default (`networkLeafKeyProbe`) converts a delegate-detected
+  /// identity rejection into an explicit `.pinMismatch` (rather than leaking the
+  /// unspecified `URLError.Code` a cancelled challenge produces) so callers can
+  /// route it deterministically.
   private func probeLeafKey(
     session: URLSession,
     delegate: LeafKeyPinningDelegate,
     healthURL: URL
   ) async throws -> Data {
-    var request = URLRequest(url: healthURL)
-    request.timeoutInterval = 10
-    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-    let data: Data
-    let response: URLResponse
-    do {
-      (data, response) = try await session.data(for: request)
-    } catch {
-      if delegate.pinMismatchDetected { throw ServerTrustError.pinMismatch }
-      throw error  // genuine connectivity failure — surfaces as URLError upstream
-    }
-    guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
-      throw ServerTrustError.invalidHealthResponse
-    }
-    guard let observedTLS = delegate.capturedLeafKeyHash else {
-      throw ServerTrustError.tlsKeyUnavailable
-    }
-    return observedTLS
+    try await leafKeyProbe(session, delegate, healthURL)
   }
+
+  /// Production network probe. Runs the health request over the pinning session
+  /// and translates a delegate-detected identity rejection into `.pinMismatch`.
+  private static let networkLeafKeyProbe:
+    @Sendable (URLSession, LeafKeyPinningDelegate, URL) async throws -> Data = {
+      session, delegate, healthURL in
+      var request = URLRequest(url: healthURL)
+      request.timeoutInterval = 10
+      request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+      let data: Data
+      let response: URLResponse
+      do {
+        (data, response) = try await session.data(for: request)
+      } catch {
+        if delegate.pinMismatchDetected { throw ServerTrustError.pinMismatch }
+        throw error  // genuine connectivity failure — surfaces as URLError upstream
+      }
+      guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
+        throw ServerTrustError.invalidHealthResponse
+      }
+      guard let observedTLS = delegate.capturedLeafKeyHash else {
+        throw ServerTrustError.tlsKeyUnavailable
+      }
+      return observedTLS
+    }
 
   /// Atomically replace the pin for a server whose TLS key legitimately rotated.
   /// Unlike a `clearPin` + `establishTrust` sequence, the OLD pin is kept until
