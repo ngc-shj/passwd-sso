@@ -19,7 +19,11 @@ public enum AuthError: Error, Equatable {
   case webAuthCancelled
   case webAuthFailed(String)
   case tokenExchangeFailed(MobileAPIError)
+  /// The server's pinned TLS identity was rejected — route to re-verify.
   case serverTrustFailed
+  /// The server could not be reached (offline / DNS / timeout / transient 5xx).
+  /// A plain retriable error — NOT an identity change.
+  case serverUnavailable
   case storeFailed
 }
 
@@ -101,8 +105,13 @@ public actor AuthCoordinator {
         )
       )
       trustedSession = urlSession
-    } catch {
+    } catch ServerTrustError.pinMismatch {
+      // Genuine identity rejection → route to re-verify.
       throw AuthError.serverTrustFailed
+    } catch {
+      // Offline / DNS / timeout / transient trust error — retriable, NOT an
+      // identity change. Do not send the user to the re-verify warning.
+      throw AuthError.serverUnavailable
     }
     let privateKey = try getOrCreateDPoPKey()
     let jwk = try exportPublicKeyJWK(key: privateKey)
@@ -324,6 +333,8 @@ extension AuthError: LocalizedError {
     switch self {
     case .serverTrustFailed:
       return "The server identity could not be verified. Check the server URL or certificate."
+    case .serverUnavailable:
+      return "Could not reach the server. Check your connection and try again."
     default:
       return "Sign-in could not be completed."
     }

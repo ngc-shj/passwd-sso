@@ -50,38 +50,31 @@ public struct SessionRestorer: Sendable {
   /// `validate`'s job.
   let makeSession: @Sendable (ServerConfig) async -> MobileAPIClient?
   let validate: @Sendable (MobileAPIClient) async -> SessionValidation
-  /// Whether a TLS pin is stored for this server. Distinguishes a
-  /// credentials-missing launch (no pin → sign-in) from a rotated-identity
-  /// launch with no local tokens (pin present → re-verify).
-  let pinExists: @Sendable (ServerConfig) async -> Bool
 
   public init(
     loadConfig: @escaping @Sendable () -> ServerConfig?,
     hasTokens: @escaping @Sendable () -> Bool,
     makeSession: @escaping @Sendable (ServerConfig) async -> MobileAPIClient?,
-    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation,
-    pinExists: @escaping @Sendable (ServerConfig) async -> Bool = { _ in false }
+    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation
   ) {
     self.loadConfig = loadConfig
     self.hasTokens = hasTokens
     self.makeSession = makeSession
     self.validate = validate
-    self.pinExists = pinExists
   }
 
   public func restore() async -> RestoredSession {
     guard let config = loadConfig() else { return .needsSetup }
-    guard hasTokens() else {
-      // No local tokens. If a pin is stored the server may have rotated its
-      // identity — offer re-verify so the user isn't stuck at a sign-in that
-      // silently fails the pinned TLS handshake. With no pin, plain sign-in.
-      return await pinExists(config) ? .serverIdentityChanged(config) : .needsSignIn(config)
-    }
+    // No local tokens → plain sign-in. A genuine identity change is NOT detected
+    // here (that would require a network probe on every tokenless launch, e.g.
+    // right after server setup, mis-warning when nothing changed); it surfaces
+    // during the sign-in TLS handshake and is routed to re-verify via
+    // AuthError.serverTrustFailed → onServerTrustFailed.
+    guard hasTokens() else { return .needsSignIn(config) }
     guard let client = await makeSession(config) else {
-      // No client despite tokens → signer/pin missing. A stored pin means the
-      // pin is intact but the signer is gone (sign-in re-derives it); no pin
-      // means first-trust. Either way, sign-in — NOT identity-changed, which is
-      // reserved for a validate() TLS rejection.
+      // No client despite tokens → signer/pin missing. Sign-in re-derives the
+      // signer (or re-pins); NOT identity-changed, which is reserved for a
+      // validate() TLS rejection.
       return .needsSignIn(config)
     }
     switch await validate(client) {
@@ -139,45 +132,32 @@ extension SessionRestorer {
         )
       },
       validate: { client in
+        // First, an explicit non-mutating pin probe. This reads the delegate's
+        // authoritative mismatch flag (via ServerTrustError.pinMismatch) rather
+        // than guessing from an unspecified URLError.Code.
+        let serverURL = client.serverURL
+        let probe = await ServerTrustService().probePinnedIdentity(
+          for: serverURL,
+          healthURL: serverURL.appending(path: APIPath.healthLive, directoryHint: .notDirectory)
+        )
+        switch probe {
+        case .mismatch:
+          return .identityMismatch
+        case .unreachable, .pinMissing:
+          // Presumed transient / not-yet-pinned: keep the cached vault usable.
+          return .offline
+        case .match:
+          break  // identity is good — fall through to token validity
+        }
         do {
           try await client.ensureValidSession()
           return .ok
-        } catch let MobileAPIError.networkError(urlError) {
-          // A pinned-TLS rejection surfaces as a URLError. Treat the
-          // certificate/handshake-failure codes as an identity change; genuine
-          // connectivity codes stay offline (cached vault remains usable).
-          return isTLSTrustFailure(urlError) ? .identityMismatch : .offline
+        } catch MobileAPIError.networkError {
+          return .offline
         } catch {
           return .dead
         }
-      },
-      pinExists: { config in
-        await ServerTrustService().currentPinExists(for: config.baseURL)
       }
     )
-  }
-}
-
-/// URLError codes that indicate the server's TLS identity was rejected (pin
-/// mismatch / untrusted cert), as opposed to plain connectivity failures.
-///
-/// Deliberately EXCLUDES `.cancelled`: although `LeafKeyPinningDelegate` cancels
-/// the challenge on a pin mismatch (which surfaces as `.cancelled`), that code
-/// is also produced by ordinary task cancellation. Misclassifying a benign
-/// cancel as an identity change is the dangerous direction (it trains reflexive
-/// re-verify and blocks offline unlock), so a mismatch that arrives ONLY as
-/// `.cancelled` falls through to `.offline` here and is caught again by the pin
-/// enforcement on the next real API call — fail-safe.
-private func isTLSTrustFailure(_ error: URLError) -> Bool {
-  switch error.code {
-  case .serverCertificateUntrusted,
-    .serverCertificateHasBadDate,
-    .serverCertificateHasUnknownRoot,
-    .serverCertificateNotYetValid,
-    .secureConnectionFailed,
-    .clientCertificateRejected:
-    return true
-  default:
-    return false
   }
 }

@@ -59,6 +59,18 @@ public enum ValidateResult: Sendable, Equatable {
   case mismatch(stored: PinSet, observed: PinSet)
 }
 
+/// Outcome of a non-mutating launch-time pin probe (`probePinnedIdentity`).
+public enum PinProbeResult: Sendable, Equatable {
+  /// Current TLS identity matches the stored pin.
+  case match
+  /// Delegate rejected the identity — genuine key rotation or MITM.
+  case mismatch
+  /// Could not reach the server (offline / DNS / timeout). Pin presumed intact.
+  case unreachable
+  /// No pin stored for this server.
+  case pinMissing
+}
+
 // MARK: - Service
 
 /// TOFU pinning for the server TLS leaf public key.
@@ -179,16 +191,7 @@ public actor ServerTrustService {
     let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
     defer { session.finishTasksAndInvalidate() }
 
-    var request = URLRequest(url: healthURL)
-    request.timeoutInterval = 10
-    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-    let (data, response) = try await session.data(for: request)
-    guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
-      throw ServerTrustError.invalidHealthResponse
-    }
-    guard let observedTLS = delegate.capturedLeafKeyHash else {
-      throw ServerTrustError.tlsKeyUnavailable
-    }
+    let observedTLS = try await probeLeafKey(session: session, delegate: delegate, healthURL: healthURL)
 
     if stored == nil {
       // aasaSHA256 is retained in the Codable shape for upgrades from earlier
@@ -199,6 +202,35 @@ public actor ServerTrustService {
         PinSet(aasaSHA256: Data(), tlsLeafKeySHA256: observedTLS)
       )
     }
+  }
+
+  /// Run the health probe over `session` and return the captured leaf-key hash.
+  /// Converts a delegate-detected identity rejection into an explicit
+  /// `.pinMismatch` (rather than leaking the unspecified `URLError.Code` a
+  /// cancelled challenge produces) so callers can route it deterministically.
+  private func probeLeafKey(
+    session: URLSession,
+    delegate: LeafKeyPinningDelegate,
+    healthURL: URL
+  ) async throws -> Data {
+    var request = URLRequest(url: healthURL)
+    request.timeoutInterval = 10
+    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    let data: Data
+    let response: URLResponse
+    do {
+      (data, response) = try await session.data(for: request)
+    } catch {
+      if delegate.pinMismatchDetected { throw ServerTrustError.pinMismatch }
+      throw error  // genuine connectivity failure — surfaces as URLError upstream
+    }
+    guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
+      throw ServerTrustError.invalidHealthResponse
+    }
+    guard let observedTLS = delegate.capturedLeafKeyHash else {
+      throw ServerTrustError.tlsKeyUnavailable
+    }
+    return observedTLS
   }
 
   /// Atomically replace the pin for a server whose TLS key legitimately rotated.
@@ -227,16 +259,7 @@ public actor ServerTrustService {
     let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
     defer { session.finishTasksAndInvalidate() }
 
-    var request = URLRequest(url: healthURL)
-    request.timeoutInterval = 10
-    request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-    let (data, response) = try await session.data(for: request)
-    guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
-      throw ServerTrustError.invalidHealthResponse
-    }
-    guard let observedTLS = delegate.capturedLeafKeyHash else {
-      throw ServerTrustError.tlsKeyUnavailable
-    }
+    let observedTLS = try await probeLeafKey(session: session, delegate: delegate, healthURL: healthURL)
 
     // Overwrite only now, after full verification succeeded.
     try await pin(
@@ -276,6 +299,36 @@ public actor ServerTrustService {
   public func validatedSession(for serverURL: URL, healthURL: URL) async throws -> URLSession {
     try await establishTrust(serverURL: serverURL, healthURL: healthURL)
     return try await pinnedSession(for: serverURL)
+  }
+
+  /// Probe the stored pin against the server's current TLS identity WITHOUT
+  /// modifying the pin. Used at launch to distinguish a genuine identity change
+  /// (→ re-verify) from a transient outage (→ keep the cached vault usable),
+  /// reading the delegate's authoritative mismatch flag rather than guessing
+  /// from `URLError.Code`.
+  public func probePinnedIdentity(for serverURL: URL, healthURL: URL) async -> PinProbeResult {
+    guard let stored = try? await currentPin(for: serverURL) else {
+      return .pinMissing
+    }
+    let delegate = LeafKeyPinningDelegate(
+      expectedLeafKeyHash: stored.tlsLeafKeySHA256,
+      expectedHost: serverURL.host
+    )
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.waitsForConnectivity = false
+    configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+    let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+    defer { session.finishTasksAndInvalidate() }
+    do {
+      _ = try await probeLeafKey(session: session, delegate: delegate, healthURL: healthURL)
+      return .match
+    } catch ServerTrustError.pinMismatch {
+      return .mismatch
+    } catch {
+      // Connectivity failure or a non-mismatch trust error — the pin is
+      // presumed intact; treat as unreachable so the cached vault stays usable.
+      return .unreachable
+    }
   }
 
   // MARK: - Helpers
@@ -328,6 +381,11 @@ public func hashAASA(_ data: Data) -> Data {
 public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
   private let lock = NSLock()
   private var _capturedLeafKeyHash: Data?
+  /// Set when the delegate cancels a challenge because the leaf key / host /
+  /// default trust did not match — the AUTHORITATIVE mismatch signal. Callers
+  /// read this after a request fails instead of guessing from `URLError.Code`
+  /// (Apple does not contract which code a cancelled challenge produces).
+  private var _pinMismatchDetected = false
   private let expectedLeafKeyHash: Data?
   private let expectedHost: String?
 
@@ -342,6 +400,20 @@ public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @un
     return _capturedLeafKeyHash
   }
 
+  /// Whether the delegate rejected the server's TLS identity (leaf-key mismatch,
+  /// host mismatch, or failed default trust) during the last handshake.
+  public var pinMismatchDetected: Bool {
+    lock.lock()
+    defer { lock.unlock() }
+    return _pinMismatchDetected
+  }
+
+  private func flagMismatch() {
+    lock.lock()
+    _pinMismatchDetected = true
+    lock.unlock()
+  }
+
   public func urlSession(
     _ session: URLSession,
     didReceive challenge: URLAuthenticationChallenge,
@@ -354,6 +426,7 @@ public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @un
       return
     }
     guard expectedHost == nil || challenge.protectionSpace.host.lowercased() == expectedHost else {
+      flagMismatch()
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
@@ -362,15 +435,19 @@ public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @un
     var error: CFError?
     let trusted = SecTrustEvaluateWithError(serverTrust, &error)
     guard trusted else {
+      flagMismatch()
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
 
     guard let hash = extractLeafKeyHash(serverTrust: serverTrust) else {
+      // Key extraction failure is not an identity mismatch — leave the flag
+      // unset so it surfaces as a generic trust/availability error.
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
     if let expectedLeafKeyHash, hash != expectedLeafKeyHash {
+      flagMismatch()
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
     }
@@ -424,6 +501,11 @@ public enum ServerTrustError: Error, Equatable {
   case pinMissing
   case tlsKeyUnavailable
   case invalidHealthResponse
+  /// The presented leaf key did not match the stored pin (or default CA trust /
+  /// host binding failed) — a genuine identity change or MITM. Surfaced
+  /// explicitly by the delegate so callers do not have to guess from an
+  /// unspecified `URLError.Code`.
+  case pinMismatch
 }
 
 extension ServerTrustError: LocalizedError {
@@ -437,6 +519,8 @@ extension ServerTrustError: LocalizedError {
       return "Could not verify the server TLS identity."
     case .invalidHealthResponse:
       return "The server did not return a valid passwd-sso health response."
+    case .pinMismatch:
+      return "The server's security identity does not match the one saved on this device."
     }
   }
 }

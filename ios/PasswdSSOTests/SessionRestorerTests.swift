@@ -29,16 +29,14 @@ final class SessionRestorerTests: XCTestCase {
     loadConfig: @escaping @Sendable () -> ServerConfig?,
     hasTokens: @escaping @Sendable () -> Bool = { true },
     makeSession: (@Sendable (ServerConfig) async -> MobileAPIClient?)? = nil,
-    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation = { _ in .ok },
-    pinExists: @escaping @Sendable (ServerConfig) async -> Bool = { _ in false }
+    validate: @escaping @Sendable (MobileAPIClient) async -> SessionValidation = { _ in .ok }
   ) -> SessionRestorer {
     let client = dummyClient()
     return SessionRestorer(
       loadConfig: loadConfig,
       hasTokens: hasTokens,
       makeSession: makeSession ?? { _ in client },
-      validate: validate,
-      pinExists: pinExists
+      validate: validate
     )
   }
 
@@ -71,42 +69,6 @@ final class SessionRestorerTests: XCTestCase {
       loadConfig: { [config] in config },
       hasTokens: { true },
       makeSession: signerExportFailed
-    ).restore()
-    guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
-  }
-
-  // makeSession fails with tokens present → sign-in (signer re-derived there).
-  // A stored pin does NOT reroute this to re-verify — identity-changed is
-  // reserved for a validate() TLS rejection, not a build failure.
-  func testRestore_makeSessionNil_pinExists_stillNeedsSignIn() async {
-    let result = await makeRestorer(
-      loadConfig: { [config] in config },
-      hasTokens: { true },
-      makeSession: { _ in nil },
-      pinExists: { _ in true }
-    ).restore()
-    guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
-  }
-
-  // No tokens + a stored pin → the server may have rotated its identity; route
-  // to re-verify so sign-in doesn't silently hit the same pinned wall.
-  func testRestore_noTokens_pinExists_serverIdentityChanged() async {
-    let result = await makeRestorer(
-      loadConfig: { [config] in config },
-      hasTokens: { false },
-      pinExists: { _ in true }
-    ).restore()
-    guard case .serverIdentityChanged = result else {
-      return XCTFail("expected .serverIdentityChanged, got \(result)")
-    }
-  }
-
-  // No tokens + no pin → plain sign-in.
-  func testRestore_noTokens_noPin_needsSignIn() async {
-    let result = await makeRestorer(
-      loadConfig: { [config] in config },
-      hasTokens: { false },
-      pinExists: { _ in false }
     ).restore()
     guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
   }

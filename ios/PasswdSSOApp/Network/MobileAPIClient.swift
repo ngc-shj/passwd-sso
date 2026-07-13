@@ -166,7 +166,9 @@ public struct UpdateEntryRequest: Sendable, Codable {
 /// The client owns DPoP proof construction per request and echoes the last
 /// `DPoP-Nonce` header the server issued. Concurrent calls are serialized by `actor`.
 public actor MobileAPIClient: VaultUnlockDataSource {
-  let serverURL: URL
+  /// `nonisolated` so launch-restore can read it to build the pin probe URL
+  /// without hopping onto the actor. Immutable + Sendable, so this is safe.
+  nonisolated let serverURL: URL
   let signer: DPoPSigner
   let jwk: [String: String]
   let tokenStore: HostTokenStore
