@@ -245,6 +245,9 @@ struct RootView: View {
           appState = .signedIn(serverConfig: config, apiClient: apiClient)
         }
       },
+      onServerTrustFailed: {
+        appState = .serverIdentityChanged(serverConfig: config)
+      },
       onEnterDemo: {
         if let demo = try? DemoVaultFactory.makeDemoVault() {
           appState = .demo(demo)

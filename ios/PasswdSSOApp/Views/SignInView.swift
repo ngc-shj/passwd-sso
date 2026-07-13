@@ -34,6 +34,9 @@ struct SignInView: View {
   /// before authenticating (the URL setup screen is skipped on a known server).
   let serverURL: URL
   let onSignedIn: (TokenPair) -> Void
+  /// The server's pinned TLS identity was rejected during sign-in — route to the
+  /// re-verify affordance instead of showing a dead-end error.
+  var onServerTrustFailed: (() -> Void)? = nil
   var onEnterDemo: (() -> Void)? = nil
 
   @State private var state: SignInViewState = .idle
@@ -106,6 +109,11 @@ struct SignInView: View {
       onSignedIn(pair)
     } catch AuthError.webAuthCancelled {
       state = .idle
+    } catch AuthError.serverTrustFailed {
+      // The pinned TLS identity was rejected — hand off to the re-verify flow
+      // rather than stranding the user on a generic error.
+      state = .idle
+      onServerTrustFailed?()
     } catch {
       state = .error(message: error.localizedDescription)
     }

@@ -75,13 +75,25 @@ final class SessionRestorerTests: XCTestCase {
     guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
   }
 
-  // makeSession fails (pinned probe / TLS mismatch) AND a pin exists →
-  // route to re-verify, not a plain sign-in that would silently hit the same wall.
-  func testRestore_makeSessionNil_pinExists_serverIdentityChanged() async {
+  // makeSession fails with tokens present → sign-in (signer re-derived there).
+  // A stored pin does NOT reroute this to re-verify — identity-changed is
+  // reserved for a validate() TLS rejection, not a build failure.
+  func testRestore_makeSessionNil_pinExists_stillNeedsSignIn() async {
     let result = await makeRestorer(
       loadConfig: { [config] in config },
       hasTokens: { true },
       makeSession: { _ in nil },
+      pinExists: { _ in true }
+    ).restore()
+    guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
+  }
+
+  // No tokens + a stored pin → the server may have rotated its identity; route
+  // to re-verify so sign-in doesn't silently hit the same pinned wall.
+  func testRestore_noTokens_pinExists_serverIdentityChanged() async {
+    let result = await makeRestorer(
+      loadConfig: { [config] in config },
+      hasTokens: { false },
       pinExists: { _ in true }
     ).restore()
     guard case .serverIdentityChanged = result else {
@@ -89,12 +101,11 @@ final class SessionRestorerTests: XCTestCase {
     }
   }
 
-  // makeSession fails but NO pin exists → normal missing-credential path.
-  func testRestore_makeSessionNil_noPin_needsSignIn() async {
+  // No tokens + no pin → plain sign-in.
+  func testRestore_noTokens_noPin_needsSignIn() async {
     let result = await makeRestorer(
       loadConfig: { [config] in config },
-      hasTokens: { true },
-      makeSession: { _ in nil },
+      hasTokens: { false },
       pinExists: { _ in false }
     ).restore()
     guard case .needsSignIn = result else { return XCTFail("expected .needsSignIn, got \(result)") }
@@ -105,6 +116,8 @@ final class SessionRestorerTests: XCTestCase {
     guard case .needsUnlock = result else { return XCTFail("expected .needsUnlock, got \(result)") }
   }
 
+  // Offline (transient) with a valid pin → cached vault stays unlockable; NOT a
+  // server-identity warning.
   func testRestore_validateOffline_needsUnlock() async {
     let result = await makeRestorer(loadConfig: { [config] in config }, validate: { _ in .offline }).restore()
     guard case .needsUnlock = result else { return XCTFail("expected .needsUnlock, got \(result)") }
@@ -113,6 +126,17 @@ final class SessionRestorerTests: XCTestCase {
   func testRestore_validateDead_needsReauth() async {
     let result = await makeRestorer(loadConfig: { [config] in config }, validate: { _ in .dead }).restore()
     guard case .needsReauth = result else { return XCTFail("expected .needsReauth, got \(result)") }
+  }
+
+  // validate() reports a pinned-TLS rejection → re-verify affordance.
+  func testRestore_validateIdentityMismatch_serverIdentityChanged() async {
+    let result = await makeRestorer(
+      loadConfig: { [config] in config },
+      validate: { _ in .identityMismatch }
+    ).restore()
+    guard case .serverIdentityChanged = result else {
+      return XCTFail("expected .serverIdentityChanged, got \(result)")
+    }
   }
 
   // MARK: - validate is not invoked when a precondition fails

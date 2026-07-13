@@ -25,7 +25,10 @@ public enum RestoredSession: Sendable {
 }
 
 /// Result of probing whether the persisted session can still reach the server.
-public enum SessionValidation: Sendable { case ok, offline, dead }
+/// `identityMismatch` is distinct from `dead`/`offline`: only a rejected TLS pin
+/// (genuine key rotation or MITM) routes to the re-verify affordance; a
+/// reachability failure keeps the cached vault usable offline.
+public enum SessionValidation: Sendable { case ok, offline, dead, identityMismatch }
 
 // MARK: - Session restorer
 
@@ -34,15 +37,22 @@ public enum SessionValidation: Sendable { case ok, offline, dead }
 /// destructive cleanup (tenant policy / QuickType / token wipe stay on the
 /// explicit Sign-Out path). The routing is expressed over injected closures so
 /// it is unit-testable without a real Secure Enclave or network.
+///
+/// `makeSession` builds the client WITHOUT a network round-trip (it uses the
+/// stored pin to construct a pinned session, or reports the pin missing). All
+/// reachability / identity probing happens in `validate`, so an offline launch
+/// still yields a client and the cached vault stays unlockable.
 public struct SessionRestorer: Sendable {
   let loadConfig: @Sendable () -> ServerConfig?
   let hasTokens: @Sendable () -> Bool
+  /// Returns the client on success, or `nil` when credentials/signer/pin are
+  /// missing (→ sign-in). Must NOT hit the network — identity/reachability is
+  /// `validate`'s job.
   let makeSession: @Sendable (ServerConfig) async -> MobileAPIClient?
   let validate: @Sendable (MobileAPIClient) async -> SessionValidation
-  /// Whether a TLS pin is stored for this server. Used to disambiguate a
-  /// `makeSession` failure: with a pin present, the failure is a pinned-probe /
-  /// identity-mismatch (→ `.serverIdentityChanged`); with no pin it is a plain
-  /// missing-credential case (→ `.needsSignIn`).
+  /// Whether a TLS pin is stored for this server. Distinguishes a
+  /// credentials-missing launch (no pin → sign-in) from a rotated-identity
+  /// launch with no local tokens (pin present → re-verify).
   let pinExists: @Sendable (ServerConfig) async -> Bool
 
   public init(
@@ -61,22 +71,27 @@ public struct SessionRestorer: Sendable {
 
   public func restore() async -> RestoredSession {
     guard let config = loadConfig() else { return .needsSetup }
-    guard hasTokens() else { return .needsSignIn(config) }
+    guard hasTokens() else {
+      // No local tokens. If a pin is stored the server may have rotated its
+      // identity — offer re-verify so the user isn't stuck at a sign-in that
+      // silently fails the pinned TLS handshake. With no pin, plain sign-in.
+      return await pinExists(config) ? .serverIdentityChanged(config) : .needsSignIn(config)
+    }
     guard let client = await makeSession(config) else {
-      // makeSession failed. If a pin is stored, the failure is a pinned-probe /
-      // TLS-identity mismatch — route to re-verify, not a plain sign-in that
-      // would silently hit the same wall. With no pin, it's a normal
-      // missing-credential/first-trust case.
-      if await pinExists(config) {
-        return .serverIdentityChanged(config)
-      }
+      // No client despite tokens → signer/pin missing. A stored pin means the
+      // pin is intact but the signer is gone (sign-in re-derives it); no pin
+      // means first-trust. Either way, sign-in — NOT identity-changed, which is
+      // reserved for a validate() TLS rejection.
       return .needsSignIn(config)
     }
     switch await validate(client) {
     case .ok, .offline:
+      // Offline keeps the cached vault unlockable — the pin is presumed valid.
       return .needsUnlock(config, client)
     case .dead:
       return .needsReauth(config, client)
+    case .identityMismatch:
+      return .serverIdentityChanged(config)
     }
   }
 }
@@ -104,15 +119,14 @@ extension SessionRestorer {
           let jwk = try? await coordinator.currentJWK()
         else { return nil }
         let trustService = ServerTrustService()
-        guard let urlSession = try? await trustService.validatedSession(
-          for: config.baseURL,
-          healthURL: config.baseURL.appending(
-            path: APIPath.healthLive,
-            directoryHint: .notDirectory
-          )
-        )
-        else { return nil }
         let baseURL = config.baseURL
+        // pinnedSession does NO network round-trip: it builds a session from the
+        // stored pin (or throws .pinMissing). Reachability + identity are probed
+        // by validate(), so an offline launch still yields a client and the
+        // cached vault stays unlockable. `.pinMissing` → nil → sign-in.
+        guard let urlSession = try? await trustService.pinnedSession(for: baseURL) else {
+          return nil
+        }
         return MobileAPIClient(
           serverURL: config.baseURL,
           signer: signer,
@@ -124,32 +138,46 @@ extension SessionRestorer {
           }
         )
       },
-      pinExists: { config in
-        // Only treat a makeSession failure as an identity change when the local
-        // credentials ARE present (signer + jwk) — otherwise a plain
-        // missing-signer failure would be misrouted to re-verify. Combined with
-        // a stored pin, "credentials present + session build failed" is the
-        // pinned-probe / TLS-mismatch signature.
-        guard await ServerTrustService().currentPinExists(for: config.baseURL) else {
-          return false
-        }
-        let coordinator = AuthCoordinator(serverConfig: config, tokenStore: tokenStore)
-        guard await coordinator.loadPersistedSigner(),
-          (try? await coordinator.currentSigner()) != nil,
-          (try? await coordinator.currentJWK()) != nil
-        else { return false }
-        return true
-      },
       validate: { client in
         do {
           try await client.ensureValidSession()
           return .ok
-        } catch MobileAPIError.networkError {
-          return .offline
+        } catch let MobileAPIError.networkError(urlError) {
+          // A pinned-TLS rejection surfaces as a URLError. Treat the
+          // certificate/handshake-failure codes as an identity change; genuine
+          // connectivity codes stay offline (cached vault remains usable).
+          return isTLSTrustFailure(urlError) ? .identityMismatch : .offline
         } catch {
           return .dead
         }
+      },
+      pinExists: { config in
+        await ServerTrustService().currentPinExists(for: config.baseURL)
       }
     )
+  }
+}
+
+/// URLError codes that indicate the server's TLS identity was rejected (pin
+/// mismatch / untrusted cert), as opposed to plain connectivity failures.
+///
+/// Deliberately EXCLUDES `.cancelled`: although `LeafKeyPinningDelegate` cancels
+/// the challenge on a pin mismatch (which surfaces as `.cancelled`), that code
+/// is also produced by ordinary task cancellation. Misclassifying a benign
+/// cancel as an identity change is the dangerous direction (it trains reflexive
+/// re-verify and blocks offline unlock), so a mismatch that arrives ONLY as
+/// `.cancelled` falls through to `.offline` here and is caught again by the pin
+/// enforcement on the next real API call — fail-safe.
+private func isTLSTrustFailure(_ error: URLError) -> Bool {
+  switch error.code {
+  case .serverCertificateUntrusted,
+    .serverCertificateHasBadDate,
+    .serverCertificateHasUnknownRoot,
+    .serverCertificateNotYetValid,
+    .secureConnectionFailed,
+    .clientCertificateRejected:
+    return true
+  default:
+    return false
   }
 }
