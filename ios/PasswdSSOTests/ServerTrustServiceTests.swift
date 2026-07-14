@@ -505,4 +505,26 @@ final class ServerTrustServiceTests: XCTestCase {
     let stored = try await svc.currentPin(for: serverURL)
     XCTAssertEqual(stored, old, "a failed re-verification must leave the old pin intact (no unpinned window)")
   }
+
+  // MARK: - mapProbeFailure (the on-path translation the network probe runs)
+  //
+  // The seam tests above inject the probe outcome, so they bypass the real
+  // pinMismatchDetected -> .pinMismatch translation inside networkLeafKeyProbe.
+  // These lock that exact translation, which the production probe calls
+  // directly -- so deleting the delegate's flagMismatch(), or inverting the
+  // pinMismatchDetected check, now breaks a test instead of passing silently.
+
+  func testMapProbeFailureReturnsPinMismatchWhenFlagged() {
+    let underlying = URLError(.cancelled)  // what a cancelled TLS challenge looks like
+    let mapped = ServerTrustService.mapProbeFailure(underlying, pinMismatchDetected: true)
+    XCTAssertEqual(mapped as? ServerTrustError, .pinMismatch,
+                   "a delegate-flagged rejection must translate to .pinMismatch")
+  }
+
+  func testMapProbeFailurePassesThroughWhenNotFlagged() {
+    let underlying = URLError(.notConnectedToInternet)
+    let mapped = ServerTrustService.mapProbeFailure(underlying, pinMismatchDetected: false)
+    XCTAssertEqual(mapped as? URLError, underlying,
+                   "a genuine connectivity failure must pass through unchanged, NOT become .pinMismatch")
+  }
 }

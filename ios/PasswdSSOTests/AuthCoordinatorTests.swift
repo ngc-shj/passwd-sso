@@ -1,3 +1,4 @@
+import AuthenticationServices
 import CryptoKit
 import Foundation
 import Security
@@ -122,6 +123,46 @@ final class AuthCoordinatorTests: XCTestCase {
     }
   }
 
+  // MARK: - startSignIn trust-failure routing
+  //
+  // The trust probe runs before the DPoP key / web-auth steps, so injecting a
+  // ServerTrustService whose probe throws lets us assert the catch arms
+  // directly: a delegate-flagged mismatch routes to .serverTrustFailed
+  // (re-verify), any other transport failure to .serverUnavailable (retriable).
+  // Swapping those arms now breaks a test.
+
+  func testStartSignIn_pinMismatch_routesToServerTrustFailed() async {
+    let config = ServerConfig(baseURL: URL(string: "https://test.passwd-sso.example")!)
+    let trust = ServerTrustService(keychain: FakeKeychain()) { _, _, _ in
+      throw ServerTrustError.pinMismatch
+    }
+    let coordinator = AuthCoordinator(serverConfig: config, trustService: trust)
+    do {
+      _ = try await coordinator.startSignIn(presentationContext: StubPresentationContext())
+      XCTFail("Expected startSignIn to throw on a pin mismatch")
+    } catch AuthError.serverTrustFailed {
+      // Expected: genuine identity rejection routes to the re-verify flow.
+    } catch {
+      XCTFail("pinMismatch must map to .serverTrustFailed, got: \(error)")
+    }
+  }
+
+  func testStartSignIn_connectivityFailure_routesToServerUnavailable() async {
+    let config = ServerConfig(baseURL: URL(string: "https://test.passwd-sso.example")!)
+    let trust = ServerTrustService(keychain: FakeKeychain()) { _, _, _ in
+      throw URLError(.notConnectedToInternet)
+    }
+    let coordinator = AuthCoordinator(serverConfig: config, trustService: trust)
+    do {
+      _ = try await coordinator.startSignIn(presentationContext: StubPresentationContext())
+      XCTFail("Expected startSignIn to throw when the server is unreachable")
+    } catch AuthError.serverUnavailable {
+      // Expected: a transient failure is NOT an identity change.
+    } catch {
+      XCTFail("a connectivity failure must map to .serverUnavailable, got: \(error)")
+    }
+  }
+
   // MARK: - Helpers
 
   /// Generate a software (non-SE) P-256 key for simulator testing.
@@ -179,3 +220,16 @@ protocol AuthCoordinatorProtocol: Actor {
 }
 
 extension AuthCoordinator: AuthCoordinatorProtocol {}
+
+// MARK: - Presentation-context stub
+
+/// Minimal ASWebAuthenticationPresentationContextProviding for tests that fail
+/// before the web-auth step ever runs (the trust probe throws first), so the
+/// anchor is never actually consumed.
+final class StubPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding,
+  @unchecked Sendable
+{
+  func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+    ASPresentationAnchor()
+  }
+}

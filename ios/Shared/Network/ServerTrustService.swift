@@ -249,8 +249,11 @@ public actor ServerTrustService {
       do {
         (data, response) = try await session.data(for: request)
       } catch {
-        if delegate.pinMismatchDetected { throw ServerTrustError.pinMismatch }
-        throw error  // genuine connectivity failure — surfaces as URLError upstream
+        // A cancelled TLS challenge surfaces as an unspecified URLError; the
+        // delegate's flag is the authoritative mismatch signal. Kept as a pure
+        // function so this exact translation is testable on the real
+        // production path (not just behind an injected probe).
+        throw mapProbeFailure(error, pinMismatchDetected: delegate.pinMismatchDetected)
       }
       guard isValidPasswdSSOHealthResponse(data: data, response: response) else {
         throw ServerTrustError.invalidHealthResponse
@@ -260,6 +263,15 @@ public actor ServerTrustService {
       }
       return observedTLS
     }
+
+  /// Translate a probe transport failure into the caller-facing error. When the
+  /// delegate flagged an identity rejection (leaf-key/host/default-trust
+  /// mismatch), the underlying `URLError.Code` is unspecified, so surface the
+  /// explicit `.pinMismatch`; otherwise the original connectivity error passes
+  /// through. `nonisolated`/`static` so the mapping is unit-testable directly.
+  nonisolated static func mapProbeFailure(_ error: Error, pinMismatchDetected: Bool) -> Error {
+    pinMismatchDetected ? ServerTrustError.pinMismatch : error
+  }
 
   /// Atomically replace the pin for a server whose TLS key legitimately rotated.
   /// Unlike a `clearPin` + `establishTrust` sequence, the OLD pin is kept until
