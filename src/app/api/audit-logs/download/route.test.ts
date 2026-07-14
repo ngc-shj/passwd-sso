@@ -1,5 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+
+// Shrink the streaming cap for tests. The route (via audit-log-stream) reads
+// these same constants, so the MAX_ROWS-reached path stays identical in shape
+// while streaming 4 batches instead of 200 — the production 100k value made
+// the test genuinely stream 100k rows and flake past even a 30s timeout under
+// full-suite CPU contention.
+vi.mock("@/lib/validations/common.server", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/validations/common.server")>()),
+  AUDIT_LOG_BATCH_SIZE: 500,
+  AUDIT_LOG_MAX_ROWS: 2000,
+}));
+
 import { AUDIT_LOG_MAX_ROWS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
 
 const {
@@ -276,10 +288,7 @@ describe("GET /api/audit-logs/download", () => {
 
     expect(callCount).toBe(maxBatches);
     expect(mockPrismaAuditLog.findMany).toHaveBeenCalledTimes(maxBatches);
-    // 30s: the route genuinely streams MAX_ROWS (100k) rows here, so it runs
-    // several seconds even drained — the default 10s timeout is flaky under
-    // full-suite CPU contention.
-  }, 30_000);
+  });
 
   it("records audit log download event", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
