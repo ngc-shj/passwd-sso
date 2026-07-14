@@ -169,6 +169,7 @@ run_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
 run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
+run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
 
 if [ "$RUN_WEB" != "1" ]; then
   printf "${BOLD}▸ Web steps skipped${RESET}  (no app-filter paths changed — iOS-only diff; set PRE_PR_FORCE_FULL=1 to override)\n\n"
