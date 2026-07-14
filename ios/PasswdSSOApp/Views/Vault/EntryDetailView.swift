@@ -17,19 +17,23 @@ struct EntryDetailView: View {
   var apiClient: MobileAPIClient? = nil
   var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
-  /// Why the vault is read-only, or `nil` when fully editable (signed-in). Demo
-  /// Mode hides Edit; a dead session disables it with a sign-in hint.
-  ///
-  /// Captured by value at push time — SwiftUI evaluates the NavigationLink
-  /// destination once, so a session that dies (or recovers) while this detail is
-  /// already on screen does NOT restyle Edit until the user pops back and
-  /// re-opens the entry. That is acceptable: the server fail-closes on any Edit
-  /// submit regardless, and the list screen (which reads the live state) shows
-  /// the offline banner. Only the pushed detail's affordance lags a mid-view flip.
-  var readOnlyReason: ReadOnlyReason? = nil
+  /// Demo Mode marker: hides Edit entirely (the "Demo Mode" chip already frames
+  /// the browse-only state). Set only by `DemoVaultView`. A live (non-demo) read-
+  /// only state comes from the session instead — see `readOnlyReason` below.
+  var isDemo: Bool = false
   /// Resolved server favicon opt-in, threaded from the list (C7) so the detail
   /// icon stays consistent with the rows rather than re-reading the store (F-3).
   var showFavicons: Bool = false
+
+  /// Live read-only reason. Demo is a fixed marker; otherwise it derives from the
+  /// SHARED view-model's `isSessionExpired`, so a session that dies (or recovers)
+  /// while this detail is already on screen restyles Edit immediately — not only
+  /// after pop-back. (The NavigationLink destination is captured once, but the
+  /// `@Observable` view-model read here stays live.) The server still fail-closes
+  /// on any Edit submit; this keeps the UI affordance honest in real time.
+  private var readOnlyReason: ReadOnlyReason? {
+    isDemo ? .demo : listReadOnlyReason(sessionExpired: viewModel.isSessionExpired)
+  }
 
   @State private var detail: VaultEntryDetail?
   @State private var loadFailed: Bool = false
@@ -100,8 +104,10 @@ struct EntryDetailView: View {
         ToolbarItem(placement: .topBarTrailing) {
           Button("Edit") { isShowingEditForm = true }
             .disabled(affordance == .disabledWithHint)
+            // verbatim empty when enabled: a plain `Text("")` would be extracted
+            // into the String Catalog as an empty "" key (fails ja-coverage).
             .accessibilityHint(
-              affordance == .disabledWithHint ? Text("Sign in again to edit") : Text(""))
+              affordance == .disabledWithHint ? Text("Sign in again to edit") : Text(verbatim: ""))
         }
       }
     }
@@ -109,7 +115,13 @@ struct EntryDetailView: View {
     // just-saved edit is reflected immediately (the VM refreshes cacheData after
     // the PUT+sync; without this trigger the view keeps showing pre-edit values).
     .sheet(isPresented: $isShowingEditForm, onDismiss: { loadDetail() }) {
-      if let detail, let apiClient, let hostSyncService {
+      // Content-level re-guard, symmetric with the create sheet: only present the
+      // edit form while editing is actually enabled. If the session died between
+      // the tap and the sheet build, this refuses to show a doomed form (the
+      // `.onChange` below also dismisses an already-open one). Server fail-closes
+      // regardless; this is the UI backstop.
+      if editAffordance(readOnlyReason: readOnlyReason) == .enabled,
+        let detail, let apiClient, let hostSyncService {
         EntryForm(
           mode: .edit(summary: summary, initial: detail),
           vaultKey: vaultKey,
@@ -121,6 +133,11 @@ struct EntryDetailView: View {
           cacheKey: cacheKey
         )
       }
+    }
+    // A session that dies while the edit form is open dismisses it — mirrors the
+    // create-sheet dismissal in VaultListView. Reads the live VM flag.
+    .onChange(of: viewModel.isSessionExpired) { _, expired in
+      if expired { isShowingEditForm = false }
     }
     .onAppear {
       loadDetail()

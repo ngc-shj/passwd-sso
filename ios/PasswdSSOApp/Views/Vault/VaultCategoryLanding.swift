@@ -77,7 +77,10 @@ struct VaultCategoryListView: View {
   var apiClient: MobileAPIClient? = nil
   var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
-  var readOnlyReason: ReadOnlyReason? = nil
+  /// Demo Mode marker forwarded to `EntryDetailView`. A live (non-demo) read-only
+  /// state is derived inside the detail view from the shared VM's session flag,
+  /// so it stays live rather than frozen at push time.
+  var isDemo: Bool = false
   var showFavicons: Bool = false
 
   // Seed synchronously so an already-active recording never shows a frame of
@@ -108,7 +111,7 @@ struct VaultCategoryListView: View {
               apiClient: apiClient,
               hostSyncService: hostSyncService,
               cacheKey: cacheKey,
-              readOnlyReason: readOnlyReason,
+              isDemo: isDemo,
               showFavicons: showFavicons
             )
           } label: {

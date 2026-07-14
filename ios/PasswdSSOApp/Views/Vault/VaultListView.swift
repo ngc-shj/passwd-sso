@@ -137,10 +137,14 @@ struct VaultListView: View {
           )
         }
       }
-      // A session that dies mid-compose (foreground/silent sync flips
-      // `sessionExpired`) dismisses an open create form — the create button is
-      // already disabled, so this only handles the in-flight sheet.
+      // Mirror the live session-expired state onto the shared view-model so
+      // already-pushed detail/category views restyle their Edit control on a
+      // mid-view flip (they read `viewModel.isSessionExpired`, not a push-time
+      // snapshot). Also dismiss an open create form when the session dies
+      // mid-compose — the create button is already disabled, so this handles
+      // only the in-flight sheet.
       .onChange(of: sessionExpired) { _, expired in
+        viewModel.isSessionExpired = expired
         if expired { isShowingCreateForm = false }
       }
       // Search moved from the top navigation drawer to the bottom bar (native
@@ -189,6 +193,10 @@ struct VaultListView: View {
         sessionExpired = sessionExpiredAtUnlock
         didSeedSession = true
       }
+      // Mirror the seed onto the VM too (the `.onChange` fires only on a CHANGE,
+      // so an entered-already-expired vault would otherwise leave the VM's copy
+      // stale until the next flip). Idempotent on pop-back re-appear.
+      viewModel.isSessionExpired = sessionExpired
       reload(cacheData)
       updateScreenRecordingState()
       // Configure the favicon loader BEFORE resolving showFavicons so the first
@@ -327,7 +335,9 @@ struct VaultListView: View {
         .disabled(!canCreateEntry)
         .opacity(canCreateEntry ? 1 : 0.4)
         .accessibilityLabel("Create entry")
-        .accessibilityHint(canCreateEntry ? Text("") : Text("Sign in again to create entries"))
+        // verbatim empty when enabled: a plain `Text("")` would be extracted into
+        // the String Catalog as an empty "" key (fails the ja-coverage test).
+        .accessibilityHint(canCreateEntry ? Text(verbatim: "") : Text("Sign in again to create entries"))
       }
     }
     .padding(.horizontal)
@@ -397,7 +407,6 @@ struct VaultListView: View {
               apiClient: apiClient,
               hostSyncService: hostSyncService,
               cacheKey: cacheKey,
-              readOnlyReason: readOnlyReason,
               showFavicons: showFavicons
             )
           } label: {
@@ -434,7 +443,6 @@ struct VaultListView: View {
           apiClient: apiClient,
           hostSyncService: hostSyncService,
           cacheKey: cacheKey,
-          readOnlyReason: readOnlyReason,
           showFavicons: showFavicons
         )
       } label: {

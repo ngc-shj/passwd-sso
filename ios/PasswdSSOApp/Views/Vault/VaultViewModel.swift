@@ -36,6 +36,15 @@ public enum VaultScope: Hashable, Sendable {
   /// cacheKey-decrypted team directory at load time).
   public var teamDirectory: [TeamDirectoryEntry] = []
 
+  /// Live "server session is dead" flag, mirrored from `VaultListView.sessionExpired`
+  /// (which owns the seed-once + sync-transition lifecycle). Held here — on the
+  /// shared, `@Observable` view-model — so pushed child views (detail/category)
+  /// read the CURRENT value rather than a value frozen at NavigationLink push
+  /// time: a session that dies while a detail view is on screen must restyle its
+  /// Edit control immediately, not only after pop-back. Demo Mode leaves this
+  /// false and drives read-only through an explicit `.demo` reason instead.
+  public var isSessionExpired: Bool = false
+
   var allSummaries: [VaultEntrySummary] = []
 
   /// Injected so tests use a clean per-test suite, not the shared App Group.
