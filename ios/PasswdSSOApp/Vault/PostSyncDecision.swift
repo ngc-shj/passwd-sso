@@ -108,6 +108,28 @@ public func syncFailedSessionExpired(from error: Error) -> Bool {
   return false
 }
 
+/// How a post-unlock `runSync` outcome should move the persistent "you're signed
+/// out" banner state. Extracted from `VaultListView.sync()` (a SwiftUI method,
+/// not XCTest-reachable) so the three transition arms are unit-testable — same
+/// rationale as `decidePostSync`/`syncFailedSessionExpired` above.
+public enum SessionBannerTransition: Equatable {
+  /// Sync reached the server → the session is alive; hide the banner.
+  case clear
+  /// Sync failed with a dead session (`authenticationRequired`); show the banner.
+  case show
+  /// A transient failure (offline / server blip) — the session state is unknown,
+  /// so LEAVE the banner as-is (a network blip must not clear a real signed-out
+  /// banner, nor raise one).
+  case unchanged
+}
+
+/// Map a `runSync` result to the banner transition. `error == nil` means the
+/// sync succeeded (reached the server).
+public func sessionBannerTransition(syncError error: Error?) -> SessionBannerTransition {
+  guard let error else { return .clear }
+  return syncFailedSessionExpired(from: error) ? .show : .unchanged
+}
+
 /// Map a fail-closed unlock (sync failed with no trustworthy local cache) to the
 /// banner outcome: a dead session routes to "sign in again", a mere offline failure
 /// to "try again with your passphrase".

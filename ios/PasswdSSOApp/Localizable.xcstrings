@@ -338,6 +338,54 @@
         }
       }
     },
+    "Showing saved items. Sign in again to make changes." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing saved items. Sign in again to make changes."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存済みの項目を表示しています。変更するには再度サインインしてください。"
+          }
+        }
+      }
+    },
+    "Signs out so you can sign in again" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signs out so you can sign in again"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サインアウトして再度サインインできるようにします"
+          }
+        }
+      }
+    },
+    "You're signed out" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You're signed out"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サインアウトしました"
+          }
+        }
+      }
+    },
     "biometrics" : {
       "comment" : "Fallback biometry name when neither Face ID nor Touch ID is detected.",
       "extractionState" : "stale",
@@ -2856,54 +2904,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "セッション情報が古くなっています。パスフレーズを入力して解錠してください。"
-          }
-        }
-      }
-    },
-    "Locks the vault so you can sign in again" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Locks the vault so you can sign in again"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保管庫をロックして再度サインインできるようにします"
-          }
-        }
-      }
-    },
-    "Showing saved items. Sign in again to make changes." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Showing saved items. Sign in again to make changes."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "保存済みの項目を表示しています。変更するには再度サインインしてください。"
-          }
-        }
-      }
-    },
-    "You're signed out" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You're signed out"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "サインアウトしました"
           }
         }
       }
