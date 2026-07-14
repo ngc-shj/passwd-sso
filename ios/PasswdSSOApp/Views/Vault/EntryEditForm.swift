@@ -76,6 +76,23 @@ struct EntryForm: View {
   var body: some View {
     NavigationStack {
       Form {
+        // Surface the save error at the TOP of the form so it is visible without
+        // scrolling right after the user taps Save (the fields push a bottom-
+        // anchored error off-screen). Warning icon + a larger, non-caption font
+        // make it read as an alert rather than a footnote.
+        if let error = saveError {
+          Section {
+            Label {
+              Text(error)
+                .font(.subheadline)
+                .foregroundStyle(.red)
+            } icon: {
+              Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            }
+          }
+        }
+
         Section("Title") {
           TextField("Title", text: $title)
         }
@@ -114,14 +131,6 @@ struct EntryForm: View {
           Text("Tags, custom fields, generator settings, and password history are kept on save — edit those in the web app.")
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-
-        if let error = saveError {
-          Section {
-            Text(error)
-              .foregroundStyle(.red)
-              .font(.caption)
-          }
         }
       }
       .navigationTitle(navigationTitle)
