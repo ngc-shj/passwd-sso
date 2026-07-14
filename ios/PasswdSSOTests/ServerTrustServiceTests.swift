@@ -511,8 +511,13 @@ final class ServerTrustServiceTests: XCTestCase {
   // The seam tests above inject the probe outcome, so they bypass the real
   // pinMismatchDetected -> .pinMismatch translation inside networkLeafKeyProbe.
   // These lock that exact translation, which the production probe calls
-  // directly -- so deleting the delegate's flagMismatch(), or inverting the
-  // pinMismatchDetected check, now breaks a test instead of passing silently.
+  // directly -- so inverting the flag->error mapping now breaks a test.
+  //
+  // Scope note: these pass pinMismatchDetected as a plain Bool, so they cover
+  // the mapping, NOT the delegate wiring. Whether the delegate actually SETS
+  // the flag (flagMismatch() on a leaf-key / host / default-trust rejection)
+  // needs a real TLS handshake or a pure-function extraction of the delegate's
+  // key comparison; deleting a flagMismatch() call would still pass here.
 
   func testMapProbeFailureReturnsPinMismatchWhenFlagged() {
     let underlying = URLError(.cancelled)  // what a cancelled TLS challenge looks like
