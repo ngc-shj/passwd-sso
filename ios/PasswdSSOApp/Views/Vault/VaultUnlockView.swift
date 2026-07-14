@@ -84,9 +84,17 @@ struct VaultUnlockView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
 
       if let error = resolveDisplayError(external: externalError, internalError: errorMessage) {
-        Text(error)
-          .font(.caption)
-          .foregroundStyle(.red)
+        // Larger than .caption + a warning icon so an unlock failure reads as an
+        // alert, matching the save-error styling in EntryForm. Position (between
+        // the field and the Unlock button) already avoids any scroll issue.
+        Label {
+          Text(error)
+            .font(.subheadline)
+            .foregroundStyle(.red)
+        } icon: {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+        }
       }
 
       Button("Unlock") {

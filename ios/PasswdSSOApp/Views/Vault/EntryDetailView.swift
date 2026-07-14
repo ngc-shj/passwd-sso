@@ -17,11 +17,23 @@ struct EntryDetailView: View {
   var apiClient: MobileAPIClient? = nil
   var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
-  /// When true, hides Edit controls and disables mutation. Used by DemoVaultView.
-  var isReadOnly: Bool = false
+  /// Demo Mode marker: hides Edit entirely (the "Demo Mode" chip already frames
+  /// the browse-only state). Set only by `DemoVaultView`. A live (non-demo) read-
+  /// only state comes from the session instead — see `readOnlyReason` below.
+  var isDemo: Bool = false
   /// Resolved server favicon opt-in, threaded from the list (C7) so the detail
   /// icon stays consistent with the rows rather than re-reading the store (F-3).
   var showFavicons: Bool = false
+
+  /// Live read-only reason. Demo is a fixed marker; otherwise it derives from the
+  /// SHARED view-model's `isSessionExpired`, so a session that dies (or recovers)
+  /// while this detail is already on screen restyles Edit immediately — not only
+  /// after pop-back. (The NavigationLink destination is captured once, but the
+  /// `@Observable` view-model read here stays live.) The server still fail-closes
+  /// on any Edit submit; this keeps the UI affordance honest in real time.
+  private var readOnlyReason: ReadOnlyReason? {
+    isDemo ? .demo : listReadOnlyReason(sessionExpired: viewModel.isSessionExpired)
+  }
 
   @State private var detail: VaultEntryDetail?
   @State private var loadFailed: Bool = false
@@ -82,11 +94,20 @@ struct EntryDetailView: View {
       // corrupt a non-login entry on save (empty login scalars + login-shaped
       // overview). Non-login entries are edited in the web app. nil/unknown
       // entryType falls back to LOGIN, so the button shows during load.
-      if !isReadOnly && EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType) {
+      //
+      // The affordance also depends on why the vault is read-only (if at all):
+      // Demo Mode hides Edit; a dead session keeps it visible-but-disabled so the
+      // user learns editing needs sign-in (the offline banner explaining that
+      // lives on the list screen, not on this pushed detail view).
+      let affordance = editAffordance(readOnlyReason: readOnlyReason)
+      if EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType), affordance != .hidden {
         ToolbarItem(placement: .topBarTrailing) {
-          Button("Edit") {
-            isShowingEditForm = true
-          }
+          Button("Edit") { isShowingEditForm = true }
+            .disabled(affordance == .disabledWithHint)
+            // verbatim empty when enabled: a plain `Text("")` would be extracted
+            // into the String Catalog as an empty "" key (fails ja-coverage).
+            .accessibilityHint(
+              affordance == .disabledWithHint ? Text("Sign in again to edit") : Text(verbatim: ""))
         }
       }
     }
@@ -94,7 +115,13 @@ struct EntryDetailView: View {
     // just-saved edit is reflected immediately (the VM refreshes cacheData after
     // the PUT+sync; without this trigger the view keeps showing pre-edit values).
     .sheet(isPresented: $isShowingEditForm, onDismiss: { loadDetail() }) {
-      if let detail, let apiClient, let hostSyncService {
+      // Content-level re-guard, symmetric with the create sheet: only present the
+      // edit form while editing is actually enabled. If the session died between
+      // the tap and the sheet build, this refuses to show a doomed form (the
+      // `.onChange` below also dismisses an already-open one). Server fail-closes
+      // regardless; this is the UI backstop.
+      if editAffordance(readOnlyReason: readOnlyReason) == .enabled,
+        let detail, let apiClient, let hostSyncService {
         EntryForm(
           mode: .edit(summary: summary, initial: detail),
           vaultKey: vaultKey,
@@ -106,6 +133,11 @@ struct EntryDetailView: View {
           cacheKey: cacheKey
         )
       }
+    }
+    // A session that dies while the edit form is open dismisses it — mirrors the
+    // create-sheet dismissal in VaultListView. Reads the live VM flag.
+    .onChange(of: viewModel.isSessionExpired) { _, expired in
+      if expired { isShowingEditForm = false }
     }
     .onAppear {
       loadDetail()
@@ -148,6 +180,19 @@ struct EntryDetailView: View {
           Spacer()
         }
         .listRowBackground(Color.clear)
+      }
+      // Read-only-because-signed-out hint: the list-screen offline banner isn't
+      // visible on this pushed view, so restate why Edit is disabled here. Shown
+      // only for iOS-editable (LOGIN) entries — a non-login entry has no iOS Edit
+      // button to disable, so this hint would misdirect ("edit in the web app"
+      // still applies, and its own footer says so).
+      if editAffordance(readOnlyReason: readOnlyReason) == .disabledWithHint,
+        EntryTypeCategory.isEditableOnIOS(rawType: d.entryType) {
+        Section {
+          Label("Sign in again to edit this entry.", systemImage: "wifi.exclamationmark")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
       // Render the field set for the entry's type. Each per-type section lives
       // in EntryDetailTypeSections.swift; LOGIN keeps its original rows so its

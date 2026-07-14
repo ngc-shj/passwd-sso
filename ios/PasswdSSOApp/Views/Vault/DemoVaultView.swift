@@ -122,7 +122,7 @@ struct DemoVaultView: View {
               userId: demo.userId,
               keyVersion: 1,
               viewModel: viewModel,
-              isReadOnly: true,
+              isDemo: true,
               showFavicons: presentation.showsFavicons
             )
           } label: {
@@ -154,7 +154,7 @@ struct DemoVaultView: View {
           userId: demo.userId,
           keyVersion: 1,
           viewModel: viewModel,
-          isReadOnly: true,
+          isDemo: true,
           showFavicons: presentation.showsFavicons
         )
       } label: {

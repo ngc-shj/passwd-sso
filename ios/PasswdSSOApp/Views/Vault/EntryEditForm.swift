@@ -76,6 +76,23 @@ struct EntryForm: View {
   var body: some View {
     NavigationStack {
       Form {
+        // Surface the save error at the TOP of the form so it is visible without
+        // scrolling right after the user taps Save (the fields push a bottom-
+        // anchored error off-screen). Warning icon + a larger, non-caption font
+        // make it read as an alert rather than a footnote.
+        if let error = saveError {
+          Section {
+            Label {
+              Text(error)
+                .font(.subheadline)
+                .foregroundStyle(.red)
+            } icon: {
+              Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            }
+          }
+        }
+
         Section("Title") {
           TextField("Title", text: $title)
         }
@@ -114,14 +131,6 @@ struct EntryForm: View {
           Text("Tags, custom fields, generator settings, and password history are kept on save — edit those in the web app.")
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-
-        if let error = saveError {
-          Section {
-            Text(error)
-              .foregroundStyle(.red)
-              .font(.caption)
-          }
         }
       }
       .navigationTitle(navigationTitle)
@@ -223,6 +232,13 @@ struct EntryForm: View {
   // TODO(ios-quota-exceeded-message): consider MobileAPIError: LocalizedError
   // for richer per-case save messages instead of one generic fallback.
   nonisolated static func saveErrorMessage(for error: Error) -> String {
+    // A dead session (server 401) can never be recovered by retrying — the
+    // generic "try again" would mislead. `syncFailedSessionExpired` classifies
+    // the same authenticationRequired case the read-only banner keys off, so the
+    // save message stays consistent with that flow.
+    if syncFailedSessionExpired(from: error) {
+      return L10n.string("Your session has expired. Sign in again to save your changes.")
+    }
     if (error as? MobileAPIError) == .quotaExceeded {
       return L10n.string("You've reached your vault's item limit. Remove unused items and try again.")
     }

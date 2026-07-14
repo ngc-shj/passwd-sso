@@ -45,6 +45,13 @@ struct VaultListView: View {
   @State private var showFavicons: Bool = false
   @Environment(\.scenePhase) private var scenePhase
 
+  /// Why the vault is read-only right now, or `nil` when fully editable. A dead
+  /// server session (offline read-only cache) suppresses create/edit affordances
+  /// as defence-in-depth on top of the server's fail-closed 401 on any mutation.
+  private var readOnlyReason: ReadOnlyReason? {
+    listReadOnlyReason(sessionExpired: sessionExpired)
+  }
+
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
@@ -113,16 +120,32 @@ struct VaultListView: View {
         SettingsView(autoLockService: autoLockService, apiClient: apiClient)
       }
       .sheet(isPresented: $isShowingCreateForm) {
-        EntryForm(
-          mode: .create,
-          vaultKey: vaultKey,
-          userId: userId,
-          keyVersion: keyVersion,
-          viewModel: viewModel,
-          apiClient: apiClient,
-          hostSyncService: hostSyncService,
-          cacheKey: cacheKey
-        )
+        // Content-level guard as well as the disabled + button: if the session
+        // dies while composing (the `.onChange` below also dismisses it), never
+        // present a doomed create form. Server still fail-closes on submit; this
+        // is the UI backstop.
+        if canCreate(readOnlyReason: readOnlyReason) {
+          EntryForm(
+            mode: .create,
+            vaultKey: vaultKey,
+            userId: userId,
+            keyVersion: keyVersion,
+            viewModel: viewModel,
+            apiClient: apiClient,
+            hostSyncService: hostSyncService,
+            cacheKey: cacheKey
+          )
+        }
+      }
+      // Mirror the live session-expired state onto the shared view-model so
+      // already-pushed detail/category views restyle their Edit control on a
+      // mid-view flip (they read `viewModel.isSessionExpired`, not a push-time
+      // snapshot). Also dismiss an open create form when the session dies
+      // mid-compose — the create button is already disabled, so this handles
+      // only the in-flight sheet.
+      .onChange(of: sessionExpired) { _, expired in
+        viewModel.isSessionExpired = expired
+        if expired { isShowingCreateForm = false }
       }
       // Search moved from the top navigation drawer to the bottom bar (native
       // Passwords-app pattern). Activity tracking stays on query change.
@@ -170,6 +193,10 @@ struct VaultListView: View {
         sessionExpired = sessionExpiredAtUnlock
         didSeedSession = true
       }
+      // Mirror the seed onto the VM too (the `.onChange` fires only on a CHANGE,
+      // so an entered-already-expired vault would otherwise leave the VM's copy
+      // stale until the next flip). Idempotent on pop-back re-appear.
+      viewModel.isSessionExpired = sessionExpired
       reload(cacheData)
       updateScreenRecordingState()
       // Configure the favicon loader BEFORE resolving showFavicons so the first
@@ -288,6 +315,12 @@ struct VaultListView: View {
       .background(Color(.secondarySystemBackground), in: Capsule())
 
       if !viewModel.isTeamScope {
+        // Suppressed (disabled + dimmed) while the session is dead — creating
+        // would hit a 401 anyway (server fail-closed). The persistent offline
+        // banner above explains the state; the disabled + reduced-opacity cue is
+        // the local reinforcement. `.disabled` also drops it from accessibility
+        // activation, so VoiceOver users can't trigger a doomed create.
+        let canCreateEntry = canCreate(readOnlyReason: readOnlyReason)
         Button {
           autoLockService.recordActivity()
           isShowingCreateForm = true
@@ -299,7 +332,12 @@ struct VaultListView: View {
         }
         .buttonStyle(.plain)
         .tint(.accentColor)
+        .disabled(!canCreateEntry)
+        .opacity(canCreateEntry ? 1 : 0.4)
         .accessibilityLabel("Create entry")
+        // verbatim empty when enabled: a plain `Text("")` would be extracted into
+        // the String Catalog as an empty "" key (fails the ja-coverage test).
+        .accessibilityHint(canCreateEntry ? Text(verbatim: "") : Text("Sign in again to create entries"))
       }
     }
     .padding(.horizontal)

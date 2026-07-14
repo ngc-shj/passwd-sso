@@ -23,4 +23,21 @@ final class EntryFormTests: XCTestCase {
     XCTAssertEqual(generic, expectedGeneric)
     XCTAssertNotEqual(quota, generic, "quota message must differ from the generic save-failure message")
   }
+
+  /// A dead session (server 401 → authenticationRequired) must NOT get the
+  /// generic "try again" message — retrying never recovers a dead session; the
+  /// user has to sign in again. The message must point them there.
+  func testSaveErrorMessage_deadSessionTellsUserToSignIn() {
+    let sessionExpired = EntryForm.saveErrorMessage(for: MobileAPIError.authenticationRequired)
+    let generic = EntryForm.saveErrorMessage(for: MobileAPIError.notFound)
+
+    let expectedSessionExpired = String(
+      localized: "Your session has expired. Sign in again to save your changes."
+    )
+
+    XCTAssertEqual(sessionExpired, expectedSessionExpired)
+    XCTAssertNotEqual(
+      sessionExpired, generic,
+      "a dead session must not show the generic retry message — retrying cannot recover it")
+  }
 }

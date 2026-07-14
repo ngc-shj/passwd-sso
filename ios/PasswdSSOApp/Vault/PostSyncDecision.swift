@@ -136,3 +136,54 @@ public func sessionBannerTransition(syncError error: Error?) -> SessionBannerTra
 public func failClosedResult(sessionExpired: Bool) -> UnlockedResult {
   sessionExpired ? .failedSessionExpired : .failedOffline
 }
+
+/// Why a vault view is read-only. The mutating-control affordance differs by
+/// reason (see `editAffordance` / `canCreate`): Demo Mode hides Edit entirely
+/// (the "Demo Mode" chip already explains the browse-only state), whereas a
+/// signed-out session keeps the control visible-but-disabled with a hint so the
+/// user learns *why* they can't edit — the offline banner that carries that
+/// context lives on the list screen and is not visible on a pushed detail view.
+///
+/// `nil` (the absence of a reason) means fully editable — the normal signed-in
+/// state.
+public enum ReadOnlyReason: Equatable {
+  /// Demo Mode: no live services, browse-only by construction.
+  case demo
+  /// The server session is dead; the vault is served read-only from the local
+  /// cache until the user signs in again.
+  case sessionExpired
+}
+
+/// How the per-entry Edit control should be presented given the read-only reason.
+public enum EditAffordance: Equatable {
+  /// Editable — show a normal, enabled Edit control.
+  case enabled
+  /// Show the Edit control disabled, with a hint explaining it needs sign-in.
+  case disabledWithHint
+  /// Hide the Edit control entirely.
+  case hidden
+}
+
+/// Decide how to present the Edit control. Signed-in → enabled; signed-out →
+/// visible-but-disabled with a "sign in to edit" hint; Demo Mode → hidden.
+public func editAffordance(readOnlyReason reason: ReadOnlyReason?) -> EditAffordance {
+  switch reason {
+  case .none: return .enabled
+  case .sessionExpired: return .disabledWithHint
+  case .demo: return .hidden
+  }
+}
+
+/// Whether the Create (+) control may act. Any read-only reason forbids creation;
+/// only the fully-editable (signed-in) state allows it.
+public func canCreate(readOnlyReason reason: ReadOnlyReason?) -> Bool {
+  reason == nil
+}
+
+/// Map the live `sessionExpired` banner state to the read-only reason for the
+/// vault list. A dead session degrades the list to read-only; otherwise it is
+/// fully editable. Extracted (mirrors `failClosedResult(sessionExpired:)`) so the
+/// boolean→reason projection is unit-testable rather than buried in a View.
+public func listReadOnlyReason(sessionExpired: Bool) -> ReadOnlyReason? {
+  sessionExpired ? .sessionExpired : nil
+}
