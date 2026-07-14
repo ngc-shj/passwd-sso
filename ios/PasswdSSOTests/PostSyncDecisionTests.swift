@@ -175,4 +175,43 @@ final class PostSyncDecisionTests: XCTestCase {
     struct Other: Error {}
     XCTAssertEqual(sessionBannerTransition(syncError: Other()), .unchanged)
   }
+
+  // MARK: - Read-only affordance (#664: suppress create/edit UI when signed out)
+
+  /// Fully editable (signed-in): Edit is a normal enabled control.
+  func testEditAffordance_signedIn_enabled() {
+    XCTAssertEqual(editAffordance(readOnlyReason: nil), .enabled)
+  }
+
+  /// Dead session: Edit stays visible but disabled, with a sign-in hint — the
+  /// list-screen offline banner isn't visible on a pushed detail view, so the
+  /// affordance itself must carry the "why".
+  func testEditAffordance_sessionExpired_disabledWithHint() {
+    XCTAssertEqual(editAffordance(readOnlyReason: .sessionExpired), .disabledWithHint)
+  }
+
+  /// Demo Mode: Edit is hidden — the "Demo Mode" chip already frames the browse-
+  /// only state, so a disabled control would be noise.
+  func testEditAffordance_demo_hidden() {
+    XCTAssertEqual(editAffordance(readOnlyReason: .demo), .hidden)
+  }
+
+  /// Create is allowed ONLY in the fully-editable state; any read-only reason
+  /// forbids it (defence-in-depth on top of the server's fail-closed 401).
+  func testCanCreate_onlyWhenFullyEditable() {
+    XCTAssertTrue(canCreate(readOnlyReason: nil))
+    XCTAssertFalse(canCreate(readOnlyReason: .sessionExpired))
+    XCTAssertFalse(canCreate(readOnlyReason: .demo))
+  }
+
+  /// A dead session maps the list to the `.sessionExpired` read-only reason; a
+  /// live session maps to `nil` (fully editable). This is the load-bearing
+  /// projection the create/edit suppression reads.
+  func testListReadOnlyReason_sessionExpired_mapsToReason() {
+    XCTAssertEqual(listReadOnlyReason(sessionExpired: true), .sessionExpired)
+  }
+
+  func testListReadOnlyReason_liveSession_mapsToNil() {
+    XCTAssertNil(listReadOnlyReason(sessionExpired: false))
+  }
 }

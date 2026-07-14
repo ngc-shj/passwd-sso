@@ -77,7 +77,7 @@ struct VaultCategoryListView: View {
   var apiClient: MobileAPIClient? = nil
   var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
-  var isReadOnly: Bool = false
+  var readOnlyReason: ReadOnlyReason? = nil
   var showFavicons: Bool = false
 
   // Seed synchronously so an already-active recording never shows a frame of
@@ -108,7 +108,7 @@ struct VaultCategoryListView: View {
               apiClient: apiClient,
               hostSyncService: hostSyncService,
               cacheKey: cacheKey,
-              isReadOnly: isReadOnly,
+              readOnlyReason: readOnlyReason,
               showFavicons: showFavicons
             )
           } label: {

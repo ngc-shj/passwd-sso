@@ -17,8 +17,16 @@ struct EntryDetailView: View {
   var apiClient: MobileAPIClient? = nil
   var hostSyncService: HostSyncService? = nil
   var cacheKey: SymmetricKey? = nil
-  /// When true, hides Edit controls and disables mutation. Used by DemoVaultView.
-  var isReadOnly: Bool = false
+  /// Why the vault is read-only, or `nil` when fully editable (signed-in). Demo
+  /// Mode hides Edit; a dead session disables it with a sign-in hint.
+  ///
+  /// Captured by value at push time — SwiftUI evaluates the NavigationLink
+  /// destination once, so a session that dies (or recovers) while this detail is
+  /// already on screen does NOT restyle Edit until the user pops back and
+  /// re-opens the entry. That is acceptable: the server fail-closes on any Edit
+  /// submit regardless, and the list screen (which reads the live state) shows
+  /// the offline banner. Only the pushed detail's affordance lags a mid-view flip.
+  var readOnlyReason: ReadOnlyReason? = nil
   /// Resolved server favicon opt-in, threaded from the list (C7) so the detail
   /// icon stays consistent with the rows rather than re-reading the store (F-3).
   var showFavicons: Bool = false
@@ -82,11 +90,18 @@ struct EntryDetailView: View {
       // corrupt a non-login entry on save (empty login scalars + login-shaped
       // overview). Non-login entries are edited in the web app. nil/unknown
       // entryType falls back to LOGIN, so the button shows during load.
-      if !isReadOnly && EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType) {
+      //
+      // The affordance also depends on why the vault is read-only (if at all):
+      // Demo Mode hides Edit; a dead session keeps it visible-but-disabled so the
+      // user learns editing needs sign-in (the offline banner explaining that
+      // lives on the list screen, not on this pushed detail view).
+      let affordance = editAffordance(readOnlyReason: readOnlyReason)
+      if EntryTypeCategory.isEditableOnIOS(rawType: detail?.entryType), affordance != .hidden {
         ToolbarItem(placement: .topBarTrailing) {
-          Button("Edit") {
-            isShowingEditForm = true
-          }
+          Button("Edit") { isShowingEditForm = true }
+            .disabled(affordance == .disabledWithHint)
+            .accessibilityHint(
+              affordance == .disabledWithHint ? Text("Sign in again to edit") : Text(""))
         }
       }
     }
@@ -148,6 +163,19 @@ struct EntryDetailView: View {
           Spacer()
         }
         .listRowBackground(Color.clear)
+      }
+      // Read-only-because-signed-out hint: the list-screen offline banner isn't
+      // visible on this pushed view, so restate why Edit is disabled here. Shown
+      // only for iOS-editable (LOGIN) entries — a non-login entry has no iOS Edit
+      // button to disable, so this hint would misdirect ("edit in the web app"
+      // still applies, and its own footer says so).
+      if editAffordance(readOnlyReason: readOnlyReason) == .disabledWithHint,
+        EntryTypeCategory.isEditableOnIOS(rawType: d.entryType) {
+        Section {
+          Label("Sign in again to edit this entry.", systemImage: "wifi.exclamationmark")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
       // Render the field set for the entry's type. Each per-type section lives
       // in EntryDetailTypeSections.swift; LOGIN keeps its original rows so its

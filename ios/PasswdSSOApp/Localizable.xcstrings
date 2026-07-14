@@ -338,6 +338,54 @@
         }
       }
     },
+    "Sign in again to create entries" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in again to create entries"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再度サインインすると作成できます"
+          }
+        }
+      }
+    },
+    "Sign in again to edit" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in again to edit"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再度サインインすると編集できます"
+          }
+        }
+      }
+    },
+    "Sign in again to edit this entry." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in again to edit this entry."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再度サインインするとこの項目を編集できます。"
+          }
+        }
+      }
+    },
     "Showing saved items. Sign in again to make changes." : {
       "localizations" : {
         "en" : {

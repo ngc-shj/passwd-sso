@@ -45,6 +45,13 @@ struct VaultListView: View {
   @State private var showFavicons: Bool = false
   @Environment(\.scenePhase) private var scenePhase
 
+  /// Why the vault is read-only right now, or `nil` when fully editable. A dead
+  /// server session (offline read-only cache) suppresses create/edit affordances
+  /// as defence-in-depth on top of the server's fail-closed 401 on any mutation.
+  private var readOnlyReason: ReadOnlyReason? {
+    listReadOnlyReason(sessionExpired: sessionExpired)
+  }
+
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
@@ -113,16 +120,28 @@ struct VaultListView: View {
         SettingsView(autoLockService: autoLockService, apiClient: apiClient)
       }
       .sheet(isPresented: $isShowingCreateForm) {
-        EntryForm(
-          mode: .create,
-          vaultKey: vaultKey,
-          userId: userId,
-          keyVersion: keyVersion,
-          viewModel: viewModel,
-          apiClient: apiClient,
-          hostSyncService: hostSyncService,
-          cacheKey: cacheKey
-        )
+        // Content-level guard as well as the disabled + button: if the session
+        // dies while composing (the `.onChange` below also dismisses it), never
+        // present a doomed create form. Server still fail-closes on submit; this
+        // is the UI backstop.
+        if canCreate(readOnlyReason: readOnlyReason) {
+          EntryForm(
+            mode: .create,
+            vaultKey: vaultKey,
+            userId: userId,
+            keyVersion: keyVersion,
+            viewModel: viewModel,
+            apiClient: apiClient,
+            hostSyncService: hostSyncService,
+            cacheKey: cacheKey
+          )
+        }
+      }
+      // A session that dies mid-compose (foreground/silent sync flips
+      // `sessionExpired`) dismisses an open create form — the create button is
+      // already disabled, so this only handles the in-flight sheet.
+      .onChange(of: sessionExpired) { _, expired in
+        if expired { isShowingCreateForm = false }
       }
       // Search moved from the top navigation drawer to the bottom bar (native
       // Passwords-app pattern). Activity tracking stays on query change.
@@ -288,6 +307,12 @@ struct VaultListView: View {
       .background(Color(.secondarySystemBackground), in: Capsule())
 
       if !viewModel.isTeamScope {
+        // Suppressed (disabled + dimmed) while the session is dead — creating
+        // would hit a 401 anyway (server fail-closed). The persistent offline
+        // banner above explains the state; the disabled + reduced-opacity cue is
+        // the local reinforcement. `.disabled` also drops it from accessibility
+        // activation, so VoiceOver users can't trigger a doomed create.
+        let canCreateEntry = canCreate(readOnlyReason: readOnlyReason)
         Button {
           autoLockService.recordActivity()
           isShowingCreateForm = true
@@ -299,7 +324,10 @@ struct VaultListView: View {
         }
         .buttonStyle(.plain)
         .tint(.accentColor)
+        .disabled(!canCreateEntry)
+        .opacity(canCreateEntry ? 1 : 0.4)
         .accessibilityLabel("Create entry")
+        .accessibilityHint(canCreateEntry ? Text("") : Text("Sign in again to create entries"))
       }
     }
     .padding(.horizontal)
@@ -369,6 +397,7 @@ struct VaultListView: View {
               apiClient: apiClient,
               hostSyncService: hostSyncService,
               cacheKey: cacheKey,
+              readOnlyReason: readOnlyReason,
               showFavicons: showFavicons
             )
           } label: {
@@ -405,6 +434,7 @@ struct VaultListView: View {
           apiClient: apiClient,
           hostSyncService: hostSyncService,
           cacheKey: cacheKey,
+          readOnlyReason: readOnlyReason,
           showFavicons: showFavicons
         )
       } label: {
