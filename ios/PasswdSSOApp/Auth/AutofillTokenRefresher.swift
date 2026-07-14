@@ -52,7 +52,8 @@ public struct AutofillTokenRefresher: Sendable {
       // authenticationRequired (expected: session lapsed while backgrounded) vs.
       // dpopInvalid (nonce desync) vs. serverError(5xx) (a real server fault).
       // The label set is hardcoded; associated values are NEVER interpolated
-      // except the plain HTTP status / rate-limit bucket, which carry no secret.
+      // except the plain HTTP status and URLError code (both integers), which
+      // carry no secret.
       Self.log.error("autofill-token refresh failed: \(Self.diagnosticSummary(for: error), privacy: .public)")
     }
   }

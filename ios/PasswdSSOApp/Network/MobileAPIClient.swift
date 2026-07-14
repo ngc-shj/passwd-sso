@@ -367,7 +367,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   }
 
   /// POST /api/mobile/cache-rollback-report with DPoP-signed access token.
-  /// On 401 + new DPoP-Nonce, retries once.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   public func postCacheRollbackReport(_ body: CacheRollbackReportBody) async throws {
     let accessToken = try await validAccessToken()
 
@@ -419,7 +419,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
   /// Create a new personal entry via POST /api/passwords.
   /// Requires a valid access token (DPoP-signed with ath).
-  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   /// Returns the server-stored entry id (must equal the client-generated id).
   public func createEntry(body: CreateEntryRequest) async throws -> String {
     let accessToken = try await validAccessToken()
@@ -474,7 +474,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// POST /api/mobile/autofill-token (plan C6). `extensionJWK` is the AutoFill
   /// extension's OWN shared-group SE public key — the server binds the minted
   /// token to its thumbprint, so only the extension can spend it.
-  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   public func mintAutofillToken(extensionJWK: [String: String]) async throws -> AutofillTokenResponse {
     let accessToken = try await validAccessToken()
 
@@ -527,7 +527,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
   /// Update an existing personal entry via PUT /api/passwords/{entryId}.
   /// Requires a valid access token (DPoP-signed with ath).
-  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   public func updateEntry(entryId: String, body: UpdateEntryRequest) async throws {
     let accessToken = try await validAccessToken()
 

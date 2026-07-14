@@ -54,6 +54,18 @@ func httpResponse(status: Int, url: URL, headers: [String: String] = [:]) -> HTT
   HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
 }
 
+/// Shared UpdateEntryRequest fixture used by both MobileAPIClientTests and
+/// TokenRefreshTests (file-scope so neither class owns a private duplicate).
+func makeUpdateEntryRequestFixture() -> UpdateEntryRequest {
+  let enc = EncryptedData(
+    ciphertext: "aabbcc",
+    iv: "112233445566778899aabbcc",
+    authTag: "deadbeefdeadbeefdeadbeefdeadbeef"
+  )
+  return UpdateEntryRequest(
+    encryptedBlob: enc, encryptedOverview: enc, keyVersion: 1, aadVersion: 1)
+}
+
 /// Read all bytes from an InputStream (URLProtocol replaces httpBody with httpBodyStream).
 func readStream(_ stream: InputStream?) -> Data? {
   guard let stream else { return nil }
@@ -323,19 +335,6 @@ final class MobileAPIClientTests: XCTestCase {
 
   // MARK: - updateEntry
 
-  private func makeUpdateRequest() -> UpdateEntryRequest {
-    let enc = EncryptedData(
-      ciphertext: "aabbcc",
-      iv: "112233445566778899aabbcc",
-      authTag: "deadbeefdeadbeefdeadbeefdeadbeef"
-    )
-    return UpdateEntryRequest(
-      encryptedBlob: enc,
-      encryptedOverview: enc,
-      keyVersion: 1,
-      aadVersion: 1
-    )
-  }
 
   private func seedAccessToken() {
     try? tokenStore.saveTokens(
@@ -366,7 +365,7 @@ final class MobileAPIClientTests: XCTestCase {
       urlSession: session
     )
 
-    try await client.updateEntry(entryId: entryId, body: makeUpdateRequest())
+    try await client.updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
 
     let req = try XCTUnwrap(capturedRequest)
     XCTAssertEqual(req.httpMethod, "PUT")
@@ -469,7 +468,7 @@ final class MobileAPIClientTests: XCTestCase {
       urlSession: session
     )
 
-    try await client.updateEntry(entryId: entryId, body: makeUpdateRequest())
+    try await client.updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
 
     let req = try XCTUnwrap(capturedRequest)
     // DPoP proof is a JWS — decode payload to verify ath claim.
@@ -768,7 +767,7 @@ final class MobileAPIClientTests: XCTestCase {
       urlSession: session
     )
 
-    try await client.updateEntry(entryId: entryId, body: makeUpdateRequest())
+    try await client.updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
 
     let nonce = try XCTUnwrap(try tokenStore.loadNonce())
     XCTAssertEqual(nonce, "nonce-upd-1")
@@ -794,7 +793,7 @@ final class MobileAPIClientTests: XCTestCase {
     )
 
     do {
-      try await client.updateEntry(entryId: entryId, body: makeUpdateRequest())
+      try await client.updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
       XCTFail("Expected notFound")
     } catch MobileAPIError.notFound {
       // Expected.
@@ -825,7 +824,7 @@ final class MobileAPIClientTests: XCTestCase {
       urlSession: session
     )
 
-    try await client.updateEntry(entryId: entryId, body: makeUpdateRequest())
+    try await client.updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
     XCTAssertEqual(callCount, 2, "Client should retry exactly once after 401+nonce")
   }
 
@@ -1612,16 +1611,6 @@ final class TokenRefreshTests: XCTestCase {
                    "Resource endpoint must not be reached when refresh fails with network error")
   }
 
-  private func makeLadderUpdateRequest() -> UpdateEntryRequest {
-    let enc = EncryptedData(
-      ciphertext: "aabbcc",
-      iv: "112233445566778899aabbcc",
-      authTag: "deadbeefdeadbeefdeadbeefdeadbeef"
-    )
-    return UpdateEntryRequest(
-      encryptedBlob: enc, encryptedOverview: enc, keyVersion: 1, aadVersion: 1)
-  }
-
   // MARK: - Mutating-call refresh ladder (parity with the GET ladder)
   //
   // Regression: `performBodyHTTP`/`performVoidHTTP` previously only did a
@@ -1655,14 +1644,18 @@ final class TokenRefreshTests: XCTestCase {
       return (Data(), httpResponse(status: 200, url: putURL))
     }
 
-    try await makeClient().updateEntry(entryId: entryId, body: makeLadderUpdateRequest())
+    try await makeClient().updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
 
     XCTAssertEqual(resourceCallCount, 2, "PUT must be retried once after the reactive refresh")
     XCTAssertEqual(refreshCallCount, 1, "refresh must run exactly once")
-    // The retry must carry the NEW access token in its Authorization header.
+    // The retry must carry the NEW token in BOTH the Authorization header AND the
+    // DPoP proof's `ath` claim — the two bindings must move together.
     let retryAuth = capturedRequests.last?.value(forHTTPHeaderField: "Authorization")
     XCTAssertEqual(retryAuth, "Bearer acc_upd_new",
                    "the refresh-retry must swap Authorization to the rotated token")
+    let retryDPoP = try XCTUnwrap(capturedRequests.last?.value(forHTTPHeaderField: "DPoP"))
+    XCTAssertEqual(try decodeDPoPAth(retryDPoP), sha256Base64URL("acc_upd_new"),
+                   "the refresh-retry proof's ath must be rebound to SHA-256(newToken)")
   }
 
   func testUpdateEntry_refreshFails_throwsAuthenticationRequired() async throws {
@@ -1682,7 +1675,7 @@ final class TokenRefreshTests: XCTestCase {
     }
 
     do {
-      try await makeClient().updateEntry(entryId: entryId, body: makeLadderUpdateRequest())
+      try await makeClient().updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
       XCTFail("a dead refresh must throw authenticationRequired")
     } catch MobileAPIError.authenticationRequired {
       // expected
@@ -1707,6 +1700,7 @@ final class TokenRefreshTests: XCTestCase {
                 httpResponse(status: 200, url: request.url!))
       }
       self?.resourceCallCount += 1
+      self?.capturedRequests.append(request)
       if (self?.resourceCallCount ?? 0) == 1 {
         return (Data(), httpResponse(status: 401, url: mintURL))
       }
@@ -1719,6 +1713,90 @@ final class TokenRefreshTests: XCTestCase {
     XCTAssertEqual(response.token, "upload_tok")
     XCTAssertEqual(resourceCallCount, 2, "mint must be retried once after the reactive refresh")
     XCTAssertEqual(refreshCallCount, 1, "refresh must run exactly once")
+
+    // The retry must carry the NEW token in BOTH the Authorization header AND
+    // the DPoP proof's `ath` claim — a stale `ath` would be a token/proof
+    // mismatch the server rejects, so both bindings must move together.
+    XCTAssertEqual(capturedRequests.count, 2, "mint: initial + one retry")
+    XCTAssertEqual(capturedRequests.last?.value(forHTTPHeaderField: "Authorization"),
+                   "Bearer acc_mint_new",
+                   "the refresh-retry must swap Authorization to the rotated token")
+    let retryDPoP = try XCTUnwrap(capturedRequests.last?.value(forHTTPHeaderField: "DPoP"))
+    XCTAssertEqual(try decodeDPoPAth(retryDPoP), sha256Base64URL("acc_mint_new"),
+                   "the refresh-retry proof's ath must be rebound to SHA-256(newToken)")
+  }
+
+  /// Bounded-ladder property: after a SUCCESSFUL refresh the resource still 401s.
+  /// The ladder must NOT loop or throw authenticationRequired — it surfaces
+  /// serverError(401) so callers fall back to cached data (mirrors the GET path).
+  func testUpdateEntry_postRefreshStill401_surfacesServerError401() async throws {
+    try tokenStore.saveTokens(
+      access: "acc_still", refresh: "ref_still", expiresAt: fixedNow.addingTimeInterval(3600))
+
+    let entryId = "entry-still-401"
+    let putURL = serverURL.appending(path: "/api/passwords/\(entryId)", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_still_new", refreshToken: "ref_still_new"),
+                httpResponse(status: 200, url: request.url!))
+      }
+      self?.resourceCallCount += 1
+      // Every PUT 401s, with NO nonce header → nonce rung skipped, refresh rung
+      // taken once, then the ladder is exhausted.
+      return (Data(), httpResponse(status: 401, url: putURL))
+    }
+
+    do {
+      try await makeClient().updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
+      XCTFail("a persistent 401 after a successful refresh must throw serverError(401)")
+    } catch MobileAPIError.serverError(let status) {
+      XCTAssertEqual(status, 401, "post-refresh persistent 401 must surface as serverError(401)")
+    }
+    XCTAssertEqual(resourceCallCount, 2, "ladder must be bounded: initial + one post-refresh retry")
+    XCTAssertEqual(refreshCallCount, 1, "refresh must run exactly once, never loop")
+  }
+
+  /// Full 3-rung ladder on a mutating call: 401+nonce → nonce-retry → still 401
+  /// → refresh → 200. Locks the nonce-then-refresh interaction (a bug where the
+  /// nonce rung consumes the refresh slot would drop to 2 resource calls).
+  func testUpdateEntry_nonceRetryThenRefreshLadder() async throws {
+    try tokenStore.saveTokens(
+      access: "acc_ladder", refresh: "ref_ladder", expiresAt: fixedNow.addingTimeInterval(3600))
+
+    let entryId = "entry-ladder"
+    let putURL = serverURL.appending(path: "/api/passwords/\(entryId)", directoryHint: .notDirectory)
+
+    MockURLProtocol.requestHandler = { [weak self] request in
+      if request.url?.path == "/api/mobile/token/refresh" {
+        self?.refreshCallCount += 1
+        return (tokenResponseJSON(accessToken: "acc_ladder_new", refreshToken: "ref_ladder_new"),
+                httpResponse(status: 200, url: request.url!))
+      }
+      let n = (self?.resourceCallCount ?? 0) + 1
+      self?.resourceCallCount = n
+      self?.capturedRequests.append(request)
+      switch n {
+      case 1:
+        // Rung 1: 401 WITH a fresh nonce → drives the nonce-retry.
+        return (Data(), httpResponse(status: 401, url: putURL, headers: ["DPoP-Nonce": "ladder-nonce"]))
+      case 2:
+        // Rung 2: nonce retry still 401, NO nonce → drives the refresh rung.
+        return (Data(), httpResponse(status: 401, url: putURL))
+      default:
+        // Rung 3: retry with the refreshed token → 200.
+        return (Data(), httpResponse(status: 200, url: putURL))
+      }
+    }
+
+    try await makeClient().updateEntry(entryId: entryId, body: makeUpdateEntryRequestFixture())
+
+    XCTAssertEqual(resourceCallCount, 3, "full ladder: initial + nonce-retry + refresh-retry")
+    XCTAssertEqual(refreshCallCount, 1, "refresh runs exactly once, after the nonce rung is spent")
+    // The final retry must carry the refreshed token.
+    XCTAssertEqual(capturedRequests.last?.value(forHTTPHeaderField: "Authorization"),
+                   "Bearer acc_ladder_new")
   }
 
   // MARK: - Helpers: decode DPoP JWS payload claims

@@ -145,4 +145,12 @@ final class AutofillTokenRefresherTests: XCTestCase {
       for: URLError(.notConnectedToInternet))
     XCTAssertTrue(summary.hasPrefix("other("))
   }
+
+  /// networkError is the second value-interpolating case: it must emit ONLY the
+  /// numeric URLError code (a stable, non-secret integer), never a message/URL.
+  func testDiagnosticSummaryNetworkErrorEmitsOnlyNumericCode() {
+    let summary = AutofillTokenRefresher.diagnosticSummary(
+      for: MobileAPIError.networkError(URLError(.timedOut)))
+    XCTAssertEqual(summary, "networkError(\(URLError.timedOut.rawValue))")
+  }
 }
