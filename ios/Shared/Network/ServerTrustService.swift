@@ -429,9 +429,41 @@ public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @un
   private let expectedLeafKeyHash: Data?
   private let expectedHost: String?
 
+  /// Default-trust evaluator. Production wires `SecTrustEvaluateWithError`; the
+  /// only reason it is injectable is the real-TLS integration tests, which
+  /// present a locally-generated self-signed leaf that platform CA trust would
+  /// reject before the leaf-key comparison — the exact logic those tests exist
+  /// to exercise. The test seam installs the local CA as an anchor and
+  /// re-evaluates, so the pin match/mismatch/rotation paths run against a
+  /// genuine handshake rather than an injected probe outcome. The default value
+  /// keeps the shipping path byte-for-byte identical to a hardcoded call.
+  private let evaluateDefaultTrust: @Sendable (SecTrust) -> Bool
+
   public init(expectedLeafKeyHash: Data? = nil, expectedHost: String? = nil) {
     self.expectedLeafKeyHash = expectedLeafKeyHash
     self.expectedHost = expectedHost?.lowercased()
+    self.evaluateDefaultTrust = Self.defaultTrustEvaluator
+  }
+
+  /// Test seam: inject a trust evaluator. `internal` so only the test target
+  /// (via `@testable import Shared`) can reach it — production callers get the
+  /// public `init` that always wires `SecTrustEvaluateWithError`.
+  init(
+    expectedLeafKeyHash: Data?,
+    expectedHost: String?,
+    evaluateDefaultTrust: @escaping @Sendable (SecTrust) -> Bool
+  ) {
+    self.expectedLeafKeyHash = expectedLeafKeyHash
+    self.expectedHost = expectedHost?.lowercased()
+    self.evaluateDefaultTrust = evaluateDefaultTrust
+  }
+
+  /// The production default-trust check: platform CA chain evaluation, no
+  /// overrides. Kept as a named static so the injected seam and the shipping
+  /// path share one definition.
+  private static let defaultTrustEvaluator: @Sendable (SecTrust) -> Bool = { serverTrust in
+    var error: CFError?
+    return SecTrustEvaluateWithError(serverTrust, &error)
   }
 
   public var capturedLeafKeyHash: Data? {
@@ -472,9 +504,7 @@ public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @un
     }
 
     // Default trust evaluation first.
-    var error: CFError?
-    let trusted = SecTrustEvaluateWithError(serverTrust, &error)
-    guard trusted else {
+    guard evaluateDefaultTrust(serverTrust) else {
       flagMismatch()
       completionHandler(.cancelAuthenticationChallenge, nil)
       return
@@ -517,14 +547,29 @@ public final class LeafKeyPinningDelegate: NSObject, URLSessionTaskDelegate, @un
 
   private func extractLeafKeyHash(serverTrust: SecTrust) -> Data? {
     // SecTrustCopyCertificateChain replaces SecTrustGetCertificateAtIndex (deprecated iOS 15).
-    // Hash is over `SecKeyCopyExternalRepresentation` output:
-    //   - ECDSA P-256: 65-byte uncompressed point (0x04 || X || Y)
-    //   - RSA: PKCS#1 RSAPublicKey DER
-    // NOT SubjectPublicKeyInfo DER.
     guard
       let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
-      let leaf = chain.first,
-      let publicKey = SecCertificateCopyKey(leaf),
+      let leaf = chain.first
+    else {
+      return nil
+    }
+    return Self.leafKeyHash(for: leaf)
+  }
+
+  /// SHA-256 of a certificate's public key in `SecKeyCopyExternalRepresentation`
+  /// form:
+  ///   - ECDSA P-256: 65-byte uncompressed point (0x04 || X || Y)
+  ///   - RSA: PKCS#1 RSAPublicKey DER
+  /// NOT SubjectPublicKeyInfo DER (so not interchangeable with `openssl dgst`
+  /// over `-pubkey -outform DER`).
+  ///
+  /// Exposed so the real-TLS integration tests can compute a server's expected
+  /// pin from the certificate they generate — using this exact code path, so
+  /// the pin the test asserts against can never drift from the pin the delegate
+  /// captures during the handshake.
+  static func leafKeyHash(for certificate: SecCertificate) -> Data? {
+    guard
+      let publicKey = SecCertificateCopyKey(certificate),
       let keyData = SecKeyCopyExternalRepresentation(publicKey, nil) as Data?
     else {
       return nil
