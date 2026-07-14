@@ -146,4 +146,33 @@ final class PostSyncDecisionTests: XCTestCase {
   func testFailClosedResult_offline_routesToPassphraseRetry() {
     XCTAssertEqual(failClosedResult(sessionExpired: false), .failedOffline)
   }
+
+  // MARK: - sessionBannerTransition (offline read-only banner set/clear)
+
+  func testSessionBannerTransition_syncSucceeded_clears() {
+    XCTAssertEqual(sessionBannerTransition(syncError: nil), .clear)
+  }
+
+  func testSessionBannerTransition_deadSession_shows() {
+    XCTAssertEqual(
+      sessionBannerTransition(syncError: MobileAPIError.authenticationRequired), .show)
+  }
+
+  /// The load-bearing invariant: a transient/offline failure must LEAVE the
+  /// banner as-is — it must neither raise a false "signed out" banner nor clear
+  /// a real one (the session state is unknown when merely offline).
+  func testSessionBannerTransition_offlineError_leavesUnchanged() {
+    let offline = MobileAPIError.networkError(URLError(.notConnectedToInternet))
+    XCTAssertEqual(sessionBannerTransition(syncError: offline), .unchanged)
+  }
+
+  func testSessionBannerTransition_otherServerError_leavesUnchanged() {
+    XCTAssertEqual(
+      sessionBannerTransition(syncError: MobileAPIError.serverError(status: 500)), .unchanged)
+  }
+
+  func testSessionBannerTransition_nonMobileError_leavesUnchanged() {
+    struct Other: Error {}
+    XCTAssertEqual(sessionBannerTransition(syncError: Other()), .unchanged)
+  }
 }
