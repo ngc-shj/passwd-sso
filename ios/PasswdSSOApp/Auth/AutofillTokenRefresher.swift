@@ -47,10 +47,35 @@ public struct AutofillTokenRefresher: Sendable {
       let nonce = try? hostTokenStore.loadNonce()
       try uploadTokenStore.save(token: response.token, expiresAt: expiresAt, dpopNonce: nonce)
     } catch {
-      // Log only the error TYPE, never its associated values: `mintAutofillToken`
-      // throws an arbitrary Error, so dumping it whole risks leaking a URL /
-      // response / internal state the day it throws a richer type.
-      Self.log.error("autofill-token refresh failed: \(String(describing: type(of: error)), privacy: .public)")
+      // Diagnostic only: emit a FIXED, non-secret label per known failure mode so
+      // the "refresh failed" symptom can be triaged from Console.app —
+      // authenticationRequired (expected: session lapsed while backgrounded) vs.
+      // dpopInvalid (nonce desync) vs. serverError(5xx) (a real server fault).
+      // The label set is hardcoded; associated values are NEVER interpolated
+      // except the plain HTTP status / rate-limit bucket, which carry no secret.
+      Self.log.error("autofill-token refresh failed: \(Self.diagnosticSummary(for: error), privacy: .public)")
+    }
+  }
+
+  /// Maps an error to a stable, secret-free label for logging. For a
+  /// `MobileAPIError` it names the case (plus the HTTP status for `serverError`);
+  /// any other error falls back to its type name only — never its value, which
+  /// could carry a URL / response body / internal state.
+  static func diagnosticSummary(for error: Error) -> String {
+    guard let apiError = error as? MobileAPIError else {
+      return "other(\(type(of: error)))"
+    }
+    switch apiError {
+    case .bridgeCodeInvalid: return "bridgeCodeInvalid"
+    case .pkceMismatch: return "pkceMismatch"
+    case .dpopInvalid: return "dpopInvalid"  // nonce intentionally omitted
+    case .rateLimited: return "rateLimited"
+    case .notFound: return "notFound"
+    case .quotaExceeded: return "quotaExceeded"
+    case .teamKeyNotDistributed: return "teamKeyNotDistributed"
+    case .serverError(let status): return "serverError(\(status))"
+    case .networkError(let urlError): return "networkError(\(urlError.code.rawValue))"
+    case .authenticationRequired: return "authenticationRequired"
     }
   }
 

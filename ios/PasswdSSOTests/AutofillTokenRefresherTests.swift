@@ -115,4 +115,34 @@ final class AutofillTokenRefresherTests: XCTestCase {
     XCTAssertNotNil(AutofillTokenRefresher.parseISO8601("2026-06-13T01:23:45Z"))
     XCTAssertNil(AutofillTokenRefresher.parseISO8601("not-a-date"))
   }
+
+  // MARK: - diagnosticSummary (secret-free, case-distinguishing log labels)
+
+  func testDiagnosticSummaryNamesTheFailureMode() {
+    XCTAssertEqual(
+      AutofillTokenRefresher.diagnosticSummary(for: MobileAPIError.authenticationRequired),
+      "authenticationRequired")
+    XCTAssertEqual(
+      AutofillTokenRefresher.diagnosticSummary(for: MobileAPIError.serverError(status: 503)),
+      "serverError(503)")
+    XCTAssertEqual(
+      AutofillTokenRefresher.diagnosticSummary(for: MobileAPIError.dpopInvalid(newNonce: "n")),
+      "dpopInvalid")
+  }
+
+  /// The DPoP nonce (though non-secret) and any error value beyond the plain
+  /// status/code must never appear in the label — the whole point of the summary
+  /// is a fixed vocabulary that cannot leak state.
+  func testDiagnosticSummaryOmitsDPoPNonceValue() {
+    let summary = AutofillTokenRefresher.diagnosticSummary(
+      for: MobileAPIError.dpopInvalid(newNonce: "super-secret-nonce"))
+    XCTAssertFalse(summary.contains("super-secret-nonce"))
+  }
+
+  /// A non-MobileAPIError falls back to its TYPE name only, never its value.
+  func testDiagnosticSummaryFallsBackToTypeForOtherErrors() {
+    let summary = AutofillTokenRefresher.diagnosticSummary(
+      for: URLError(.notConnectedToInternet))
+    XCTAssertTrue(summary.hasPrefix("other("))
+  }
 }
