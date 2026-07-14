@@ -367,7 +367,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   }
 
   /// POST /api/mobile/cache-rollback-report with DPoP-signed access token.
-  /// On 401 + new DPoP-Nonce, retries once.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   public func postCacheRollbackReport(_ body: CacheRollbackReportBody) async throws {
     let accessToken = try await validAccessToken()
 
@@ -398,16 +398,20 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    try await performVoidHTTP(request) { newNonce in
+    try await performVoidHTTP(request, staleToken: accessToken) { nonce, freshToken in
+      let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
-        ath: ath,
-        nonce: newNonce,
+        ath: freshToken != nil ? sha256Base64URL(token) : ath,
+        nonce: nonce ?? (try? self.tokenStore.loadNonce()),
         signer: localSigner
       )
       var retryRequest = request
+      if freshToken != nil {
+        retryRequest.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      }
       retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
@@ -415,7 +419,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
   /// Create a new personal entry via POST /api/passwords.
   /// Requires a valid access token (DPoP-signed with ath).
-  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   /// Returns the server-stored entry id (must equal the client-generated id).
   public func createEntry(body: CreateEntryRequest) async throws -> String {
     let accessToken = try await validAccessToken()
@@ -447,16 +451,20 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    return try await performCreateHTTP(request) { newNonce in
+    return try await performCreateHTTP(request, staleToken: accessToken) { nonce, freshToken in
+      let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
-        ath: ath,
-        nonce: newNonce,
+        ath: freshToken != nil ? sha256Base64URL(token) : ath,
+        nonce: nonce ?? (try? self.tokenStore.loadNonce()),
         signer: localSigner
       )
       var retryRequest = request
+      if freshToken != nil {
+        retryRequest.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      }
       retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
@@ -466,7 +474,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   /// POST /api/mobile/autofill-token (plan C6). `extensionJWK` is the AutoFill
   /// extension's OWN shared-group SE public key — the server binds the minted
   /// token to its thumbprint, so only the extension can spend it.
-  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   public func mintAutofillToken(extensionJWK: [String: String]) async throws -> AutofillTokenResponse {
     let accessToken = try await validAccessToken()
 
@@ -497,16 +505,20 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    let data = try await performBodyHTTP(request) { newNonce in
+    let data = try await performBodyHTTP(request, staleToken: accessToken) { nonce, freshToken in
+      let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.post,
         htu: htu,
         jwk: localJWK,
-        ath: ath,
-        nonce: newNonce,
+        ath: freshToken != nil ? sha256Base64URL(token) : ath,
+        nonce: nonce ?? (try? self.tokenStore.loadNonce()),
         signer: localSigner
       )
       var retryRequest = request
+      if freshToken != nil {
+        retryRequest.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      }
       retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
@@ -515,7 +527,7 @@ public actor MobileAPIClient: VaultUnlockDataSource {
 
   /// Update an existing personal entry via PUT /api/passwords/{entryId}.
   /// Requires a valid access token (DPoP-signed with ath).
-  /// On 401 + new DPoP-Nonce, retries once with the fresh nonce.
+  /// On 401, applies the full retry ladder (DPoP-nonce retry, then token-refresh retry).
   public func updateEntry(entryId: String, body: UpdateEntryRequest) async throws {
     let accessToken = try await validAccessToken()
 
@@ -546,16 +558,20 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    try await performVoidHTTP(request) { newNonce in
+    try await performVoidHTTP(request, staleToken: accessToken) { nonce, freshToken in
+      let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.put,
         htu: htu,
         jwk: localJWK,
-        ath: ath,
-        nonce: newNonce,
+        ath: freshToken != nil ? sha256Base64URL(token) : ath,
+        nonce: nonce ?? (try? self.tokenStore.loadNonce()),
         signer: localSigner
       )
       var retryRequest = request
+      if freshToken != nil {
+        retryRequest.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      }
       retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
@@ -669,16 +685,20 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     request.setValue(proof.jws, forHTTPHeaderField: HTTPHeader.dpop)
     request.httpBody = bodyData
 
-    let data = try await performBodyHTTP(request) { newNonce in
+    let data = try await performBodyHTTP(request, staleToken: accessToken) { nonce, freshToken in
+      let token = freshToken ?? accessToken
       let retryProof = try await buildDPoPProof(
         htm: HTTPMethod.put,
         htu: htu,
         jwk: localJWK,
-        ath: ath,
-        nonce: newNonce,
+        ath: freshToken != nil ? sha256Base64URL(token) : ath,
+        nonce: nonce ?? (try? self.tokenStore.loadNonce()),
         signer: localSigner
       )
       var retryRequest = request
+      if freshToken != nil {
+        retryRequest.setValue("\(HTTPAuthScheme.bearerPrefix)\(token)", forHTTPHeaderField: HTTPHeader.authorization)
+      }
       retryRequest.setValue(retryProof.jws, forHTTPHeaderField: HTTPHeader.dpop)
       return retryRequest
     }
@@ -902,33 +922,79 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   // the extension-side uploader and this client share one implementation.
   // Unqualified calls in this file resolve to those free functions.
 
-  /// Perform an HTTP request that returns no body; on 401 + new nonce, retry once.
-  /// Throws `MobileAPIError.notFound` for 404, `.serverError(status:)` for other non-2xx.
+  /// Closure that rebuilds a mutating request for a retry. Both arguments are
+  /// nil-unless-relevant so one closure serves both rungs of the ladder:
+  ///   - `nonce != nil`  → a DPoP-Nonce challenge: re-sign the proof with it
+  ///     (same access token / ath).
+  ///   - `freshToken != nil` → the access token was refreshed: rebuild the ath
+  ///     from the new token AND swap the Authorization header to it.
+  /// Exactly one is non-nil per invocation.
+  typealias MutatingRetryBuilder = (_ nonce: String?, _ freshToken: String?) async throws -> URLRequest
+
+  /// Shared retry ladder for mutating (non-GET) requests, mirroring
+  /// `performAuthedGET` so mutating calls recover from an expired access token
+  /// the same way GETs do:
+  ///   1. Initial request.
+  ///   2. On 401 with a fresh DPoP-Nonce (once): nonce-retry, same token.
+  ///   3. On still-401 (once): refresh via the single-flight gate, retry with the
+  ///      new token (rebuilt ath + Authorization).
+  ///   4. Still 401 → return status 401 to the decoder (surfaces .serverError(401),
+  ///      NOT .authenticationRequired — a failed REFRESH already threw that).
+  /// Saves any DPoP-Nonce on every response. `staleToken` is the access token the
+  /// caller signed the initial request with — the refresh rung passes it to the
+  /// single-flight gate so a token already rotated by a concurrent call is reused
+  /// instead of triggering a second refresh.
+  private func performMutatingWithLadder(
+    _ request: URLRequest,
+    staleToken: String,
+    makeRetry: MutatingRetryBuilder?
+  ) async throws -> (Data, Int) {
+    var current = request
+    var didNonceRetry = false
+    var didRefreshRetry = false
+    var token = staleToken
+
+    while true {
+      let (data, response) = try await performHTTP(current)
+      let http = response as! HTTPURLResponse
+      let freshNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce)
+      if let freshNonce {
+        try? tokenStore.saveNonce(freshNonce)
+      }
+
+      if http.statusCode == 401, let makeRetry {
+        // Rung 2: a nonce in THIS response is the challenge signal; a stale
+        // stored nonce must NOT drive a retry (keeps the ladder bounded at ≤3).
+        if !didNonceRetry, freshNonce != nil {
+          didNonceRetry = true
+          current = try await makeRetry(freshNonce, nil)
+          continue
+        }
+        // Rung 3: token rejected — refresh and retry with the new token. A failed
+        // refresh throws .authenticationRequired from ensureRefreshed.
+        if !didRefreshRetry {
+          didRefreshRetry = true
+          token = try await ensureRefreshed(staleToken: token)
+          current = try await makeRetry(nil, token)
+          continue
+        }
+      }
+
+      return (data, http.statusCode)
+    }
+  }
+
+  /// Perform an HTTP request that returns no body; full 401 ladder (nonce +
+  /// token refresh). Throws `MobileAPIError.notFound` for 404,
+  /// `.serverError(status:)` for other non-2xx.
   private func performVoidHTTP(
     _ request: URLRequest,
-    makeRetry: ((String) async throws -> URLRequest)? = nil
+    staleToken: String,
+    makeRetry: MutatingRetryBuilder? = nil
   ) async throws {
-    let (_, response) = try await performHTTP(request)
-    let http = response as! HTTPURLResponse
-
-    if let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
-      try? tokenStore.saveNonce(newNonce)
-    }
-
-    if http.statusCode == 401,
-       let makeRetry,
-       let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
-      let retryRequest = try await makeRetry(newNonce)
-      let (_, retryResponse) = try await performHTTP(retryRequest)
-      let retryHTTP = retryResponse as! HTTPURLResponse
-      if let retryNonce = retryHTTP.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
-        try? tokenStore.saveNonce(retryNonce)
-      }
-      try decodeVoidResponse(status: retryHTTP.statusCode)
-      return
-    }
-
-    try decodeVoidResponse(status: http.statusCode)
+    let (_, status) = try await performMutatingWithLadder(
+      request, staleToken: staleToken, makeRetry: makeRetry)
+    try decodeVoidResponse(status: status)
   }
 
   private func decodeVoidResponse(status: Int) throws {
@@ -942,33 +1008,17 @@ public actor MobileAPIClient: VaultUnlockDataSource {
     }
   }
 
-  /// Perform a request whose success (200/201) response body is returned raw.
-  /// On 401 + new nonce, retries once. 404 → .notFound; other non-2xx →
+  /// Perform a request whose success (200/201) response body is returned raw;
+  /// full 401 ladder (nonce + token refresh). 404 → .notFound; other non-2xx →
   /// .serverError(status:).
   private func performBodyHTTP(
     _ request: URLRequest,
-    makeRetry: ((String) async throws -> URLRequest)? = nil
+    staleToken: String,
+    makeRetry: MutatingRetryBuilder? = nil
   ) async throws -> Data {
-    let (data, response) = try await performHTTP(request)
-    let http = response as! HTTPURLResponse
-
-    if let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
-      try? tokenStore.saveNonce(newNonce)
-    }
-
-    if http.statusCode == 401,
-       let makeRetry,
-       let newNonce = http.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
-      let retryRequest = try await makeRetry(newNonce)
-      let (retryData, retryResponse) = try await performHTTP(retryRequest)
-      let retryHTTP = retryResponse as! HTTPURLResponse
-      if let retryNonce = retryHTTP.value(forHTTPHeaderField: HTTPHeader.dpopNonce) {
-        try? tokenStore.saveNonce(retryNonce)
-      }
-      return try decodeBodyResponse(retryData, status: retryHTTP.statusCode)
-    }
-
-    return try decodeBodyResponse(data, status: http.statusCode)
+    let (data, status) = try await performMutatingWithLadder(
+      request, staleToken: staleToken, makeRetry: makeRetry)
+    return try decodeBodyResponse(data, status: status)
   }
 
   private func decodeBodyResponse(_ data: Data, status: Int) throws -> Data {
@@ -990,12 +1040,13 @@ public actor MobileAPIClient: VaultUnlockDataSource {
   }
 
   /// Perform a create (POST) request that returns a body with an `id` field.
-  /// Accepts 200 or 201 as success. On 401 + new nonce, retries once.
+  /// Accepts 200 or 201 as success; full 401 ladder (nonce + token refresh).
   private func performCreateHTTP(
     _ request: URLRequest,
-    makeRetry: ((String) async throws -> URLRequest)? = nil
+    staleToken: String,
+    makeRetry: MutatingRetryBuilder? = nil
   ) async throws -> String {
-    let data = try await performBodyHTTP(request, makeRetry: makeRetry)
+    let data = try await performBodyHTTP(request, staleToken: staleToken, makeRetry: makeRetry)
     let resp = try JSONDecoder().decode(CreateEntryResponse.self, from: data)
     return resp.id
   }
