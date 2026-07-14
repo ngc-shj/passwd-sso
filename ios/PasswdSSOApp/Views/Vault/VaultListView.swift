@@ -22,7 +22,14 @@ struct VaultListView: View {
   /// The REAL cacheKey from unlock (nil in debug). Needed to decrypt team entries
   /// in-app + persist/read team keys; cannot be re-derived (readDirect is empty).
   let cacheKey: SymmetricKey?
+  /// Whether the unlock-time sync found the server session dead (refresh token
+  /// expired / replay-revoked). Seeds the persistent offline banner; a later
+  /// successful sync clears it, a later authenticationRequired sync re-arms it.
+  let sessionExpiredAtUnlock: Bool
 
+  /// Live session-expired state driving the banner. Seeded from
+  /// `sessionExpiredAtUnlock` on first appear, then updated by sync outcomes.
+  @State private var sessionExpired: Bool = false
   @State private var isScreenRecording: Bool = UIScreen.main.isCaptured
   @State private var isShowingSettings: Bool = false
   @State private var isShowingCreateForm: Bool = false
@@ -36,6 +43,9 @@ struct VaultListView: View {
   var body: some View {
     NavigationStack {
       VStack(spacing: 0) {
+        if sessionExpired {
+          sessionExpiredBanner
+        }
         vaultSwitcher
         Group {
           if isScreenRecording {
@@ -148,6 +158,9 @@ struct VaultListView: View {
       }
     }
     .onAppear {
+      // Seed the banner from the unlock-time verdict (idempotent — re-running on
+      // a benign re-appear just re-applies the same value).
+      sessionExpired = sessionExpiredAtUnlock
       reload(cacheData)
       updateScreenRecordingState()
       // Configure the favicon loader BEFORE resolving showFavicons so the first
@@ -186,6 +199,40 @@ struct VaultListView: View {
         viewModel.searchQuery = ""
       }
     }
+  }
+
+  /// Persistent banner shown while the vault is usable from the local cache but
+  /// the server session is dead — the read-only degraded state that would
+  /// otherwise only reveal itself when the user tries to edit/create. Tapping it
+  /// locks the vault; the re-unlock flow then routes a dead session to sign-in.
+  @ViewBuilder private var sessionExpiredBanner: some View {
+    Button {
+      autoLockService.recordActivity()
+      // Lock → the passphrase unlock re-probes the session; a dead session
+      // surfaces there as "sign in again" (VaultUnlocker → .sessionExpired).
+      autoLockService.lock()
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: "wifi.exclamationmark")
+        VStack(alignment: .leading, spacing: 1) {
+          Text("You're signed out")
+            .font(.subheadline.weight(.semibold))
+          Text("Showing saved items. Sign in again to make changes.")
+            .font(.caption)
+        }
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .opacity(0.6)
+      }
+      .foregroundStyle(.primary)
+      .padding(.horizontal)
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity)
+      .background(.yellow.opacity(0.18))
+    }
+    .buttonStyle(.plain)
+    .accessibilityHint(Text("Locks the vault so you can sign in again"))
   }
 
   /// Decrypt + bind a fresh cache: use the unlock-time cacheKey (for team entries)
@@ -390,7 +437,13 @@ struct VaultListView: View {
       if let fresh = report.cacheData {
         reload(fresh)
       }
+      // Sync reached the server → the session is alive again; clear the banner.
+      sessionExpired = false
     } catch MobileAPIError.authenticationRequired {
+      // Persistent state, set even on a SILENT foreground sync (surfaceErrors ==
+      // false): the banner is the ambient "you're signed out" signal, distinct
+      // from the transient alert that only a user-initiated sync raises.
+      sessionExpired = true
       if surfaceErrors {
         syncError = L10n.string("Your session expired. Lock and unlock to sign in again.")
       }

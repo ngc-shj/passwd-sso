@@ -29,7 +29,8 @@ enum AppState {
     cacheData: CacheData,
     autoLockService: AutoLockService,
     apiClient: MobileAPIClient,
-    cacheKey: SymmetricKey?
+    cacheKey: SymmetricKey?,
+    sessionExpired: Bool
   )
   // Locked but still signed in: re-unlock needs only the passphrase, keeping the
   // server config + token (no OAuth re-sign-in). Carries serverConfig/apiClient
@@ -115,7 +116,7 @@ struct RootView: View {
         // Arriving via sign-in / app entry → auto-prompt Face ID on appear.
         vaultLockedScreen(serverConfig: serverConfig, apiClient: apiClient, autoPromptOnAppear: true)
 
-      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let keyVersion, let cacheData, let autoLockService, let apiClient, let cacheKey):
+      case .vaultUnlocked(let serverConfig, let vaultKey, let userId, let keyVersion, let cacheData, let autoLockService, let apiClient, let cacheKey, let sessionExpired):
         VaultListView(
           cacheData: cacheData,
           vaultKey: vaultKey,
@@ -124,7 +125,8 @@ struct RootView: View {
           autoLockService: autoLockService,
           apiClient: apiClient,
           hostSyncService: hostSyncService ?? makeFallbackSyncService(apiClient: apiClient),
-          cacheKey: cacheKey
+          cacheKey: cacheKey,
+          sessionExpiredAtUnlock: sessionExpired
         )
         .onChange(of: autoLockService.state) { _, newState in
           switch newState {
@@ -504,7 +506,10 @@ struct RootView: View {
       cacheData: cacheData,
       autoLockService: autoLockService,
       apiClient: apiClient,
-      cacheKey: unlockResult.cacheKey
+      cacheKey: unlockResult.cacheKey,
+      // A dead-session unlock that fell back to the local cache (.useLocalCache /
+      // .useEmptyCache) reaches the vault read-only — surface it via the banner.
+      sessionExpired: sessionExpired
     )
     return .reachedVault
   }
