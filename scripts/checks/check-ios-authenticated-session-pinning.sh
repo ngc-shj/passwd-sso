@@ -45,7 +45,9 @@ UNPINNED_ALLOWLIST=(
 )
 
 # Session construction primitives that bypass the pinned derivation path.
-SESSION_CTOR_PATTERN='URLSession\(|URLSession\.shared'
+# Covers the sugared `URLSession(...)`, the explicit `URLSession.init(...)`
+# spelling (valid Swift, so a blanket ban must catch it), and `URLSession.shared`.
+SESSION_CTOR_PATTERN='URLSession\(|URLSession\.init\(|URLSession\.shared'
 
 is_allowlisted() {
   local rel="$1" entry
