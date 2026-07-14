@@ -41,7 +41,15 @@ export function canonicalHtu(args: { route: string }): string {
   const basePath = resolveBasePath(url);
 
   const path = normalizePath(args.route);
-  return `${scheme}//${authority}${basePath}${path}`;
+  // A route derived from req.url is externally visible and already contains
+  // basePath. Keep this operation idempotent so a sub-path deployment never
+  // validates DPoP against `/base/base/api/...`. Require a path-segment
+  // boundary so `/passwd-sso-evil` is not mistaken for `/passwd-sso`.
+  const canonicalPath =
+    basePath && (path === basePath || path.startsWith(`${basePath}/`))
+      ? path
+      : `${basePath}${path}`;
+  return `${scheme}//${authority}${canonicalPath}`;
 }
 
 function normalizePath(route: string): string {
@@ -57,7 +65,13 @@ function normalizePath(route: string): string {
  * APP_URL/AUTH_URL, ensuring client-server htu equivalence:
  *
  *   canonicalHtuClient(serverUrl, route) === canonicalHtu({ route })
- *   when getAppOrigin() === serverUrl (basePath included)
+ *   when getAppOrigin() === serverUrl AND `route` carries no basePath prefix.
+ *
+ * This function unconditionally prepends basePath, so it is NOT idempotent the
+ * way `canonicalHtu` is — the equivalence holds only for basePath-free routes,
+ * which is exactly the client contract (all callers pass hardcoded API routes
+ * like `/api/extension/token/exchange`). The server needs the idempotency guard
+ * only because ITS caller may derive `route` from `req.url` (basePath included).
  *
  * Algorithm (per plan §C-shared / Round-3 S23-r3):
  *  - Parse serverUrl with `new URL`.

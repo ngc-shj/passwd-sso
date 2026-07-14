@@ -9,6 +9,7 @@ import {
   resolveCodeTenantId,
   resolveRefreshTokenGate,
 } from "./oauth-server";
+import { MCP_PRESENTED_TOKEN_MAX_LENGTH } from "@/lib/constants/auth/mcp";
 
 // ─── Mock Prisma ──────────────────────────────────────────────
 
@@ -493,6 +494,19 @@ describe("validateMcpToken", () => {
     const result = await validateMcpToken("bearer_invalid_token");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe("invalid_token");
+  });
+
+  it("rejects an oversized token before hashing or DB lookup", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const findUnique = vi.fn();
+    mockDelegates(prisma).mcpAccessToken = { findUnique };
+
+    const result = await validateMcpToken(
+      "mcp_" + "A".repeat(MCP_PRESENTED_TOKEN_MAX_LENGTH),
+    );
+
+    expect(result).toEqual({ ok: false, error: "invalid_token" });
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it("returns invalid_token when token not found in DB", async () => {

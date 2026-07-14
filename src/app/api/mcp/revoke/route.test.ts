@@ -21,6 +21,12 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
 }));
 
 import { POST } from "@/app/api/mcp/revoke/route";
+import {
+  MCP_CLIENT_ID_MAX_LENGTH,
+  MCP_CLIENT_SECRET_MAX_LENGTH,
+  MCP_PRESENTED_TOKEN_MAX_LENGTH,
+  MCP_TOKEN_TYPE_HINT_MAX_LENGTH,
+} from "@/lib/constants/auth/mcp";
 
 const VALID_JSON_BODY = {
   token: "mcp_access_token_abc",
@@ -64,6 +70,22 @@ describe("POST /api/mcp/revoke", () => {
       expect.objectContaining({
         token: "mcp_access_token_abc",
         tokenTypeHint: "refresh_token",
+        clientId: "mcpc_testclient",
+      }),
+    );
+  });
+
+  it("maps an unsupported token_type_hint to undefined (RFC 7009 §2.1 — try both)", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/revoke", {
+      body: { ...VALID_JSON_BODY, token_type_hint: "urn:ietf:params:oauth:token-type:jwt" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(mockRevokeToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: "mcp_access_token_abc",
+        tokenTypeHint: undefined,
         clientId: "mcpc_testclient",
       }),
     );
@@ -187,6 +209,60 @@ describe("POST /api/mcp/revoke", () => {
 
     expect(res.status).toBe(400);
     expect(json.error).toBe("invalid_request");
+  });
+
+  it.each([
+    { token: { nested: true }, client_id: "mcpc_testclient" },
+    { token: ["mcp_access_token_abc"], client_id: "mcpc_testclient" },
+    { token: "mcp_access_token_abc", client_id: { nested: true } },
+    { ...VALID_JSON_BODY, client_secret: { nested: true } },
+  ])("returns 400 for non-string OAuth parameters", async (body) => {
+    const req = createRequest("POST", "http://localhost/api/mcp/revoke", { body });
+    const res = await POST(req);
+    const json = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRevokeToken).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 when client_id exceeds the shared DB-backed length limit", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/revoke", {
+      body: {
+        ...VALID_JSON_BODY,
+        client_id: "x".repeat(MCP_CLIENT_ID_MAX_LENGTH + 1),
+      },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(mockRevokeToken).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["token", MCP_PRESENTED_TOKEN_MAX_LENGTH],
+    ["token_type_hint", MCP_TOKEN_TYPE_HINT_MAX_LENGTH],
+    ["client_secret", MCP_CLIENT_SECRET_MAX_LENGTH],
+  ] as const)("returns 400 when %s exceeds its shared length limit", async (field, max) => {
+    const req = createRequest("POST", "http://localhost/api/mcp/revoke", {
+      body: { ...VALID_JSON_BODY, [field]: "x".repeat(max + 1) },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(400);
+    expect(mockRevokeToken).not.toHaveBeenCalled();
+  });
+
+  it("preserves empty optional OAuth parameters for public-client compatibility", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/revoke", {
+      body: { ...VALID_JSON_BODY, token_type_hint: "", client_secret: "" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(mockRevokeToken).toHaveBeenCalledWith(
+      expect.objectContaining({ clientSecretHash: undefined }),
+    );
   });
 
   // ─── Rate limiting ──────────────────────────────────────────────────────────

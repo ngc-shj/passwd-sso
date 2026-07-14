@@ -80,6 +80,10 @@ public struct EntryUploader: Sendable {
   private let onNonceUpdate: (@Sendable (String) -> Void)?
   private let urlSession: URLSession
 
+  /// `urlSession` has no default: the passkey upload POSTs a bearer token + an
+  /// encrypted entry to the app's own server, so it must run over the TLS-pinned
+  /// session. A `.shared` default previously let the AutoFill caller silently
+  /// upload over an unpinned connection.
   public init(
     serverURL: URL,
     signer: any DPoPSigner,
@@ -87,7 +91,7 @@ public struct EntryUploader: Sendable {
     accessToken: String,
     initialNonce: String? = nil,
     onNonceUpdate: (@Sendable (String) -> Void)? = nil,
-    urlSession: URLSession = .shared
+    urlSession: URLSession
   ) {
     self.serverURL = serverURL
     self.signer = signer

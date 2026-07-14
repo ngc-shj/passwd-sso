@@ -22,6 +22,9 @@ import {
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
   MCP_REFRESH_TOKEN_FAMILY_ABSOLUTE_TIMEOUT_SEC,
   MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
+  MCP_AUTHORIZATION_CODE_MAX_LENGTH,
+  MCP_CLIENT_ID_MAX_LENGTH,
+  MCP_PRESENTED_TOKEN_MAX_LENGTH,
   REFRESH_EXCHANGE_REASON,
   type McpScope,
   type RefreshExchangeReason,
@@ -173,6 +176,7 @@ export type TokenExchangeOutcome =
  * IP gate only ever restricts, never grants).
  */
 export async function resolveCodeTenantId(code: string): Promise<string | null> {
+  if (!code || code.length > MCP_AUTHORIZATION_CODE_MAX_LENGTH) return null;
   const codeHash = hashToken(code);
   return withBypassRls(
     prisma,
@@ -204,6 +208,7 @@ export interface RefreshTokenGate {
 export async function resolveRefreshTokenGate(
   refreshToken: string,
 ): Promise<RefreshTokenGate | null> {
+  if (!refreshToken || refreshToken.length > MCP_PRESENTED_TOKEN_MAX_LENGTH) return null;
   const tokenHash = hashToken(refreshToken);
   return withBypassRls(
     prisma,
@@ -222,6 +227,12 @@ export async function resolveRefreshTokenGate(
 export async function exchangeCodeForToken(
   params: ExchangeCodeParams,
 ): Promise<TokenExchangeOutcome> {
+  if (!params.code || params.code.length > MCP_AUTHORIZATION_CODE_MAX_LENGTH) {
+    return { ok: false, error: "invalid_grant" };
+  }
+  if (!params.clientId || params.clientId.length > MCP_CLIENT_ID_MAX_LENGTH) {
+    return { ok: false, error: "invalid_client" };
+  }
   const codeHash = hashToken(params.code);
 
   const result = await withBypassRls(prisma, async (tx) => {
@@ -452,6 +463,12 @@ export async function exchangeRefreshToken(
       storedClientId?: string;
     }
 > {
+  if (!params.refreshToken || params.refreshToken.length > MCP_PRESENTED_TOKEN_MAX_LENGTH) {
+    return { ok: false, error: "invalid_grant" };
+  }
+  if (!params.clientId || params.clientId.length > MCP_CLIENT_ID_MAX_LENGTH) {
+    return { ok: false, error: "invalid_client" };
+  }
   const dbClient = options.prisma ?? prisma;
   const tokenHash = hashToken(params.refreshToken);
   const nowMs = params.now ? params.now() : Date.now();
@@ -750,7 +767,10 @@ async function checkTenantMembership(
 export async function validateMcpToken(
   token: string,
 ): Promise<McpTokenValidationResult> {
-  if (!token.startsWith(MCP_TOKEN_PREFIX)) {
+  if (
+    !token.startsWith(MCP_TOKEN_PREFIX) ||
+    token.length > MCP_PRESENTED_TOKEN_MAX_LENGTH
+  ) {
     return { ok: false, error: "invalid_token" };
   }
 
@@ -843,6 +863,14 @@ export async function revokeToken(params: {
   clientId: string;
   clientSecretHash?: string;
 }): Promise<void> {
+  if (
+    !params.token ||
+    params.token.length > MCP_PRESENTED_TOKEN_MAX_LENGTH ||
+    !params.clientId ||
+    params.clientId.length > MCP_CLIENT_ID_MAX_LENGTH
+  ) {
+    return;
+  }
   const tokenHash = hashToken(params.token);
 
   await withBypassRls(prisma, async (tx) => {

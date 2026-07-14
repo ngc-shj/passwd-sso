@@ -4,7 +4,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
-import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/auth/mcp";
+import {
+  MCP_CLIENT_ID_MAX_LENGTH,
+  MCP_SCOPES,
+  MAX_MCP_CLIENTS_PER_TENANT,
+} from "@/lib/constants/auth/mcp";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -62,7 +66,7 @@ export async function POST(req: NextRequest) {
   const state = formData.get("state") ?? "";
   const action = formData.get("action") ?? "";
 
-  if (!clientId || !redirectUri) {
+  if (!clientId || clientId.length > MCP_CLIENT_ID_MAX_LENGTH || !redirectUri) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 

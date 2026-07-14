@@ -20,7 +20,8 @@ final class SessionRestorerTests: XCTestCase {
       serverURL: URL(string: "https://dummy.example")!,
       signer: FakeSigner(),
       jwk: [:],
-      tokenStore: HostTokenStore(service: "com.test.session-restorer", keychain: FakeKeychain())
+      tokenStore: HostTokenStore(service: "com.test.session-restorer", keychain: FakeKeychain()),
+      urlSession: .shared
     )
   }
 
@@ -77,6 +78,8 @@ final class SessionRestorerTests: XCTestCase {
     guard case .needsUnlock = result else { return XCTFail("expected .needsUnlock, got \(result)") }
   }
 
+  // Offline (transient) with a valid pin → cached vault stays unlockable; NOT a
+  // server-identity warning.
   func testRestore_validateOffline_needsUnlock() async {
     let result = await makeRestorer(loadConfig: { [config] in config }, validate: { _ in .offline }).restore()
     guard case .needsUnlock = result else { return XCTFail("expected .needsUnlock, got \(result)") }
@@ -85,6 +88,17 @@ final class SessionRestorerTests: XCTestCase {
   func testRestore_validateDead_needsReauth() async {
     let result = await makeRestorer(loadConfig: { [config] in config }, validate: { _ in .dead }).restore()
     guard case .needsReauth = result else { return XCTFail("expected .needsReauth, got \(result)") }
+  }
+
+  // validate() reports a pinned-TLS rejection → re-verify affordance.
+  func testRestore_validateIdentityMismatch_serverIdentityChanged() async {
+    let result = await makeRestorer(
+      loadConfig: { [config] in config },
+      validate: { _ in .identityMismatch }
+    ).restore()
+    guard case .serverIdentityChanged = result else {
+      return XCTFail("expected .serverIdentityChanged, got \(result)")
+    }
   }
 
   // MARK: - validate is not invoked when a precondition fails

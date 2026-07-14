@@ -24,6 +24,7 @@ import {
   signAssertion,
   base64urlEncode,
 } from "../lib/webauthn-crypto";
+import { isRpIdAllowedForHostname } from "../lib/webauthn-rp-id";
 
 export interface PasskeyProviderDeps {
   getEncryptionKey: () => CryptoKey | null;
@@ -65,8 +66,7 @@ export function isSenderAuthorizedForRpId(rpId: string, senderUrl: string | unde
   if (!senderUrl) return false;
   try {
     const hostname = new URL(senderUrl).hostname;
-    if (!rpId || rpId.split(".").filter(Boolean).length < 2) return false;
-    return rpId === hostname || hostname.endsWith("." + rpId);
+    return isRpIdAllowedForHostname(rpId, hostname);
   } catch {
     return false;
   }

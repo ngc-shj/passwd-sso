@@ -368,8 +368,14 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
 
       if let encryption {
         let uploadTokenStore = UploadTokenStore()
+        // The upload runs over the pinned session established when the user set
+        // up the server in the main app. The extension only VERIFIES the pin
+        // (never runs the network probe that first establishes it), so a missing
+        // pin fails closed: skip the upload rather than fall back to an unpinned
+        // connection that would leak the bearer token to an on-path attacker.
         if let stored = try? uploadTokenStore.loadValid(),
            let serverConfig = loadServerConfig(),
+           let pinnedSession = try? await ServerTrustService().pinnedSession(for: serverConfig.baseURL),
            let dpopKey = try? getOrCreateAutofillDPoPKey(),
            let extensionJWK = try? exportPublicKeyJWK(key: dpopKey) {
           hasUploadToken = true
@@ -379,7 +385,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
             jwk: extensionJWK,
             accessToken: stored.token,
             initialNonce: stored.dpopNonce,
-            onNonceUpdate: { [uploadTokenStore] nonce in try? uploadTokenStore.saveNonce(nonce) }
+            onNonceUpdate: { [uploadTokenStore] nonce in try? uploadTokenStore.saveNonce(nonce) },
+            urlSession: pinnedSession
           )
           let body = CreateEntryRequest(
             id: entryId,

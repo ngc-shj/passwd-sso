@@ -12,7 +12,8 @@ final class BackgroundSyncContextTests: XCTestCase {
       serverURL: URL(string: "https://test.example")!,
       signer: FakeSigner(),
       jwk: [:],
-      tokenStore: HostTokenStore(service: "com.test.bgctx", keychain: FakeKeychain())
+      tokenStore: HostTokenStore(service: "com.test.bgctx", keychain: FakeKeychain()),
+      urlSession: .shared
     )
     return HostSyncService(
       apiClient: client,

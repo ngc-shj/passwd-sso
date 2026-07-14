@@ -693,6 +693,18 @@ describe("passkey-provider", () => {
       expect(isSenderAuthorizedForRpId("localhost", "https://localhost/login")).toBe(false);
     });
 
+    it.each(["co.uk", "github.io", "appspot.com"])(
+      "returns false when rpId is public suffix %s",
+      (rpId) => {
+        expect(isSenderAuthorizedForRpId(rpId, `https://tenant.${rpId}/login`)).toBe(false);
+      },
+    );
+
+    it("allows only the matching tenant below a private suffix", () => {
+      expect(isSenderAuthorizedForRpId("alice.github.io", "https://login.alice.github.io")).toBe(true);
+      expect(isSenderAuthorizedForRpId("alice.github.io", "https://bob.github.io")).toBe(false);
+    });
+
     it("returns false when senderUrl is undefined", () => {
       expect(isSenderAuthorizedForRpId("example.com", undefined)).toBe(false);
     });

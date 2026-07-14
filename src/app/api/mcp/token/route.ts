@@ -20,7 +20,10 @@ import { resolveAuditUserId } from "@/lib/constants/app";
 import {
   REFRESH_EXCHANGE_REASON,
   FAMILY_REVOKED_REASON,
+  MCP_AUTHORIZATION_CODE_MAX_LENGTH,
   MCP_CLIENT_ID_MAX_LENGTH,
+  MCP_CLIENT_SECRET_MAX_LENGTH,
+  MCP_PRESENTED_TOKEN_MAX_LENGTH,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -97,18 +100,22 @@ async function handlePOST(req: NextRequest) {
     // backend (memory / bandwidth / log amplification).
     if (
       typeof code !== "string" ||
+      code.length === 0 ||
+      code.length > MCP_AUTHORIZATION_CODE_MAX_LENGTH ||
       typeof redirect_uri !== "string" ||
       typeof client_id !== "string" ||
       client_id.length === 0 ||
       client_id.length > MCP_CLIENT_ID_MAX_LENGTH ||
       typeof code_verifier !== "string" ||
-      (client_secret !== undefined && typeof client_secret !== "string")
+      (client_secret !== undefined &&
+        (typeof client_secret !== "string" ||
+          client_secret.length > MCP_CLIENT_SECRET_MAX_LENGTH))
     ) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
     // client_secret is optional for public clients (token_endpoint_auth_method: "none")
-    if (!code || !redirect_uri || !code_verifier) {
+    if (!redirect_uri || !code_verifier) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
@@ -207,10 +214,13 @@ async function handlePOST(req: NextRequest) {
     if (
       typeof refreshTokenValue !== "string" ||
       refreshTokenValue.length === 0 ||
+      refreshTokenValue.length > MCP_PRESENTED_TOKEN_MAX_LENGTH ||
       typeof clientIdValue !== "string" ||
       clientIdValue.length === 0 ||
       clientIdValue.length > MCP_CLIENT_ID_MAX_LENGTH ||
-      (clientSecretValue !== undefined && typeof clientSecretValue !== "string")
+      (clientSecretValue !== undefined &&
+        (typeof clientSecretValue !== "string" ||
+          clientSecretValue.length > MCP_CLIENT_SECRET_MAX_LENGTH))
     ) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }

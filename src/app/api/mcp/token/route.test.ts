@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "../../../../__tests__/helpers/request-builder";
+import {
+  MCP_AUTHORIZATION_CODE_MAX_LENGTH,
+  MCP_CLIENT_SECRET_MAX_LENGTH,
+  MCP_PRESENTED_TOKEN_MAX_LENGTH,
+} from "@/lib/constants/auth/mcp";
 
 const {
   mockExchangeCodeForToken,
@@ -244,6 +249,24 @@ describe("POST /api/mcp/token", () => {
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
+  it("authorization_code: rejects an oversized code before hashing or lookup", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        ...VALID_BODY,
+        code: "A".repeat(MCP_AUTHORIZATION_CODE_MAX_LENGTH + 1),
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockResolveCodeTenantId).not.toHaveBeenCalled();
+    expect(mockHashToken).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
   it("authorization_code: rejects a non-string code (JSON body) before the rate-limit key or exchange", async () => {
     // The JSON body is only cast to Record<string,string>; a non-string `code`
     // must be rejected by the boundary type check, parallel to the client_id
@@ -322,6 +345,23 @@ describe("POST /api/mcp/token", () => {
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
     expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
+  });
+
+  it("authorization_code: rejects an oversized client_secret before hashing", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        ...VALID_BODY,
+        client_secret: "A".repeat(MCP_CLIENT_SECRET_MAX_LENGTH + 1),
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockHashToken).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -784,6 +824,24 @@ describe("POST /api/mcp/token", () => {
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
+  it("refresh_token: rejects an oversized refresh_token before hashing or lookup", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        ...VALID_REFRESH_BODY,
+        refresh_token: "A".repeat(MCP_PRESENTED_TOKEN_MAX_LENGTH + 1),
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockResolveRefreshTokenGate).not.toHaveBeenCalled();
+    expect(mockHashToken).not.toHaveBeenCalled();
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+  });
+
   it("refresh_token: rejects a non-string client_secret before the rate-limit key or exchange", async () => {
     // client_secret is optional but must be a string when present.
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
@@ -800,6 +858,24 @@ describe("POST /api/mcp/token", () => {
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
     expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("refresh_token: rejects an oversized client_secret before hashing", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: {
+        ...VALID_REFRESH_BODY,
+        client_secret: "A".repeat(MCP_CLIENT_SECRET_MAX_LENGTH + 1),
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockHashToken).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });

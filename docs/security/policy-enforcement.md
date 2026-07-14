@@ -92,4 +92,4 @@ Sensitive browser-session flows that mint non-session credentials require a rece
 | Tenant access policy | 60s | `invalidateTenantPolicyCache(tenantId)` | `access-restriction.ts` |
 | Lockout thresholds | 60s | `invalidateLockoutThresholdCache(tenantId)` | `account-lockout.ts` |
 | Session timeouts (per user) | 60s | `invalidateSessionTimeoutCache(userId)` / `invalidateSessionTimeoutCacheForTenant(tenantId)` | `session-timeout.ts` |
-| Session cache (Redis) | `SESSION_CACHE_TTL_MS` (30 s) | Tombstone-based revocation via `invalidateCachedSession` (TTL `TOMBSTONE_TTL_MS` = 5 s) | `src/lib/auth/session/session-cache.ts` (proxy reads via `src/lib/proxy/auth-gate.ts`) |
+| Session cache (Redis) | `SESSION_CACHE_TTL_MS` (30 s) | Tombstone-based revocation via `invalidateCachedSession` (TTL `TOMBSTONE_TTL_MS` = 30 s) | `src/lib/auth/session/session-cache.ts` (proxy reads via `src/lib/proxy/auth-gate.ts`) |

@@ -170,7 +170,10 @@ describe("generate-env-example.ts", () => {
     const enContent = readFileSync(rEn.outPath, "utf8");
     const trContent = readFileSync(rTr.outPath, "utf8");
     expect(enContent).toBe(trContent);
-  });
+    // 30s: this case spawns `npx tsx` twice (--locale=en + --locale=tr), so
+    // two cold TS starts blow past the default 10s it-timeout under full-suite
+    // CPU contention. The single-spawn cases above stay well under it.
+  }, 30_000);
 
   it("C4: REDIS_PASSWORD renders uncommented with NOTE comment retained (requiredForCompose)", () => {
     // Pins the C4 rendering so a future generator refactor cannot silently

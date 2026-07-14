@@ -94,6 +94,22 @@ describe("canonicalHtu", () => {
       "https://example.com/passwd-sso/api/extension/token/exchange",
     );
   });
+
+  it("does not duplicate basePath when the request pathname already contains it", () => {
+    vi.stubEnv("APP_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    expect(canonicalHtu({ route: "/passwd-sso/api/mobile/cache-rollback-report" })).toBe(
+      "https://example.com/passwd-sso/api/mobile/cache-rollback-report",
+    );
+  });
+
+  it("uses a segment boundary when detecting an existing basePath", () => {
+    vi.stubEnv("APP_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    expect(canonicalHtu({ route: "/passwd-sso-evil/api/foo" })).toBe(
+      "https://example.com/passwd-sso/passwd-sso-evil/api/foo",
+    );
+  });
 });
 
 describe("htuMatches", () => {

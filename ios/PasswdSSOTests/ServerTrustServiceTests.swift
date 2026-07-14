@@ -176,4 +176,360 @@ final class ServerTrustServiceTests: XCTestCase {
     XCTAssertEqual(p1, pin1)
     XCTAssertEqual(p2, pin2)
   }
+
+  func testHealthResponseAccepts200JSONWithStatusAlive() throws {
+    let url = URL(string: "https://passwd-sso.example/api/health/live")!
+    let response = try XCTUnwrap(HTTPURLResponse(
+      url: url,
+      statusCode: 200,
+      httpVersion: nil,
+      headerFields: ["Content-Type": "application/json; charset=utf-8"]
+    ))
+    XCTAssertTrue(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive"}"#.utf8),
+      response: response
+    ))
+  }
+
+  /// Adding fields to /api/health/live must NOT lock out an older client, so an
+  /// extra key alongside `status: alive` is still accepted (cross-repo drift).
+  func testHealthResponseAcceptsExtraFieldsAlongsideStatus() throws {
+    let url = URL(string: "https://passwd-sso.example/api/health/live")!
+    let response = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    ))
+    XCTAssertTrue(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive","version":"1.2.3"}"#.utf8), response: response))
+  }
+
+  func testHealthResponseRejects404HTMLAndMissingStatus() throws {
+    let url = URL(string: "https://passwd-sso.example/api/health/live")!
+    let notFound = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 404, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    ))
+    let html = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "text/html"]
+    ))
+    let json = try XCTUnwrap(HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"]
+    ))
+
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"alive"}"#.utf8), response: notFound))
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data("<html>login</html>".utf8), response: html))
+    // status marker absent → reject (generic 2xx JSON page).
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"ok":true}"#.utf8), response: json))
+    // wrong status value → reject.
+    XCTAssertFalse(isValidPasswdSSOHealthResponse(
+      data: Data(#"{"status":"degraded"}"#.utf8), response: json))
+  }
+
+  // MARK: - pinnedSession / clearPin fail-closed paths
+
+  func testPinnedSessionThrowsPinMissingWhenUnpinned() async {
+    do {
+      _ = try await service.pinnedSession(for: serverURL)
+      XCTFail("pinnedSession must throw when no pin is stored")
+    } catch let error as ServerTrustError {
+      XCTAssertEqual(error, .pinMissing)
+    } catch {
+      XCTFail("unexpected error: \(error)")
+    }
+  }
+
+  func testPinnedSessionSucceedsWhenPinned() async throws {
+    let pinSet = PinSet(
+      aasaSHA256: Data(),
+      tlsLeafKeySHA256: Data(repeating: 0xBB, count: 32)
+    )
+    try await service.pin(for: serverURL, pinSet)
+    _ = try await service.pinnedSession(for: serverURL)
+  }
+
+  func testClearPinRemovesStoredPin() async throws {
+    let pinSet = PinSet(
+      aasaSHA256: Data(),
+      tlsLeafKeySHA256: Data(repeating: 0xCD, count: 32)
+    )
+    try await service.pin(for: serverURL, pinSet)
+    let existsBeforeClear = await service.currentPinExists(for: serverURL)
+    XCTAssertTrue(existsBeforeClear)
+
+    try service.clearPin(for: serverURL)
+
+    let existsAfterClear = await service.currentPinExists(for: serverURL)
+    XCTAssertFalse(existsAfterClear)
+    // After clearing, pinnedSession must fail closed again.
+    do {
+      _ = try await service.pinnedSession(for: serverURL)
+      XCTFail("pinnedSession must throw after clearPin")
+    } catch let error as ServerTrustError {
+      XCTAssertEqual(error, .pinMissing)
+    }
+  }
+
+  func testClearPinOnAbsentPinIsNoOp() throws {
+    // errSecItemNotFound must not surface as an error.
+    XCTAssertNoThrow(try service.clearPin(for: serverURL))
+  }
+
+  // MARK: - reestablishTrust atomicity (re-verify must not drop the old pin on failure)
+
+  func testReestablishTrustKeepsOldPinWhenProbeFails() async throws {
+    let original = PinSet(
+      aasaSHA256: Data(),
+      tlsLeafKeySHA256: Data(repeating: 0x7A, count: 32)
+    )
+    // Pin against a routable-but-dead address so the health probe fails fast.
+    let deadURL = URL(string: "https://127.0.0.1:1")!
+    try await service.pin(for: deadURL, original)
+
+    do {
+      try await service.reestablishTrust(
+        serverURL: deadURL,
+        healthURL: deadURL.appending(path: "api/health/live", directoryHint: .notDirectory)
+      )
+      XCTFail("reestablishTrust must throw when the probe cannot reach the server")
+    } catch {
+      // expected — connection refused / TLS failure
+    }
+
+    // The OLD pin must still be intact — a failed re-verification is NOT a clear.
+    let stored = try await service.currentPin(for: deadURL)
+    XCTAssertEqual(stored, original,
+                   "a failed reestablishTrust must leave the existing pin unchanged (no lockout, no unpinned window)")
+  }
+
+  func testCurrentPinExistsReflectsStoredState() async throws {
+    let existsBeforePin = await service.currentPinExists(for: serverURL)
+    XCTAssertFalse(existsBeforePin)
+    try await service.pin(
+      for: serverURL,
+      PinSet(aasaSHA256: Data(), tlsLeafKeySHA256: Data(repeating: 0x01, count: 32))
+    )
+    let existsAfterPin = await service.currentPinExists(for: serverURL)
+    XCTAssertTrue(existsAfterPin)
+  }
+
+  // MARK: - LeafKeyPinningDelegate redirect guard (F2 — plain-value, no SecTrust)
+
+  private func makeRedirectResponse() throws -> HTTPURLResponse {
+    try XCTUnwrap(HTTPURLResponse(
+      url: URL(string: "https://passwd-sso.example/api/health/live")!,
+      statusCode: 302, httpVersion: nil, headerFields: nil
+    ))
+  }
+
+  func testRedirectAllowsSameHostHTTPS() async throws {
+    let delegate = LeafKeyPinningDelegate(expectedHost: "passwd-sso.example")
+    let response = try makeRedirectResponse()
+    let newRequest = URLRequest(url: URL(string: "https://passwd-sso.example/other")!)
+
+    let forwarded = await withCheckedContinuation { continuation in
+      delegate.urlSession(
+        URLSession.shared, task: URLSession.shared.dataTask(with: URL(string: "https://x")!),
+        willPerformHTTPRedirection: response, newRequest: newRequest
+      ) { continuation.resume(returning: $0) }
+    }
+    XCTAssertNotNil(forwarded, "same-host HTTPS redirect must be forwarded")
+  }
+
+  func testRedirectRejectsHTTPDowngrade() async throws {
+    let delegate = LeafKeyPinningDelegate(expectedHost: "passwd-sso.example")
+    let response = try makeRedirectResponse()
+    let newRequest = URLRequest(url: URL(string: "http://passwd-sso.example/other")!)
+
+    let forwarded = await withCheckedContinuation { continuation in
+      delegate.urlSession(
+        URLSession.shared, task: URLSession.shared.dataTask(with: URL(string: "https://x")!),
+        willPerformHTTPRedirection: response, newRequest: newRequest
+      ) { continuation.resume(returning: $0) }
+    }
+    XCTAssertNil(forwarded, "http:// downgrade redirect must be blocked")
+  }
+
+  func testRedirectRejectsCrossHost() async throws {
+    let delegate = LeafKeyPinningDelegate(expectedHost: "passwd-sso.example")
+    let response = try makeRedirectResponse()
+    let newRequest = URLRequest(url: URL(string: "https://evil.example/other")!)
+
+    let forwarded = await withCheckedContinuation { continuation in
+      delegate.urlSession(
+        URLSession.shared, task: URLSession.shared.dataTask(with: URL(string: "https://x")!),
+        willPerformHTTPRedirection: response, newRequest: newRequest
+      ) { continuation.resume(returning: $0) }
+    }
+    XCTAssertNil(forwarded, "cross-host redirect must be blocked")
+  }
+
+  // MARK: - Typed pin-mismatch boundary (probe seam → outcome routing)
+  //
+  // The delegate's authoritative mismatch flag can only be set by a real TLS
+  // handshake (MockURLProtocol never drives the server-trust challenge), so
+  // these tests inject the probe outcome the delegate would produce and assert
+  // that `probePinnedIdentity` / `establishTrust` / `reestablishTrust` route it
+  // into the correct typed result — the security boundary added by this branch.
+
+  private let healthURL = URL(string: "https://passwd-sso.example/api/health/live")!
+  private let capturedHash = Data(repeating: 0xAB, count: 32)
+
+  /// Build a service whose probe returns a fixed outcome, pre-seeded with a pin.
+  private func serviceWithProbe(
+    seededPin: PinSet?,
+    probe: @escaping @Sendable (URLSession, LeafKeyPinningDelegate, URL) async throws -> Data
+  ) async throws -> ServerTrustService {
+    let svc = ServerTrustService(keychain: keychain, leafKeyProbe: probe)
+    if let seededPin {
+      try await svc.pin(for: serverURL, seededPin)
+    }
+    return svc
+  }
+
+  private func pinSet(_ byte: UInt8) -> PinSet {
+    PinSet(aasaSHA256: Data(), tlsLeafKeySHA256: Data(repeating: byte, count: 32))
+  }
+
+  // --- probePinnedIdentity: match / mismatch / unreachable / pinMissing ---
+
+  func testProbePinnedIdentityReturnsMatchWhenProbeSucceeds() async throws {
+    let hash = capturedHash
+    let svc = try await serviceWithProbe(seededPin: pinSet(0x11)) { _, _, _ in
+      hash
+    }
+    let result = await svc.probePinnedIdentity(for: serverURL, healthURL: healthURL)
+    XCTAssertEqual(result, .match)
+  }
+
+  func testProbePinnedIdentityReturnsMismatchOnPinMismatch() async throws {
+    // The delegate would set pinMismatchDetected → networkLeafKeyProbe throws
+    // .pinMismatch. probePinnedIdentity must translate that to .mismatch.
+    let svc = try await serviceWithProbe(seededPin: pinSet(0x22)) { _, _, _ in
+      throw ServerTrustError.pinMismatch
+    }
+    let result = await svc.probePinnedIdentity(for: serverURL, healthURL: healthURL)
+    XCTAssertEqual(result, .mismatch, "a delegate-detected key rejection must route to .mismatch")
+  }
+
+  func testProbePinnedIdentityReturnsUnreachableOnConnectivityError() async throws {
+    // A genuine offline/timeout failure surfaces as URLError, NOT pinMismatch:
+    // the pin is presumed intact so the cached vault stays usable.
+    let svc = try await serviceWithProbe(seededPin: pinSet(0x33)) { _, _, _ in
+      throw URLError(.notConnectedToInternet)
+    }
+    let result = await svc.probePinnedIdentity(for: serverURL, healthURL: healthURL)
+    XCTAssertEqual(result, .unreachable, "a connectivity failure must NOT be treated as an identity change")
+  }
+
+  func testProbePinnedIdentityReturnsUnreachableOnNonMismatchTrustError() async throws {
+    // e.g. tlsKeyUnavailable / invalidHealthResponse — not an identity change.
+    let svc = try await serviceWithProbe(seededPin: pinSet(0x34)) { _, _, _ in
+      throw ServerTrustError.invalidHealthResponse
+    }
+    let result = await svc.probePinnedIdentity(for: serverURL, healthURL: healthURL)
+    XCTAssertEqual(result, .unreachable)
+  }
+
+  func testProbePinnedIdentityReturnsPinMissingWhenUnpinned() async throws {
+    let svc = try await serviceWithProbe(seededPin: nil) { _, _, _ in
+      XCTFail("probe must not run when no pin is stored")
+      return Data()
+    }
+    let result = await svc.probePinnedIdentity(for: serverURL, healthURL: healthURL)
+    XCTAssertEqual(result, .pinMissing)
+  }
+
+  // --- establishTrust: pinMismatch propagates; existing pin never replaced ---
+
+  func testEstablishTrustPropagatesPinMismatch() async throws {
+    let existing = pinSet(0x44)
+    let svc = try await serviceWithProbe(seededPin: existing) { _, _, _ in
+      throw ServerTrustError.pinMismatch
+    }
+    do {
+      try await svc.establishTrust(serverURL: serverURL, healthURL: healthURL)
+      XCTFail("establishTrust must rethrow the delegate's pinMismatch")
+    } catch let error as ServerTrustError {
+      XCTAssertEqual(error, .pinMismatch)
+    }
+    let stored = try await svc.currentPin(for: serverURL)
+    XCTAssertEqual(stored, existing, "a mismatched probe must leave the existing pin untouched")
+  }
+
+  func testEstablishTrustPinsOnFirstUse() async throws {
+    let hash = capturedHash
+    let svc = try await serviceWithProbe(seededPin: nil) { _, _, _ in hash }
+    try await svc.establishTrust(serverURL: serverURL, healthURL: healthURL)
+    let stored = try await svc.currentPin(for: serverURL)
+    XCTAssertEqual(stored?.tlsLeafKeySHA256, capturedHash, "first-use trust must persist the captured leaf key")
+  }
+
+  func testEstablishTrustKeepsExistingPinOnSuccess() async throws {
+    // With a pin already stored, a successful probe must NOT overwrite it.
+    let existing = pinSet(0x55)
+    let svc = try await serviceWithProbe(seededPin: existing) { _, _, _ in
+      Data(repeating: 0x99, count: 32)  // a different observed key
+    }
+    try await svc.establishTrust(serverURL: serverURL, healthURL: healthURL)
+    let stored = try await svc.currentPin(for: serverURL)
+    XCTAssertEqual(stored, existing, "establishTrust must never silently replace an existing pin")
+  }
+
+  // --- reestablishTrust: overwrites only after the probe succeeds ---
+
+  func testReestablishTrustOverwritesPinOnSuccess() async throws {
+    let old = pinSet(0x66)
+    let newHash = Data(repeating: 0x77, count: 32)
+    let svc = try await serviceWithProbe(seededPin: old) { _, _, _ in newHash }
+    try await svc.reestablishTrust(serverURL: serverURL, healthURL: healthURL)
+    let stored = try await svc.currentPin(for: serverURL)
+    XCTAssertEqual(stored?.tlsLeafKeySHA256, newHash, "a user-approved rotation must persist the new key")
+  }
+
+  func testReestablishTrustKeepsOldPinWhenProbeThrows() async throws {
+    let old = pinSet(0x88)
+    let svc = try await serviceWithProbe(seededPin: old) { _, _, _ in
+      throw URLError(.cannotConnectToHost)
+    }
+    do {
+      try await svc.reestablishTrust(serverURL: serverURL, healthURL: healthURL)
+      XCTFail("reestablishTrust must throw when the probe fails")
+    } catch {
+      // expected
+    }
+    let stored = try await svc.currentPin(for: serverURL)
+    XCTAssertEqual(stored, old, "a failed re-verification must leave the old pin intact (no unpinned window)")
+  }
+
+  // MARK: - mapProbeFailure (the on-path translation the network probe runs)
+  //
+  // The seam tests above inject the probe outcome, so they bypass the real
+  // pinMismatchDetected -> .pinMismatch translation inside networkLeafKeyProbe.
+  // These lock that exact translation, which the production probe calls
+  // directly -- so inverting the flag->error mapping now breaks a test.
+  //
+  // Scope note: these pass pinMismatchDetected as a plain Bool, so they cover
+  // the mapping, NOT the delegate wiring. Whether the delegate actually SETS
+  // the flag (flagMismatch() on a leaf-key / host / default-trust rejection)
+  // needs a real TLS handshake or a pure-function extraction of the delegate's
+  // key comparison; deleting a flagMismatch() call would still pass here.
+
+  func testMapProbeFailureReturnsPinMismatchWhenFlagged() {
+    let underlying = URLError(.cancelled)  // what a cancelled TLS challenge looks like
+    let mapped = ServerTrustService.mapProbeFailure(underlying, pinMismatchDetected: true)
+    XCTAssertEqual(mapped as? ServerTrustError, .pinMismatch,
+                   "a delegate-flagged rejection must translate to .pinMismatch")
+  }
+
+  func testMapProbeFailurePassesThroughWhenNotFlagged() {
+    let underlying = URLError(.notConnectedToInternet)
+    let mapped = ServerTrustService.mapProbeFailure(underlying, pinMismatchDetected: false)
+    XCTAssertEqual(mapped as? URLError, underlying,
+                   "a genuine connectivity failure must pass through unchanged, NOT become .pinMismatch")
+  }
 }

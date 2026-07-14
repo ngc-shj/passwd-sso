@@ -8,11 +8,25 @@ import { readJsonWithCap, readFormWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
+import {
+  MCP_CLIENT_ID_MAX_LENGTH,
+  MCP_CLIENT_SECRET_MAX_LENGTH,
+  MCP_PRESENTED_TOKEN_MAX_LENGTH,
+  MCP_TOKEN_TYPE_HINT_MAX_LENGTH,
+} from "@/lib/constants/auth/mcp";
+import { z } from "zod";
 
 const revokeLimiter = createRateLimiter({
   windowMs: MS_PER_MINUTE,
   max: 30,
   failClosedOnRedisError: true,
+});
+
+const RevokeRequestSchema = z.object({
+  token: z.string().min(1).max(MCP_PRESENTED_TOKEN_MAX_LENGTH),
+  token_type_hint: z.string().max(MCP_TOKEN_TYPE_HINT_MAX_LENGTH).optional(),
+  client_id: z.string().min(1).max(MCP_CLIENT_ID_MAX_LENGTH),
+  client_secret: z.string().max(MCP_CLIENT_SECRET_MAX_LENGTH).optional(),
 });
 
 /**
@@ -53,7 +67,7 @@ export async function POST(req: NextRequest) {
   });
   if (blocked) return blocked;
 
-  let body: Record<string, string>;
+  let rawBody: unknown;
   const contentType = req.headers.get("content-type") ?? "";
 
   if (contentType.includes("application/x-www-form-urlencoded")) {
@@ -64,24 +78,26 @@ export async function POST(req: NextRequest) {
     if (!read.ok) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
-    body = Object.fromEntries(new URLSearchParams(read.text));
+    rawBody = Object.fromEntries(new URLSearchParams(read.text));
   } else {
     const read = await readJsonWithCap(req, MAX_JSON_BODY_BYTES);
     if (!read.ok) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-    body = read.body as Record<string, string>;
+    rawBody = read.body;
   }
 
-  const token = body.token;
-  const tokenTypeHint = body.token_type_hint as "access_token" | "refresh_token" | undefined;
-  const clientId = body.client_id;
-
-  if (!token || !clientId) {
+  const parsed = RevokeRequestSchema.safeParse(rawBody);
+  if (!parsed.success) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
-
-  if (tokenTypeHint && tokenTypeHint !== "access_token" && tokenTypeHint !== "refresh_token") {
-    // RFC 7009 §2.1: unsupported token type → ignore hint, try both
-  }
+  const body = parsed.data;
+  const token = body.token;
+  // RFC 7009 §2.1: an unsupported hint is ignored (try both token types), so
+  // map only the two known values through and drop anything else to undefined.
+  const tokenTypeHint =
+    body.token_type_hint === "access_token" || body.token_type_hint === "refresh_token"
+      ? body.token_type_hint
+      : undefined;
+  const clientId = body.client_id;
 
   const clientSecret = body.client_secret;
   const clientSecretHash = clientSecret ? hashToken(clientSecret) : undefined;

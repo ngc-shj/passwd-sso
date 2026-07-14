@@ -13,6 +13,19 @@ export const MCP_CLIENT_ID_PREFIX = "mcpc_";
 // this length before writing it into audit metadata (see /api/mcp/token).
 export const MCP_CLIENT_ID_MAX_LENGTH = 64;
 
+// Presented OAuth credentials are opaque at the HTTP boundary. Authorization
+// codes and confidential-client secrets issued today are 43 chars; access and
+// refresh tokens are 47 / 48 chars. Keep bounded headroom for a future
+// versioned format without accepting multi-kilobyte values into hashing and
+// lookup paths.
+export const MCP_AUTHORIZATION_CODE_MAX_LENGTH = 256;
+export const MCP_PRESENTED_TOKEN_MAX_LENGTH = 256;
+export const MCP_CLIENT_SECRET_MAX_LENGTH = 256;
+
+// RFC 7009 permits registered/extension token type hints. Unsupported hints
+// are ignored by the revocation endpoint, but still need a bounded wire shape.
+export const MCP_TOKEN_TYPE_HINT_MAX_LENGTH = 256;
+
 // MCP scope values (subset of SA scopes, read-only for safety)
 export const MCP_SCOPE = {
   CREDENTIALS_LIST: "credentials:list",
