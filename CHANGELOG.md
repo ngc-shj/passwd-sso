@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.70](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.69...passwd-sso-v0.4.70) (2026-07-14)
+
+
+### Features
+
+* **ios:** show a persistent banner when the vault is read-only offline ([#663](https://github.com/ngc-shj/passwd-sso/issues/663)) ([3fbd83c](https://github.com/ngc-shj/passwd-sso/commit/3fbd83c1d5ec84e749be44363e98d0183d74c49c))
+* **ios:** suppress create/edit UI when the vault is read-only offline ([#665](https://github.com/ngc-shj/passwd-sso/issues/665)) ([f483baa](https://github.com/ngc-shj/passwd-sso/commit/f483baa397bef63223c5f7f982299e2e2a3a1613))
+
+
+### Bug Fixes
+
+* harden authentication security boundaries (iOS TLS pinning, MCP OAuth caps, WebAuthn RP ID) ([#659](https://github.com/ngc-shj/passwd-sso/issues/659)) ([1836b15](https://github.com/ngc-shj/passwd-sso/commit/1836b1575fac705a1c23d4aca9469f4fc9c097a0))
+* **ios:** recover mutating API calls from an expired access token ([#662](https://github.com/ngc-shj/passwd-sso/issues/662)) ([74ada77](https://github.com/ngc-shj/passwd-sso/commit/74ada779845713d592d13a817e6f58d68e443477))
+
 ## [0.4.69](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.68...passwd-sso-v0.4.69) (2026-07-12)
 
 
