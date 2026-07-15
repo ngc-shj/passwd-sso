@@ -45,10 +45,10 @@ function sh(cmd) {
 //             "expired" → leaf with a past validity window (both dates in the past)
 //
 // The expired leaf is signed with `openssl ca -startdate/-enddate` rather than
-// `openssl x509 -req -not_before/-not_after`: the latter flags only exist on
-// OpenSSL 3.2+, but ubuntu-latest CI ships 3.0.x, so `x509 -req` there errors
-// out. `openssl ca` with explicit start/end dates has been supported for far
-// longer and works on both — a real dev/CI env-parity difference (R16).
+// `openssl x509 -req -not_before/-not_after`: the latter flags were only added
+// in OpenSSL 3.4.0, but ubuntu-latest CI ships 3.0.x, so `x509 -req` there
+// errors out. `openssl ca` with explicit start/end dates has been supported for
+// far longer and works on both — a real dev/CI env-parity difference (R16).
 function makeLeafFixture(label, validity) {
   const p12 = join(dir, `tlsLeaf${label}.p12`);
 
