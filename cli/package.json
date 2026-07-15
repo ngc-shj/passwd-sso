@@ -23,6 +23,9 @@
   "bin": {
     "passwd-sso": "./dist/index.js"
   },
+  "publishConfig": {
+    "provenance": true
+  },
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts"

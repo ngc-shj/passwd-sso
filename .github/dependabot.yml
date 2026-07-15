@@ -18,5 +18,40 @@ updates:
           - "*"
     open-pull-requests-limit: 5
 
-  # npm dependencies (root) — keep existing cadence; this file only adds
-  # github-actions ecosystem. Other ecosystems can be added here later.
+  # npm ecosystems (root app + CLI + extension). Grouped weekly bumps requiring
+  # human review — NO auto-merge (a password manager must not treat an untrusted
+  # upstream version bump as trusted; tests do not detect a supply-chain payload).
+  # No swift ecosystem: iOS uses xcodegen with no Package.swift/Podfile for
+  # Dependabot to read.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      npm-root:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "npm"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      npm-cli:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "npm"
+    directory: "/extension"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    groups:
+      npm-extension:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5

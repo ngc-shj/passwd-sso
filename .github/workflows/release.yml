@@ -63,3 +63,32 @@ jobs:
       - name: Publish to npm
         working-directory: cli
         run: npm publish # Auth via OIDC Trusted Publishing (no NODE_AUTH_TOKEN)
+
+      # Fail-closed provenance assertion (INV-C1b): publishConfig.provenance:true
+      # only *emits* provenance in a supported OIDC context. If the context ever
+      # degrades (id-token narrowing, unsupported-context best-effort), the publish
+      # still succeeds but ships no attestation. Assert the just-published version
+      # actually carries an SLSA provenance attestation, distinguishing a registry
+      # lookup error (retry, propagation lag) from a definitive "published but
+      # unattested" (hard-fail). Never mask this step's exit.
+      - name: Assert published provenance
+        working-directory: cli
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Asserting SLSA provenance for passwd-sso-cli@${VERSION}"
+          for attempt in 1 2 3 4 5; do
+            if VIEW=$(npm view "passwd-sso-cli@${VERSION}" --json 2>/dev/null); then
+              PREDICATE=$(echo "$VIEW" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d);process.stdout.write(j?.dist?.attestations?.provenance?.predicateType||'')}catch{process.stdout.write('')}})")
+              if [ "$PREDICATE" = "https://slsa.dev/provenance/v1" ]; then
+                echo "✓ SLSA provenance present"
+                exit 0
+              fi
+              echo "attempt ${attempt}: attestation not yet visible (predicate='${PREDICATE}'); retrying for propagation lag"
+            else
+              echo "attempt ${attempt}: npm view failed (registry/network); retrying"
+            fi
+            sleep 15
+          done
+          echo "::error::published passwd-sso-cli@${VERSION} carries no SLSA provenance attestation after retries — OIDC provenance emission may have silently failed"
+          exit 1
