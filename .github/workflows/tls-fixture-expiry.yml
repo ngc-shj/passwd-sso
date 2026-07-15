@@ -1,0 +1,36 @@
+name: "TLS Fixture Expiry"
+
+# The iOS real-TLS test-fixture leaves (tlsLeaf*.p12) are 397-day certificates
+# (Apple caps TLS leaf validity at ~398 days), so they lapse roughly once a
+# year. A lapse breaks ServerTrustRealTLSTests on the macOS runner with an
+# opaque handshake error. This monthly job warns ~45 days BEFORE lapse — a
+# wall-clock trigger that fires even in a month where no PR touches the fixtures
+# (the PR-CI static-checks guard only runs on pushes/PRs). It does not
+# regenerate anything; it fails with an actionable message pointing at
+# ios/scripts/generate-tls-test-fixtures.sh.
+#
+# Runs on ubuntu (OpenSSL 3.x) so `openssl pkcs12 -legacy` works — macOS ships
+# LibreSSL, which rejects -legacy.
+
+on:
+  schedule:
+    - cron: "0 3 1 * *" # Monthly, 1st of the month 03:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-expiry:
+    name: "Check iOS TLS fixture expiry"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Check fixture expiry (45-day look-ahead)
+        env:
+          TLS_FIXTURE_CHECKEND_DAYS: "45"
+        run: bash scripts/checks/check-tls-fixture-expiry.sh
