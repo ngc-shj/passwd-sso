@@ -217,7 +217,7 @@ already-probed `claimBatch`.
      exemption may only *document* an already-safe statement, never *grant* boundedness to
      an unbounded sweep.
   2. **Runtime bounds**: assert `src/lib/constants/audit/audit.ts` contains
-     `envInt("OUTBOX_BATCH_SIZE", 500)`, `MAX_ATTEMPTS: 8`, `REAP_BATCH_SIZE: 1000`,
+     `envInt("OUTBOX_BATCH_SIZE", 500)`, `MAX_ATTEMPTS: envInt("OUTBOX_MAX_ATTEMPTS", 8)`, `REAP_BATCH_SIZE: 1000`,
      `PURGE_BATCH_SIZE: 1000` (values interpolated from `runtimeBounds`), and that
      `prisma/schema.prisma` carries `@default(8)` on the `maxAttempts` lines of BOTH the
      `AuditOutbox` and `AuditDelivery` models. Filesystem-only (no @prisma/client
