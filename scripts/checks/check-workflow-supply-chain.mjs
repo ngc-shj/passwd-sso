@@ -39,8 +39,13 @@ const WORKFLOWS_DIR = ".github/workflows";
 export function findAutoMergeViolation(content, name) {
   const mentionsDependabot = /dependabot/i.test(content);
   if (!mentionsDependabot) return null;
+  // Each alternative uses a single bounded character class (no overlapping
+  // greedy groups) so the pattern is linear — no ReDoS surface on hostile
+  // workflow content. `pulls\/[^\s]*\/merge` covers every `gh api … pulls/N/merge`
+  // REST shape, so no separate `gh api …` alternative is needed. `merge-dependabot`
+  // and `pulls.merge` cover the fastify action and github-script REST client.
   const mergeRe =
-    /gh\s+pr\s+merge|--auto\b|enable-pull-request-automerge|enablePullRequestAutoMerge|gh\s+api[^\n]*pulls\/[^\n]*\/merge|pulls\/[^\s]*\/merge|pull-request\/merge/i;
+    /gh\s+pr\s+merge|--auto\b|enable-pull-request-automerge|enablePullRequestAutoMerge|merge-dependabot|pulls\.merge|pulls\/[^\s]*\/merge|pull-request\/merge/i;
   if (mergeRe.test(content)) {
     return `${name}: workflow references 'dependabot' and an auto-merge command — Dependabot auto-merge is forbidden (human review required)`;
   }
@@ -60,18 +65,22 @@ export function findAutoMergeViolation(content, name) {
 export function findMaskedVerifierViolations(content, name) {
   const violations = [];
   const lines = content.split("\n");
-  const verifierRe = /audit\s+signatures|npm\s+view[^\n]*attestations|dist\.attestations/;
-  const maskRe = /(\|\|\s*(true|:|exit\s+0|echo)|;\s*(true|exit\s+0))\b/;
-  let runsVerifier = false;
+  // `dist\??\.attestations` tolerates optional chaining (`j?.dist?.attestations`
+  // in the real release.yml assertion). `runsVerifier` is a WORKFLOW-level flag,
+  // not per-line, so a `npm view` and an `attestations` reference on separate
+  // lines still mark the workflow as verifier-running.
+  const verifierLineRe = /audit\s+signatures|dist\??\.attestations/;
+  const runsVerifier =
+    /audit\s+signatures/.test(content) ||
+    (/npm\s+view/.test(content) && /attestations/.test(content));
+  // `:` needs a lookahead boundary (a trailing \b never matches after non-word `:`).
+  const maskRe = /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$))/;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (verifierRe.test(line)) {
-      runsVerifier = true;
-      if (maskRe.test(line)) {
-        violations.push(
-          `${name}:${i + 1}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || echo) — it must fail closed`,
-        );
-      }
+    if (verifierLineRe.test(line) && maskRe.test(line)) {
+      violations.push(
+        `${name}:${i + 1}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo) — it must fail closed`,
+      );
     }
   }
   // A workflow-level continue-on-error on a verifier-running workflow silently

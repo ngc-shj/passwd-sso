@@ -110,9 +110,31 @@ describe("findMaskedVerifierViolations", () => {
     expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
   });
 
-  it("flags a provenance assertion masked with || true", () => {
-    const wf = `      - run: npm view pkg --json | jq .dist.attestations || true\n`;
+  it("flags npm audit signatures masked with || :", () => {
+    const wf = `      - run: npm audit signatures || :\n`;
+    expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
+  });
+
+  it("flags a provenance assertion (optional-chaining shape) masked with || true", () => {
+    // Mirrors the REAL release.yml assertion, which uses optional chaining
+    // (j?.dist?.attestations) — the detector must tolerate the `?.`.
+    const wf = `      - run: node -e "j?.dist?.attestations?.provenance" || true\n`;
     expect(findMaskedVerifierViolations(wf, "release.yml")).toHaveLength(1);
+  });
+
+  it("catches continue-on-error when npm view + attestations span separate lines", () => {
+    // The real release.yml has `npm view` and `attestations` on different lines;
+    // continue-on-error on such a workflow must still be caught.
+    const wf = `
+    steps:
+      - run: |
+          VIEW=$(npm view pkg --json)
+          echo "$VIEW" | jq .dist.attestations
+        continue-on-error: true
+`;
+    expect(
+      findMaskedVerifierViolations(wf, "release.yml").some((m) => /continue-on-error/.test(m)),
+    ).toBe(true);
   });
 
   it("flags continue-on-error on a verifier-running workflow", () => {

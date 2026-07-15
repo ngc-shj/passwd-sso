@@ -36,3 +36,11 @@ Created: 2026-07-16
 
 ### D7: workflow guard hardened against evasion shapes
 - Round-1 code review (M2 = Sec SEC-1; m1 = Func F3 + Sec SEC-2; m2 = Sec SEC-3; m3 = Func F2) widened the auto-merge regex to the documented Dependabot shapes (peter-evans action, enablePullRequestAutoMerge GraphQL, gh api pulls/N/merge REST), dropped the over-broad bare --merge, extended the anti-mask detector to || exit 0 / continue-on-error, extended verifier coverage to the npm view attestations provenance assertion, and documented CODEOWNERS as the PRIMARY control (the regex is defense-in-depth; a cross-file reusable-workflow split is out of a per-file grep's reach). New self-tests cover each shape (fire + stay-quiet).
+
+### D8: workflow guard regex hardened again (Round-2 code review)
+- Round-1's guard-widening (D7) itself introduced defects the Round-2 review caught, all self-verified:
+  - Critical (ReDoS): the gh api pulls/N/merge alternative had overlapping greedy groups with an unsatisfiable tail — a hostile workflow line could hang the guard. Removed; pulls/[^\s]*/merge (single bounded class) already covers every REST pulls/N/merge case, zero coverage loss.
+  - Major (missed shapes): added merge-dependabot (fastify action) + pulls.merge (github-script REST client).
+  - Major (|| : dead match): the : no-op never matched under a shared trailing \b; gave it a lookahead boundary + a RED self-test.
+  - Major (verifierRe missed real release.yml): the provenance assertion uses optional chaining j?.dist?.attestations, which dist.attestations did not match, and npm view + attestations are on separate lines. Switched to dist optional-chaining match + a WORKFLOW-level runsVerifier flag. Verified: injecting continue-on-error on the real release.yml provenance step now goes RED (was green before).
+- All tightenings (no boundary widened). Guard self-tests grew to 16; real workflows stay clean.

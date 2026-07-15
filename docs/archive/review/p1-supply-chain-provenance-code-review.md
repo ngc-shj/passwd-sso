@@ -88,3 +88,19 @@ RT1/RT2/RT5/RT9 met (real manifest + real tree, proven by RED-on-mutation; fs+ts
 - Modified: docs/archive/review/p1-supply-chain-provenance-deviation.md
 
 Verification: 54 guard+manifest tests pass; full suite 950 files / 12359 tests pass (1 skip); lint clean.
+
+---
+
+## Round 2
+Incremental review of the Round-1 fix commit. Round-1 guard-widening itself introduced defects — 1 Critical (self-inflicted ReDoS), 3 Major — all in the workflow guard, all self-verified and fixed.
+
+### R2 findings (all resolved)
+- Critical ReDoS (sec/test): gh api pulls/N/merge overlapping greedy groups + unsatisfiable tail. Fixed: removed (redundant with the bounded pulls/*/merge alternative). Evil input now 0.4ms.
+- Major missed shapes (sec/test): fastify/github-action-merge-dependabot + github.rest.pulls.merge. Fixed: added merge-dependabot and pulls.merge.
+- Major dead match (sec/test): the colon no-op never matched under a trailing word-boundary. Fixed: lookahead boundary + RED self-test.
+- Major verifierRe misses real release.yml (func): provenance uses optional chaining j?.dist?.attestations with npm view/attestations on separate lines. Fixed: optional-chaining match + workflow-level runsVerifier. Self-verified: continue-on-error on the real release.yml provenance step now RED.
+
+Resolution recorded in deviation D8. Guard self-tests 16; full suite 950 files / 12361 tests; lint clean. All R2 fixes are tightenings (R43 clean).
+
+### R2 lesson
+The Round-1 guard regexes were self-tested only against shapes they already caught, and against a synthetic literal instead of the real release.yml optional-chaining string. A guard that protects a specific artifact must be self-tested against that artifact actual content. Round 2 self-tests now mirror the real shapes.
