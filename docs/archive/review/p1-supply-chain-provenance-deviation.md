@@ -44,3 +44,14 @@ Created: 2026-07-16
   - Major (|| : dead match): the : no-op never matched under a shared trailing \b; gave it a lookahead boundary + a RED self-test.
   - Major (verifierRe missed real release.yml): the provenance assertion uses optional chaining j?.dist?.attestations, which dist.attestations did not match, and npm view + attestations are on separate lines. Switched to dist optional-chaining match + a WORKFLOW-level runsVerifier flag. Verified: injecting continue-on-error on the real release.yml provenance step now goes RED (was green before).
 - All tightenings (no boundary widened). Guard self-tests grew to 16; real workflows stay clean.
+
+## Post-review external findings
+
+### D9: [High] classification-completeness gate — every runtime dep must be packages OR excluded
+- An external review found the three-set guard's blind spot was still exploitable: a new auth lib (e.g. better-auth) added OUTSIDE the CODE_ROOTS and whose name misses CRYPTO_NAME_RE passes (A), (C), CODEOWNERS, and lands unclassified. Self-verified.
+- Fix: added (E) computeUnclassifiedDeps — EVERY runtime dependency of each workspace must be classified as a crypto/auth packages member OR an excluded support dep; a dep in neither is a finding. This forces a supply-chain review decision on every new dependency regardless of name or import location, closing the R-3 residual at its root. Enumerated all 17 previously-unclassified root deps into excluded with reasons. RED/GREEN self-tests incl. the better-auth scenario.
+- Also surfaced a latent bug: react/react-dom were excluded for BOTH root and extension under the same JSON key, so the extension entry silently overwrote root's (JSON dup-key). The (E) check caught it; fixed with composite keys (react@extension). (E) is itself the safety net against future dup-key overwrites.
+
+### D10: [Medium] anti-mask guard missed multi-line + expression masks
+- External review found findMaskedVerifierViolations only detected a mask on the SAME line as the verifier, missing `npm audit signatures \` + newline + `|| true`, and missed continue-on-error: ${{ true }} (expression form). Both self-verified as false-negatives.
+- Fix: join shell line-continuations into one logical line (tracking the original line number) before scanning; broaden the continue-on-error match to the expression form. Self-tests for both; real workflows stay clean.

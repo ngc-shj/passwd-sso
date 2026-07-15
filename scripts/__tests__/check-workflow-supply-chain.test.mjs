@@ -115,6 +115,27 @@ describe("findMaskedVerifierViolations", () => {
     expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
   });
 
+  it("flags a mask split across a shell line-continuation", () => {
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          npm audit signatures \\",
+      "            || true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
+  });
+
+  it("flags continue-on-error in the expression form", () => {
+    const wf = [
+      "    steps:",
+      "      - run: npm audit signatures",
+      "        continue-on-error: ${{ true }}",
+    ].join("\n");
+    expect(
+      findMaskedVerifierViolations(wf, "ci.yml").some((m) => /continue-on-error/.test(m)),
+    ).toBe(true);
+  });
+
   it("flags a provenance assertion (optional-chaining shape) masked with || true", () => {
     // Mirrors the REAL release.yml assertion, which uses optional chaining
     // (j?.dist?.attestations) — the detector must tolerate the `?.`.

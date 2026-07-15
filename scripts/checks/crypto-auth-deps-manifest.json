@@ -114,6 +114,23 @@
     "next-intl": { "workspace": "root", "reason": "i18n framework (UI), not a crypto/auth primitive; imported in the shared component tree." },
     "react-markdown": { "workspace": "root", "reason": "Markdown rendering (UI), not a crypto/auth primitive; imported in the shared component tree." },
     "remark-gfm": { "workspace": "root", "reason": "Markdown GFM plugin (UI), not a crypto/auth primitive; imported in the shared component tree." },
+    "@hookform/resolvers": { "workspace": "root", "reason": "react-hook-form validation resolver (UI form glue), not a crypto/auth primitive." },
+    "@swc/helpers": { "workspace": "root", "reason": "SWC runtime helpers (build output), not a crypto/auth primitive." },
+    "class-variance-authority": { "workspace": "root", "reason": "Tailwind class variant helper (UI), not a crypto/auth primitive." },
+    "clsx": { "workspace": "root", "reason": "className concatenation (UI), not a crypto/auth primitive." },
+    "dotenv": { "workspace": "root", "reason": "Loads .env into process.env; not a crypto/auth primitive (no cryptographic secret handling)." },
+    "file-type": { "workspace": "root", "reason": "Magic-byte MIME detection for uploads; content-type sniffing, not a crypto/auth primitive." },
+    "jsqr": { "workspace": "root", "reason": "QR image decoding (UI, e.g. TOTP setup scan); not a crypto/auth primitive — the OTP secret is handled by otpauth." },
+    "next": { "workspace": "root", "reason": "Next.js framework, not a crypto/auth primitive." },
+    "next-themes": { "workspace": "root", "reason": "Theme switching (UI), not a crypto/auth primitive." },
+    "pino": { "workspace": "root", "reason": "Structured logging, not a crypto/auth primitive." },
+    "radix-ui": { "workspace": "root", "reason": "Headless UI primitives, not a crypto/auth primitive." },
+    "react": { "workspace": "root", "reason": "UI framework, not a crypto/auth primitive." },
+    "react-dom": { "workspace": "root", "reason": "UI framework, not a crypto/auth primitive." },
+    "react-hook-form": { "workspace": "root", "reason": "Form state (UI), not a crypto/auth primitive." },
+    "sonner": { "workspace": "root", "reason": "Toast notifications (UI), not a crypto/auth primitive." },
+    "tailwind-merge": { "workspace": "root", "reason": "Tailwind class merge helper (UI), not a crypto/auth primitive." },
+    "undici": { "workspace": "root", "reason": "HTTP client for outbound webhook delivery; transport, not a crypto/auth primitive (webhook signing lives in app code)." },
     "chalk": { "workspace": "cli", "reason": "CLI terminal styling, not a crypto/auth primitive." },
     "commander": { "workspace": "cli", "reason": "CLI argument parsing, not a crypto/auth primitive." },
     "cli-table3": { "workspace": "cli", "reason": "CLI table rendering, not a crypto/auth primitive." },
@@ -121,7 +138,7 @@
     "inquirer": { "workspace": "cli", "reason": "CLI interactive prompts, not a crypto/auth primitive." },
     "zod@cli": { "package": "zod", "workspace": "cli", "reason": "Input validation, not a crypto/auth primitive." },
     "tldts": { "workspace": "extension", "reason": "Public-suffix/domain parsing for autofill origin matching, not a crypto/auth primitive." },
-    "react": { "workspace": "extension", "reason": "UI framework, not a crypto/auth primitive." },
-    "react-dom": { "workspace": "extension", "reason": "UI framework, not a crypto/auth primitive." }
+    "react@extension": { "package": "react", "workspace": "extension", "reason": "UI framework, not a crypto/auth primitive." },
+    "react-dom@extension": { "package": "react-dom", "workspace": "extension", "reason": "UI framework, not a crypto/auth primitive." }
   }
 }

@@ -64,7 +64,20 @@ export function findAutoMergeViolation(content, name) {
  */
 export function findMaskedVerifierViolations(content, name) {
   const violations = [];
-  const lines = content.split("\n");
+  // Join shell line-continuations (`… \` + newline) into one logical line BEFORE
+  // scanning, so a mask split across lines (`npm audit signatures \` / `  || true`)
+  // is caught. Track the original 1-based line number of each logical line's start.
+  const rawLines = content.split("\n");
+  const logical = [];
+  for (let i = 0; i < rawLines.length; i += 1) {
+    let joined = rawLines[i];
+    const start = i;
+    while (/\\\s*$/.test(joined) && i + 1 < rawLines.length) {
+      joined = joined.replace(/\\\s*$/, " ") + rawLines[i + 1];
+      i += 1;
+    }
+    logical.push({ text: joined, line: start + 1 });
+  }
   // `dist\??\.attestations` tolerates optional chaining (`j?.dist?.attestations`
   // in the real release.yml assertion). `runsVerifier` is a WORKFLOW-level flag,
   // not per-line, so a `npm view` and an `attestations` reference on separate
@@ -75,17 +88,17 @@ export function findMaskedVerifierViolations(content, name) {
     (/npm\s+view/.test(content) && /attestations/.test(content));
   // `:` needs a lookahead boundary (a trailing \b never matches after non-word `:`).
   const maskRe = /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$))/;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (verifierLineRe.test(line) && maskRe.test(line)) {
+  for (const { text, line } of logical) {
+    if (verifierLineRe.test(text) && maskRe.test(text)) {
       violations.push(
-        `${name}:${i + 1}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo) — it must fail closed`,
+        `${name}:${line}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo) — it must fail closed`,
       );
     }
   }
   // A workflow-level continue-on-error on a verifier-running workflow silently
-  // downgrades a red verifier to a soft warning.
-  if (runsVerifier && /continue-on-error:\s*true/i.test(content)) {
+  // downgrades a red verifier to a soft warning — including the `${{ true }}`
+  // expression form and a bare `true`.
+  if (runsVerifier && /continue-on-error:\s*(\$\{\{\s*)?true/i.test(content)) {
     violations.push(
       `${name}: a verifier-running workflow sets 'continue-on-error: true' — remove it so the verifier fails closed`,
     );

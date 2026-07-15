@@ -192,6 +192,23 @@ export function computeMissingDeps(manifestPackages: Set<string>, deps: Set<stri
 }
 
 /**
+ * (E) completeness of the classification itself: EVERY runtime dependency of the
+ * workspace MUST be classified as either a crypto/auth `packages` member OR an
+ * `excluded` support dep. A dep in neither is unclassified — the exact hole a
+ * name-pattern heuristic + fixed CODE_ROOTS leaves open (a new auth lib like
+ * `better-auth`, added outside the roots and not matching CRYPTO_NAME_RE, would
+ * otherwise pass every other check silently). This forces a supply-chain review
+ * decision on every new dependency, regardless of its name or import location.
+ */
+export function computeUnclassifiedDeps(
+  deps: string[],
+  manifestPackages: Set<string>,
+  excluded: Set<string>,
+): string[] {
+  return deps.filter((d) => !manifestPackages.has(d) && !excluded.has(d)).sort();
+}
+
+/**
  * detectedBy accuracy (INV-C4c): a `static-import`/`dynamic-import`-marked entry
  * whose package has NO CODE occurrence in its workspace is a stale/mis-labeled
  * claim → finding. `manual` entries are exempt (they are declared code-absent).
@@ -343,6 +360,14 @@ describe("crypto-auth-deps-manifest — three-set reconciliation", () => {
         const findings = computeDetectedByViolations(manifestByPackage, code);
         expect(findings, `stale detectedBy claims in ${workspace}: ${findings.join(", ")}`).toEqual([]);
       });
+
+      it("(E) every runtime dependency is classified as a crypto/auth member OR excluded", () => {
+        const unclassified = computeUnclassifiedDeps(deps, manifestPackages, excluded);
+        expect(
+          unclassified,
+          `unclassified ${workspace} deps (add to packages or excluded): ${unclassified.join(", ")}`,
+        ).toEqual([]);
+      });
     });
   }
 });
@@ -424,6 +449,21 @@ describe("RT7 self-test — computeMissingDeps (B)", () => {
   });
   it("returns empty when every manifest package is present in DEPS", () => {
     expect(computeMissingDeps(new Set(["next-auth"]), new Set(["next-auth", "zod"]))).toEqual([]);
+  });
+});
+
+describe("RT7 self-test — computeUnclassifiedDeps (E)", () => {
+  it("flags a runtime dep that is neither a manifest member nor excluded", () => {
+    // The `better-auth` scenario: a new auth lib whose name doesn't match
+    // CRYPTO_NAME_RE and which lives outside CODE_ROOTS — (A)/(C) miss it, (E) catches it.
+    const findings = computeUnclassifiedDeps(["better-auth", "next-auth"], new Set(["next-auth"]), new Set());
+    expect(findings).toEqual(["better-auth"]);
+  });
+  it("does not flag a dep that is a manifest member", () => {
+    expect(computeUnclassifiedDeps(["next-auth"], new Set(["next-auth"]), new Set())).toEqual([]);
+  });
+  it("does not flag a dep that is excluded", () => {
+    expect(computeUnclassifiedDeps(["clsx"], new Set(), new Set(["clsx"]))).toEqual([]);
   });
 });
 
