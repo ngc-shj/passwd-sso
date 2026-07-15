@@ -59,8 +59,9 @@ numbers (R2). audit.ts imports these from common.server.ts — one-directional, 
 **Correction (R2b)**: the first R2 attempt bounded the batch but kept a SERIAL loop and
 wrongly multiplied the batch by `WEBHOOK_CONCURRENCY` — which parallelizes only subscribers
 within one item, not items. A re-review caught that the serial worst case was still
-batch × 36s (720s ≫ 300s lease). Fixed by making item processing genuinely parallel (per
-user direction: "ちゃんと並列にしましょうよ") and correcting the formula/tests to the real model.
+batch × 36s (720s ≫ 300s lease). Fixed by making item processing genuinely parallel (at the
+user's direction to actually parallelize rather than shrink the batch) and correcting the
+formula/tests to the real model.
 
 ## D6 — onError callback for recoverable delivery errors (F2)
 `deliverSingleWebhook`/`deliverToWebhookRecords` gained an optional `onError`. The durable
