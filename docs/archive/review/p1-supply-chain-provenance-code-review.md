@@ -104,3 +104,6 @@ Resolution recorded in deviation D8. Guard self-tests 16; full suite 950 files /
 
 ### R2 lesson
 The Round-1 guard regexes were self-tested only against shapes they already caught, and against a synthetic literal instead of the real release.yml optional-chaining string. A guard that protects a specific artifact must be self-tested against that artifact actual content. Round 2 self-tests now mirror the real shapes.
+
+### Round 3 -- converged
+Convergence check of the Round-2 fix commit: mergeRe ReDoS-free (hostile 50k input under 1ms), maskRe colon lookahead correct + no ternary false-positive, verifierRe/runsVerifier verified against the REAL release.yml (0 violations clean; continue-on-error injection to RED; optional-chaining matched; no false verifier-running workflow). 56 guard+manifest tests green, real guard exit 0. R43: no boundary weakened -- every change is a RED-detector broadening (tightening) or ReDoS-removal-with-redundant-coverage. No findings -- converged.
