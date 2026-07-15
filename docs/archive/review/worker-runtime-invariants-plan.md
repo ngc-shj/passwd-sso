@@ -165,6 +165,13 @@ already-probed `claimBatch`.
   sample_tenant` wrapper so the `AUDIT_OUTBOX_RETENTION_PURGED` emission gate
   (`if (result.purged > 0 && result.sampleTenantId)` at :906) still fires; the combined
   per-tick purged count is the sum of both branches (metadata unchanged).
+  **[Post-impl update — superseded by M1 code-review fix]** the `MIN(tenant_id)` /
+  `sample_tenant` shape here was a tenant-isolation defect: a multi-tenant purge batch
+  attributed the whole count to one tenant and dropped the audit for the rest. The shipped
+  code instead uses `... RETURNING id, tenant_id) SELECT tenant_id::text, COUNT(*) GROUP BY
+  tenant_id` and writes one `AUDIT_OUTBOX_RETENTION_PURGED` row **per tenant** (each with
+  only that tenant's count + a `branch` "SENT"/"FAILED" discriminator), all inside the
+  branch's DELETE tx. See `webhook-durable-delivery-code-review.md` Review round 3 (M1).
 - The before-delete trigger (`audit_outbox_before_delete_guard`, migration :61-68) is
   unaffected — both branches select only SENT/FAILED rows.
 - Acceptance: cap + drain pattern (C8), PLUS a FAILED-aged row is purged even when `limit`

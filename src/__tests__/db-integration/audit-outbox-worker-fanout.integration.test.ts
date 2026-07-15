@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import type { PrismaClient } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { deliverRow, deliverRowWithChain, type AuditOutboxRow } from "@/workers/audit-outbox-worker";
@@ -278,6 +279,17 @@ describe("audit-outbox worker fan-out — durable in-tx audit-delivery enqueue (
     });
   }
 
+  async function webhookDeliveriesForOutbox(outboxId: string) {
+    return ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<Array<{ id: string; status: string }>>(
+        `SELECT id, status::text AS status
+         FROM webhook_deliveries WHERE outbox_id = $1::uuid`,
+        outboxId,
+      );
+    });
+  }
+
   const payload = (): AuditOutboxPayload =>
     ({
       scope: AUDIT_SCOPE.TENANT,
@@ -380,5 +392,78 @@ describe("audit-outbox worker fan-out — durable in-tx audit-delivery enqueue (
     expect(new Set(deliveries.map((d) => d.target_id))).toEqual(
       new Set([webhookTargetId, siemTargetId]),
     );
+  });
+
+  it("M2 rollback: if enqueueAuditDeliveriesInTx throws, the whole winning tx rolls back (no audit_logs row, no audit_deliveries, outbox NOT marked SENT)", async () => {
+    // The load-bearing durability property of M2: the delivery enqueue lives in
+    // the SAME tx as the audit_logs INSERT + outbox SENT update. Inject a fault
+    // into the createMany that enqueueAuditDeliveriesInTx issues (never by
+    // editing the worker) and assert the entire tx rolls back.
+    await insertActiveTarget("WEBHOOK");
+    const p = payload();
+    const row = await insertPendingOutboxRow(p);
+
+    const injected = new Error("injected: audit_deliveries createMany failure");
+    const proxy = new Proxy(ctx.su.prisma, {
+      get(target, prop, receiver) {
+        if (prop === "$transaction") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (fn: (tx: any) => unknown, ...rest: unknown[]) =>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (target.$transaction as any)((tx: any) => {
+              const txProxy = new Proxy(tx, {
+                get(t, pp, rr) {
+                  if (pp === "auditDelivery") {
+                    return new Proxy(t.auditDelivery, {
+                      get(model, mp, mr) {
+                        if (mp === "createMany") {
+                          return () => Promise.reject(injected);
+                        }
+                        return Reflect.get(model, mp, mr);
+                      },
+                    });
+                  }
+                  return Reflect.get(t, pp, rr);
+                },
+              });
+              return fn(txProxy);
+            }, ...rest);
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as unknown as PrismaClient;
+
+    await expect(deliverRow(proxy, row, p)).rejects.toThrow(injected);
+
+    // audit_logs INSERT rolled back — no row for this outbox.
+    const auditLogs = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT COUNT(*) AS n FROM audit_logs WHERE outbox_id = $1::uuid`,
+        row.id,
+      );
+    });
+    expect(Number(auditLogs[0]?.n ?? 0)).toBe(0);
+
+    // No audit_deliveries rows.
+    expect(await deliveriesForOutbox(row.id)).toHaveLength(0);
+
+    // The webhook enqueue (enqueueWebhookDeliveryInTx) runs earlier in the SAME
+    // winning tx, so its row must have rolled back too — proving the atomicity
+    // spans both enqueue kinds, not just audit_deliveries.
+    expect(await webhookDeliveriesForOutbox(row.id)).toHaveLength(0);
+
+    // Outbox row survived and stayed PENDING (deliverRow marks SENT only at the
+    // end of the winning tx; rollback leaves the pre-call PENDING state). Assert
+    // the row still exists so optional-chaining can't mask a vanished row.
+    const outbox = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ status: string }[]>(
+        `SELECT status::text AS status FROM audit_outbox WHERE id = $1::uuid`,
+        row.id,
+      );
+    });
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]!.status).toBe("PENDING");
   });
 });
