@@ -496,15 +496,21 @@ async function fanOutDeliveries(
  * caller's tx, which is required when the audit row must commit atomically
  * with a sibling mutation (e.g. the retention-purge DELETE).
  */
+interface DirectAuditScope {
+  scope?: string;
+  teamId?: string | null;
+}
+
 async function writeDirectAuditLogInTx(
   tx: Prisma.TransactionClient,
   tenantId: string,
   action: string,
   metadata: Record<string, unknown>,
+  opts?: DirectAuditScope,
 ): Promise<void> {
   await tx.$executeRawUnsafe(
     `INSERT INTO audit_logs (
-      id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
+      id, tenant_id, scope, action, user_id, actor_type, team_id, metadata, created_at
     ) VALUES (
       gen_random_uuid(),
       $1::uuid,
@@ -512,14 +518,16 @@ async function writeDirectAuditLogInTx(
       $3::"AuditAction",
       $4::uuid,
       $5::"ActorType",
-      $6::jsonb,
+      $6::uuid,
+      $7::jsonb,
       now()
     )`,
     tenantId,
-    AUDIT_SCOPE.TENANT,
+    opts?.scope ?? AUDIT_SCOPE.TENANT,
     action,
     SYSTEM_ACTOR_ID,
     ACTOR_TYPE.SYSTEM,
+    opts?.teamId ?? null,
     JSON.stringify(metadata),
   );
 }
@@ -534,11 +542,12 @@ async function writeDirectAuditLog(
   tenantId: string,
   action: string,
   metadata: Record<string, unknown>,
+  opts?: DirectAuditScope,
 ): Promise<void> {
   try {
     await prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      await writeDirectAuditLogInTx(tx, tenantId, action, metadata);
+      await writeDirectAuditLogInTx(tx, tenantId, action, metadata, opts);
     });
   } catch (err) {
     getLogger().warn(
@@ -954,6 +963,11 @@ async function processOneWebhookDelivery(
       // Lazy import: keeps the @/lib/prisma singleton out of the worker's eager
       // module graph so `--validate-env-only` fails cleanly (see the import note).
       const { deliverToWebhookRecords } = await import("@/lib/webhook-dispatcher");
+      // A recoverable per-webhook error (secret-version/key/decrypt failure or a
+      // health-field DB-update throw) must NOT let the work item be marked SENT —
+      // that would permanently lose the webhook on a pending key migration or a
+      // transient error. Collect them and fail the work item so it retries.
+      const recoverableErrors: unknown[] = [];
       await deliverToWebhookRecords(
         webhooks,
         payloadStr,
@@ -961,7 +975,16 @@ async function processOneWebhookDelivery(
         async (id) => onWebhookDeliverySuccess(workerPrisma, item.scope, id),
         async (id, failCount, url) =>
           onWebhookDeliveryFailure(workerPrisma, item, id, failCount, url),
+        async (_id, err) => {
+          recoverableErrors.push(err);
+        },
       );
+      if (recoverableErrors.length > 0) {
+        const first = recoverableErrors[0];
+        throw first instanceof Error
+          ? first
+          : new Error(`webhook delivery recoverable error: ${String(first)}`);
+      }
     }
 
     await markWebhookDeliverySent(workerPrisma, item.id);
@@ -984,7 +1007,16 @@ async function resolveWebhookSubscribers(
     await setBypassRlsGucs(tx);
     if (item.scope === "TEAM" && item.team_id) {
       const rows = await tx.teamWebhook.findMany({
-        where: { teamId: item.team_id, isActive: true, events: { has: item.action } },
+        // Scope by tenantId too (defense-in-depth): delivery runs under bypass
+        // RLS, so filtering by teamId alone would let an inconsistent queue row
+        // reach another tenant's team webhook. team_id is globally unique, but a
+        // corrupt enqueue must not cross the tenant boundary.
+        where: {
+          tenantId: item.tenant_id,
+          teamId: item.team_id,
+          isActive: true,
+          events: { has: item.action },
+        },
       });
       return rows.map((r) => ({
         id: r.id,
@@ -1080,7 +1112,10 @@ async function onWebhookDeliveryFailure(
 
   // Per-webhook delivery failure is a distinct, unchained audit event (parity
   // with the app dispatcher). Uses writeDirectAuditLog (bypass outbox) so it
-  // never re-enters the queue.
+  // never re-enters the queue. TEAM failures must be recorded with TEAM scope +
+  // teamId so they surface in the team audit view (the app dispatcher logged
+  // WEBHOOK_DELIVERY_FAILED as TEAM/teamId; a plain TENANT-scope write would
+  // change the audit attribution and hide the failure from team admins).
   await writeDirectAuditLog(
     workerPrisma,
     item.tenant_id,
@@ -1092,6 +1127,7 @@ async function onWebhookDeliveryFailure(
       url: maskUrlForDisplay(url),
       failCount: newFailCount,
     },
+    isTeam ? { scope: AUDIT_SCOPE.TEAM, teamId: item.team_id } : undefined,
   );
 }
 
@@ -1151,6 +1187,9 @@ async function recordWebhookDeliveryError(
 
   if (isDead) {
     getLogger().warn({ deliveryId: item.id }, "webhook_delivery.dead_lettered");
+    // Record the dead-letter with the work item's own scope/teamId (parity with
+    // the per-failure WEBHOOK_DELIVERY_FAILED event) so a TEAM work item's
+    // dead-letter surfaces in the team audit view, not just the tenant view.
     await writeDirectAuditLog(
       workerPrisma,
       item.tenant_id,
@@ -1161,6 +1200,9 @@ async function recordWebhookDeliveryError(
         attemptCount: newAttemptCount,
         lastError: message.slice(0, 256),
       },
+      item.scope === "TEAM" && item.team_id
+        ? { scope: AUDIT_SCOPE.TEAM, teamId: item.team_id }
+        : undefined,
     );
   } else {
     getLogger().info(
@@ -1746,9 +1788,17 @@ export function createWorker(config: WorkerConfig) {
       }
 
       // Durable webhook delivery: drain pending webhook_deliveries work items.
+      // Uses a small bounded batch (NOT the 500-row outbox batchSize): each item
+      // can hold the claim lease for the full worst-case delivery time, so the
+      // batch must stay short enough that serial processing finishes before the
+      // PROCESSING timeout — otherwise the reaper resets in-flight rows and a
+      // second worker re-claims them (duplicate + concurrent delivery).
       let webhookDeliveryClaimed = 0;
       try {
-        webhookDeliveryClaimed = await processWebhookDeliveryBatch(workerPrisma, batchSize);
+        webhookDeliveryClaimed = await processWebhookDeliveryBatch(
+          workerPrisma,
+          AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE,
+        );
         if (webhookDeliveryClaimed > 0) {
           log.debug({ webhookDeliveryClaimed }, "processed webhook delivery batch");
         }

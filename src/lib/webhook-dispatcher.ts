@@ -17,9 +17,8 @@ import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD } from "@/lib/validations/common.server";
+import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_FETCH_TIMEOUT_MS, WEBHOOK_RETRY_DELAYS_MS } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
-import { MS_PER_SECOND } from "@/lib/constants/time";
 import {
   sanitizeForExternalDelivery,
   resolveAndValidateIps,
@@ -79,7 +78,7 @@ export interface WebhookRecord {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const RETRY_DELAYS = [1 * MS_PER_SECOND, 5 * MS_PER_SECOND, 25 * MS_PER_SECOND];
+const RETRY_DELAYS = WEBHOOK_RETRY_DELAYS_MS;
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -142,7 +141,7 @@ async function deliverWithRetry(
           "X-Webhook-Signature": `t=${signatures.timestamp},v1=${signatures.v1Signature}`,
         },
         body: payload,
-        signal: AbortSignal.timeout(10 * MS_PER_SECOND),
+        signal: AbortSignal.timeout(WEBHOOK_FETCH_TIMEOUT_MS),
         redirect: "error",
         // @ts-expect-error -- Node.js fetch supports undici dispatcher
         dispatcher,
@@ -167,6 +166,7 @@ async function deliverSingleWebhook(
   timestamp: string,
   onSuccess: (id: string) => Promise<void>,
   onFailure: (id: string, failCount: number, url: string) => Promise<void>,
+  onError?: (id: string, err: unknown) => Promise<void>,
 ): Promise<void> {
   try {
     let secret: string;
@@ -207,6 +207,12 @@ async function deliverSingleWebhook(
         },
         "webhook secret decryption failed",
       );
+      // Secret-version / key / decrypt failure is RECOVERABLE (a pending key
+      // migration or transient key-store error), NOT a delivery attempt that
+      // failed. Signal it via onError so the durable delivery path retries the
+      // work item instead of marking it SENT and losing the webhook. The
+      // fire-and-forget app path passes no onError → unchanged log-and-drop.
+      if (onError) await onError(webhook.id, err);
       return;
     }
 
@@ -223,7 +229,10 @@ async function deliverSingleWebhook(
       await onFailure(webhook.id, webhook.failCount + 1, webhook.url);
     }
   } catch (err) {
+    // Reaches here on an onSuccess/onFailure DB-update throw (or any unexpected
+    // error). Also recoverable — propagate so the durable path can retry.
     getLogger().error({ webhookId: webhook.id, err }, "webhook dispatch error");
+    if (onError) await onError(webhook.id, err);
   }
 }
 
@@ -242,12 +251,13 @@ export async function deliverToWebhookRecords(
   timestamp: string,
   onSuccess: (id: string) => Promise<void>,
   onFailure: (id: string, failCount: number, url: string) => Promise<void>,
+  onError?: (id: string, err: unknown) => Promise<void>,
 ): Promise<void> {
   for (let i = 0; i < webhooks.length; i += WEBHOOK_CONCURRENCY) {
     const chunk = webhooks.slice(i, i + WEBHOOK_CONCURRENCY);
     await Promise.allSettled(
       chunk.map((webhook) =>
-        deliverSingleWebhook(webhook, payload, timestamp, onSuccess, onFailure),
+        deliverSingleWebhook(webhook, payload, timestamp, onSuccess, onFailure, onError),
       ),
     );
   }

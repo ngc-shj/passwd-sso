@@ -51,7 +51,6 @@ import {
   purgeRetention,
   type AuditOutboxRow,
 } from "@/workers/audit-outbox-worker";
-import { deliverToWebhookRecords, type WebhookRecord } from "@/lib/webhook-dispatcher";
 import { encryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
 
@@ -233,6 +232,70 @@ async function createTenantWebhook(
   return id;
 }
 
+async function createTeam(ctx: TestContext, tenantId: string): Promise<string> {
+  const id = randomUUID();
+  const slug = `t-${id.slice(0, 8)}`;
+  await ctx.su.prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    await tx.$executeRawUnsafe(
+      `INSERT INTO teams (id, tenant_id, name, slug, team_key_version, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3, $4, 1, now(), now())`,
+      id,
+      tenantId,
+      "integration-test-team",
+      slug,
+    );
+  });
+  return id;
+}
+
+async function createTeamWebhook(
+  ctx: TestContext,
+  opts: {
+    tenantId: string;
+    teamId: string;
+    url: string;
+    events: string[];
+    isActive?: boolean;
+    secretAadVersion?: number;
+  },
+): Promise<string> {
+  const id = randomUUID();
+  const masterKeyVersion = 1;
+  const secretAadVersion = opts.secretAadVersion ?? 2;
+  const enc = encryptWebhookSecret({
+    kind: "TeamWebhook",
+    webhookId: id,
+    tenantId: opts.tenantId,
+    teamId: opts.teamId,
+    masterKeyVersion,
+    secretAadVersion,
+    secret: "test-webhook-secret",
+  });
+  await ctx.su.prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    await tx.$executeRawUnsafe(
+      `INSERT INTO team_webhooks
+         (id, team_id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag,
+          master_key_version, secret_aad_version, events, is_active,
+          created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10::text[], $11, now(), now())`,
+      id,
+      opts.teamId,
+      opts.tenantId,
+      opts.url,
+      enc.ciphertext,
+      enc.iv,
+      enc.authTag,
+      masterKeyVersion,
+      secretAadVersion,
+      opts.events,
+      opts.isActive ?? true,
+    );
+  });
+  return id;
+}
+
 /**
  * Park a webhook_deliveries row far in the future so the LIVE docker worker
  * (a separate process without this test's resolveAndValidateIps mock) cannot
@@ -275,31 +338,6 @@ async function readWebhookDeliveryRowsByOutboxId(ctx: TestContext, outboxId: str
   });
 }
 
-async function resolveTenantWebhookRecords(ctx: TestContext, tenantId: string, action: string): Promise<WebhookRecord[]> {
-  // Mirrors resolveWebhookSubscribers: runs under the worker role + bypass
-  // GUCs (tenant_webhooks has FORCE ROW LEVEL SECURITY — a plain findMany
-  // outside a bypass-scoped tx returns zero rows regardless of the WHERE
-  // clause matching).
-  const rows = await ctx.worker.prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    return tx.tenantWebhook.findMany({
-      where: { tenantId, isActive: true, events: { has: action } },
-    });
-  });
-  return rows.map((r) => ({
-    id: r.id,
-    url: r.url,
-    secretEncrypted: r.secretEncrypted,
-    secretIv: r.secretIv,
-    secretAuthTag: r.secretAuthTag,
-    masterKeyVersion: r.masterKeyVersion,
-    secretAadVersion: r.secretAadVersion,
-    tenantId: r.tenantId,
-    kind: "TenantWebhook" as const,
-    teamId: undefined,
-    failCount: r.failCount,
-  }));
-}
 
 // ─── Suite ───────────────────────────────────────────────────────────────────
 
@@ -562,11 +600,18 @@ describe("webhook delivery — durable pipeline (real DB + real delivery core)",
     expect(after[0].status).toBe("SENT");
   });
 
-  // ── T-adj (fail-closed): a v1 (retired) secretAadVersion row must never be
-  // delivered to — deliverSingleWebhook throws WebhookSecretVersionError before
-  // any signature is computed or fetch is issued. Assert NO request reached
-  // the mock server (the mutation), and the fan-out pass does not crash.
-  it("T-adj: a webhook with retired secretAadVersion=1 fails closed — zero requests reach the server", async () => {
+  // ── T-adj (F2 regression, recoverable-not-lost): a v1 (retired)
+  // secretAadVersion webhook is subscribed at delivery time. The version gate
+  // throws WebhookSecretVersionError — a RECOVERABLE error (pending key
+  // migration). processOneWebhookDelivery must collect it via the onError
+  // callback and THROW after the pass, so recordWebhookDeliveryError retries the
+  // work item (PENDING + attempt_count incremented + next_retry_at in the
+  // future) instead of marking it SENT. Marking SENT would permanently LOSE the
+  // webhook the moment its secret is migrated. Zero POSTs reach the server.
+  //
+  // Dropping the onError propagation regresses this to markWebhookDeliverySent —
+  // the status assertion (PENDING, not SENT) is the F2 regression guard.
+  it("T-adj (F2): a retired secretAadVersion=1 subscriber retries the work item (PENDING) instead of losing it (SENT); zero POSTs", async () => {
     const webhookId = await createTenantWebhook(ctx, {
       tenantId,
       url: mockUrl(),
@@ -594,29 +639,37 @@ describe("webhook delivery — durable pipeline (real DB + real delivery core)",
     const res = await deliverRowWithChain(ctx.su.prisma, row, payload);
     expect(res.inserted).toBe(true);
 
-    const webhooks = await resolveTenantWebhookRecords(ctx, tenantId, AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE);
-    expect(webhooks).toHaveLength(1);
-    expect(webhooks[0].secretAadVersion).toBe(1);
+    const deliveries = await readWebhookDeliveryRowsByOutboxId(ctx, row.id);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0].attempt_count).toBe(0);
 
-    let successCalled = false;
-    let failureCalled = false;
-    await expect(
-      deliverToWebhookRecords(
-        webhooks,
-        "irrelevant-payload",
-        row.created_at.toISOString(),
-        async () => { successCalled = true; },
-        async () => { failureCalled = true; },
-      ),
-    ).resolves.toBeUndefined();
+    // Drive the REAL exported delivery primitive (deliverToWebhookRecords is
+    // real by default — no override here). park/unpark so the bg worker can't
+    // steal it.
+    await parkDeliveryRow(ctx, deliveries[0].id, 3600);
+    await unparkDeliveryRow(ctx, deliveries[0].id);
+    await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
 
-    // Fail-closed: no HTTP request reached the server, no spurious success,
-    // and the per-webhook failure callback is not invoked either (the
-    // version-gate error is caught and logged inside deliverSingleWebhook —
-    // it is a silent skip, not a retryable failure).
+    // Zero POSTs — the version gate rejected before any fetch.
     expect(received).toHaveLength(0);
-    expect(successCalled).toBe(false);
-    expect(failureCalled).toBe(false);
+
+    // The work item is RETRIED, not SENT: recordWebhookDeliveryError set PENDING
+    // (attempt_count 0→1, below max_attempts) with a future next_retry_at.
+    const after = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<
+        { id: string; status: string; attempt_count: number; future_retry: boolean }[]
+      >(
+        `SELECT id, status, attempt_count, (next_retry_at > now()) AS future_retry
+         FROM webhook_deliveries WHERE id = $1::uuid`,
+        deliveries[0].id,
+      );
+    });
+    expect(after).toHaveLength(1);
+    expect(after[0].status).toBe("PENDING");
+    expect(after[0].status).not.toBe("SENT");
+    expect(after[0].attempt_count).toBe(1);
+    expect(after[0].future_retry).toBe(true);
   });
 
   // ── T-purge (survival-by-id, not count-delta): an aged-SENT outbox row with
@@ -906,4 +959,135 @@ describe("webhook delivery — durable pipeline (real DB + real delivery core)",
     // Dropping NULLS NOT DISTINCT would let both in and this assertion fails.
     expect(rows).toHaveLength(1);
   });
+
+  // ── F3 (schema backstop): the webhook_deliveries_scope_team_id_ck CHECK
+  // constraint enforces the scope/team_id invariant at the storage layer, so an
+  // inconsistent enqueue (or an out-of-band write) cannot produce a TEAM row
+  // without a team_id or a TENANT row carrying one — which the delivery worker
+  // would otherwise use to resolve subscribers. Dropping the CHECK lets both
+  // malformed rows insert and this test fails.
+  it("F3: CHECK constraint rejects a TEAM row with null team_id and a TENANT row with a non-null team_id", async () => {
+    async function tryInsert(scope: string, teamId: string | null): Promise<void> {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO webhook_deliveries (
+            id, outbox_id, tenant_id, scope, team_id, action, status, next_retry_at, created_at
+          ) VALUES (
+            gen_random_uuid(), $1::uuid, $2::uuid, $3::"WebhookDeliveryScope", $4::uuid, $5,
+            'PENDING', now(), now()
+          )`,
+          randomUUID(),
+          tenantId,
+          scope,
+          teamId,
+          AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE,
+        );
+      });
+    }
+
+    // TEAM + null team_id → rejected.
+    await expect(tryInsert("TEAM", null)).rejects.toThrow(/scope_team_id_ck|check constraint/i);
+    // TENANT + non-null team_id → rejected.
+    await expect(tryInsert("TENANT", randomUUID())).rejects.toThrow(/scope_team_id_ck|check constraint/i);
+
+    // Sanity: the two well-formed shapes are accepted (proves the CHECK is not
+    // rejecting everything, i.e. the assertion above is non-vacuous).
+    await expect(tryInsert("TENANT", null)).resolves.toBeUndefined();
+  });
+
+  // ── F3b (TEAM tenant-scoped resolution, positive correctness): a TEAM work
+  // item for (tenant, team) is delivered to that team's subscribed webhook via
+  // the REAL processWebhookDeliveryBatch → resolveWebhookSubscribers (which now
+  // filters by BOTH tenantId AND teamId). Cross-tenant leakage is double-guarded
+  // by the F3 CHECK + this filter; a positive test that the (tenantId, teamId)
+  // filter delivers to the right team is the correctness anchor.
+  it("F3b: a TEAM work item is delivered to the correct team webhook (tenantId+teamId filter)", async () => {
+    const teamId = await createTeam(ctx, tenantId);
+    await createTeamWebhook(ctx, {
+      tenantId,
+      teamId,
+      url: mockUrl(),
+      events: [AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE],
+    });
+
+    const payload = makeOutboxPayload({ scope: AUDIT_SCOPE.TEAM, teamId }, userId);
+    const row = await enqueueOutboxRow(ctx, tenantId, payload);
+    const res = await deliverRowWithChain(ctx.su.prisma, row, payload);
+    expect(res.inserted).toBe(true);
+
+    const deliveries = await readWebhookDeliveryRowsByOutboxId(ctx, row.id);
+    expect(deliveries).toHaveLength(1);
+    expect(deliveries[0].scope).toBe("TEAM");
+    expect(deliveries[0].team_id).toBe(teamId);
+
+    await parkDeliveryRow(ctx, deliveries[0].id, 3600);
+    await unparkDeliveryRow(ctx, deliveries[0].id);
+    await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
+
+    // The team webhook (matched by tenantId+teamId) received the POST.
+    expect(received).toHaveLength(1);
+    expect(received[0].headers["x-webhook-signature"]).toMatch(/^t=.+,v1=[0-9a-f]{64}$/);
+    const sentBody = JSON.parse(received[0].body);
+    expect(sentBody.teamId).toBe(teamId);
+
+    const after = await readWebhookDeliveryRowsByOutboxId(ctx, row.id);
+    expect(after[0].status).toBe("SENT");
+  });
+
+  // ── F5 (TEAM failure audit scope): a TEAM webhook whose delivery FAILS (mock
+  // server returns 500 → deliverWithRetry exhausts retries → onFailure, NOT the
+  // recoverable onError path) must record WEBHOOK_DELIVERY_FAILED with TEAM scope
+  // + teamId, so it surfaces in the team audit view. Reverting F5 records
+  // TENANT/null and fails the scope/team_id assertion.
+  it("F5: a failed TEAM webhook delivery audits WEBHOOK_DELIVERY_FAILED with scope=TEAM and team_id", async () => {
+    // Mock server returns 500 so deliverWithRetry returns false → onFailure
+    // (a genuine delivery failure, distinct from the recoverable onError path).
+    server.removeAllListeners("request");
+    server.on("request", (req, res) => {
+      req.on("data", () => {});
+      req.on("end", () => {
+        received.push({ headers: req.headers, body: "" });
+        res.writeHead(500);
+        res.end("nope");
+      });
+    });
+
+    const teamId = await createTeam(ctx, tenantId);
+    await createTeamWebhook(ctx, {
+      tenantId,
+      teamId,
+      url: mockUrl(),
+      events: [AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE],
+    });
+
+    const payload = makeOutboxPayload({ scope: AUDIT_SCOPE.TEAM, teamId }, userId);
+    const row = await enqueueOutboxRow(ctx, tenantId, payload);
+    const res = await deliverRowWithChain(ctx.su.prisma, row, payload);
+    expect(res.inserted).toBe(true);
+
+    const deliveries = await readWebhookDeliveryRowsByOutboxId(ctx, row.id);
+    expect(deliveries).toHaveLength(1);
+
+    await parkDeliveryRow(ctx, deliveries[0].id, 3600);
+    await unparkDeliveryRow(ctx, deliveries[0].id);
+    await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
+
+    // The mock server was hit (retries exhausted on 500).
+    expect(received.length).toBeGreaterThanOrEqual(1);
+
+    // The failure audit row is TEAM-scoped with the team's id — NOT TENANT/null.
+    const auditRows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ scope: string; team_id: string | null }[]>(
+        `SELECT scope::text AS scope, team_id
+         FROM audit_logs
+         WHERE tenant_id = $1::uuid
+           AND action = 'WEBHOOK_DELIVERY_FAILED'::"AuditAction"`,
+        tenantId,
+      );
+    });
+    expect(auditRows.length).toBeGreaterThanOrEqual(1);
+    expect(auditRows.every((r) => r.scope === "TEAM" && r.team_id === teamId)).toBe(true);
+  }, 20000);
 });

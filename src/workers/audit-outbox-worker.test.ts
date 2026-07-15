@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit/audit";
+import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+import {
+  WEBHOOK_CONCURRENCY,
+  WEBHOOK_MAX_RETRIES,
+  WEBHOOK_FETCH_TIMEOUT_MS,
+  WEBHOOK_RETRY_DELAYS_MS,
+} from "@/lib/validations/common.server";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
 
@@ -1197,8 +1203,8 @@ describe("reaper — invoked on first loop tick", () => {
     expect(reapedInserts).toHaveLength(2);
 
     // Verify outboxId appears in the metadata JSON for each insert
-    // writeDirectAuditLog params: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), metadata($6)
-    const metadataArgs = reapedInserts.map((call) => JSON.parse(call[6] as string));
+    // writeDirectAuditLog params: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), teamId($6), metadata($7)
+    const metadataArgs = reapedInserts.map((call) => JSON.parse(call[7] as string));
     expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_1)).toBe(true);
     expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_2)).toBe(true);
   }, 15000);
@@ -1269,8 +1275,8 @@ describe("reaper — invoked on first loop tick", () => {
     );
     expect(purgeInsert).toBeDefined();
 
-    // metadata JSON at param index 6: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), metadata($6)
-    const metadata = JSON.parse(purgeInsert![6] as string);
+    // metadata JSON at param index 7: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), teamId($6), metadata($7)
+    const metadata = JSON.parse(purgeInsert![7] as string);
     expect(metadata.purgedCount).toBe(5);
   }, 15000);
 
@@ -1404,7 +1410,8 @@ describe("recordError — sanitizes error message before persisting", () => {
         call[3] === AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
     );
     expect(deadLetterInsert).toBeDefined();
-    const metadata = JSON.parse(deadLetterInsert![6] as string);
+    // team_id is param $6, metadata JSON is $7 (writeDirectAuditLogInTx shape).
+    const metadata = JSON.parse(deadLetterInsert![7] as string);
     expect(metadata.lastError).toBe("[SANITIZED]");
     expect(metadata.lastError).not.toContain("token=secret123");
   }, 15000);
@@ -1513,4 +1520,39 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
     );
     expect(deadLetterInsert).toBeUndefined();
   }, 15000);
+});
+
+// ─── F1: webhook delivery batch size — lease-alignment invariant ─────────────
+//
+// processWebhookDeliveryBatch is driven in loop() with
+// AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE, NOT the 500-row outbox BATCH_SIZE.
+// The batch must be small AND bounded so the serial worst-case wall-clock of a
+// full batch (every hook unreachable, holding the claim lease) stays under the
+// PROCESSING_TIMEOUT — otherwise the reaper resets still-in-flight rows
+// mid-delivery and a second worker re-claims them → duplicate/concurrent
+// delivery. This guards the invariant if someone bumps the timeout or the retry
+// budget without re-deriving the batch.
+
+describe("F1: WEBHOOK_DELIVERY_BATCH_SIZE lease alignment", () => {
+  it("is a small bounded value (1..=50) and distinct from the 500-row outbox batch", () => {
+    expect(AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE).toBeGreaterThanOrEqual(1);
+    expect(AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE).toBeLessThanOrEqual(50);
+    expect(AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE).not.toBe(AUDIT_OUTBOX.BATCH_SIZE);
+  });
+
+  it("serial worst-case for a full batch stays under PROCESSING_TIMEOUT_MS", () => {
+    // Worst-case wall-clock one unreachable hook can hold the claim lease:
+    // every attempt hits the full fetch timeout, plus the inter-attempt backoffs.
+    const worstCasePerHookMs =
+      WEBHOOK_MAX_RETRIES * WEBHOOK_FETCH_TIMEOUT_MS +
+      WEBHOOK_RETRY_DELAYS_MS.slice(0, WEBHOOK_MAX_RETRIES - 1).reduce((a, b) => a + b, 0);
+
+    // A batch is processed serially in chunks of WEBHOOK_CONCURRENCY.
+    const serialChunks = Math.ceil(
+      AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE / WEBHOOK_CONCURRENCY,
+    );
+    const serialWorstCaseMs = serialChunks * worstCasePerHookMs;
+
+    expect(serialWorstCaseMs).toBeLessThan(AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS);
+  });
 });

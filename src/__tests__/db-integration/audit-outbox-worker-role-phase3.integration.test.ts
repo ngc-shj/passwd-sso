@@ -67,12 +67,36 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
     // Phase 4 grants
     expect(privMap.get("audit_chain_anchors")?.sort()).toEqual(["INSERT", "SELECT", "UPDATE"]);
 
-    // Durable webhook delivery grants
+    // Durable webhook delivery grants. UPDATE on the webhook config tables is
+    // column-scoped (health fields only), so it appears in column_privileges,
+    // NOT as a table-level UPDATE — table_privileges shows SELECT only.
     expect(privMap.get("webhook_deliveries")?.sort()).toEqual(
       ["DELETE", "INSERT", "SELECT", "UPDATE"].sort(),
     );
-    expect(privMap.get("tenant_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
-    expect(privMap.get("team_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
+    expect(privMap.get("tenant_webhooks")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("team_webhooks")?.sort()).toEqual(["SELECT"]);
+
+    // Column-scoped UPDATE: the worker may update ONLY the delivery health
+    // fields, never url / events / secret / master_key_version / tenant_id /
+    // team_id (F4). Assert the exact allowed column set on both tables.
+    const expectedUpdateCols = [
+      "fail_count",
+      "is_active",
+      "last_delivered_at",
+      "last_error",
+      "last_failed_at",
+      "updated_at",
+    ];
+    for (const table of ["tenant_webhooks", "team_webhooks"]) {
+      const cols = await ctx.su.prisma.$queryRawUnsafe<{ column_name: string }[]>(
+        `SELECT column_name FROM information_schema.column_privileges
+         WHERE grantee = 'passwd_outbox_worker' AND table_schema = 'public'
+           AND table_name = $1 AND privilege_type = 'UPDATE'
+         ORDER BY column_name`,
+        table,
+      );
+      expect(cols.map((c) => c.column_name).sort()).toEqual(expectedUpdateCols);
+    }
 
     // Verify exact table set (Phase 1+2+3+4 + webhook delivery combined)
     const allowedTables = new Set([

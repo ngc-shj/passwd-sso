@@ -85,3 +85,63 @@ blocked-deferred paths.
 ### T-events-vacuous [Major] / INV-W1 [Minor] / W-1 test gap [Major-adjacent]
 - Action: test fixes (see Testing Findings). Modified:
   src/__tests__/db-integration/webhook-delivery-durable.integration.test.ts
+
+---
+
+## Review round 2 (external re-review after base commit 9ff8e788)
+
+A second external security review of the durable delivery implementation found 5 findings
+(2 High, 3 Medium) and marked the branch not-mergeable. All fixed in a follow-up commit.
+
+### R2-F1 [High] — batch-claimed lease expires mid-delivery
+`processWebhookDeliveryBatch` claimed up to 500 items (the outbox batch size) into
+PROCESSING then processed them serially. An unreachable webhook takes ~36s (3 attempts ×
+10s fetch + 6s backoff); ~9 slow items exceed the 5-min PROCESSING timeout, so the reaper
+resets still-in-flight rows to PENDING and a second worker re-claims them → duplicate +
+concurrent delivery, and a malicious unreachable URL stalls the shared worker.
+- **FIXED**: dedicated `WEBHOOK_DELIVERY_BATCH_SIZE` (audit.ts), computed from the timing
+  constants so the serial worst case stays under half the PROCESSING lease
+  (`floor((TIMEOUT/2 / worstCasePerHook) × CONCURRENCY)` = 20). Fetch timeout + retry delays
+  extracted to `WEBHOOK_FETCH_TIMEOUT_MS` / `WEBHOOK_RETRY_DELAYS_MS` (common.server.ts).
+  Modified: src/lib/constants/audit/audit.ts, src/lib/validations/common.server.ts,
+  src/workers/audit-outbox-worker.ts (loop uses the bounded size).
+
+### R2-F2 [High] — crypto/AAD/DB errors silently marked the work item SENT
+`deliverSingleWebhook` swallowed secretAadVersion/key/decrypt failures and onSuccess/
+onFailure DB-update throws with a log only; the worker then marked the work item SENT →
+a recoverable pending-key-migration or transient DB error **permanently lost** the audit
+webhook. The T-adj test had frozen this silent-skip as correct.
+- **FIXED**: added an optional `onError(id, err)` callback to `deliverSingleWebhook` /
+  `deliverToWebhookRecords` for recoverable (non-HTTP) errors. The worker collects them and
+  throws after the pass → `recordWebhookDeliveryError` retries the work item (PENDING +
+  backoff) instead of marking SENT. The app fire-and-forget path passes no `onError`
+  (unchanged log-and-drop). T-adj rewritten to assert the work item does NOT reach SENT.
+  Modified: src/lib/webhook-dispatcher.ts, src/workers/audit-outbox-worker.ts.
+
+### R2-F3 [Medium] — TEAM delivery did not verify tenant ownership
+`resolveWebhookSubscribers` filtered `teamWebhook.findMany({ teamId })` without `tenantId`
+under bypass RLS, and the schema had no scope/team_id constraint — an inconsistent queue
+row could deliver one tenant's audit metadata to another tenant's team webhook.
+- **FIXED**: the TEAM query now filters by `{ tenantId, teamId }`; a new migration adds
+  `CHECK ((scope='TEAM' AND team_id IS NOT NULL) OR (scope='TENANT' AND team_id IS NULL))`.
+  Modified: src/workers/audit-outbox-worker.ts,
+  prisma/migrations/20260715001000_webhook_deliveries_review_hardening/migration.sql.
+
+### R2-F4 [Medium] — worker UPDATE grant too broad
+`GRANT SELECT, UPDATE ON tenant_webhooks/team_webhooks` let the worker rewrite url, events,
+encrypted secret, master_key_version, tenant_id/team_id — far beyond the health fields it
+touches.
+- **FIXED**: REVOKE the table-wide UPDATE, re-GRANT column-scoped UPDATE on
+  (fail_count, last_error, last_failed_at, last_delivered_at, is_active, updated_at). Grant
+  tests updated to assert table-level SELECT-only + an exact column-level UPDATE set.
+  Modified: the follow-up migration + both worker-role integration tests.
+
+### R2-F5 [Medium] — TEAM failure audit recorded as TENANT scope
+`writeDirectAuditLog` always wrote TENANT scope + null team_id, so TEAM webhook failures no
+longer appeared in the team audit view (the app dispatcher logged them as TEAM/teamId).
+- **FIXED**: `writeDirectAuditLog{,InTx}` gained an optional `{ scope, teamId }`; the audit_logs
+  INSERT now carries team_id; `onWebhookDeliveryFailure` passes TEAM scope + teamId for team
+  webhooks. Modified: src/workers/audit-outbox-worker.ts.
+
+All R2 fixes verified: typecheck/lint clean, migration applied to dev DB (drift clean),
+grant + worker unit + webhook integration suites green.

@@ -93,6 +93,10 @@ export const RATE_LIMIT_MAP_MAX_SIZE = 10_000;
 
 // ─── Webhook Dispatcher ─────────────────────────────────────
 export const WEBHOOK_MAX_RETRIES = 3;
+/** Per-attempt HTTP fetch timeout for webhook delivery. */
+export const WEBHOOK_FETCH_TIMEOUT_MS = 10 * MS_PER_SECOND;
+/** Backoff between webhook delivery retry attempts (index = attempt just failed). */
+export const WEBHOOK_RETRY_DELAYS_MS = [1 * MS_PER_SECOND, 5 * MS_PER_SECOND, 25 * MS_PER_SECOND];
 /** Consecutive delivery failures after which a webhook is auto-disabled. */
 export const WEBHOOK_AUTO_DISABLE_THRESHOLD = 10;
 

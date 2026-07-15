@@ -73,10 +73,12 @@ describe("audit-outbox worker role privileges", () => {
     // Phase 4: chain anchors
     expect(privMap.get("audit_chain_anchors")?.sort()).toEqual(["INSERT", "SELECT", "UPDATE"]);
 
-    // Durable webhook delivery
+    // Durable webhook delivery. UPDATE on the webhook config tables is
+    // column-scoped (health fields only) so it lives in column_privileges, not
+    // as a table-level UPDATE — table_privileges shows SELECT only.
     expect(privMap.get("webhook_deliveries")?.sort()).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
-    expect(privMap.get("tenant_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
-    expect(privMap.get("team_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
+    expect(privMap.get("tenant_webhooks")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("team_webhooks")?.sort()).toEqual(["SELECT"]);
 
     // Verify no unexpected tables
     const allowedTables = new Set([

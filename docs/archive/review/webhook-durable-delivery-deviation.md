@@ -44,6 +44,35 @@ path; T-obs/T-crash/T-deadletter drive `processWebhookDeliveryBatch`).
 needs a test targeting the real export, not a copied SQL string). `reapStuckWebhookDeliveries`
 is likewise exported, matching the existing `reapStuckRows`/`reapStuckDeliveries` convention.
 
+## Review round 2 deviations (external re-review, commit after 9ff8e788)
+
+## D5 — bounded WEBHOOK_DELIVERY_BATCH_SIZE (F1)
+The delivery loop now claims `AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE` (computed ≈20)
+instead of the 500-row outbox batch, so a batch of unreachable webhooks cannot hold the
+claim lease past the PROCESSING timeout (which would let the reaper reset in-flight rows →
+duplicate/concurrent delivery). `WEBHOOK_FETCH_TIMEOUT_MS` / `WEBHOOK_RETRY_DELAYS_MS`
+extracted from the dispatcher's magic numbers (R2). audit.ts imports these from
+common.server.ts — one-directional, no cycle.
+
+## D6 — onError callback for recoverable delivery errors (F2)
+`deliverSingleWebhook`/`deliverToWebhookRecords` gained an optional `onError`. The durable
+worker path passes it and retries the work item on a recoverable (crypto/DB) error instead
+of marking SENT; the app fire-and-forget path passes none (unchanged log-and-drop). This
+was NOT in the original plan — the plan (and the T-adj test) had accepted the silent skip,
+which the re-review correctly identified as a durability hole (parity with the reverted-then-
+re-derived didInsert lesson: "silent skip as correct" is the recurring trap).
+
+## D7 — follow-up migration for CHECK + column-scoped grants (F3/F4)
+`20260715001000_webhook_deliveries_review_hardening` adds the scope/team_id CHECK constraint
+and narrows the worker's UPDATE on the webhook tables to the health columns. A separate
+migration (not an edit to the already-committed `20260715000000`) because the first was
+committed in 9ff8e788.
+
+## D8 — writeDirectAuditLog scope/teamId opts (F5 + dead-letter parity)
+`writeDirectAuditLog{,InTx}` gained an optional `{scope, teamId}` and the audit_logs INSERT
+now carries team_id. TEAM webhook failure + dead-letter events record TEAM scope + teamId
+(the app dispatcher's prior behavior); all other callers default to TENANT/null.
+
 ## Pre-existing, out-of-scope (recorded, not fixed)
 - **eslint-disable @typescript-eslint/no-explicit-any** at
   `audit-outbox-retention-purge-audit-atomicity.integration.test.ts:202` — a Proxy
