@@ -55,3 +55,11 @@ Created: 2026-07-16
 ### D10: [Medium] anti-mask guard missed multi-line + expression masks
 - External review found findMaskedVerifierViolations only detected a mask on the SAME line as the verifier, missing `npm audit signatures \` + newline + `|| true`, and missed continue-on-error: ${{ true }} (expression form). Both self-verified as false-negatives.
 - Fix: join shell line-continuations into one logical line (tracking the original line number) before scanning; broaden the continue-on-error match to the expression form. Self-tests for both; real workflows stay clean.
+
+## Second external-review round
+
+### D11 [High] classification check moved to a standalone always-run guard
+- (E) in the vitest test rides app-ci (gated app||ci); a cli/ext-only package.json PR skips it. Extracted (E) into standalone scripts/checks/check-crypto-auth-deps-classified.mjs (node:fs+JSON only) wired into pre-pr.sh which static-checks runs unconditionally. RT7 self-test + prisma-displacement-verified.
+
+### D12 [Medium] anti-mask guard now folds YAML folded/block scalars
+- A run: > folded scalar evaded the guard (earlier fix only joined backslash-continuations). The logical-line builder now absorbs a run block deeper-indented body before scanning. Folded-scalar self-test added.

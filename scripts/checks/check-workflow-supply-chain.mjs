@@ -69,9 +69,23 @@ export function findMaskedVerifierViolations(content, name) {
   // is caught. Track the original 1-based line number of each logical line's start.
   const rawLines = content.split("\n");
   const logical = [];
+  const indentOf = (s) => (s.match(/^\s*/)?.[0].length ?? 0);
   for (let i = 0; i < rawLines.length; i += 1) {
     let joined = rawLines[i];
     const start = i;
+    const blockMatch = joined.match(/(^\s*)(?:-\s+)?run:\s*[>|][+-]?\s*$/);
+    if (blockMatch && i + 1 < rawLines.length) {
+      const baseIndent = blockMatch[1].length;
+      while (
+        i + 1 < rawLines.length &&
+        (rawLines[i + 1].trim() === "" || indentOf(rawLines[i + 1]) > baseIndent)
+      ) {
+        joined += " " + rawLines[i + 1].trim();
+        i += 1;
+      }
+      logical.push({ text: joined, line: start + 1 });
+      continue;
+    }
     while (/\\\s*$/.test(joined) && i + 1 < rawLines.length) {
       joined = joined.replace(/\\\s*$/, " ") + rawLines[i + 1];
       i += 1;

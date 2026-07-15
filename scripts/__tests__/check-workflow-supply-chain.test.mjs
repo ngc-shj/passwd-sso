@@ -125,6 +125,16 @@ describe("findMaskedVerifierViolations", () => {
     expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
   });
 
+  it("flags a mask folded across a YAML folded scalar (>)", () => {
+    const wf = [
+      "    steps:",
+      "      - run: >",
+      "          npm audit signatures",
+      "          || true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
+  });
+
   it("flags continue-on-error in the expression form", () => {
     const wf = [
       "    steps:",
