@@ -186,6 +186,32 @@ export function computeUnbackedSensitiveDeps(
   return findings.sort();
 }
 
+/** (B) manifest packages absent from the workspace's package.json dependencies. */
+export function computeMissingDeps(manifestPackages: Set<string>, deps: Set<string>): string[] {
+  return [...manifestPackages].filter((p) => !deps.has(p)).sort();
+}
+
+/**
+ * detectedBy accuracy (INV-C4c): a `static-import`/`dynamic-import`-marked entry
+ * whose package has NO CODE occurrence in its workspace is a stale/mis-labeled
+ * claim → finding. `manual` entries are exempt (they are declared code-absent).
+ * This catches the case a crypto-named-only (C) check misses: a non-crypto-named
+ * member (e.g. next-auth) whose import was removed but left in package.json+manifest.
+ */
+export function computeDetectedByViolations(
+  manifestByPackage: Map<string, ManifestEntry>,
+  codeSpecifiers: Set<string>,
+): string[] {
+  const findings: string[] = [];
+  for (const [pkg, entry] of manifestByPackage) {
+    if (entry.detectedBy.includes("manual")) continue;
+    if (!codeSpecifiers.has(pkg)) {
+      findings.push(`${pkg}: detectedBy=[${entry.detectedBy.join(",")}] but no CODE occurrence found`);
+    }
+  }
+  return findings.sort();
+}
+
 /** (D) metadata completeness: reason ≥10 chars and every owner in the enum. */
 export function computeMetadataViolations(
   key: string,
@@ -299,8 +325,7 @@ describe("crypto-auth-deps-manifest — three-set reconciliation", () => {
       });
 
       it("(B) every manifest package is present in the workspace package.json dependencies", () => {
-        const depSet = new Set(deps);
-        const missing = [...manifestPackages].filter((p) => !depSet.has(p));
+        const missing = computeMissingDeps(manifestPackages, new Set(deps));
         expect(missing, `manifest packages missing from ${workspace} deps: ${missing.join(", ")}`).toEqual(
           [],
         );
@@ -312,6 +337,11 @@ describe("crypto-auth-deps-manifest — three-set reconciliation", () => {
           findings,
           `crypto-named deps in ${workspace} lacking CODE evidence and manual marker: ${findings.join(", ")}`,
         ).toEqual([]);
+      });
+
+      it("(detectedBy accuracy) every static/dynamic-import entry has a confirming CODE occurrence", () => {
+        const findings = computeDetectedByViolations(manifestByPackage, code);
+        expect(findings, `stale detectedBy claims in ${workspace}: ${findings.join(", ")}`).toEqual([]);
       });
     });
   }
@@ -355,6 +385,22 @@ describe("RT7 self-test — isExternalSpecifier", () => {
     expect(isExternalSpecifier("hash-wasm")).toBe(true);
     expect(isExternalSpecifier("@simplewebauthn/server")).toBe(true);
   });
+  it("does NOT drop a package whose name merely starts with a framework name", () => {
+    expect(isExternalSpecifier("nextfoo")).toBe(true);
+    expect(isExternalSpecifier("react-markdown")).toBe(true);
+  });
+});
+
+describe("RT7 self-test — toPackageRoot", () => {
+  it("returns a bare package name unchanged", () => {
+    expect(toPackageRoot("otpauth")).toBe("otpauth");
+  });
+  it("strips an unscoped subpath to the first segment", () => {
+    expect(toPackageRoot("next-auth/providers/nodemailer")).toBe("next-auth");
+  });
+  it("keeps exactly scope/name for a scoped deep subpath", () => {
+    expect(toPackageRoot("@simplewebauthn/server/helpers/x")).toBe("@simplewebauthn/server");
+  });
 });
 
 describe("RT7 self-test — computeUnregisteredImports (A)", () => {
@@ -368,6 +414,62 @@ describe("RT7 self-test — computeUnregisteredImports (A)", () => {
     expect(
       computeUnregisteredImports(code, new Set(["next-auth"]), new Set(["zod"])),
     ).toEqual([]);
+  });
+});
+
+describe("RT7 self-test — computeMissingDeps (B)", () => {
+  it("flags a manifest package absent from the DEPS set", () => {
+    const findings = computeMissingDeps(new Set(["hash-wasm", "next-auth"]), new Set(["next-auth"]));
+    expect(findings).toEqual(["hash-wasm"]);
+  });
+  it("returns empty when every manifest package is present in DEPS", () => {
+    expect(computeMissingDeps(new Set(["next-auth"]), new Set(["next-auth", "zod"]))).toEqual([]);
+  });
+});
+
+describe("RT7 self-test — computeDetectedByViolations (detectedBy accuracy, INV-C4c)", () => {
+  const entry = (detectedBy: string[]): ManifestEntry => ({
+    workspace: "root",
+    reason: "x".repeat(10),
+    detectedBy,
+    owners: ["security"],
+    category: "auth-flow",
+  });
+  it("flags a static-import entry with no CODE occurrence", () => {
+    const findings = computeDetectedByViolations(
+      new Map([["next-auth", entry(["static-import"])]]),
+      new Set(),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatch(/next-auth/);
+  });
+  it("flags a dynamic-import entry with no confirmable dynamic occurrence", () => {
+    const findings = computeDetectedByViolations(
+      new Map([["hash-wasm", entry(["dynamic-import"])]]),
+      new Set(),
+    );
+    expect(findings).toHaveLength(1);
+  });
+  it("does NOT flag a static-import entry that has a CODE occurrence", () => {
+    const findings = computeDetectedByViolations(
+      new Map([["next-auth", entry(["static-import"])]]),
+      new Set(["next-auth"]),
+    );
+    expect(findings).toEqual([]);
+  });
+  it("does NOT flag a dynamic-import entry the resolver confirms", () => {
+    const findings = computeDetectedByViolations(
+      new Map([["hash-wasm", entry(["dynamic-import"])]]),
+      new Set(["hash-wasm"]),
+    );
+    expect(findings).toEqual([]);
+  });
+  it("exempts a manual entry with no CODE occurrence", () => {
+    const findings = computeDetectedByViolations(
+      new Map([["defensive-dep", entry(["manual"])]]),
+      new Set(),
+    );
+    expect(findings).toEqual([]);
   });
 });
 

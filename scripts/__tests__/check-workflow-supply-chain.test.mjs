@@ -43,6 +43,50 @@ jobs:
 `;
     expect(findAutoMergeViolation(wf, "release.yml")).toBeNull();
   });
+
+  it("flags the peter-evans enable-pull-request-automerge action for dependabot", () => {
+    const wf = `
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - uses: peter-evans/enable-pull-request-automerge@v3
+`;
+    expect(findAutoMergeViolation(wf, "automerge.yml")).toMatch(/auto-merge/);
+  });
+
+  it("flags an enablePullRequestAutoMerge GraphQL mutation for dependabot", () => {
+    const wf = `
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - run: gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'
+`;
+    expect(findAutoMergeViolation(wf, "automerge.yml")).not.toBeNull();
+  });
+
+  it("flags a REST pulls/N/merge call for dependabot", () => {
+    const wf = `
+jobs:
+  automerge:
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - run: gh api -X PUT repos/o/r/pulls/123/merge
+`;
+    expect(findAutoMergeViolation(wf, "automerge.yml")).not.toBeNull();
+  });
+
+  it("does NOT false-positive on a bare 'git merge' near the word dependabot", () => {
+    const wf = `
+# dependabot bumps land on main
+jobs:
+  sync:
+    steps:
+      - run: git merge --no-ff origin/main
+`;
+    expect(findAutoMergeViolation(wf, "sync.yml")).toBeNull();
+  });
 });
 
 describe("findMaskedVerifierViolations", () => {
@@ -61,11 +105,40 @@ describe("findMaskedVerifierViolations", () => {
     expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
   });
 
+  it("flags npm audit signatures masked with || exit 0", () => {
+    const wf = `      - run: npm audit signatures || exit 0\n`;
+    expect(findMaskedVerifierViolations(wf, "ci.yml")).toHaveLength(1);
+  });
+
+  it("flags a provenance assertion masked with || true", () => {
+    const wf = `      - run: npm view pkg --json | jq .dist.attestations || true\n`;
+    expect(findMaskedVerifierViolations(wf, "release.yml")).toHaveLength(1);
+  });
+
+  it("flags continue-on-error on a verifier-running workflow", () => {
+    const wf = `
+    steps:
+      - run: npm audit signatures
+        continue-on-error: true
+`;
+    const v = findMaskedVerifierViolations(wf, "ci.yml");
+    expect(v.some((m) => /continue-on-error/.test(m))).toBe(true);
+  });
+
   it("returns no violations for an unmasked npm audit signatures step", () => {
     const wf = `
     steps:
       - run: npm audit signatures
 `;
     expect(findMaskedVerifierViolations(wf, "ci.yml")).toEqual([]);
+  });
+
+  it("does not flag continue-on-error in a workflow that runs no verifier", () => {
+    const wf = `
+    steps:
+      - run: npm ci
+        continue-on-error: true
+`;
+    expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
   });
 });

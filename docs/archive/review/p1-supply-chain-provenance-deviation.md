@@ -25,3 +25,14 @@ Created: 2026-07-16
 - (B) presence: added a synthetic `nonexistent-crypto-pkg` to a scratch copy of the manifest → (B) RED; restored clean.
 - (A) drift: dropped `hash-wasm` from a scratch copy (still imported) → (A) RED (proving the dynamic-import member flows through the drift gate); restored clean, 26/26 green.
 - (C)/(D)/heuristic/dynamic-resolver: proven RED at the pure-function unit level (RT7 self-tests in the test file).
+
+## Phase 3 code-review fixes
+
+### D5: (B) presence check reads only `dependencies` (runtime-dep assumption)
+- The (B) real-tree check reads each workspace's package.json `dependencies` only, not `devDependencies` (Round-1 code-review T4). Confirmed every manifest-listed package is a runtime `dependencies` entry in its workspace. A crypto/auth primitive would never be a devDependency in production, so the assumption is sound; recorded so a reviewer can contest it.
+
+### D6: detectedBy-accuracy + (B) extracted to pure functions with unit negatives
+- Round-1 code review (M1 = Func F1 + Test T2; M3 = Test T1) found the (B) presence check inlined and the INV-C4c detectedBy-accuracy branch unimplemented. Added `computeMissingDeps` (B) and `computeDetectedByViolations` (detectedBy accuracy) as pure exported functions, each wired into the real-tree reconciliation AND given RED/GREEN unit self-tests. The detectedBy-accuracy check catches the case (C) misses: a non-crypto-named member (e.g. next-auth) whose import is removed but left in package.json+manifest — a stale static-import claim now goes RED.
+
+### D7: workflow guard hardened against evasion shapes
+- Round-1 code review (M2 = Sec SEC-1; m1 = Func F3 + Sec SEC-2; m2 = Sec SEC-3; m3 = Func F2) widened the auto-merge regex to the documented Dependabot shapes (peter-evans action, enablePullRequestAutoMerge GraphQL, gh api pulls/N/merge REST), dropped the over-broad bare --merge, extended the anti-mask detector to || exit 0 / continue-on-error, extended verifier coverage to the npm view attestations provenance assertion, and documented CODEOWNERS as the PRIMARY control (the regex is defense-in-depth; a cross-file reusable-workflow split is out of a per-file grep's reach). New self-tests cover each shape (fire + stay-quiet).

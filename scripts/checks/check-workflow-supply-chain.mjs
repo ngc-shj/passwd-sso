@@ -6,11 +6,18 @@
  *     password manager treats an untrusted upstream as trusted (tests do not
  *     detect a supply-chain payload — event-stream/ua-parser-js/xz were all
  *     patch/minor bumps that passed tests). Human review must stay required, so
- *     no workflow may pair a `dependabot` trigger/context with a merge command.
+ *     no workflow may pair a `dependabot` context with an auto-merge command.
  *
- *  2. `npm audit signatures` must never be exit-masked. A signature verifier
- *     behind `|| true` / `; true` / `|| echo` is theater — a real tamper would
- *     be swallowed. The same applies to the post-publish provenance assertion.
+ *  2. A supply-chain verifier (`npm audit signatures`, or the post-publish
+ *     provenance assertion `npm view … dist.attestations`) must never be
+ *     exit-masked. A verifier behind `|| true` / `; true` / `|| exit 0` /
+ *     `continue-on-error` is theater — a real tamper would be swallowed.
+ *
+ * PRIMARY control note: `/.github/workflows/` is CODEOWNERS-gated to @ngc-shj,
+ * so ANY new auto-merge or verifier-masking workflow — in any shape — already
+ * requires owner review to land. These regex checks are DEFENSE-IN-DEPTH: they
+ * catch the common shapes fast in `pre-pr.sh`, but a per-file grep cannot see a
+ * cross-file reusable-workflow auto-merge split, so CODEOWNERS is the backstop.
  *
  * The detection logic is exported as pure functions so it can be unit-tested
  * with synthetic inputs (RT7 — the guard must be provably able to fail).
@@ -21,8 +28,10 @@ import { join } from "node:path";
 const WORKFLOWS_DIR = ".github/workflows";
 
 /**
- * Returns a violation string if the workflow content pairs a dependabot
- * trigger/context with an auto-merge command, else null.
+ * Returns a violation string if the workflow content pairs a dependabot context
+ * with an auto-merge command, else null. Covers the documented Dependabot
+ * auto-merge shapes; a cross-file reusable-workflow split is out of a per-file
+ * grep's reach and is backstopped by CODEOWNERS (see header).
  * @param {string} content
  * @param {string} name
  * @returns {string | null}
@@ -30,16 +39,20 @@ const WORKFLOWS_DIR = ".github/workflows";
 export function findAutoMergeViolation(content, name) {
   const mentionsDependabot = /dependabot/i.test(content);
   if (!mentionsDependabot) return null;
-  const mergeRe = /gh\s+pr\s+merge|--auto\b|--merge\b|pull-request\/merge/i;
+  const mergeRe =
+    /gh\s+pr\s+merge|--auto\b|enable-pull-request-automerge|enablePullRequestAutoMerge|gh\s+api[^\n]*pulls\/[^\n]*\/merge|pulls\/[^\s]*\/merge|pull-request\/merge/i;
   if (mergeRe.test(content)) {
-    return `${name}: workflow references 'dependabot' and a merge command (gh pr merge / --auto) — Dependabot auto-merge is forbidden (human review required)`;
+    return `${name}: workflow references 'dependabot' and an auto-merge command — Dependabot auto-merge is forbidden (human review required)`;
   }
   return null;
 }
 
 /**
- * Returns violation strings for any `npm audit signatures` or provenance
- * assertion whose exit status is masked by a trailing || true / ; true / || echo.
+ * Returns violation strings for any supply-chain verifier — `npm audit
+ * signatures` or the post-publish provenance assertion (`npm view` reading
+ * `dist.attestations`) — whose exit status is masked (|| true / ; true /
+ * || exit 0 / || : / || echo), or a step-level `continue-on-error: true`
+ * anywhere in a workflow that runs such a verifier.
  * @param {string} content
  * @param {string} name
  * @returns {string[]}
@@ -47,14 +60,26 @@ export function findAutoMergeViolation(content, name) {
 export function findMaskedVerifierViolations(content, name) {
   const violations = [];
   const lines = content.split("\n");
-  const maskRe = /(\|\|\s*true|;\s*true|\|\|\s*:\s*$|\|\|\s*echo)\b/;
+  const verifierRe = /audit\s+signatures|npm\s+view[^\n]*attestations|dist\.attestations/;
+  const maskRe = /(\|\|\s*(true|:|exit\s+0|echo)|;\s*(true|exit\s+0))\b/;
+  let runsVerifier = false;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (/audit\s+signatures/.test(line) && maskRe.test(line)) {
-      violations.push(
-        `${name}:${i + 1}: 'npm audit signatures' exit status is masked (|| true / ; true / || echo) — the verifier must fail closed`,
-      );
+    if (verifierRe.test(line)) {
+      runsVerifier = true;
+      if (maskRe.test(line)) {
+        violations.push(
+          `${name}:${i + 1}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || echo) — it must fail closed`,
+        );
+      }
     }
+  }
+  // A workflow-level continue-on-error on a verifier-running workflow silently
+  // downgrades a red verifier to a soft warning.
+  if (runsVerifier && /continue-on-error:\s*true/i.test(content)) {
+    violations.push(
+      `${name}: a verifier-running workflow sets 'continue-on-error: true' — remove it so the verifier fails closed`,
+    );
   }
   return violations;
 }
