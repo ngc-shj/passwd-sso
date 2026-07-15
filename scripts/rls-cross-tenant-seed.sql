@@ -285,6 +285,12 @@ INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000AA', '00000000-0000-0000-0000-0000000000A9', '00000000-0000-0000-0000-0000000000A0'),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000BA', '00000000-0000-0000-0000-0000000000B9', '00000000-0000-0000-0000-0000000000B0');
 
+-- webhook_deliveries has no FK to audit_outbox (survives purge), so outbox_id is
+-- a bare UUID. scope='TENANT' with NULL team_id satisfies the scope/team_id CHECK.
+INSERT INTO webhook_deliveries (id, outbox_id, tenant_id, scope, team_id, action) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000AB', '00000000-0000-0000-0000-0000000000A0', 'TENANT', NULL, 'ENTRY_CREATE'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000BB', '00000000-0000-0000-0000-0000000000B0', 'TENANT', NULL, 'ENTRY_CREATE');
+
 -- ---------------------------------------------------------------------------
 -- MCP chain: clients (NULL row + A + B) → access_tokens → refresh_tokens,
 --            authorization_codes, delegation_sessions
