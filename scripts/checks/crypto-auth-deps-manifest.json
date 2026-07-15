@@ -1,0 +1,127 @@
+{
+  "$note": "Crypto/auth-sensitive npm dependency manifest across all three npm workspaces (root/cli/extension). Reconciled by src/__tests__/checks/crypto-auth-deps-manifest.test.ts against (1) CODE imports derived via ts-morph AST over the crypto/auth roots, (2) each workspace package.json dependencies, (3) this manifest. A bump to any listed package should trigger deeper supply-chain review; a NEW crypto/auth import must be added here (or to excluded[]). Both this file and its enforcing test are CODEOWNERS-gated.",
+  "owners_enum": ["security"],
+  "packages": {
+    "next-auth": {
+      "workspace": "root",
+      "reason": "Core authentication framework (Auth.js v5): session strategy, OAuth/SAML/passkey/magic-link providers.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "auth-flow"
+    },
+    "@auth/prisma-adapter": {
+      "workspace": "root",
+      "reason": "Auth.js Prisma adapter backing the database session store.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "auth-flow"
+    },
+    "@simplewebauthn/server": {
+      "workspace": "root",
+      "reason": "WebAuthn/passkey registration + authentication verification boundary.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "signature"
+    },
+    "@simplewebauthn/types": {
+      "workspace": "root",
+      "reason": "WebAuthn type contracts used at the passkey verification boundary.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "signature"
+    },
+    "hash-wasm": {
+      "workspace": "root",
+      "reason": "Argon2id password KDF (WASM) for vault wrapping-key derivation.",
+      "detectedBy": ["dynamic-import"],
+      "owners": ["security"],
+      "category": "kdf"
+    },
+    "@prisma/adapter-pg": {
+      "workspace": "root",
+      "reason": "Postgres driver adapter for the identity/session/token store.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "db-identity-store"
+    },
+    "pg": {
+      "workspace": "root",
+      "reason": "Postgres driver underlying the identity/session/token store.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "db-identity-store"
+    },
+    "@prisma/client": {
+      "workspace": "root",
+      "reason": "ORM for all identity/session/token tables (data-access boundary, not a crypto primitive).",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "db-identity-store"
+    },
+    "nodemailer": {
+      "workspace": "root",
+      "reason": "SMTP transport for the magic-link auth channel that carries the session-granting token.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "auth-flow"
+    },
+    "resend": {
+      "workspace": "root",
+      "reason": "Resend transport for the magic-link auth channel that carries the session-granting token.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "auth-flow"
+    },
+    "otpauth": {
+      "workspace": "root",
+      "reason": "TOTP (2FA shared-secret OTP) generation in the vault entry TOTP field.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "otp"
+    },
+    "otpauth@cli": {
+      "package": "otpauth",
+      "workspace": "cli",
+      "reason": "TOTP (2FA shared-secret OTP) generation in the CLI.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "otp"
+    },
+    "otpauth@extension": {
+      "package": "otpauth",
+      "workspace": "extension",
+      "reason": "TOTP (2FA shared-secret OTP) generation in the browser extension.",
+      "detectedBy": ["static-import"],
+      "owners": ["security"],
+      "category": "otp"
+    },
+    "bcrypt-pbkdf": {
+      "workspace": "cli",
+      "reason": "OpenSSH-key KDF that decrypts encrypted SSH private keys in the CLI.",
+      "detectedBy": ["dynamic-import"],
+      "owners": ["security"],
+      "category": "kdf"
+    }
+  },
+  "excluded": {
+    "ioredis": { "workspace": "root", "reason": "Session-cache transport, not a crypto/auth primitive." },
+    "@sentry/nextjs": { "workspace": "root", "reason": "Error reporting, not a crypto/auth primitive." },
+    "bowser": { "workspace": "root", "reason": "User-agent parsing for new-device detection, not a crypto/auth primitive." },
+    "zod": { "workspace": "root", "reason": "Input validation, not a crypto/auth primitive." },
+    "@noble/hashes": { "workspace": "root", "reason": "Test-only oracle (devDependency, *.test.ts) for crypto conformance vectors; not a runtime path." },
+    "@simplewebauthn/browser": { "workspace": "root", "reason": "Production dep but not imported anywhere; the app uses the raw WebAuthn API instead (see webauthn-client.ts)." },
+    "lucide-react": { "workspace": "root", "reason": "Icon components (UI), not a crypto/auth primitive; imported in the shared component tree alongside the TOTP field." },
+    "next-intl": { "workspace": "root", "reason": "i18n framework (UI), not a crypto/auth primitive; imported in the shared component tree." },
+    "react-markdown": { "workspace": "root", "reason": "Markdown rendering (UI), not a crypto/auth primitive; imported in the shared component tree." },
+    "remark-gfm": { "workspace": "root", "reason": "Markdown GFM plugin (UI), not a crypto/auth primitive; imported in the shared component tree." },
+    "chalk": { "workspace": "cli", "reason": "CLI terminal styling, not a crypto/auth primitive." },
+    "commander": { "workspace": "cli", "reason": "CLI argument parsing, not a crypto/auth primitive." },
+    "cli-table3": { "workspace": "cli", "reason": "CLI table rendering, not a crypto/auth primitive." },
+    "clipboardy": { "workspace": "cli", "reason": "Clipboard access, not a crypto/auth primitive." },
+    "inquirer": { "workspace": "cli", "reason": "CLI interactive prompts, not a crypto/auth primitive." },
+    "zod@cli": { "package": "zod", "workspace": "cli", "reason": "Input validation, not a crypto/auth primitive." },
+    "tldts": { "workspace": "extension", "reason": "Public-suffix/domain parsing for autofill origin matching, not a crypto/auth primitive." },
+    "react": { "workspace": "extension", "reason": "UI framework, not a crypto/auth primitive." },
+    "react-dom": { "workspace": "extension", "reason": "UI framework, not a crypto/auth primitive." }
+  }
+}
