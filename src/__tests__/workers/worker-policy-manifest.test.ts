@@ -236,7 +236,12 @@ export function classifySweeps(
 
   for (const statement of statements) {
     if (HAS_LIMIT_RE.test(statement)) continue;
-    if (SINGLE_ROW_BY_ID_RE.test(statement)) continue;
+    // Single-row pass: a top-level `WHERE id =` proves single-row shape ONLY
+    // when there is no subselect. A `WHERE id =` buried inside a subselect
+    // (e.g. `WHERE owner_id IN (SELECT ... WHERE id = $1)`) is NOT a top-level
+    // single-row equality for the outer DELETE — the outer statement is still
+    // an unbounded multi-row sweep. Mirror the exemption tightness gate here.
+    if (SINGLE_ROW_BY_ID_RE.test(statement) && !HAS_SUBSELECT_RE.test(statement)) continue;
     if (tightlyExemptedStatements.has(statement)) continue;
     violations.push({
       statement,
@@ -571,5 +576,19 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
       { module: "m", match: "DELETE FROM x", reason: "x".repeat(10) },
     ]);
     expect(violations.some((v) => v.kind === "loose-exemption")).toBe(true);
+  });
+
+  it("(g) flags an unbounded DELETE whose only WHERE id= is inside a subselect", () => {
+    // The outer DELETE has no LIMIT and no exemption; its only `WHERE id =` is
+    // buried in a subselect, so it is NOT top-level single-row-shaped. Before
+    // the subselect exclusion on pass-condition (b), the bare
+    // `SINGLE_ROW_BY_ID_RE.test(statement)` matched the subselect equality and
+    // silently passed this unbounded multi-row sweep.
+    const violations = classifySweeps(
+      ["DELETE FROM x WHERE owner_id IN (SELECT owner_id FROM y WHERE id = $1)"],
+      [],
+    );
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations.some((v) => v.kind === "unbounded")).toBe(true);
   });
 });

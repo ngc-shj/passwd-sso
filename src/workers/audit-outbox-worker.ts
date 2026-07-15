@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
@@ -396,8 +396,44 @@ async function fanOutDeliveries(
 }
 
 /**
+ * Insert a SYSTEM-actor audit event into audit_logs using the caller's
+ * transaction. The caller's tx MUST have already run setBypassRlsGucs. This
+ * does NOT open a tx and does NOT swallow errors — a failure rolls back the
+ * caller's tx, which is required when the audit row must commit atomically
+ * with a sibling mutation (e.g. the retention-purge DELETE).
+ */
+async function writeDirectAuditLogInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  action: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  await tx.$executeRawUnsafe(
+    `INSERT INTO audit_logs (
+      id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
+    ) VALUES (
+      gen_random_uuid(),
+      $1::uuid,
+      $2::"AuditScope",
+      $3::"AuditAction",
+      $4::uuid,
+      $5::"ActorType",
+      $6::jsonb,
+      now()
+    )`,
+    tenantId,
+    AUDIT_SCOPE.TENANT,
+    action,
+    SYSTEM_ACTOR_ID,
+    ACTOR_TYPE.SYSTEM,
+    JSON.stringify(metadata),
+  );
+}
+
+/**
  * Write a SYSTEM-actor audit event directly to audit_logs, bypassing the outbox.
- * Used by reaper and dead-letter logging to avoid recursion.
+ * Used by reaper and dead-letter logging to avoid recursion. Opens its own tx
+ * and swallows errors (best-effort — must never break the caller's flow).
  */
 async function writeDirectAuditLog(
   prisma: PrismaClient,
@@ -408,26 +444,7 @@ async function writeDirectAuditLog(
   try {
     await prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      await tx.$executeRawUnsafe(
-        `INSERT INTO audit_logs (
-          id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
-        ) VALUES (
-          gen_random_uuid(),
-          $1::uuid,
-          $2::"AuditScope",
-          $3::"AuditAction",
-          $4::uuid,
-          $5::"ActorType",
-          $6::jsonb,
-          now()
-        )`,
-        tenantId,
-        AUDIT_SCOPE.TENANT,
-        action,
-        SYSTEM_ACTOR_ID,
-        ACTOR_TYPE.SYSTEM,
-        JSON.stringify(metadata),
-      );
+      await writeDirectAuditLogInTx(tx, tenantId, action, metadata);
     });
   } catch (err) {
     getLogger().warn(
@@ -905,6 +922,10 @@ export async function purgeRetention(
   const sentCutoff = new Date(Date.now() - retentionHours * MS_PER_HOUR);
   const failedCutoff = new Date(Date.now() - failedRetentionDays * MS_PER_DAY);
 
+  // Each branch's DELETE and its RETENTION_PURGED audit event commit
+  // atomically in the SAME tx. A destructive delete must never succeed without
+  // a matching audit record: if the FAILED-branch tx later throws, the
+  // SENT-branch delete + its audit event have already committed together.
   const sentResult = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
@@ -928,10 +949,16 @@ export async function purgeRetention(
       retentionHours,
       limit,
     );
-    return {
-      purged: Number(rows[0]?.purged ?? 0),
-      sampleTenantId: rows[0]?.sample_tenant_id ?? null,
-    };
+    const purged = Number(rows[0]?.purged ?? 0);
+    const sampleTenantId = rows[0]?.sample_tenant_id ?? null;
+    if (purged > 0 && sampleTenantId) {
+      await writeDirectAuditLogInTx(tx, sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+        purgedCount: purged,
+        retentionHours,
+        failedRetentionDays,
+      });
+    }
+    return { purged, sampleTenantId };
   });
 
   const failedResult = await prisma.$transaction(async (tx) => {
@@ -952,22 +979,21 @@ export async function purgeRetention(
       failedRetentionDays,
       limit,
     );
-    return {
-      purged: Number(rows[0]?.purged ?? 0),
-      sampleTenantId: rows[0]?.sample_tenant_id ?? null,
-    };
+    const purged = Number(rows[0]?.purged ?? 0);
+    const sampleTenantId = rows[0]?.sample_tenant_id ?? null;
+    if (purged > 0 && sampleTenantId) {
+      await writeDirectAuditLogInTx(tx, sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+        purgedCount: purged,
+        retentionHours,
+        failedRetentionDays,
+      });
+    }
+    return { purged, sampleTenantId };
   });
 
   const totalPurged = sentResult.purged + failedResult.purged;
-  const sampleTenantId = sentResult.sampleTenantId ?? failedResult.sampleTenantId;
-
-  if (totalPurged > 0 && sampleTenantId) {
+  if (totalPurged > 0) {
     getLogger().info({ purged: totalPurged }, "worker.retention_purged");
-    await writeDirectAuditLog(prisma, sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
-      purgedCount: totalPurged,
-      retentionHours,
-      failedRetentionDays,
-    });
   }
 
   // Purge terminal delivery rows
@@ -1125,12 +1151,22 @@ export function createWorker(config: WorkerConfig) {
       try {
         const chainEnabled = await getChainEnabled(row.tenant_id);
         let rowDelivered: boolean;
+        // didInsert closes a double-send: when two workers process the SAME row
+        // (e.g. the reaper re-enqueues a long-running row), the audit_logs INSERT
+        // + chain advance happen once (ON CONFLICT), so only the winning delivery
+        // has inserted:true. Gating webhook + fan-out on inserted (not delivered)
+        // suppresses the duplicate external notification from the losing delivery.
+        // The non-chain path has no ON CONFLICT dedup and always inserts, so it is
+        // treated as inserted:true.
+        let didInsert: boolean;
         if (chainEnabled) {
           const res = await deliverRowWithChain(workerPrisma, row, payload);
           rowDelivered = res.delivered;
+          didInsert = res.inserted;
         } else {
           await deliverRow(workerPrisma, row, payload);
           rowDelivered = true;
+          didInsert = true;
         }
         if (!rowDelivered) {
           // Row was skipped because the tenant's anchor has publish_paused_until
@@ -1142,6 +1178,12 @@ export function createWorker(config: WorkerConfig) {
           { outboxId: row.id, action: payload.action, tenantId: row.tenant_id },
           "worker.delivered",
         );
+        if (!didInsert) {
+          // Conflicting re-delivery: the row is marked SENT (done by
+          // deliverRowWithChain) but the first delivery already dispatched the
+          // webhook + fan-out. Skip both here to avoid a duplicate send.
+          continue;
+        }
         void dispatchWebhookForRow(payload, row.tenant_id);
         // Phase 3: fan out to non-DB delivery targets (fire-and-forget).
         // If the worker crashes here, outbox row is already SENT so fan-out
