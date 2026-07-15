@@ -101,3 +101,76 @@ No VC1/VC2/VC3 (macOS/cosign/container) paths touched → N/A.
 Convergence: Functionality + Security return No findings; Testing's sole finding is a
 Minor documented-residual requiring no code change. All contracts remain locked. Review
 converged in Round 1.
+
+---
+
+# Code Review: worker-runtime-invariants — Round 2 (external security review)
+Date: 2026-07-15
+Review round: 2
+
+## Changes from Previous Round
+An external security review of the branch raised 3 findings that the triangulate
+Phase-3 pass had missed or mis-dispositioned. All three fixed on this branch (commit
+"fix(worker): make purge audit atomic, suppress duplicate webhook, tighten sweep guard").
+Two were pre-existing / mis-scoped; per user ruling, "pre-existing" is a provenance note,
+never a reason to skip — and the SC3 at-least-once webhook policy itself was wrong.
+
+## Findings and resolution
+
+**EXT-1 (High) — purge partial-success loses the audit trail.** The C3 SENT/FAILED
+two-branch split (this PR's own change) emitted AUDIT_OUTBOX_RETENTION_PURGED only AFTER
+both txs committed. If the SENT tx commits and the FAILED tx then throws, a destructive
+delete succeeded with no audit record — a new partial-commit boundary (pre-split it was a
+single outbox-DELETE tx). This is a genuine gap the Phase-3 review missed (it accepted
+"emission was already non-atomic" without noticing the SENT-committed-but-emission-skipped
+window).
+→ FIX: added a private `writeDirectAuditLogInTx(tx, ...)` (byte-identical INSERT, no own
+tx, no error-swallow — rolls back the caller's tx). Each purge branch now emits its own
+RETENTION_PURGED INSIDE its DELETE tx, so delete + audit commit atomically. `writeDirectAuditLog`
+refactored to wrap `writeDirectAuditLogInTx` in its own tx (existing callers unchanged).
+Both stay unexported (INV3). Up to two events/tick (per-branch counts). Regression:
+`audit-outbox-retention-purge-audit-atomicity.integration.test.ts` — happy-path two-event,
+single-branch one-event, and the core atomicity test (a test-side prisma Proxy rejects the
+2nd $transaction → asserts SENT delete + its audit row committed, FAILED untouched, call
+rejects). Chain columns NULL (INV3) asserted.
+
+**EXT-2 (Medium) — duplicate webhook on conflicting re-delivery.** Pre-existing: main also
+dispatched the webhook whenever `delivered:true`, and `deliverRowWithChain` returned true
+unconditionally, so a reaper-re-enqueued row delivered by two workers (ON CONFLICT → one
+audit_logs row) dispatched the webhook twice. The Phase-3 review dispositioned this as
+"SC3 at-least-once, accepted" — WRONG per user: the SC3 policy itself was the bug.
+→ FIX: processBatch now gates dispatchWebhookForRow + fanOutDeliveries on the `inserted`
+discriminator (chain path); a conflicting re-delivery (delivered:true, inserted:false)
+marks the row SENT but skips dispatch. Non-chain path (no ON CONFLICT dedup) stays
+inserted:true. Regression: `audit-outbox-webhook-dedup.integration.test.ts` drives the
+REAL worker loop (createWorker + tick) over a conflicting row (pre-seeded audit_logs →
+inserted:false → 0 fan-out rows) plus a control row (fresh → inserted:true → exactly 1
+fan-out row) — non-vacuous.
+
+**EXT-3 (Low) — sweep guard's single-row pass matched subselect-internal `WHERE id =`.**
+This PR's own C5 classifier: pass-condition (b) `SINGLE_ROW_BY_ID_RE.test(statement)` matched
+`WHERE id =` anywhere, so an unbounded `DELETE ... WHERE col IN (SELECT ... WHERE id = $1)`
+would pass. The tightness gate already had `!HAS_SUBSELECT_RE` but condition (b) did not.
+The Phase-3 security review examined TIGHT_PK_WHERE_RE but missed condition (b).
+→ FIX: condition (b) now requires `!HAS_SUBSELECT_RE.test(statement)` too. New self-test
+fixture (g) proves an unbounded DELETE whose only id-equality is subselect-internal is
+flagged `unbounded`. Real worker sweeps stay green (no false-positive).
+
+## Verification
+- `npm run lint` — clean
+- `npx vitest run` — 12293 passed / 1 skipped (+1 for the new atomicity/dedup tests)
+- Regression gate + new integration tests (9 files) — 19 passed × 2 stable runs
+- `npx next build` — compiled successfully
+- Forbidden patterns / INV3 (bypass actions on direct-write path only; helpers unexported) —
+  clean. R21 residue — clean (no production mutation cycle; residue grep verified).
+
+## Process note
+Two of the three findings were pre-existing (EXT-2) or a mis-scoped policy (SC3) / this
+PR's own new guard (EXT-3). Per user ruling, "pre-existing / not introduced by this PR" is
+a correct provenance classification but NEVER a disposition to skip — fixed here. Recorded
+in memory: pre-existing-in-changed-file and a mis-classified scope-out are both fixed, not
+deferred. The Phase-3 triangulate review's misses (EXT-1 atomicity window, EXT-2 SC3
+mis-acceptance, EXT-3 condition-(b) gap) are the value the external review added.
+
+## Convergence
+All 3 external findings fixed + regression-tested. Full suite green. Branch ready.

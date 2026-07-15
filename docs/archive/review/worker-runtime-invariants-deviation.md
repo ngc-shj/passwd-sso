@@ -63,3 +63,23 @@ the audit trail, per the Phase-2 R21 obligation.
 - SC2 poison-message replay — not built.
 - .claude/settings.json (rtk permission add) — out of scope; excluded from the
   commit (a session-level permission grant, unrelated to this feature).
+
+## Post-review fixes — external security review (3 findings)
+An external security review after Phase 3 raised 3 findings the triangulate pass missed
+or mis-dispositioned. All fixed on this branch (commit "fix(worker): make purge audit
+atomic, ..."). Details in the code review Round 2. Summary:
+
+- **EXT-1 (High)**: C3's SENT/FAILED two-branch purge emitted RETENTION_PURGED only after
+  BOTH txs committed → a FAILED-branch failure after the SENT commit left a destructive
+  delete with no audit record. FIX: private `writeDirectAuditLogInTx(tx,...)` emits each
+  branch's audit event INSIDE its own DELETE tx (atomic). Regression test added.
+- **EXT-2 (Medium)**: duplicate webhook on concurrent same-row re-delivery. The original
+  SC3 "accept at-least-once duplicates" policy was itself wrong (not just pre-existing).
+  FIX: gate dispatch on the `inserted` discriminator. SC3 RETRACTED in the plan.
+  Regression test added (real worker loop).
+- **EXT-3 (Low)**: C5 classifier pass-condition (b) matched subselect-internal `WHERE
+  id =`. FIX: require `!HAS_SUBSELECT_RE`; negative self-test fixture (g) added.
+
+Process: two of the three (EXT-2, EXT-3) were pre-existing / this-PR's-own-guard. Per user
+ruling, "pre-existing / not introduced by this PR" is a provenance note, NEVER a reason to
+skip — fixed here. Recorded in memory (feedback_no_skip_existing_code corollary).

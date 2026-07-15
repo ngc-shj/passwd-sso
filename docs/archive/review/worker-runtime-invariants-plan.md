@@ -436,10 +436,19 @@ already-probed `claimBatch`.
   exists today (GT-6). If ever built it requires the M-g authz model (distinct operator
   scope, SYSTEM-actor audit of who replayed which outbox_id, idempotent, INV3-unchained).
   Owner: a dedicated future PR + plan.
-- **SC3**: duplicate external webhook posts on crash-redelivery are accepted
-  (at-least-once delivery semantics; `dispatchWebhookForRow` is fire-and-forget by
-  design/R9 — fan-out ROWS are deduped by INV2, external POSTs are not). Industry-
-  standard webhook contract; consumers must key on event id.
+- **SC3 (RETRACTED — the accept-duplicates stance was wrong; see EXT-2 in the code
+  review)**: the original scope contract accepted duplicate external webhook posts on
+  concurrent same-row re-delivery as "at-least-once, consumers must key on event id".
+  An external security review correctly rejected this: two workers delivering the same
+  outbox row both returned `delivered:true` and both dispatched the webhook + fan-out,
+  even though the `audit_logs` INSERT + chain advance happened once (ON CONFLICT). This
+  is a fixable double-send, not an inherent at-least-once property. FIX: `processBatch`
+  now gates dispatch on the `inserted` discriminator (chain path) — only the delivery
+  that won the ON CONFLICT race dispatches; a conflicting re-delivery marks the row SENT
+  but skips webhook + fan-out. (A genuinely-crashed-mid-dispatch window can still lose a
+  notification, i.e. the semantics move toward at-most-once for the losing delivery; a
+  durable idempotent delivery queue is the follow-up for full exactly-once, out of scope
+  here.)
 - **SC4**: ORM-level bulk calls (`deleteMany`/`updateMany` — retention-gc sweep.ts:542/
   :550 bounded by LIMIT-selected id lists; anchor-publisher :319/:388 bounded by the
   chain-enabled tenant set) are outside the C5 raw-SQL mechanization. Their boundedness
