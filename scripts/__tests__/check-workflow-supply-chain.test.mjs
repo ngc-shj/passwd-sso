@@ -153,6 +153,23 @@ describe("findMaskedVerifierViolations", () => {
     expect(findMaskedVerifierViolations(wf, "release.yml")).toHaveLength(1);
   });
 
+  it("flags a folded scalar with a trailing comment and an indentation indicator", () => {
+    const withComment = [
+      "    steps:",
+      "      - run: > # folded",
+      "          npm audit signatures",
+      "          || true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(withComment, "ci.yml")).toHaveLength(1);
+    const withIndent = [
+      "    steps:",
+      "      - run: >2",
+      "          npm audit signatures",
+      "          || true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(withIndent, "ci.yml")).toHaveLength(1);
+  });
+
   it("catches continue-on-error when npm view + attestations span separate lines", () => {
     // The real release.yml has `npm view` and `attestations` on different lines;
     // continue-on-error on such a workflow must still be caught.

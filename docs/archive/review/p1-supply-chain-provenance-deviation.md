@@ -63,3 +63,6 @@ Created: 2026-07-16
 
 ### D12 [Medium] anti-mask guard now folds YAML folded/block scalars
 - A run: > folded scalar evaded the guard (earlier fix only joined backslash-continuations). The logical-line builder now absorbs a run block deeper-indented body before scanning. Folded-scalar self-test added.
+
+### D13 block-scalar header variants (Low)
+- Header regex required a trailing anchor after the indicator, so a trailing comment and an indentation indicator evaded folding. Fixed: accepts indentation + chomping indicators in any order plus an optional trailing comment. Self-tests for both.

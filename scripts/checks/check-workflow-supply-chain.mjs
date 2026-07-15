@@ -73,7 +73,9 @@ export function findMaskedVerifierViolations(content, name) {
   for (let i = 0; i < rawLines.length; i += 1) {
     let joined = rawLines[i];
     const start = i;
-    const blockMatch = joined.match(/(^\s*)(?:-\s+)?run:\s*[>|][+-]?\s*$/);
+    // Block-scalar header: `>`/`|` then indentation- and chomping-indicators in
+    // any order (`>2`, `|-`, `>2-`, `|+2`), then an optional trailing comment.
+    const blockMatch = joined.match(/(^\s*)(?:-\s+)?run:\s*[>|][0-9+-]*\s*(#.*)?$/);
     if (blockMatch && i + 1 < rawLines.length) {
       const baseIndent = blockMatch[1].length;
       while (
