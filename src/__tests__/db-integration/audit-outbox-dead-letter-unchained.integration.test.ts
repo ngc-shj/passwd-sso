@@ -13,7 +13,12 @@ import type { PrismaClient } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX, AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { deliverRowWithChain, reapStuckRows } from "@/workers/audit-outbox-worker";
+import {
+  deliverRowWithChain,
+  reapStuckRows,
+  reapStuckDeliveries,
+  reapStuckWebhookDeliveries,
+} from "@/workers/audit-outbox-worker";
 import type { AuditOutboxRow, AuditOutboxPayload } from "@/workers/audit-outbox-worker";
 import { verifyTenantChain } from "../../../scripts/audit-chain-verify-worker";
 
@@ -165,6 +170,72 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
     expect((log.metadata as { outboxId: string }).outboxId).toBe(stuckOutboxId);
   });
 
+  it("Nit-1 atomicity: if the reaper's DEAD_LETTER audit insert fails, the reap transition rolls back (row stays PROCESSING, no audit row)", async () => {
+    // The dead-letter audit now commits in the SAME tx as the FAILED transition.
+    // Inject a fault into the in-tx audit_logs INSERT and assert the whole tx
+    // rolls back: the stuck row must NOT be left FAILED without its audit trail.
+    const stuckOutboxId = await insertStuckAboutToDie();
+
+    // Proxy the Prisma client so the reaper's $transaction runs against the real
+    // client, but the tx client's $executeRawUnsafe throws when it targets
+    // audit_logs (the writeDirectAuditLogInTx insert) — never by editing the
+    // worker.
+    const injected = new Error("injected: audit_logs insert failure");
+    const proxy = new Proxy(ctx.su.prisma, {
+      get(target, prop, receiver) {
+        if (prop === "$transaction") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (fn: (tx: any) => unknown, ...rest: unknown[]) =>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (target.$transaction as any)((tx: any) => {
+              const txProxy = new Proxy(tx, {
+                get(t, p, r) {
+                  if (p === "$executeRawUnsafe") {
+                    return (sql: string, ...args: unknown[]) => {
+                      if (
+                        typeof sql === "string" &&
+                        sql.includes("INSERT INTO audit_logs")
+                      ) {
+                        return Promise.reject(injected);
+                      }
+                      return t.$executeRawUnsafe(sql, ...args);
+                    };
+                  }
+                  return Reflect.get(t, p, r);
+                },
+              });
+              return fn(txProxy);
+            }, ...rest);
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as unknown as PrismaClient;
+
+    await expect(reapStuckRows(proxy)).rejects.toThrow(injected);
+
+    // The reap transition rolled back: the row is still PROCESSING, not FAILED.
+    const rowAfter = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ status: string }[]>(
+        `SELECT status::text FROM audit_outbox WHERE id = $1::uuid`,
+        stuckOutboxId,
+      );
+    });
+    expect(rowAfter[0]?.status).toBe("PROCESSING");
+
+    // No dead-letter audit row was committed.
+    const logs = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT COUNT(*) AS n FROM audit_logs
+         WHERE tenant_id = $1::uuid AND action = $2::"AuditAction"`,
+        tenantId,
+        AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
+      );
+    });
+    expect(Number(logs[0]?.n ?? 0)).toBe(0);
+  });
+
   it("does not advance the tenant's chain anchor when dead-lettering", async () => {
     const anchorRow = await insertAndClaim(makePayload());
     await deliverRowWithChain(ctx.su.prisma, anchorRow, makePayload());
@@ -211,5 +282,183 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
 
     expect(result.walkedThrough).toBe(2);
     expect(result.ok).toBe(true);
+  });
+});
+
+// ─── F3: sibling reapers emit a dead-letter audit (class-completeness sweep) ──
+//
+// reapStuckDeliveries (audit_deliveries) and reapStuckWebhookDeliveries
+// (webhook_deliveries) also transition rows to FAILED when they exceed
+// max_attempts. Parity with reapStuckRows: that terminal transition must emit a
+// dead-letter audit, co-committed in the reap tx.
+describe("sibling reapers — reaper-driven dead-letter audit (F3)", () => {
+  let ctx: TestContext;
+  let tenantId: string;
+
+  beforeAll(async () => {
+    ctx = await createTestContext();
+  });
+  afterAll(async () => {
+    await ctx.cleanup();
+  });
+  beforeEach(async () => {
+    tenantId = await ctx.createTenant();
+  });
+  afterEach(async () => {
+    await ctx.deleteTestData(tenantId);
+  });
+
+  const staleCutoffSql =
+    "now() - make_interval(secs => $STALE::double precision) - interval '60 seconds'";
+
+  async function insertStuckDelivery(atMax: boolean): Promise<string> {
+    const id = randomUUID();
+    const outboxId = randomUUID();
+    const targetId = randomUUID();
+    const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      // Minimal outbox + target to satisfy any incidental reads; the reaper
+      // itself only touches audit_deliveries.
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+         VALUES ($1::uuid, $2::uuid, '{}'::jsonb, 'SENT', now())`,
+        outboxId,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_delivery_targets (
+           id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag,
+           master_key_version, is_active, created_at
+         ) VALUES ($1::uuid, $2::uuid, 'WEBHOOK'::"AuditDeliveryTargetKind", 'e','i','t', 1, true, now())`,
+        targetId,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status, attempt_count, max_attempts, processing_started_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PROCESSING', $5, 8,
+                 ${staleCutoffSql.replace("$STALE", "$6")})`,
+        id,
+        outboxId,
+        targetId,
+        tenantId,
+        atMax ? 7 : 1,
+        timeoutSeconds,
+      );
+    });
+    return id;
+  }
+
+  async function insertStuckWebhookDelivery(atMax: boolean): Promise<string> {
+    const id = randomUUID();
+    const outboxId = randomUUID();
+    const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO webhook_deliveries (id, outbox_id, tenant_id, scope, team_id, action, status, attempt_count, max_attempts, processing_started_at, next_retry_at, created_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'TENANT'::"WebhookDeliveryScope", NULL, 'ADMIN_VAULT_RESET_INITIATE', 'PROCESSING', $4, 8,
+                 ${staleCutoffSql.replace("$STALE", "$5")}, now(), now())`,
+        id,
+        outboxId,
+        tenantId,
+        atMax ? 7 : 1,
+        timeoutSeconds,
+      );
+    });
+    return id;
+  }
+
+  async function auditCount(action: string): Promise<number> {
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT COUNT(*) AS n FROM audit_logs WHERE tenant_id = $1::uuid AND action = $2::"AuditAction"`,
+        tenantId,
+        action,
+      );
+    });
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  it("reapStuckDeliveries emits AUDIT_DELIVERY_DEAD_LETTER only for rows that hit FAILED", async () => {
+    const dying = await insertStuckDelivery(true); // attempt 7 → +1 = 8 = max → FAILED
+    await insertStuckDelivery(false); // attempt 1 → +1 = 2 → PENDING, no audit
+
+    const reaped = await reapStuckDeliveries(ctx.su.prisma);
+    expect(reaped).toBe(2);
+
+    const status = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ status: string }[]>(
+        `SELECT status::text FROM audit_deliveries WHERE id = $1::uuid`,
+        dying,
+      );
+    });
+    expect(status[0]?.status).toBe("FAILED");
+    // Exactly one dead-letter audit — for the FAILED row, not the PENDING one.
+    expect(await auditCount(AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER)).toBe(1);
+  });
+
+  it("reapStuckWebhookDeliveries emits AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER only for rows that hit FAILED", async () => {
+    const dying = await insertStuckWebhookDelivery(true);
+    await insertStuckWebhookDelivery(false);
+
+    const reaped = await reapStuckWebhookDeliveries(ctx.su.prisma);
+    expect(reaped).toBe(2);
+
+    const status = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ status: string }[]>(
+        `SELECT status::text FROM webhook_deliveries WHERE id = $1::uuid`,
+        dying,
+      );
+    });
+    expect(status[0]?.status).toBe("FAILED");
+    expect(await auditCount(AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER)).toBe(1);
+  });
+
+  it("F3-atomicity: if the webhook-reaper's dead-letter audit insert fails, the FAILED transition rolls back (row stays PROCESSING, no audit)", async () => {
+    const dying = await insertStuckWebhookDelivery(true);
+
+    const injected = new Error("injected: audit_logs insert failure");
+    const proxy = new Proxy(ctx.su.prisma, {
+      get(target, prop, receiver) {
+        if (prop === "$transaction") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return (fn: (tx: any) => unknown, ...rest: unknown[]) =>
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (target.$transaction as any)((tx: any) => {
+              const txProxy = new Proxy(tx, {
+                get(t, p, r) {
+                  if (p === "$executeRawUnsafe") {
+                    return (sql: string, ...args: unknown[]) => {
+                      if (typeof sql === "string" && sql.includes("INSERT INTO audit_logs")) {
+                        return Promise.reject(injected);
+                      }
+                      return t.$executeRawUnsafe(sql, ...args);
+                    };
+                  }
+                  return Reflect.get(t, p, r);
+                },
+              });
+              return fn(txProxy);
+            }, ...rest);
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as unknown as PrismaClient;
+
+    await expect(reapStuckWebhookDeliveries(proxy)).rejects.toThrow(injected);
+
+    const status = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ status: string }[]>(
+        `SELECT status::text FROM webhook_deliveries WHERE id = $1::uuid`,
+        dying,
+      );
+    });
+    expect(status[0]?.status).toBe("PROCESSING");
+    expect(await auditCount(AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER)).toBe(0);
   });
 });

@@ -199,7 +199,8 @@ export const AUDIT_ACTION = {
   AUDIT_DELIVERY_FAILED: "AUDIT_DELIVERY_FAILED",
   AUDIT_DELIVERY_DEAD_LETTER: "AUDIT_DELIVERY_DEAD_LETTER",
   // Webhook delivery queue (webhook_deliveries) dead-letter: a work item
-  // exhausted maxAttempts. Unchained — emitted via writeDirectAuditLog.
+  // exhausted maxAttempts. Unchained — emitted in-tx with the FAILED transition
+  // via writeDirectAuditLogInTx (bypasses the outbox, no recursion).
   AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER: "AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER",
   AUDIT_ANCHOR_PUBLISHED: "AUDIT_ANCHOR_PUBLISHED",
   AUDIT_ANCHOR_PUBLISH_FAILED: "AUDIT_ANCHOR_PUBLISH_FAILED",

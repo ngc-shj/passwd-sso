@@ -284,7 +284,7 @@ function makeOneShotTxImpl(
       // Delivery claims, reaper, purge, or other queries — return empty/default
       if (sql.includes("DELETE FROM audit_outbox")) {
         // purgeRetention CTE — return 0 purged
-        return [{ purged: BigInt(0), sample_tenant_id: null }];
+        return [];
       }
       return [];
     });
@@ -1079,7 +1079,7 @@ describe("reaper — invoked on first loop tick", () => {
         }
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
           if (txCallCount === 5 || txCallCount === 6) {
-            return [{ purged: BigInt(0), sample_tenant_id: null }];
+            return [];
           }
           return mockQueryRawUnsafe(sql, ...args);
         });
@@ -1112,8 +1112,8 @@ describe("reaper — invoked on first loop tick", () => {
 
   it("reapStuckRows does not write a direct audit log when no rows are reaped (empty result)", async () => {
     // mockQueryRawUnsafe already returns [] by default.
-    // With 0 reaped rows, writeDirectAuditLog should NOT be called for AUDIT_OUTBOX_REAPED.
-    // writeDirectAuditLog emits an INSERT via $executeRawUnsafe with AUDIT_OUTBOX_REAPED action.
+    // With 0 reaped rows, writeDirectAuditLogInTx should NOT be called for AUDIT_OUTBOX_REAPED.
+    // writeDirectAuditLogInTx emits an INSERT via $executeRawUnsafe with AUDIT_OUTBOX_REAPED action.
 
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
@@ -1147,18 +1147,18 @@ describe("reaper — invoked on first loop tick", () => {
         // tx 1 = claimBatch (outbox PENDING check): returns []
         // tx 2 = processDeliveryBatch (delivery claim): returns []
         // tx 3 = processWebhookDeliveryBatch (webhook delivery claim): returns []
-        // tx 4 = reapStuckRows (PROCESSING check): returns two reaped rows
-        // tx 5 = writeDirectAuditLog for REAPED_ROW_1 (REAPED)
-        // tx 6 = writeDirectAuditLog for REAPED_ROW_2 (REAPED)
-        // tx 7 = reapStuckDeliveries
-        // tx 8 = reapStuckWebhookDeliveries
-        // tx 9 = purgeRetention SENT-branch DELETE CTE: returns 0 purged
-        // tx 10 = purgeRetention FAILED-branch DELETE CTE: returns 0 purged
-        // tx 11 = delivery retention purge
-        // tx 12 = webhook delivery retention purge
-        // tx 13 = next claimBatch iteration — stop here
+        // tx 4 = reapStuckRows (PROCESSING check): returns two reaped rows; both
+        //        AUDIT_OUTBOX_REAPED audit inserts now run INSIDE this same tx
+        //        (co-committed with the reap transition — no separate audit txs).
+        // tx 5 = reapStuckDeliveries
+        // tx 6 = reapStuckWebhookDeliveries
+        // tx 7 = purgeRetention SENT-branch DELETE CTE: returns 0 purged
+        // tx 8 = purgeRetention FAILED-branch DELETE CTE: returns 0 purged
+        // tx 9 = delivery retention purge
+        // tx 10 = webhook delivery retention purge
+        // tx 11 = next claimBatch iteration — stop here
 
-        if (txCallCount >= 13) {
+        if (txCallCount >= 11) {
           worker.stop();
           return [];
         }
@@ -1171,11 +1171,11 @@ describe("reaper — invoked on first loop tick", () => {
               { id: REAPED_ROW_2, tenant_id: TENANT_ID, attempt_count: 2, new_status: "PENDING" },
             ];
           }
-          if (txCallCount === 9 || txCallCount === 10) {
+          if (txCallCount === 7 || txCallCount === 8) {
             // purgeRetention SENT/FAILED branches — return 0 purged
-            return [{ purged: BigInt(0), sample_tenant_id: null }];
+            return [];
           }
-          // claimBatch, delivery claim, and direct-audit transactions return []
+          // claimBatch and delivery claim transactions return []
           return mockQueryRawUnsafe(sql, ...args);
         });
 
@@ -1191,7 +1191,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     await worker.start();
 
-    // writeDirectAuditLog inserts with AUDIT_OUTBOX_REAPED as the action (param index 3)
+    // writeDirectAuditLogInTx inserts with AUDIT_OUTBOX_REAPED as the action (param index 3)
     const reapedInserts = mockExecuteRawUnsafe.mock.calls.filter(
       (call) =>
         typeof call[0] === "string" &&
@@ -1201,7 +1201,7 @@ describe("reaper — invoked on first loop tick", () => {
     expect(reapedInserts).toHaveLength(2);
 
     // Verify outboxId appears in the metadata JSON for each insert
-    // writeDirectAuditLog params: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), teamId($6), metadata($7)
+    // writeDirectAuditLogInTx params: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), teamId($6), metadata($7)
     const metadataArgs = reapedInserts.map((call) => JSON.parse(call[7] as string));
     expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_1)).toBe(true);
     expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_2)).toBe(true);
@@ -1242,12 +1242,13 @@ describe("reaper — invoked on first loop tick", () => {
             return [];
           }
           if (txCallCount === 7) {
-            // purgeRetention SENT-branch — 5 rows deleted with a sample tenant
-            return [{ purged: BigInt(5), sample_tenant_id: TENANT_ID }];
+            // purgeRetention SENT-branch — 5 rows deleted for one tenant
+            // (per-tenant GROUP BY result: one row per tenant).
+            return [{ tenant_id: TENANT_ID, purged: BigInt(5) }];
           }
           if (txCallCount === 8) {
             // purgeRetention FAILED-branch — 0 rows deleted
-            return [{ purged: BigInt(0), sample_tenant_id: null }];
+            return [];
           }
           return mockQueryRawUnsafe(sql, ...args);
         });
@@ -1264,7 +1265,7 @@ describe("reaper — invoked on first loop tick", () => {
 
     await worker.start();
 
-    // writeDirectAuditLog for AUDIT_OUTBOX_RETENTION_PURGED inserts with that action at param 3
+    // writeDirectAuditLogInTx for AUDIT_OUTBOX_RETENTION_PURGED inserts with that action at param 3
     const purgeInsert = mockExecuteRawUnsafe.mock.calls.find(
       (call) =>
         typeof call[0] === "string" &&
@@ -1308,8 +1309,8 @@ describe("reaper — invoked on first loop tick", () => {
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
           if (txCallCount === 7 || txCallCount === 8) {
-            // purgeRetention SENT/FAILED branches — 0 purged
-            return [{ purged: BigInt(0), sample_tenant_id: null }];
+            // purgeRetention SENT/FAILED branches — 0 purged (empty GROUP BY)
+            return [];
           }
           return mockQueryRawUnsafe(sql, ...args);
         });
@@ -1357,18 +1358,19 @@ describe("recordError — sanitizes error message before persisting", () => {
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw the raw URL-bearing message
-        // tx 3 = recordError (UPDATE to FAILED with sanitized msg)
-        // tx 4 = writeDirectAuditLog (DEAD_LETTER INSERT with sanitized msg)
-        // tx 5 = reapStuckRows
-        // tx 6 = reapStuckDeliveries
+        // tx 3 = recordError (UPDATE to FAILED + DEAD_LETTER audit INSERT, both
+        //        with the sanitized msg, in the SAME co-committed tx)
+        // tx 4 = reapStuckRows
+        // tx 5 = reapStuckDeliveries
+        // tx 6 = reapStuckWebhookDeliveries
         // tx 7 = purgeRetention SENT-branch
         // tx 8 = purgeRetention FAILED-branch
-        // tx 9 = delivery retention purge
-        // tx 10 = next claimBatch — stop
+        // tx 9 = delivery retention purge / tx 10 = webhook delivery retention purge
+        // tx 11 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error(RAW_MESSAGE);
         }
-        if (txCallCount === 10) {
+        if (txCallCount === 11) {
           worker.stop();
           return [];
         }
@@ -1415,14 +1417,15 @@ describe("recordError — sanitizes error message before persisting", () => {
   }, 15000);
 });
 
-// ─── recordError — AUDIT_OUTBOX_DEAD_LETTER via writeDirectAuditLog ──────────
+// ─── recordError — AUDIT_OUTBOX_DEAD_LETTER via writeDirectAuditLogInTx ──────────
 
 describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () => {
   beforeEach(resetMocks);
 
-  it("writeDirectAuditLog is called with AUDIT_OUTBOX_DEAD_LETTER when row is dead-lettered", async () => {
-    // When attempt_count + 1 >= max_attempts, recordError must call writeDirectAuditLog
-    // which issues an INSERT INTO audit_logs with action = AUDIT_OUTBOX_DEAD_LETTER.
+  it("an AUDIT_OUTBOX_DEAD_LETTER audit row is inserted when the row is dead-lettered", async () => {
+    // When attempt_count + 1 >= max_attempts, recordError must insert an
+    // audit_logs row with action = AUDIT_OUTBOX_DEAD_LETTER (co-committed with
+    // the FAILED transition in the same tx).
     const row = makeRow({ attempt_count: 7, max_attempts: 8 });
 
     mockQueryRawUnsafe.mockResolvedValueOnce([row]);
@@ -1434,18 +1437,19 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw to trigger recordError
-        // tx 3 = recordError (UPDATE to FAILED)
-        // tx 4 = writeDirectAuditLog (DEAD_LETTER INSERT)
-        // tx 5 = reapStuckRows
-        // tx 6 = reapStuckDeliveries
+        // tx 3 = recordError (UPDATE to FAILED + DEAD_LETTER audit INSERT in the
+        //        SAME tx — co-committed, no separate audit tx)
+        // tx 4 = reapStuckRows
+        // tx 5 = reapStuckDeliveries
+        // tx 6 = reapStuckWebhookDeliveries
         // tx 7 = purgeRetention SENT-branch
         // tx 8 = purgeRetention FAILED-branch
-        // tx 9 = delivery retention purge
-        // tx 10 = next claimBatch — stop
+        // tx 9 = delivery retention purge / tx 10 = webhook delivery retention purge
+        // tx 11 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error("deliver failed");
         }
-        if (txCallCount === 10) {
+        if (txCallCount === 11) {
           worker.stop();
           return [];
         }
@@ -1461,7 +1465,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
 
     await worker.start();
 
-    // writeDirectAuditLog inserts with AUDIT_OUTBOX_DEAD_LETTER at param index 3
+    // writeDirectAuditLogInTx inserts with AUDIT_OUTBOX_DEAD_LETTER at param index 3
     const deadLetterInsert = mockExecuteRawUnsafe.mock.calls.find(
       (call) =>
         typeof call[0] === "string" &&
@@ -1471,7 +1475,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
     expect(deadLetterInsert).toBeDefined();
   }, 15000);
 
-  it("writeDirectAuditLog is NOT called when row is not yet dead-lettered (attempt_count < max_attempts)", async () => {
+  it("no DEAD_LETTER audit row is inserted when the row is not yet dead-lettered (attempt_count < max_attempts)", async () => {
     const row = makeRow({ attempt_count: 2, max_attempts: 8 });
 
     mockQueryRawUnsafe.mockResolvedValueOnce([row]);
@@ -1483,17 +1487,18 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
         txCallCount++;
         // tx 1 = claimBatch (returns [row])
         // tx 2 = deliverRow — throw
-        // tx 3 = recordError (UPDATE to PENDING, not dead)
+        // tx 3 = recordError (UPDATE to PENDING, not dead — no audit write)
         // tx 4 = reapStuckRows
         // tx 5 = reapStuckDeliveries
-        // tx 6 = purgeRetention SENT-branch
-        // tx 7 = purgeRetention FAILED-branch
-        // tx 8 = delivery retention purge
-        // tx 9 = next claimBatch — stop
+        // tx 6 = reapStuckWebhookDeliveries
+        // tx 7 = purgeRetention SENT-branch
+        // tx 8 = purgeRetention FAILED-branch
+        // tx 9 = delivery retention purge / tx 10 = webhook delivery retention purge
+        // tx 11 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error("transient error");
         }
-        if (txCallCount === 9) {
+        if (txCallCount === 11) {
           worker.stop();
           return [];
         }

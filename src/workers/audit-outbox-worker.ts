@@ -252,11 +252,12 @@ export async function deliverRow(
       row.id,
     );
 
-    // Only the ON CONFLICT winner enqueues the webhook delivery — atomic with
-    // the audit_logs INSERT. A reaper re-delivery (inserted.length === 0) must
-    // not re-enqueue (the original work item already exists / was processed).
+    // Only the ON CONFLICT winner enqueues delivery work — atomic with the
+    // audit_logs INSERT. A reaper re-delivery (inserted.length === 0) must not
+    // re-enqueue (the original work items already exist / were processed).
     if (inserted.length > 0) {
       await enqueueWebhookDeliveryInTx(tx, row, payload);
+      await enqueueAuditDeliveriesInTx(tx, row.id, row.tenant_id);
     }
 
     await tx.$executeRawUnsafe(
@@ -445,8 +446,10 @@ export async function deliverRowWithChain(
         eventHash,
         row.tenant_id,
       );
-      // Enqueue the webhook delivery in the same winning tx (INV-W2).
+      // Enqueue the webhook delivery + non-DB audit deliveries in the same
+      // winning tx (INV-W2) — durable, atomic with the audit_logs INSERT.
       await enqueueWebhookDeliveryInTx(tx, row, payload);
+      await enqueueAuditDeliveriesInTx(tx, row.id, row.tenant_id);
     }
 
     // Unconditionally mark outbox row as SENT
@@ -464,32 +467,38 @@ export async function deliverRowWithChain(
 }
 
 /**
- * Create audit_deliveries rows for each active delivery target.
- * Called after a row is successfully delivered to audit_logs (DB target).
+ * Create audit_deliveries rows for each active non-DB delivery target, inside
+ * the caller's winning audit tx (the tx MUST have already run setBypassRlsGucs).
+ * Called only by the ON CONFLICT winner of the audit_logs INSERT, so the
+ * delivery rows are enqueued atomically with the audit event: a crash before
+ * commit rolls back both; a crash after commit leaves durable PENDING rows the
+ * processDeliveryBatch loop drives. This closes the same durability gap the
+ * webhook path closes (enqueueWebhookDeliveryInTx) — the former post-commit
+ * fire-and-forget fanOutDeliveries lost the delivery rows on a crash in the
+ * window between the audit commit and the fan-out.
+ *
+ * `createMany({ skipDuplicates: true })` on the (outboxId, targetId) unique key
+ * makes this idempotent against a reaper double-claim.
  */
-async function fanOutDeliveries(
-  prisma: PrismaClient,
+async function enqueueAuditDeliveriesInTx(
+  tx: Prisma.TransactionClient,
   outboxId: string,
   tenantId: string,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    const targets = await tx.auditDeliveryTarget.findMany({
-      where: { tenantId, isActive: true, kind: { not: "DB" } },
-    });
+  const targets = await tx.auditDeliveryTarget.findMany({
+    where: { tenantId, isActive: true, kind: { not: "DB" } },
+  });
 
-    getLogger().info({ outboxId, tenantId, targetCount: targets.length }, "worker.fanout_targets");
-    if (targets.length === 0) return;
+  if (targets.length === 0) return;
 
-    await tx.auditDelivery.createMany({
-      data: targets.map((t) => ({
-        outboxId,
-        targetId: t.id,
-        tenantId,
-        status: "PENDING" as const,
-      })),
-      skipDuplicates: true,
-    });
+  await tx.auditDelivery.createMany({
+    data: targets.map((t) => ({
+      outboxId,
+      targetId: t.id,
+      tenantId,
+      status: "PENDING" as const,
+    })),
+    skipDuplicates: true,
   });
 }
 
@@ -537,11 +546,16 @@ async function writeDirectAuditLogInTx(
 }
 
 /**
- * Write a SYSTEM-actor audit event directly to audit_logs, bypassing the outbox.
- * Used by reaper and dead-letter logging to avoid recursion. Opens its own tx
- * and swallows errors (best-effort — must never break the caller's flow).
+ * Best-effort own-tx SYSTEM-actor audit write. Opens its own tx and SWALLOWS
+ * errors (warn only). Use ONLY where the state change must persist even if the
+ * audit write fails — i.e. a self-healing availability control whose fail-safe
+ * direction is "apply the change even without the audit record". The
+ * WEBHOOK_DELIVERY_FAILED / auto-disable path is the sole such site: gating the
+ * fail_count increment on audit completeness would let a persistent audit_logs
+ * failure keep a broken webhook live forever, hammering the endpoint. Every
+ * TERMINAL/dead-letter audit uses writeDirectAuditLogInTx (co-committed) instead.
  */
-async function writeDirectAuditLog(
+async function writeDirectAuditLogBestEffort(
   prisma: PrismaClient,
   tenantId: string,
   action: string,
@@ -592,6 +606,16 @@ async function recordError(
           sanitizedError,
           row.id,
         );
+        // Dead-letter audit committed atomically with the FAILED transition
+        // (same tx, in-tx variant that rolls the whole tx back on failure) so a
+        // dead-lettered row can never exist without its AUDIT_OUTBOX_DEAD_LETTER
+        // record. Recursion-safe: this action is in OUTBOX_BYPASS_AUDIT_ACTIONS.
+        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
+          outboxId: row.id,
+          action: parsePayloadAction(row.payload),
+          attemptCount: newAttemptCount,
+          lastError: sanitizedError.slice(0, 256),
+        });
       } else {
         await tx.$executeRawUnsafe(
           `UPDATE audit_outbox
@@ -613,16 +637,6 @@ async function recordError(
       { outboxId: row.id, err: recoveryErr },
       "worker.error_recovery_tx_failed",
     );
-  }
-
-  // Emit AUDIT_OUTBOX_DEAD_LETTER when row is dead-lettered
-  if (isDead) {
-    await writeDirectAuditLog(prisma, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
-      outboxId: row.id,
-      action: parsePayloadAction(row.payload),
-      attemptCount: newAttemptCount,
-      lastError: sanitizedError.slice(0, 256),
-    });
   }
 }
 
@@ -817,13 +831,14 @@ async function recordDeliveryError(
           lastError: message,
         },
       });
-    });
-
-    // Write dead-letter audit event directly (bypass outbox — avoids recursion)
-    await writeDirectAuditLog(workerPrisma, delivery.tenantId, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
-      deliveryId: delivery.id,
-      targetId: delivery.target.id,
-      error: message.slice(0, 256),
+      // Dead-letter audit in the SAME tx as the FAILED transition (bypass outbox
+      // — avoids recursion) so a dead-lettered delivery can never lack its
+      // AUDIT_DELIVERY_DEAD_LETTER record.
+      await writeDirectAuditLogInTx(tx, delivery.tenantId, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
+        deliveryId: delivery.id,
+        targetId: delivery.target.id,
+        error: message.slice(0, 256),
+      });
     });
 
     getLogger().warn({ deliveryId: delivery.id }, "delivery dead-lettered");
@@ -1116,6 +1131,15 @@ async function onWebhookDeliveryFailure(
   // write the same absolute value → a lost update that under-counts failures and
   // delays auto-disable. Derive is_active from the POST-increment value in the
   // same statement, and RETURN it so the audit event reports the true count.
+  // The fail_count increment and the is_active auto-disable it can trigger must
+  // COMMIT INDEPENDENTLY of its audit write. Auto-disabling a repeatedly-failing
+  // webhook is a self-healing availability control: if the audit_logs write were
+  // co-committed and failed deterministically (constraint/enum/persistent DB
+  // issue on that table), the increment would roll back on every retry and the
+  // broken webhook would NEVER disable — hammering the endpoint forever. So the
+  // increment lands in its own tx; the WEBHOOK_DELIVERY_FAILED audit is written
+  // best-effort AFTER (warn-on-fail). This is the ONLY sweep site where the state
+  // change outranks audit atomicity — terminal/dead-letter events stay co-committed.
   const updated = await workerPrisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     const rows = await tx.$queryRawUnsafe<{ fail_count: number }[]>( // raw-sql-ident: `table` is a code-controlled literal ("team_webhooks" | "tenant_webhooks") chosen by isTeam, never user input — no injection risk
@@ -1137,12 +1161,10 @@ async function onWebhookDeliveryFailure(
   const newFailCount = updated?.fail_count ?? 0;
 
   // Per-webhook delivery failure is a distinct, unchained audit event (parity
-  // with the app dispatcher). Uses writeDirectAuditLog (bypass outbox) so it
-  // never re-enters the queue. TEAM failures must be recorded with TEAM scope +
-  // teamId so they surface in the team audit view (the app dispatcher logged
-  // WEBHOOK_DELIVERY_FAILED as TEAM/teamId; a plain TENANT-scope write would
-  // change the audit attribution and hide the failure from team admins).
-  await writeDirectAuditLog(
+  // with the app dispatcher). TEAM failures are recorded with TEAM scope + teamId
+  // so they surface in the team audit view (a plain TENANT-scope write would hide
+  // the failure from team admins).
+  await writeDirectAuditLogBestEffort(
     workerPrisma,
     item.tenant_id,
     isTeam
@@ -1188,6 +1210,25 @@ async function recordWebhookDeliveryError(
           message,
           item.id,
         );
+        // Dead-letter audit in the SAME tx as the FAILED transition, with the
+        // work item's own scope/teamId (parity with the per-failure
+        // WEBHOOK_DELIVERY_FAILED event) so a TEAM work item's dead-letter
+        // surfaces in the team audit view. A dead-lettered work item can never
+        // exist without its AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER record.
+        await writeDirectAuditLogInTx(
+          tx,
+          item.tenant_id,
+          AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER,
+          {
+            deliveryId: item.id,
+            action: item.action,
+            attemptCount: newAttemptCount,
+            lastError: message.slice(0, 256),
+          },
+          item.scope === "TEAM" && item.team_id
+            ? { scope: AUDIT_SCOPE.TEAM, teamId: item.team_id }
+            : undefined,
+        );
       } else {
         const backoffMs = withFullJitter(computeBackoffMs(newAttemptCount));
         const backoffSeconds = backoffMs / MS_PER_SECOND;
@@ -1213,23 +1254,6 @@ async function recordWebhookDeliveryError(
 
   if (isDead) {
     getLogger().warn({ deliveryId: item.id }, "webhook_delivery.dead_lettered");
-    // Record the dead-letter with the work item's own scope/teamId (parity with
-    // the per-failure WEBHOOK_DELIVERY_FAILED event) so a TEAM work item's
-    // dead-letter surfaces in the team audit view, not just the tenant view.
-    await writeDirectAuditLog(
-      workerPrisma,
-      item.tenant_id,
-      AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER,
-      {
-        deliveryId: item.id,
-        action: item.action,
-        attemptCount: newAttemptCount,
-        lastError: message.slice(0, 256),
-      },
-      item.scope === "TEAM" && item.team_id
-        ? { scope: AUDIT_SCOPE.TEAM, teamId: item.team_id }
-        : undefined,
-    );
   } else {
     getLogger().info(
       { deliveryId: item.id, attempt: newAttemptCount },
@@ -1255,6 +1279,12 @@ export async function reapStuckRows(
 
   // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
   // those at or over max_attempts transition to FAILED (dead-letter).
+  // The reap transition (FAILED/PENDING) and every row's audit event
+  // (AUDIT_OUTBOX_DEAD_LETTER / AUDIT_OUTBOX_REAPED) commit in ONE tx via the
+  // in-tx audit writer, so a reaped/dead-lettered row can never exist without
+  // its audit record. If any audit insert throws, the whole batch rolls back and
+  // is retried on the next reaper tick. Both actions are in
+  // OUTBOX_BYPASS_AUDIT_ACTIONS, so the direct write never re-enters the outbox.
   const reaped = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     const rows = await tx.$queryRawUnsafe<{
@@ -1283,6 +1313,20 @@ export async function reapStuckRows(
       timeoutSeconds,
       limit,
     );
+    for (const row of rows) {
+      if (row.new_status === "FAILED") {
+        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
+          outboxId: row.id,
+          attemptCount: row.attempt_count,
+          reason: "reaped_max_attempts",
+        });
+      } else {
+        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_REAPED, {
+          outboxId: row.id,
+          attemptCount: row.attempt_count,
+        });
+      }
+    }
     return rows;
   });
 
@@ -1294,17 +1338,8 @@ export async function reapStuckRows(
         { outboxId: row.id, tenantId: row.tenant_id, attemptCount: row.attempt_count },
         "outbox row reaped and dead-lettered",
       );
-      await writeDirectAuditLog(prisma, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
-        outboxId: row.id,
-        attemptCount: row.attempt_count,
-        reason: "reaped_max_attempts",
-      });
     } else {
       log.info({ outboxId: row.id, attemptCount: row.attempt_count }, "worker.reaped");
-      await writeDirectAuditLog(prisma, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_REAPED, {
-        outboxId: row.id,
-        attemptCount: row.attempt_count,
-      });
     }
   }
 
@@ -1325,9 +1360,17 @@ export async function reapStuckDeliveries(
   const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
   const cutoff = new Date(Date.now() - timeout);
 
-  const result = await prisma.$transaction(async (tx) => {
+  // Reap transition + dead-letter audit for rows that hit FAILED co-commit in one
+  // tx (parity with reapStuckRows), so a reaper-driven delivery dead-letter can
+  // never be silent in the audit trail.
+  const reaped = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    return tx.$executeRawUnsafe(
+    const rows = await tx.$queryRawUnsafe<{
+      id: string;
+      tenant_id: string;
+      attempt_count: number;
+      new_status: string;
+    }[]>(
       `UPDATE "audit_deliveries"
        SET "status" = CASE
          WHEN "attempt_count" + 1 >= "max_attempts" THEN 'FAILED'::"AuditDeliveryStatus"
@@ -1343,13 +1386,24 @@ export async function reapStuckDeliveries(
          ORDER BY "processing_started_at" ASC
          LIMIT $2
          FOR UPDATE SKIP LOCKED
-       )`,
+       )
+       RETURNING "id", "tenant_id", "attempt_count", "status"::text AS new_status`,
       cutoff,
       limit,
     );
+    for (const row of rows) {
+      if (row.new_status === "FAILED") {
+        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
+          deliveryId: row.id,
+          attemptCount: row.attempt_count,
+          reason: "reaped_max_attempts",
+        });
+      }
+    }
+    return rows;
   });
 
-  const count = Number(result);
+  const count = reaped.length;
   if (count > 0) {
     getLogger().info({ count }, "reaped stuck delivery rows");
   }
@@ -1368,9 +1422,20 @@ export async function reapStuckWebhookDeliveries(
   const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
   const cutoff = new Date(Date.now() - timeout);
 
-  const result = await prisma.$transaction(async (tx) => {
+  // Reap transition + dead-letter audit for rows that hit FAILED co-commit in one
+  // tx (parity with reapStuckRows/reapStuckDeliveries). TEAM rows carry TEAM
+  // scope + teamId so a reaper dead-letter surfaces in the team audit view.
+  const reaped = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    return tx.$executeRawUnsafe(
+    const rows = await tx.$queryRawUnsafe<{
+      id: string;
+      tenant_id: string;
+      scope: string;
+      team_id: string | null;
+      action: string;
+      attempt_count: number;
+      new_status: string;
+    }[]>(
       `UPDATE webhook_deliveries
        SET status = CASE
          WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditDeliveryStatus"
@@ -1386,13 +1451,34 @@ export async function reapStuckWebhookDeliveries(
          ORDER BY processing_started_at ASC
          LIMIT $2
          FOR UPDATE SKIP LOCKED
-       )`,
+       )
+       RETURNING id, tenant_id, scope::text AS scope, team_id, action,
+                 attempt_count, status::text AS new_status`,
       cutoff,
       limit,
     );
+    for (const row of rows) {
+      if (row.new_status === "FAILED") {
+        await writeDirectAuditLogInTx(
+          tx,
+          row.tenant_id,
+          AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER,
+          {
+            deliveryId: row.id,
+            action: row.action,
+            attemptCount: row.attempt_count,
+            reason: "reaped_max_attempts",
+          },
+          row.scope === "TEAM" && row.team_id
+            ? { scope: AUDIT_SCOPE.TEAM, teamId: row.team_id }
+            : undefined,
+        );
+      }
+    }
+    return rows;
   });
 
-  const count = Number(result);
+  const count = reaped.length;
   if (count > 0) {
     getLogger().info({ count }, "reaped stuck webhook delivery rows");
   }
@@ -1423,9 +1509,14 @@ export async function purgeRetention(
   // atomically in the SAME tx. A destructive delete must never succeed without
   // a matching audit record: if the FAILED-branch tx later throws, the
   // SENT-branch delete + its audit event have already committed together.
-  const sentResult = await prisma.$transaction(async (tx) => {
+  const sentPurged = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
+    // Aggregate the deleted rows per tenant (not MIN): a purge batch spans many
+    // tenants, and each tenant's own AUDIT_OUTBOX_RETENTION_PURGED event must be
+    // attributed to that tenant with only that tenant's count. Attributing the
+    // whole batch to MIN(tenant_id) both hid the purge from the other tenants
+    // and leaked their counts into one tenant's audit metadata.
+    const rows = await tx.$queryRawUnsafe<{ tenant_id: string; purged: bigint }[]>(
       `WITH deleted AS (
         DELETE FROM audit_outbox
         WHERE id IN (
@@ -1447,25 +1538,27 @@ export async function purgeRetention(
         )
         RETURNING id, tenant_id
       )
-      SELECT COUNT(*) AS purged, MIN(tenant_id::text) AS sample_tenant_id FROM deleted`,
+      SELECT tenant_id::text AS tenant_id, COUNT(*) AS purged FROM deleted GROUP BY tenant_id`,
       retentionHours,
       limit,
     );
-    const purged = Number(rows[0]?.purged ?? 0);
-    const sampleTenantId = rows[0]?.sample_tenant_id ?? null;
-    if (purged > 0 && sampleTenantId) {
-      await writeDirectAuditLogInTx(tx, sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
-        purgedCount: purged,
+    let purged = 0;
+    for (const row of rows) {
+      const count = Number(row.purged);
+      purged += count;
+      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+        purgedCount: count,
         retentionHours,
         failedRetentionDays,
+        branch: "SENT",
       });
     }
-    return { purged, sampleTenantId };
+    return purged;
   });
 
-  const failedResult = await prisma.$transaction(async (tx) => {
+  const failedPurged = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
+    const rows = await tx.$queryRawUnsafe<{ tenant_id: string; purged: bigint }[]>(
       `WITH deleted AS (
         DELETE FROM audit_outbox
         WHERE id IN (
@@ -1477,23 +1570,25 @@ export async function purgeRetention(
         )
         RETURNING id, tenant_id
       )
-      SELECT COUNT(*) AS purged, MIN(tenant_id::text) AS sample_tenant_id FROM deleted`,
+      SELECT tenant_id::text AS tenant_id, COUNT(*) AS purged FROM deleted GROUP BY tenant_id`,
       failedRetentionDays,
       limit,
     );
-    const purged = Number(rows[0]?.purged ?? 0);
-    const sampleTenantId = rows[0]?.sample_tenant_id ?? null;
-    if (purged > 0 && sampleTenantId) {
-      await writeDirectAuditLogInTx(tx, sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
-        purgedCount: purged,
+    let purged = 0;
+    for (const row of rows) {
+      const count = Number(row.purged);
+      purged += count;
+      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+        purgedCount: count,
         retentionHours,
         failedRetentionDays,
+        branch: "FAILED",
       });
     }
-    return { purged, sampleTenantId };
+    return purged;
   });
 
-  const totalPurged = sentResult.purged + failedResult.purged;
+  const totalPurged = sentPurged + failedPurged;
   if (totalPurged > 0) {
     getLogger().info({ purged: totalPurged }, "worker.retention_purged");
   }
@@ -1694,24 +1789,19 @@ export function createWorker(config: WorkerConfig) {
           // Row was skipped because the tenant's anchor has publish_paused_until
           // active. The row is already reset to PENDING inside deliverRowWithChain.
           // Skip fan-out — it will run after the pause lifts. The webhook enqueue
-          // is gated on the audit_logs INSERT winner and did not fire here.
+          // and audit-delivery enqueue are gated on the audit_logs INSERT winner
+          // and did not fire here.
           continue;
         }
         log.info(
           { outboxId: row.id, action: payload.action, tenantId: row.tenant_id },
           "worker.delivered",
         );
-        // Webhook delivery is now durable: enqueueWebhookDeliveryInTx committed a
-        // webhook_deliveries row inside the winning audit tx, and
-        // processWebhookDeliveryBatch drives the actual HTTP fan-out. No
-        // fire-and-forget dispatch here (replaces the former dispatchWebhookForRow).
-        // Phase 3: fan out to non-DB delivery targets (fire-and-forget).
-        // If the worker crashes here, outbox row is already SENT so fan-out
-        // will not be retried. This is the design trade-off per Plan §3.4:
-        // DB target success is not rolled back by fan-out failure.
-        fanOutDeliveries(workerPrisma, row.id, row.tenant_id).catch((err) => {
-          log.error({ err, outboxId: row.id }, "worker.fanout_failed");
-        });
+        // Webhook delivery AND non-DB audit deliveries are now durable:
+        // enqueueWebhookDeliveryInTx + enqueueAuditDeliveriesInTx committed their
+        // work rows inside the winning audit tx, and processWebhookDeliveryBatch /
+        // processDeliveryBatch drive the actual fan-out. No fire-and-forget
+        // dispatch here (replaces the former dispatchWebhookForRow + fanOutDeliveries).
       } catch (err) {
         log.warn(
           { err, outboxId: row.id, action: payload.action },

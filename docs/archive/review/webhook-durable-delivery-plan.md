@@ -119,8 +119,11 @@ dedup key independent of the webhook set.
   **unconditionally true** (deliverRow always marks the outbox row SENT and never returns a
   paused/skip state, unlike deliverRowWithChain). Do NOT wire `rowDelivered` to `res.inserted`; the
   `inserted` gate lives INSIDE deliverRow's tx (guarding the enqueue), not in processBatch. `res` is
-  captured only so a future reader sees the discriminator; the fan-out/log after the call stay
-  unconditional as today.
+  captured only so a future reader sees the discriminator; the log after the call stays unconditional.
+  **[Post-impl update, review round 3]** the audit-delivery fan-out is no longer a post-commit
+  `fanOutDeliveries` call after `deliverRow`/`deliverRowWithChain`; it moved INTO the winning tx as
+  `enqueueAuditDeliveriesInTx` (gated on the same `inserted` discriminator), matching the webhook
+  enqueue. `processBatch` has no post-call fan-out anymore.
 - INV-W2 (app-enforced + schema-backed): the enqueue commits atomically with the
   `audit_logs` INSERT; only the ON CONFLICT winner enqueues. Crash before commit rolls
   back both; crash after commit leaves a durable PENDING row.

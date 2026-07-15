@@ -160,6 +160,60 @@ describe("audit-outbox retention purge — per-branch atomic audit emission (Fin
     }
   });
 
+  it("attributes purge audit per tenant — each tenant gets its OWN event with only its OWN count (Finding M1)", async () => {
+    // A single purge batch spans two tenants. The fix replaced MIN(tenant_id)
+    // (which attributed the whole batch to one tenant and leaked the others'
+    // counts) with a per-tenant GROUP BY: each tenant must get exactly one
+    // RETENTION_PURGED event carrying only that tenant's purgedCount.
+    const otherTenantId = await ctx.createTenant();
+    const insertSentAgedRowFor = async (tid: string): Promise<string> => {
+      const id = randomUUID();
+      const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, sent_at)
+           VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', 1, 8, now() - interval '48 hours', now(),
+                   now() - make_interval(hours => $4) - interval '1 hour')`,
+          id,
+          tid,
+          makePayload(),
+          retentionHours,
+        );
+      });
+      return id;
+    };
+    const purgedEventsFor = async (tid: string) =>
+      ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<Array<{ metadata: Record<string, unknown> }>>(
+          `SELECT metadata FROM audit_logs WHERE tenant_id = $1::uuid AND action = $2::"AuditAction"`,
+          tid,
+          AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED,
+        );
+      });
+
+    try {
+      // 1 aged SENT row for this tenant, 2 for the other — same batch.
+      await insertSentAgedRowFor(tenantId);
+      await insertSentAgedRowFor(otherTenantId);
+      await insertSentAgedRowFor(otherTenantId);
+
+      await purgeRetention(ctx.su.prisma);
+
+      const mine = await purgedEventsFor(tenantId);
+      const theirs = await purgedEventsFor(otherTenantId);
+
+      // Each tenant: exactly one event, carrying ONLY its own count.
+      expect(mine).toHaveLength(1);
+      expect(Number((mine[0]!.metadata as { purgedCount: number }).purgedCount)).toBe(1);
+      expect(theirs).toHaveLength(1);
+      expect(Number((theirs[0]!.metadata as { purgedCount: number }).purgedCount)).toBe(2);
+    } finally {
+      await ctx.deleteTestData(otherTenantId);
+    }
+  });
+
   it("emits exactly ONE RETENTION_PURGED event when only the SENT branch has eligible rows", async () => {
     // Only SENT-aged rows; the FAILED branch purges 0 and emits nothing.
     const sentIds = [await insertSentAgedRow(), await insertSentAgedRow()];

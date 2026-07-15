@@ -225,3 +225,73 @@ A re-review of the DNS/lease work found:
   the entry script validates the parsed timeout right after Zod parse (before the exit); both
   the env-check and normal startup now reject it. start()'s own guard is kept for programmatic
   callers. Test: `exits 1 with a lease error when OUTBOX_PROCESSING_TIMEOUT_MS is too small`.
+
+### Review round 3 — worker runtime invariants (post-P2 external re-review)
+
+Two Medium findings on the audit-outbox worker, both fixed with regression tests:
+
+- **[Medium] purge audit not attributed per tenant (M1)** — `purgeRetention`'s SENT/FAILED
+  branches emitted a single `AUDIT_OUTBOX_RETENTION_PURGED` event attributed to
+  `MIN(tenant_id)`, with a `purgedCount` aggregating rows from every tenant in the batch. The
+  other tenants got no purge audit, and the chosen tenant's metadata leaked the others' counts
+  (a tenant-isolation break). FIXED: both branches now `GROUP BY tenant_id` and write one
+  SYSTEM-actor audit row per tenant, each carrying only that tenant's count plus a `branch`
+  discriminator ("SENT"/"FAILED"). Test: `attributes purge audit per tenant` (two tenants in one
+  batch → each gets exactly one event with only its own count).
+- **[Medium] non-DB audit delivery fan-out not durable (M2)** — `fanOutDeliveries` created the
+  `audit_deliveries` work rows in a post-commit fire-and-forget tx, so a worker crash in the
+  window between the audit commit (outbox already SENT) and the fan-out permanently lost the
+  non-DB deliveries (SIEM/S3/webhook targets) — the same durability gap the webhook path already
+  closed. FIXED: replaced with `enqueueAuditDeliveriesInTx`, called inside the winning audit tx
+  of both `deliverRow` and `deliverRowWithChain` (gated on the audit_logs ON CONFLICT winner),
+  `createMany({ skipDuplicates: true })` on the `(outboxId, targetId)` unique key for
+  idempotency. Post-commit `fanOutDeliveries` removed. The webhook and audit-delivery enqueues
+  are now symmetric (both in-tx, both durable). Tests: `deliverRow enqueues one PENDING
+  audit_deliveries row per active non-DB target, atomically with the audit_logs INSERT`; DB-kind
+  target enqueues nothing; reaper-style re-delivery (inserted=false) does not double-enqueue.
+
+- **[Nit→fixed] dead-letter / terminal audit was best-effort in a separate post-commit tx** —
+  every terminal-transition audit wrote its audit via the own-tx, error-swallowing
+  `writeDirectAuditLog` AFTER the state-change tx had committed — so a crash/throw in that window
+  could leave a dead-lettered row with no audit trail. FIXED (horizontal sweep of the whole
+  class): the TERMINAL/dead-letter events now write via `writeDirectAuditLogInTx` INSIDE the same
+  tx as the state change, so the transition and its audit commit atomically (a failed audit rolls
+  the transition back and it retries next tick): `recordError` → AUDIT_OUTBOX_DEAD_LETTER,
+  `recordDeliveryError` → AUDIT_DELIVERY_DEAD_LETTER, `recordWebhookDeliveryError` →
+  AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER, `reapStuckRows` → REAPED/DEAD_LETTER. The now-unused own-tx
+  `writeDirectAuditLog` was renamed `writeDirectAuditLogBestEffort` and retained for the ONE
+  exception below. All actions are in `OUTBOX_BYPASS_AUDIT_ACTIONS`, so the direct writes never
+  re-enter the outbox (no recursion).
+
+### Review round 3b — triangulate three-perspective review of round 3
+
+Security: no findings. Functionality + testing surfaced three real items; all fixed:
+
+- **[Major, functionality] `onWebhookDeliveryFailure` must NOT co-commit its audit.** Co-committing
+  the `WEBHOOK_DELIVERY_FAILED` audit with the fail_count increment inverted the fail-safe
+  direction for a self-healing availability control: a *deterministic* audit_logs failure would
+  roll the increment back on every retry, so a broken webhook would NEVER auto-disable and would
+  hammer the endpoint forever. FIXED: the fail_count increment + `is_active` auto-disable commit in
+  their own tx (independent), and the audit is written best-effort AFTER via
+  `writeDirectAuditLogBestEffort` (warn-on-fail). This is the ONLY sweep site where the state
+  change outranks audit atomicity; every terminal/dead-letter event stays co-committed.
+- **[Minor→fixed, functionality/class-completeness] the two sibling reapers dead-lettered
+  silently.** `reapStuckDeliveries` (audit_deliveries) and `reapStuckWebhookDeliveries`
+  (webhook_deliveries) also transition rows to FAILED at max_attempts but emitted NO dead-letter
+  audit — members of the same class the sweep addressed. FIXED: both now `RETURNING` the FAILED
+  rows and emit `AUDIT_DELIVERY_DEAD_LETTER` / `AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER` in-tx (TEAM
+  webhook rows carry TEAM scope + teamId). Regression tests: reaper emits the audit only for rows
+  that hit FAILED, plus a fault-injection rollback test on the webhook reaper.
+- **[Major→fixed, testing] chain-path M2 enqueue had zero coverage.** The M2 tests exercised only
+  `deliverRow` (non-chain). ADDED a `deliverRowWithChain` (chain-enabled tenant) variant asserting
+  the same in-tx audit_deliveries enqueue. Also strengthened the M2 idempotency test to isolate
+  the `inserted > 0` gate from `createMany({skipDuplicates})` (a target added between the two
+  deliver calls must NOT be enqueued by the loser), and added a `recordError`-class rollback
+  atomicity test on a second co-commit site.
+
+Non-blocking residuals accepted: the reaper all-or-nothing batch (a poison row rolls back the
+whole bounded batch and retries next tick) — audit inputs are machine-generated, so a
+deterministic per-row failure is not realistically reachable, and `runReaper` catches the throw so
+the worker keeps running (fail-safe, low/low). The global reaper is oldest-first with a global cap
+(liveness/fairness, not safety). P2's generic `runWorkerJob`/idempotency-table scaffolding is out
+of scope (audit-outbox worker hardening is stage 1).

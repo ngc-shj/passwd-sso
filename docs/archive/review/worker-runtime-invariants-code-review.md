@@ -139,13 +139,15 @@ dispatched the webhook whenever `delivered:true`, and `deliverRowWithChain` retu
 unconditionally, so a reaper-re-enqueued row delivered by two workers (ON CONFLICT → one
 audit_logs row) dispatched the webhook twice. The Phase-3 review dispositioned this as
 "SC3 at-least-once, accepted" — WRONG per user: the SC3 policy itself was the bug.
-→ FIX: processBatch now gates dispatchWebhookForRow + fanOutDeliveries on the `inserted`
-discriminator (chain path); a conflicting re-delivery (delivered:true, inserted:false)
-marks the row SENT but skips dispatch. Non-chain path (no ON CONFLICT dedup) stays
-inserted:true. Regression: `audit-outbox-webhook-dedup.integration.test.ts` drives the
-REAL worker loop (createWorker + tick) over a conflicting row (pre-seeded audit_logs →
-inserted:false → 0 fan-out rows) plus a control row (fresh → inserted:true → exactly 1
-fan-out row) — non-vacuous.
+→ FIX: `deliverRow`/`deliverRowWithChain` gate the delivery enqueue
+(`enqueueWebhookDeliveryInTx` + `enqueueAuditDeliveriesInTx`) on the `inserted` discriminator
+INSIDE the winning audit tx; a conflicting re-delivery (delivered:true, inserted:false) marks
+the row SENT but enqueues nothing. There is no post-commit `dispatchWebhookForRow` /
+`fanOutDeliveries` in `processBatch` anymore — both delivery kinds are durable, in-tx, and
+idempotent. Regression: `webhook-delivery-durable.integration.test.ts` (T-dedup) asserts the
+conflicting re-delivery adds no second webhook_deliveries row via the `{inserted}` discriminator
+AND a by-outbox-id row count; `audit-outbox-worker-fanout.integration.test.ts` (M2) asserts the
+same for audit_deliveries rows.
 
 **EXT-3 (Low) — sweep guard's single-row pass matched subselect-internal `WHERE id =`.**
 This PR's own C5 classifier: pass-condition (b) `SINGLE_ROW_BY_ID_RE.test(statement)` matched
