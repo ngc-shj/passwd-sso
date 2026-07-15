@@ -1151,22 +1151,12 @@ export function createWorker(config: WorkerConfig) {
       try {
         const chainEnabled = await getChainEnabled(row.tenant_id);
         let rowDelivered: boolean;
-        // didInsert closes a double-send: when two workers process the SAME row
-        // (e.g. the reaper re-enqueues a long-running row), the audit_logs INSERT
-        // + chain advance happen once (ON CONFLICT), so only the winning delivery
-        // has inserted:true. Gating webhook + fan-out on inserted (not delivered)
-        // suppresses the duplicate external notification from the losing delivery.
-        // The non-chain path has no ON CONFLICT dedup and always inserts, so it is
-        // treated as inserted:true.
-        let didInsert: boolean;
         if (chainEnabled) {
           const res = await deliverRowWithChain(workerPrisma, row, payload);
           rowDelivered = res.delivered;
-          didInsert = res.inserted;
         } else {
           await deliverRow(workerPrisma, row, payload);
           rowDelivered = true;
-          didInsert = true;
         }
         if (!rowDelivered) {
           // Row was skipped because the tenant's anchor has publish_paused_until
@@ -1178,12 +1168,6 @@ export function createWorker(config: WorkerConfig) {
           { outboxId: row.id, action: payload.action, tenantId: row.tenant_id },
           "worker.delivered",
         );
-        if (!didInsert) {
-          // Conflicting re-delivery: the row is marked SENT (done by
-          // deliverRowWithChain) but the first delivery already dispatched the
-          // webhook + fan-out. Skip both here to avoid a duplicate send.
-          continue;
-        }
         void dispatchWebhookForRow(payload, row.tenant_id);
         // Phase 3: fan out to non-DB delivery targets (fire-and-forget).
         // If the worker crashes here, outbox row is already SENT so fan-out

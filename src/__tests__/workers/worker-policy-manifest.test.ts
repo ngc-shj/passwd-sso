@@ -161,15 +161,112 @@ export interface SweepViolation {
   detail: string;
 }
 
-const HAS_LIMIT_RE = /LIMIT/i;
-const SINGLE_ROW_BY_ID_RE = /WHERE\s+id\s*=/i;
-// Exemption tightness gate (S5/S6): the statement an exemption identifies must
-// itself be a top-level single-row equality on a PK/unique column, with no
-// subselect. A loose /WHERE\s+\w+\s*=/ would also match an equality *inside* a
-// multi-row sweep's subselect (e.g. `WHERE status = 'PROCESSING'`), which must
-// NOT be accepted as proof of single-row shape.
-const TIGHT_PK_WHERE_RE = /\bWHERE\s+(id|tenant_id)\s*=/i;
-const HAS_SUBSELECT_RE = /\(SELECT/i;
+/**
+ * Remove every balanced parenthesised group from a SQL string, leaving only the
+ * top-level text. A `LIMIT` or `WHERE key =` buried inside a subselect
+ * (`... WHERE EXISTS (SELECT 1 FROM y LIMIT 1)`, `... WHERE col IN (SELECT id
+ * FROM y WHERE id = $1)`) does NOT bound or single-row-shape the OUTER
+ * DELETE/UPDATE, so boundedness must be judged on the top-level text only. A
+ * plain regex cannot strip nested parens; walk the string tracking paren depth
+ * and keep only depth-0 characters.
+ */
+function topLevelSql(statement: string): string {
+  let depth = 0;
+  let out = "";
+  for (const ch of statement) {
+    if (ch === "(") {
+      depth++;
+      continue;
+    }
+    if (ch === ")") {
+      if (depth > 0) depth--;
+      continue;
+    }
+    if (depth === 0) out += ch;
+  }
+  return out;
+}
+
+// Per-table primary/unique-key registry (S6): a single-row pass or an exemption
+// may only bind a column that is actually a PK/unique key for THAT table — a
+// bare `WHERE tenant_id =` is single-row on audit_chain_anchors (tenant_id is
+// its PK) but multi-row on audit_outbox. Anchor the check to (table, key-column)
+// pairs derived from prisma/schema.prisma, never a blanket "tenant_id is unique".
+const PK_BY_TABLE: Record<string, readonly string[]> = {
+  audit_chain_anchors: ["tenant_id"], // @@map, PK is tenant_id (one row per tenant)
+};
+// Every table has `id` as its primary key unless overridden above.
+const DEFAULT_PK_COLUMNS = ["id"] as const;
+
+function tableOf(statement: string): string | null {
+  // Outer DELETE FROM <table> or UPDATE <table>. Table may be quoted.
+  const m =
+    /\bDELETE\s+FROM\s+"?(\w+)"?/i.exec(statement) ??
+    /\bUPDATE\s+"?(\w+)"?/i.exec(statement);
+  return m ? m[1] : null;
+}
+
+function pkColumnsOf(statement: string): readonly string[] {
+  const table = tableOf(statement);
+  return (table !== null ? PK_BY_TABLE[table] : undefined) ?? DEFAULT_PK_COLUMNS;
+}
+
+/**
+ * True when the statement's TOP-LEVEL WHERE is a single-row equality on a
+ * primary/unique key of the statement's own table — e.g.
+ * `UPDATE audit_chain_anchors ... WHERE tenant_id = $3` (tenant_id is that
+ * table's PK) or any `... WHERE id = $1`. A `WHERE tenant_id =` on a table
+ * whose PK is `id` is NOT single-row and is rejected.
+ */
+function isTopLevelSingleRowByKey(statement: string): boolean {
+  const top = topLevelSql(statement);
+  return pkColumnsOf(statement).some((key) =>
+    new RegExp(`\\bWHERE\\s+"?${key}"?\\s*=`, "i").test(top),
+  );
+}
+
+/**
+ * True when the statement bounds its DELETE/UPDATE row set by a LIMIT that
+ * actually caps the *key set being mutated* — the canonical
+ * `... WHERE <keys> IN (SELECT <keys> FROM <same table> WHERE ... LIMIT n)`
+ * shape used by every capped sweep in this codebase. This is the crucial
+ * distinction the review flagged: a LIMIT inside a subselect bounds the outer
+ * statement ONLY when that subselect selects the same key set fed to
+ * `WHERE <keys> IN (…)`. A LIMIT inside an EXISTS/scalar probe
+ * (`WHERE EXISTS (SELECT 1 … LIMIT 1)`) does NOT cap the deleted rows.
+ *
+ * The left side may be a single column (`WHERE id IN`), a parenthesised key
+ * list / composite key (`WHERE (id) IN`, `WHERE (tenant_id, id) IN`), or a
+ * template-interpolated key list (`WHERE (${keyList}) IN`). The requirement is
+ * that the outer IN-list keys are byte-identical to the inner SELECT projection
+ * (so the LIMIT bounds exactly the keys being deleted), and the subselect has a
+ * LIMIT before the matching close paren.
+ */
+function isKeySetLimited(statement: string): boolean {
+  // Capture: WHERE <lhs> IN ( SELECT <proj> FROM ... LIMIT ... )
+  // lhs / proj may be `col`, `"col"`, `(col)`, `(a, b)`, or `(${x})`.
+  const re =
+    /\bWHERE\s+\(?\s*([\w$.,"' {}]+?)\s*\)?\s+IN\s*\(\s*SELECT\s+\(?\s*([\w$.,"' {}]+?)\s*\)?\s+FROM\b[\s\S]*?\bLIMIT\b[\s\S]*?\)/i;
+  const m = re.exec(statement);
+  if (!m) return false;
+  // Normalize away whitespace AND quoting so `"id"` == `id`.
+  const normalize = (s: string): string => s.replace(/[\s"']/g, "");
+  // The IN-list keys must equal the SELECT projection — the LIMIT then bounds
+  // exactly the mutated key set.
+  return normalize(m[1]) === normalize(m[2]);
+}
+
+/**
+ * A statement is genuinely bounded iff it either mutates a single row by its
+ * table's PK, or caps the mutated key set with a `WHERE <pk> IN (SELECT <pk> …
+ * LIMIT n)`. A top-level `LIMIT` alone would also bound it, but Postgres does
+ * not allow a bare `LIMIT` on DELETE/UPDATE, so the key-set-IN form is the real
+ * shape — checked explicitly so a subselect-internal LIMIT that does NOT cap the
+ * key set (EXISTS probe) is correctly rejected.
+ */
+function isBounded(statement: string): boolean {
+  return isTopLevelSingleRowByKey(statement) || isKeySetLimited(statement);
+}
 
 /**
  * Pure classifier: given the extracted SQL statement strings for one worker
@@ -184,7 +281,9 @@ export function classifySweeps(
   const violations: SweepViolation[] = [];
 
   // Pre-compute, for every exemption, which statements its `match` hits and
-  // whether the statement it identifies passes the tightness gate.
+  // whether the statement it identifies is itself already bounded (an exemption
+  // may only DOCUMENT an already-single-row statement, never GRANT boundedness
+  // to an unbounded sweep — S5/S6).
   const exemptionMatchCounts = exemptions.map((exemption) => {
     const matchingStatements = statements.filter((statement) =>
       statement.includes(exemption.match),
@@ -210,43 +309,35 @@ export function classifySweeps(
       continue;
     }
     const [target] = matchingStatements;
-    const passesTightnessGate = TIGHT_PK_WHERE_RE.test(target) && !HAS_SUBSELECT_RE.test(target);
-    if (!passesTightnessGate) {
+    // Tightness gate: the exemption's target must be a top-level single-row
+    // equality on its table's PK (subselects stripped). LIMIT is NOT accepted
+    // here — a LIMIT-bounded statement needs no exemption (it passes on its own).
+    if (!isTopLevelSingleRowByKey(target)) {
       violations.push({
         statement: target,
         kind: "loose-exemption",
-        detail: `exemption match "${exemption.match}" (module ${exemption.module}) identifies a statement that is not top-level single-row-shaped (contains a subselect or lacks a top-level WHERE id/tenant_id = equality): ${target}`,
+        detail: `exemption match "${exemption.match}" (module ${exemption.module}) identifies a statement that is not a top-level single-row equality on the table's primary key (subselect-internal equality or a non-PK column does not count): ${target}`,
       });
     }
   }
 
-  // A statement passes iff it has LIMIT, is single-row-by-id, or is covered by
-  // exactly one exemption whose target statement independently passed the
-  // tightness gate above.
   const tightlyExemptedStatements = new Set(
     exemptionMatchCounts
       .filter(
         ({ matchingStatements }) =>
           matchingStatements.length === 1 &&
-          TIGHT_PK_WHERE_RE.test(matchingStatements[0]) &&
-          !HAS_SUBSELECT_RE.test(matchingStatements[0]),
+          isTopLevelSingleRowByKey(matchingStatements[0]),
       )
       .map(({ matchingStatements }) => matchingStatements[0]),
   );
 
   for (const statement of statements) {
-    if (HAS_LIMIT_RE.test(statement)) continue;
-    // Single-row pass: a top-level `WHERE id =` proves single-row shape ONLY
-    // when there is no subselect. A `WHERE id =` buried inside a subselect
-    // (e.g. `WHERE owner_id IN (SELECT ... WHERE id = $1)`) is NOT a top-level
-    // single-row equality for the outer DELETE — the outer statement is still
-    // an unbounded multi-row sweep. Mirror the exemption tightness gate here.
-    if (SINGLE_ROW_BY_ID_RE.test(statement) && !HAS_SUBSELECT_RE.test(statement)) continue;
+    if (isBounded(statement)) continue;
     if (tightlyExemptedStatements.has(statement)) continue;
     violations.push({
       statement,
       kind: "unbounded",
-      detail: `no LIMIT, no top-level WHERE id =, and no valid exemption covers this statement: ${statement}`,
+      detail: `no top-level LIMIT, no top-level single-row PK equality, and no valid exemption covers this statement: ${statement}`,
     });
   }
 
@@ -535,29 +626,29 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
     expect(violations[0].kind).toBe("unbounded");
   });
 
-  it("(b) a DELETE with LIMIT in a subselect passes", () => {
+  it("(b) a DELETE with a TOP-LEVEL LIMIT passes", () => {
     const violations = classifySweeps(
-      ["DELETE FROM x WHERE id IN (SELECT id FROM x LIMIT 5)"],
+      ["DELETE FROM x WHERE id IN (SELECT id FROM x WHERE status = 'SENT' LIMIT 5)"],
       [],
     );
     expect(violations).toEqual([]);
   });
 
-  it("(c) a single-row WHERE id = statement passes", () => {
+  it("(c) a single-row top-level WHERE id = statement passes", () => {
     const violations = classifySweeps(["DELETE FROM x WHERE id = $1"], []);
     expect(violations).toEqual([]);
   });
 
   it("(d) an exemption whose match no longer appears in any statement is flagged as unused", () => {
-    // Note: the statement's own WHERE tenant_id = does not satisfy the primary
-    // single-row predicate (WHERE id =, not tenant_id), so absent a valid
-    // exemption it is separately unbounded too — the fixture's point is that
-    // the stale exemption itself is caught, not that it is the only finding.
+    // audit_chain_anchors' PK is tenant_id (PK_BY_TABLE), so this UPDATE is a
+    // bona-fide single-row statement and is NOT itself unbounded. The stale
+    // exemption (its match never appears) is still flagged unused.
     const violations = classifySweeps(
       ["UPDATE audit_chain_anchors SET a=1 WHERE tenant_id = $1"],
       [{ module: "m", match: "UPDATE nonexistent", reason: "x".repeat(10) }],
     );
     expect(violations.some((v) => v.kind === "unused-exemption")).toBe(true);
+    expect(violations.some((v) => v.kind === "unbounded")).toBe(false);
   });
 
   it("(e) an over-broad exemption targeting an unbounded, non-PK-WHERE statement is rejected as loose-exemption", () => {
@@ -579,16 +670,48 @@ describe("classifySweeps self-test (RT7 proof — the guard must be able to fail
   });
 
   it("(g) flags an unbounded DELETE whose only WHERE id= is inside a subselect", () => {
-    // The outer DELETE has no LIMIT and no exemption; its only `WHERE id =` is
-    // buried in a subselect, so it is NOT top-level single-row-shaped. Before
-    // the subselect exclusion on pass-condition (b), the bare
-    // `SINGLE_ROW_BY_ID_RE.test(statement)` matched the subselect equality and
-    // silently passed this unbounded multi-row sweep.
+    // The outer DELETE has no top-level LIMIT and no exemption; its only
+    // `WHERE id =` is buried in a subselect, so it is NOT top-level
+    // single-row-shaped. The top-level-only judgement strips the subselect and
+    // sees an unbounded multi-row sweep.
     const violations = classifySweeps(
       ["DELETE FROM x WHERE owner_id IN (SELECT owner_id FROM y WHERE id = $1)"],
       [],
     );
-    expect(violations.length).toBeGreaterThan(0);
     expect(violations.some((v) => v.kind === "unbounded")).toBe(true);
+  });
+
+  it("(h) flags an unbounded DELETE whose only LIMIT is inside a subselect (top-level LIMIT judgement)", () => {
+    // `DELETE FROM x WHERE EXISTS (SELECT 1 FROM y LIMIT 1)` — the LIMIT bounds
+    // the EXISTS probe, not the number of x rows deleted. A regex that matched
+    // LIMIT anywhere would pass this unbounded sweep; the top-level judgement
+    // strips the subselect and correctly flags it.
+    const violations = classifySweeps(
+      ["DELETE FROM x WHERE EXISTS (SELECT 1 FROM y LIMIT 1)"],
+      [],
+    );
+    expect(violations.some((v) => v.kind === "unbounded")).toBe(true);
+  });
+
+  it("(i) rejects an exemption on `WHERE tenant_id =` for a table whose PK is id (tenant_id is not that table's unique key)", () => {
+    // audit_outbox's PK is id; `WHERE tenant_id = $1` selects MANY rows per
+    // tenant. An exemption must not be able to declare it single-row just
+    // because the column happens to be named tenant_id (which IS the PK on a
+    // different table, audit_chain_anchors).
+    const violations = classifySweeps(
+      ["DELETE FROM audit_outbox WHERE tenant_id = $1"],
+      [{ module: "m", match: "DELETE FROM audit_outbox", reason: "x".repeat(10) }],
+    );
+    expect(violations.some((v) => v.kind === "loose-exemption")).toBe(true);
+  });
+
+  it("(j) accepts the genuine anchor exemption: WHERE tenant_id = on audit_chain_anchors (its PK)", () => {
+    // The one real exemption in the manifest. tenant_id IS audit_chain_anchors'
+    // primary key, so this is a legitimate single-row UPDATE.
+    const violations = classifySweeps(
+      ["UPDATE audit_chain_anchors SET chain_seq=$1, prev_hash=$2 WHERE tenant_id = $3"],
+      [],
+    );
+    expect(violations).toEqual([]);
   });
 });
