@@ -533,6 +533,7 @@ model Tenant {
   auditOutbox                AuditOutbox[]
   auditDeliveryTargets       AuditDeliveryTarget[]
   auditDeliveries            AuditDelivery[]
+  webhookDeliveries          WebhookDelivery[]
   attachments                Attachment[]
   emergencyAccessGrants      EmergencyAccessGrant[]
   folders                    Folder[]
@@ -1045,6 +1046,7 @@ enum AuditAction {
   AUDIT_OUTBOX_PURGE_EXECUTED
   AUDIT_DELIVERY_FAILED
   AUDIT_DELIVERY_DEAD_LETTER
+  AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER
   AUDIT_CHAIN_VERIFY
   AUDIT_DELIVERY_TARGET_CREATE
   AUDIT_DELIVERY_TARGET_DEACTIVATE
@@ -1101,6 +1103,11 @@ enum AuditDeliveryStatus {
   PROCESSING
   SENT
   FAILED
+}
+
+enum WebhookDeliveryScope {
+  TENANT
+  TEAM
 }
 
 model AuditLog {
@@ -1214,6 +1221,36 @@ model AuditDelivery {
   @@index([tenantId, status, nextRetryAt])
   @@index([status, nextRetryAt])
   @@map("audit_deliveries")
+}
+
+/// Durable, idempotent work queue for tenant/team webhook delivery from the
+/// audit-outbox worker. One row per (outboxId, scope, teamId): enqueued inside
+/// the winning audit_logs INSERT tx (only the ON CONFLICT winner enqueues), so
+/// a crash after the audit commit leaves a durable PENDING row the delivery loop
+/// re-runs. No FK to audit_outbox (survives outbox purge, like AuditDelivery).
+/// `action` is denormalized so the delivery loop can resolve the LIVE
+/// tenant_webhooks/team_webhooks subscribers (events filter) at delivery time.
+model WebhookDelivery {
+  id                  String               @id @default(uuid(4)) @db.Uuid
+  outboxId            String               @map("outbox_id") @db.Uuid
+  tenantId            String               @map("tenant_id") @db.Uuid
+  scope               WebhookDeliveryScope
+  teamId              String?              @map("team_id") @db.Uuid
+  action              String
+  status              AuditDeliveryStatus  @default(PENDING)
+  attemptCount        Int                  @default(0) @map("attempt_count")
+  maxAttempts         Int                  @default(8) @map("max_attempts")
+  nextRetryAt         DateTime             @default(now()) @map("next_retry_at") @db.Timestamptz(3)
+  processingStartedAt DateTime?            @map("processing_started_at") @db.Timestamptz(3)
+  lastError           String?              @map("last_error") @db.VarChar(1024)
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([outboxId, scope, teamId])
+  @@index([tenantId, status, nextRetryAt])
+  @@index([status, nextRetryAt])
+  @@map("webhook_deliveries")
 }
 
 // ─── Access Request Models (JIT) ────────────────────────────

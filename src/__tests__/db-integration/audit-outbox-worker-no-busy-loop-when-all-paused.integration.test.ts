@@ -159,7 +159,7 @@ describe("deliverRowWithChain — no busy-loop when all tenants are paused", () 
       const results: boolean[] = [];
       for (let i = 0; i < rows.length; i++) {
         const result = await deliverRowWithChain(ctx.su.prisma, rows[i]!, payloads[i]!);
-        results.push(result);
+        results.push(result.delivered);
       }
 
       const chainSeqsAfter = await getChainSeqs();

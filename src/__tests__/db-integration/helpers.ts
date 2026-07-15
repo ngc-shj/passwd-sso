@@ -154,6 +154,10 @@ export async function createTestContext(): Promise<TestContext> {
       await setBypassRlsGucs(tx);
       // FK-safe deletion order
       await tx.$executeRawUnsafe(
+        `DELETE FROM webhook_deliveries WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
         `DELETE FROM audit_deliveries WHERE tenant_id = $1::uuid`,
         tenantId,
       );
@@ -224,6 +228,15 @@ export async function createTestContext(): Promise<TestContext> {
       );
       await tx.$executeRawUnsafe(
         `DELETE FROM team_members WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      // Webhook config tables FK to teams/tenants — delete before teams.
+      await tx.$executeRawUnsafe(
+        `DELETE FROM team_webhooks WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM tenant_webhooks WHERE tenant_id = $1::uuid`,
         tenantId,
       );
       await tx.$executeRawUnsafe(

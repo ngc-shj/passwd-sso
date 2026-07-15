@@ -1,5 +1,5 @@
 {
-  "$schema-note": "Mechanically verified by src/__tests__/workers/worker-policy-manifest.test.ts: completeness (candidate module set, derived from the R42 primitive-anchored grep in the security-review-followups plan C5, vs. manifest `modules`/`entrypoint`/`$documented-exclusions`, both directions), `rawSql` (/\\$queryRaw|\\$executeRaw/ grep across an entry's modules), `destructive` (/deleteMany|DELETE FROM/i grep), `emitsAudit` (/logAudit|enqueueAudit|AUDIT_ACTION/ grep), `usesSecurityDefiner` (grep of the SECURITY DEFINER function names extracted from prisma/migrations/20260522000200_audit_log_revoke_via_definer/migration.sql: audit_log_purge, audit_log_tenant_migrate), file existence of every `entrypoint`/`modules` path. Doc fields (`tenantScoped` reason, `idempotent`, `retryPolicy`, `poisonMessageHandling`, `retentionPolicyTouched`) are presence + >=10-char-prose verified only; their accuracy is a human review concern (SC3), same trust level as route-policy-manifest.json's `handlerAuthReason`.",
+  "$schema-note": "Mechanically verified by src/__tests__/workers/worker-policy-manifest.test.ts: completeness (candidate module set, derived from the R42 primitive-anchored grep in the security-review-followups plan C5, vs. manifest `modules`/`entrypoint`/`$documented-exclusions`, both directions), `rawSql` (/\\$queryRaw|\\$executeRaw/ grep across an entry's modules), `destructive` (/deleteMany|DELETE FROM/i grep), `emitsAudit` (/logAudit|enqueueAudit|AUDIT_ACTION/ grep), `usesSecurityDefiner` (grep of the SECURITY DEFINER function names extracted from prisma/migrations/20260522000200_audit_log_revoke_via_definer/migration.sql: audit_log_purge, audit_log_tenant_migrate), file existence of every `entrypoint`/`modules` path. Doc fields (`tenantScoped` reason, `idempotent`, `retryPolicy`, `poisonMessageHandling`, `retentionPolicyTouched`) are presence + >=10-char-prose verified only; their accuracy is a human review concern (SC3), same trust level as route-policy-manifest.json's `handlerAuthReason`. Per the worker-runtime-invariants plan C5, `sweepBounds` (every `rawSql: true` entry) and `runtimeBounds` (audit-outbox-worker only) are additionally mechanized: every extracted DELETE/UPDATE sweep statement in an entry's modules must be LIMIT-bounded, single-row-by-id, or covered by exactly one tight, used `sweepBounds.exemptions[]` entry, and `runtimeBounds` values are cross-checked against the literal constants in src/lib/constants/audit/audit.ts and the `@default(8)` maxAttempts lines in prisma/schema.prisma.",
   "$documented-exclusions": {
     "src/workers/worker-pool-config.ts": "Constants-only module: two exported pool-timeout constants (WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS), no PrismaClient/Pool construction, no DB access at all.",
     "scripts/migrate-webhook-secrets-v1-to-v2.ts": "One-shot operator-invoked migration (v1 no-AAD -> v2 AAD-bound webhook secrets), --dry-run-capable, idempotent by design. No unattended steady-state process and no retry/poison-message surface for the manifest fields to describe; reviewed per-PR at the diff level instead (review S4 disposition (b)).",
@@ -27,8 +27,26 @@
       "poisonMessageHandling": "Rows at/over max_attempts are marked FAILED and an AUDIT_OUTBOX_DEAD_LETTER event is written directly to audit_logs (bypassing the outbox, to avoid recursion) via writeDirectAuditLog (audit-outbox-worker.ts:397-434,490-497); reapStuckRows separately reaps PROCESSING rows stuck past PROCESSING_TIMEOUT_MS, dead-lettering those already at max_attempts (audit-outbox-worker.ts:775-831).",
       "retentionPolicyTouched": [
         "audit_outbox",
-        "audit_deliveries"
-      ]
+        "audit_deliveries",
+        "webhook_deliveries"
+      ],
+      "sweepBounds": {
+        "value": true,
+        "exemptions": [
+          {
+            "module": "src/workers/audit-outbox-worker.ts",
+            "match": "UPDATE audit_chain_anchors",
+            "reason": "Anchor advance is single-row by PK (WHERE tenant_id = $3, tenant_id is audit_chain_anchors' primary key); not a multi-row sweep."
+          }
+        ]
+      },
+      "runtimeBounds": {
+        "batchSizeEnv": "OUTBOX_BATCH_SIZE",
+        "batchSizeDefault": 500,
+        "maxAttemptsDefault": 8,
+        "reapBatchSize": 1000,
+        "purgeBatchSize": 1000
+      }
     },
     "retention-gc-worker": {
       "entrypoint": "scripts/retention-gc-worker.ts",
@@ -50,6 +68,10 @@
       "idempotent": "Each EXPIRY/EXPIRY_GUARDED/EXPIRY_AUDIT_PROVENANCE DELETE is batch-bounded via (keys) IN (SELECT keys ... LIMIT $1) keyed off cutoffColumn < now(), so a re-run after a crash simply finds fewer (or zero) newly-expired rows -- no duplicate side effects (sweep.ts:181-189, 219-228, 278-289). sweepAuditLogs routes through the audit_log_purge SECURITY DEFINER function which is itself a plain bounded DELETE (registry.ts:475-479, sweep.ts:362-365).",
       "retryPolicy": "No per-row retry/backoff: sweepOnce catches each registry entry's error individually (INV-C4b), logs {table, code} only, records counts[table]=-1, and continues to the next entry -- the NEXT scheduled sweep tick (fixed intervalMs, no backoff) naturally retries the same cutoff-based query (sweep.ts:602-641).",
       "poisonMessageHandling": "There is no per-row poison-message concept (bulk cutoff-based DELETE, not a per-item queue); a systematically failing entry (e.g. a bad identifier) is caught per-tick, logged with {table, code}, and left for the next tick -- the boot-time validateRegistry() call fails closed (throws) before the loop starts if any registry entry has an invalid identifier or missing globalDelete flag, so malformed entries never reach runtime processing (index.ts:61-132,139).",
+      "sweepBounds": {
+        "value": true,
+        "exemptions": []
+      },
       "retentionPolicyTouched": [
         "mcp_clients",
         "sessions",
@@ -96,6 +118,10 @@
       "idempotent": "runCadence is gated by pg_try_advisory_xact_lock(hashtext('audit-anchor-publish')) so only one instance publishes per cadence tick (audit-anchor-publisher.ts:158-164); ensureDeploymentIdMatch pins a single owning DEPLOYMENT_ID via INSERT ... ON CONFLICT DO NOTHING against system_settings so a second concurrent instance throws DeploymentIdMismatchError instead of double-publishing (audit-anchor-publisher.ts:100-125).",
       "retryPolicy": "No in-process retry loop; on upload failure the whole cadence transaction is rolled back and the tenant's audit_chain_anchors.publish_paused_until is set (in a separate post-rollback tx) to LEAST(now + 1 cadence, GREATEST(anchor.updatedAt, now) + pauseCapFactor * cadence) so outbox delivery holds off chain advancement until the next scheduled cadence tick attempts again (audit-anchor-publisher.ts:292-311,363-398).",
       "poisonMessageHandling": "There is no per-item queue to poison; a cadence tick that fails to upload to any destination emits AUDIT_ANCHOR_PUBLISH_FAILED with the failure reason and persists the pause window described above so subsequent audit-outbox delivery does not advance the (now-inconsistent) chain until the pause expires and the next cadence tick retries (audit-anchor-publisher.ts:340-424).",
+      "sweepBounds": {
+        "value": true,
+        "exemptions": []
+      },
       "retentionPolicyTouched": []
     },
     "audit-chain-verify-worker": {
@@ -116,6 +142,10 @@
       "idempotent": "Verification is read-only (SELECT ... ORDER BY chain_seq ASC, no writes) and re-walks the same rows deterministically every tick, so re-running never mutates state and always reproduces the same ok/firstTamperedSeq result for an unchanged chain (audit-chain-verify-worker.ts:68-121).",
       "retryPolicy": "No retry semantics: a per-tenant verify failure is caught, logged (\"tenant=%s verify threw\"), and the loop continues to the next tenant; the NEXT hourly tick (fixed TICK_INTERVAL_MS, no backoff) re-attempts the same tenant from scratch (audit-chain-verify-worker.ts:130-173,208-215).",
       "poisonMessageHandling": "Not applicable -- there is no queue or per-row claim, only a full per-tenant re-scan every tick; a tamper finding is reported via CHAIN_VERIFY_FAILED console logging with hysteresis (re-alert only on clean-to-failed transition or every 24h while failed, audit-chain-verify-worker.ts:145-163) rather than any dead-letter mechanism.",
+      "sweepBounds": {
+        "value": true,
+        "exemptions": []
+      },
       "retentionPolicyTouched": []
     }
   }

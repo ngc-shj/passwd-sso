@@ -47,7 +47,7 @@ describe("audit bypass coverage", () => {
     }
   });
 
-  it("OUTBOX_BYPASS_AUDIT_ACTIONS contains exactly the expected 7 actions", () => {
+  it("OUTBOX_BYPASS_AUDIT_ACTIONS contains exactly the expected 8 actions", () => {
     const expected = new Set([
       // Phase 1: webhook delivery failures
       AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
@@ -59,9 +59,11 @@ describe("audit bypass coverage", () => {
       // Phase 3: audit delivery failures
       AUDIT_ACTION.AUDIT_DELIVERY_FAILED,
       AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER,
+      // Webhook delivery queue dead-letter (durable delivery)
+      AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER,
     ]);
     expect(OUTBOX_BYPASS_AUDIT_ACTIONS).toEqual(expected);
-    expect(OUTBOX_BYPASS_AUDIT_ACTIONS.size).toBe(7);
+    expect(OUTBOX_BYPASS_AUDIT_ACTIONS.size).toBe(8);
   });
 
   it("admin-endpoint AUDIT_OUTBOX_* actions are NOT in OUTBOX_BYPASS_AUDIT_ACTIONS", () => {

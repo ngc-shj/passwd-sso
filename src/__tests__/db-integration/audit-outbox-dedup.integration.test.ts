@@ -115,7 +115,7 @@ describe("audit-outbox dedup (ON CONFLICT) — real deliverRowWithChain", () => 
     const row = await claimRow(outboxId);
 
     const delivered = await deliverRowWithChain(ctx.su.prisma, row, payload);
-    expect(delivered).toBe(true);
+    expect(delivered.delivered).toBe(true);
     expect(await countAuditLogsFor(outboxId)).toBe(1);
 
     const anchor = await ctx.su.prisma.$transaction(async (tx) => {
@@ -135,7 +135,7 @@ describe("audit-outbox dedup (ON CONFLICT) — real deliverRowWithChain", () => 
     // First delivery cycle.
     const row1 = await claimRow(outboxId);
     const delivered1 = await deliverRowWithChain(ctx.su.prisma, row1, payload);
-    expect(delivered1).toBe(true);
+    expect(delivered1.delivered).toBe(true);
     expect(await countAuditLogsFor(outboxId)).toBe(1);
 
     const anchorAfterFirst = await ctx.su.prisma.$transaction(async (tx) => {
@@ -154,10 +154,10 @@ describe("audit-outbox dedup (ON CONFLICT) — real deliverRowWithChain", () => 
     const row2 = await claimRow(outboxId);
     const delivered2 = await deliverRowWithChain(ctx.su.prisma, row2, payload);
 
-    // deliverRowWithChain always returns true when not paused (it unconditionally
-    // marks the outbox row SENT) — the dedup guarantee is on audit_logs, not on
-    // this return value.
-    expect(delivered2).toBe(true);
+    // deliverRowWithChain always returns delivered:true when not paused (it
+    // unconditionally marks the outbox row SENT) — the dedup guarantee is on
+    // audit_logs, not on this return value.
+    expect(delivered2.delivered).toBe(true);
 
     // Still exactly ONE audit_logs row for this outbox_id (ON CONFLICT DO NOTHING).
     expect(await countAuditLogsFor(outboxId)).toBe(1);

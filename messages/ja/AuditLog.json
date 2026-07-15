@@ -258,6 +258,7 @@
   "SECURITY_RECORD_RETENTION_PURGED": "期限切れのセキュリティ記録を証跡記録のうえ削除（システムワーカー）",
   "AUDIT_DELIVERY_FAILED": "監査配信失敗",
   "AUDIT_DELIVERY_DEAD_LETTER": "監査配信デッドレター化",
+  "AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER": "Webhook配信デッドレター化",
   "AUDIT_ANCHOR_PUBLISHED": "監査アンカーマニフェストを公開",
   "AUDIT_ANCHOR_PUBLISH_FAILED": "監査アンカーの公開に失敗",
   "AUDIT_ANCHOR_PUBLISH_PAUSED": "監査アンカーの公開を一時停止",

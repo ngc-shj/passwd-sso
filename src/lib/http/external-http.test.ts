@@ -54,6 +54,7 @@ import {
   sanitizeForExternalDelivery,
   sanitizeErrorForStorage,
   EXTERNAL_DELIVERY_METADATA_BLOCKLIST,
+  DNS_RESOLVE_TIMEOUT_MS,
 } from "./external-http";
 
 // ─── Guard assertions ─────────────────────────────────────────────
@@ -116,6 +117,46 @@ describe("resolveAndValidateIps", () => {
     expect(result).toEqual(["93.184.216.34"]);
     expect(mockResolve4).not.toHaveBeenCalled();
     expect(mockResolve6).not.toHaveBeenCalled();
+  });
+
+  it("a hung DNS resolver is bounded by DNS_RESOLVE_TIMEOUT_MS, not blocked indefinitely", async () => {
+    vi.useFakeTimers();
+    try {
+      // Both A and AAAA lookups hang forever — without the timeout wrapper this
+      // would never settle, letting a slow resolver blow the caller's wall-clock
+      // budget (the webhook lease bound depends on this being bounded).
+      mockResolve4.mockReturnValue(new Promise<string[]>(() => {}));
+      mockResolve6.mockReturnValue(new Promise<string[]>(() => {}));
+
+      const promise = resolveAndValidateIps("https://slow-dns.example.com/path");
+      const assertion = expect(promise).rejects.toThrow(/DNS resolution failed|timed out/i);
+      // A and AAAA each run under their own DNS_RESOLVE_TIMEOUT_MS deadline; both
+      // hang, so advancing past the (shared-duration) deadline trips both and the
+      // empty-ips path throws "DNS resolution failed".
+      await vi.advanceTimersByTimeAsync(DNS_RESOLVE_TIMEOUT_MS + 1);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a fast A record is USED even when AAAA hangs to its own timeout (one-family survival)", async () => {
+    vi.useFakeTimers();
+    try {
+      // A resolves immediately with a public IPv4; AAAA hangs forever. Because
+      // each lookup has its OWN timeout (not one shared deadline around the pair),
+      // the good A result must survive the AAAA hang — a shared timeout would
+      // reject the whole thing and discard the usable IPv4.
+      mockResolve4.mockResolvedValue(["93.184.216.34"]);
+      mockResolve6.mockReturnValue(new Promise<string[]>(() => {}));
+
+      const promise = resolveAndValidateIps("https://half-hung.example.com/path");
+      // Let the immediate A resolution settle, then advance past the AAAA deadline.
+      await vi.advanceTimersByTimeAsync(DNS_RESOLVE_TIMEOUT_MS + 1);
+      await expect(promise).resolves.toEqual(["93.184.216.34"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("IP literal (private) throws 'Private IP rejected'", async () => {

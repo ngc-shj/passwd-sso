@@ -2,8 +2,9 @@
 --
 -- Seeds two tenants A (00000000-0000-0000-0000-0000000000A0) and
 -- B (00000000-0000-0000-0000-0000000000B0) with exactly one row per
--- tenant in each of the 53 tenant-scoped tables. mcp_clients also
--- gets a third row with tenant_id = NULL (DCR pre-claimed clients).
+-- tenant in each of the 55 tenant-scoped tables (see
+-- rls-cross-tenant-tables.manifest). mcp_clients also gets a third row
+-- with tenant_id = NULL (DCR pre-claimed clients).
 --
 -- Runs as passwd_user (SUPERUSER, BYPASSRLS). Sets app.bypass_rls = 'on'
 -- to also bypass the BEFORE INSERT triggers (enforce_tenant_id_from_context)
@@ -284,6 +285,12 @@ INSERT INTO audit_logs (id, tenant_id, scope, action, user_id, actor_type) VALUE
 INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000AA', '00000000-0000-0000-0000-0000000000A9', '00000000-0000-0000-0000-0000000000A0'),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000BA', '00000000-0000-0000-0000-0000000000B9', '00000000-0000-0000-0000-0000000000B0');
+
+-- webhook_deliveries has no FK to audit_outbox (survives purge), so outbox_id is
+-- a bare UUID. scope='TENANT' with NULL team_id satisfies the scope/team_id CHECK.
+INSERT INTO webhook_deliveries (id, outbox_id, tenant_id, scope, team_id, action) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000AB', '00000000-0000-0000-0000-0000000000A0', 'TENANT', NULL, 'ENTRY_CREATE'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000BB', '00000000-0000-0000-0000-0000000000B0', 'TENANT', NULL, 'ENTRY_CREATE');
 
 -- ---------------------------------------------------------------------------
 -- MCP chain: clients (NULL row + A + B) → access_tokens → refresh_tokens,

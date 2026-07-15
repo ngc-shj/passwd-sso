@@ -162,6 +162,32 @@ describe("audit-outbox-worker --validate-env-only", () => {
     expect(hasBatchSizeError).toBe(true);
   });
 
+  it("exits 1 with a lease error when OUTBOX_PROCESSING_TIMEOUT_MS is too small for webhook delivery", () => {
+    // 10s is Zod-valid (>= min) but too small to hold one durable-webhook item's
+    // worst case, so the lease guard must reject it in --validate-env-only too,
+    // not only at worker.start().
+    const result = spawnWorker({
+      DATABASE_URL: VALID_DATABASE_URL,
+      OUTBOX_PROCESSING_TIMEOUT_MS: "10000",
+    });
+
+    expect(result.status).toBe(1);
+
+    const stderrLines = result.stderr.trim().split("\n").filter(Boolean);
+    const hasLeaseError = stderrLines.some((l) => {
+      try {
+        const obj = JSON.parse(l);
+        return (
+          obj.path === "OUTBOX_PROCESSING_TIMEOUT_MS" &&
+          obj.code === "webhook_delivery_lease_too_small"
+        );
+      } catch {
+        return false;
+      }
+    });
+    expect(hasLeaseError).toBe(true);
+  });
+
   it("stderr from failure path does NOT include the rejected value (F30 + S22 regression)", () => {
     const sensitiveValue = "super-secret-malformed-url-that-must-not-leak-12345";
     const result = spawnWorker({

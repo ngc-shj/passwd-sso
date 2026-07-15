@@ -101,8 +101,8 @@ describe("audit-chain-ordering (concurrent inserts)", () => {
       (c) => deliverRowWithChain(c, rowB, payloadB),
     );
 
-    expect(deliveredA).toBe(true);
-    expect(deliveredB).toBe(true);
+    expect(deliveredA.delivered).toBe(true);
+    expect(deliveredB.delivered).toBe(true);
 
     // Both audit_logs rows landed with gap-free sequential chain_seq {1,2},
     // in either race order. (created_at ordering is deliberately NOT asserted:
