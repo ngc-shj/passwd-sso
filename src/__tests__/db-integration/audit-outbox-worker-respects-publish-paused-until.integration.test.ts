@@ -110,7 +110,7 @@ describe("deliverRowWithChain — respects publish_paused_until", () => {
     const delivered = await deliverRowWithChain(ctx.su.prisma, row, payload);
 
     // deliverRowWithChain must signal that the row was NOT delivered
-    expect(delivered).toBe(false);
+    expect(delivered.delivered).toBe(false);
 
     // Outbox row must still be PENDING (not SENT)
     const outboxRows = await ctx.su.prisma.$transaction(async (tx) => {
@@ -202,7 +202,7 @@ describe("deliverRowWithChain — respects publish_paused_until", () => {
 
     const delivered = await deliverRowWithChain(ctx.su.prisma, row, payload);
 
-    expect(delivered).toBe(true);
+    expect(delivered.delivered).toBe(true);
 
     // Outbox row must be SENT
     const outboxRows = await ctx.su.prisma.$transaction(async (tx) => {
@@ -284,7 +284,7 @@ describe("deliverRowWithChain — respects publish_paused_until", () => {
     const delivered = await deliverRowWithChain(ctx.su.prisma, row, payload);
 
     // Expired pause — should proceed normally
-    expect(delivered).toBe(true);
+    expect(delivered.delivered).toBe(true);
 
     const outboxRows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);

@@ -192,15 +192,19 @@ export async function checkChainEnabled(
 }
 
 /**
- * Returns true when the row was delivered and the chain advanced,
- * false when the row was skipped because publish_paused_until is active.
+ * Returns `delivered: true` when the row was delivered and the chain advanced,
+ * `delivered: false` when the row was skipped because publish_paused_until is
+ * active. `inserted` reflects whether the audit_logs INSERT actually won the
+ * ON CONFLICT race (false when a concurrent delivery already inserted this
+ * outbox row's audit log) — callers must read `.delivered` for the prior
+ * boolean semantics; `.inserted` is only for concurrency-race assertions.
  */
 export async function deliverRowWithChain(
   prisma: PrismaClient,
   row: AuditOutboxRow,
   payload: AuditOutboxPayload,
-): Promise<boolean> {
-  const delivered = await prisma.$transaction(async (tx) => {
+): Promise<{ delivered: boolean; inserted: boolean }> {
+  const result = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
 
     // P4-S2 fix: prevent indefinite lock wait
@@ -258,7 +262,7 @@ export async function deliverRowWithChain(
          WHERE id = $1`,
         row.id,
       );
-      return false;
+      return { delivered: false, inserted: false };
     }
 
     const newSeq = anchor.chain_seq + BigInt(1);
@@ -356,9 +360,9 @@ export async function deliverRowWithChain(
        WHERE id = $1`,
       row.id,
     );
-    return true;
+    return { delivered: true, inserted: inserted.length > 0 };
   });
-  return delivered ?? false;
+  return result;
 }
 
 /**
@@ -772,7 +776,10 @@ async function dispatchWebhookForRow(
  * Exported so integration tests can target the real function (see sweep.ts's
  * re-export convention) instead of duplicating this SQL.
  */
-export async function reapStuckRows(prisma: PrismaClient): Promise<number> {
+export async function reapStuckRows(
+  prisma: PrismaClient,
+  limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
+): Promise<number> {
   const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND;
 
   // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
@@ -797,10 +804,13 @@ export async function reapStuckRows(prisma: PrismaClient): Promise<number> {
          SELECT id FROM audit_outbox
          WHERE status = 'PROCESSING'
            AND processing_started_at < now() - make_interval(secs => $1)
+         ORDER BY processing_started_at ASC
+         LIMIT $2
          FOR UPDATE SKIP LOCKED
        )
        RETURNING id, tenant_id, attempt_count, status::text AS new_status`,
       timeoutSeconds,
+      limit,
     );
     return rows;
   });
@@ -837,7 +847,10 @@ export async function reapStuckRows(prisma: PrismaClient): Promise<number> {
  * Exported so integration tests can target the real function (see sweep.ts's
  * re-export convention) instead of duplicating this SQL.
  */
-export async function reapStuckDeliveries(prisma: PrismaClient): Promise<number> {
+export async function reapStuckDeliveries(
+  prisma: PrismaClient,
+  limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
+): Promise<number> {
   const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
   const cutoff = new Date(Date.now() - timeout);
 
@@ -852,9 +865,16 @@ export async function reapStuckDeliveries(prisma: PrismaClient): Promise<number>
        "attempt_count" = "attempt_count" + 1,
        "processing_started_at" = NULL,
        "last_error" = 'reaped: processing timeout exceeded'
-       WHERE "status" = 'PROCESSING'
-         AND "processing_started_at" < $1`,
+       WHERE "id" IN (
+         SELECT "id" FROM "audit_deliveries"
+         WHERE "status" = 'PROCESSING'
+           AND "processing_started_at" < $1
+         ORDER BY "processing_started_at" ASC
+         LIMIT $2
+         FOR UPDATE SKIP LOCKED
+       )`,
       cutoff,
+      limit,
     );
   });
 
@@ -868,34 +888,45 @@ export async function reapStuckDeliveries(prisma: PrismaClient): Promise<number>
 
 /**
  * Purge SENT rows older than RETENTION_HOURS and FAILED rows older than FAILED_RETENTION_DAYS.
+ *
+ * Split into two independently-capped branches (SENT-aged, FAILED-aged) so a
+ * large backlog of SENT rows cannot starve the FAILED-aged purge of its
+ * budget — FAILED rows retain the full payload (PII) and must not silently
+ * outlive their 90-day retention policy.
  */
-async function purgeRetention(prisma: PrismaClient): Promise<void> {
+export async function purgeRetention(
+  prisma: PrismaClient,
+  opts?: { limit?: number },
+): Promise<void> {
+  const limit = opts?.limit ?? AUDIT_OUTBOX.PURGE_BATCH_SIZE;
   const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
   const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
 
   const sentCutoff = new Date(Date.now() - retentionHours * MS_PER_HOUR);
   const failedCutoff = new Date(Date.now() - failedRetentionDays * MS_PER_DAY);
 
-  const result = await prisma.$transaction(async (tx) => {
+  const sentResult = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
       `WITH deleted AS (
         DELETE FROM audit_outbox
-        WHERE (
-          status = 'SENT'
-          AND sent_at < now() - make_interval(hours => $1)
-          AND NOT EXISTS (
-            SELECT 1 FROM "audit_deliveries"
-            WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
-              AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
-          )
+        WHERE id IN (
+          SELECT id FROM audit_outbox
+          WHERE status = 'SENT'
+            AND sent_at < now() - make_interval(hours => $1)
+            AND NOT EXISTS (
+              SELECT 1 FROM "audit_deliveries"
+              WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
+                AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
+            )
+          ORDER BY sent_at ASC
+          LIMIT $2
         )
-           OR (status = 'FAILED' AND created_at < now() - make_interval(days  => $2))
         RETURNING id, tenant_id
       )
       SELECT COUNT(*) AS purged, MIN(tenant_id::text) AS sample_tenant_id FROM deleted`,
       retentionHours,
-      failedRetentionDays,
+      limit,
     );
     return {
       purged: Number(rows[0]?.purged ?? 0),
@@ -903,10 +934,37 @@ async function purgeRetention(prisma: PrismaClient): Promise<void> {
     };
   });
 
-  if (result.purged > 0 && result.sampleTenantId) {
-    getLogger().info({ purged: result.purged }, "worker.retention_purged");
-    await writeDirectAuditLog(prisma, result.sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
-      purgedCount: result.purged,
+  const failedResult = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
+      `WITH deleted AS (
+        DELETE FROM audit_outbox
+        WHERE id IN (
+          SELECT id FROM audit_outbox
+          WHERE status = 'FAILED'
+            AND created_at < now() - make_interval(days => $1)
+          ORDER BY created_at ASC
+          LIMIT $2
+        )
+        RETURNING id, tenant_id
+      )
+      SELECT COUNT(*) AS purged, MIN(tenant_id::text) AS sample_tenant_id FROM deleted`,
+      failedRetentionDays,
+      limit,
+    );
+    return {
+      purged: Number(rows[0]?.purged ?? 0),
+      sampleTenantId: rows[0]?.sample_tenant_id ?? null,
+    };
+  });
+
+  const totalPurged = sentResult.purged + failedResult.purged;
+  const sampleTenantId = sentResult.sampleTenantId ?? failedResult.sampleTenantId;
+
+  if (totalPurged > 0 && sampleTenantId) {
+    getLogger().info({ purged: totalPurged }, "worker.retention_purged");
+    await writeDirectAuditLog(prisma, sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+      purgedCount: totalPurged,
       retentionHours,
       failedRetentionDays,
     });
@@ -917,10 +975,16 @@ async function purgeRetention(prisma: PrismaClient): Promise<void> {
     await setBypassRlsGucs(tx);
     return tx.$executeRawUnsafe(
       `DELETE FROM "audit_deliveries"
-       WHERE ("status" = 'SENT' AND "created_at" < $1)
-          OR ("status" = 'FAILED' AND "created_at" < $2)`,
+       WHERE "id" IN (
+         SELECT "id" FROM "audit_deliveries"
+         WHERE ("status" = 'SENT' AND "created_at" < $1)
+            OR ("status" = 'FAILED' AND "created_at" < $2)
+         ORDER BY "created_at" ASC
+         LIMIT $3
+       )`,
       sentCutoff,
       failedCutoff,
+      limit,
     );
   });
   if (Number(deliveryPurged) > 0) {
@@ -1062,7 +1126,8 @@ export function createWorker(config: WorkerConfig) {
         const chainEnabled = await getChainEnabled(row.tenant_id);
         let rowDelivered: boolean;
         if (chainEnabled) {
-          rowDelivered = await deliverRowWithChain(workerPrisma, row, payload);
+          const res = await deliverRowWithChain(workerPrisma, row, payload);
+          rowDelivered = res.delivered;
         } else {
           await deliverRow(workerPrisma, row, payload);
           rowDelivered = true;
