@@ -21,7 +21,7 @@
 # was renamed in migration 20260321110000_convert_id_columns_to_uuid_type.
 # The discovery OR-branch for the bare name remains as defensive forward-compat.
 #
-# Total: 54 tenant-scoped tables (excludes `tenants` itself, which is
+# Total: 55 tenant-scoped tables (excludes `tenants` itself, which is
 # structurally exempt — it has no `tenant_id` column).
 access_requests
 accounts
@@ -77,3 +77,4 @@ tenant_webhooks
 users
 vault_keys
 webauthn_credentials
+webhook_deliveries

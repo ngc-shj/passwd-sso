@@ -2,8 +2,9 @@
 --
 -- Seeds two tenants A (00000000-0000-0000-0000-0000000000A0) and
 -- B (00000000-0000-0000-0000-0000000000B0) with exactly one row per
--- tenant in each of the 53 tenant-scoped tables. mcp_clients also
--- gets a third row with tenant_id = NULL (DCR pre-claimed clients).
+-- tenant in each of the 55 tenant-scoped tables (see
+-- rls-cross-tenant-tables.manifest). mcp_clients also gets a third row
+-- with tenant_id = NULL (DCR pre-claimed clients).
 --
 -- Runs as passwd_user (SUPERUSER, BYPASSRLS). Sets app.bypass_rls = 'on'
 -- to also bypass the BEFORE INSERT triggers (enforce_tenant_id_from_context)
