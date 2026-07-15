@@ -13,6 +13,10 @@ import {
   OUTBOX_BYPASS_AUDIT_ACTIONS,
   WEBHOOK_DISPATCH_SUPPRESS,
 } from "@/lib/constants/audit/audit";
+import {
+  WEBHOOK_DELIVERY_BATCH_SIZE,
+  validateWebhookDeliveryLease,
+} from "@/lib/constants/audit/webhook-delivery-lease.server";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
@@ -28,7 +32,7 @@ import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/
 // must surface before any prisma init). `type WebhookRecord` is a type-only import
 // (erased at compile time, no runtime module load).
 import type { WebhookRecord } from "@/lib/webhook-dispatcher";
-import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD } from "@/lib/validations/common.server";
+import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_DELIVERY_CONCURRENCY } from "@/lib/validations/common.server";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
 
 export interface AuditOutboxRow {
@@ -900,8 +904,17 @@ export async function processWebhookDeliveryBatch(
 
   if (claimed.length === 0) return 0;
 
-  for (const item of claimed) {
-    await processOneWebhookDelivery(prisma, item);
+  // Process work items in parallel chunks of WEBHOOK_DELIVERY_CONCURRENCY so a
+  // batch of slow/unreachable webhooks does not hold the claim lease serially
+  // past the PROCESSING timeout (which would let the reaper reset in-flight rows
+  // for another worker to re-claim → duplicate + concurrent delivery). The batch
+  // size (WEBHOOK_DELIVERY_BATCH_SIZE) is derived from this concurrency and the
+  // per-item worst case so ceil(batch/concurrency) chunks fit within half the
+  // lease. processOneWebhookDelivery never throws (its own try/catch routes to
+  // recordWebhookDeliveryError), so allSettled is belt-and-suspenders.
+  for (let i = 0; i < claimed.length; i += WEBHOOK_DELIVERY_CONCURRENCY) {
+    const chunk = claimed.slice(i, i + WEBHOOK_DELIVERY_CONCURRENCY);
+    await Promise.allSettled(chunk.map((item) => processOneWebhookDelivery(prisma, item)));
   }
 
   return claimed.length;
@@ -1091,24 +1104,37 @@ async function onWebhookDeliveryFailure(
   workerPrisma: PrismaClient,
   item: WebhookDeliveryRow,
   webhookId: string,
-  newFailCount: number,
+  _newFailCount: number,
   url: string,
 ): Promise<void> {
   const isTeam = item.scope === "TEAM";
-  await workerPrisma.$transaction(async (tx) => {
+  const table = isTeam ? "team_webhooks" : "tenant_webhooks";
+  // Atomic increment (fail_count = fail_count + 1) computed IN the UPDATE, not
+  // read-modify-write from the WebhookRecord snapshot: since work items for the
+  // same webhook can run concurrently (WEBHOOK_DELIVERY_CONCURRENCY), every
+  // concurrent failure would otherwise read the same snapshot failCount and
+  // write the same absolute value → a lost update that under-counts failures and
+  // delays auto-disable. Derive is_active from the POST-increment value in the
+  // same statement, and RETURN it so the audit event reports the true count.
+  const updated = await workerPrisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    const data = {
-      failCount: newFailCount,
-      lastFailedAt: new Date(),
-      lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
-      isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
-    };
-    if (isTeam) {
-      await tx.teamWebhook.update({ where: { id: webhookId }, data });
-    } else {
-      await tx.tenantWebhook.update({ where: { id: webhookId }, data });
-    }
+    const rows = await tx.$queryRawUnsafe<{ fail_count: number }[]>( // raw-sql-ident: `table` is a code-controlled literal ("team_webhooks" | "tenant_webhooks") chosen by isTeam, never user input — no injection risk
+      `UPDATE "${table}"
+       SET fail_count = fail_count + 1,
+           last_failed_at = now(),
+           last_error = $1,
+           is_active = CASE WHEN fail_count + 1 >= $2 THEN false ELSE is_active END,
+           updated_at = now()
+       WHERE id = $3::uuid
+       RETURNING fail_count`,
+      `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
+      WEBHOOK_AUTO_DISABLE_THRESHOLD,
+      webhookId,
+    );
+    return rows[0] ?? null;
   });
+
+  const newFailCount = updated?.fail_count ?? 0;
 
   // Per-webhook delivery failure is a distinct, unchained audit event (parity
   // with the app dispatcher). Uses writeDirectAuditLog (bypass outbox) so it
@@ -1797,7 +1823,7 @@ export function createWorker(config: WorkerConfig) {
       try {
         webhookDeliveryClaimed = await processWebhookDeliveryBatch(
           workerPrisma,
-          AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE,
+          WEBHOOK_DELIVERY_BATCH_SIZE,
         );
         if (webhookDeliveryClaimed > 0) {
           log.debug({ webhookDeliveryClaimed }, "processed webhook delivery batch");
@@ -1844,6 +1870,15 @@ export function createWorker(config: WorkerConfig) {
 
   return {
     async start(): Promise<void> {
+      // Fail closed if the configured PROCESSING timeout cannot safely hold one
+      // webhook delivery item's worst case — otherwise the reaper would reset
+      // in-flight rows mid-delivery for a duplicate re-claim (F1 lease guard).
+      const leaseError = validateWebhookDeliveryLease();
+      if (leaseError) {
+        getLogger().error({ leaseError }, "worker.webhook_delivery_lease_misconfigured");
+        throw new Error(leaseError);
+      }
+
       running = true;
       registerShutdown();
 

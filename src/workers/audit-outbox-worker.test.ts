@@ -1,11 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
-import {
-  WEBHOOK_CONCURRENCY,
-  WEBHOOK_MAX_RETRIES,
-  WEBHOOK_FETCH_TIMEOUT_MS,
-  WEBHOOK_RETRY_DELAYS_MS,
-} from "@/lib/validations/common.server";
+import { validateWebhookDeliveryLease, WEBHOOK_WORST_CASE_PER_ITEM_MS, WEBHOOK_DELIVERY_BATCH_SIZE } from "@/lib/constants/audit/webhook-delivery-lease.server";
+import { WEBHOOK_DELIVERY_CONCURRENCY } from "@/lib/validations/common.server";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
 
@@ -158,6 +154,8 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/http/external-http", () => ({
   sanitizeErrorForStorage: vi.fn((msg: string) => msg),
   sanitizeForExternalDelivery: vi.fn((data: unknown) => data),
+  // Consumed transitively by @/lib/constants/audit/audit (WEBHOOK_WORST_CASE_PER_ITEM_MS).
+  DNS_RESOLVE_TIMEOUT_MS: 5000,
 }));
 
 vi.mock("@/lib/url/url-validation", () => ({
@@ -1526,33 +1524,68 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
 //
 // processWebhookDeliveryBatch is driven in loop() with
 // AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE, NOT the 500-row outbox BATCH_SIZE.
-// The batch must be small AND bounded so the serial worst-case wall-clock of a
-// full batch (every hook unreachable, holding the claim lease) stays under the
-// PROCESSING_TIMEOUT — otherwise the reaper resets still-in-flight rows
-// mid-delivery and a second worker re-claims them → duplicate/concurrent
-// delivery. This guards the invariant if someone bumps the timeout or the retry
-// budget without re-deriving the batch.
+// Work items are processed in parallel CHUNKS of WEBHOOK_DELIVERY_CONCURRENCY
+// (the work-item pool, distinct from WEBHOOK_CONCURRENCY which parallelizes
+// subscribers within one item). The batch must be bounded so the batch's serial
+// depth — ceil(batch / WEBHOOK_DELIVERY_CONCURRENCY) chunks, each up to the
+// per-item worst case — stays under the PROCESSING timeout; otherwise the reaper
+// resets still-in-flight rows mid-delivery and a second worker re-claims them →
+// duplicate/concurrent delivery. This guards the invariant if someone bumps the
+// timeout, the retry budget, or the concurrency without re-deriving the batch.
 
 describe("F1: WEBHOOK_DELIVERY_BATCH_SIZE lease alignment", () => {
-  it("is a small bounded value (1..=50) and distinct from the 500-row outbox batch", () => {
-    expect(AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE).toBeGreaterThanOrEqual(1);
-    expect(AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE).toBeLessThanOrEqual(50);
-    expect(AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE).not.toBe(AUDIT_OUTBOX.BATCH_SIZE);
+  it("is a bounded value distinct from the 500-row outbox batch", () => {
+    expect(WEBHOOK_DELIVERY_BATCH_SIZE).toBeGreaterThanOrEqual(1);
+    expect(WEBHOOK_DELIVERY_BATCH_SIZE).toBeLessThan(AUDIT_OUTBOX.BATCH_SIZE);
   });
 
-  it("serial worst-case for a full batch stays under PROCESSING_TIMEOUT_MS", () => {
-    // Worst-case wall-clock one unreachable hook can hold the claim lease:
-    // every attempt hits the full fetch timeout, plus the inter-attempt backoffs.
-    const worstCasePerHookMs =
-      WEBHOOK_MAX_RETRIES * WEBHOOK_FETCH_TIMEOUT_MS +
-      WEBHOOK_RETRY_DELAYS_MS.slice(0, WEBHOOK_MAX_RETRIES - 1).reduce((a, b) => a + b, 0);
+  it("parallel-chunk worst-case for a full batch stays under half the PROCESSING timeout", () => {
+    // Use the PRODUCTION constant (which now includes the bounded DNS budget per
+    // attempt), not a re-derivation — otherwise the test's local model could
+    // silently under-count (as it did before DNS was folded in) and pass while
+    // the real batch violates the lease.
+    const worstCasePerItemMs = WEBHOOK_WORST_CASE_PER_ITEM_MS;
 
-    // A batch is processed serially in chunks of WEBHOOK_CONCURRENCY.
+    // Work items run in parallel chunks of WEBHOOK_DELIVERY_CONCURRENCY, so the
+    // serial depth is ceil(batch / WEBHOOK_DELIVERY_CONCURRENCY) chunks — NOT the
+    // full batch (the earlier model that divided by the subscriber-level
+    // WEBHOOK_CONCURRENCY was wrong: the delivery loop was serial). The formula
+    // targets ÷2 of the timeout as its safety margin, so assert against that.
     const serialChunks = Math.ceil(
-      AUDIT_OUTBOX.WEBHOOK_DELIVERY_BATCH_SIZE / WEBHOOK_CONCURRENCY,
+      WEBHOOK_DELIVERY_BATCH_SIZE / WEBHOOK_DELIVERY_CONCURRENCY,
     );
-    const serialWorstCaseMs = serialChunks * worstCasePerHookMs;
+    const serialWorstCaseMs = serialChunks * worstCasePerItemMs;
 
-    expect(serialWorstCaseMs).toBeLessThan(AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS);
+    expect(serialWorstCaseMs).toBeLessThanOrEqual(AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 2);
+  });
+});
+
+// ─── FIX #2: lease-vs-delivery-time guard (validateWebhookDeliveryLease) ──────
+//
+// The worker's start() throws when validateWebhookDeliveryLease() returns a
+// message — i.e. when half the PROCESSING lease cannot hold one work item's
+// worst-case delivery (reaper would reset in-flight rows → duplicate/concurrent
+// delivery). The guard is pure over its timeoutMs argument, so we exercise both
+// the reject and the accept branch directly at their boundary.
+
+describe("FIX #2: validateWebhookDeliveryLease fail-closed guard", () => {
+  it("returns null on the default config (half the lease holds one item's worst case)", () => {
+    expect(validateWebhookDeliveryLease()).toBeNull();
+    expect(AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 2).toBeGreaterThanOrEqual(
+      WEBHOOK_WORST_CASE_PER_ITEM_MS,
+    );
+  });
+
+  it("REJECTS a too-small timeout (the 10s operator floor) with a message", () => {
+    const err = validateWebhookDeliveryLease(10_000);
+    expect(err).not.toBeNull();
+    expect(err).toContain("too small");
+    expect(err).toContain(String(2 * WEBHOOK_WORST_CASE_PER_ITEM_MS));
+  });
+
+  it("boundary: rejects just below 2×worstCase, accepts at exactly 2×worstCase", () => {
+    // safeTimeout = timeoutMs/2 must be >= worstCase, i.e. timeoutMs >= 2×worstCase.
+    expect(validateWebhookDeliveryLease(2 * WEBHOOK_WORST_CASE_PER_ITEM_MS - 2)).not.toBeNull();
+    expect(validateWebhookDeliveryLease(2 * WEBHOOK_WORST_CASE_PER_ITEM_MS)).toBeNull();
   });
 });

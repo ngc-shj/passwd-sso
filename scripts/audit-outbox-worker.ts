@@ -7,6 +7,7 @@ loadEnv();
 // non-worker vars (auth providers, WebAuthn, etc.) are absent.
 import { envObject } from "@/lib/env-schema";
 import { createWorker } from "@/workers/audit-outbox-worker";
+import { validateWebhookDeliveryLease } from "@/lib/constants/audit/webhook-delivery-lease.server";
 
 // Pick only the fields the worker reads. envObject (not envSchema) because
 // Zod 4 throws on .pick() of a refined schema (F16).
@@ -49,6 +50,23 @@ if (!parseResult.success) {
   process.exit(1);
 }
 const workerEnv = parseResult.data;
+
+// Fail-closed lease guard: OUTBOX_PROCESSING_TIMEOUT_MS is Zod-valid down to 10s,
+// which is too small to hold one durable-webhook-delivery item's worst case — the
+// reaper would reset in-flight rows for a duplicate re-claim. Reject it here so
+// --validate-env-only (config-check path) catches it too, not only worker.start().
+const leaseError = validateWebhookDeliveryLease(workerEnv.OUTBOX_PROCESSING_TIMEOUT_MS);
+if (leaseError) {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      msg: "env validation failed",
+      path: "OUTBOX_PROCESSING_TIMEOUT_MS",
+      code: "webhook_delivery_lease_too_small",
+    }),
+  );
+  process.exit(1);
+}
 
 // T17: --validate-env-only flag exits 0 after parsing, without touching DB.
 // Byte-exact contract tested in scripts/__tests__/audit-outbox-worker-env.test.mjs.

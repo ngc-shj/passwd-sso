@@ -848,37 +848,20 @@ export const AUDIT_METADATA_KEY = {
 export const AUDIT_ACTION_EMERGENCY_PREFIX = "EMERGENCY_";
 
 import { envInt } from "@/lib/env/env-utils";
-import {
-  WEBHOOK_CONCURRENCY,
-  WEBHOOK_MAX_RETRIES,
-  WEBHOOK_FETCH_TIMEOUT_MS,
-  WEBHOOK_RETRY_DELAYS_MS,
-} from "@/lib/validations/common.server";
 
-const OUTBOX_PROCESSING_TIMEOUT_MS = envInt("OUTBOX_PROCESSING_TIMEOUT_MS", 5 * MS_PER_MINUTE);
-
-// Worst-case wall-clock a single unreachable webhook can hold the claim lease:
-// every attempt hits the full fetch timeout, plus the inter-attempt backoffs.
-const WEBHOOK_WORST_CASE_PER_HOOK_MS =
-  WEBHOOK_MAX_RETRIES * WEBHOOK_FETCH_TIMEOUT_MS +
-  WEBHOOK_RETRY_DELAYS_MS.slice(0, WEBHOOK_MAX_RETRIES - 1).reduce((a, b) => a + b, 0);
-
-// A delivery batch is processed serially in chunks of WEBHOOK_CONCURRENCY.
-// Bound the batch so the serial worst case stays well under the PROCESSING
-// timeout (÷2 safety margin), otherwise the reaper resets still-in-flight rows
-// mid-delivery and a second worker re-claims them → duplicate + concurrent
-// delivery. Floor of 1 so the queue always drains.
-export const WEBHOOK_DELIVERY_BATCH_SIZE = Math.max(
-  1,
-  Math.floor(
-    (OUTBOX_PROCESSING_TIMEOUT_MS / 2 / WEBHOOK_WORST_CASE_PER_HOOK_MS) * WEBHOOK_CONCURRENCY,
-  ),
-);
+// NOTE: the durable-webhook-delivery lease constants (WEBHOOK_DELIVERY_BATCH_SIZE,
+// WEBHOOK_WORST_CASE_PER_ITEM_MS, validateWebhookDeliveryLease) live in the
+// server-only sibling webhook-delivery-lease.server.ts. They derive from
+// DNS_RESOLVE_TIMEOUT_MS in @/lib/http/external-http (node:dns), and this file is
+// imported by Client Components — so those values must NOT be pulled in here or
+// Next.js fails to bundle node:dns into a client chunk. The worker reads its
+// batch size directly from that server-only module; AUDIT_OUTBOX below stays
+// client-safe (envInt only).
 
 export const AUDIT_OUTBOX = {
   BATCH_SIZE: envInt("OUTBOX_BATCH_SIZE", 500),
   POLL_INTERVAL_MS: envInt("OUTBOX_POLL_INTERVAL_MS", MS_PER_SECOND),
-  PROCESSING_TIMEOUT_MS: OUTBOX_PROCESSING_TIMEOUT_MS,
+  PROCESSING_TIMEOUT_MS: envInt("OUTBOX_PROCESSING_TIMEOUT_MS", 5 * MS_PER_MINUTE),
   MAX_ATTEMPTS: envInt("OUTBOX_MAX_ATTEMPTS", 8),
   RETENTION_HOURS: envInt("OUTBOX_RETENTION_HOURS", 24),
   FAILED_RETENTION_DAYS: envInt("OUTBOX_FAILED_RETENTION_DAYS", 90),
@@ -887,9 +870,6 @@ export const AUDIT_OUTBOX = {
   REAPER_INTERVAL_MS: envInt("OUTBOX_REAPER_INTERVAL_MS", 30 * MS_PER_SECOND),
   REAP_BATCH_SIZE: 1000,
   PURGE_BATCH_SIZE: 1000,
-  // Small bounded batch for the durable webhook delivery loop — see
-  // WEBHOOK_DELIVERY_BATCH_SIZE (lease-vs-delivery-time alignment).
-  WEBHOOK_DELIVERY_BATCH_SIZE,
 } as const;
 
 export const OUTBOX_BYPASS_AUDIT_ACTIONS: ReadonlySet<string> = new Set([

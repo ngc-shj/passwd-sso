@@ -81,5 +81,5 @@ src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/a
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
 src/workers/audit-anchor-publisher.ts # bypass_rls GUC set + anchor row lock/read for chain anchor publishing
-src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params throughout
+src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params, one code-controlled table-name ident (webhook health atomic increment) # ident-markers=1
 src/workers/retention-gc-worker/sweep.ts # batch-bounded DELETE/SELECT sweeps over registry-declared tables/columns # ident-markers=4

@@ -1090,4 +1090,132 @@ describe("webhook delivery — durable pipeline (real DB + real delivery core)",
     expect(auditRows.length).toBeGreaterThanOrEqual(1);
     expect(auditRows.every((r) => r.scope === "TEAM" && r.team_id === teamId)).toBe(true);
   }, 20000);
+
+  // ── F1-runtime (parallelism, not just the math): processWebhookDeliveryBatch
+  // now processes claimed work items in PARALLEL chunks of
+  // WEBHOOK_DELIVERY_CONCURRENCY (Promise.allSettled), not one-at-a-time. A slow
+  // mock server records the MAX simultaneous in-flight requests; with the serial
+  // for-loop this would be exactly 1. Enqueue 3 distinct TENANT outbox rows (→ 3
+  // separate webhook_deliveries work items), all resolving the same single
+  // tenant webhook that POSTs to the slow server, run ONE batch, and assert the
+  // observed max in-flight is >= 2 — a serial regression fails this.
+  it("F1-runtime: work items are delivered concurrently, not serially", async () => {
+    // Slow, in-flight-tracking handler (rewires the beforeEach mock server).
+    let inFlight = 0;
+    let maxInFlight = 0;
+    server.removeAllListeners("request");
+    server.on("request", (req, res) => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      req.on("data", () => {});
+      req.on("end", () => {
+        setTimeout(() => {
+          received.push({ headers: req.headers, body: "" });
+          inFlight--;
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        }, 250);
+      });
+    });
+
+    await createTenantWebhook(ctx, {
+      tenantId,
+      url: mockUrl(),
+      events: [AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE],
+    });
+
+    // Three DISTINCT outbox rows → three separate webhook_deliveries work items
+    // (one per outboxId). All resolve the same single tenant webhook.
+    const deliveryIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const payload = makeOutboxPayload({}, userId);
+      const row = await enqueueOutboxRow(ctx, tenantId, payload);
+      const res = await deliverRowWithChain(ctx.su.prisma, row, payload);
+      expect(res.inserted).toBe(true);
+      const deliveries = await readWebhookDeliveryRowsByOutboxId(ctx, row.id);
+      expect(deliveries).toHaveLength(1);
+      deliveryIds.push(deliveries[0].id);
+    }
+
+    // Park all three far-future so the bg docker worker can't steal any, then
+    // unpark all so a single in-process batch claims the whole set at once.
+    for (const id of deliveryIds) await parkDeliveryRow(ctx, id, 3600);
+    for (const id of deliveryIds) await unparkDeliveryRow(ctx, id);
+
+    const claimed = await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
+    expect(claimed).toBe(3);
+
+    // The core assertion: at least 2 requests were in flight simultaneously.
+    // WEBHOOK_DELIVERY_CONCURRENCY=4 > 3, so all three overlap; a serial
+    // for-loop would cap maxInFlight at 1 and this fails.
+    expect(maxInFlight).toBeGreaterThanOrEqual(2);
+    expect(received).toHaveLength(3);
+
+    // All three work items reached SENT.
+    const statuses = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ status: string }[]>(
+        `SELECT status FROM webhook_deliveries WHERE id = ANY($1::uuid[])`,
+        deliveryIds,
+      );
+    });
+    expect(statuses).toHaveLength(3);
+    expect(statuses.every((s) => s.status === "SENT")).toBe(true);
+  }, 20000);
+
+  // ── R2c (atomic fail_count, no lost update): N work items for the SAME webhook
+  // fail concurrently (parallel chunk). onWebhookDeliveryFailure now increments
+  // fail_count atomically IN the UPDATE (fail_count = fail_count + 1 RETURNING),
+  // so each of the N racing failures counts. The OLD absolute-snapshot write had
+  // every concurrent failure read the same failCount and write the same value →
+  // lost update, under-count, delayed auto-disable. Assert fail_count == N.
+  it("R2c: concurrent failures increment fail_count atomically (no lost update)", async () => {
+    // 500-mock so deliverWithRetry exhausts → onFailure fires (same as F5).
+    server.removeAllListeners("request");
+    server.on("request", (req, res) => {
+      req.on("data", () => {});
+      req.on("end", () => {
+        received.push({ headers: req.headers, body: "" });
+        res.writeHead(500);
+        res.end("nope");
+      });
+    });
+
+    const N = 3;
+    const webhookId = await createTenantWebhook(ctx, {
+      tenantId,
+      url: mockUrl(),
+      events: [AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE],
+    });
+
+    // N DISTINCT outbox rows → N webhook_deliveries work items, all resolving the
+    // SAME single webhook. WEBHOOK_DELIVERY_CONCURRENCY (=4) > N, so all N run in
+    // one parallel chunk and their fail_count increments race.
+    const deliveryIds: string[] = [];
+    for (let i = 0; i < N; i++) {
+      const payload = makeOutboxPayload({}, userId);
+      const row = await enqueueOutboxRow(ctx, tenantId, payload);
+      const res = await deliverRowWithChain(ctx.su.prisma, row, payload);
+      expect(res.inserted).toBe(true);
+      const deliveries = await readWebhookDeliveryRowsByOutboxId(ctx, row.id);
+      expect(deliveries).toHaveLength(1);
+      deliveryIds.push(deliveries[0].id);
+    }
+
+    for (const id of deliveryIds) await parkDeliveryRow(ctx, id, 3600);
+    for (const id of deliveryIds) await unparkDeliveryRow(ctx, id);
+    await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
+
+    // Every retry-exhausted failure incremented fail_count atomically → exactly N.
+    // The old absolute-snapshot write would under-count here (lost update).
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ fail_count: number }[]>(
+        `SELECT fail_count FROM tenant_webhooks WHERE id = $1::uuid`,
+        webhookId,
+      );
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].fail_count).toBe(N);
+  }, 30000);
 });

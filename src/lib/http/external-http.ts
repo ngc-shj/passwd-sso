@@ -85,6 +85,35 @@ export function isPrivateIp(ip: string): boolean {
   return BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr));
 }
 
+/** Per-call DNS resolution deadline (see withDnsTimeout). */
+export const DNS_RESOLVE_TIMEOUT_MS = 5 * MS_PER_SECOND;
+
+/**
+ * Race a DNS resolution against a hard deadline. node:dns/promises resolve4/
+ * resolve6 have no built-in per-call timeout, so a slow or hung resolver can
+ * block indefinitely and blow any wall-clock budget the caller assumed. The
+ * timer is cleared on settle so it never keeps the event loop alive. A no-op
+ * catch is attached so an orphaned resolver that rejects AFTER the timeout wins
+ * does not surface as an unhandledRejection.
+ */
+async function withDnsTimeout<T>(p: Promise<T>, hostname: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  p.catch(() => {});
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`DNS resolution timed out: ${hostname}`)),
+          DNS_RESOLVE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /**
  * Resolve hostname and reject private/reserved IPs to prevent SSRF.
  * Returns the list of validated public IPs for use in IP pinning.
@@ -130,9 +159,27 @@ export async function resolveAndValidateIps(url: string): Promise<string[]> {
     throw new Error(`Malformed IP literal rejected: ${hostname}`);
   }
 
+  // Bound DNS resolution so a slow/hung resolver cannot extend the caller's
+  // wall-clock past its own timeout budget. Node's resolve4/resolve6 have no
+  // built-in per-call deadline; without this cap the webhook delivery worker's
+  // per-item worst-case model (fetch timeout + backoffs) would understate the
+  // real time an item can hold its claim lease, risking a reaper re-claim +
+  // duplicate delivery. Applies to every external-HTTP caller (SSRF defense).
+  //
+  // A and AAAA run CONCURRENTLY, each under its OWN DNS_RESOLVE_TIMEOUT_MS
+  // deadline, then awaited together with allSettled. The total wall-clock ceiling
+  // is ~DNS_RESOLVE_TIMEOUT_MS (not 2×, since they overlap), AND a family that
+  // resolves fast is USED even if the other family hangs to its own timeout — a
+  // single shared timeout around the pair would discard the good result when
+  // either family hangs. Each family's failure (no records OR timeout) is
+  // independently swallowed; only when BOTH yield nothing do we fail closed.
   const ips: string[] = [];
-  try { ips.push(...await resolve4(hostname)); } catch { /* no A records */ }
-  try { ips.push(...await resolve6(hostname)); } catch { /* no AAAA records */ }
+  const [v4, v6] = await Promise.allSettled([
+    withDnsTimeout(resolve4(hostname), hostname),
+    withDnsTimeout(resolve6(hostname), hostname),
+  ]);
+  if (v4.status === "fulfilled") ips.push(...v4.value);
+  if (v6.status === "fulfilled") ips.push(...v6.value);
 
   if (ips.length === 0) throw new Error(`DNS resolution failed: ${hostname}`);
 

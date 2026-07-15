@@ -145,3 +145,83 @@ longer appeared in the team audit view (the app dispatcher logged them as TEAM/t
 
 All R2 fixes verified: typecheck/lint clean, migration applied to dev DB (drift clean),
 grant + worker unit + webhook integration suites green.
+
+### Review round 2b — F1 correction (re-review of the R2 fix)
+
+A re-review of the R2 fixes found the F1 batch-size model was **wrong**: the formula
+multiplied by `WEBHOOK_CONCURRENCY` (=5) on the assumption that work items processed in
+parallel, but the delivery loop was a plain serial `for…await`. `WEBHOOK_CONCURRENCY` only
+parallelizes subscribers *within* one work item, not across items — so a batch of 20 would
+run serially for 20 × 36s = 720s, far past the 300s lease: the exact lease-expiry the fix was
+meant to close.
+- **FIXED (genuinely parallel, per user direction)**: `processWebhookDeliveryBatch` now
+  processes work items in parallel chunks of a new `WEBHOOK_DELIVERY_CONCURRENCY` (=4,
+  distinct from the subscriber-level `WEBHOOK_CONCURRENCY`) via `Promise.allSettled`. The
+  batch formula is corrected to `WEBHOOK_DELIVERY_CONCURRENCY × floor(TIMEOUT/2 /
+  worstCasePerItem)` so the serial depth `ceil(batch/concurrency) × worstCasePerItem` (=2 ×
+  51s = 102s) stays under half the lease. The F1 unit test now checks the real parallel model
+  (÷WEBHOOK_DELIVERY_CONCURRENCY, ≤ TIMEOUT/2), and a new integration test proves work items
+  run concurrently at runtime (peak in-flight ≥ 2 against a slow mock server — fails if the
+  loop regresses to serial). Modified: src/lib/constants/audit/audit.ts,
+  src/lib/validations/common.server.ts, src/workers/audit-outbox-worker.ts + tests.
+
+### Review round 2c — consequences of the parallelization
+
+A re-review of the parallelization found 3 more issues, all fixed:
+- **[Medium] fail_count lost update** — with items now parallel, concurrent failures for the
+  SAME webhook each read the snapshot failCount and wrote the same absolute value → the count
+  under-recorded and auto-disable was delayed up to ~4×. FIXED: `onWebhookDeliveryFailure`
+  increments atomically in SQL (`fail_count = fail_count + 1`, `is_active` derived from the
+  post-increment value via CASE, `RETURNING fail_count`). A concurrency integration test
+  asserts `fail_count === N` for N racing failures (mutation-verified: the old absolute write
+  fails it).
+- **[Medium] lease vs. configurable timeout + unbounded DNS** — `OUTBOX_PROCESSING_TIMEOUT_MS`
+  is operator-configurable down to 10s, below the per-item worst case, so the `Math.max(1,…)`
+  floor would still claim one item that outlives the lease; AND the per-item worst-case model
+  excluded DNS resolution (`resolve4`/`resolve6` have no built-in timeout), so even a "safe"
+  timeout hid unbounded slack. FIXED: (a) `resolveAndValidateIps` now bounds each DNS lookup
+  with `DNS_RESOLVE_TIMEOUT_MS` (5s) via `Promise.race` (applies to all external-HTTP SSRF
+  callers), and `WEBHOOK_WORST_CASE_PER_ITEM_MS` folds the DNS budget in
+  (`MAX_RETRIES × (DNS + fetch) + backoffs` = 51s), making the lease bound a real ceiling
+  (batch 8, chunks 2, 102s ≤ 150s); (b) `validateWebhookDeliveryLease()` fails the worker
+  closed at startup when `TIMEOUT/2 < worstCasePerItem` (a 10s timeout is now rejected).
+  Both unit-tested (DNS-hang timeout test with fake timers; guard boundary test).
+- **[Low] doc/comment drift** — corrected the concurrency/batch numbers (4/16) in the
+  deviation log, this doc, and the runtime-test comment.
+- The atomic UPDATE interpolates a code-controlled table name (`isTeam ? "team_webhooks" :
+  "tenant_webhooks"`); a `// raw-sql-ident:` marker + `ident-markers=1` in raw-sql-usage.txt
+  satisfy the CI raw-SQL guard.
+
+Final round-3 re-review (11 correctness points) confirmed all fixes correct, zero findings.
+
+### Review round 2d — build regression + DNS model correction
+
+A re-review of the DNS/lease work found:
+- **[High] production build broken** — folding `DNS_RESOLVE_TIMEOUT_MS` into the lease
+  computation made `audit.ts` transitively import `node:dns` (via external-http); `audit.ts`
+  is imported by Client Components, so `next build` failed ("chunking context does not support
+  external modules: node:dns/promises"). FIXED: moved `WEBHOOK_DELIVERY_BATCH_SIZE`,
+  `WEBHOOK_WORST_CASE_PER_ITEM_MS`, `validateWebhookDeliveryLease` to a server-only sibling
+  `webhook-delivery-lease.server.ts`; `audit.ts` no longer imports external-http. Build now
+  compiles. (Process note: `vitest`/`tsc` do not catch this — only `next build` does; the
+  pre-pr Build step is the gate.)
+- **[Medium] DNS worst-case halved** — A and AAAA lookups ran serially (each 5s = 10s/attempt)
+  but the model counted 5s. FIXED: A/AAAA now run concurrently under ONE 5s deadline, so the
+  per-attempt DNS ceiling is genuinely 5s and the 51s per-item model is accurate.
+- **[Low] guard not directly tested / [Low] stale =5 comment** — `validateWebhookDeliveryLease`
+  is now pure over a `timeoutMs` argument; tests assert the reject/accept boundary directly
+  (rejects 10s and just-below-2×worstCase, accepts exactly 2×worstCase). The =5 comment fixed to =4.
+
+### Review round 2e — DNS availability + env-validation guard
+
+- **[Medium] one-family DNS availability** — the parallel DNS form wrapped ONE timeout around
+  `Promise.allSettled([resolve4, resolve6])`, so a fast A record was discarded if AAAA hung to
+  the deadline (→ `DNS resolution failed`). FIXED: each lookup gets its OWN `withDnsTimeout`,
+  then allSettled — total ceiling stays ~5s, a resolved family survives the other's hang, and
+  the private-IP check still runs on every collected IP (SSRF intact). Test: `a fast A record is
+  USED even when AAAA hangs`.
+- **[Low] --validate-env-only bypassed the lease guard** — the guard ran at `worker.start()`,
+  but the env-check path exits before start(), so a 10s timeout passed config validation. FIXED:
+  the entry script validates the parsed timeout right after Zod parse (before the exit); both
+  the env-check and normal startup now reject it. start()'s own guard is kept for programmatic
+  callers. Test: `exits 1 with a lease error when OUTBOX_PROCESSING_TIMEOUT_MS is too small`.

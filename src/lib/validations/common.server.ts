@@ -97,6 +97,27 @@ export const WEBHOOK_MAX_RETRIES = 3;
 export const WEBHOOK_FETCH_TIMEOUT_MS = 10 * MS_PER_SECOND;
 /** Backoff between webhook delivery retry attempts (index = attempt just failed). */
 export const WEBHOOK_RETRY_DELAYS_MS = [1 * MS_PER_SECOND, 5 * MS_PER_SECOND, 25 * MS_PER_SECOND];
+/**
+ * How many webhook_deliveries WORK ITEMS the durable delivery worker processes
+ * concurrently per batch (distinct from WEBHOOK_CONCURRENCY, which parallelizes
+ * the subscribers WITHIN a single work item).
+ *
+ * Pool interaction: peak connection DEMAND is WEBHOOK_DELIVERY_CONCURRENCY ×
+ * WEBHOOK_CONCURRENCY (= 4 × 5 = 20) — each item fans out up to WEBHOOK_CONCURRENCY
+ * subscribers in parallel, each opening its own short onSuccess/onFailure
+ * transaction — which EXCEEDS the worker pg pool size (max: 5). This is safe, but
+ * NOT because demand fits the pool: it is safe because every one of those
+ * transactions is a short leaf (no async chain ever holds two connections at
+ * once), so excess acquisitions queue briefly and drain, and the slow HTTP fetch
+ * holds no connection at all. The lease bound (WEBHOOK_DELIVERY_BATCH_SIZE) is
+ * dominated by that connection-less fetch wall-clock, so pool queueing does not
+ * push it past the PROCESSING timeout. connectionTimeoutMillis on the pool turns
+ * a genuine future hold-and-wait (e.g. a nested transaction added inside a
+ * callback, or a raised concurrency constant) into a surfaced error instead of a
+ * silent hang — revisit this reasoning if either concurrency constant or the
+ * callback transaction shape changes.
+ */
+export const WEBHOOK_DELIVERY_CONCURRENCY = 4;
 /** Consecutive delivery failures after which a webhook is auto-disabled. */
 export const WEBHOOK_AUTO_DISABLE_THRESHOLD = 10;
 
