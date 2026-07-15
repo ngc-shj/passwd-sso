@@ -42,28 +42,54 @@ function sh(cmd) {
 
 // Build a CA + one leaf p12 (`tlsLeaf<label>.p12`) into `dir`.
 //   validity: "valid"   → leaf valid for 400 days (past the guard's 30d window)
-//             "expired" → leaf with past, correctly-ordered not_before/not_after
+//             "expired" → leaf with a past validity window (both dates in the past)
+//
+// The expired leaf is signed with `openssl ca -startdate/-enddate` rather than
+// `openssl x509 -req -not_before/-not_after`: the latter flags only exist on
+// OpenSSL 3.2+, but ubuntu-latest CI ships 3.0.x, so `x509 -req` there errors
+// out. `openssl ca` with explicit start/end dates has been supported for far
+// longer and works on both — a real dev/CI env-parity difference (R16).
 function makeLeafFixture(label, validity) {
   const p12 = join(dir, `tlsLeaf${label}.p12`);
-  const signSpec =
-    validity === "expired"
-      ? `-not_before 20200101000000Z -not_after 20200201000000Z`
-      : `-days 400`;
-  sh(
-    [
-      `cd "${dir}"`,
-      `openssl ecparam -name prime256v1 -genkey -noout -out ca.key`,
-      `openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=Test CA" -out ca.crt`,
-      `openssl ecparam -name prime256v1 -genkey -noout -out leaf.key`,
-      `openssl req -new -key leaf.key -subj "/CN=localhost" -out leaf.csr`,
+
+  const common = [
+    `cd "${dir}"`,
+    `openssl ecparam -name prime256v1 -genkey -noout -out ca.key`,
+    `openssl req -x509 -new -key ca.key -sha256 -days 3650 -subj "/CN=Test CA" -out ca.crt`,
+    `openssl ecparam -name prime256v1 -genkey -noout -out leaf.key`,
+    `openssl req -new -key leaf.key -subj "/CN=localhost" -out leaf.csr`,
+  ];
+
+  let sign;
+  if (validity === "expired") {
+    // Minimal `openssl ca` state so -startdate/-enddate can sign a leaf whose
+    // whole validity window is in the past (deterministic — no clock freezing).
+    sign = [
+      `printf '%s\\n' ` +
+        `'[ca]' 'default_ca=CA_default' ` +
+        `'[CA_default]' 'new_certs_dir=.' 'database=index.txt' 'serial=serial' 'default_md=sha256' 'policy=pol' ` +
+        `'[pol]' 'commonName=supplied' > ca.cnf`,
+      `: > index.txt`,
+      `echo 01 > serial`,
+      `openssl ca -batch -config ca.cnf -cert ca.crt -keyfile ca.key ` +
+        `-startdate 20200101000000Z -enddate 20200201000000Z ` +
+        `-in leaf.csr -out leaf.crt -notext`,
+    ];
+  } else {
+    sign = [
       `openssl x509 -req -in leaf.csr -CA ca.crt -CAkey ca.key -CAcreateserial ` +
-        `${signSpec} -sha256 -out leaf.crt`,
-      `openssl pkcs12 -export -inkey leaf.key -in leaf.crt -certfile ca.crt ` +
-        `-name "leaf${label}" -passout pass:${PASS} -legacy -out "${p12}"`,
-      `rm -f "${dir}/ca.key" "${dir}/ca.crt" "${dir}/leaf.key" "${dir}/leaf.csr" ` +
-        `"${dir}/leaf.crt" "${dir}"/*.srl`,
-    ].join(" && "),
-  );
+        `-days 400 -sha256 -out leaf.crt`,
+    ];
+  }
+
+  const pack = [
+    `openssl pkcs12 -export -inkey leaf.key -in leaf.crt -certfile ca.crt ` +
+      `-name "leaf${label}" -passout pass:${PASS} -legacy -out "${p12}"`,
+    `rm -f "${dir}/ca.key" "${dir}/ca.crt" "${dir}/leaf.key" "${dir}/leaf.csr" ` +
+      `"${dir}/leaf.crt" "${dir}/ca.cnf" "${dir}/index.txt"* "${dir}/serial"* "${dir}"/*.srl "${dir}"/*.pem`,
+  ];
+
+  sh([...common, ...sign, ...pack].join(" && "));
 }
 
 function run(extraEnv = {}) {
