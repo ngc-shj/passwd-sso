@@ -59,6 +59,7 @@ Every remaining Prisma model, i.e. models with no row in the registry above. The
 | `AuditOutbox` | `audit_outbox` |
 | `AuditDeliveryTarget` | `audit_delivery_targets` |
 | `AuditDelivery` | `audit_deliveries` |
+| `WebhookDelivery` | `webhook_deliveries` |
 | `Attachment` | `attachments` |
 | `Folder` | `folders` |
 | `TeamFolder` | `team_folders` |

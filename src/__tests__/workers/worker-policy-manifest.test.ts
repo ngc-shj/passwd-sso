@@ -604,9 +604,9 @@ describe("worker-policy-manifest.json parity", () => {
       .split("\n")
       .filter((line) => line.includes("maxAttempts") && line.includes("@map(\"max_attempts\")"));
 
-    if (maxAttemptsLines.length !== 2) {
+    if (maxAttemptsLines.length !== 3) {
       violations.push(
-        `prisma/schema.prisma: expected exactly 2 maxAttempts lines (AuditOutbox, AuditDelivery), found ${maxAttemptsLines.length}`,
+        `prisma/schema.prisma: expected exactly 3 maxAttempts lines (AuditOutbox, AuditDelivery, WebhookDelivery), found ${maxAttemptsLines.length}`,
       );
     }
     for (const line of maxAttemptsLines) {

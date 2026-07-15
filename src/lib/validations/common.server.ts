@@ -93,6 +93,8 @@ export const RATE_LIMIT_MAP_MAX_SIZE = 10_000;
 
 // ─── Webhook Dispatcher ─────────────────────────────────────
 export const WEBHOOK_MAX_RETRIES = 3;
+/** Consecutive delivery failures after which a webhook is auto-disabled. */
+export const WEBHOOK_AUTO_DISABLE_THRESHOLD = 10;
 
 // ─── Folder Depth ───────────────────────────────────────────
 export const MAX_FOLDER_DEPTH = 5;

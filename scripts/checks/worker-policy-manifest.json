@@ -27,7 +27,8 @@
       "poisonMessageHandling": "Rows at/over max_attempts are marked FAILED and an AUDIT_OUTBOX_DEAD_LETTER event is written directly to audit_logs (bypassing the outbox, to avoid recursion) via writeDirectAuditLog (audit-outbox-worker.ts:397-434,490-497); reapStuckRows separately reaps PROCESSING rows stuck past PROCESSING_TIMEOUT_MS, dead-lettering those already at max_attempts (audit-outbox-worker.ts:775-831).",
       "retentionPolicyTouched": [
         "audit_outbox",
-        "audit_deliveries"
+        "audit_deliveries",
+        "webhook_deliveries"
       ],
       "sweepBounds": {
         "value": true,

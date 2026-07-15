@@ -17,7 +17,7 @@ import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
+import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import {
@@ -59,7 +59,7 @@ export type WebhookEvent = TeamWebhookEvent;
 
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
 
-interface WebhookRecord {
+export interface WebhookRecord {
   id: string;
   url: string;
   secretEncrypted: string;
@@ -228,11 +228,15 @@ async function deliverSingleWebhook(
 }
 
 /**
- * Shared delivery loop for both team and tenant webhooks.
- * Decrypts HMAC secret, computes signature, delivers with retry.
- * Processes up to WEBHOOK_CONCURRENCY webhooks in parallel per chunk.
+ * Shared delivery loop for both team and tenant webhooks — the pure delivery
+ * core. Decrypts each HMAC secret, computes the dual signatures, delivers with
+ * SSRF-pinned retry, and invokes onSuccess/onFailure per webhook. Holds no
+ * prisma/singleton dependency: the caller injects the persistence closures, so
+ * the audit-outbox worker can drive it under its own worker prisma + bypass
+ * GUCs (see processWebhookDeliveryBatch). Processes up to WEBHOOK_CONCURRENCY
+ * webhooks in parallel per chunk.
  */
-async function dispatchToWebhooks(
+export async function deliverToWebhookRecords(
   webhooks: WebhookRecord[],
   payload: string,
   timestamp: string,
@@ -289,7 +293,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
     };
     const payload = JSON.stringify(sanitizedEvent);
 
-    await dispatchToWebhooks(
+    await deliverToWebhookRecords(
       webhooks,
       payload,
       event.timestamp,
@@ -313,7 +317,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               failCount: newFailCount,
               lastFailedAt: new Date(),
               lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
-              isActive: newFailCount >= 10 ? false : undefined,
+              isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
             },
           });
         }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
@@ -376,7 +380,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
     };
     const payload = JSON.stringify(sanitizedEvent);
 
-    await dispatchToWebhooks(
+    await deliverToWebhookRecords(
       webhooks,
       payload,
       event.timestamp,
@@ -400,7 +404,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               failCount: newFailCount,
               lastFailedAt: new Date(),
               lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
-              isActive: newFailCount >= 10 ? false : undefined,
+              isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
             },
           });
         }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);

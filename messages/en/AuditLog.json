@@ -258,6 +258,7 @@
   "SECURITY_RECORD_RETENTION_PURGED": "Expired security record purged after recording its provenance (system worker)",
   "AUDIT_DELIVERY_FAILED": "Audit delivery failed",
   "AUDIT_DELIVERY_DEAD_LETTER": "Audit delivery dead-lettered",
+  "AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER": "Webhook delivery dead-lettered",
   "AUDIT_ANCHOR_PUBLISHED": "Audit anchor manifest published",
   "AUDIT_ANCHOR_PUBLISH_FAILED": "Audit anchor publication failed",
   "AUDIT_ANCHOR_PUBLISH_PAUSED": "Audit anchor publication paused",

@@ -19,8 +19,17 @@ import { MS_PER_DAY, MS_PER_HOUR, MS_PER_SECOND } from "@/lib/constants/time";
 import { WORKER_POOL_IDLE_TIMEOUT_MS, WORKER_POOL_STATEMENT_TIMEOUT_MS } from "@/workers/worker-pool-config";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
-import { sanitizeErrorForStorage } from "@/lib/http/external-http";
+import { sanitizeErrorForStorage, sanitizeForExternalDelivery } from "@/lib/http/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit/audit-chain";
+// NOTE: @/lib/webhook-dispatcher is imported LAZILY inside processOneWebhookDelivery
+// (not at module scope) — it transitively pulls in the @/lib/prisma singleton,
+// which throws at import time when DATABASE_URL is unset. Eager-importing it here
+// would break the entry script's `--validate-env-only` path (the Zod env error
+// must surface before any prisma init). `type WebhookRecord` is a type-only import
+// (erased at compile time, no runtime module load).
+import type { WebhookRecord } from "@/lib/webhook-dispatcher";
+import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD } from "@/lib/validations/common.server";
+import { maskUrlForDisplay } from "@/lib/url/url-validation";
 
 export interface AuditOutboxRow {
   id: string;
@@ -114,19 +123,92 @@ async function claimBatch(
   });
 }
 
-async function deliverRow(
-  prisma: PrismaClient,
+/**
+ * Enqueue exactly one webhook delivery work item for this outbox row, inside
+ * the caller's winning audit tx (the tx MUST have already run setBypassRlsGucs).
+ * Called only by the ON CONFLICT winner of the audit_logs INSERT, so the row is
+ * enqueued atomically with the audit event: a crash before commit rolls back
+ * both; a crash after commit leaves a durable PENDING row the delivery loop
+ * re-runs.
+ *
+ * Scope maps to the current dispatchWebhookForRow semantics: TEAM+teamId → one
+ * TEAM item, TENANT → one TENANT item, PERSONAL → nothing. Suppressed actions
+ * (operational/dead-letter events) enqueue nothing. Subscriber resolution and
+ * the events filter happen later, at delivery time, against the live webhook
+ * tables — so this is a cheap single INSERT keyed only on the outbox row.
+ *
+ * `ON CONFLICT (outbox_id, scope, team_id) DO NOTHING` is defense-in-depth
+ * against a reaper double-claim; in the normal path the audit_logs ON CONFLICT
+ * winner is the only caller, so this never conflicts.
+ */
+async function enqueueWebhookDeliveryInTx(
+  tx: Prisma.TransactionClient,
   row: AuditOutboxRow,
   payload: AuditOutboxPayload,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  if (
+    OUTBOX_BYPASS_AUDIT_ACTIONS.has(payload.action) ||
+    WEBHOOK_DISPATCH_SUPPRESS.has(payload.action)
+  ) {
+    return;
+  }
+
+  let scope: "TENANT" | "TEAM";
+  let teamId: string | null;
+  if (payload.scope === AUDIT_SCOPE.TEAM && payload.teamId) {
+    scope = "TEAM";
+    teamId = payload.teamId;
+  } else if (payload.scope === AUDIT_SCOPE.TENANT) {
+    scope = "TENANT";
+    teamId = null;
+  } else {
+    // PERSONAL (or TEAM with no teamId) — never dispatched to webhooks.
+    return;
+  }
+
+  await tx.$executeRawUnsafe(
+    `INSERT INTO webhook_deliveries (
+      id, outbox_id, tenant_id, scope, team_id, action, status, next_retry_at, created_at
+    ) VALUES (
+      gen_random_uuid(),
+      $1::uuid,
+      $2::uuid,
+      $3::"WebhookDeliveryScope",
+      $4::uuid,
+      $5,
+      'PENDING',
+      now(),
+      now()
+    )
+    ON CONFLICT (outbox_id, scope, team_id) DO NOTHING`,
+    row.id,
+    row.tenant_id,
+    scope,
+    teamId,
+    payload.action,
+  );
+}
+
+/**
+ * Returns `inserted: true` when the audit_logs INSERT won the ON CONFLICT race
+ * (false when a concurrent/reaper re-delivery already inserted this outbox
+ * row's audit log). The outbox row is marked SENT regardless. Callers that
+ * need the prior void semantics can ignore the return; the webhook enqueue is
+ * gated on `inserted` INSIDE this tx so only the winner enqueues.
+ */
+export async function deliverRow(
+  prisma: PrismaClient,
+  row: AuditOutboxRow,
+  payload: AuditOutboxPayload,
+): Promise<{ inserted: boolean }> {
+  return prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
 
     const metadataJson =
       payload.metadata !== null ? JSON.stringify(payload.metadata) : null;
     const createdAtIso = row.created_at.toISOString();
 
-    await tx.$executeRawUnsafe(
+    const inserted = await tx.$queryRawUnsafe<{ id: string }[]>(
       `INSERT INTO audit_logs (
         id, tenant_id, scope, action, user_id, actor_type,
         service_account_id, team_id, target_type, target_id,
@@ -148,7 +230,8 @@ async function deliverRow(
         $13::timestamptz,
         $14::uuid
       )
-      ON CONFLICT (outbox_id) DO NOTHING`,
+      ON CONFLICT (outbox_id) DO NOTHING
+      RETURNING id`,
       row.tenant_id,
       payload.scope,
       payload.action,
@@ -165,6 +248,13 @@ async function deliverRow(
       row.id,
     );
 
+    // Only the ON CONFLICT winner enqueues the webhook delivery — atomic with
+    // the audit_logs INSERT. A reaper re-delivery (inserted.length === 0) must
+    // not re-enqueue (the original work item already exists / was processed).
+    if (inserted.length > 0) {
+      await enqueueWebhookDeliveryInTx(tx, row, payload);
+    }
+
     await tx.$executeRawUnsafe(
       `UPDATE audit_outbox
        SET status = 'SENT',
@@ -173,6 +263,8 @@ async function deliverRow(
        WHERE id = $1`,
       row.id,
     );
+
+    return { inserted: inserted.length > 0 };
   });
 }
 
@@ -349,6 +441,8 @@ export async function deliverRowWithChain(
         eventHash,
         row.tenant_id,
       );
+      // Enqueue the webhook delivery in the same winning tx (INV-W2).
+      await enqueueWebhookDeliveryInTx(tx, row, payload);
     }
 
     // Unconditionally mark outbox row as SENT
@@ -745,41 +839,333 @@ async function recordDeliveryError(
   }
 }
 
-async function dispatchWebhookForRow(
-  payload: AuditOutboxPayload,
-  tenantId: string,
-): Promise<void> {
-  if (OUTBOX_BYPASS_AUDIT_ACTIONS.has(payload.action)) {
-    return;
-  }
-  if (WEBHOOK_DISPATCH_SUPPRESS.has(payload.action)) {
-    return;
-  }
-  try {
-    const { dispatchWebhook, dispatchTenantWebhook } = await import(
-      "@/lib/webhook-dispatcher"
+// ─── Webhook delivery (durable) ─────────────────────────────────
+
+interface WebhookDeliveryRow {
+  id: string;
+  outbox_id: string;
+  tenant_id: string;
+  scope: string;
+  team_id: string | null;
+  action: string;
+  attempt_count: number;
+  max_attempts: number;
+}
+
+/**
+ * Claim and process a batch of pending webhook_deliveries work items.
+ * Sibling of processDeliveryBatch — same FOR UPDATE SKIP LOCKED claim, but the
+ * fan-out resolves the LIVE tenant_webhooks/team_webhooks subscribers whose
+ * `events` includes the row's action (delivery-time semantics: an event that
+ * lost its subscription between enqueue and delivery is not delivered), and
+ * delivers via the extracted webhook-dispatcher core under the worker prisma.
+ * The work item is marked SENT once the fan-out pass completes; individual
+ * per-webhook HTTP failures stay on the per-webhook failCount + in-worker
+ * deliverWithRetry (no re-notify of already-succeeded webhooks). Returns the
+ * number of work items claimed.
+ */
+export async function processWebhookDeliveryBatch(
+  prisma: PrismaClient,
+  batchSize: number,
+): Promise<number> {
+  const claimed = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$queryRawUnsafe<WebhookDeliveryRow[]>(
+      `UPDATE webhook_deliveries
+       SET status = 'PROCESSING',
+           processing_started_at = now()
+       WHERE id IN (
+         SELECT id FROM webhook_deliveries
+         WHERE status = 'PENDING'
+           AND next_retry_at <= now()
+         ORDER BY next_retry_at ASC
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       AND status = 'PENDING'
+       RETURNING id, outbox_id, tenant_id, scope::text AS scope,
+                 team_id, action, attempt_count, max_attempts`,
+      batchSize,
     );
-    const timestamp = new Date().toISOString();
-    const webhookData = (payload.metadata ?? {}) as Record<string, unknown>;
-    if (payload.scope === AUDIT_SCOPE.TEAM && payload.teamId) {
-      void dispatchWebhook({
-        type: payload.action,
-        teamId: payload.teamId,
+  });
+
+  if (claimed.length === 0) return 0;
+
+  for (const item of claimed) {
+    await processOneWebhookDelivery(prisma, item);
+  }
+
+  return claimed.length;
+}
+
+async function processOneWebhookDelivery(
+  workerPrisma: PrismaClient,
+  item: WebhookDeliveryRow,
+): Promise<void> {
+  try {
+    // Fetch the outbox payload for the delivery body. If the outbox row was
+    // purged (event predates retention), mark SENT + log — there is nothing
+    // left to deliver, and the outbox-purge guard only allows this once no
+    // PENDING/PROCESSING webhook delivery references the row.
+    const outbox = await workerPrisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      const rows = await tx.$queryRawUnsafe<
+        { created_at: Date; payload: unknown }[]
+      >(
+        `SELECT created_at, payload FROM audit_outbox WHERE id = $1::uuid`,
+        item.outbox_id,
+      );
+      return rows[0] ?? null;
+    });
+
+    if (!outbox) {
+      getLogger().warn(
+        { deliveryId: item.id, outboxId: item.outbox_id },
+        "webhook_delivery.outbox_purged",
+      );
+      await markWebhookDeliverySent(workerPrisma, item.id);
+      return;
+    }
+
+    // Resolve the LIVE subscribers whose events filter includes this action.
+    const webhooks = await resolveWebhookSubscribers(workerPrisma, item);
+
+    if (webhooks.length > 0) {
+      const outboxPayload = (outbox.payload ?? {}) as Record<string, unknown>;
+      const webhookData = (outboxPayload.metadata ?? {}) as Record<
+        string,
+        unknown
+      >;
+      // Dispatch-time timestamp (NOT outbox.created_at): it is fed to the
+      // Stripe-style X-Webhook-Timestamp anti-replay signature, which receivers
+      // reject outside a ±5-minute window. A durable/retried delivery can leave
+      // the queue minutes-to-hours after the event; signing with created_at
+      // would make every delayed delivery replay-stale and silently dropped by
+      // a spec-compliant receiver — the exact failure this feature exists to
+      // avoid. Matches the former fire-and-forget dispatch (new Date()).
+      const timestamp = new Date().toISOString();
+      const data = sanitizeForExternalDelivery(webhookData) as Record<string, unknown>;
+      const eventBody =
+        item.scope === "TEAM"
+          ? { type: item.action, teamId: item.team_id, timestamp, data }
+          : { type: item.action, tenantId: item.tenant_id, timestamp, data };
+      const payloadStr = JSON.stringify(eventBody);
+
+      // Lazy import: keeps the @/lib/prisma singleton out of the worker's eager
+      // module graph so `--validate-env-only` fails cleanly (see the import note).
+      const { deliverToWebhookRecords } = await import("@/lib/webhook-dispatcher");
+      await deliverToWebhookRecords(
+        webhooks,
+        payloadStr,
         timestamp,
-        data: webhookData,
+        async (id) => onWebhookDeliverySuccess(workerPrisma, item.scope, id),
+        async (id, failCount, url) =>
+          onWebhookDeliveryFailure(workerPrisma, item, id, failCount, url),
+      );
+    }
+
+    await markWebhookDeliverySent(workerPrisma, item.id);
+  } catch (err) {
+    await recordWebhookDeliveryError(workerPrisma, item, err);
+  }
+}
+
+/**
+ * Read the live webhook rows for this work item whose `events` array includes
+ * the action and that are active, mapped to WebhookRecord for the delivery
+ * core. TenantWebhook rows pass teamId: undefined (not null) to keep the AAD
+ * byte-identical to the app dispatcher path (buildWebhookSecretAAD).
+ */
+async function resolveWebhookSubscribers(
+  workerPrisma: PrismaClient,
+  item: WebhookDeliveryRow,
+): Promise<WebhookRecord[]> {
+  return workerPrisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    if (item.scope === "TEAM" && item.team_id) {
+      const rows = await tx.teamWebhook.findMany({
+        where: { teamId: item.team_id, isActive: true, events: { has: item.action } },
       });
-    } else if (payload.scope === AUDIT_SCOPE.TENANT) {
-      void dispatchTenantWebhook({
-        type: payload.action,
-        tenantId,
-        timestamp,
-        data: webhookData,
+      return rows.map((r) => ({
+        id: r.id,
+        url: r.url,
+        secretEncrypted: r.secretEncrypted,
+        secretIv: r.secretIv,
+        secretAuthTag: r.secretAuthTag,
+        masterKeyVersion: r.masterKeyVersion,
+        secretAadVersion: r.secretAadVersion,
+        tenantId: r.tenantId,
+        kind: "TeamWebhook" as const,
+        teamId: r.teamId,
+        failCount: r.failCount,
+      }));
+    }
+    const rows = await tx.tenantWebhook.findMany({
+      where: { tenantId: item.tenant_id, isActive: true, events: { has: item.action } },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      url: r.url,
+      secretEncrypted: r.secretEncrypted,
+      secretIv: r.secretIv,
+      secretAuthTag: r.secretAuthTag,
+      masterKeyVersion: r.masterKeyVersion,
+      secretAadVersion: r.secretAadVersion,
+      tenantId: r.tenantId,
+      kind: "TenantWebhook" as const,
+      teamId: undefined,
+      failCount: r.failCount,
+    }));
+  });
+}
+
+async function markWebhookDeliverySent(
+  workerPrisma: PrismaClient,
+  deliveryId: string,
+): Promise<void> {
+  await workerPrisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    await tx.$executeRawUnsafe(
+      `UPDATE webhook_deliveries
+       SET status = 'SENT', last_error = NULL, processing_started_at = NULL
+       WHERE id = $1::uuid`,
+      deliveryId,
+    );
+  });
+}
+
+async function onWebhookDeliverySuccess(
+  workerPrisma: PrismaClient,
+  scope: string,
+  webhookId: string,
+): Promise<void> {
+  await workerPrisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    if (scope === "TEAM") {
+      await tx.teamWebhook.update({
+        where: { id: webhookId },
+        data: { lastDeliveredAt: new Date(), failCount: 0, lastError: null },
+      });
+    } else {
+      await tx.tenantWebhook.update({
+        where: { id: webhookId },
+        data: { lastDeliveredAt: new Date(), failCount: 0, lastError: null },
       });
     }
-  } catch (err) {
-    getLogger().warn(
-      { err, tenantId, action: payload.action },
-      "worker.webhook_dispatch_import_failed",
+  });
+}
+
+async function onWebhookDeliveryFailure(
+  workerPrisma: PrismaClient,
+  item: WebhookDeliveryRow,
+  webhookId: string,
+  newFailCount: number,
+  url: string,
+): Promise<void> {
+  const isTeam = item.scope === "TEAM";
+  await workerPrisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    const data = {
+      failCount: newFailCount,
+      lastFailedAt: new Date(),
+      lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
+      isActive: newFailCount >= WEBHOOK_AUTO_DISABLE_THRESHOLD ? false : undefined,
+    };
+    if (isTeam) {
+      await tx.teamWebhook.update({ where: { id: webhookId }, data });
+    } else {
+      await tx.tenantWebhook.update({ where: { id: webhookId }, data });
+    }
+  });
+
+  // Per-webhook delivery failure is a distinct, unchained audit event (parity
+  // with the app dispatcher). Uses writeDirectAuditLog (bypass outbox) so it
+  // never re-enters the queue.
+  await writeDirectAuditLog(
+    workerPrisma,
+    item.tenant_id,
+    isTeam
+      ? AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED
+      : AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
+    {
+      webhookId,
+      url: maskUrlForDisplay(url),
+      failCount: newFailCount,
+    },
+  );
+}
+
+/**
+ * DB-backed backoff + dead-letter for a webhook_deliveries WORK ITEM. Only
+ * fires on infrastructure failure of the fan-out pass (outbox read, subscriber
+ * resolution, unexpected throw) — individual per-webhook HTTP failures are
+ * handled by onWebhookDeliveryFailure and do NOT retry the work item, which
+ * would re-notify already-succeeded webhooks. Mirrors recordDeliveryError.
+ */
+async function recordWebhookDeliveryError(
+  workerPrisma: PrismaClient,
+  item: WebhookDeliveryRow,
+  err: unknown,
+): Promise<void> {
+  const message = sanitizeErrorForStorage(
+    err instanceof Error ? err.message : String(err),
+  );
+  const newAttemptCount = item.attempt_count + 1;
+  const isDead = newAttemptCount >= item.max_attempts;
+
+  try {
+    await workerPrisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      if (isDead) {
+        await tx.$executeRawUnsafe(
+          `UPDATE webhook_deliveries
+           SET status = 'FAILED', attempt_count = $1,
+               last_error = LEFT($2, 1024), processing_started_at = NULL
+           WHERE id = $3::uuid`,
+          newAttemptCount,
+          message,
+          item.id,
+        );
+      } else {
+        const backoffMs = withFullJitter(computeBackoffMs(newAttemptCount));
+        const backoffSeconds = backoffMs / MS_PER_SECOND;
+        await tx.$executeRawUnsafe(
+          `UPDATE webhook_deliveries
+           SET status = 'PENDING', attempt_count = $1,
+               next_retry_at = now() + make_interval(secs => $2),
+               last_error = LEFT($3, 1024), processing_started_at = NULL
+           WHERE id = $4::uuid`,
+          newAttemptCount,
+          backoffSeconds,
+          message,
+          item.id,
+        );
+      }
+    });
+  } catch (recoveryErr) {
+    getLogger().error(
+      { deliveryId: item.id, err: recoveryErr },
+      "webhook_delivery.error_recovery_tx_failed",
+    );
+  }
+
+  if (isDead) {
+    getLogger().warn({ deliveryId: item.id }, "webhook_delivery.dead_lettered");
+    await writeDirectAuditLog(
+      workerPrisma,
+      item.tenant_id,
+      AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER,
+      {
+        deliveryId: item.id,
+        action: item.action,
+        attemptCount: newAttemptCount,
+        lastError: message.slice(0, 256),
+      },
+    );
+  } else {
+    getLogger().info(
+      { deliveryId: item.id, attempt: newAttemptCount },
+      "webhook_delivery.will_retry",
     );
   }
 }
@@ -904,6 +1290,49 @@ export async function reapStuckDeliveries(
 }
 
 /**
+ * Reset stuck PROCESSING webhook_deliveries rows back to PENDING or FAILED.
+ * Copy of reapStuckDeliveries against the webhook_deliveries table (bounded).
+ */
+export async function reapStuckWebhookDeliveries(
+  prisma: PrismaClient,
+  limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
+): Promise<number> {
+  const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
+  const cutoff = new Date(Date.now() - timeout);
+
+  const result = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$executeRawUnsafe(
+      `UPDATE webhook_deliveries
+       SET status = CASE
+         WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditDeliveryStatus"
+         ELSE 'PENDING'::"AuditDeliveryStatus"
+       END,
+       attempt_count = attempt_count + 1,
+       processing_started_at = NULL,
+       last_error = 'reaped: processing timeout exceeded'
+       WHERE id IN (
+         SELECT id FROM webhook_deliveries
+         WHERE status = 'PROCESSING'
+           AND processing_started_at < $1
+         ORDER BY processing_started_at ASC
+         LIMIT $2
+         FOR UPDATE SKIP LOCKED
+       )`,
+      cutoff,
+      limit,
+    );
+  });
+
+  const count = Number(result);
+  if (count > 0) {
+    getLogger().info({ count }, "reaped stuck webhook delivery rows");
+  }
+
+  return count;
+}
+
+/**
  * Purge SENT rows older than RETENTION_HOURS and FAILED rows older than FAILED_RETENTION_DAYS.
  *
  * Split into two independently-capped branches (SENT-aged, FAILED-aged) so a
@@ -939,6 +1368,11 @@ export async function purgeRetention(
               SELECT 1 FROM "audit_deliveries"
               WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
                 AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM "webhook_deliveries"
+              WHERE "webhook_deliveries"."outbox_id" = "audit_outbox"."id"
+                AND "webhook_deliveries"."status" IN ('PENDING', 'PROCESSING')
             )
           ORDER BY sent_at ASC
           LIMIT $2
@@ -1016,6 +1450,27 @@ export async function purgeRetention(
   if (Number(deliveryPurged) > 0) {
     getLogger().info({ deliveryPurged }, "purged delivery retention rows");
   }
+
+  // Purge terminal webhook delivery rows (bounded).
+  const webhookDeliveryPurged = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$executeRawUnsafe(
+      `DELETE FROM webhook_deliveries
+       WHERE id IN (
+         SELECT id FROM webhook_deliveries
+         WHERE (status = 'SENT' AND created_at < $1)
+            OR (status = 'FAILED' AND created_at < $2)
+         ORDER BY created_at ASC
+         LIMIT $3
+       )`,
+      sentCutoff,
+      failedCutoff,
+      limit,
+    );
+  });
+  if (Number(webhookDeliveryPurged) > 0) {
+    getLogger().info({ webhookDeliveryPurged }, "purged webhook delivery retention rows");
+  }
 }
 
 /**
@@ -1036,6 +1491,12 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
     await reapStuckDeliveries(prisma);
   } catch (err) {
     log.error({ err }, "worker.reaper.stuck_deliveries_reset_failed");
+  }
+
+  try {
+    await reapStuckWebhookDeliveries(prisma);
+  } catch (err) {
+    log.error({ err }, "worker.reaper.stuck_webhook_deliveries_reset_failed");
   }
 
   try {
@@ -1155,20 +1616,27 @@ export function createWorker(config: WorkerConfig) {
           const res = await deliverRowWithChain(workerPrisma, row, payload);
           rowDelivered = res.delivered;
         } else {
+          // deliverRow always marks the outbox row SENT and never returns a
+          // paused/skip state (unlike deliverRowWithChain); the webhook enqueue
+          // gate lives inside its tx, so rowDelivered stays unconditionally true.
           await deliverRow(workerPrisma, row, payload);
           rowDelivered = true;
         }
         if (!rowDelivered) {
           // Row was skipped because the tenant's anchor has publish_paused_until
           // active. The row is already reset to PENDING inside deliverRowWithChain.
-          // Skip webhook dispatch and fan-out — they will run after the pause lifts.
+          // Skip fan-out — it will run after the pause lifts. The webhook enqueue
+          // is gated on the audit_logs INSERT winner and did not fire here.
           continue;
         }
         log.info(
           { outboxId: row.id, action: payload.action, tenantId: row.tenant_id },
           "worker.delivered",
         );
-        void dispatchWebhookForRow(payload, row.tenant_id);
+        // Webhook delivery is now durable: enqueueWebhookDeliveryInTx committed a
+        // webhook_deliveries row inside the winning audit tx, and
+        // processWebhookDeliveryBatch drives the actual HTTP fan-out. No
+        // fire-and-forget dispatch here (replaces the former dispatchWebhookForRow).
         // Phase 3: fan out to non-DB delivery targets (fire-and-forget).
         // If the worker crashes here, outbox row is already SENT so fan-out
         // will not be retried. This is the design trade-off per Plan §3.4:
@@ -1266,7 +1734,7 @@ export function createWorker(config: WorkerConfig) {
     while (running) {
       const claimed = await processBatch();
 
-      // Phase 3: process pending deliveries
+      // Phase 3: process pending audit-log deliveries (SIEM/S3 sinks)
       let deliveryClaimed = 0;
       try {
         deliveryClaimed = await processDeliveryBatch(workerPrisma, batchSize);
@@ -1275,6 +1743,17 @@ export function createWorker(config: WorkerConfig) {
         }
       } catch (err) {
         log.error({ err }, "worker.delivery_batch_failed");
+      }
+
+      // Durable webhook delivery: drain pending webhook_deliveries work items.
+      let webhookDeliveryClaimed = 0;
+      try {
+        webhookDeliveryClaimed = await processWebhookDeliveryBatch(workerPrisma, batchSize);
+        if (webhookDeliveryClaimed > 0) {
+          log.debug({ webhookDeliveryClaimed }, "processed webhook delivery batch");
+        }
+      } catch (err) {
+        log.error({ err }, "worker.webhook_delivery_batch_failed");
       }
 
       // Run reaper at REAPER_INTERVAL_MS intervals
@@ -1289,7 +1768,7 @@ export function createWorker(config: WorkerConfig) {
 
       if (!running) break;
 
-      if (claimed === 0 && deliveryClaimed === 0) {
+      if (claimed === 0 && deliveryClaimed === 0 && webhookDeliveryClaimed === 0) {
         await new Promise<void>((resolve) => {
           sleepResolve = resolve;
           setTimeout(() => { sleepResolve = null; resolve(); }, pollIntervalMs);

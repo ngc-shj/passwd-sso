@@ -67,7 +67,14 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
     // Phase 4 grants
     expect(privMap.get("audit_chain_anchors")?.sort()).toEqual(["INSERT", "SELECT", "UPDATE"]);
 
-    // Verify exact table set (Phase 1+2+3+4 combined)
+    // Durable webhook delivery grants
+    expect(privMap.get("webhook_deliveries")?.sort()).toEqual(
+      ["DELETE", "INSERT", "SELECT", "UPDATE"].sort(),
+    );
+    expect(privMap.get("tenant_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
+    expect(privMap.get("team_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
+
+    // Verify exact table set (Phase 1+2+3+4 + webhook delivery combined)
     const allowedTables = new Set([
       "audit_outbox",
       "audit_logs",
@@ -78,6 +85,9 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
       "audit_delivery_targets",
       "audit_deliveries",
       "audit_chain_anchors",
+      "webhook_deliveries",
+      "tenant_webhooks",
+      "team_webhooks",
     ]);
     for (const tableName of privMap.keys()) {
       expect(

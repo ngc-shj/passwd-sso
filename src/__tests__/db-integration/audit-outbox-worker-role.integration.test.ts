@@ -73,12 +73,18 @@ describe("audit-outbox worker role privileges", () => {
     // Phase 4: chain anchors
     expect(privMap.get("audit_chain_anchors")?.sort()).toEqual(["INSERT", "SELECT", "UPDATE"]);
 
+    // Durable webhook delivery
+    expect(privMap.get("webhook_deliveries")?.sort()).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
+    expect(privMap.get("tenant_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
+    expect(privMap.get("team_webhooks")?.sort()).toEqual(["SELECT", "UPDATE"]);
+
     // Verify no unexpected tables
     const allowedTables = new Set([
       "audit_outbox", "audit_logs", "tenants",
       "users", "teams", "service_accounts",
       "audit_delivery_targets", "audit_deliveries",
       "audit_chain_anchors",
+      "webhook_deliveries", "tenant_webhooks", "team_webhooks",
     ]);
     for (const tableName of privMap.keys()) {
       expect(allowedTables.has(tableName), `Unexpected grant on table: ${tableName}`).toBe(true);

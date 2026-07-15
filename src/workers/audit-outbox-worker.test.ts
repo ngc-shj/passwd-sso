@@ -19,8 +19,8 @@ const {
   mockDeadLetterWarn,
   mockComputeBackoffMs,
   mockWithFullJitter,
-  mockDispatchWebhook,
-  mockDispatchTenantWebhook,
+  mockDeliverToWebhookRecords,
+  mockAuditLogsInsert,
 } = vi.hoisted(() => {
   const mockExecuteRaw = vi.fn().mockResolvedValue(undefined);
   const mockQueryRawUnsafe = vi.fn().mockResolvedValue([]);
@@ -75,8 +75,14 @@ const {
   const mockComputeBackoffMs = vi.fn().mockReturnValue(1000);
   const mockWithFullJitter = vi.fn().mockReturnValue(1000);
 
-  const mockDispatchWebhook = vi.fn();
-  const mockDispatchTenantWebhook = vi.fn();
+  const mockDeliverToWebhookRecords = vi.fn().mockResolvedValue(undefined);
+
+  // Dedicated spy for deliverRow/deliverRowWithChain's audit_logs INSERT ...
+  // RETURNING id call (routed through the tx's $queryRawUnsafe, distinct from
+  // the shared mockQueryRawUnsafe used for claimBatch's one-time resolved
+  // values). Tests inspect this to verify the INSERT params without disturbing
+  // mockQueryRawUnsafe's claim-specific queueing.
+  const mockAuditLogsInsert = vi.fn();
 
   return {
     mockExecuteRaw,
@@ -95,8 +101,8 @@ const {
     mockDeadLetterWarn,
     mockComputeBackoffMs,
     mockWithFullJitter,
-    mockDispatchWebhook,
-    mockDispatchTenantWebhook,
+    mockDeliverToWebhookRecords,
+    mockAuditLogsInsert,
   };
 });
 
@@ -145,6 +151,11 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 
 vi.mock("@/lib/http/external-http", () => ({
   sanitizeErrorForStorage: vi.fn((msg: string) => msg),
+  sanitizeForExternalDelivery: vi.fn((data: unknown) => data),
+}));
+
+vi.mock("@/lib/url/url-validation", () => ({
+  maskUrlForDisplay: vi.fn((url: string) => url),
 }));
 
 vi.mock("@/lib/http/backoff", () => ({
@@ -153,8 +164,7 @@ vi.mock("@/lib/http/backoff", () => ({
 }));
 
 vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchWebhook: mockDispatchWebhook,
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
+  deliverToWebhookRecords: mockDeliverToWebhookRecords,
 }));
 
 import { createWorker } from "./audit-outbox-worker";
@@ -235,12 +245,20 @@ type TxFn = (tx: MockTxClient) => Promise<unknown>;
  * override $transaction can call it themselves.
  *
  * claimBatch is the only transaction that calls $queryRawUnsafe inside the callback.
- * deliverRow and recordError only call $executeRawUnsafe.
+ * deliverRow's audit_logs INSERT ALSO goes through $queryRawUnsafe now (RETURNING id,
+ * to detect the ON CONFLICT winner) — identified by its distinct SQL shape
+ * (`INSERT INTO audit_logs` + `RETURNING id`). Default: the INSERT "wins" (returns
+ * a row), matching the common case where deliverRow is the sole writer for a fresh
+ * outbox row — tests that need the ON-CONFLICT-loser path pass `auditLogsInsertResult: []`.
  * We detect the second claimBatch by tracking whether a previous tx already used
  * $queryRawUnsafe.
  */
-function makeOneShotTxImpl(stopFn: () => void): (fn: TxFn) => Promise<unknown> {
+function makeOneShotTxImpl(
+  stopFn: () => void,
+  opts: { auditLogsInsertResult?: { id: string }[] } = {},
+): (fn: TxFn) => Promise<unknown> {
   let outboxClaimCount = 0;
+  const auditLogsInsertResult = opts.auditLogsInsertResult ?? [{ id: "11111111-1111-4111-8111-111111111111" }];
   return async function (fn: TxFn) {
     const txQueryRaw = vi.fn(async (...args: unknown[]) => {
       const sql = typeof args[0] === "string" ? args[0] : "";
@@ -253,6 +271,11 @@ function makeOneShotTxImpl(stopFn: () => void): (fn: TxFn) => Promise<unknown> {
           return [];
         }
         return mockQueryRawUnsafe(...args);
+      }
+      // deliverRow's audit_logs INSERT ... ON CONFLICT (outbox_id) DO NOTHING RETURNING id
+      if (sql.includes("INSERT INTO audit_logs") && sql.includes("RETURNING id")) {
+        mockAuditLogsInsert(...args);
+        return auditLogsInsertResult;
       }
       // Delivery claims, reaper, purge, or other queries — return empty/default
       if (sql.includes("DELETE FROM audit_outbox")) {
@@ -311,26 +334,26 @@ const TEST_DB_URL = "postgresql://test:test@localhost:5432/test";
  * but must also include the stop-after-one-batch logic themselves, OR they can
  * call makeOneShotTxImpl and compose on top of it.
  */
-async function runWorkerOnce(worker: ReturnType<typeof createWorker>): Promise<void> {
-  mockTransaction.mockImplementation(makeOneShotTxImpl(() => worker.stop()));
+async function runWorkerOnce(
+  worker: ReturnType<typeof createWorker>,
+  opts: { auditLogsInsertResult?: { id: string }[] } = {},
+): Promise<void> {
+  mockTransaction.mockImplementation(makeOneShotTxImpl(() => worker.stop(), opts));
   await worker.start();
 }
 
 /**
- * Drain pending fire-and-forget dispatch promises.
- *
- * The worker calls `void dispatchWebhookForRow(...)`, which internally does
- * `await import("@/lib/webhook-dispatcher")` then `void dispatchWebhook(...)`.
- * vi.dynamicImportSettled() waits for the import to resolve; the trailing
- * setImmediate ticks drain the post-import microtasks so the inner void call
- * reaches our mock. Replaces fixed setTimeout(20ms) waits that were flaky
- * under CPU load.
+ * Find the `INSERT INTO webhook_deliveries` enqueue call issued by
+ * enqueueWebhookDeliveryInTx (called from inside deliverRow/deliverRowWithChain
+ * only when the audit_logs INSERT won the ON CONFLICT race). Params (per the
+ * production SQL): [0]=sql, [1]=outboxId, [2]=tenantId, [3]=scope, [4]=teamId, [5]=action.
  */
-async function flushDispatchQueue(): Promise<void> {
-  await vi.dynamicImportSettled();
-  for (let i = 0; i < 3; i++) {
-    await new Promise<void>((resolve) => setImmediate(resolve));
-  }
+function findWebhookEnqueueCall(
+  calls: unknown[][],
+): unknown[] | undefined {
+  return calls.find(
+    (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO webhook_deliveries"),
+  );
 }
 
 // ─── parsePayload — happy path ────────────────────────────────────────────────
@@ -361,7 +384,7 @@ describe("parsePayload — happy path", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeDefined();
@@ -385,7 +408,7 @@ describe("parsePayload — happy path", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeDefined();
@@ -407,7 +430,7 @@ describe("parsePayload — edge cases", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeDefined();
@@ -433,7 +456,7 @@ describe("parsePayload — edge cases", () => {
     await runWorkerOnce(worker);
 
     // INSERT INTO audit_logs must NOT be called
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeUndefined();
@@ -481,7 +504,7 @@ describe("createWorker lifecycle", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeUndefined();
@@ -498,7 +521,7 @@ describe("claimBatch", () => {
     await runWorkerOnce(worker);
 
     // No INSERT should have been attempted
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeUndefined();
@@ -706,7 +729,7 @@ describe("error paths", () => {
     await runWorkerOnce(worker);
 
     // INSERT INTO audit_logs must NOT be called
-    const insertCall = mockExecuteRawUnsafe.mock.calls.find(
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
     expect(insertCall).toBeUndefined();
@@ -718,12 +741,20 @@ describe("error paths", () => {
   }, 15000);
 });
 
-// ─── Webhook dispatch ─────────────────────────────────────────────────────────
+// ─── Webhook delivery enqueue ─────────────────────────────────────────────────
+//
+// The worker no longer fire-and-forget dispatches (dispatchWebhookForRow was
+// removed). Instead, deliverRow enqueues exactly one webhook_deliveries work
+// item via enqueueWebhookDeliveryInTx, gated on the audit_logs INSERT winner
+// (see mockAuditLogsInsert / makeOneShotTxImpl — the winner path is the
+// default). These tests assert the enqueue INSERT itself, not an HTTP dispatch
+// call (that now happens later, in processWebhookDeliveryBatch, driven by
+// deliverToWebhookRecords — covered by the real-DB integration suite).
 
-describe("webhook dispatch", () => {
+describe("webhook delivery enqueue", () => {
   beforeEach(resetMocks);
 
-  it("dispatches team webhook for TEAM scope with teamId", async () => {
+  it("enqueues a TEAM-scope webhook_deliveries row for TEAM scope with teamId", async () => {
     const row = makeRow({
       payload: {
         scope: AUDIT_SCOPE.TEAM,
@@ -745,18 +776,15 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: AUDIT_ACTION.ENTRY_CREATE,
-        teamId: TEAM_ID,
-      }),
-    );
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+    const enqueueCall = findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls);
+    expect(enqueueCall).toBeDefined();
+    expect(enqueueCall![1]).toBe(ROW_ID); // outbox_id
+    expect(enqueueCall![3]).toBe("TEAM"); // scope
+    expect(enqueueCall![4]).toBe(TEAM_ID); // team_id
+    expect(enqueueCall![5]).toBe(AUDIT_ACTION.ENTRY_CREATE); // action
   }, 15000);
 
-  it("dispatches tenant webhook for TENANT scope", async () => {
+  it("enqueues a TENANT-scope webhook_deliveries row (team_id null) for TENANT scope", async () => {
     const row = makeRow({
       payload: {
         scope: AUDIT_SCOPE.TENANT,
@@ -778,18 +806,14 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: AUDIT_ACTION.ENTRY_CREATE,
-        tenantId: TENANT_ID,
-      }),
-    );
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    const enqueueCall = findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls);
+    expect(enqueueCall).toBeDefined();
+    expect(enqueueCall![3]).toBe("TENANT"); // scope
+    expect(enqueueCall![4]).toBeNull(); // team_id
+    expect(enqueueCall![5]).toBe(AUDIT_ACTION.ENTRY_CREATE); // action
   }, 15000);
 
-  it("skips webhook dispatch for PERSONAL scope", async () => {
+  it("skips enqueue for PERSONAL scope", async () => {
     const row = makeRow();
     // payload defaults to PERSONAL scope
 
@@ -798,13 +822,10 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
-  it("skips webhook dispatch for OUTBOX_BYPASS_AUDIT_ACTIONS", async () => {
+  it("skips enqueue for OUTBOX_BYPASS_AUDIT_ACTIONS", async () => {
     const bypassAction = [...OUTBOX_BYPASS_AUDIT_ACTIONS][0];
     const row = makeRow({
       payload: {
@@ -827,10 +848,42 @@ describe("webhook dispatch", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
+  }, 15000);
 
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  it("does not enqueue when the audit_logs INSERT loses the ON CONFLICT race (inserted=false)", async () => {
+    // Mirrors the reaper re-delivery scenario: a concurrent/earlier delivery
+    // already won the ON CONFLICT (outbox_id) — deliverRow's INSERT returns
+    // zero rows, and enqueueWebhookDeliveryInTx must NOT be reached at all.
+    const row = makeRow({
+      payload: {
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        userId: USER_ID,
+        actorType: ACTOR_TYPE.HUMAN,
+        serviceAccountId: null,
+        teamId: null,
+        targetType: null,
+        targetId: null,
+        metadata: null,
+        ip: null,
+        userAgent: null,
+      },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker, { auditLogsInsertResult: [] });
+
+    expect(mockAuditLogsInsert).toHaveBeenCalled();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
+    // The outbox row must still be marked SENT regardless (deliverRow's
+    // unconditional SENT update — see the "ON CONFLICT DO NOTHING dedup" suite).
+    const sentUpdate = mockExecuteRawUnsafe.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("status = 'SENT'"),
+    );
+    expect(sentUpdate).toBeDefined();
   }, 15000);
 });
 
@@ -839,17 +892,14 @@ describe("webhook dispatch", () => {
 describe("ON CONFLICT DO NOTHING dedup", () => {
   beforeEach(resetMocks);
 
-  it("deliverRow marks SENT even if audit_logs INSERT was a no-op (0 rows affected)", async () => {
+  it("deliverRow marks SENT even if audit_logs INSERT was a no-op (ON CONFLICT — 0 rows returned)", async () => {
     const row = makeRow();
 
     mockQueryRawUnsafe.mockResolvedValueOnce([row]);
-    // GUCs go through $executeRaw (tagged template), not $executeRawUnsafe
-    mockExecuteRawUnsafe
-      .mockResolvedValueOnce(0)         // INSERT ON CONFLICT DO NOTHING — 0 rows
-      .mockResolvedValueOnce(1);        // UPDATE to SENT — 1 row
 
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
-    await runWorkerOnce(worker);
+    // deliverRow's audit_logs INSERT ... RETURNING id returns [] (conflict/no-op).
+    await runWorkerOnce(worker, { auditLogsInsertResult: [] });
 
     // SENT update must still be called regardless of INSERT return value
     const sentUpdate = mockExecuteRawUnsafe.mock.calls.find(
@@ -858,21 +908,23 @@ describe("ON CONFLICT DO NOTHING dedup", () => {
         call[0].includes("status = 'SENT'"),
     );
     expect(sentUpdate).toBeDefined();
+    // The no-op (conflict) path must not enqueue a webhook delivery either.
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 });
 
 // ─── WEBHOOK_DISPATCH_SUPPRESS ────────────────────────────────────────────────
 //
-// dispatchWebhookForRow checks OUTBOX_BYPASS_AUDIT_ACTIONS first, then
+// enqueueWebhookDeliveryInTx checks OUTBOX_BYPASS_AUDIT_ACTIONS first, then
 // WEBHOOK_DISPATCH_SUPPRESS. These sets overlap for AUDIT_OUTBOX_* actions but
 // WEBHOOK_DISPATCH_SUPPRESS also includes actions like AUDIT_OUTBOX_METRICS_VIEW
 // and AUDIT_OUTBOX_PURGE_EXECUTED that are NOT in OUTBOX_BYPASS_AUDIT_ACTIONS.
 // We test both guard paths here.
 
-describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
+describe("webhook delivery enqueue — WEBHOOK_DISPATCH_SUPPRESS", () => {
   beforeEach(resetMocks);
 
-  it("skips webhook dispatch for actions in WEBHOOK_DISPATCH_SUPPRESS but NOT in OUTBOX_BYPASS_AUDIT_ACTIONS", async () => {
+  it("skips enqueue for actions in WEBHOOK_DISPATCH_SUPPRESS but NOT in OUTBOX_BYPASS_AUDIT_ACTIONS", async () => {
     // AUDIT_OUTBOX_METRICS_VIEW is in SUPPRESS but NOT in BYPASS (admin endpoint action)
     const suppressOnlyAction = AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW;
     expect(WEBHOOK_DISPATCH_SUPPRESS.has(suppressOnlyAction)).toBe(true);
@@ -899,13 +951,10 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
-  it("skips webhook dispatch for AUDIT_OUTBOX_REAPED (in both suppression sets, TENANT scope)", async () => {
+  it("skips enqueue for AUDIT_OUTBOX_REAPED (in both suppression sets, TENANT scope)", async () => {
     const row = makeRow({
       payload: {
         scope: AUDIT_SCOPE.TENANT,
@@ -927,14 +976,11 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
-  it("skips webhook dispatch for AUDIT_OUTBOX_DEAD_LETTER (in both suppression sets, TEAM scope with teamId)", async () => {
-    // Even with TEAM scope + teamId, WEBHOOK_DISPATCH_SUPPRESS must prevent dispatch
+  it("skips enqueue for AUDIT_OUTBOX_DEAD_LETTER (in both suppression sets, TEAM scope with teamId)", async () => {
+    // Even with TEAM scope + teamId, WEBHOOK_DISPATCH_SUPPRESS must prevent enqueue
     const row = makeRow({
       payload: {
         scope: AUDIT_SCOPE.TEAM,
@@ -956,13 +1002,10 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 
-  it("skips webhook dispatch for AUDIT_OUTBOX_RETENTION_PURGED (in both suppression sets, TENANT scope)", async () => {
+  it("skips enqueue for AUDIT_OUTBOX_RETENTION_PURGED (in both suppression sets, TENANT scope)", async () => {
     const row = makeRow({
       payload: {
         scope: AUDIT_SCOPE.TENANT,
@@ -984,10 +1027,7 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    await flushDispatchQueue();
-
-    expect(mockDispatchWebhook).not.toHaveBeenCalled();
-    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+    expect(findWebhookEnqueueCall(mockExecuteRawUnsafe.mock.calls)).toBeUndefined();
   }, 15000);
 });
 
@@ -1098,32 +1138,36 @@ describe("reaper — invoked on first loop tick", () => {
       async function (fn: TxFn) {
         txCallCount++;
 
-        // Phase 3 flow (C3 split purgeRetention into SENT/FAILED branches):
+        // Durable webhook delivery flow (processWebhookDeliveryBatch +
+        // reapStuckWebhookDeliveries + its purge branch are new sibling txs):
         // tx 1 = claimBatch (outbox PENDING check): returns []
         // tx 2 = processDeliveryBatch (delivery claim): returns []
-        // tx 3 = reapStuckRows (PROCESSING check): returns two reaped rows
-        // tx 4 = reapStuckDeliveries
+        // tx 3 = processWebhookDeliveryBatch (webhook delivery claim): returns []
+        // tx 4 = reapStuckRows (PROCESSING check): returns two reaped rows
         // tx 5 = writeDirectAuditLog for REAPED_ROW_1 (REAPED)
         // tx 6 = writeDirectAuditLog for REAPED_ROW_2 (REAPED)
-        // tx 7 = purgeRetention SENT-branch DELETE CTE: returns 0 purged
-        // tx 8 = purgeRetention FAILED-branch DELETE CTE: returns 0 purged
-        // tx 9 = delivery retention purge
-        // tx 10 = next claimBatch iteration — stop here
+        // tx 7 = reapStuckDeliveries
+        // tx 8 = reapStuckWebhookDeliveries
+        // tx 9 = purgeRetention SENT-branch DELETE CTE: returns 0 purged
+        // tx 10 = purgeRetention FAILED-branch DELETE CTE: returns 0 purged
+        // tx 11 = delivery retention purge
+        // tx 12 = webhook delivery retention purge
+        // tx 13 = next claimBatch iteration — stop here
 
-        if (txCallCount >= 10) {
+        if (txCallCount >= 13) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 3) {
+          if (txCallCount === 4) {
             // reapStuckRows — return two stuck rows (both below max_attempts)
             return [
               { id: REAPED_ROW_1, tenant_id: TENANT_ID, attempt_count: 1, new_status: "PENDING" },
               { id: REAPED_ROW_2, tenant_id: TENANT_ID, attempt_count: 2, new_status: "PENDING" },
             ];
           }
-          if (txCallCount === 7 || txCallCount === 8) {
+          if (txCallCount === 9 || txCallCount === 10) {
             // purgeRetention SENT/FAILED branches — return 0 purged
             return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
@@ -1167,32 +1211,37 @@ describe("reaper — invoked on first loop tick", () => {
       async function (fn: TxFn) {
         txCallCount++;
 
-        // Phase 3 flow (C3 split purgeRetention into SENT/FAILED branches):
+        // Durable webhook delivery flow (processWebhookDeliveryBatch +
+        // reapStuckWebhookDeliveries + its purge branch are new sibling txs).
+        // writeDirectAuditLogInTx for AUDIT_OUTBOX_RETENTION_PURGED runs INSIDE
+        // the SENT-branch purgeRetention tx (not a separate transaction).
         // tx 1 = claimBatch: []
         // tx 2 = processDeliveryBatch: []
-        // tx 3 = reapStuckRows: 0 reaped
-        // tx 4 = reapStuckDeliveries
-        // tx 5 = purgeRetention SENT-branch: 5 rows purged
-        // tx 6 = purgeRetention FAILED-branch: 0 rows purged
-        // tx 7 = writeDirectAuditLog for AUDIT_OUTBOX_RETENTION_PURGED (totalPurged=5>0)
-        // tx 8 = delivery retention purge
-        // tx 9 = next claimBatch — stop
+        // tx 3 = processWebhookDeliveryBatch: []
+        // tx 4 = reapStuckRows: 0 reaped
+        // tx 5 = reapStuckDeliveries
+        // tx 6 = reapStuckWebhookDeliveries
+        // tx 7 = purgeRetention SENT-branch: 5 rows purged (+ inline writeDirectAuditLogInTx)
+        // tx 8 = purgeRetention FAILED-branch: 0 rows purged
+        // tx 9 = delivery retention purge
+        // tx 10 = webhook delivery retention purge
+        // tx 11 = next claimBatch — stop
 
-        if (txCallCount >= 9) {
+        if (txCallCount >= 11) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 3) {
+          if (txCallCount === 4) {
             // reapStuckRows — 0 reaped
             return [];
           }
-          if (txCallCount === 5) {
+          if (txCallCount === 7) {
             // purgeRetention SENT-branch — 5 rows deleted with a sample tenant
             return [{ purged: BigInt(5), sample_tenant_id: TENANT_ID }];
           }
-          if (txCallCount === 6) {
+          if (txCallCount === 8) {
             // purgeRetention FAILED-branch — 0 rows deleted
             return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
@@ -1236,23 +1285,25 @@ describe("reaper — invoked on first loop tick", () => {
       async function (fn: TxFn) {
         txCallCount++;
 
-        // Phase 3 flow (C3 split purgeRetention into SENT/FAILED branches):
+        // Durable webhook delivery flow (processWebhookDeliveryBatch +
+        // reapStuckWebhookDeliveries + its purge branch are new sibling txs):
         // tx 1 = claimBatch: []
         // tx 2 = processDeliveryBatch: []
-        // tx 3 = reapStuckRows: throw (caught by runReaper)
-        // tx 4 = reapStuckDeliveries / purgeRetention: runs independently
+        // tx 3 = processWebhookDeliveryBatch: []
+        // tx 4 = reapStuckRows: throw (caught by runReaper)
+        // tx 5 = reapStuckDeliveries / tx 6 = reapStuckWebhookDeliveries / purgeRetention: run independently
         // ...
-        // tx >= 9 = next claimBatch — stop
-        if (txCallCount === 3) {
+        // tx >= 11 = next claimBatch — stop
+        if (txCallCount === 4) {
           throw new Error("reaper db error");
         }
-        if (txCallCount >= 9) {
+        if (txCallCount >= 11) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 5 || txCallCount === 6) {
+          if (txCallCount === 7 || txCallCount === 8) {
             // purgeRetention SENT/FAILED branches — 0 purged
             return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
