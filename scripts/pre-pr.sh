@@ -170,6 +170,9 @@ run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinn
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
+# Runs here (ubuntu OpenSSL 3.x), never the macOS iOS job — the .p12 fixtures are
+# -legacy-encrypted and macOS LibreSSL rejects `openssl pkcs12 -legacy`.
+run_step "Static: tls-fixture-expiry" bash scripts/checks/check-tls-fixture-expiry.sh
 
 if [ "$RUN_WEB" != "1" ]; then
   printf "${BOLD}▸ Web steps skipped${RESET}  (no app-filter paths changed — iOS-only diff; set PRE_PR_FORCE_FULL=1 to override)\n\n"

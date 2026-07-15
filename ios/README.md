@@ -130,6 +130,43 @@ xcodebuild \
 
 For the iOS 17.0 minimum-deployment-target validation (AutoFill TOTP `prepareOneTimeCodeCredentialList(for:)` regression check), substitute `iOS17.2` for the runtime parameter when creating the simulator.
 
+### Real-TLS test fixtures
+
+`ServerTrustRealTLSTests` drives a genuine TLS handshake against a local server
+using committed fixtures in `PasswdSSOTests/fixtures/TLS/`:
+
+| File | What |
+|------|------|
+| `tlsLeafA.p12` | Pinned "good" server leaf identity |
+| `tlsLeafB.p12` | Rotated / attacker leaf (drives the pin-mismatch case) |
+| `testLocalCA.der` | Long-lived local test CA that signs both leaves |
+
+The leaves are **short-lived by necessity**: Apple's TLS trust policy rejects any
+server leaf whose validity span exceeds ~398 days (SecTrust `-67901`), so the
+generator caps them at 397 days. They therefore **expire roughly once a year**
+and must be regenerated. The CA has no such cap and stays valid for decades.
+
+Regenerate all three with:
+
+```bash
+ios/scripts/generate-tls-test-fixtures.sh
+```
+
+Then commit the updated `tlsLeaf*.p12` (the CA rarely changes).
+
+Two guards warn before a lapse breaks CI:
+
+- **`scripts/checks/check-tls-fixture-expiry.sh`** runs in the `static-checks`
+  CI job and in `pre-pr.sh` (30-day window), blocking a PR that would ship an
+  expired/imminent fixture. It runs on ubuntu (OpenSSL 3.x) because the `.p12`
+  is `-legacy`-encrypted and macOS LibreSSL cannot read it.
+- **`.github/workflows/tls-fixture-expiry.yml`** runs monthly (45-day
+  look-ahead) so a lapse is caught even in a month where no PR touches iOS.
+
+These keys are **test-only**: scoped to `localhost` / `127.0.0.1`, `CA:FALSE` on
+the leaves, and the PKCS#12 passphrase (`passwd-sso-test`) is intentionally
+public. They MUST NOT be used in production.
+
 ### Targets
 
 | Target | Type | Bundle ID |
