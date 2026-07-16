@@ -76,3 +76,6 @@ Created: 2026-07-16
 - L2: pinned npm in the weekly signature-sweep so the verifier tracks the release producer attestation format.
 - L3: split each Dependabot npm ecosystem into a security-sensitive group + a general group, so sensitive bumps land in a dedicated PR.
 - L1: documented that the post-publish assertion reads dist.attestations metadata shape rather than npm audit signatures; acceptable because it fails closed and the weekly sweep re-verifies officially.
+
+### D16 node-version guard: 22.14 floor + per-job evaluation
+- The guard checked only major 22-plus whole-file, passing 22.13.1 and a Node-24 pin in a different job than npm publish. Added isTrustedPublishingNodeVersion (numeric; major 22 needs minor 14-plus) + splitJobs so node-version is evaluated only within the npm-publish job. Self-tests + real/reverted verification.

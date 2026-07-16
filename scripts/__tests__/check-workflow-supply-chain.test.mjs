@@ -9,6 +9,7 @@ import {
   findAutoMergeViolation,
   findMaskedVerifierViolations,
   findTrustedPublishNodeViolation,
+  isTrustedPublishingNodeVersion,
 } from "../checks/check-workflow-supply-chain.mjs";
 
 describe("findAutoMergeViolation", () => {
@@ -250,5 +251,70 @@ describe("findTrustedPublishNodeViolation", () => {
   it("returns null for a workflow that does not run npm publish", () => {
     const wf = `          node-version-file: ".nvmrc"\n      - run: npm ci\n`;
     expect(findTrustedPublishNodeViolation(wf, "ci.yml")).toBeNull();
+  });
+
+  it("flags node-version 22.13.1 (below the 22.14 floor)", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version: \"22.13.1\"",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).not.toBeNull();
+  });
+
+  it("does NOT accept a Node-24 pin that lives in a different job than npm publish", () => {
+    const wf = [
+      "jobs:",
+      "  test:",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version: \"24\"",
+      "  publish:",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version-file: \".nvmrc\"",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).not.toBeNull();
+  });
+
+  it("passes when the publish job itself pins node-version 24 (sibling job irrelevant)", () => {
+    const wf = [
+      "jobs:",
+      "  test:",
+      "    steps:",
+      "      - run: npm ci",
+      "  publish:",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version: \"24\"",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).toBeNull();
+  });
+});
+
+describe("isTrustedPublishingNodeVersion", () => {
+  it("rejects the 22.0-22.13 range and bare 22 / 22.x", () => {
+    for (const v of ["22", "22.0.0", "22.13.1", "22.x"]) {
+      expect(isTrustedPublishingNodeVersion(v), v).toBe(false);
+    }
+  });
+  it("accepts 22.14+, 23, 24, 24.x", () => {
+    for (const v of ["22.14.0", "22.15", "23", "24", "24.x"]) {
+      expect(isTrustedPublishingNodeVersion(v), v).toBe(true);
+    }
+  });
+  it("rejects below-22 majors", () => {
+    for (const v of ["20", "18.19.0"]) {
+      expect(isTrustedPublishingNodeVersion(v), v).toBe(false);
+    }
   });
 });

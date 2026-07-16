@@ -128,11 +128,53 @@ function listWorkflowFiles() {
     .map((f) => join(WORKFLOWS_DIR, f));
 }
 
+export function isTrustedPublishingNodeVersion(version) {
+  const m = version.match(/^(\d+)(?:\.(\d+|x))?(?:\.(\d+|x))?$/);
+  if (!m) return false;
+  const major = Number(m[1]);
+  if (major > 22) return true;
+  if (major < 22) return false;
+  // major === 22: need an explicit numeric minor >= 14 (bare `22`/`22.x`
+  // resolves to the latest 22.x at runtime — not a reproducible >= 22.14).
+  if (m[2] === undefined || m[2] === "x") return false;
+  return Number(m[2]) >= 14;
+}
+
+function splitJobs(content) {
+  const lines = content.split("\n");
+  const jobsIdx = lines.findIndex((l) => /^jobs:\s*(#.*)?$/.test(l));
+  if (jobsIdx === -1) return [];
+  const jobs = [];
+  let current = null;
+  for (let i = jobsIdx + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\S/.test(line) && line.trim() !== "") break;
+    const jobHeader = line.match(/^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/);
+    if (jobHeader) {
+      if (current) jobs.push(current);
+      current = { name: jobHeader[1], text: line + "\n" };
+    } else if (current) {
+      current.text += line + "\n";
+    }
+  }
+  if (current) jobs.push(current);
+  return jobs;
+}
+
 export function findTrustedPublishNodeViolation(content, name) {
   if (!/npm\s+publish/.test(content)) return null;
-  const okNode = /node-version:\s*["']?(2[2-9]|[3-9]\d)(\.\d+)*(\.x)?["']?/i.test(content);
-  if (!okNode) {
-    return `${name}: runs 'npm publish' (Trusted Publishing) but does not pin an explicit node-version >= 22.14 — OIDC publishing requires Node >= 22.14.0 (do not inherit the Node-20 .nvmrc)`;
+  const jobs = splitJobs(content);
+  const publishJobs = jobs.filter((j) => /npm\s+publish/.test(j.text));
+  // Fall back to whole-file evaluation if job-splitting finds no publish job,
+  // so the guard never silently passes on an unusual layout.
+  const targets = publishJobs.length > 0 ? publishJobs : [{ name: "(file)", text: content }];
+  for (const job of targets) {
+    const versions = [...job.text.matchAll(/node-version:\s*["']?([\d.x]+)["']?/gi)].map(
+      (mm) => mm[1],
+    );
+    if (!versions.some((v) => isTrustedPublishingNodeVersion(v))) {
+      return `${name} (job '${job.name}'): runs 'npm publish' (Trusted Publishing) but does not pin an explicit node-version >= 22.14 in that job — OIDC publishing requires Node >= 22.14.0 (do not inherit the Node-20 .nvmrc)`;
+    }
   }
   return null;
 }
