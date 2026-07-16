@@ -170,6 +170,7 @@ run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinn
 run_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
 run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
+run_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
 # Runs here (ubuntu OpenSSL 3.x), never the macOS iOS job — the .p12 fixtures are

@@ -616,7 +616,11 @@ jobs:
           node-version-file: ".nvmrc"
           cache: "npm"
 
-      - run: npm ci
+      # Audit-only job: install without lifecycle scripts so a compromised
+      # dependency's install script cannot run before `npm audit signatures`
+      # verifies it. Nothing is built after install here, so --ignore-scripts
+      # is side-effect-free.
+      - run: npm ci --ignore-scripts
       - run: npm audit --omit=dev --audit-level=high
       # Verify registry signatures/attestations of installed deps (and our own
       # published versions). Fails closed on tamper; do not mask its exit.
@@ -641,7 +645,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: "extension/package-lock.json"
 
-      - run: npm ci
+      # Audit-only job: install without lifecycle scripts so a compromised
+      # dependency's install script cannot run before `npm audit signatures`
+      # verifies it. Nothing is built after install here, so --ignore-scripts
+      # is side-effect-free.
+      - run: npm ci --ignore-scripts
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures
 
@@ -664,7 +672,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: "cli/package-lock.json"
 
-      - run: npm ci
+      # Audit-only job: install without lifecycle scripts so a compromised
+      # dependency's install script cannot run before `npm audit signatures`
+      # verifies it. Nothing is built after install here, so --ignore-scripts
+      # is side-effect-free.
+      - run: npm ci --ignore-scripts
       - run: npm audit --omit=dev --audit-level=high
       - run: npm audit signatures
 

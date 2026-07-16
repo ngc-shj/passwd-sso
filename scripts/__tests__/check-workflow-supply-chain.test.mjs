@@ -6,10 +6,13 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  extractRunCommands,
   findAutoMergeViolation,
   findMaskedVerifierViolations,
+  findPublishJobIsolationViolation,
   findTrustedPublishNodeViolation,
   isTrustedPublishingNodeVersion,
+  parseTopLevelEnv,
 } from "../checks/check-workflow-supply-chain.mjs";
 
 describe("findAutoMergeViolation", () => {
@@ -284,6 +287,36 @@ describe("findTrustedPublishNodeViolation", () => {
     expect(findTrustedPublishNodeViolation(wf, "release.yml")).not.toBeNull();
   });
 
+  it("resolves node-version from a top-level env pin (env.PUBLISH_NODE_VERSION)", () => {
+    const wf = [
+      "env:",
+      '  PUBLISH_NODE_VERSION: "24.15.0"',
+      "jobs:",
+      "  publish:",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version: ${{ env.PUBLISH_NODE_VERSION }}",
+      "      - run: npm publish ./p.tgz",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("flags an env-resolved node-version below the floor", () => {
+    const wf = [
+      "env:",
+      '  PUBLISH_NODE_VERSION: "20.11.0"',
+      "jobs:",
+      "  publish:",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version: ${{ env.PUBLISH_NODE_VERSION }}",
+      "      - run: npm publish ./p.tgz",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).not.toBeNull();
+  });
+
   it("passes when the publish job itself pins node-version 24 (sibling job irrelevant)", () => {
     const wf = [
       "jobs:",
@@ -298,6 +331,294 @@ describe("findTrustedPublishNodeViolation", () => {
       "      - run: npm publish",
     ].join("\n");
     expect(findTrustedPublishNodeViolation(wf, "release.yml")).toBeNull();
+  });
+});
+
+describe("findPublishJobIsolationViolation", () => {
+  it("flags npm ci inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm ci",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm install\/ci\/exec/);
+  });
+
+  it("flags npm run build inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm run build",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm run build/);
+  });
+
+  it("flags a bare tsc invocation inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: tsc",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/tsc/);
+  });
+
+  it("flags a path-form tsc invocation inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: ./node_modules/.bin/tsc",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/tsc/);
+  });
+
+  it("does not false-positive on a word ending in tsc (e.g. tsconfig)", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: cat tsconfig.json",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("flags even the pinned global npm bootstrap in an id-token:write job (no registry npm fetch under OIDC)", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm install -g npm@11.12.1 --ignore-scripts",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm install/);
+  });
+
+  it("allows a publish job that uses the bundled npm (no npm install at all)", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("flags a floating npm@latest bootstrap", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm install -g npm@latest --ignore-scripts",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).not.toBeNull();
+  });
+
+  it.each(["npm i evil", "npm add evil", "npm exec evil", "npm x evil"])(
+    "flags the npm install/exec alias %s in an id-token:write job",
+    (cmd) => {
+      const wf = [
+        "jobs:",
+        "  publish:",
+        "    permissions:",
+        "      id-token: write",
+        "    steps:",
+        `      - run: ${cmd}`,
+      ].join("\n");
+      expect(findPublishJobIsolationViolation(wf, "release.yml")).not.toBeNull();
+    },
+  );
+
+  it("does not false-positive on 'npm publish' or 'npm view' in an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm publish ./pkg.tgz",
+      "      - run: npm view passwd-sso-cli@1.0.0 dist.integrity",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("flags a chained second install command in an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: node --version && npm install evil",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm install/);
+  });
+
+  it("returns null for a clean publish job that only downloads + publishes a tarball", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - uses: actions/download-artifact@sha",
+      "      - run: npm publish ./passwd-sso-cli-1.0.0.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("does NOT flag npm ci in a sibling job that lacks id-token:write", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    permissions:",
+      "      contents: read",
+      "    steps:",
+      "      - run: npm ci --ignore-scripts",
+      "      - run: npm run build",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("does not trip on the word 'npm ci' inside a comment in an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      # Do NOT add npm ci here — this job is OIDC-privileged",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("does not trip on 'npm ci' appearing only in a step name (not a run command)", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - name: run npm ci somewhere",
+      "        run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("flags a top-level id-token:write grant applied to a job that runs npm ci", () => {
+    const wf = [
+      "permissions:",
+      "  id-token: write",
+      "jobs:",
+      "  publish:",
+      "    steps:",
+      "      - run: npm ci",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm install\/ci\/exec/);
+  });
+
+  it("flags npm ci split across a shell line-continuation inside a block scalar", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: |",
+      "          npm \\",
+      "            ci",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm install\/ci\/exec/);
+  });
+
+  it("flags npm run build inside a block scalar with other benign lines", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: |",
+      "          echo building",
+      "          npm run build",
+      "          npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm run build/);
+  });
+});
+
+describe("parseTopLevelEnv", () => {
+  it("parses quoted and unquoted top-level env entries", () => {
+    const wf = [
+      "env:",
+      '  PUBLISH_NODE_VERSION: "24.15.0"',
+      "  PUBLISH_NPM_VERSION: 11.12.1",
+      "jobs:",
+      "  build:",
+      "    env:",
+      "      SHOULD_NOT_APPEAR: nope",
+    ].join("\n");
+    const env = parseTopLevelEnv(wf);
+    expect(env.PUBLISH_NODE_VERSION).toBe("24.15.0");
+    expect(env.PUBLISH_NPM_VERSION).toBe("11.12.1");
+    expect(env.SHOULD_NOT_APPEAR).toBeUndefined();
+  });
+
+  it("returns an empty map when there is no top-level env block", () => {
+    expect(parseTopLevelEnv("jobs:\n  build:\n    steps: []")).toEqual({});
+  });
+});
+
+describe("extractRunCommands", () => {
+  it("returns inline run commands and ignores name/env lines", () => {
+    const text = [
+      "    steps:",
+      "      - name: npm ci mention in a name",
+      "        run: npm publish ./p.tgz",
+    ].join("\n");
+    expect(extractRunCommands(text)).toEqual(["npm publish ./p.tgz"]);
+  });
+
+  it("splits a block scalar into individual commands and drops comments", () => {
+    const text = [
+      "      - run: |",
+      "          # a comment",
+      "          echo hi",
+      "          npm ci",
+    ].join("\n");
+    expect(extractRunCommands(text)).toEqual(["echo hi", "npm ci"]);
+  });
+
+  it("joins a line-continuation into a single command", () => {
+    const text = ["      - run: |", "          npm \\", "            ci"].join("\n");
+    expect(extractRunCommands(text)).toEqual(["npm ci"]);
   });
 });
 
