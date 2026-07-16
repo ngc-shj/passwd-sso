@@ -618,6 +618,9 @@ jobs:
 
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
+      # Verify registry signatures/attestations of installed deps (and our own
+      # published versions). Fails closed on tamper; do not mask its exit.
+      - run: npm audit signatures
 
   # ─── Security Audit: Extension ────────────────────────────
   audit-ext:
@@ -640,6 +643,7 @@ jobs:
 
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit signatures
 
   # ─── Security Audit: CLI ──────────────────────────────────
   audit-cli:
@@ -662,6 +666,7 @@ jobs:
 
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit signatures
 
   # ─── License Audit ─────────────────────────────────────────
   license-audit:

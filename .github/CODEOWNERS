@@ -13,6 +13,10 @@
 
 # Check scripts — all under scripts/checks/ after PR 2.
 /scripts/checks/**                           @ngc-shj
+# Supply-chain crypto/auth-deps parity test: gate the ENFORCING test too, not
+# just the manifest data, so the reconciliation logic + name-pattern heuristic +
+# manual-allowance acceptance cannot be weakened without owner review.
+/src/__tests__/checks/**                      @ngc-shj
 # PR 9 (F25 Round 4): dead flat-file patterns /src/lib/crypto* and
 # /src/lib/auth* REMOVED — no files match them after PR #392 split
 # (all crypto/auth/audit code now under subdirs). /src/lib/{auth,crypto,audit}/**

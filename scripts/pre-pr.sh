@@ -167,6 +167,8 @@ run_step "Static: step-up-client-coverage" bash scripts/checks/check-step-up-cli
 run_step "Static: passkey-mint-gate" bash scripts/checks/check-passkey-mint-gate.sh
 run_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
 run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
+run_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
+run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
