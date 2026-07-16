@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "otpauth": "^9.5.0",
+    "otpauth": "^9.5.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tldts": "7.4.8"
