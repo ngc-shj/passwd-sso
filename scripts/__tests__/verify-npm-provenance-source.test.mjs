@@ -146,6 +146,25 @@ describe("verifyProvenanceSource", () => {
     expect(r).toMatchObject({ ok: false, reason: "BAD_INNER_PREDICATE_TYPE" });
   });
 
+  it("matches a scoped package whose subject encodes the leading @ as %40", () => {
+    const scoped = {
+      package: "@ngc-shj/passwd-sso-cli",
+      version: "0.4.71",
+      repo: "ngc-shj/passwd-sso",
+      sha: EXPECTED.sha,
+      workflow: ".github/workflows/release.yml",
+      ref: "refs/heads/main",
+    };
+    const r = verifyProvenanceSource(
+      audit([{ payload: payload({ subjectName: "pkg:npm/%40ngc-shj/passwd-sso-cli@0.4.71" }) }], {
+        name: scoped.package,
+        version: scoped.version,
+      }),
+      scoped,
+    );
+    expect(r).toMatchObject({ ok: true });
+  });
+
   it("rejects when the subject is a different package", () => {
     const r = verifyProvenanceSource(
       audit([{ payload: payload({ subjectName: "pkg:npm/other-pkg@0.4.71" }) }]),

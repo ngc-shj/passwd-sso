@@ -93,9 +93,12 @@ export function verifyProvenanceSource(auditOutput, expected) {
       continue;
     }
 
-    // Subject must be OUR package@version.
+    // Subject must be OUR package@version. In purl form the package's leading
+    // scope `@` is percent-encoded (`@scope/n` → `%40scope/n`); use replaceAll so
+    // every `@` is encoded, not just the first (a name has at most one, but a
+    // first-occurrence-only replace is an incomplete-escaping footgun).
     const subjects = Array.isArray(stmt.subject) ? stmt.subject : [];
-    const wantSubject = `pkg:npm/${expected.package.replace("@", "%40")}@${expected.version}`;
+    const wantSubject = `pkg:npm/${expected.package.replaceAll("@", "%40")}@${expected.version}`;
     const subject = subjects.find((s) => {
       const n = String(s?.name || "");
       return n === wantSubject || n === `pkg:npm/${expected.package}@${expected.version}`;
