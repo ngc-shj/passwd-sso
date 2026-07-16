@@ -119,6 +119,26 @@ Round 1 was verification-only. User approved the full remediation package; imple
 ### Round 2 finding F1 [Minor] — fixed inline
 - Action: broadened the `tsc` regex in findPublishJobIsolationViolation to catch path-form invocations. Added two tests (path-form flagged, `tsconfig` not false-positived).
 
+## Round 2/3 — Second external re-review follow-ups (applied)
+
+Two further external re-reviews of commit `99144fe76` produced findings; all valid ones fixed on this branch and re-reviewed adversarially.
+
+### Medium — verify-published install-retry was fail-open
+- Problem: the 5-attempt `if npm install ...` loop did not fail the job when all attempts failed (`set -e` ignores an `if`-condition command), so `npm audit signatures` could run against an empty scratch tree and "pass" without ever fetching the package.
+- Fix: explicit `installed=false`/`=true` flag + `exit 1` on total failure; plus post-install checks that `node_modules/passwd-sso-cli/package.json` exists and its version equals the published version. Verified fail-closed in a shell sim.
+
+### High (design) — no registry npm fetch under OIDC; use bundled npm
+- Decision (per user): the OIDC publish job must not fetch npm from the registry at all. Replaced `npm install -g npm@11.12.1` in publish-cli/verify-published with the npm bundled in the SHA-pinned setup-node's official Node distribution. Pinned `PUBLISH_NODE_VERSION: "24.15.0"` (which bundles npm 11.12.1, verified against nodejs.org/dist/index.json, ≥ Trusted Publishing floor 11.5.1) as a workflow-level env, with a runtime `node --version`/`npm --version` assert in each job. build-cli uses the same bundled npm too (drops its registry npm install).
+- Guard: `findPublishJobIsolationViolation` updated to forbid ALL npm install (incl. the global bootstrap) in id-token:write jobs. Mutation-verified.
+
+### Medium — published tarball not bound to built bytes
+- Fix: build-cli records `integrity` (`sha512-<base64>`, verified byte-identical to `npm pack --json`'s integrity = npm's dist.integrity). verify-published compares the registry's `dist.integrity` for the published version against it, failing closed on mismatch. Also reworded the L1 comment to state plainly it is only an emission-liveness/presence check, not authenticity.
+
+### Guard robustness (from re-review + adversarial pass)
+- `check-npm-version-pin.sh` (cross-file identity) replaced by `check-publish-toolchain.sh` (role-based: publish job pins exact Node patch + declares npm ≥ floor + no registry npm fetch; verifier & Docker each pinned for their own role, not required to match). Rewired in pre-pr.sh. Mutation-verified.
+- `findPublishJobIsolationViolation` hardened: inspects only `run:` command text (no `name:`/comment false-positive), joins block scalars + line-continuations (split-command bypass closed), detects top-level `id-token: write`, and covers all npm install/exec aliases (`npm i`/`add`/`ci`/`exec`/`x`, `pnpm dlx`) — the last from the final adversarial pass (a `npm i` would otherwise have slipped through). `findTrustedPublishNodeViolation` resolves `node-version: ${{ env.X }}` via a new `parseTopLevelEnv`.
+- Self-test grew to 59 cases; all new invariants red-proven.
+
 ## Environment Verification Report (Round 2)
 
 - `verified-local`: check-npm-version-pin.sh, check-workflow-supply-chain.mjs, check-e2e-selectors.sh all pass on the real tree; vitest self-test 40/40; new guards mutation-verified (red-proven); `PRE_PR_STATIC_ONLY=1 pre-pr.sh` → 40 passed; `cli/ npm run build` (tsc) → dist/index.js produced.

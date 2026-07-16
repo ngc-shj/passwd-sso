@@ -8,6 +8,18 @@ permissions:
   contents: write
   pull-requests: write
 
+# Publishing toolchain, pinned to an exact Node patch release and the npm it
+# bundles. The privileged publish job must NOT fetch npm from the registry
+# (that would run externally-sourced code while id-token:write is live); instead
+# it uses the npm that ships inside the SHA-pinned setup-node's official Node
+# distribution. Node v24.15.0 bundles npm 11.12.1, which meets Trusted
+# Publishing's floor (npm >= 11.5.1, Node >= 22.14.0). When bumping, pick a Node
+# patch whose bundled npm still meets the floor and update BOTH values together
+# (they are asserted at runtime). Source: https://nodejs.org/dist/index.json
+env:
+  PUBLISH_NODE_VERSION: "24.15.0"
+  PUBLISH_NPM_VERSION: "11.12.1"
+
 jobs:
   release-please:
     name: "Release Please"
@@ -42,19 +54,23 @@ jobs:
       version: ${{ steps.pack.outputs.version }}
       tarball: ${{ steps.pack.outputs.tarball }}
       sha256: ${{ steps.pack.outputs.sha256 }}
+      integrity: ${{ steps.pack.outputs.integrity }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # Match the publish job's toolchain so the tarball is built with the same
-      # Node/npm the publish job authenticates with (npm >= 11.5.1 / Node >= 22.14
-      # for Trusted Publishing). Pin npm exactly — the lockstep with the Dockerfile
-      # and dependency-signatures.yml is guarded by check-npm-version-pin.sh.
+      # Use the exact Node patch (and its bundled npm) that the publish job uses,
+      # from the SHA-pinned setup-node — no `npm install -g` from the registry.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version: ${{ env.PUBLISH_NODE_VERSION }}
 
-      - name: Install pinned npm
-        run: npm install -g npm@11.12.1 --ignore-scripts
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v${PUBLISH_NODE_VERSION}" \
+            || { echo "::error::node $(node --version), expected v${PUBLISH_NODE_VERSION}"; exit 1; }
+          test "$(npm --version)" = "${PUBLISH_NPM_VERSION}" \
+            || { echo "::error::npm $(npm --version), expected ${PUBLISH_NPM_VERSION} (bundled with Node ${PUBLISH_NODE_VERSION})"; exit 1; }
 
       - name: Install and build CLI
         working-directory: cli
@@ -78,10 +94,18 @@ jobs:
           npm pack
           [ -f "$TARBALL" ] || { echo "::error::expected packed tarball ${TARBALL} not found"; exit 1; }
           SHA256=$(sha256sum "$TARBALL" | cut -d' ' -f1)
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tarball=${TARBALL}" >> "$GITHUB_OUTPUT"
-          echo "sha256=${SHA256}"   >> "$GITHUB_OUTPUT"
-          echo "Packed ${TARBALL} (sha256=${SHA256})"
+          # Also record npm's own integrity string (sha512-<base64>) for THIS
+          # tarball — this is exactly the value npm stores as dist.integrity when
+          # it publishes, so verify-published can compare the registry's published
+          # integrity against the bytes we built without depending on npm not
+          # re-packing (npm publishes the tarball we hand it verbatim; a directory
+          # publish would re-pack, but we publish the tarball spec).
+          INTEGRITY=$(node -e "const c=require('crypto'),fs=require('fs');const b=fs.readFileSync('${TARBALL}');process.stdout.write('sha512-'+c.createHash('sha512').update(b).digest('base64'))")
+          echo "version=${VERSION}"     >> "$GITHUB_OUTPUT"
+          echo "tarball=${TARBALL}"     >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256}"       >> "$GITHUB_OUTPUT"
+          echo "integrity=${INTEGRITY}" >> "$GITHUB_OUTPUT"
+          echo "Packed ${TARBALL} (sha256=${SHA256}, integrity=${INTEGRITY})"
 
       - name: Upload tarball artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -108,20 +132,26 @@ jobs:
       contents: read
       id-token: write # OIDC for npm Trusted Publishing
     steps:
-      # npm Trusted Publishing requires BOTH npm >= 11.5.1 AND Node >= 22.14.0.
-      # The repo .nvmrc pins Node 20 (ships npm 10) for the app; the publish job
-      # must NOT inherit it — pin Node 24 here explicitly so OIDC publishing meets
-      # the current requirement. Do not switch this back to node-version-file.
+      # This job holds id-token:write. It uses ONLY the npm bundled in the
+      # SHA-pinned setup-node's official Node distribution — it does NOT run
+      # `npm install -g npm@...`, because fetching npm from the registry would run
+      # externally-sourced code while the OIDC publish token is mintable. The
+      # pinned Node patch (env.PUBLISH_NODE_VERSION) bundles an npm that meets
+      # Trusted Publishing's floor (npm >= 11.5.1, Node >= 22.14.0); the assert
+      # step below fails closed if the toolchain ever drifts.
+      # (.nvmrc pins Node 20 / npm 10 for the app — deliberately NOT inherited.)
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version: ${{ env.PUBLISH_NODE_VERSION }}
           registry-url: "https://registry.npmjs.org"
 
-      # Pin the npm version (matches Dockerfile NPM_VER, guarded by
-      # check-npm-version-pin.sh) — this job holds id-token:write, so an
-      # unpinned npm@latest is a supply-chain path to the OIDC publish token.
-      - name: Install pinned npm
-        run: npm install -g npm@11.12.1 --ignore-scripts
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v${PUBLISH_NODE_VERSION}" \
+            || { echo "::error::node $(node --version), expected v${PUBLISH_NODE_VERSION}"; exit 1; }
+          test "$(npm --version)" = "${PUBLISH_NPM_VERSION}" \
+            || { echo "::error::npm $(npm --version), expected ${PUBLISH_NPM_VERSION} bundled with Node ${PUBLISH_NODE_VERSION} (this OIDC job must use the bundled npm, not a registry fetch)"; exit 1; }
 
       - name: Download tarball artifact
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
@@ -162,12 +192,14 @@ jobs:
       # Known operational limit (L1): this reads the dist.attestations metadata
       # shape rather than running the cryptographic `npm audit signatures`
       # verifier, and it does NOT compare the attestation subject digest against
-      # the tarball this run built. It is an emission-liveness check — it proves
-      # an attestation of the documented predicate type is present, not that the
-      # attestation is cryptographically valid or bound to our exact bytes. It
-      # fails closed (an absent/degraded attestation hard-fails), never
-      # false-green. Full cryptographic verification of the published package runs
-      # in the separate verify-published job below.
+      # the tarball this run built. It is ONLY an emission-liveness check — it
+      # proves an attestation of the documented predicate type is *present*. It
+      # does NOT prove the attestation is cryptographically valid, nor that it is
+      # bound to our exact bytes; presence alone cannot rule out a false-green on
+      # authenticity. Its one guarantee is fail-closed on ABSENCE (a missing or
+      # degraded attestation hard-fails here). The authenticity + our-bytes checks
+      # are the verify-published job's `npm audit signatures` and tarball-digest
+      # comparison below.
       - name: Assert published provenance
         env:
           VERSION: ${{ needs.build-cli.outputs.version }}
@@ -209,25 +241,79 @@ jobs:
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
+          node-version: ${{ env.PUBLISH_NODE_VERSION }}
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install pinned npm
-        run: npm install -g npm@11.12.1 --ignore-scripts
+      - name: Verify toolchain versions
+        run: |
+          set -euo pipefail
+          test "$(node --version)" = "v${PUBLISH_NODE_VERSION}" \
+            || { echo "::error::node $(node --version), expected v${PUBLISH_NODE_VERSION}"; exit 1; }
+          test "$(npm --version)" = "${PUBLISH_NPM_VERSION}" \
+            || { echo "::error::npm $(npm --version), expected ${PUBLISH_NPM_VERSION}"; exit 1; }
 
       - name: Verify published package signature
         env:
           VERSION: ${{ needs.build-cli.outputs.version }}
+          EXPECTED_INTEGRITY: ${{ needs.build-cli.outputs.integrity }}
         run: |
           set -euo pipefail
           WORK=$(mktemp -d)
+          trap 'rm -rf "$WORK"' EXIT
           cd "$WORK"
           npm init -y >/dev/null 2>&1
+          # `set -e` does NOT abort on a failed `npm install` here — it runs as an
+          # `if` condition, which errexit ignores. Track success explicitly so a
+          # run where every attempt fails does NOT fall through to
+          # `npm audit signatures` against an empty tree (which would "pass" and
+          # report the published package as verified when it was never fetched).
+          installed=false
           for attempt in 1 2 3 4 5; do
             if npm install --no-save --ignore-scripts "passwd-sso-cli@${VERSION}" >/dev/null 2>&1; then
+              installed=true
               break
             fi
             echo "attempt ${attempt}: install of published version failed (propagation lag); retrying"
-            sleep 15
+            # Explicit if (not `[ ] && sleep`) so the loop body's last command
+            # never returns non-zero — keeps intent clear under `set -e`.
+            if [ "$attempt" -lt 5 ]; then sleep 15; fi
           done
+          if [ "$installed" != true ]; then
+            echo "::error::failed to install passwd-sso-cli@${VERSION} after 5 attempts — cannot verify its signature"
+            exit 1
+          fi
+          # Belt-and-suspenders: the package tree must actually exist and be the
+          # exact version we published, so `npm audit signatures` is verifying the
+          # intended bytes and not some other resolved version.
+          [ -f node_modules/passwd-sso-cli/package.json ] || {
+            echo "::error::passwd-sso-cli was not installed despite a reported success"
+            exit 1
+          }
+          ACTUAL_VERSION=$(node -p "require('./node_modules/passwd-sso-cli/package.json').version")
+          if [ "$ACTUAL_VERSION" != "$VERSION" ]; then
+            echo "::error::installed version mismatch: expected=${VERSION}, actual=${ACTUAL_VERSION}"
+            exit 1
+          fi
+          # Cryptographic signature + provenance verification of the published pkg.
           npm audit signatures
+          # Bind the published bytes to the bytes build-cli produced: compare the
+          # registry's dist.integrity for this version against the integrity we
+          # recorded at pack time. Because publish-cli publishes the tarball spec
+          # verbatim (not a directory re-pack), the registry integrity must equal
+          # ours exactly. A mismatch means the published tarball is not the one we
+          # built — fail closed.
+          if ! PUBLISHED_INTEGRITY=$(npm view "passwd-sso-cli@${VERSION}" dist.integrity 2>/dev/null); then
+            echo "::error::could not read published dist.integrity for passwd-sso-cli@${VERSION}"
+            exit 1
+          fi
+          if [ -z "$PUBLISHED_INTEGRITY" ]; then
+            echo "::error::published dist.integrity is empty for passwd-sso-cli@${VERSION}"
+            exit 1
+          fi
+          if [ "$PUBLISHED_INTEGRITY" != "$EXPECTED_INTEGRITY" ]; then
+            echo "::error::published tarball integrity does not match the build artifact"
+            echo "  expected (built):  ${EXPECTED_INTEGRITY}"
+            echo "  published (npm):   ${PUBLISHED_INTEGRITY}"
+            exit 1
+          fi
+          echo "✓ published tarball integrity matches build artifact (${EXPECTED_INTEGRITY})"
