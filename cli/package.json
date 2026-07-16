@@ -41,16 +41,16 @@
     "bcrypt-pbkdf": "^1.0.2",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
-    "clipboardy": "^4.0.0",
-    "commander": "^13.1.0",
-    "inquirer": "^12.6.0",
+    "clipboardy": "^5.3.1",
+    "commander": "^15.0.0",
+    "inquirer": "^14.0.2",
     "otpauth": "^9.4.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@types/node": "^22.15.3",
+    "@types/node": "^26.1.1",
     "tsx": "^4.19.4",
-    "typescript": "^5.9.0-beta",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.8"
   },
   "overrides": {
