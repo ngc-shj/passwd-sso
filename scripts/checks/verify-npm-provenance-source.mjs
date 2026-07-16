@@ -30,15 +30,14 @@
  */
 
 const PROVENANCE_PREDICATE = "https://slsa.dev/provenance/v1";
-const INTOTO_STATEMENT_TYPES = new Set([
-  "https://in-toto.io/Statement/v1",
-  "https://in-toto.io/Statement/v0.1",
-]);
-// GitHub-hosted runner builder IDs npm/GitHub emit for Trusted Publishing.
-const ALLOWED_BUILDER_IDS = new Set([
-  "https://github.com/actions/runner/github-hosted",
-  "https://github.com/actions/runner",
-]);
+// This release flow pins its Node/npm toolchain, so we require the EXACT values
+// current npm Trusted Publishing emits rather than a compatibility set — an
+// unexpected statement type or builder should fail closed for review, not be
+// silently accepted. (Verified against real `npm audit signatures
+// --include-attestations` output: _type = in-toto Statement/v1, builder =
+// actions/runner/github-hosted.)
+const EXPECTED_STATEMENT_TYPE = "https://in-toto.io/Statement/v1";
+const EXPECTED_BUILDER_ID = "https://github.com/actions/runner/github-hosted";
 
 /**
  * @param {unknown} auditOutput  parsed `npm audit signatures --json --include-attestations`
@@ -85,7 +84,7 @@ export function verifyProvenanceSource(auditOutput, expected) {
 
     // Inner (signed) statement must itself be an in-toto SLSA provenance — the
     // OUTER predicateType is not signed, so we do not trust it alone.
-    if (!INTOTO_STATEMENT_TYPES.has(String(stmt?._type))) {
+    if (String(stmt?._type) !== EXPECTED_STATEMENT_TYPE) {
       lastReason = "BAD_STATEMENT_TYPE";
       continue;
     }
@@ -118,9 +117,9 @@ export function verifyProvenanceSource(auditOutput, expected) {
     const bd = pred.buildDefinition || {};
     const wf = bd.externalParameters?.workflow || {};
 
-    // Builder identity must be a GitHub-hosted runner.
+    // Builder identity must be the GitHub-hosted runner.
     const builder = String(pred.runDetails?.builder?.id || "");
-    if (!ALLOWED_BUILDER_IDS.has(builder)) {
+    if (builder !== EXPECTED_BUILDER_ID) {
       lastReason = "BUILDER_MISMATCH";
       continue;
     }

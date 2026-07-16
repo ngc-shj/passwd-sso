@@ -302,16 +302,21 @@ jobs:
             exit 1
           fi
           # Cryptographic signature + provenance verification of the published
-          # pkg. Capture the machine-readable output too (with the verified
-          # attestation bundles), so the source-identity check consumes the SAME
-          # bundles npm just cryptographically verified — not a separately fetched,
-          # unsigned copy (which a compromised/equivocating registry could differ).
-          # `npm audit signatures` exits non-zero on any verification failure;
-          # `set -e` fails the job closed. We tee to a file so the human-readable
-          # gate still runs while the JSON is retained for the parser.
+          # pkg, ONCE, in JSON form (with the verified attestation bundles) so the
+          # source-identity check consumes the SAME bundles npm just verified — not
+          # a separately fetched, unsigned copy (which a compromised/equivocating
+          # registry could differ). `npm audit signatures` exits non-zero on any
+          # verification failure; `set -e` fails the job closed. A human-readable
+          # summary is printed from the JSON (no second network call / second
+          # false-red surface).
           AUDIT_JSON="$WORK/audit.json"
           npm audit signatures --json --include-attestations > "$AUDIT_JSON"
-          npm audit signatures
+          node -e '
+            const j = require(process.argv[1]);
+            const v = (j.verified || []).length, m = (j.missing || []).length, i = (j.invalid || []).length;
+            console.log(`npm audit signatures: ${v} verified, ${m} missing, ${i} invalid`);
+            if (i > 0 || m > 0) { console.error("::error::signature verification reported missing/invalid entries"); process.exit(1); }
+          ' "$AUDIT_JSON"
           # Bind the published bytes to the bytes build-cli produced: compare the
           # registry's dist.integrity for this version against the integrity we
           # recorded at pack time. Because publish-cli publishes the tarball spec

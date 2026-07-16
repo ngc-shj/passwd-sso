@@ -162,6 +162,22 @@ describe("verifyProvenanceSource", () => {
     expect(r).toMatchObject({ ok: false, reason: "BUILDER_MISMATCH" });
   });
 
+  it("rejects the non-hosted actions/runner builder (exact GitHub-hosted required)", () => {
+    const r = verifyProvenanceSource(
+      audit([{ payload: payload({ builder: "https://github.com/actions/runner" }) }]),
+      EXPECTED,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "BUILDER_MISMATCH" });
+  });
+
+  it("rejects an older in-toto Statement/v0.1 type (exact v1 required)", () => {
+    const r = verifyProvenanceSource(
+      audit([{ payload: payload({ statementType: "https://in-toto.io/Statement/v0.1" }) }]),
+      EXPECTED,
+    );
+    expect(r).toMatchObject({ ok: false, reason: "BAD_STATEMENT_TYPE" });
+  });
+
   it("rejects when the expected repo appears only as a resolved DEPENDENCY, not the source", () => {
     const r = verifyProvenanceSource(
       audit([
