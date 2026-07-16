@@ -91,7 +91,7 @@
     "resend": "^6.9.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
-    "undici": "^8.7.0",
+    "undici": "^7.28.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
