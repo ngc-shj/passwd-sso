@@ -46,7 +46,11 @@ jobs:
           node-version-file: ".nvmrc"
 
       # Pin npm to match the release producer so the verifier tracks the same
-      # attestation format the packages were published with (L2).
-      - run: npm install -g npm@11.12.1
-      - run: npm ci
+      # attestation format the packages were published with (L2). The pin is
+      # kept in lockstep with Dockerfile NPM_VER and release.yml by
+      # check-npm-version-pin.sh.
+      - run: npm install -g npm@11.12.1 --ignore-scripts
+      # Install without lifecycle scripts so a compromised dependency's install
+      # script cannot run before `npm audit signatures` verifies it.
+      - run: npm ci --ignore-scripts
       - run: npm audit signatures

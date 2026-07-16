@@ -18,6 +18,17 @@ YELLOW='\033[0;33m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+# Fail loud if the base ref does not resolve (shallow clone, gitless tree, or a
+# CI checkout that did not fetch main). Every diff below is wrapped in `|| true`,
+# so a missing base ref would otherwise make every check silently pass — the
+# guard would report green while inspecting nothing. Mirror the fail-closed
+# preamble of check-test-hygiene.sh (exit 2 = environment error, distinct from
+# exit 1 = selector breakage detected).
+if ! git rev-parse --verify --quiet "$BASE" >/dev/null; then
+  printf "${RED}check-e2e-selectors: base ref '%s' not found. Pass the base branch as \$1 or fetch it (e.g. shallow clone / gitless tree).${RESET}\n" "$BASE" >&2
+  exit 2
+fi
+
 warnings=0
 
 warn() {

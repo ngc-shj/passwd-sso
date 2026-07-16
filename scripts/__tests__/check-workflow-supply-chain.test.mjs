@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   findAutoMergeViolation,
   findMaskedVerifierViolations,
+  findPublishJobIsolationViolation,
   findTrustedPublishNodeViolation,
   isTrustedPublishingNodeVersion,
 } from "../checks/check-workflow-supply-chain.mjs";
@@ -298,6 +299,127 @@ describe("findTrustedPublishNodeViolation", () => {
       "      - run: npm publish",
     ].join("\n");
     expect(findTrustedPublishNodeViolation(wf, "release.yml")).toBeNull();
+  });
+});
+
+describe("findPublishJobIsolationViolation", () => {
+  it("flags npm ci inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm ci",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm ci/);
+  });
+
+  it("flags npm run build inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm run build",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/npm run build/);
+  });
+
+  it("flags a bare tsc invocation inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: tsc",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/tsc/);
+  });
+
+  it("flags a path-form tsc invocation inside an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: ./node_modules/.bin/tsc",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toMatch(/tsc/);
+  });
+
+  it("does not false-positive on a word ending in tsc (e.g. tsconfig)", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: cat tsconfig.json",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("allows the pinned toolchain bootstrap (npm install -g npm@X.Y.Z) in an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm install -g npm@11.12.1 --ignore-scripts",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("returns null for a clean publish job that only downloads + publishes a tarball", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - uses: actions/download-artifact@sha",
+      "      - run: npm publish ./passwd-sso-cli-1.0.0.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("does NOT flag npm ci in a sibling job that lacks id-token:write", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    permissions:",
+      "      contents: read",
+      "    steps:",
+      "      - run: npm ci --ignore-scripts",
+      "      - run: npm run build",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("does not trip on the word 'npm ci' inside a comment in an id-token:write job", () => {
+    const wf = [
+      "jobs:",
+      "  publish:",
+      "    permissions:",
+      "      id-token: write",
+      "    steps:",
+      "      # Do NOT add npm ci here — this job is OIDC-privileged",
+      "      - run: npm publish ./pkg.tgz",
+    ].join("\n");
+    expect(findPublishJobIsolationViolation(wf, "release.yml")).toBeNull();
   });
 });
 

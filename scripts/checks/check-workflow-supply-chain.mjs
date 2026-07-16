@@ -179,6 +179,63 @@ export function findTrustedPublishNodeViolation(content, name) {
   return null;
 }
 
+/**
+ * Returns a violation string for any job that grants `id-token: write` and also
+ * runs untrusted install/build code, else null. A job holding id-token:write can
+ * mint an OIDC token (npm Trusted Publishing); GitHub permissions are job-scoped,
+ * so ANY step in that job runs with that capability. Running `npm ci`, a build,
+ * or `tsc` there lets a compromised dependency (via an install script or the
+ * build) mint the publish token — the exact amplification the build/publish
+ * split closes. The publish job must only download the pre-built tarball, verify
+ * its digest, and `npm publish <tarball>` (a tarball spec runs no lifecycle
+ * scripts). The pinned `npm install -g npm@X.Y.Z --ignore-scripts` is allowed —
+ * it is the OIDC-capable npm itself and is script-suppressed and version-pinned.
+ * @param {string} content
+ * @param {string} name
+ * @returns {string | null}
+ */
+export function findPublishJobIsolationViolation(content, name) {
+  const jobs = splitJobs(content);
+  const targets =
+    jobs.length > 0 ? jobs : [{ name: "(file)", text: content }];
+  // Forbidden install/build shapes inside an id-token:write job. `npm install -g
+  // npm@...` (the toolchain bootstrap) is explicitly excluded — it is matched and
+  // skipped below before the generic `npm install` rule applies.
+  const forbidden = [
+    { re: /\bnpm\s+ci\b/, label: "npm ci" },
+    { re: /\bnpm\s+run\s+build\b/, label: "npm run build" },
+    { re: /\bnpm\s+install\b/, label: "npm install" },
+    { re: /\byarn\s+(install|add)\b/, label: "yarn install/add" },
+    { re: /\bpnpm\s+(install|i|add)\b/, label: "pnpm install" },
+    // Match `tsc`, `npx tsc`, and path-form invocations (`./node_modules/.bin/tsc`).
+    { re: /\bnpx\s+tsc\b|(?:^|[\s/])tsc(?:\s|$)/m, label: "tsc" },
+  ];
+  const toolchainBootstrapRe = /\bnpm\s+install\s+-g\s+npm@[\d.]+/;
+  // Match the actual permission grant only, on a non-comment line — a comment
+  // like "# the only job with id-token:write" (which splitJobs attributes to the
+  // preceding job) must not mark a job as OIDC-privileged.
+  const grantsIdToken = (text) =>
+    text.split("\n").some((l) => !/^\s*#/.test(l) && /id-token:\s*write/.test(l));
+  for (const job of targets) {
+    if (!grantsIdToken(job.text)) continue;
+    for (const rawLine of job.text.split("\n")) {
+      // Only inspect run-command content; a comment or an env value that merely
+      // mentions "npm ci" must not trip the guard.
+      const runMatch = rawLine.match(/^\s*(?:-\s+)?run:\s*(.*)$/);
+      const line = runMatch ? runMatch[1] : rawLine;
+      if (!runMatch && /^\s*#/.test(rawLine)) continue;
+      // Allow the pinned toolchain bootstrap (`npm install -g npm@X.Y.Z`).
+      const scrubbed = line.replace(toolchainBootstrapRe, "");
+      for (const { re, label } of forbidden) {
+        if (re.test(scrubbed)) {
+          return `${name} (job '${job.name}'): a job with 'id-token: write' runs '${label}' — an OIDC-publish job must not install dependencies or build (a compromised dep could mint the publish token). Move the build to an unprivileged (contents:read) job and publish the pre-built tarball.`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function main() {
   const violations = [];
   for (const file of listWorkflowFiles()) {
@@ -187,6 +244,8 @@ function main() {
     if (autoMerge) violations.push(autoMerge);
     const nodePin = findTrustedPublishNodeViolation(content, file);
     if (nodePin) violations.push(nodePin);
+    const publishIsolation = findPublishJobIsolationViolation(content, file);
+    if (publishIsolation) violations.push(publishIsolation);
     violations.push(...findMaskedVerifierViolations(content, file));
   }
   if (violations.length > 0) {
