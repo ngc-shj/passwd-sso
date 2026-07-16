@@ -21,9 +21,11 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
 
-RELEASE_WF=".github/workflows/release.yml"
-SIGS_WF=".github/workflows/dependency-signatures.yml"
-DOCKERFILE="Dockerfile"
+# Paths are overridable via PUBLISH_TOOLCHAIN_* so the self-test can drive the
+# guard against fixture files without mutating tracked ones.
+RELEASE_WF="${PUBLISH_TOOLCHAIN_RELEASE_WF:-.github/workflows/release.yml}"
+SIGS_WF="${PUBLISH_TOOLCHAIN_SIGS_WF:-.github/workflows/dependency-signatures.yml}"
+DOCKERFILE="${PUBLISH_TOOLCHAIN_DOCKERFILE:-Dockerfile}"
 
 fail() {
   echo "ERROR: $1"
@@ -61,8 +63,14 @@ printf '%s' "$node_pin" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
 # `node-version:` line whose value is not exactly `${{ env.PUBLISH_NODE_VERSION }}`
 # is a violation, as is any `node-version-file:` line. This is the structural
 # guard that a per-value blocklist ("2[0-9]") kept missing.
+# Whole-line match (not a substring): a value like
+# `${{ env.PUBLISH_NODE_VERSION }}.x` CONTAINS the exact string but is not it, so
+# a fixed-string filter would wrongly accept it. Anchor the accepted form to the
+# full line (allowing surrounding whitespace and a trailing comment), then any
+# `node-version:` line that does NOT match the accepted form is a violation.
+accepted_node_version_re='^[[:space:]]*node-version:[[:space:]]*\$\{\{[[:space:]]*env\.PUBLISH_NODE_VERSION[[:space:]]*\}\}[[:space:]]*(#.*)?$'
 bad_node_version=$(grep -nE '^\s*node-version:' "$RELEASE_WF" \
-  | grep -vF 'node-version: ${{ env.PUBLISH_NODE_VERSION }}' || true)
+  | grep -vE ":${accepted_node_version_re#^}" || true)
 if [ -n "$bad_node_version" ]; then
   echo "ERROR: release.yml pins node-version literally instead of \${{ env.PUBLISH_NODE_VERSION }}:"
   echo "$bad_node_version"

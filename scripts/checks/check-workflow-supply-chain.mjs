@@ -128,6 +128,16 @@ function listWorkflowFiles() {
     .map((f) => join(WORKFLOWS_DIR, f));
 }
 
+/**
+ * Whether a node-version string clears the npm Trusted Publishing FLOOR (Node
+ * >= 22.14). This is a lower-bound check only — it deliberately accepts floating
+ * forms like `24` / `24.x`, because any 24.x meets the floor. It is NOT the
+ * exact-pin invariant: the requirement that release.yml pin an exact Node patch
+ * (so the bundled npm is deterministic) is a separate, stricter concern owned by
+ * scripts/checks/check-publish-toolchain.sh. Do not tighten this helper to
+ * require an exact patch — other publish workflows may legitimately floor-check
+ * with `24.x`, and the exact-pin enforcement belongs in the toolchain gate.
+ */
 export function isTrustedPublishingNodeVersion(version) {
   const m = version.match(/^(\d+)(?:\.(\d+|x))?(?:\.(\d+|x))?$/);
   if (!m) return false;
