@@ -108,6 +108,7 @@
     "@sentry/nextjs": { "workspace": "root", "reason": "Error reporting, not a crypto/auth primitive." },
     "bowser": { "workspace": "root", "reason": "User-agent parsing for new-device detection, not a crypto/auth primitive." },
     "zod": { "workspace": "root", "reason": "Input validation, not a crypto/auth primitive." },
+    "uuid": { "workspace": "root", "reason": "Deterministic UUIDv5 generation for SCIM Group IDs; an identifier utility, not a crypto/auth primitive." },
     "@noble/hashes": { "workspace": "root", "reason": "Test-only oracle (devDependency, *.test.ts) for crypto conformance vectors; not a runtime path." },
     "@simplewebauthn/browser": { "workspace": "root", "reason": "Production dep but not imported anywhere; the app uses the raw WebAuthn API instead (see webauthn-client.ts)." },
     "lucide-react": { "workspace": "root", "reason": "Icon components (UI), not a crypto/auth primitive; imported in the shared component tree alongside the TOTP field." },
