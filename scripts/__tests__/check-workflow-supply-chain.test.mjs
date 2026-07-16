@@ -8,6 +8,7 @@ import { describe, it, expect } from "vitest";
 import {
   findAutoMergeViolation,
   findMaskedVerifierViolations,
+  findTrustedPublishNodeViolation,
 } from "../checks/check-workflow-supply-chain.mjs";
 
 describe("findAutoMergeViolation", () => {
@@ -210,5 +211,44 @@ describe("findMaskedVerifierViolations", () => {
         continue-on-error: true
 `;
     expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+});
+
+describe("findTrustedPublishNodeViolation", () => {
+  it("flags an npm-publish workflow that inherits node-version-file (Node 20)", () => {
+    const wf = [
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version-file: \".nvmrc\"",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).toMatch(/22\.14/);
+  });
+
+  it("passes an npm-publish workflow pinned to node-version 24", () => {
+    const wf = [
+      "    steps:",
+      "      - uses: actions/setup-node@sha",
+      "        with:",
+      "          node-version: \"24\"",
+      "      - run: npm publish",
+    ].join("\n");
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("passes node-version 22.14.x", () => {
+    const wf = `          node-version: "22.14.0"\n      - run: npm publish\n`;
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).toBeNull();
+  });
+
+  it("flags node-version 20 explicitly for an npm-publish workflow", () => {
+    const wf = `          node-version: "20"\n      - run: npm publish\n`;
+    expect(findTrustedPublishNodeViolation(wf, "release.yml")).not.toBeNull();
+  });
+
+  it("returns null for a workflow that does not run npm publish", () => {
+    const wf = `          node-version-file: ".nvmrc"\n      - run: npm ci\n`;
+    expect(findTrustedPublishNodeViolation(wf, "ci.yml")).toBeNull();
   });
 });

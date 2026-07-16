@@ -23,15 +23,42 @@ updates:
   # upstream version bump as trusted; tests do not detect a supply-chain payload).
   # No swift ecosystem: iOS uses xcodegen with no Package.swift/Podfile for
   # Dependabot to read.
+  # Crypto/auth-sensitive packages get their own Dependabot group so their bumps
+  # land in a dedicated PR that warrants the deeper supply-chain review the
+  # crypto-auth-deps-manifest exists to demand — separated from routine UI/tooling
+  # bumps. The sensitive-patterns list mirrors the manifest's `packages` members;
+  # keep the two in sync (a manifest addition of a new crypto/auth dep should add
+  # its pattern here). General deps are grouped separately.
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
     groups:
-      npm-root:
+      npm-root-security-sensitive:
+        patterns:
+          - "next-auth"
+          - "@auth/*"
+          - "@simplewebauthn/*"
+          - "hash-wasm"
+          - "@prisma/*"
+          - "pg"
+          - "nodemailer"
+          - "resend"
+          - "otpauth"
+      npm-root-general:
         patterns:
           - "*"
+        exclude-patterns:
+          - "next-auth"
+          - "@auth/*"
+          - "@simplewebauthn/*"
+          - "hash-wasm"
+          - "@prisma/*"
+          - "pg"
+          - "nodemailer"
+          - "resend"
+          - "otpauth"
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
@@ -40,9 +67,16 @@ updates:
       interval: "weekly"
       day: "monday"
     groups:
-      npm-cli:
+      npm-cli-security-sensitive:
+        patterns:
+          - "bcrypt-pbkdf"
+          - "otpauth"
+      npm-cli-general:
         patterns:
           - "*"
+        exclude-patterns:
+          - "bcrypt-pbkdf"
+          - "otpauth"
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
@@ -51,7 +85,12 @@ updates:
       interval: "weekly"
       day: "monday"
     groups:
-      npm-extension:
+      npm-extension-security-sensitive:
+        patterns:
+          - "otpauth"
+      npm-extension-general:
         patterns:
           - "*"
+        exclude-patterns:
+          - "otpauth"
     open-pull-requests-limit: 5

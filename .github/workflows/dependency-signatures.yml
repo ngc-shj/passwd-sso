@@ -45,5 +45,8 @@ jobs:
         with:
           node-version-file: ".nvmrc"
 
+      # Pin npm to match the release producer so the verifier tracks the same
+      # attestation format the packages were published with (L2).
+      - run: npm install -g npm@11.12.1
       - run: npm ci
       - run: npm audit signatures

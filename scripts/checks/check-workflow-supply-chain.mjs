@@ -128,12 +128,23 @@ function listWorkflowFiles() {
     .map((f) => join(WORKFLOWS_DIR, f));
 }
 
+export function findTrustedPublishNodeViolation(content, name) {
+  if (!/npm\s+publish/.test(content)) return null;
+  const okNode = /node-version:\s*["']?(2[2-9]|[3-9]\d)(\.\d+)*(\.x)?["']?/i.test(content);
+  if (!okNode) {
+    return `${name}: runs 'npm publish' (Trusted Publishing) but does not pin an explicit node-version >= 22.14 — OIDC publishing requires Node >= 22.14.0 (do not inherit the Node-20 .nvmrc)`;
+  }
+  return null;
+}
+
 function main() {
   const violations = [];
   for (const file of listWorkflowFiles()) {
     const content = readFileSync(file, "utf8");
     const autoMerge = findAutoMergeViolation(content, file);
     if (autoMerge) violations.push(autoMerge);
+    const nodePin = findTrustedPublishNodeViolation(content, file);
+    if (nodePin) violations.push(nodePin);
     violations.push(...findMaskedVerifierViolations(content, file));
   }
   if (violations.length > 0) {

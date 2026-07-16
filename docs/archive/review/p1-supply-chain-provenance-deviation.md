@@ -66,3 +66,13 @@ Created: 2026-07-16
 
 ### D13 block-scalar header variants (Low)
 - Header regex required a trailing anchor after the indicator, so a trailing comment and an indentation indicator evaded folding. Fixed: accepts indentation + chomping indicators in any order plus an optional trailing comment. Self-tests for both.
+
+## Third external-review round
+
+### D14 release Node 24 pin (M1, release-blocker)
+- npm Trusted Publishing needs both npm 11.5.1+ AND Node 22.14+. The release job used node-version-file .nvmrc (Node 20) and only upgraded npm, so the next npm publish would fail OIDC auth. Pinned the release job to node-version 24 explicitly. Added findTrustedPublishNodeViolation guard (an npm-publish workflow must pin node-version >= 22.14) with 5 self-tests, wired into the workflow-supply-chain guard.
+
+### D15 verifier npm pin + Dependabot sensitive group + L1 note
+- L2: pinned npm in the weekly signature-sweep so the verifier tracks the release producer attestation format.
+- L3: split each Dependabot npm ecosystem into a security-sensitive group + a general group, so sensitive bumps land in a dedicated PR.
+- L1: documented that the post-publish assertion reads dist.attestations metadata shape rather than npm audit signatures; acceptable because it fails closed and the weekly sweep re-verifies officially.
