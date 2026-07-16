@@ -1,50 +1,76 @@
 #!/usr/bin/env node
 /**
- * Verify that an npm SLSA v1 provenance attestation binds a published package to
- * THIS repository, commit, workflow, and ref — not merely to the same repo. The
- * registry attestation bundle (JSON) is read from stdin; expected values come
- * from the environment:
+ * Verify that the VERIFIED SLSA provenance attestation for a published npm
+ * package binds it to THIS repository, commit, workflow, and ref — and that the
+ * signed in-toto statement's own type, subject, and builder are what we expect.
  *
+ * INPUT (stdin): the JSON output of
+ *   `npm audit signatures --json --include-attestations`
+ * i.e. `{ verified: [ { name, version, attestationBundles: [...] }, ... ] }`.
+ * The bundles under `verified[].attestationBundles` are the ones npm
+ * CRYPTOGRAPHICALLY verified (Sigstore signature + transparency log) during the
+ * audit. We deliberately consume THOSE — not a separately fetched, unsigned copy
+ * of the bundle — so the identity we assert is the identity of a bundle whose
+ * signature was already checked, closing the registry-equivocation gap.
+ *
+ * Expected values come from the environment:
+ *   EXPECTED_PACKAGE   e.g. "passwd-sso-cli"
+ *   EXPECTED_VERSION   e.g. "0.4.71"
  *   EXPECTED_REPO      e.g. "ngc-shj/passwd-sso"        (github.repository)
- *   EXPECTED_SHA       e.g. "deadbeef…" (40-hex)        (github.sha)
+ *   EXPECTED_SHA       40-hex commit                    (github.sha)
  *   EXPECTED_WORKFLOW  e.g. ".github/workflows/release.yml"
- *   EXPECTED_REF       e.g. "refs/heads/main"           (github.ref) — optional;
- *                      when unset, ref is not asserted.
+ *   EXPECTED_REF       e.g. "refs/heads/main"           (github.ref) — optional
  *
- * Exits 0 and prints `OK …` only when a provenance predicate matches ALL of the
- * required fields exactly. Otherwise prints a specific reason and exits 1. It
- * fails CLOSED on every ambiguity (no provenance, missing field, unparseable
- * bundle): a false-fail on a legitimate release, never a false-pass.
+ * Exits 0 and prints `OK …` only when a verified provenance matches ALL required
+ * fields exactly. Otherwise prints a specific reason and exits 1. Fails CLOSED on
+ * every ambiguity: a false-fail on a legitimate release, never a false-pass.
  *
- * The verifier is pure (verifyProvenanceSource) so it can be unit-tested against
+ * The verifier is pure (verifyProvenanceSource) so it is unit-tested against
  * SLSA v1 fixtures; the file also runs as a CLI when invoked directly.
  */
 
-const GITHUB = "https://github.com/";
+const PROVENANCE_PREDICATE = "https://slsa.dev/provenance/v1";
+const INTOTO_STATEMENT_TYPES = new Set([
+  "https://in-toto.io/Statement/v1",
+  "https://in-toto.io/Statement/v0.1",
+]);
+// GitHub-hosted runner builder IDs npm/GitHub emit for Trusted Publishing.
+const ALLOWED_BUILDER_IDS = new Set([
+  "https://github.com/actions/runner/github-hosted",
+  "https://github.com/actions/runner",
+]);
 
 /**
- * @param {unknown} bundle  parsed attestation bundle
- * @param {{repo:string, sha:string, workflow:string, ref?:string}} expected
- * @returns {{ok:true, repo:string, sha:string, workflow:string, ref:string}
+ * @param {unknown} auditOutput  parsed `npm audit signatures --json --include-attestations`
+ * @param {{package:string, version:string, repo:string, sha:string, workflow:string, ref?:string}} expected
+ * @returns {{ok:true, repo:string, sha:string, workflow:string, ref:string, builder:string}
  *          | {ok:false, reason:string}}
  */
-export function verifyProvenanceSource(bundle, expected) {
-  if (!expected?.repo) return { ok: false, reason: "EXPECTED_REPO not set" };
-  if (!expected?.sha) return { ok: false, reason: "EXPECTED_SHA not set" };
-  if (!expected?.workflow) return { ok: false, reason: "EXPECTED_WORKFLOW not set" };
+export function verifyProvenanceSource(auditOutput, expected) {
+  for (const [k, label] of [
+    ["package", "EXPECTED_PACKAGE"],
+    ["version", "EXPECTED_VERSION"],
+    ["repo", "EXPECTED_REPO"],
+    ["sha", "EXPECTED_SHA"],
+    ["workflow", "EXPECTED_WORKFLOW"],
+  ]) {
+    if (!expected?.[k]) return { ok: false, reason: `${label} not set` };
+  }
 
-  const atts = Array.isArray(bundle?.attestations) ? bundle.attestations : [];
-  const provs = atts.filter(
-    (a) => a?.predicateType === "https://slsa.dev/provenance/v1",
+  const verified = Array.isArray(auditOutput?.verified) ? auditOutput.verified : [];
+  const entry = verified.find(
+    (v) => v?.name === expected.package && v?.version === expected.version,
   );
-  if (provs.length === 0) return { ok: false, reason: "NO_PROVENANCE" };
+  if (!entry) return { ok: false, reason: "PACKAGE_NOT_VERIFIED" };
 
-  // Collect a specific rejection reason from the last candidate we could parse,
-  // so a caller sees WHICH field diverged rather than a generic mismatch.
+  const bundles = Array.isArray(entry.attestationBundles) ? entry.attestationBundles : [];
+  const provBundles = bundles.filter((b) => b?.predicateType === PROVENANCE_PREDICATE);
+  if (provBundles.length === 0) return { ok: false, reason: "NO_VERIFIED_PROVENANCE" };
+
   let lastReason = "NO_MATCHING_PROVENANCE";
 
-  for (const a of provs) {
-    const env = a?.bundle?.dsseEnvelope || a?.dsseEnvelope;
+  for (const b of provBundles) {
+    const env = b?.bundle?.dsseEnvelope || b?.dsseEnvelope;
     if (!env?.payload) {
       lastReason = "NO_DSSE_PAYLOAD";
       continue;
@@ -56,15 +82,51 @@ export function verifyProvenanceSource(bundle, expected) {
       lastReason = "PAYLOAD_PARSE_ERROR";
       continue;
     }
-    const pred = stmt?.predicate || {};
+
+    // Inner (signed) statement must itself be an in-toto SLSA provenance — the
+    // OUTER predicateType is not signed, so we do not trust it alone.
+    if (!INTOTO_STATEMENT_TYPES.has(String(stmt?._type))) {
+      lastReason = "BAD_STATEMENT_TYPE";
+      continue;
+    }
+    if (stmt?.predicateType !== PROVENANCE_PREDICATE) {
+      lastReason = "BAD_INNER_PREDICATE_TYPE";
+      continue;
+    }
+
+    // Subject must be OUR package@version.
+    const subjects = Array.isArray(stmt.subject) ? stmt.subject : [];
+    const wantSubject = `pkg:npm/${expected.package.replace("@", "%40")}@${expected.version}`;
+    const subject = subjects.find((s) => {
+      const n = String(s?.name || "");
+      return n === wantSubject || n === `pkg:npm/${expected.package}@${expected.version}`;
+    });
+    if (!subject) {
+      lastReason = "SUBJECT_MISMATCH";
+      continue;
+    }
+    // If build-cli's integrity was supplied, bind the subject digest to it.
+    if (expected.sha512Digest) {
+      const digest = subject.digest?.sha512 || "";
+      if (digest !== expected.sha512Digest) {
+        lastReason = "SUBJECT_DIGEST_MISMATCH";
+        continue;
+      }
+    }
+
+    const pred = stmt.predicate || {};
     const bd = pred.buildDefinition || {};
     const wf = bd.externalParameters?.workflow || {};
 
-    // Source repository — the authoritative field is externalParameters.workflow
-    // .repository. Do NOT fall back to scanning resolvedDependencies: any GitHub
-    // URI there could be an ordinary dependency, not the built source, which
-    // would let an attacker's provenance pass by listing the expected repo as a
-    // dep. Missing source repository fails closed.
+    // Builder identity must be a GitHub-hosted runner.
+    const builder = String(pred.runDetails?.builder?.id || "");
+    if (!ALLOWED_BUILDER_IDS.has(builder)) {
+      lastReason = "BUILDER_MISMATCH";
+      continue;
+    }
+
+    // Source repository — the authoritative field is workflow.repository. No
+    // fallback to scanning resolvedDependencies (any dep URI could be planted).
     if (!wf.repository) {
       lastReason = "MISSING_SOURCE_REPOSITORY";
       continue;
@@ -75,10 +137,10 @@ export function verifyProvenanceSource(bundle, expected) {
       continue;
     }
 
-    // Source commit — from the resolved dependency whose URI is THIS repo.
+    // Source commit — from the resolved dependency whose URI is EXACTLY this repo
+    // (prefix-then-boundary, so `repo-evil` cannot satisfy `repo`).
     const deps = Array.isArray(bd.resolvedDependencies) ? bd.resolvedDependencies : [];
-    const repoUriPrefix = `git+${GITHUB}${expected.repo}`;
-    const srcDep = deps.find((d) => String(d?.uri || "").startsWith(repoUriPrefix));
+    const srcDep = deps.find((d) => isThisRepoUri(String(d?.uri || ""), expected.repo));
     const sha = srcDep?.digest?.gitCommit || "";
     if (!sha) {
       lastReason = "MISSING_COMMIT";
@@ -89,22 +151,19 @@ export function verifyProvenanceSource(bundle, expected) {
       continue;
     }
 
-    // Workflow path — strip an `owner/repo/` prefix and any `@ref` suffix so we
-    // compare the repo-relative path (`.github/workflows/release.yml`).
+    // Workflow path — strip an `owner/repo/` prefix and any `@ref` suffix.
     const rawPath = String(wf.path || "");
     if (!rawPath) {
       lastReason = "MISSING_WORKFLOW_PATH";
       continue;
     }
-    const path = rawPath
-      .replace(new RegExp(`^${expected.repo}/`), "")
-      .replace(/@.*$/, "");
+    const path = rawPath.replace(new RegExp(`^${escapeRe(expected.repo)}/`), "").replace(/@.*$/, "");
     if (path !== expected.workflow) {
       lastReason = "WORKFLOW_MISMATCH";
       continue;
     }
 
-    // Ref — asserted only when an expected ref is supplied.
+    // Ref — asserted only when supplied.
     const ref = String(wf.ref || "");
     if (expected.ref) {
       if (!ref) {
@@ -117,10 +176,25 @@ export function verifyProvenanceSource(bundle, expected) {
       }
     }
 
-    return { ok: true, repo, sha, workflow: path, ref };
+    return { ok: true, repo, sha, workflow: path, ref, builder };
   }
 
   return { ok: false, reason: lastReason };
+}
+
+/**
+ * True when a resolved-dependency URI names EXACTLY this repo. Matches
+ * `git+https://github.com/<repo>` followed by a boundary (`@`, `.git`, or end),
+ * so `…/passwd-sso-evil` does NOT match `…/passwd-sso`.
+ */
+function isThisRepoUri(uri, repo) {
+  const m = uri.match(/^git\+https:\/\/github\.com\/(.+?)(?:\.git)?(?:@.*)?$/);
+  if (!m) return false;
+  return m[1] === repo;
+}
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function readStdin() {
@@ -130,22 +204,25 @@ async function readStdin() {
 }
 
 async function main() {
-  let bundle;
+  let auditOutput;
   try {
-    bundle = JSON.parse(await readStdin());
+    auditOutput = JSON.parse(await readStdin());
   } catch (e) {
-    console.error(`::error::attestation bundle is not valid JSON: ${e.message}`);
+    console.error(`::error::audit output is not valid JSON: ${e.message}`);
     process.exit(1);
   }
-  const result = verifyProvenanceSource(bundle, {
+  const result = verifyProvenanceSource(auditOutput, {
+    package: process.env.EXPECTED_PACKAGE || "",
+    version: process.env.EXPECTED_VERSION || "",
     repo: process.env.EXPECTED_REPO || "",
     sha: process.env.EXPECTED_SHA || "",
     workflow: process.env.EXPECTED_WORKFLOW || "",
     ref: process.env.EXPECTED_REF || "",
+    sha512Digest: process.env.EXPECTED_SHA512_DIGEST || "",
   });
   if (result.ok) {
     console.log(
-      `OK repo=${result.repo} sha=${result.sha} workflow=${result.workflow} ref=${result.ref || "(not asserted)"}`,
+      `OK repo=${result.repo} sha=${result.sha} workflow=${result.workflow} ref=${result.ref || "(not asserted)"} builder=${result.builder}`,
     );
     process.exit(0);
   }

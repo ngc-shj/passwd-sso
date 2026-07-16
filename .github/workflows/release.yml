@@ -301,7 +301,16 @@ jobs:
             echo "::error::installed version mismatch: expected=${VERSION}, actual=${ACTUAL_VERSION}"
             exit 1
           fi
-          # Cryptographic signature + provenance verification of the published pkg.
+          # Cryptographic signature + provenance verification of the published
+          # pkg. Capture the machine-readable output too (with the verified
+          # attestation bundles), so the source-identity check consumes the SAME
+          # bundles npm just cryptographically verified — not a separately fetched,
+          # unsigned copy (which a compromised/equivocating registry could differ).
+          # `npm audit signatures` exits non-zero on any verification failure;
+          # `set -e` fails the job closed. We tee to a file so the human-readable
+          # gate still runs while the JSON is retained for the parser.
+          AUDIT_JSON="$WORK/audit.json"
+          npm audit signatures --json --include-attestations > "$AUDIT_JSON"
           npm audit signatures
           # Bind the published bytes to the bytes build-cli produced: compare the
           # registry's dist.integrity for this version against the integrity we
@@ -324,31 +333,33 @@ jobs:
             exit 1
           fi
           echo "✓ published tarball integrity matches build artifact (${EXPECTED_INTEGRITY})"
+          cp "$AUDIT_JSON" "$GITHUB_WORKSPACE/audit-signatures.json"
 
       # Verify the provenance attestation's SOURCE IDENTITY, not just that a valid
-      # signature exists. `npm audit signatures` proves the attestation is
-      # cryptographically valid, but not WHICH repository/commit/workflow produced
-      # it. Fetch the registry attestation bundle and assert the SLSA provenance
-      # binds the published package to THIS repository, commit, and workflow —
-      # all exact. The parser (verify-npm-provenance-source.mjs) fails CLOSED on a
-      # missing/mismatched field, an absent provenance predicate, or an
-      # unparseable bundle (a false-fail on a legitimate release, never a
-      # false-pass). It is unit-tested against SLSA v1 fixtures. If a real release
-      # fails here, inspect the bundle at ATT_URL against the parser's field paths
-      # before assuming tampering; `npm audit signatures` above already confirmed
-      # cryptographic validity.
+      # signature exists. The previous step proved the attestation is
+      # cryptographically valid; this asserts WHICH repository/commit/workflow/
+      # builder produced it, and that the signed statement's own type and subject
+      # (our package@version, digest bound to the built tarball) are what we
+      # expect. It consumes the VERIFIED attestationBundles from
+      # `npm audit signatures --json --include-attestations` — the same bundles
+      # npm just verified — so identity is asserted on signed data, not a
+      # separately fetched unsigned copy. verify-npm-provenance-source.mjs fails
+      # CLOSED on any missing/mismatched field, absent verified provenance, or
+      # unparseable input (a false-fail on a legitimate release, never a
+      # false-pass) and is unit-tested against SLSA v1 fixtures.
       - name: Verify provenance source identity
         env:
-          VERSION: ${{ needs.build-cli.outputs.version }}
+          EXPECTED_PACKAGE: "passwd-sso-cli"
+          EXPECTED_VERSION: ${{ needs.build-cli.outputs.version }}
           EXPECTED_REPO: ${{ github.repository }}
           EXPECTED_SHA: ${{ github.sha }}
           EXPECTED_WORKFLOW: ".github/workflows/release.yml"
           EXPECTED_REF: ${{ github.ref }}
+          EXPECTED_INTEGRITY: ${{ needs.build-cli.outputs.integrity }}
         run: |
           set -euo pipefail
-          ATT_URL="https://registry.npmjs.org/-/npm/v1/attestations/passwd-sso-cli@${VERSION}"
-          if ! BUNDLE=$(curl -fsSL "$ATT_URL"); then
-            echo "::error::could not fetch attestation bundle from ${ATT_URL}"
-            exit 1
-          fi
-          printf '%s' "$BUNDLE" | node scripts/checks/verify-npm-provenance-source.mjs
+          # Convert build-cli's `sha512-<base64>` integrity to the hex form the
+          # provenance subject digest uses, so the parser can bind them.
+          EXPECTED_SHA512_DIGEST=$(node -e 'process.stdout.write(Buffer.from(process.env.EXPECTED_INTEGRITY.replace(/^sha512-/,""),"base64").toString("hex"))')
+          export EXPECTED_SHA512_DIGEST
+          node scripts/checks/verify-npm-provenance-source.mjs < "$GITHUB_WORKSPACE/audit-signatures.json"
