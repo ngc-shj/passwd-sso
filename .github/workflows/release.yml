@@ -241,6 +241,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      # Checkout so the provenance-source verifier script is available. This job
+      # is unprivileged (contents:read, no id-token), so running repo code here
+      # carries none of the publish job's risk.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.PUBLISH_NODE_VERSION }}
@@ -322,22 +327,23 @@ jobs:
 
       # Verify the provenance attestation's SOURCE IDENTITY, not just that a valid
       # signature exists. `npm audit signatures` proves the attestation is
-      # cryptographically valid, but not WHICH repository/workflow/commit produced
+      # cryptographically valid, but not WHICH repository/commit/workflow produced
       # it. Fetch the registry attestation bundle and assert the SLSA provenance
-      # points at THIS repository. Fails closed if the provenance is missing or
-      # names a different source repo.
-      # NOTE (fail direction): this parses the npm attestation bundle's SLSA v1
-      # shape best-effort. It fails CLOSED — an unexpected bundle shape yields
-      # PARSE_ERROR/REPO_MISMATCH and hard-fails this step (a false-fail on a
-      # legitimate release, never a false-pass). If a real release fails here,
-      # inspect the bundle at the ATT_URL below against the parser's field paths
-      # before assuming tampering; `npm audit signatures` above already covered
+      # binds the published package to THIS repository, commit, and workflow —
+      # all exact. The parser (verify-npm-provenance-source.mjs) fails CLOSED on a
+      # missing/mismatched field, an absent provenance predicate, or an
+      # unparseable bundle (a false-fail on a legitimate release, never a
+      # false-pass). It is unit-tested against SLSA v1 fixtures. If a real release
+      # fails here, inspect the bundle at ATT_URL against the parser's field paths
+      # before assuming tampering; `npm audit signatures` above already confirmed
       # cryptographic validity.
       - name: Verify provenance source identity
         env:
           VERSION: ${{ needs.build-cli.outputs.version }}
           EXPECTED_REPO: ${{ github.repository }}
           EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_WORKFLOW: ".github/workflows/release.yml"
+          EXPECTED_REF: ${{ github.ref }}
         run: |
           set -euo pipefail
           ATT_URL="https://registry.npmjs.org/-/npm/v1/attestations/passwd-sso-cli@${VERSION}"
@@ -345,49 +351,4 @@ jobs:
             echo "::error::could not fetch attestation bundle from ${ATT_URL}"
             exit 1
           fi
-          # Extract the SLSA provenance predicate's source repository and commit
-          # from the DSSE-wrapped in-toto statement inside the attestation bundle.
-          # Fails closed (exit 1) if no provenance attestation or no repo URI is found.
-          RESULT=$(EXPECTED_REPO="$EXPECTED_REPO" EXPECTED_SHA="$EXPECTED_SHA" node -e '
-            let raw = "";
-            process.stdin.on("data", (c) => (raw += c)).on("end", () => {
-              try {
-                const bundle = JSON.parse(raw);
-                const atts = bundle.attestations || [];
-                const provs = atts.filter((a) => a.predicateType === "https://slsa.dev/provenance/v1");
-                if (provs.length === 0) { console.log("NO_PROVENANCE"); return; }
-                for (const a of provs) {
-                  const env = a.bundle?.dsseEnvelope || a.dsseEnvelope;
-                  if (!env?.payload) continue;
-                  const stmt = JSON.parse(Buffer.from(env.payload, "base64").toString("utf8"));
-                  const pred = stmt.predicate || {};
-                  // SLSA v1 build definition: resolvedDependencies / externalParameters.
-                  const ext = pred.buildDefinition?.externalParameters || {};
-                  const wf = ext.workflow || {};
-                  const deps = pred.buildDefinition?.resolvedDependencies || [];
-                  const srcDep = deps.find((d) => (d.uri || "").includes("git+https://github.com/"));
-                  const repoFromWf = (wf.repository || "").replace(/^https:\/\/github\.com\//, "");
-                  const repoFromDep = (srcDep?.uri || "").replace(/^git\+https:\/\/github\.com\//, "").replace(/@.*$/, "").replace(/\.git.*/, "");
-                  const repo = repoFromWf || repoFromDep;
-                  const sha = srcDep?.digest?.gitCommit || "";
-                  if (repo && repo === process.env.EXPECTED_REPO) {
-                    console.log("OK repo=" + repo + " sha=" + (sha || "(unset)"));
-                    return;
-                  }
-                }
-                console.log("REPO_MISMATCH");
-              } catch (e) {
-                console.log("PARSE_ERROR:" + e.message);
-              }
-            });
-          ' <<<"$BUNDLE")
-          case "$RESULT" in
-            OK*)
-              echo "✓ provenance source identity matches ${EXPECTED_REPO} (${RESULT#OK })" ;;
-            NO_PROVENANCE)
-              echo "::error::attestation bundle carries no SLSA provenance predicate"; exit 1 ;;
-            REPO_MISMATCH)
-              echo "::error::provenance does not name ${EXPECTED_REPO} as the source repository"; exit 1 ;;
-            *)
-              echo "::error::could not verify provenance source identity: ${RESULT}"; exit 1 ;;
-          esac
+          printf '%s' "$BUNDLE" | node scripts/checks/verify-npm-provenance-source.mjs
