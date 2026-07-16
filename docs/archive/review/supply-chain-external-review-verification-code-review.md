@@ -139,6 +139,10 @@ Two further external re-reviews of commit `99144fe76` produced findings; all val
 - `findPublishJobIsolationViolation` hardened: inspects only `run:` command text (no `name:`/comment false-positive), joins block scalars + line-continuations (split-command bypass closed), detects top-level `id-token: write`, and covers all npm install/exec aliases (`npm i`/`add`/`ci`/`exec`/`x`, `pnpm dlx`) — the last from the final adversarial pass (a `npm i` would otherwise have slipped through). `findTrustedPublishNodeViolation` resolves `node-version: ${{ env.X }}` via a new `parseTopLevelEnv`.
 - Self-test grew to 59 cases; all new invariants red-proven.
 
+### Round 3 — Low regression-gate gap (third re-review, applied)
+- Problem: `check-publish-toolchain.sh`'s floating-Node detection (`grep "2[0-9]"`) missed `node-version: "24.x"` / `"24.15"` / unquoted `24`, and a job could pin a floating literal while the top-level `PUBLISH_NODE_VERSION` env stayed valid — the gate would pass. `findTrustedPublishNodeViolation` intentionally stays a floor check (accepts `24.x`), so it does not cover the exact-pin invariant either.
+- Fix: replaced the value-blocklist with a positive-form structural check — every `node-version:` line in release.yml must be exactly `${{ env.PUBLISH_NODE_VERSION }}` (any literal or `node-version-file:` is a violation), and `PUBLISH_NODE_VERSION` itself must be full `X.Y.Z`. Both bypass paths (job-level floating literal with valid env; floating env value) mutation-verified red.
+
 ## Environment Verification Report (Round 2)
 
 - `verified-local`: check-npm-version-pin.sh, check-workflow-supply-chain.mjs, check-e2e-selectors.sh all pass on the real tree; vitest self-test 40/40; new guards mutation-verified (red-proven); `PRE_PR_STATIC_ONLY=1 pre-pr.sh` → 40 passed; `cli/ npm run build` (tsc) → dist/index.js produced.

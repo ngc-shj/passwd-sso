@@ -48,10 +48,29 @@ npm_pin=$(grep -oE 'PUBLISH_NPM_VERSION:\s*"[0-9]+\.[0-9]+\.[0-9]+"' "$RELEASE_W
 # Trusted Publishing floor.
 ver_ge "$npm_pin" "11.5.1" || fail "release.yml: PUBLISH_NPM_VERSION=$npm_pin is below the npm Trusted Publishing floor (>= 11.5.1)"
 
-# The privileged jobs must resolve node-version from the pinned env, never a
-# floating major and never a node-version-file (which would inherit Node 20).
-if grep -nE 'node-version:\s*"2[0-9]"' "$RELEASE_WF" >/dev/null; then
-  fail "release.yml: a floating major node-version (e.g. \"24\") is present — publish/verify jobs must pin the exact patch via \${{ env.PUBLISH_NODE_VERSION }}"
+# PUBLISH_NODE_VERSION must be an EXACT patch (X.Y.Z), so the bundled npm is
+# deterministic. (The grep above already required the X.Y.Z shape; assert the
+# captured value has no trailing `.x`/range and is a full three-part semver.)
+printf '%s' "$node_pin" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+  || fail "release.yml: PUBLISH_NODE_VERSION=$node_pin must be an exact patch (X.Y.Z), not a partial or floating version"
+
+# Every setup-node in release.yml MUST resolve node-version from the pinned env —
+# never a literal (which could be a floating major like "24" or "24.x" while the
+# env pin stays valid, silently un-pinning a job) and never node-version-file
+# (which would inherit the Node-20 .nvmrc). Enforce the POSITIVE form: any
+# `node-version:` line whose value is not exactly `${{ env.PUBLISH_NODE_VERSION }}`
+# is a violation, as is any `node-version-file:` line. This is the structural
+# guard that a per-value blocklist ("2[0-9]") kept missing.
+bad_node_version=$(grep -nE '^\s*node-version:' "$RELEASE_WF" \
+  | grep -vF 'node-version: ${{ env.PUBLISH_NODE_VERSION }}' || true)
+if [ -n "$bad_node_version" ]; then
+  echo "ERROR: release.yml pins node-version literally instead of \${{ env.PUBLISH_NODE_VERSION }}:"
+  echo "$bad_node_version"
+  echo "Every publish/verify job must use the exact env-pinned Node so the bundled npm is deterministic."
+  exit 1
+fi
+if grep -nE '^\s*node-version-file:' "$RELEASE_WF" >/dev/null; then
+  fail "release.yml: node-version-file is present — the publish toolchain must pin an exact Node via \${{ env.PUBLISH_NODE_VERSION }}, not inherit .nvmrc (Node 20)"
 fi
 
 # No registry npm install anywhere in release.yml. The build job also avoids it
