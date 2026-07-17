@@ -160,6 +160,9 @@ describe("passwords:write scope", () => {
     const updateBody = {
       encryptedBlob: { ciphertext: "aabbccdd", iv: validIv, authTag: validAuthTag },
       encryptedOverview: { ciphertext: "11223344", iv: validIv, authTag: validAuthTag },
+      // A blob write must carry its keyVersion (real clients always do); the
+      // FOR SHARE guard mock (mockQueryRaw) returns key_version 1 so it passes.
+      keyVersion: 1,
     };
 
     it("allows session-authenticated requests", async () => {
