@@ -798,6 +798,10 @@ for (let iteration = 0; iteration <= reExportScanTargets.length; iteration++) {
     let flagged;
 
     for (const decl of getReExportDeclarations(sf)) {
+      // `export type { x } from "..."` is erased at compile time — no runtime
+      // call surface, so flagging it would be a pure false positive that
+      // trains reflexive exemption (review F1).
+      if (decl.isTypeOnly()) continue;
       const specifier = decl.getModuleSpecifierValue();
       const targetRel = resolveRelativeSpecifierToRel(rel, specifier, knownRels);
       const targetSet = targetRel !== undefined ? destructiveExportsByModule.get(targetRel) : undefined;
@@ -817,9 +821,18 @@ for (let iteration = 0; iteration <= reExportScanTargets.length; iteration++) {
 
       // (a) named re-export: `export { x }` / `export { x as y }` from "...".
       for (const named of decl.getNamedExports()) {
+        if (named.isTypeOnly()) continue; // `export { type x } from` — erased, no call surface
         const sourceName = named.getName(); // the SOURCE-side name (before `as`)
+        // When the specifier resolves to an in-scope file, match ONLY against
+        // that file's own registered destructive exports — a same-named but
+        // unrelated symbol in a different module must not flag (review F2).
+        // The flat cross-module fallback applies only when resolution fails
+        // (target outside the .ts scan scope, e.g. .tsx or generated code):
+        // fail closed there, since we cannot inspect the target.
         const isDestructive =
-          destructiveNames.has(sourceName) || (targetSet !== undefined && targetSet.has(sourceName));
+          targetRel !== undefined
+            ? targetSet !== undefined && targetSet.has(sourceName)
+            : destructiveNames.has(sourceName);
         if (!isDestructive) continue;
         // Register the re-exporting file's OWN locally-visible export name
         // (the alias if present, else the source name unchanged) — NOT the

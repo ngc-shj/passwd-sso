@@ -946,6 +946,65 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
       expect(exitCode).toBe(0);
       expect(stderr).not.toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
     });
+
+    it("passes (no REEXPORTED_DESTRUCTIVE_WRAPPER) for a TYPE-ONLY re-export of a destructive wrapper name", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/vault/reexport-type-only.ts",
+        'export type { executeVaultReset } from "./vault-reset";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(0);
+      expect(stderr).not.toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("passes (no REEXPORTED_DESTRUCTIVE_WRAPPER) for a same-named but unrelated symbol re-exported from a RESOLVED in-scope module", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      // Unrelated module whose innocuous export coincidentally shares the
+      // destructive wrapper's name — must NOT flag when the specifier
+      // resolves cleanly to this in-scope file (its own export set decides).
+      writeSource(
+        "src/lib/labels/label-formatter.ts",
+        "export function executeVaultReset(label) {\n  return label.trim();\n}\n",
+      );
+      writeSource(
+        "src/lib/labels/reexport-collision.ts",
+        'export { executeVaultReset } from "./label-formatter";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(0);
+      expect(stderr).not.toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a destructive-named re-export whose specifier does NOT resolve in-scope (flat-fallback fail-closed)", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      // Target lives outside the .ts scan scope (e.g. .tsx / generated) so
+      // resolution fails — the flat cross-module name set must fail closed.
+      writeSource(
+        "src/lib/vault/reexport-unresolved.ts",
+        'export { executeVaultReset } from "./generated/not-in-scan";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/reexport-unresolved.ts re-exports executeVaultReset from ./generated/not-in-scan",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
   });
 
   describe("env-pollution guard (sec-F6)", () => {
