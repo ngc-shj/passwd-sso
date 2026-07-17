@@ -1,6 +1,26 @@
 # Code Review: overview-pairing-and-reexport-guard
 Date: 2026-07-18
-Review round: 3 — external post-push review round (rounds 1-2 log below)
+Review round: 4 — second external review round (rounds 1-3 log below)
+
+## Round 4 — external review findings (two reviewers, post-review(2))
+
+Both reviewers confirmed the round-3 fixes (alias resolver, dotted member propagation) resolved. Four new evasion findings, all fixed in review(3):
+
+### R4-1 [Major→fixed] Whitespace-dependent pre-filter (`content.includes(" from ")`) skips valid syntax
+Newline-before-`from`, compact `export*from"./x"`, and comment-separated forms never reached the AST. **Fixed**: pre-filter reduced to the bare token `from` (a sound necessary condition — every detected shape textually requires the keyword, in the re-export or in the import that created a laundered binding), and the pass restructured to parse each file exactly once up front (`extractReExportFacts`) with the fixpoint iterating over extracted data — removing the per-iteration re-parse the old structure paid.
+
+### R4-2 [Major→fixed] Import-then-export laundering undetected
+`import { executeVaultReset as reset } from "./vault-reset"; export { reset };` — a specifier-less ExportDeclaration was never examined, so the barrel escaped registration AND the route pass could not resolve `reset()`. **Fixed**: exported bindings resolve back to their ImportDeclarations and are matched exactly like direct re-exports (named + second alias, namespace `export { svc }`, and `export default r`), with member propagation intact.
+
+### R4-3 [Major→fixed] `.tsx` barrels outside the scan set
+`getSourceFiles` collected `.ts` only, so a `.tsx` barrel was unscanned and unreachable via `knownRels` despite the resolver's `.tsx` candidates. **Fixed**: the re-export pass scans production `.ts` + `.tsx` (primitive derivation stays `.ts`-only — `.tsx` files are not delete-primitive sites); a flagged `.tsx` barrel fails CI outright, which is the enforcement even where the route pass's own `.ts`-fixed resolution would not follow it.
+
+### R4-4 [covered by R4-1] Comment-separated `from` — same root cause, pinned by its own fixture.
+
+### Round 4 verification
+- 9 new fixtures: newline-`from`, compact `export*from`, comment-separated, import-then-export (plain / second alias / namespace / default), `.tsx` barrel — all red with single-failure-code isolation; innocent import-then-export — green.
+- Checker self-test 64/64; real tree exit 0 (the `.tsx` scan and laundering detection introduce no false positives on existing code); eslint clean.
+- Residual limitation narrowed again and re-documented: only VALUE-LEVEL indirect bindings (`const q = r;`, higher-order pass-through) remain, requiring whole-program resolution by design.
 
 ## Round 3 — external static review findings (user-provided, post-push)
 

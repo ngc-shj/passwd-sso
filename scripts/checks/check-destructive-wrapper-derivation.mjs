@@ -72,14 +72,17 @@
  * RESIDUAL LIMITATION (documented, not silently ignored — no occurrences in the
  * repo today, verified by grep): RE-EXPORT chains (`export { executeVaultReset }
  * from "./reset"` re-exported by a barrel, `export * from`, `export * as ns
- * from`, any depth, including inside route.ts) are now mechanically rejected by
- * the re-export pass below (REEXPORTED_DESTRUCTIVE_WRAPPER) — closing the gap
- * this paragraph used to describe. The remaining residual narrows to an
- * INDIRECT binding only: assigning the imported function to a local variable,
- * or passing it through a higher-order call, before the route calls it. Closing
- * that would require whole-program symbol resolution (a ts-morph Program with
- * type-checking), which this repo's AST guards deliberately avoid for
- * speed/simplicity. The compensating control is code review of route imports.
+ * from`, any depth, relative or `@/`-aliased, `.ts` or `.tsx`, including inside
+ * route.ts) are mechanically rejected by the re-export pass below
+ * (REEXPORTED_DESTRUCTIVE_WRAPPER), as are import-then-export launderings
+ * (`import { X as r } from "./m"; export { r }` — also via `export { r as p }`,
+ * namespace `export { svc }`, and `export default r`). The remaining residual
+ * narrows to a VALUE-LEVEL indirect binding only: assigning the imported
+ * function to a new local variable (`const q = r;`) or passing it through a
+ * higher-order call before export/use. Closing that would require whole-program
+ * symbol resolution (a ts-morph Program with type-checking), which this repo's
+ * AST guards deliberately avoid for speed/simplicity. The compensating control
+ * is code review of route imports.
  *
  * Inverse: every identifier-like alternative in deleteSignal that is NOT one
  * of the raw Prisma primitives above (i.e. executeVaultReset, deleteTeamPassword
@@ -290,7 +293,11 @@ if (exemptParseFailures.length > 0) {
 // ---------------------------------------------------------------------------
 const EXCLUDE_RE = /\.test\.|__tests__/;
 
-function getSourceFiles(root, pathRoot) {
+// exts: primitive-derivation scans .ts only (.tsx routes/components are not
+// delete-primitive sites in this codebase); the re-export pass widens to
+// [".ts", ".tsx"] because a .tsx barrel can still re-export a .ts wrapper
+// (external review, Major).
+function getSourceFiles(root, pathRoot, exts = [".ts"]) {
   const files = [];
   let dirEntries;
   try {
@@ -302,7 +309,7 @@ function getSourceFiles(root, pathRoot) {
   for (const entry of dirEntries) {
     if (!entry.isFile()) continue;
     const ext = extname(entry.name);
-    if (ext !== ".ts") continue; // .tsx routes/components are not delete-primitive sites in this codebase
+    if (!exts.includes(ext)) continue;
     if (entry.name === "route.ts") continue;
     const abs = join(entry.parentPath ?? entry.path, entry.name);
     // rel is PATH_ROOT-relative (repo-relative in production), not
@@ -706,11 +713,15 @@ if (staleExempt.length > 0) {
 //   (c) `export * as ns from "<in-repo specifier>"` — same lookup as (b); a
 //       namespace re-export binds the whole module, so any destructive export
 //       in the target counts.
+//   (d) import-then-export laundering — `import { X as r } from "./m"` followed
+//       by `export { r }` / `export { r as p }` / namespace `export { svc }` /
+//       `export default r`: the exported binding resolves back to its import
+//       and is matched exactly like (a)/(c) (external review, Major).
 // True package imports are skipped — destructive wrappers are all in-repo.
-// Repo-shaped specifiers that fail to resolve (target outside the .ts scan
+// Repo-shaped specifiers that fail to resolve (target outside the scan
 // scope) keep the fail-closed flat-name fallback for named re-exports.
 //
-// Scan scope: production src/**/*.ts INCLUDING route.ts (a re-export hosted
+// Scan scope: production src/**/*.ts AND *.tsx INCLUDING route.ts (a re-export hosted
 // inside route.ts is invisible to the route pass's import-walk below, since
 // that pass only resolves `@/`-aliased imports of wrapper modules, not a
 // route.ts acting as a re-export source for some OTHER file). Test files stay
@@ -789,106 +800,193 @@ function resolveSpecifierToRel(fromRel, spec, knownRels) {
   return { targetRel: candidates.find((c) => knownRels.has(c)), inRepo: true };
 }
 
-/** Every module ExportDeclaration whose moduleSpecifier is set, for a source file. */
-function getReExportDeclarations(sf) {
-  return sf.getExportDeclarations().filter((d) => d.getModuleSpecifierValue() !== undefined);
+/**
+ * Extract every re-export-relevant fact from a source file ONCE, so the
+ * fixpoint below iterates over plain data instead of re-parsing ASTs per
+ * iteration. Shapes covered:
+ *   - specifier-bearing ExportDeclarations (`export { x } from`, `export *
+ *     from`, `export * as ns from`) — type-only declarations/specifiers
+ *     dropped here (erased at compile time, no call surface);
+ *   - import bindings (named, aliased, namespace) — so a specifier-LESS
+ *     `export { binding }` that launders an imported wrapper through a local
+ *     binding is treated as the re-export it is (external review, Major);
+ *   - `export default <identifier>` of an import binding — same laundering
+ *     via the default slot.
+ */
+function extractReExportFacts(sf) {
+  const reexports = [];
+  for (const decl of sf.getExportDeclarations()) {
+    if (decl.isTypeOnly()) continue;
+    const specifier = decl.getModuleSpecifierValue();
+    const named = decl
+      .getNamedExports()
+      .filter((n) => !n.isTypeOnly())
+      .map((n) => ({
+        sourceName: n.getName(), // the SOURCE-side name (before `as`)
+        localName: n.getAliasNode()?.getText() ?? n.getName(),
+      }));
+    if (specifier !== undefined) {
+      reexports.push({ specifier, isStarLike: decl.getNamedExports().length === 0, named });
+    }
+  }
+
+  const importBindings = new Map(); // local binding name → { specifier, sourceName, isNamespace }
+  for (const imp of sf.getImportDeclarations()) {
+    if (imp.isTypeOnly()) continue;
+    const specifier = imp.getModuleSpecifierValue();
+    const ns = imp.getNamespaceImport();
+    if (ns) importBindings.set(ns.getText(), { specifier, sourceName: undefined, isNamespace: true });
+    for (const ni of imp.getNamedImports()) {
+      if (ni.isTypeOnly()) continue;
+      const local = ni.getAliasNode()?.getText() ?? ni.getName();
+      importBindings.set(local, { specifier, sourceName: ni.getName(), isNamespace: false });
+    }
+  }
+
+  const localExports = []; // specifier-less `export { binding [as name] }`
+  for (const decl of sf.getExportDeclarations()) {
+    if (decl.getModuleSpecifierValue() !== undefined || decl.isTypeOnly()) continue;
+    for (const n of decl.getNamedExports()) {
+      if (n.isTypeOnly()) continue;
+      localExports.push({
+        bindingName: n.getName(),
+        exportedName: n.getAliasNode()?.getText() ?? n.getName(),
+      });
+    }
+  }
+
+  const defaultExportIds = sf
+    .getExportAssignments()
+    .filter((a) => !a.isExportEquals())
+    .map((a) => a.getExpression())
+    .filter((e) => Node.isIdentifier(e))
+    .map((e) => e.getText());
+
+  return { reexports, importBindings, localExports, defaultExportIds };
 }
 
-// Union of scan targets for the re-export pass: non-route source files plus
-// route.ts files (route.ts is excluded from the primitive-derivation scan
-// above, but not from this pass — see header comment).
-const reExportScanTargets = [...sourceFiles, ...getRouteFiles(API_DIR, PATH_ROOT)];
+// Union of scan targets for the re-export pass: non-route .ts source files,
+// production .tsx files (a .tsx barrel can re-export a .ts wrapper — external
+// review, Major; .tsx stays excluded from the primitive-derivation scan), and
+// route.ts files (excluded from derivation, included here).
+const reExportScanTargets = [
+  ...sourceFiles,
+  ...getSourceFiles(SCAN_ROOT, PATH_ROOT, [".tsx"]),
+  ...getRouteFiles(API_DIR, PATH_ROOT),
+];
 const knownRels = new Set(reExportScanTargets.map((f) => f.rel));
+
+// Parse once, up front. Pre-filter on the bare token `from` — every shape
+// this pass detects textually requires the `from` keyword (in the re-export
+// itself or in the import that created the laundered binding). Deliberately
+// NOT `" from "`: `export{x}from"./y"` and newline-before-`from` are valid
+// syntax a whitespace-dependent filter would skip (external review, Major).
+const reExportFacts = []; // { rel, facts }
+for (const { abs, rel } of reExportScanTargets) {
+  let content;
+  try {
+    content = readFileSync(abs, "utf8");
+  } catch {
+    continue;
+  }
+  if (!content.includes("from")) continue;
+  let sf;
+  try {
+    sf = project.createSourceFile(`__reexport__/${rel}`, content, { overwrite: true });
+  } catch {
+    continue;
+  }
+  reExportFacts.push({ rel, facts: extractReExportFacts(sf) });
+}
 
 const reExportedWrappers = []; // { file, name, specifier }
 const reExportFlaggedFiles = new Set(); // rel paths already flagged (dedup across fixpoint iterations)
 
 // Fixpoint loop: bounded by file count (each iteration can flag at least one
 // previously-unflagged file, or it terminates).
-for (let iteration = 0; iteration <= reExportScanTargets.length; iteration++) {
+for (let iteration = 0; iteration <= reExportFacts.length; iteration++) {
   let changed = false;
 
-  for (const { abs, rel } of reExportScanTargets) {
+  for (const { rel, facts } of reExportFacts) {
     if (reExportFlaggedFiles.has(rel)) continue;
-
-    let content;
-    try {
-      content = readFileSync(abs, "utf8");
-    } catch {
-      continue;
-    }
-    if (!content.includes(" from ")) continue; // cheap pre-filter: no re-export possible
-
-    let sf;
-    try {
-      sf = project.createSourceFile(`__reexport__/${rel}`, content, { overwrite: true });
-    } catch {
-      continue;
-    }
 
     const destructiveNames = allDestructiveNames();
     let flagged;
 
-    for (const decl of getReExportDeclarations(sf)) {
-      // `export type { x } from "..."` is erased at compile time — no runtime
-      // call surface, so flagging it would be a pure false positive that
-      // trains reflexive exemption (review F1).
-      if (decl.isTypeOnly()) continue;
-      const specifier = decl.getModuleSpecifierValue();
+    // Shared named-binding matcher. Pool selection: resolved target → that
+    // module's own registered exports only — a same-named but unrelated
+    // symbol in a different module must not flag (review F2). Repo-shaped
+    // but unresolved → flat cross-module fallback, fail closed since we
+    // cannot inspect the target. True package import → skip. Matching is
+    // binding-prefix-aware: a destructive export is either the bare binding
+    // (`executeVaultReset`) or a member behind it (`vaultService.purge`) —
+    // re-exporting the binding re-exports every member, and each member path
+    // is re-registered under the locally-visible (post-alias) name so
+    // further hops and the route pass match the name their own specifier
+    // actually uses.
+    const matchNamedBinding = (specifier, sourceName, localName) => {
       const { targetRel, inRepo } = resolveSpecifierToRel(rel, specifier, knownRels);
       const targetSet = targetRel !== undefined ? destructiveExportsByModule.get(targetRel) : undefined;
-      const isStarLike = decl.getNamedExports().length === 0; // `export * from` or `export * as ns from`
-
-      if (isStarLike) {
-        // (b) `export * from "./x"` / (c) `export * as ns from "./x"` — flag
-        // when the one-hop-resolved target is a destructive-exporting module;
-        // a namespace/star re-export binds the whole module, so register ALL
-        // of the target's destructive export names onto this file for the
-        // next fixpoint hop.
-        if (targetSet === undefined || targetSet.size === 0) continue;
-        for (const n of targetSet) recordDestructiveExport(rel, n);
-        flagged = { name: [...targetSet].sort().join(", "), specifier };
-        break;
+      let pool;
+      if (targetRel !== undefined) pool = targetSet ?? new Set();
+      else if (inRepo) pool = destructiveNames;
+      else return undefined;
+      const memberPrefix = `${sourceName}.`;
+      const matching = [...pool].filter((n) => n === sourceName || n.startsWith(memberPrefix));
+      if (matching.length === 0) return undefined;
+      for (const n of matching) {
+        recordDestructiveExport(rel, localName + n.slice(sourceName.length));
       }
+      return { name: matching.sort().join(", "), specifier };
+    };
 
-      // (a) named re-export: `export { x }` / `export { x as y }` from "...".
-      for (const named of decl.getNamedExports()) {
-        if (named.isTypeOnly()) continue; // `export { type x } from` — erased, no call surface
-        const sourceName = named.getName(); // the SOURCE-side name (before `as`)
-        // Match pool: resolved target → that module's own registered exports
-        // only — a same-named but unrelated symbol in a different module must
-        // not flag (review F2). Repo-shaped but unresolved (target outside
-        // the .ts scan scope, e.g. .tsx or generated code) → flat
-        // cross-module fallback, fail closed since we cannot inspect the
-        // target. True package import → skip (not this repo's wrapper).
-        let pool;
-        if (targetRel !== undefined) pool = targetSet ?? new Set();
-        else if (inRepo) pool = destructiveNames;
-        else continue;
-        // A destructive export is either the bare binding itself
-        // (`executeVaultReset`) or a member behind an exported binding
-        // (`vaultService.purge`, `VaultService.purgeAll`). Re-exporting the
-        // binding re-exports every member, so match by binding prefix — bare
-        // name comparison alone lets `export { vaultService } from ...`
-        // evade (external review, Major).
-        const memberPrefix = `${sourceName}.`;
-        const matching = [...pool].filter(
-          (n) => n === sourceName || n.startsWith(memberPrefix),
-        );
-        if (matching.length === 0) continue;
-        // Register under the re-exporting file's OWN locally-visible binding
-        // name (the alias if present) with each member path preserved —
-        // `vaultService.purge` re-exported `as service` propagates as
-        // `service.purge` so a further hop (and the route pass) matches the
-        // name its own specifier actually uses.
-        const localName = named.getAliasNode()?.getText() ?? sourceName;
-        for (const n of matching) {
-          recordDestructiveExport(rel, localName + n.slice(sourceName.length));
+    // Star/namespace re-export of a resolved destructive module — binds the
+    // whole module, so register ALL of the target's destructive export names
+    // for the next fixpoint hop. memberPrefix distinguishes the plain-star
+    // form (names re-exported as-is) from a bound namespace (`ns.name`).
+    const matchStarLike = (specifier, memberPrefix) => {
+      const { targetRel } = resolveSpecifierToRel(rel, specifier, knownRels);
+      const targetSet = targetRel !== undefined ? destructiveExportsByModule.get(targetRel) : undefined;
+      if (targetSet === undefined || targetSet.size === 0) return undefined;
+      for (const n of targetSet) recordDestructiveExport(rel, `${memberPrefix}${n}`);
+      return { name: [...targetSet].sort().join(", "), specifier };
+    };
+
+    for (const re of facts.reexports) {
+      if (re.isStarLike) {
+        flagged = matchStarLike(re.specifier, "");
+      } else {
+        for (const { sourceName, localName } of re.named) {
+          flagged = matchNamedBinding(re.specifier, sourceName, localName);
+          if (flagged !== undefined) break;
         }
-        flagged = { name: matching.sort().join(", "), specifier };
-        break;
       }
       if (flagged !== undefined) break;
+    }
+
+    // Import-then-export laundering: `import { X as r } from "./m"` followed
+    // by a specifier-less `export { r [as pub] }` is semantically the same
+    // re-export — resolve the exported binding back to its import.
+    if (flagged === undefined) {
+      for (const { bindingName, exportedName } of facts.localExports) {
+        const binding = facts.importBindings.get(bindingName);
+        if (binding === undefined) continue;
+        flagged = binding.isNamespace
+          ? matchStarLike(binding.specifier, `${exportedName}.`)
+          : matchNamedBinding(binding.specifier, binding.sourceName, exportedName);
+        if (flagged !== undefined) break;
+      }
+    }
+
+    // `export default r` where r is an imported destructive binding — the
+    // default slot launders the wrapper under an arbitrary import name.
+    if (flagged === undefined) {
+      for (const id of facts.defaultExportIds) {
+        const binding = facts.importBindings.get(id);
+        if (binding === undefined || binding.isNamespace) continue;
+        flagged = matchNamedBinding(binding.specifier, binding.sourceName, "default");
+        if (flagged !== undefined) break;
+      }
     }
 
     if (flagged === undefined) continue;
