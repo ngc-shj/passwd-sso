@@ -399,6 +399,9 @@ describe("passkey-provider", () => {
       const decryptedBlobStr = await decryptData(putBody.encryptedBlob, testKey, aad);
       const decryptedBlob = JSON.parse(decryptedBlobStr) as { passkeySignCount: number };
       expect(decryptedBlob.passkeySignCount).toBe(1);
+      // Shape pin: counter persist sends blob-without-overview (schema's
+      // one-direction refine requires this shape to stay valid — entry.ts).
+      expect(putBody).not.toHaveProperty("encryptedOverview");
       // Verify invalidateCache was called after successful PUT
       expect(deps.invalidateCache).toHaveBeenCalledOnce();
     });

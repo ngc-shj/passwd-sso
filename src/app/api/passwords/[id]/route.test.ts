@@ -935,6 +935,45 @@ describe("PUT /api/passwords/[id]", () => {
     expect(txMock.passwordEntry.update).not.toHaveBeenCalled();
   });
 
+  // C1/S1: overview-only PUT has no legitimate consumer (all clients derive
+  // overview from blob at save time) and is the corruption vector the refine closes.
+  it("C1: rejects encryptedOverview without encryptedBlob → 400 VALIDATION_ERROR, no write attempted", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: {
+          encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe(API_ERROR.VALIDATION_ERROR);
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    expect(mockPrismaPasswordEntry.update).not.toHaveBeenCalled();
+    expect(txMock.passwordEntry.update).not.toHaveBeenCalled();
+  });
+
+  // C1: the extension passkey signature-counter persist sends blob-without-overview
+  // (passkey-provider.ts) — must remain a valid, successful shape under the refine.
+  it("C1: accepts encryptedBlob without encryptedOverview (passkey counter shape) → 200", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: {
+          encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
+          keyVersion: 1,
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.passwordEntry.update).toHaveBeenCalledTimes(1);
+  });
+
   it("C1: metadata-only PUT issues no $queryRaw and no History.create", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     mockPrismaPasswordEntry.update.mockResolvedValue({

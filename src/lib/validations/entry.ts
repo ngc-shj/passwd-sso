@@ -66,7 +66,14 @@ export const updateE2EPasswordSchema = z.object({
   entryType: entryTypeSchema.optional(),
   requireReprompt: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
-});
+}).refine(
+  // Unlike the team refine (team.ts:103-113, 4-field all-or-none both directions),
+  // this is one-direction over 2 fields: blob-without-overview is a legitimate
+  // shipped shape (extension passkey counter persist, passkey-provider.ts),
+  // while overview-without-blob has no legitimate consumer.
+  (d) => d.encryptedOverview === undefined || d.encryptedBlob !== undefined,
+  { message: "encryptedOverview requires encryptedBlob", path: ["encryptedOverview"] },
+);
 
 // ─── Generate Request Schema (with legacy mode fallback) ────
 

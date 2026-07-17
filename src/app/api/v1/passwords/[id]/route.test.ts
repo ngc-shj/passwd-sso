@@ -613,6 +613,41 @@ describe("PUT /api/v1/passwords/[id]", () => {
     expect(json).toHaveProperty("tagIds");
     expect(json).toHaveProperty("encryptedOverview");
   });
+
+  // C1/S1: overview-only PUT has no legitimate consumer (all clients derive
+  // overview from blob at save time) and is the corruption vector the refine closes.
+  it("C1: rejects encryptedOverview without encryptedBlob → 400 VALIDATION_ERROR, no write attempted", async () => {
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: {
+          encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+    expect(mockHistoryCreate).not.toHaveBeenCalled();
+  });
+
+  // C1: the extension passkey signature-counter persist sends blob-without-overview
+  // (passkey-provider.ts) — must remain a valid, successful shape under the refine.
+  it("C1: accepts encryptedBlob without encryptedOverview (passkey counter shape) → 200", async () => {
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: {
+          encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
+          keyVersion: 2,
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(mockEntryUpdate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("DELETE /api/v1/passwords/[id]", () => {
