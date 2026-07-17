@@ -73,6 +73,14 @@ RT8 pass where tested; R34 satisfied.
 - Action: renamed to reflect it asserts the error-class→code contract.
 ### test-F5 [Minor] T2 witness SQL precedence
 - Action: parenthesized the OR so state='active' filters both disjuncts.
+### Round-2 regression (caught by full-suite gate, R19) — write-scope fixture
+- The F1 fix (blob PUT now requires keyVersion) is a behavior change. A pre-existing
+  `src/__tests__/api/passwords/write-scope.test.ts` fixture PUT a blob without keyVersion (valid
+  before the guard was made unconditional) and correctly began returning 409. Fixed the fixture to
+  send `keyVersion: 1` (what real clients always send). This is the all-test-tree safety net (R19)
+  doing its job — the ripple surfaced only at the full-suite run, not the directly-touched files.
+  Full suite green after: 963 files, 12,532 tests. Commit 86ae9405e.
+
 ### test-F6 [Minor] single-shot C9a races lack witness — ACCEPTED
 - Anti-Deferral: Worst case = a single-shot race passes without contention firing (false green on
   that one assertion). Likelihood = low: the same updateMany CAS primitive IS contention-proven by
