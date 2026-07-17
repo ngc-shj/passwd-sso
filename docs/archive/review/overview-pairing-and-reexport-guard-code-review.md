@@ -1,6 +1,12 @@
 # Code Review: overview-pairing-and-reexport-guard
 Date: 2026-07-18
-Review round: 4 — second external review round (rounds 1-3 log below)
+Review round: 5 — CONVERGED, both external reviewers merge-approve (rounds 1-4 log below)
+
+## Round 5 — external re-review of review(3)
+
+- Reviewer A: **merge-OK** — whitespace/newline/compact/comment evasions confirmed closed with the requested regression fixtures; bare-token `from` pre-filter accepted as sound for the covered grammar; no new Major/Medium.
+- Reviewer B: **merge-OK** (no security blocker) with one Minor: `export * as svc from` collapsed into `isStarLike` and dropped the namespace name, so hop B registered `executeVaultReset` instead of `svc.executeVaultReset` — a following `export { svc }` hop went undetected (B itself still flags, so CI fails; the gap was vs the "all hops, any depth" claim, not a full evasion).
+- **Fixed in review(4)**: `extractReExportFacts` preserves `getNamespaceExport()?.getName()`; the star branch registers under `svc.` prefix when present (plain `export * from` keeps the empty prefix). New 2-hop fixture asserts BOTH hops flag, with hop A's message proving the `svc.executeVaultReset` registration. Self-test 65/65; real tree exit 0; eslint clean.
 
 ## Round 4 — external review findings (two reviewers, post-review(2))
 

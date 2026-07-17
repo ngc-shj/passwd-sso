@@ -1372,6 +1372,35 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
       expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
     });
 
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) on BOTH hops of a namespace-re-export chain (`export * as svc from` then `export { svc }`)", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/ns-chain-b.ts",
+        'export * as svc from "./vault/vault-reset";\n',
+      );
+      writeSource(
+        "src/lib/ns-chain-a.ts",
+        'export { svc } from "./ns-chain-b";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/ns-chain-b.ts re-exports executeVaultReset from ./vault/vault-reset",
+      );
+      // The second hop only matches if hop B registered `svc.executeVaultReset`
+      // (namespace name preserved), not a bare `executeVaultReset`.
+      expect(stderr).toContain(
+        "src/lib/ns-chain-a.ts re-exports svc.executeVaultReset from ./ns-chain-b",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
     it("passes (no REEXPORTED_DESTRUCTIVE_WRAPPER) for import-then-export of an INNOCENT binding", () => {
       seedWrapperStubs();
       writeSource(

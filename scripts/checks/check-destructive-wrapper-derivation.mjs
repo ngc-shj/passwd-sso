@@ -826,7 +826,15 @@ function extractReExportFacts(sf) {
         localName: n.getAliasNode()?.getText() ?? n.getName(),
       }));
     if (specifier !== undefined) {
-      reexports.push({ specifier, isStarLike: decl.getNamedExports().length === 0, named });
+      reexports.push({
+        specifier,
+        isStarLike: decl.getNamedExports().length === 0,
+        // `export * as svc from` binds the target under `svc` — the name must
+        // survive so the next hop's `export { svc }` matches `svc.<member>`
+        // registrations; a plain `export * from` re-exports names as-is.
+        namespaceName: decl.getNamespaceExport()?.getName(),
+        named,
+      });
     }
   }
 
@@ -954,7 +962,10 @@ for (let iteration = 0; iteration <= reExportFacts.length; iteration++) {
 
     for (const re of facts.reexports) {
       if (re.isStarLike) {
-        flagged = matchStarLike(re.specifier, "");
+        flagged = matchStarLike(
+          re.specifier,
+          re.namespaceName !== undefined ? `${re.namespaceName}.` : "",
+        );
       } else {
         for (const { sourceName, localName } of re.named) {
           flagged = matchNamedBinding(re.specifier, sourceName, localName);
