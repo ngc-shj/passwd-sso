@@ -28,6 +28,9 @@ function runGuard(extraEnv = {}) {
     env: {
       ...process.env,
       DOCKERFILE_PRISMA_PIN_ROOT: root,
+      // Fixture-mode default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back to "".
+      DOCKERFILE_PRISMA_PIN_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -91,7 +94,7 @@ describe("check-dockerfile-prisma-pin.sh", () => {
     it("FAILS when CI=true and an override is set without DOCKERFILE_PRISMA_PIN_FIXTURE_MODE=1", () => {
       writeLockfile("7.2.0");
       writeFileSync(join(root, "Dockerfile"), "ARG PRISMA_VER=7.2.0\n", "utf8");
-      const { exitCode, stdout } = runGuard({ CI: "true" });
+      const { exitCode, stdout } = runGuard({ CI: "true", DOCKERFILE_PRISMA_PIN_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stdout).toContain("ENV_POLLUTION_GUARD");
     });

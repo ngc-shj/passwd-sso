@@ -33,6 +33,9 @@ function runGuard(extraEnv = {}) {
       ...process.env,
       FAIL_CLOSED_TEST_ROOT: root,
       FAIL_CLOSED_TEST_DEBT_FILE: debtFile,
+      // Fixture-mode default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back to "".
+      FAIL_CLOSED_TEST_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -104,7 +107,7 @@ describe("check-fail-closed-routes-have-test.sh", () => {
 
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without FAIL_CLOSED_TEST_FIXTURE_MODE=1", () => {
-      const { exitCode, stdout } = runGuard({ CI: "true" });
+      const { exitCode, stdout } = runGuard({ CI: "true", FAIL_CLOSED_TEST_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stdout).toContain("ENV_POLLUTION_GUARD");
     });

@@ -122,6 +122,21 @@ describe("master-key rotation — real-DB integration (C9)", () => {
   beforeEach(async () => {
     tenantId = await ctx.createTenant();
     vi.clearAllMocks();
+    // The execute handler re-validates targetVersion against
+    // SHARE_MASTER_KEY_CURRENT_VERSION and needs SHARE_MASTER_KEY_V2 configured
+    // to rewrap. These tests seed targetVersion: 2, so make the env self-
+    // contained rather than relying on the ambient .env (CI's ci-integration.yml
+    // sets only the legacy SHARE_MASTER_KEY = v1). Individual tests (C9c) may
+    // override SHARE_MASTER_KEY_CURRENT_VERSION to exercise version drift.
+    vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "2");
+    vi.stubEnv(
+      "SHARE_MASTER_KEY_V2",
+      "2222222222222222222222222222222222222222222222222222222222222222",
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   afterEach(async () => {

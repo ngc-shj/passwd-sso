@@ -29,6 +29,9 @@ function runGuard(extraEnv = {}) {
     env: {
       ...process.env,
       IOS_DIAG_GUARD_IOS_DIR: iosDir,
+      // Fixture-mode default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back to "".
+      IOS_DIAG_GUARD_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -71,7 +74,7 @@ describe("check-ios-no-diagnostic-logging.sh", () => {
 
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without IOS_DIAG_GUARD_FIXTURE_MODE=1", () => {
-      const { exitCode, stderr } = runGuard({ CI: "true" });
+      const { exitCode, stderr } = runGuard({ CI: "true", IOS_DIAG_GUARD_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stderr).toContain("ENV_POLLUTION_GUARD");
     });

@@ -49,6 +49,9 @@ function runGuard(extraEnv = {}) {
       // run. Routes live at <scanRoot>/app/api/**/route.ts.
       STEPUP_GUARD_API_DIR: join(scanRoot, "app", "api"),
       STEPUP_GUARD_EXEMPT_FILE: stepupExemptFile,
+      // Fixture-mode default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back to "".
+      DESTRUCTIVE_WRAPPER_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -745,7 +748,7 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
 
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without DESTRUCTIVE_WRAPPER_FIXTURE_MODE=1", () => {
-      const { exitCode, stderr } = runGuard({ CI: "true" });
+      const { exitCode, stderr } = runGuard({ CI: "true", DESTRUCTIVE_WRAPPER_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stderr).toContain("ENV_POLLUTION_GUARD");
     });

@@ -35,6 +35,9 @@ function runGuard(extraEnv = {}) {
       GATE_SELFTEST_TESTS_DIR: testsDir,
       GATE_SELFTEST_DEBT_FILE: debtFile,
       GATE_SELFTEST_PREPR_FILE: preprFile,
+      // Fixture-mode default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back to "".
+      GATE_SELFTEST_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -208,7 +211,7 @@ describe("check-gate-selftest-coverage.sh", () => {
 
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without GATE_SELFTEST_FIXTURE_MODE=1", () => {
-      const { exitCode, stdout } = runGuard({ CI: "true" });
+      const { exitCode, stdout } = runGuard({ CI: "true", GATE_SELFTEST_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stdout).toContain("ENV_POLLUTION_GUARD");
     });

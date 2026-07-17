@@ -30,6 +30,10 @@ function runGuard(extraEnv = {}) {
       RAW_BODY_READ_API_DIR: apiDir,
       RAW_BODY_READ_ALLOWLIST: allowlist,
       RAW_BODY_READ_PATH_ROOT: root,
+      // These tests ARE fixture-mode; declare it so the env-pollution guard
+      // does not fire when CI=true (GitHub Actions sets CI=true globally). The
+      // pollution-guard test below overrides this back to "" to exercise it.
+      RAW_BODY_READ_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -120,7 +124,7 @@ describe("check-raw-body-read.sh", () => {
 
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without RAW_BODY_READ_FIXTURE_MODE=1", () => {
-      const { exitCode, stdout } = runGuard({ CI: "true" });
+      const { exitCode, stdout } = runGuard({ CI: "true", RAW_BODY_READ_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stdout).toContain("ENV_POLLUTION_GUARD");
     });

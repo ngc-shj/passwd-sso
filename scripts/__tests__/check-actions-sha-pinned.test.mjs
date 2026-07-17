@@ -27,6 +27,9 @@ function runGuard(extraEnv = {}) {
     env: {
       ...process.env,
       ACTIONS_SHA_PINNED_WORKFLOWS_DIR: workflowsDir,
+      // Fixture-mode default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back to "".
+      ACTIONS_SHA_PINNED_FIXTURE_MODE: "1",
       ...extraEnv,
     },
   });
@@ -84,7 +87,7 @@ describe("check-actions-sha-pinned.sh", () => {
 
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without ACTIONS_SHA_PINNED_FIXTURE_MODE=1", () => {
-      const { exitCode, stdout } = runGuard({ CI: "true" });
+      const { exitCode, stdout } = runGuard({ CI: "true", ACTIONS_SHA_PINNED_FIXTURE_MODE: "" });
       expect(exitCode).toBe(1);
       expect(stdout).toContain("ENV_POLLUTION_GUARD");
     });
