@@ -34,6 +34,45 @@
  *       (exact match) with a reason.
  * Fail: UNDECLARED_DESTRUCTIVE_WRAPPER: <file>#<function>
  *
+ * Wrapper forms and grep-matchability: the route-side classifier
+ * (check-permanent-delete-stepup.sh) is a FLAT-TEXT grep of deleteSignal over
+ * route.ts files, so a deleteSignal alternative only classifies a route when its
+ * literal string appears in the route's call token. The resolver therefore
+ * distinguishes forms whose route call token a grep CAN match (top-level
+ * function `fn(`, exported object-literal method `obj.method(`, STATIC class
+ * method `Class.method(`) from forms it CANNOT (a class INSTANCE method — route
+ * calls `<var>.method(`, not `Class.method(`; and an anonymous default export —
+ * imported under an arbitrary name). Registering the derived key of a
+ * non-grep-matchable wrapper in deleteSignal is a false-green, so those are
+ * failed as NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER and must be refactored to a
+ * grep-matchable form or exempted.
+ *
+ * ROUTE PASS (AST alias-close): the flat-text deleteSignal grep in
+ * check-permanent-delete-stepup.sh cannot follow an ALIAS import
+ * (`import { executeVaultReset as reset }` then `reset(`) or a NAMESPACE import
+ * (`import * as svc` then `svc.deleteTeamPassword(` — a shape the real
+ * team-password route uses). This check adds a second AST pass over route.ts:
+ * it resolves each route's local import bindings (named, aliased, and
+ * namespace) against the derived destructive-export set, plus detects raw
+ * primitives called directly, and requires that any route reaching a
+ * destructive primitive/wrapper calls requireRecentCurrentAuthMethod( or is
+ * listed in stepup-delete-exempt.txt — else ROUTE_DESTRUCTIVE_NO_STEPUP. This
+ * closes the alias/namespace evasion the grep misses.
+ *
+ * RESIDUAL LIMITATION (documented, not silently ignored — no occurrences in the
+ * repo today, verified by grep): the route pass resolves imports one level deep.
+ * It does NOT follow a RE-EXPORT chain (`export { executeVaultReset } from
+ * "./reset"` re-exported by a barrel the route then imports from) nor an
+ * INDIRECT binding (assigning the imported function to a local variable, or
+ * passing it through a higher-order call). Closing these would require whole-
+ * program symbol resolution (a ts-morph Program with type-checking), which this
+ * repo's AST guards deliberately avoid for speed/simplicity. The compensating
+ * control is code review of route imports plus the barrel-free convention; if a
+ * re-export chain of a destructive wrapper is ever introduced, add the barrel
+ * module to the scan or register the wrapper at the barrel. The pass narrows the
+ * gap from "any wrapper form / alias / namespace silently evades" to "only a
+ * re-export chain or an indirect binding evades".
+ *
  * Inverse: every identifier-like alternative in deleteSignal that is NOT one
  * of the raw Prisma primitives above (i.e. executeVaultReset, deleteTeamPassword
  * today) must resolve to an existing exported function somewhere in scope —
@@ -89,6 +128,16 @@ const PATH_ROOT = process.env.DESTRUCTIVE_WRAPPER_PATH_ROOT ?? ROOT;
 const PATTERNS_FILE =
   process.env.DESTRUCTIVE_WRAPPER_PATTERNS_FILE ??
   join(ROOT, "scripts/checks/route-class-patterns.json");
+// Route pass (AST-precise alias-close): scan route.ts under this dir, resolve
+// each route's local imports/aliases to the destructive-wrapper export set, and
+// require step-up (or a stepup-delete-exempt.txt entry). Mirrors
+// check-permanent-delete-stepup.sh's STEPUP_GUARD_* envs so the two share the
+// same fixture surface and exempt allowlist.
+const API_DIR = process.env.STEPUP_GUARD_API_DIR ?? join(ROOT, "src/app/api");
+const STEPUP_EXEMPT_FILE =
+  process.env.STEPUP_GUARD_EXEMPT_FILE ??
+  join(ROOT, "scripts/checks/stepup-delete-exempt.txt");
+const STEPUP_CALL_RE = /(^|[^A-Za-z0-9_])requireRecentCurrentAuthMethod\(/;
 
 // CI-auditable: print effective paths on one line.
 console.log(
@@ -101,10 +150,15 @@ if (process.env.CI === "true") {
     process.env.DESTRUCTIVE_WRAPPER_SCAN_ROOT !== undefined ||
     process.env.DESTRUCTIVE_WRAPPER_EXEMPT_FILE !== undefined ||
     process.env.DESTRUCTIVE_WRAPPER_PATH_ROOT !== undefined ||
-    process.env.DESTRUCTIVE_WRAPPER_PATTERNS_FILE !== undefined;
+    process.env.DESTRUCTIVE_WRAPPER_PATTERNS_FILE !== undefined ||
+    // The route pass reads these; redirecting them at an empty dir would false-
+    // green the ROUTE_DESTRUCTIVE_NO_STEPUP check just as a scan-root override
+    // would false-green the wrapper derivation.
+    process.env.STEPUP_GUARD_API_DIR !== undefined ||
+    process.env.STEPUP_GUARD_EXEMPT_FILE !== undefined;
   if (overridden && process.env.DESTRUCTIVE_WRAPPER_FIXTURE_MODE !== "1") {
     console.error(
-      "ENV_POLLUTION_GUARD: DESTRUCTIVE_WRAPPER_* override set under CI=true without DESTRUCTIVE_WRAPPER_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path.",
+      "ENV_POLLUTION_GUARD: a DESTRUCTIVE_WRAPPER_* or STEPUP_GUARD_* override is set under CI=true without DESTRUCTIVE_WRAPPER_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path.",
     );
     process.exit(1);
   }
@@ -287,15 +341,30 @@ function exportedFunctionName(node) {
 
 /**
  * A wrapper can be an exported top-level function OR a method reachable through
- * an exported object/class. The route-side call shape differs:
- *   - top-level function:      `purgeUserEntries(`      -> key `purgeUserEntries`
- *   - exported object method:  `vaultService.purge(`    -> key `vaultService.purge`
- *   - exported class method:   `new VaultService().purge(` or instance.purge(`
- *                                                       -> key `VaultService.purge`
- * The qualified `Receiver.method` key mirrors the actual route call token and
- * avoids same-name collisions across different services. deleteSignal / the
- * exempt file are matched against this same key. Anonymous default exports get
- * a file-scoped sentinel so they can never silently escape.
+ * an exported object/class. Crucially, the route-side classifier
+ * (check-permanent-delete-stepup.sh) is a FLAT-TEXT grep of `deleteSignal` over
+ * route.ts files — so a deleteSignal alternative only classifies a route when
+ * that literal string appears in the route's call token. Whether the derived
+ * key can be route-matched by grep therefore depends on the wrapper form:
+ *
+ *   FORM                         route call token        grep-matchable?
+ *   ----                         ----------------        ---------------
+ *   top-level function           `executeVaultReset(`    yes  (key `executeVaultReset`)
+ *   exported object method       `vaultService.purge(`   yes  (key `vaultService.purge`)
+ *   exported STATIC class method `VaultService.purge(`   yes  (key `VaultService.purge`)
+ *   exported INSTANCE method     `svc.purge(`            NO   (receiver is a runtime var)
+ *   anonymous default export     `<anyName>(`            NO   (default import renames freely)
+ *
+ * (Alias imports — `import { x as y }` — defeat the grep for ALL forms; this is
+ * a pre-existing, documented limitation of every grep-based guard in the repo,
+ * not specific to this check.)
+ *
+ * So the resolver returns BOTH the qualified key AND a `grepMatchable` flag. The
+ * caller lets a grep-matchable wrapper be "declared" by adding its key to
+ * deleteSignal, but a NON-grep-matchable wrapper (instance method / anonymous
+ * default) can never be safely resolved that way — registering its key in
+ * deleteSignal is a false-green — so the caller forces it to an explicit
+ * exemption (or a refactor to a grep-matchable form) instead.
  */
 function methodName(node) {
   // MethodDeclaration (class or object shorthand method) or a
@@ -315,14 +384,23 @@ function methodName(node) {
   return undefined;
 }
 
-/** For a class-method node, the enclosing exported class name (or undefined). */
-function enclosingExportedClassName(node) {
+/** For a class-method node, the enclosing exported class declaration (or undefined). */
+function enclosingExportedClass(node) {
   let c = node;
   while (c) {
-    if (Node.isClassDeclaration(c) && c.isExported()) return c.getName();
+    if (Node.isClassDeclaration(c) && c.isExported()) return c;
     c = c.getParent();
   }
   return undefined;
+}
+
+/** True when a MethodDeclaration carries the `static` modifier. */
+function isStaticMethod(methodNode) {
+  return (
+    Node.isMethodDeclaration(methodNode) &&
+    typeof methodNode.isStatic === "function" &&
+    methodNode.isStatic()
+  );
 }
 
 /**
@@ -346,36 +424,55 @@ function enclosingExportedObjectVarName(node) {
   return undefined;
 }
 
-/** Walk up from `node` to the nearest ancestor that is an exported callable. */
+/**
+ * Walk up from `node` to the nearest ancestor that is an exported callable.
+ * Returns `{ key, grepMatchable }` or `undefined` when not route-reachable.
+ * `grepMatchable` = true when a route call to this wrapper produces a text
+ * token that a `deleteSignal` grep over route.ts can match (see methodName's
+ * table). Instance methods and anonymous default exports are route-reachable
+ * but NOT grep-matchable, so they cannot be resolved by deleteSignal.
+ */
 function resolveEnclosingExportedFunction(node) {
   let current = node;
   while (current) {
-    // 1. Top-level exported function / const-arrow.
+    // 1. Top-level exported function / const-arrow → `fn(` in the route.
     const fnName = exportedFunctionName(current);
-    if (fnName !== undefined) return fnName;
+    if (fnName !== undefined) return { key: fnName, grepMatchable: true };
 
     // 2. Class or object method reachable through an exported class/object.
     const mName = methodName(current);
     if (mName !== undefined) {
-      const cls = enclosingExportedClassName(current);
-      if (cls !== undefined) return `${cls}.${mName}`;
+      const cls = enclosingExportedClass(current);
+      if (cls !== undefined) {
+        // Static method → route calls `ClassName.method(` (grep-matchable).
+        // Instance method → route calls `<instanceVar>.method(` where the
+        // receiver is a runtime variable, NOT the class name — a deleteSignal
+        // `ClassName.method\(` alternative can never match it.
+        return {
+          key: `${cls.getName()}.${mName}`,
+          grepMatchable: isStaticMethod(current),
+        };
+      }
       const objVar = enclosingExportedObjectVarName(current);
-      if (objVar !== undefined) return `${objVar}.${mName}`;
+      if (objVar !== undefined) {
+        // Object method → route calls `objVar.method(` (grep-matchable, modulo
+        // the shared alias-import limitation).
+        return { key: `${objVar}.${mName}`, grepMatchable: true };
+      }
       // A method not reachable via an exported class/object is not
       // route-callable on its own — keep walking (it may sit inside an
       // exported outer function).
     }
 
-    // 3. Anonymous default export: `export default async function () {…}` /
-    //    `export default () => {…}`. Route-callable via the default import;
-    //    give it a file-scoped sentinel so it can never silently escape.
+    // 3. Anonymous default export: route imports it under ANY name, so no
+    //    deleteSignal literal can match the call token → NOT grep-matchable.
     if (
       (Node.isFunctionDeclaration(current) ||
         Node.isArrowFunction(current) ||
         Node.isFunctionExpression(current)) &&
       isDefaultExported(current)
     ) {
-      return "default";
+      return { key: "default", grepMatchable: false };
     }
 
     current = current.getParent();
@@ -399,7 +496,25 @@ function isDefaultExported(node) {
 }
 
 const undeclaredWrappers = []; // { file, fn }
+const nonGrepMatchableWrappers = []; // { file, fn } — instance method / anon default
 const resolvedWrapperKeys = new Set(); // "path#fn" for functions found matching deleteSignal by name
+
+// Route-pass input (AST-precise alias-resolution — closes the grep's alias
+// evasion vector). Maps a PATH_ROOT-relative module file to the set of its
+// exported wrapper NAMES that are route-importable and destructive:
+//   destructiveExportsByModule: "src/lib/vault/vault-reset.ts" -> { "executeVaultReset" }
+// A route that `import { executeVaultReset as reset } from "@/lib/vault/vault-reset"`
+// and calls `reset(` is then detected regardless of the local alias — the
+// flat-text deleteSignal grep in check-permanent-delete-stepup.sh cannot.
+const destructiveExportsByModule = new Map();
+function recordDestructiveExport(moduleRel, exportName) {
+  let set = destructiveExportsByModule.get(moduleRel);
+  if (!set) {
+    set = new Set();
+    destructiveExportsByModule.set(moduleRel, set);
+  }
+  set.add(exportName);
+}
 
 for (const { abs, rel } of sourceFiles) {
   const content = readFileSync(abs, "utf8");
@@ -440,17 +555,38 @@ for (const { abs, rel } of sourceFiles) {
     );
     if (!isPrimitiveCall) continue;
 
-    const fnName = resolveEnclosingExportedFunction(call);
-    if (fnName === undefined) continue; // not inside any exported function — not route-reachable, skip
+    const resolved = resolveEnclosingExportedFunction(call);
+    if (resolved === undefined) continue; // not route-reachable — skip
+    const { key: fnName, grepMatchable } = resolved;
     if (seenFns.has(fnName)) continue;
     seenFns.add(fnName);
 
     const key = `${rel}#${fnName}`;
     resolvedWrapperKeys.add(key);
 
+    // An explicit exemption always wins (documents "not route-reachable" or a
+    // compensating control such as worker-policy-manifest.json).
+    if (exemptKeys.has(key)) continue;
+
+    // deleteSignal-registration only DECLARES a wrapper when a route call to it
+    // produces a token the route-side grep can match. For a NON-grep-matchable
+    // wrapper (instance method / anonymous default) a deleteSignal alternative
+    // is a false-green: the derived key would never appear in the route text.
+    // Force such wrappers to a refactor (or an explicit exemption) instead.
+    if (!grepMatchable) {
+      nonGrepMatchableWrappers.push({ file: rel, fn: fnName });
+      continue;
+    }
+
+    // Record the route-importable binding for the AST route pass: the first
+    // segment of the key is the exported symbol a route imports (`executeVault-
+    // Reset`, or `vaultService` for `vaultService.purge`). This lets the route
+    // pass resolve an aliased import to the wrapper the grep would miss.
+    const exportBinding = fnName.split(".")[0];
+    recordDestructiveExport(rel, exportBinding);
+
     const matchesDeleteSignalByName = DELETE_SIGNAL_RE.test(`${fnName}(`);
     if (matchesDeleteSignalByName) continue; // declared — routes calling it classify correctly
-    if (exemptKeys.has(key)) continue; // documented exemption
 
     undeclaredWrappers.push({ file: rel, fn: fnName });
   }
@@ -467,6 +603,23 @@ if (undeclaredWrappers.length > 0) {
   console.error(
     "\nEither add the function name as a deleteSignal alternative in route-class-patterns.json" +
       " (so calling routes classify as destructive) OR add `<file>#<function>  # reason` to" +
+      " scripts/checks/destructive-wrapper-exempt.txt.",
+  );
+}
+
+if (nonGrepMatchableWrappers.length > 0) {
+  failed = true;
+  console.error(
+    "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: these wrap a raw destructive-delete primitive in a form whose route CALL TOKEN a deleteSignal grep cannot match — a class INSTANCE method (route calls `<var>.method(`, not `ClassName.method(`) or an anonymous default export (route imports it under any name). Registering their derived key in deleteSignal would be a false-green (the route-side classifier is a flat-text grep over route.ts):",
+  );
+  for (const w of nonGrepMatchableWrappers) {
+    console.error(`  NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: ${w.file}#${w.fn}`);
+  }
+  console.error(
+    "\nResolve by refactoring to a grep-matchable form — a top-level `export function`," +
+      " an exported object-literal method (`export const svc = { method() {} }`), or a" +
+      " `static` class method — so a route call produces a stable literal token; OR, if the" +
+      " wrapper is genuinely NOT route-reachable, add `<file>#<function>  # reason` to" +
       " scripts/checks/destructive-wrapper-exempt.txt.",
   );
 }
@@ -499,6 +652,187 @@ if (staleExempt.length > 0) {
   for (const e of staleExempt) {
     console.error(`  STALE_WRAPPER_EXEMPT: ${e.key}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Route pass (AST-precise) — close the alias-import evasion the flat-text
+// deleteSignal grep in check-permanent-delete-stepup.sh cannot see.
+//
+// For each route.ts: resolve its local import bindings (INCLUDING aliases:
+// `import { executeVaultReset as reset }`) against the destructive-wrapper
+// export set built above, plus detect direct raw-primitive calls and
+// direct-name wrapper calls. A route that reaches a destructive primitive/
+// wrapper MUST call requireRecentCurrentAuthMethod( or be listed in
+// stepup-delete-exempt.txt — else ROUTE_DESTRUCTIVE_NO_STEPUP.
+//
+// This is AST defense-in-depth over the grep guard: the grep catches the
+// literal-token cases fast; this pass catches the aliased ones the grep misses.
+// ---------------------------------------------------------------------------
+
+/** Parse stepup-delete-exempt.txt → Set of repo-relative route paths. */
+function parseStepupExempt(text) {
+  const paths = new Set();
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    // `path  # reason` — path is everything before a whitespace-preceded `#`.
+    const hashIdx = line.search(/\s#/);
+    const path = (hashIdx === -1 ? line : line.slice(0, hashIdx)).trim();
+    if (path) paths.add(path);
+  }
+  return paths;
+}
+
+/** Map an import module specifier from a route to a PATH_ROOT-relative file. */
+function resolveModuleToRel(spec) {
+  // `@/lib/x` -> `src/lib/x.ts`. Only the `@/` alias + relative forms that land
+  // inside src are resolvable without a tsconfig; anything else (bare package,
+  // unresolvable relative) is not a local wrapper module and is skipped.
+  if (spec.startsWith("@/")) return `src/${spec.slice(2)}.ts`;
+  return undefined; // relative imports between route files don't reach wrappers here
+}
+
+// Collect route files (src/app/api/**/route.ts).
+function getRouteFiles(apiDir, pathRoot) {
+  const out = [];
+  let entries;
+  try {
+    entries = readdirSync(apiDir, { withFileTypes: true, recursive: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || entry.name !== "route.ts") continue;
+    const abs = join(entry.parentPath ?? entry.path, entry.name);
+    const rel = abs.slice(pathRoot.length).replace(/^\/+/, "");
+    out.push({ abs, rel });
+  }
+  return out.sort((a, b) => a.rel.localeCompare(b.rel));
+}
+
+const stepupExemptText = (() => {
+  try {
+    return readFileSync(STEPUP_EXEMPT_FILE, "utf8");
+  } catch {
+    return "";
+  }
+})();
+const stepupExemptPaths = parseStepupExempt(stepupExemptText);
+
+const routesReachingDestructiveNoStepup = []; // { file, via }
+
+for (const { abs, rel } of getRouteFiles(API_DIR, PATH_ROOT)) {
+  let content;
+  try {
+    content = readFileSync(abs, "utf8");
+  } catch {
+    continue;
+  }
+
+  let sf;
+  try {
+    sf = project.createSourceFile(`__route__/${rel}`, content, { overwrite: true });
+  } catch {
+    continue;
+  }
+
+  // Build local-binding -> wrapper description from this route's imports.
+  // localWrapperBindings: Map<localName, "moduleRel#exportName">  (named/aliased)
+  // namespaceBindings:    Map<localNs, { moduleRel, exportSet }>  (import * as ns)
+  //   The real repo uses `import * as teamPasswordService from "..."` then
+  //   `teamPasswordService.deleteTeamPassword(` — resolve it so the pass does
+  //   not have a false-negative on the exact shape production uses.
+  const localWrapperBindings = new Map();
+  const namespaceBindings = new Map();
+  for (const imp of sf.getImportDeclarations()) {
+    const moduleRel = resolveModuleToRel(imp.getModuleSpecifierValue());
+    if (!moduleRel) continue;
+    const exportSet = destructiveExportsByModule.get(moduleRel);
+    if (!exportSet) continue;
+    const nsImport = imp.getNamespaceImport();
+    if (nsImport) {
+      namespaceBindings.set(nsImport.getText(), { moduleRel, exportSet });
+    }
+    for (const named of imp.getNamedImports()) {
+      const exportName = named.getName(); // the exported symbol
+      const localName = named.getAliasNode()?.getText() ?? exportName; // alias or same
+      if (exportSet.has(exportName)) {
+        localWrapperBindings.set(localName, `${moduleRel}#${exportName}`);
+      }
+    }
+  }
+
+  // Does the route reach a destructive primitive/wrapper?
+  let reachedVia;
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const callee = call.getExpression();
+
+    // (a) Direct raw primitive: `tx.passwordEntry.deleteMany(` etc. — the grep
+    //     already catches these, but detecting them here keeps the pass complete.
+    if (Node.isPropertyAccessExpression(callee)) {
+      const m = callee.getName();
+      const recv = callee.getExpression();
+      const recvName = Node.isPropertyAccessExpression(recv)
+        ? recv.getName()
+        : Node.isIdentifier(recv)
+          ? recv.getText()
+          : undefined;
+      if (
+        recvName !== undefined &&
+        RAW_PRIMITIVES.some((p) => p.receiver === recvName && p.methods.includes(m))
+      ) {
+        reachedVia = `raw ${recvName}.${m}`;
+        break;
+      }
+      // (c) Aliased object wrapper: `reset.purge(` where `reset` is an aliased
+      //     import of an exported object wrapper. localWrapperBindings holds the
+      //     object binding; any method call on it is destructive-reaching.
+      if (recvName !== undefined && localWrapperBindings.has(recvName)) {
+        reachedVia = `alias ${recvName}.${m} -> ${localWrapperBindings.get(recvName)}`;
+        break;
+      }
+      // (d) Namespace import: `ns.deleteTeamPassword(` where `ns` is
+      //     `import * as ns from "<module>"` and the called member is a
+      //     destructive export of that module.
+      if (recvName !== undefined && namespaceBindings.has(recvName)) {
+        const { moduleRel: nsModule, exportSet: nsExports } = namespaceBindings.get(recvName);
+        if (nsExports.has(m)) {
+          reachedVia = `namespace ${recvName}.${m}() -> ${nsModule}#${m}`;
+          break;
+        }
+      }
+    }
+
+    // (b) Direct/aliased top-level wrapper call: `reset(` where `reset` is a
+    //     (possibly aliased) import of a destructive top-level function wrapper.
+    if (Node.isIdentifier(callee) && localWrapperBindings.has(callee.getText())) {
+      reachedVia = `alias ${callee.getText()}() -> ${localWrapperBindings.get(callee.getText())}`;
+      break;
+    }
+  }
+
+  if (!reachedVia) continue;
+
+  const hasStepup = STEPUP_CALL_RE.test(content);
+  const isExempt = stepupExemptPaths.has(rel);
+  if (!hasStepup && !isExempt) {
+    routesReachingDestructiveNoStepup.push({ file: rel, via: reachedVia });
+  }
+}
+
+if (routesReachingDestructiveNoStepup.length > 0) {
+  failed = true;
+  console.error(
+    "ROUTE_DESTRUCTIVE_NO_STEPUP: these route.ts files reach an irreversible vault-data delete (via a raw primitive or an imported destructive wrapper — INCLUDING aliased imports the deleteSignal grep misses) but call neither requireRecentCurrentAuthMethod( nor appear in stepup-delete-exempt.txt:",
+  );
+  for (const r of routesReachingDestructiveNoStepup) {
+    console.error(`  ROUTE_DESTRUCTIVE_NO_STEPUP: ${r.file}  (via ${r.via})`);
+  }
+  console.error(
+    "\nAdd requireRecentCurrentAuthMethod( to the route, OR add its path + reason to" +
+      " scripts/checks/stepup-delete-exempt.txt if a stronger ceremony applies.",
+  );
 }
 
 if (failed) {

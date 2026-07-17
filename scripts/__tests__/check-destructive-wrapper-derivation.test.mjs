@@ -26,6 +26,7 @@ let root;
 let scanRoot;
 let exemptFile;
 let patternsFile;
+let stepupExemptFile;
 
 // Fixture deleteSignal mirrors production shape (raw primitives + the two
 // hand-added wrapper names) so STALE_DELETE_SIGNAL_NAME/UNDECLARED tests are
@@ -43,6 +44,11 @@ function runGuard(extraEnv = {}) {
       DESTRUCTIVE_WRAPPER_PATH_ROOT: root,
       DESTRUCTIVE_WRAPPER_EXEMPT_FILE: exemptFile,
       DESTRUCTIVE_WRAPPER_PATTERNS_FILE: patternsFile,
+      // Point the route pass at the fixture tree's api dir + an isolated
+      // stepup-exempt, so it never scans the real src/app/api during a fixture
+      // run. Routes live at <scanRoot>/app/api/**/route.ts.
+      STEPUP_GUARD_API_DIR: join(scanRoot, "app", "api"),
+      STEPUP_GUARD_EXEMPT_FILE: stepupExemptFile,
       ...extraEnv,
     },
   });
@@ -78,8 +84,10 @@ beforeEach(() => {
   scanRoot = join(root, "src");
   exemptFile = join(root, "exempt.txt");
   patternsFile = join(root, "route-class-patterns.json");
+  stepupExemptFile = join(root, "stepup-exempt.txt");
   mkdirSync(scanRoot, { recursive: true });
   writeFileSync(exemptFile, "# fixture exempt list\n", "utf8");
+  writeFileSync(stepupExemptFile, "# fixture stepup exempt list\n", "utf8");
   writeFileSync(patternsFile, JSON.stringify({ deleteSignal: FIXTURE_DELETE_SIGNAL }), "utf8");
 });
 
@@ -164,14 +172,26 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     );
   });
 
-  it("does NOT scan route.ts files (governed directly by check-permanent-delete-stepup.sh)", () => {
+  it("does NOT treat route.ts as a WRAPPER-DEFINITION site (no UNDECLARED for a raw delete in a route)", () => {
     seedWrapperStubs();
+    // A raw delete directly in a route is the route classifier's concern, not a
+    // wrapper definition — so it must not emit UNDECLARED_DESTRUCTIVE_WRAPPER.
+    // (It DOES trip the route pass unless step-up is present; step-up here keeps
+    // this test focused on the wrapper-derivation scope.)
     writeSource(
       "src/app/api/passwords/bulk-purge/route.ts",
-      `export async function POST() {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n`,
+      [
+        "import { requireRecentCurrentAuthMethod } from '@/lib/auth/session/recent-current-auth-method';",
+        "export async function POST() {",
+        "  await requireRecentCurrentAuthMethod();",
+        "  await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "}",
+        "",
+      ].join("\n"),
     );
-    const { exitCode } = runGuard();
+    const { exitCode, stderr } = runGuard();
     expect(exitCode).toBe(0);
+    expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
   });
 
   it("does NOT scan test files", () => {
@@ -273,7 +293,7 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     );
   });
 
-  it("catches a destructive method on a directly-exported class (qualified key)", () => {
+  it("flags a destructive INSTANCE method as NON_GREP_MATCHABLE (route calls instance.method, not Class.method)", () => {
     seedWrapperStubs();
     writeSource(
       "src/lib/vault-service-class.ts",
@@ -289,8 +309,81 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     const { exitCode, stderr } = runGuard();
     expect(exitCode).toBe(1);
     expect(stderr).toContain(
-      "UNDECLARED_DESTRUCTIVE_WRAPPER: src/lib/vault-service-class.ts#VaultService.purgeUserEntries",
+      "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: src/lib/vault-service-class.ts#VaultService.purgeUserEntries",
     );
+  });
+
+  it("false-green guard: registering an INSTANCE method's Class.method key in deleteSignal does NOT satisfy the check", () => {
+    seedWrapperStubs();
+    // The exact evasion the external review flagged: derive VaultService.purge,
+    // add `VaultService\.purge\(` to deleteSignal, but the route calls
+    // `svc.purge(` — the grep never matches. The check must still fail
+    // NON_GREP_MATCHABLE rather than silently accept the registration.
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|VaultService\\.purge\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/lib/vault-service-class.ts",
+      [
+        "export class VaultService {",
+        "  async purge(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: src/lib/vault-service-class.ts#VaultService.purge",
+    );
+  });
+
+  it("accepts a STATIC class method registered via deleteSignal (route calls Class.method — grep-matchable)", () => {
+    seedWrapperStubs();
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|VaultService\\.purgeAll\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/lib/vault-service-static.ts",
+      [
+        "export class VaultService {",
+        "  static async purgeAll(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
+  });
+
+  it("a NON_GREP_MATCHABLE instance method can still be resolved via an explicit exemption", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/vault-service-class.ts",
+      [
+        "export class VaultService {",
+        "  async purge(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      exemptFile,
+      "src/lib/vault-service-class.ts#VaultService.purge  # test fixture: not route-reachable in this scenario\n",
+      "utf8",
+    );
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
   });
 
   it("catches an exported object property whose value is an arrow function", () => {
@@ -313,7 +406,7 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     );
   });
 
-  it("catches an anonymous default export via a file-scoped #default sentinel (cannot silently escape)", () => {
+  it("flags an anonymous default export as NON_GREP_MATCHABLE (default import renames freely; deleteSignal cannot match)", () => {
     seedWrapperStubs();
     writeSource(
       "src/lib/purge-default.ts",
@@ -327,7 +420,30 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     const { exitCode, stderr } = runGuard();
     expect(exitCode).toBe(1);
     expect(stderr).toContain(
-      "UNDECLARED_DESTRUCTIVE_WRAPPER: src/lib/purge-default.ts#default",
+      "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: src/lib/purge-default.ts#default",
+    );
+  });
+
+  it("false-green guard: registering `default(` in deleteSignal does NOT satisfy an anonymous default wrapper", () => {
+    seedWrapperStubs();
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|default\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/lib/purge-default.ts",
+      [
+        "export default async function () {",
+        "  await tx.user.delete({ where: {} });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: src/lib/purge-default.ts#default",
     );
   });
 
@@ -369,6 +485,179 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     const { exitCode, stderr } = runGuard();
     expect(exitCode).toBe(1);
     expect(stderr).toContain("STALE_DELETE_SIGNAL_NAME: goneService.wipe");
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Route pass (AST alias-close): the flat-text deleteSignal grep in
+  // check-permanent-delete-stepup.sh misses an ALIASED import of a destructive
+  // wrapper. This pass resolves local imports (incl. aliases) and requires
+  // step-up on any route reaching a destructive primitive/wrapper.
+  // ─────────────────────────────────────────────────────────────────────────
+  it("ROUTE_DESTRUCTIVE_NO_STEPUP: an ALIASED wrapper import without step-up is caught (grep would miss it)", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/reset-svc.ts",
+      "export async function executeVaultResetAlt(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+    );
+    // Register the wrapper so the derivation pass is satisfied; the route
+    // aliases it, which the deleteSignal grep cannot follow.
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|executeVaultResetAlt\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/app/api/danger/route.ts",
+      [
+        "import { executeVaultResetAlt as reset } from '@/lib/reset-svc';",
+        "export async function POST() {",
+        "  await reset('u1');",
+        "  return new Response('ok');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/danger/route.ts");
+    expect(stderr).toContain("src/lib/reset-svc.ts#executeVaultResetAlt");
+  });
+
+  it("passes when the aliased-wrapper route calls requireRecentCurrentAuthMethod", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/reset-svc.ts",
+      "export async function executeVaultResetAlt(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+    );
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|executeVaultResetAlt\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/app/api/danger/route.ts",
+      [
+        "import { executeVaultResetAlt as reset } from '@/lib/reset-svc';",
+        "import { requireRecentCurrentAuthMethod } from '@/lib/auth/session/recent-current-auth-method';",
+        "export async function POST() {",
+        "  await requireRecentCurrentAuthMethod();",
+        "  await reset('u1');",
+        "  return new Response('ok');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
+  });
+
+  it("passes when the aliased-wrapper route is listed in stepup-delete-exempt.txt", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/reset-svc.ts",
+      "export async function executeVaultResetAlt(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+    );
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|executeVaultResetAlt\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/app/api/danger/route.ts",
+      [
+        "import { executeVaultResetAlt as reset } from '@/lib/reset-svc';",
+        "export async function POST() {",
+        "  await reset('u1');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      stepupExemptFile,
+      "src/app/api/danger/route.ts  # test fixture: stronger ceremony applies\n",
+      "utf8",
+    );
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
+  });
+
+  it("ROUTE_DESTRUCTIVE_NO_STEPUP: a raw delete primitive directly in a route without step-up is caught", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/app/api/wipe/route.ts",
+      [
+        "export async function POST() {",
+        "  await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/wipe/route.ts");
+  });
+
+  it("a NAMESPACE import (`import * as ns`) reaching a wrapper without step-up is caught (real-repo shape)", () => {
+    // The real team-password route uses `import * as teamPasswordService` then
+    // `teamPasswordService.deleteTeamPassword(` — resolve it so the pass has no
+    // false-negative on the exact shape production uses.
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/svc.ts",
+      "export async function wipeIt(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+    );
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|wipeIt\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/app/api/ns-danger/route.ts",
+      [
+        "import * as svc from '@/lib/svc';",
+        "export async function POST() {",
+        "  await svc.wipeIt('u1');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/ns-danger/route.ts");
+    expect(stderr).toContain("namespace svc.wipeIt()");
+  });
+
+  it("an ALIASED object-wrapper method call without step-up is caught", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/vault-svc.ts",
+      [
+        "export const vaultService = {",
+        "  async purgeUserEntries(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|vaultService\\.purgeUserEntries\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/app/api/danger2/route.ts",
+      [
+        "import { vaultService as vault } from '@/lib/vault-svc';",
+        "export async function POST() {",
+        "  await vault.purgeUserEntries('u1');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/danger2/route.ts");
   });
 
   describe("env-pollution guard (sec-F6)", () => {
