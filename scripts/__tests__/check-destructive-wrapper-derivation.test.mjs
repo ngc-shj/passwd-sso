@@ -746,6 +746,208 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/danger2/route.ts");
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Re-export pass (C2): the residual limitation this file used to document
+  // ("re-export chains evade") is now mechanically rejected. Each red fixture
+  // is isolated to REEXPORTED_DESTRUCTIVE_WRAPPER only (no
+  // ROUTE_DESTRUCTIVE_NO_STEPUP / UNDECLARED_DESTRUCTIVE_WRAPPER
+  // contamination) — seedWrapperStubs() keeps STALE_DELETE_SIGNAL_NAME quiet,
+  // and the barrel fixtures below stand alone (no route imports them), so the
+  // route pass and the wrapper-derivation loop have nothing to say.
+  // ─────────────────────────────────────────────────────────────────────────
+  describe("re-export pass (C2)", () => {
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a named re-export of a destructive wrapper", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/vault/reexport-barrel.ts",
+        'export { executeVaultReset } from "./vault-reset";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/reexport-barrel.ts re-exports executeVaultReset from ./vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for an ALIASED named re-export of a destructive wrapper", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/vault/reexport-barrel-alias.ts",
+        'export { executeVaultReset as resetVault } from "./vault-reset";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/reexport-barrel-alias.ts re-exports executeVaultReset from ./vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for `export * from` (2-hop)", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource("src/lib/vault/barrel-star.ts", 'export * from "./vault-reset";\n');
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/barrel-star.ts re-exports executeVaultReset from ./vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a 3-hop `export * from` chain A->B->C (transitive closure)", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset-c.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource("src/lib/vault/barrel-b.ts", 'export * from "./vault-reset-c";\n');
+      writeSource("src/lib/vault/barrel-a.ts", 'export * from "./barrel-b";\n');
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      // Every hop must be flagged, not just the direct one.
+      expect(stderr).toContain(
+        "src/lib/vault/barrel-b.ts re-exports executeVaultReset from ./vault-reset-c",
+      );
+      expect(stderr).toContain(
+        "src/lib/vault/barrel-a.ts re-exports executeVaultReset from ./barrel-b",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) when the barrel sorts BEFORE its target in scan order (ordering-adversarial)", () => {
+      seedWrapperStubs();
+      // "aaa-barrel.ts" sorts before "vault-reset.ts" alphabetically — the
+      // fixpoint loop, not scan order, must still catch this.
+      writeSource(
+        "src/lib/vault/aaa-barrel.ts",
+        'export { executeVaultReset } from "./vault-reset";\n',
+      );
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/aaa-barrel.ts re-exports executeVaultReset from ./vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for `export * as ns from`", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/vault/barrel-ns.ts",
+        'export * as vaultReset from "./vault-reset";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/barrel-ns.ts re-exports executeVaultReset from ./vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a re-export hosted inside a route.ts file", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      // A route.ts acting as a re-export SOURCE for some other file — invisible
+      // to the route pass's import-walk (which only resolves @/-aliased
+      // imports into wrapper modules, not a route file as a barrel).
+      writeSource(
+        "src/app/api/internal/route.ts",
+        [
+          'export { executeVaultReset } from "@/lib/vault/vault-reset";',
+          "export async function GET() {",
+          "  return new Response('ok');",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/app/api/internal/route.ts re-exports executeVaultReset from @/lib/vault/vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a 2-hop NAMED chain with a distinct alias at each hop (post-alias name registration)", () => {
+      seedWrapperStubs();
+      // C defines the wrapper; B re-exports it under alias `x`; A re-exports
+      // B's `x` under alias `y`. The fixpoint step must register B -> x (its
+      // OWN locally-visible name), not B -> executeVaultReset, so A's lookup
+      // of the source-side name `x` against B's registered exports succeeds.
+      writeSource(
+        "src/lib/vault/vault-reset-chain-c.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/vault/chain-b.ts",
+        'export { executeVaultReset as x } from "./vault-reset-chain-c";\n',
+      );
+      writeSource("src/lib/vault/chain-a.ts", 'export { x as y } from "./chain-b";\n');
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/vault/chain-b.ts re-exports executeVaultReset from ./vault-reset-chain-c",
+      );
+      expect(stderr).toContain("src/lib/vault/chain-a.ts re-exports x from ./chain-b");
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("passes (no REEXPORTED_DESTRUCTIVE_WRAPPER) for an innocuous non-destructive re-export", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/helpers.ts",
+        "export function formatVaultLabel(name) {\n  return name.trim();\n}\n",
+      );
+      writeSource(
+        "src/lib/vault/reexport-innocuous.ts",
+        'export { formatVaultLabel } from "./helpers";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(0);
+      expect(stderr).not.toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+    });
+  });
+
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without DESTRUCTIVE_WRAPPER_FIXTURE_MODE=1", () => {
       const { exitCode, stderr } = runGuard({ CI: "true", DESTRUCTIVE_WRAPPER_FIXTURE_MODE: "" });

@@ -139,6 +139,23 @@ sends blob-without-overview)
 4. Stale tab / third-party v1 script PUTs overview without blob → 400 with Zod message naming `encryptedOverview`.
 5. Developer adds `export { executeVaultReset } from "./vault-reset"` (any depth of barrel, incl. inside route.ts) → CI fails `REEXPORTED_DESTRUCTIVE_WRAPPER`.
 
+## Implementation Checklist
+
+Batch A (C1 + C4 app tests):
+- [ ] `src/lib/validations/entry.ts` — one-direction refine + scope-difference comment
+- [ ] R19 test trees referencing `updateE2EPasswordSchema` (ALL must be checked/updated): `src/lib/validations/entry.test.ts` (co-located), `src/lib/validations/validations.test.ts`, `src/lib/validations.test.ts`
+- [ ] `src/app/api/passwords/[id]/route.test.ts` — overview-only 400 + no-mutation (RT8); blob-only success pin
+- [ ] `src/app/api/v1/passwords/[id]/route.test.ts` — same two cases
+- [ ] `extension/src/__tests__/background-passkey-provider.test.ts` — PUT body `not.toHaveProperty("encryptedOverview")`
+
+Batch B (C2 + C3 + checker fixtures):
+- [ ] `scripts/checks/check-destructive-wrapper-derivation.mjs` — re-export pass (post-map, fixpoint, post-alias name registration, route.ts included), header edits (C3 + residual narrowing)
+- [ ] `scripts/__tests__/check-destructive-wrapper-derivation.test.mjs` — 8 red fixtures + green regression
+
+Shared utilities to reuse (no reimplementation): `encryptedFieldSchema` (entry.ts), team refine idiom (team.ts:103-113), checker's `destructiveExportsByModule` / `getRouteFiles` / `sourceFiles` / `seedWrapperStubs()` harness.
+
+CI gate parity: pre-pr.sh (54 gates) covers all app CI jobs; known-uncovered CI jobs = Extension CI + integration tests (memory: project_ci_gates_beyond_pre_pr) — both explicitly in Testing strategy steps 3-4. No new parity gap introduced by this diff.
+
 ## Go/No-Go Gate
 
 | ID  | Subject                                                          | Status |

@@ -1,7 +1,7 @@
 # Report Verification: Comprehensive Assessment (A / 9.2) — Triangulated Review
 Date: 2026-07-17
 Review round: 1 (terminal — no Critical/Major findings)
-Target: externally produced comprehensive evaluation report (A / 9.2) vs repo state at main @ 00ed72362
+Target: externally produced comprehensive evaluation report (A / 9.2) vs repo state at main @ `00ed72362`
 Mode adaptation: triangulate Phase 3 applied to report-claims-vs-repo verification (no branch diff; Ollama seed step N/A)
 
 ## Functionality Findings (quantitative claims)

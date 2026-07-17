@@ -279,6 +279,29 @@ describe("updateE2EPasswordSchema", () => {
     const result = updateE2EPasswordSchema.safeParse({ aadVersion: 2 });
     expect(result.success).toBe(false);
   });
+
+  it("rejects encryptedOverview without encryptedBlob", () => {
+    const result = updateE2EPasswordSchema.safeParse({ encryptedOverview: validEncryptedField() });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts encryptedBlob without encryptedOverview", () => {
+    const result = updateE2EPasswordSchema.safeParse({ encryptedBlob: validEncryptedField() });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts encryptedBlob and encryptedOverview together", () => {
+    const result = updateE2EPasswordSchema.safeParse({
+      encryptedBlob: validEncryptedField(),
+      encryptedOverview: validEncryptedField(),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts neither encryptedBlob nor encryptedOverview", () => {
+    const result = updateE2EPasswordSchema.safeParse({ isFavorite: true });
+    expect(result.success).toBe(true);
+  });
 });
 
 // ─── generateRequestSchema ──────────────────────────────────
