@@ -28,6 +28,7 @@ import {
   LegacyAttachmentsResidualError,
   AttachmentCekManifestMismatchError,
   LegacyAttachmentInconsistentVersionError,
+  AttachmentCekWrapAadVersionMismatchError,
   type AttachmentCekRewrap,
   type RotationPayload,
   type AttachmentMigrationPayload,
@@ -758,6 +759,83 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
         return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
       }),
     ).rejects.toThrow(LegacyAttachmentInconsistentVersionError);
+  });
+
+  // ── RT7/F3: manifest entry carries a stale/future cekWrapAadVersion ───────
+
+  it("RT7/F3 — attachmentCekRewraps entry with cekWrapAadVersion=2 → AttachmentCekWrapAadVersionMismatchError; cek columns unchanged", async () => {
+    // CURRENT_CEK_WRAP_AAD_VERSION is pinned to 1. The upload/migrate route
+    // boundaries already reject cekWrapAadVersion !== 1 before a manifest can
+    // ever be built this way — this test targets applyVaultRotation's OWN
+    // defense-in-depth check (rotate-key-server.ts, just above the
+    // attachment.updateMany call), which exists precisely so a bad value
+    // can never reach the DB via rotation even if the upstream boundary is
+    // ever bypassed. Reverting the
+    // `if (rewrap.cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION) throw`
+    // guard would let this rewrap silently write the row to a mismatched
+    // format, only surfacing on the NEXT rotation's own guard/post-condition
+    // check.
+    const vaultKey = await generateVaultKey();
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
+    const newKeyVersion = oldKeyVersion + 1;
+    const entryId = await seedPasswordEntry(ctx, userId, tenantId);
+
+    const { id: attId } = await seedAttachmentRow(ctx, {
+      entryId, userId, tenantId,
+      plaintext: Buffer.from("aad-version-guard"),
+      vaultKey,
+      encryptionMode: 2,
+      keyVersion: oldKeyVersion,
+      cekKeyVersion: oldKeyVersion,
+      cekWrapAadVersion: 1,
+    });
+
+    const before = await ctx.su.pool.query<{
+      cek_encrypted: Buffer; cek_iv: string; cek_auth_tag: string;
+      cek_key_version: number; cek_wrap_aad_version: number;
+    }>(
+      `SELECT cek_encrypted, cek_iv, cek_auth_tag, cek_key_version, cek_wrap_aad_version
+       FROM attachments WHERE id = $1::uuid`,
+      [attId],
+    );
+
+    const rewrap: AttachmentCekRewrap = {
+      id: attId,
+      cekEncrypted: randomBytes(48).toString("base64"),
+      cekIv: randomBytes(12).toString("hex"),
+      cekAuthTag: randomBytes(16).toString("hex"),
+      cekKeyVersion: newKeyVersion,
+      cekWrapAadVersion: 2, // exceeds CURRENT_CEK_WRAP_AAD_VERSION (1)
+    };
+
+    const payload = buildRotationPayload({
+      entryIds: [entryId],
+      historyIds: [],
+      attachmentCekRewraps: [rewrap],
+    });
+
+    await expect(
+      ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
+      }),
+    ).rejects.toThrow(AttachmentCekWrapAadVersionMismatchError);
+
+    // The whole rotation transaction must have rolled back — the attachment's
+    // cek columns must be byte-for-byte unchanged from before the attempt.
+    const after = await ctx.su.pool.query<{
+      cek_encrypted: Buffer; cek_iv: string; cek_auth_tag: string;
+      cek_key_version: number; cek_wrap_aad_version: number;
+    }>(
+      `SELECT cek_encrypted, cek_iv, cek_auth_tag, cek_key_version, cek_wrap_aad_version
+       FROM attachments WHERE id = $1::uuid`,
+      [attId],
+    );
+    expect(after.rows[0].cek_key_version).toBe(before.rows[0].cek_key_version);
+    expect(after.rows[0].cek_wrap_aad_version).toBe(before.rows[0].cek_wrap_aad_version);
+    expect(Buffer.compare(after.rows[0].cek_encrypted, before.rows[0].cek_encrypted)).toBe(0);
+    expect(after.rows[0].cek_iv).toBe(before.rows[0].cek_iv);
+    expect(after.rows[0].cek_auth_tag).toBe(before.rows[0].cek_auth_tag);
   });
 
   // ── T12.4c: new mode-2 row arrives between data-fetch and POST ────────────

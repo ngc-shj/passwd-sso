@@ -378,6 +378,54 @@ describe("PUT /api/v1/passwords/[id]", () => {
     expect(mockEntryUpdate).not.toHaveBeenCalled();
   });
 
+  // RT7/F1a: metadata-only PUT must strip keyVersion/aadVersion from the
+  // prisma update payload even when the caller supplies matching values —
+  // they are ONLY legitimate on the blob (re-encrypt) path. Reverting the
+  // `if (encryptedBlob) { ... }` guard would let these fields leak into
+  // `data` on the metadata-only path, failing this test.
+  it("RT7/F1a: strips keyVersion and aadVersion from the update payload on metadata-only PUT", async () => {
+    // ownedEntry.keyVersion === 1 — send the SAME value (no
+    // KEY_VERSION_WITHOUT_REENCRYPT rejection) alongside a metadata field.
+    // aadVersion is omitted from the body: aadVersionSchema is min(1) and
+    // ownedEntry.aadVersion is 0, so there is no valid "same value" to send —
+    // the keyVersion assertion alone proves the strip guard fires.
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: { isFavorite: true, keyVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+    expect(mockEntryUpdate).toHaveBeenCalledTimes(1);
+    const updateArg = mockEntryUpdate.mock.calls[0][0];
+    expect(updateArg.data).not.toHaveProperty("keyVersion");
+    expect(updateArg.data).not.toHaveProperty("aadVersion");
+  });
+
+  // RT7/F1b: a blob-changing PUT MUST carry its keyVersion so
+  // assertCurrentKeyVersion always runs — otherwise a blob-without-keyVersion
+  // write could race a rotation and permanently brick the entry. Reverting
+  // the `if (encryptedBlob && keyVersion === undefined)` guard would let
+  // this request fall through to a 200 instead of 409.
+  it("RT7/F1b: rejects blob PUT with keyVersion omitted → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
+    const res = await PUT(
+      createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, {
+        body: {
+          encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
+          encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
+          // keyVersion intentionally omitted
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe("KEY_VERSION_WITHOUT_REENCRYPT");
+    expect(mockEntryUpdate).not.toHaveBeenCalled();
+    expect(mockHistoryCreate).not.toHaveBeenCalled();
+  });
+
   it("allows a keyVersion change when an encryptedBlob is supplied (re-encryption)", async () => {
     const res = await PUT(
       createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),

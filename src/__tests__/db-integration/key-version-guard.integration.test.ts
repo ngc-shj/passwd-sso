@@ -326,8 +326,8 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
             }>(
               `SELECT pid, pg_blocking_pids(pid) AS blocked_by
                FROM pg_stat_activity
-               WHERE state = 'active' AND query ILIKE '%FOR UPDATE%users%'
-                  OR query ILIKE '%users%FOR UPDATE%'`,
+               WHERE state = 'active'
+                 AND (query ILIKE '%FOR UPDATE%users%' OR query ILIKE '%users%FOR UPDATE%')`,
             );
             const blocked = r.rows.find((row) => row.blocked_by.length > 0);
             if (blocked) {

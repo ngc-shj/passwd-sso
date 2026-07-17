@@ -273,7 +273,7 @@ describe("personal rotation — exact-set + retry semantics (C10)", () => {
 
   // ── Route-level envelope assertion for the same collision ─────────────────
 
-  it("route maps the VaultKey collision to KEY_VERSION_MISMATCH with the standard 409 envelope", async () => {
+  it("VaultKey @@unique collision surfaces as RotationCasConflictError (which the route maps to KEY_VERSION_MISMATCH → 409)", async () => {
     const { userId, keyVersion: v1, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const entryId = await seedPasswordEntry(ctx, userId, tenantId, v1);
     const newKeyVersion = v1 + 1;

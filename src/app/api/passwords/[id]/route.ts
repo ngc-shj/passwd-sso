@@ -166,6 +166,13 @@ async function handlePUT(
   if ((keyVersionChanged || aadVersionChanged) && !encryptedBlob) {
     return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   }
+  // A blob write MUST carry its keyVersion so the stale-write guard below always
+  // runs. Without this, a blob-without-keyVersion PUT skips assertCurrentKeyVersion
+  // and could overwrite a freshly-rotated v(N+1) blob with vN ciphertext while the
+  // column stays N+1 — permanently undecryptable. Honest clients always send it.
+  if (encryptedBlob && keyVersion === undefined) {
+    return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+  }
 
   // keyVersion/aadVersion are ONLY written on the re-encrypt (blob) path. On the
   // metadata-only path they cannot legitimately change (the guard above rejects a

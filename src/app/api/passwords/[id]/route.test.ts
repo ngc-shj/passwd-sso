@@ -746,6 +746,69 @@ describe("PUT /api/passwords/[id]", () => {
     expect(json.error).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   });
 
+  // RT7/F1a: metadata-only PUT must strip keyVersion/aadVersion from the
+  // prisma update payload even when the caller supplies them alongside a
+  // same-value match — they are ONLY legitimate on the blob (re-encrypt) path.
+  // Reverting the `if (encryptedBlob) { ... }` guard around
+  // updateData.keyVersion/aadVersion would let this test fail (the fields
+  // would leak into `data` on the metadata-only path).
+  it("RT7/F1a: strips keyVersion and aadVersion from the update payload on metadata-only PUT", async () => {
+    // aadVersionSchema is min(1), so use an entry with aadVersion=1 and send
+    // the SAME values (no KEY_VERSION_WITHOUT_REENCRYPT rejection) alongside
+    // a metadata field.
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, aadVersion: 1 });
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      aadVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { isFavorite: true, keyVersion: 1, aadVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledTimes(1);
+    const updateArg = mockPrismaPasswordEntry.update.mock.calls[0][0];
+    expect(updateArg.data).not.toHaveProperty("keyVersion");
+    expect(updateArg.data).not.toHaveProperty("aadVersion");
+  });
+
+  // RT7/F1b: a blob-changing PUT MUST carry its keyVersion so
+  // assertCurrentKeyVersion always runs — otherwise a blob-without-keyVersion
+  // write could race a rotation and permanently brick the entry (v(N+1)
+  // column, vN ciphertext). Reverting the
+  // `if (encryptedBlob && keyVersion === undefined)` guard would let this
+  // request fall through to a 200 instead of 409.
+  it("RT7/F1b: rejects blob PUT with keyVersion omitted → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: {
+          encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
+          encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
+          // keyVersion intentionally omitted
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+    // No transaction/write should have been attempted.
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    expect(txMock.passwordEntry.update).not.toHaveBeenCalled();
+  });
+
   it("allows same aadVersion without encryptedBlob → no error", async () => {
     // ownedEntry has aadVersion=0; sending aadVersion=0 is a no-op (same value)
     // NOTE: aadVersion schema has min(1), so we simulate an entry with aadVersion=1

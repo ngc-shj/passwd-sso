@@ -142,6 +142,23 @@ describe("PUT /api/passwords/[id]/attachments/[attachmentId]/migrate", () => {
     expect(res.status).toBe(400);
   });
 
+  // RT7/F3: cekWrapAadVersion is pinned to exactly CURRENT_CEK_WRAP_AAD_VERSION
+  // (currently 1) — a floor-only check would let a bad value lie dormant
+  // until the next rotation, where applyVaultRotation's own defense-in-depth
+  // check throws and leaves the vault stuck. Reverting the
+  // `cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION` guard would let this
+  // request through to applyAttachmentMigration instead of rejecting at 400.
+  it("RT7/F3: rejects migrate with cekWrapAadVersion=2 (exceeds current format) → 400, no write", async () => {
+    const res = await PUT(
+      createRequest("PUT", "http://localhost/api/passwords/entry-1/attachments/att-1/migrate", {
+        body: { ...validMigrateBody, cekWrapAadVersion: 2 },
+      }),
+      createParams("entry-1", "att-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(mockApplyAttachmentMigration).not.toHaveBeenCalled();
+  });
+
   // Error mapping
 
   it("rejects when row is mode-2 (already migrated) → 409 LEGACY_MIGRATION_NOT_APPLICABLE", async () => {

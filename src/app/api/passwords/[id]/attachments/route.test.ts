@@ -370,6 +370,34 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(res.status).toBe(400);
   });
 
+  // RT7/F3: CURRENT_CEK_WRAP_AAD_VERSION is pinned to exactly 1 — a floor-only
+  // check would let a stale/future cekWrapAadVersion lie dormant until the
+  // next rotation, where applyVaultRotation's own defense-in-depth check
+  // throws and leaves the vault stuck. Reverting the
+  // `cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION` guard to something
+  // looser (e.g. `< CURRENT_CEK_WRAP_AAD_VERSION`) would let this request
+  // through with 201 instead of 400.
+  it("RT7/F3: rejects upload with cekWrapAadVersion=2 (exceeds current format) → 400, no write", async () => {
+    const res = await POST(
+      await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+        ...validCekFields(),
+        cekWrapAadVersion: "2",
+      }),
+      createParams("pw-1"),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(mockPrismaAttachment.create).not.toHaveBeenCalled();
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
   it("uploads with full mode-2 CEK fields → 201, row has encryptionMode: 2", async () => {
     const clientId = "550e8400-e29b-41d4-a716-446655440099";
     mockPrismaAttachment.create.mockResolvedValue({

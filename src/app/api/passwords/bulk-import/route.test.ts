@@ -159,6 +159,36 @@ describe("POST /api/passwords/bulk-import", () => {
     expect(json.failedCount).toBe(1);
   });
 
+  // RT7/F2: a stale keyVersion means the whole import is racing a vault
+  // rotation — createPersonalPasswordEntry's assertCurrentKeyVersion throws
+  // KeyVersionMismatchError, which the per-entry catch in the route MUST
+  // rethrow (not swallow into failedCount) so the entire withUserTenantRls
+  // transaction rolls back. Reverting the `if (e instanceof
+  // KeyVersionMismatchError) throw e;` rethrow (letting it fall through to
+  // `failedCount++` like any other per-entry error) would make this test
+  // fail: the response would be 201 with failedCount=1 instead of 409, and
+  // passwordEntry.create would have been called for the other entries.
+  it("RT7/F2: aborts the whole import with 409 KEY_VERSION_MISMATCH when the user's keyVersion has moved (no partial writes)", async () => {
+    // Server's current key_version is 2; the request's entries all carry
+    // keyVersion: 1 (via makeEntry) — assertCurrentKeyVersion's `FROM users`
+    // guard read must reject on the very first entry.
+    mockQueryRaw.mockResolvedValue([{ key_version: 2 }]);
+
+    const entries = [
+      makeEntry("550e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("550e8400-e29b-41d4-a716-000000000002"),
+    ];
+
+    const res = await POST(createRequest("POST", URL, { body: { entries } }));
+    const json = await res.json();
+
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("KEY_VERSION_MISMATCH");
+    // Whole import rolled back — no entry was ever persisted, not even a
+    // partial success counted via failedCount.
+    expect(mockPrismaPasswordEntry.create).not.toHaveBeenCalled();
+  });
+
   it("calls logAuditAsync with ENTRY_BULK_IMPORT action", async () => {
     const entries = [
       makeEntry("550e8400-e29b-41d4-a716-000000000001"),

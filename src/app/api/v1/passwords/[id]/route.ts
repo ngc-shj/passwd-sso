@@ -191,6 +191,12 @@ async function handlePUT(
   if ((keyVersionChanged || aadVersionChanged) && !encryptedBlob) {
     return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   }
+  // A blob write MUST carry its keyVersion so the stale-write guard always runs
+  // (mirrors the session API). Otherwise a blob-without-keyVersion PUT racing a
+  // rotation could brick the entry (v(N+1) column, vN ciphertext).
+  if (encryptedBlob && keyVersion === undefined) {
+    return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+  }
 
   // keyVersion/aadVersion are ONLY written on the re-encrypt (blob) path — see
   // session API (src/app/api/passwords/[id]/route.ts) for the full rationale.
