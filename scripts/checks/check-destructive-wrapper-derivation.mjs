@@ -59,9 +59,15 @@
  * listed in stepup-delete-exempt.txt — else ROUTE_DESTRUCTIVE_NO_STEPUP. This
  * closes the alias/namespace evasion the grep misses.
  *
+ * The route pass resolves: bare imports (`import { fn }` → `fn(`), aliases
+ * (`import { fn as g }` → `g(`), object/static aliases (`vault.method(`),
+ * one-level namespace (`ns.fn(`), and two-level namespace (`ns.obj.method(`).
+ * Default exports (named OR anonymous) are rejected at the derivation stage
+ * (NON_GREP_MATCHABLE) since a default import renames freely.
+ *
  * RESIDUAL LIMITATION (documented, not silently ignored — no occurrences in the
- * repo today, verified by grep): the route pass resolves imports one level deep.
- * It does NOT follow a RE-EXPORT chain (`export { executeVaultReset } from
+ * repo today, verified by grep): the route pass resolves imports one hop. It
+ * does NOT follow a RE-EXPORT chain (`export { executeVaultReset } from
  * "./reset"` re-exported by a barrel the route then imports from) nor an
  * INDIRECT binding (assigning the imported function to a local variable, or
  * passing it through a higher-order call). Closing these would require whole-
@@ -70,8 +76,7 @@
  * control is code review of route imports plus the barrel-free convention; if a
  * re-export chain of a destructive wrapper is ever introduced, add the barrel
  * module to the scan or register the wrapper at the barrel. The pass narrows the
- * gap from "any wrapper form / alias / namespace silently evades" to "only a
- * re-export chain or an indirect binding evades".
+ * gap to "only a re-export chain or an indirect binding evades".
  *
  * Inverse: every identifier-like alternative in deleteSignal that is NOT one
  * of the raw Prisma primitives above (i.e. executeVaultReset, deleteTeamPassword
@@ -435,11 +440,37 @@ function enclosingExportedObjectVarName(node) {
 function resolveEnclosingExportedFunction(node) {
   let current = node;
   while (current) {
-    // 1. Top-level exported function / const-arrow → `fn(` in the route.
+    // 1. Default export — checked FIRST, before the named-function branch. A
+    //    default export's route call token is ALWAYS the local import name
+    //    (`import wipeVault from "..."` -> `wipeVault(`), NEVER the declared
+    //    name, whether the default function is anonymous OR named
+    //    (`export default async function purgeEverything() {}`). So no
+    //    deleteSignal literal can match it → NOT grep-matchable. Checking this
+    //    before exportedFunctionName is essential: a NAMED default function also
+    //    satisfies exportedFunctionName, and letting that branch win first would
+    //    misclassify it as grepMatchable=true (the false-green this ordering
+    //    closes). The key keeps the declared name (for a readable
+    //    <file>#<name> report) but grepMatchable is false regardless.
+    if (
+      (Node.isFunctionDeclaration(current) ||
+        Node.isArrowFunction(current) ||
+        Node.isFunctionExpression(current)) &&
+      isDefaultExported(current)
+    ) {
+      const declName =
+        Node.isFunctionDeclaration(current) && current.getName()
+          ? current.getName()
+          : "default";
+      return { key: declName, grepMatchable: false };
+    }
+
+    // 2. Top-level (non-default) exported function / const-arrow → `fn(` in the
+    //    route (grep-matchable, modulo the shared alias-import limitation the
+    //    route pass compensates for).
     const fnName = exportedFunctionName(current);
     if (fnName !== undefined) return { key: fnName, grepMatchable: true };
 
-    // 2. Class or object method reachable through an exported class/object.
+    // 3. Class or object method reachable through an exported class/object.
     const mName = methodName(current);
     if (mName !== undefined) {
       const cls = enclosingExportedClass(current);
@@ -462,17 +493,6 @@ function resolveEnclosingExportedFunction(node) {
       // A method not reachable via an exported class/object is not
       // route-callable on its own — keep walking (it may sit inside an
       // exported outer function).
-    }
-
-    // 3. Anonymous default export: route imports it under ANY name, so no
-    //    deleteSignal literal can match the call token → NOT grep-matchable.
-    if (
-      (Node.isFunctionDeclaration(current) ||
-        Node.isArrowFunction(current) ||
-        Node.isFunctionExpression(current)) &&
-      isDefaultExported(current)
-    ) {
-      return { key: "default", grepMatchable: false };
     }
 
     current = current.getParent();
@@ -578,12 +598,14 @@ for (const { abs, rel } of sourceFiles) {
       continue;
     }
 
-    // Record the route-importable binding for the AST route pass: the first
-    // segment of the key is the exported symbol a route imports (`executeVault-
-    // Reset`, or `vaultService` for `vaultService.purge`). This lets the route
-    // pass resolve an aliased import to the wrapper the grep would miss.
-    const exportBinding = fnName.split(".")[0];
-    recordDestructiveExport(rel, exportBinding);
+    // Record the route-importable export for the AST route pass. `fnName` is
+    // either a bare export (`executeVaultReset`) or a qualified `export.member`
+    // (`vaultService.purge` / `VaultService.purgeAll` static). Store BOTH the
+    // full key and its first segment (the imported symbol), so the route pass
+    // can match a bare call, a `binding.method(`, and a two-level
+    // `namespace.binding.method(`. This lets the pass resolve aliased/namespaced
+    // imports of the wrapper the grep would miss.
+    recordDestructiveExport(rel, fnName);
 
     const matchesDeleteSignalByName = DELETE_SIGNAL_RE.test(`${fnName}(`);
     if (matchesDeleteSignalByName) continue; // declared — routes calling it classify correctly
@@ -610,7 +632,7 @@ if (undeclaredWrappers.length > 0) {
 if (nonGrepMatchableWrappers.length > 0) {
   failed = true;
   console.error(
-    "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: these wrap a raw destructive-delete primitive in a form whose route CALL TOKEN a deleteSignal grep cannot match — a class INSTANCE method (route calls `<var>.method(`, not `ClassName.method(`) or an anonymous default export (route imports it under any name). Registering their derived key in deleteSignal would be a false-green (the route-side classifier is a flat-text grep over route.ts):",
+    "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: these wrap a raw destructive-delete primitive in a form whose route CALL TOKEN a deleteSignal grep cannot match — a class INSTANCE method (route calls `<var>.method(`, not `ClassName.method(`) or a default export, named OR anonymous (route imports it under any name via `import <anyName> from ...`). Registering their derived key in deleteSignal would be a false-green (the route-side classifier is a flat-text grep over route.ts):",
   );
   for (const w of nonGrepMatchableWrappers) {
     console.error(`  NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: ${w.file}#${w.fn}`);
@@ -738,27 +760,55 @@ for (const { abs, rel } of getRouteFiles(API_DIR, PATH_ROOT)) {
   }
 
   // Build local-binding -> wrapper description from this route's imports.
-  // localWrapperBindings: Map<localName, "moduleRel#exportName">  (named/aliased)
-  // namespaceBindings:    Map<localNs, { moduleRel, exportSet }>  (import * as ns)
-  //   The real repo uses `import * as teamPasswordService from "..."` then
-  //   `teamPasswordService.deleteTeamPassword(` — resolve it so the pass does
-  //   not have a false-negative on the exact shape production uses.
-  const localWrapperBindings = new Map();
+  // The module's destructive export set holds either a bare export name
+  // (`executeVaultReset`) or a qualified `export.member` (`vaultService.purge`,
+  // `VaultService.purgeAll` static). We index it two ways per module:
+  //   bareExports:  Set of exports called directly     -> `binding(`
+  //   memberExports: Map<exportBinding, Set<method>>   -> `binding.method(`
+  // and then resolve the route's imports through them.
+  //
+  //   localWrapperCalls: Map<localName, "moduleRel#exportKey">  (bare fn, named/aliased)
+  //   localMemberBindings: Map<localName, {moduleRel, methods:Set}> (object/class import, named/aliased)
+  //   namespaceBindings: Map<localNs, {moduleRel, bareExports, memberExports}> (import * as ns)
+  const localWrapperCalls = new Map();
+  const localMemberBindings = new Map();
   const namespaceBindings = new Map();
   for (const imp of sf.getImportDeclarations()) {
     const moduleRel = resolveModuleToRel(imp.getModuleSpecifierValue());
     if (!moduleRel) continue;
     const exportSet = destructiveExportsByModule.get(moduleRel);
     if (!exportSet) continue;
+
+    // Split the module's export keys into bare vs qualified(member).
+    const bareExports = new Set();
+    const memberExports = new Map(); // exportBinding -> Set<method>
+    for (const k of exportSet) {
+      const dot = k.indexOf(".");
+      if (dot === -1) {
+        bareExports.add(k);
+      } else {
+        const bind = k.slice(0, dot);
+        const meth = k.slice(dot + 1);
+        if (!memberExports.has(bind)) memberExports.set(bind, new Set());
+        memberExports.get(bind).add(meth);
+      }
+    }
+
     const nsImport = imp.getNamespaceImport();
     if (nsImport) {
-      namespaceBindings.set(nsImport.getText(), { moduleRel, exportSet });
+      namespaceBindings.set(nsImport.getText(), { moduleRel, bareExports, memberExports });
     }
     for (const named of imp.getNamedImports()) {
       const exportName = named.getName(); // the exported symbol
       const localName = named.getAliasNode()?.getText() ?? exportName; // alias or same
-      if (exportSet.has(exportName)) {
-        localWrapperBindings.set(localName, `${moduleRel}#${exportName}`);
+      if (bareExports.has(exportName)) {
+        localWrapperCalls.set(localName, `${moduleRel}#${exportName}`);
+      }
+      if (memberExports.has(exportName)) {
+        localMemberBindings.set(localName, {
+          moduleRel,
+          methods: memberExports.get(exportName),
+        });
       }
     }
   }
@@ -768,16 +818,22 @@ for (const { abs, rel } of getRouteFiles(API_DIR, PATH_ROOT)) {
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
 
-    // (a) Direct raw primitive: `tx.passwordEntry.deleteMany(` etc. — the grep
-    //     already catches these, but detecting them here keeps the pass complete.
     if (Node.isPropertyAccessExpression(callee)) {
-      const m = callee.getName();
+      const m = callee.getName(); // final method: `.deleteMany` / `.purge` / ...
       const recv = callee.getExpression();
-      const recvName = Node.isPropertyAccessExpression(recv)
+      // The immediate receiver name, and (for two-level) the outer namespace.
+      const recvIsProp = Node.isPropertyAccessExpression(recv);
+      const recvName = recvIsProp
         ? recv.getName()
         : Node.isIdentifier(recv)
           ? recv.getText()
           : undefined;
+      const outerNs =
+        recvIsProp && Node.isIdentifier(recv.getExpression())
+          ? recv.getExpression().getText()
+          : undefined;
+
+      // (a) Direct raw primitive: `tx.passwordEntry.deleteMany(` etc.
       if (
         recvName !== undefined &&
         RAW_PRIMITIVES.some((p) => p.receiver === recvName && p.methods.includes(m))
@@ -785,20 +841,31 @@ for (const { abs, rel } of getRouteFiles(API_DIR, PATH_ROOT)) {
         reachedVia = `raw ${recvName}.${m}`;
         break;
       }
-      // (c) Aliased object wrapper: `reset.purge(` where `reset` is an aliased
-      //     import of an exported object wrapper. localWrapperBindings holds the
-      //     object binding; any method call on it is destructive-reaching.
-      if (recvName !== undefined && localWrapperBindings.has(recvName)) {
-        reachedVia = `alias ${recvName}.${m} -> ${localWrapperBindings.get(recvName)}`;
-        break;
+      // (c) Aliased object wrapper: `vault.purge(` where `vault` is a
+      //     (possibly aliased) import of an exported OBJECT/STATIC-CLASS wrapper;
+      //     match the specific destructive method, not any method.
+      if (recvName !== undefined && localMemberBindings.has(recvName)) {
+        const b = localMemberBindings.get(recvName);
+        if (b.methods.has(m)) {
+          reachedVia = `alias ${recvName}.${m}() -> ${b.moduleRel}#${recvName}.${m}`;
+          break;
+        }
       }
-      // (d) Namespace import: `ns.deleteTeamPassword(` where `ns` is
-      //     `import * as ns from "<module>"` and the called member is a
-      //     destructive export of that module.
-      if (recvName !== undefined && namespaceBindings.has(recvName)) {
-        const { moduleRel: nsModule, exportSet: nsExports } = namespaceBindings.get(recvName);
-        if (nsExports.has(m)) {
-          reachedVia = `namespace ${recvName}.${m}() -> ${nsModule}#${m}`;
+      // (d) Namespace, one level: `ns.deleteTeamPassword(` (bare export member).
+      if (recvName !== undefined && !recvIsProp && namespaceBindings.has(recvName)) {
+        const ns = namespaceBindings.get(recvName);
+        if (ns.bareExports.has(m)) {
+          reachedVia = `namespace ${recvName}.${m}() -> ${ns.moduleRel}#${m}`;
+          break;
+        }
+      }
+      // (e) Namespace, two levels: `ns.vaultService.purge(` (object/static member
+      //     of a namespaced module). Resolve outer ns -> middle export -> method.
+      if (outerNs !== undefined && namespaceBindings.has(outerNs)) {
+        const ns = namespaceBindings.get(outerNs);
+        const middle = recvName; // the object/class export name
+        if (middle !== undefined && ns.memberExports.get(middle)?.has(m)) {
+          reachedVia = `namespace ${outerNs}.${middle}.${m}() -> ${ns.moduleRel}#${middle}.${m}`;
           break;
         }
       }
@@ -806,8 +873,8 @@ for (const { abs, rel } of getRouteFiles(API_DIR, PATH_ROOT)) {
 
     // (b) Direct/aliased top-level wrapper call: `reset(` where `reset` is a
     //     (possibly aliased) import of a destructive top-level function wrapper.
-    if (Node.isIdentifier(callee) && localWrapperBindings.has(callee.getText())) {
-      reachedVia = `alias ${callee.getText()}() -> ${localWrapperBindings.get(callee.getText())}`;
+    if (Node.isIdentifier(callee) && localWrapperCalls.has(callee.getText())) {
+      reachedVia = `alias ${callee.getText()}() -> ${localWrapperCalls.get(callee.getText())}`;
       break;
     }
   }

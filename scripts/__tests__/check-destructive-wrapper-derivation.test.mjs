@@ -424,6 +424,52 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     );
   });
 
+  it("flags a NAMED default export as NON_GREP_MATCHABLE (default import renames freely, same as anonymous)", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/purge-named-default.ts",
+      [
+        "export default async function purgeEverything(userId) {",
+        "  await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: src/lib/purge-named-default.ts#purgeEverything",
+    );
+  });
+
+  it("false-green guard: registering a NAMED default export's declared name in deleteSignal does NOT satisfy it", () => {
+    // The exact bug external review round 3 flagged: `export default async
+    // function purgeEverything()` was misclassified grepMatchable=true because
+    // the named-function branch ran before the default-export branch, so adding
+    // `purgeEverything\(` to deleteSignal false-greened it — but the route does
+    // `import wipeVault from ...; wipeVault(`, which the grep never matches.
+    seedWrapperStubs();
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|purgeEverything\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/lib/purge-named-default.ts",
+      [
+        "export default async function purgeEverything(userId) {",
+        "  await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "NON_GREP_MATCHABLE_DESTRUCTIVE_WRAPPER: src/lib/purge-named-default.ts#purgeEverything",
+    );
+  });
+
   it("false-green guard: registering `default(` in deleteSignal does NOT satisfy an anonymous default wrapper", () => {
     seedWrapperStubs();
     writeFileSync(
@@ -625,6 +671,43 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     expect(exitCode).toBe(1);
     expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/ns-danger/route.ts");
     expect(stderr).toContain("namespace svc.wipeIt()");
+  });
+
+  it("a TWO-LEVEL namespace member call (ns.obj.method) reaching a static/object wrapper without step-up is caught", () => {
+    // ns.vaultService.purgeUserEntries() — the outer namespace, the object
+    // export, and the method must all resolve. Defense-hardening for a form the
+    // one-level namespace pass would otherwise miss.
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/vault-ns.ts",
+      [
+        "export const vaultService = {",
+        "  async purgeUserEntries(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|vaultService\\.purgeUserEntries\\(` }),
+      "utf8",
+    );
+    writeSource(
+      "src/app/api/ns2/route.ts",
+      [
+        "import * as ns from '@/lib/vault-ns';",
+        "export async function POST() {",
+        "  await ns.vaultService.purgeUserEntries('u1');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ROUTE_DESTRUCTIVE_NO_STEPUP: src/app/api/ns2/route.ts");
+    expect(stderr).toContain("namespace ns.vaultService.purgeUserEntries()");
   });
 
   it("an ALIASED object-wrapper method call without step-up is caught", () => {
