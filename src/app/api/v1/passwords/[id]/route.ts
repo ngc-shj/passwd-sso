@@ -7,6 +7,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { validateV1Auth } from "@/lib/auth/session/v1-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { assertCurrentKeyVersion, KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
@@ -190,9 +191,19 @@ async function handlePUT(
   if ((keyVersionChanged || aadVersionChanged) && !encryptedBlob) {
     return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   }
+  // A blob write MUST carry its keyVersion so the stale-write guard always runs
+  // (mirrors the session API). Otherwise a blob-without-keyVersion PUT racing a
+  // rotation could brick the entry (v(N+1) column, vN ciphertext).
+  if (encryptedBlob && keyVersion === undefined) {
+    return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+  }
 
-  if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
-  if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
+  // keyVersion/aadVersion are ONLY written on the re-encrypt (blob) path — see
+  // session API (src/app/api/passwords/[id]/route.ts) for the full rationale.
+  if (encryptedBlob) {
+    if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
+    if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
+  }
   if (folderId !== undefined) updateData.folderId = folderId;
   if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
@@ -218,45 +229,59 @@ async function handlePUT(
   // When the blob changes, acquire a PK row lock first: concurrent PUTs serialise
   // here, so each writer snapshots the immediately-preceding committed blob
   // (not the stale outside-tx `existing` read).
-  const updated = await withTenantRls(prisma, tenantId, async (tx) => {
-    if (encryptedBlob) {
-      const [cur] = await tx.$queryRaw<PersonalBlobRow[]>`
-        SELECT encrypted_blob, blob_iv, blob_auth_tag, key_version, aad_version
-        FROM password_entries
-        WHERE id = ${id}::uuid
-        FOR UPDATE
-      `;
-      // Entry may be concurrently deleted between the early read and this lock.
-      if (!cur) return null;
-      await tx.passwordEntryHistory.create({
-        data: {
-          entryId: id,
-          tenantId: existing.tenantId,
-          encryptedBlob: cur.encrypted_blob,
-          blobIv: cur.blob_iv,
-          blobAuthTag: cur.blob_auth_tag,
-          keyVersion: cur.key_version,
-          aadVersion: cur.aad_version,
-        },
-      });
-      // Trim to max 20 history entries (stable sort: changedAt asc, id asc)
-      const all = await tx.passwordEntryHistory.findMany({
-        where: { entryId: id },
-        orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-        select: { id: true },
-      });
-      if (all.length > 20) {
-        await tx.passwordEntryHistory.deleteMany({
-          where: { entryId: id, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+  let updated;
+  try {
+    updated = await withTenantRls(prisma, tenantId, async (tx) => {
+      if (encryptedBlob) {
+        // Lock order: users FOR SHARE first, then the entry FOR UPDATE. Rejects
+        // a stale keyVersion (rotation-vs-write race) and blocks a concurrent
+        // rotation from committing between this read and the entry write.
+        if (keyVersion !== undefined) {
+          await assertCurrentKeyVersion(tx, userId, keyVersion);
+        }
+        const [cur] = await tx.$queryRaw<PersonalBlobRow[]>`
+          SELECT encrypted_blob, blob_iv, blob_auth_tag, key_version, aad_version
+          FROM password_entries
+          WHERE id = ${id}::uuid
+          FOR UPDATE
+        `;
+        // Entry may be concurrently deleted between the early read and this lock.
+        if (!cur) return null;
+        await tx.passwordEntryHistory.create({
+          data: {
+            entryId: id,
+            tenantId: existing.tenantId,
+            encryptedBlob: cur.encrypted_blob,
+            blobIv: cur.blob_iv,
+            blobAuthTag: cur.blob_auth_tag,
+            keyVersion: cur.key_version,
+            aadVersion: cur.aad_version,
+          },
         });
+        // Trim to max 20 history entries (stable sort: changedAt asc, id asc)
+        const all = await tx.passwordEntryHistory.findMany({
+          where: { entryId: id },
+          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+          select: { id: true },
+        });
+        if (all.length > 20) {
+          await tx.passwordEntryHistory.deleteMany({
+            where: { entryId: id, id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+          });
+        }
       }
-    }
-    return tx.passwordEntry.update({
-      where: { id, userId },
-      data: updateData,
-      include: { tags: { select: { id: true } } },
+      return tx.passwordEntry.update({
+        where: { id, userId },
+        data: updateData,
+        include: { tags: { select: { id: true } } },
+      });
     });
-  });
+  } catch (e) {
+    if (e instanceof KeyVersionMismatchError) {
+      return errorResponse(API_ERROR.KEY_VERSION_MISMATCH);
+    }
+    throw e;
+  }
 
   // Null sentinel: the blob-tx path returns null when the entry was concurrently
   // deleted between the early findUnique and the FOR UPDATE lock.

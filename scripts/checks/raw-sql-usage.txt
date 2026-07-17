@@ -67,6 +67,7 @@ src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox de
 src/app/api/maintenance/audit-outbox-purge-failed/route.ts # operator-gated purge of FAILED outbox rows, tagged-template $queryRaw
 src/app/api/maintenance/purge-audit-logs/route.ts # operator-gated system-wide audit log purge via audit_log_purge() definer fn
 src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
+src/app/api/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) for atomic blob snapshot read before history restore
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
@@ -80,6 +81,9 @@ src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
+src/lib/vault/key-version-guard.ts # row lock (FOR SHARE) reading users.key_version for the personal-vault stale-write guard
+src/lib/vault/rotate-key-server.ts # row lock (FOR UPDATE) on users for the pre-write rotation tuple-CAS (key_version/vault_setup_at/account_salt)
+src/lib/vault/vault-reset.ts # row lock (FOR UPDATE) on users, acquired first for lock-order consistency with rotation before entry deletes
 src/workers/audit-anchor-publisher.ts # bypass_rls GUC set + anchor row lock/read for chain anchor publishing
 src/workers/audit-outbox-worker.ts # outbox claim/deliver/reap/purge queries; static SQL + $N params, one code-controlled table-name ident (webhook health atomic increment) # ident-markers=1
 src/workers/retention-gc-worker/sweep.ts # batch-bounded DELETE/SELECT sweeps over registry-declared tables/columns # ident-markers=4

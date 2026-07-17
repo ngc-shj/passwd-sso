@@ -13,9 +13,27 @@
 #   uses: actions/checkout@main
 set -euo pipefail
 
-cd "$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || (cd "$(dirname "$0")/../.." && pwd))"
 
-WORKFLOWS_DIR=".github/workflows"
+# WORKFLOWS_DIR is overridable so the self-test
+# (scripts/__tests__/check-actions-sha-pinned.test.mjs) can point the guard at
+# a fixture tree. Production CI uses the default. Mirrors the STEPUP_GUARD_*
+# scan-root idiom (check-permanent-delete-stepup.sh).
+WORKFLOWS_DIR="${ACTIONS_SHA_PINNED_WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
+
+# CI-auditable: print effective scan path on one line.
+echo "check-actions-sha-pinned: WORKFLOWS_DIR=$WORKFLOWS_DIR"
+
+# sec-F6: env-pollution guard. Any override + CI=true requires an explicit
+# fixture-mode acknowledgement, so a stray `export` leaking into a real CI
+# run cannot silently point the gate at an empty fixture dir and green it.
+if [ "${CI:-}" = "true" ] && [ -n "${ACTIONS_SHA_PINNED_WORKFLOWS_DIR:-}" ]; then
+  if [ "${ACTIONS_SHA_PINNED_FIXTURE_MODE:-}" != "1" ]; then
+    echo "ENV_POLLUTION_GUARD: ACTIONS_SHA_PINNED_WORKFLOWS_DIR override set under CI=true without ACTIONS_SHA_PINNED_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
+    exit 1
+  fi
+fi
+
 if [ ! -d "$WORKFLOWS_DIR" ]; then
   exit 0
 fi

@@ -16,6 +16,7 @@ import {
   CEK_WRAP_BASE64_MAX,
 } from "@/lib/validations/common";
 import { readJsonWithCap } from "@/lib/http/parse-body";
+import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import {
   applyAttachmentMigration,
   LegacyAttachmentInconsistentVersionError,
@@ -107,7 +108,9 @@ async function handlePUT(
   if (!Number.isInteger(cekKeyVersion) || cekKeyVersion < 1) {
     return validationError();
   }
-  if (!Number.isInteger(cekWrapAadVersion) || cekWrapAadVersion < 1) {
+  // Pinned to exactly the current format — see upload route for rationale
+  // (floor-only would let a bad value lie dormant until the next rotation).
+  if (!Number.isInteger(cekWrapAadVersion) || cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION) {
     return validationError();
   }
   // Cap the base64-encoded blobs so a malformed client cannot inflate the

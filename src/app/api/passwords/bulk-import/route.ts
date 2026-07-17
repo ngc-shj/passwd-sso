@@ -6,7 +6,9 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { createPersonalPasswordEntry } from "@/lib/services/personal-password-service";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { rateLimited, unauthorized, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 
 import { parseBody } from "@/lib/http/parse-body";
 import { bulkImportSchema } from "@/lib/validations";
@@ -43,17 +45,30 @@ async function handlePOST(req: NextRequest) {
   const createdIds: string[] = [];
   let failedCount = 0;
 
-  await withUserTenantRls(userId, async (tenantId) => {
-    for (const entryData of entries) {
-      try {
-        const res = await createPersonalPasswordEntry(prisma, userId, tenantId, entryData);
-        if (res.ok) createdIds.push(res.entry.id);
-        else failedCount++;
-      } catch {
-        failedCount++;
+  try {
+    await withUserTenantRls(userId, async (tenantId) => {
+      for (const entryData of entries) {
+        try {
+          const res = await createPersonalPasswordEntry(prisma, userId, tenantId, entryData);
+          if (res.ok) createdIds.push(res.entry.id);
+          else failedCount++;
+        } catch (e) {
+          // A stale keyVersion means the whole import is racing a rotation —
+          // rethrow out of the tx so it fully rolls back (no partial
+          // undecryptable rows) instead of being counted as a per-entry
+          // failure. Single-tx + first-guard FOR SHARE means mid-import
+          // rotation cannot interleave, so stale-at-start is the only case.
+          if (e instanceof KeyVersionMismatchError) throw e;
+          failedCount++;
+        }
       }
+    });
+  } catch (e) {
+    if (e instanceof KeyVersionMismatchError) {
+      return errorResponse(API_ERROR.KEY_VERSION_MISMATCH);
     }
-  });
+    throw e;
+  }
 
   const requestMeta = personalAuditBase(req, userId);
 

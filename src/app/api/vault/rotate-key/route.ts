@@ -39,6 +39,8 @@ import {
   LegacyAttachmentInconsistentVersionError,
   Mode2InvariantViolationError,
   RotationPostConditionError,
+  RotationCasConflictError,
+  AttachmentCekWrapAadVersionMismatchError,
 } from "@/lib/vault/rotate-key-server";
 
 export const runtime = "nodejs";
@@ -144,13 +146,17 @@ async function handlePOST(request: NextRequest) {
         masterPasswordServerHash: true,
         masterPasswordServerSalt: true,
         keyVersion: true,
+        accountSalt: true,
       },
     }),
   );
 
-  if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
+  if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt || !user.accountSalt) {
     return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
+  // Snapshot narrowed (non-null) values for use inside the transaction
+  // closure below — TS does not retain the guard's narrowing through it.
+  const { vaultSetupAt, accountSalt } = user;
 
   // Verify current passphrase
   const computedHash = createHash("sha256")
@@ -189,6 +195,8 @@ async function handlePOST(request: NextRequest) {
           newServerHash,
           newServerSalt,
           payload,
+          vaultSetupAt,
+          accountSalt,
         );
       }, { timeout: VAULT_ROTATE_TX_TIMEOUT_MS }),
     );
@@ -202,6 +210,9 @@ async function handlePOST(request: NextRequest) {
     if (e instanceof LegacyAttachmentInconsistentVersionError) {
       return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
     }
+    if (e instanceof AttachmentCekWrapAadVersionMismatchError) {
+      return errorResponse(API_ERROR.ATTACHMENT_INCONSISTENT_VERSION);
+    }
     if (e instanceof Mode2InvariantViolationError) {
       // Server-side data corruption (mode-2 row with NULL cek_*). Surface
       // as 500 to match the post-condition error pattern; rotation must
@@ -211,6 +222,12 @@ async function handlePOST(request: NextRequest) {
     }
     if (e instanceof RotationPostConditionError) {
       return errorResponse(API_ERROR.INTERNAL_ERROR);
+    }
+    if (e instanceof RotationCasConflictError) {
+      // Vault wrapping state moved since the pre-tx snapshot (concurrent
+      // rotation, reset, change-passphrase, or recover) — same client-facing
+      // shape as a stale-keyVersion write.
+      return errorResponse(API_ERROR.KEY_VERSION_MISMATCH);
     }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
       return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH);

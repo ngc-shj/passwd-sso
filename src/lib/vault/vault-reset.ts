@@ -51,6 +51,12 @@ export async function executeVaultReset(
 
   // Single transaction: delete all vault data (callback form required for bulkTransition — S4).
   const attachmentRefs = await withBypassRls(prisma, async (tx) => {
+    // Lock order: users row FIRST, before any password_entries row lock —
+    // mirrors the invariant in rotate-key-server.ts. Without this, a guarded
+    // write holding the users FOR SHARE while waiting on an entry row here
+    // (entries locked first, users updated last) would form a deadlock cycle.
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${targetUserId}::uuid FOR UPDATE`;
+
     // Attachments: rows are bytea in DB, but external blob backends store the
     // ciphertext out-of-band — capture refs before delete so they aren't
     // orphaned, then purge after the transaction commits.

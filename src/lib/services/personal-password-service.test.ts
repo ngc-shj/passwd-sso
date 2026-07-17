@@ -2,17 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { z } from "zod";
 import type { createE2EPasswordSchema } from "@/lib/validations";
 import { createPersonalPasswordEntry } from "./personal-password-service";
+import { KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 
 type CreateInput = z.infer<typeof createE2EPasswordSchema>;
 
 const mockFolderFindFirst = vi.fn();
 const mockTagCount = vi.fn();
 const mockPasswordEntryCreate = vi.fn();
+// assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE` —
+// default matches baseInput()'s keyVersion (1) so the guard passes.
+const mockQueryRaw = vi.fn();
 
 const db = {
   folder: { findFirst: mockFolderFindFirst },
   tag: { count: mockTagCount },
   passwordEntry: { create: mockPasswordEntryCreate },
+  $queryRaw: mockQueryRaw,
 } as never;
 
 const USER_ID = "user-1";
@@ -34,6 +39,8 @@ beforeEach(() => {
   mockTagCount.mockReset();
   mockPasswordEntryCreate.mockReset();
   mockPasswordEntryCreate.mockResolvedValue({ id: "entry-1", tags: [] });
+  mockQueryRaw.mockReset();
+  mockQueryRaw.mockResolvedValue([{ key_version: 1 }]);
 });
 
 describe("createPersonalPasswordEntry", () => {
@@ -151,5 +158,15 @@ describe("createPersonalPasswordEntry", () => {
     );
 
     expect(result).toEqual({ ok: false, reason: "TAGS_NOT_OWNED" });
+  });
+
+  it("C5: throws KeyVersionMismatchError and never creates the row when keyVersion is stale", async () => {
+    mockQueryRaw.mockResolvedValue([{ key_version: 2 }]); // current is 2, input carries 1
+
+    await expect(
+      createPersonalPasswordEntry(db, USER_ID, TENANT_ID, baseInput({ keyVersion: 1 })),
+    ).rejects.toThrow(KeyVersionMismatchError);
+
+    expect(mockPasswordEntryCreate).not.toHaveBeenCalled();
   });
 });

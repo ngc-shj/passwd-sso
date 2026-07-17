@@ -278,8 +278,19 @@ describe("PUT /api/passwords/[id]", () => {
     aad_version: 3,
   };
 
+  // Discriminate by SQL text: assertCurrentKeyVersion's `FROM users` guard
+  // read must return a DIFFERENT row than the entry `FOR UPDATE` snapshot
+  // read — a single blanket mock would vacuously satisfy both (test-F4).
+  const defaultQueryRawImpl = (tpl: TemplateStringsArray) => {
+    const sql = tpl.join("?");
+    if (/FROM users/i.test(sql)) {
+      return Promise.resolve([{ key_version: 1 }]);
+    }
+    return Promise.resolve([curRow]);
+  };
+
   const txMock = {
-    $queryRaw: vi.fn().mockResolvedValue([curRow]),
+    $queryRaw: vi.fn().mockImplementation(defaultQueryRawImpl),
     passwordEntryHistory: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
@@ -298,7 +309,7 @@ describe("PUT /api/passwords/[id]", () => {
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
     mockPrismaTag.count.mockResolvedValue(1);
     mockAuditCreate.mockResolvedValue({});
-    txMock.$queryRaw.mockResolvedValue([curRow]);
+    txMock.$queryRaw.mockImplementation(defaultQueryRawImpl);
     txMock.passwordEntryHistory.create.mockResolvedValue({});
     txMock.passwordEntryHistory.findMany.mockResolvedValue([]);
     txMock.passwordEntryHistory.deleteMany.mockResolvedValue({ count: 0 });
@@ -735,6 +746,69 @@ describe("PUT /api/passwords/[id]", () => {
     expect(json.error).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   });
 
+  // RT7/F1a: metadata-only PUT must strip keyVersion/aadVersion from the
+  // prisma update payload even when the caller supplies them alongside a
+  // same-value match — they are ONLY legitimate on the blob (re-encrypt) path.
+  // Reverting the `if (encryptedBlob) { ... }` guard around
+  // updateData.keyVersion/aadVersion would let this test fail (the fields
+  // would leak into `data` on the metadata-only path).
+  it("RT7/F1a: strips keyVersion and aadVersion from the update payload on metadata-only PUT", async () => {
+    // aadVersionSchema is min(1), so use an entry with aadVersion=1 and send
+    // the SAME values (no KEY_VERSION_WITHOUT_REENCRYPT rejection) alongside
+    // a metadata field.
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ ...ownedEntry, aadVersion: 1 });
+    mockPrismaPasswordEntry.update.mockResolvedValue({
+      id: PW_ID,
+      encryptedOverview: "overview-cipher",
+      overviewIv: "overview-iv",
+      overviewAuthTag: "overview-tag",
+      keyVersion: 1,
+      aadVersion: 1,
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: { isFavorite: true, keyVersion: 1, aadVersion: 1 },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaPasswordEntry.update).toHaveBeenCalledTimes(1);
+    const updateArg = mockPrismaPasswordEntry.update.mock.calls[0][0];
+    expect(updateArg.data).not.toHaveProperty("keyVersion");
+    expect(updateArg.data).not.toHaveProperty("aadVersion");
+  });
+
+  // RT7/F1b: a blob-changing PUT MUST carry its keyVersion so
+  // assertCurrentKeyVersion always runs — otherwise a blob-without-keyVersion
+  // write could race a rotation and permanently brick the entry (v(N+1)
+  // column, vN ciphertext). Reverting the
+  // `if (encryptedBlob && keyVersion === undefined)` guard would let this
+  // request fall through to a 200 instead of 409.
+  it("RT7/F1b: rejects blob PUT with keyVersion omitted → 409 KEY_VERSION_WITHOUT_REENCRYPT", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
+
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, {
+        body: {
+          encryptedBlob: { ciphertext: "new-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
+          encryptedOverview: { ciphertext: "new-over", iv: "c".repeat(24), authTag: "d".repeat(32) },
+          // keyVersion intentionally omitted
+        },
+      }),
+      createParams({ id: PW_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+    // No transaction/write should have been attempted.
+    expect(mockPrismaTransaction).not.toHaveBeenCalled();
+    expect(txMock.passwordEntry.update).not.toHaveBeenCalled();
+  });
+
   it("allows same aadVersion without encryptedBlob → no error", async () => {
     // ownedEntry has aadVersion=0; sending aadVersion=0 is a no-op (same value)
     // NOTE: aadVersion schema has min(1), so we simulate an entry with aadVersion=1
@@ -764,8 +838,13 @@ describe("PUT /api/passwords/[id]", () => {
   it("C1: $queryRaw is called before History.create on blob-changing PUT", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     const callOrder: string[] = [];
-    txMock.$queryRaw.mockImplementation(() => {
-      callOrder.push("$queryRaw");
+    txMock.$queryRaw.mockImplementation((tpl: TemplateStringsArray) => {
+      const sql = tpl.join("?");
+      if (/FROM users/i.test(sql)) {
+        callOrder.push("$queryRaw:users");
+        return Promise.resolve([{ key_version: 1 }]);
+      }
+      callOrder.push("$queryRaw:entries");
       return Promise.resolve([curRow]);
     });
     txMock.passwordEntryHistory.create.mockImplementation(() => {
@@ -778,7 +857,9 @@ describe("PUT /api/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    expect(callOrder.indexOf("$queryRaw")).toBeLessThan(callOrder.indexOf("historyCreate"));
+    // Both queryRaw reads (user guard, then entry FOR UPDATE) precede History.create.
+    expect(callOrder.indexOf("$queryRaw:users")).toBeLessThan(callOrder.indexOf("$queryRaw:entries"));
+    expect(callOrder.indexOf("$queryRaw:entries")).toBeLessThan(callOrder.indexOf("historyCreate"));
   });
 
   it("C1: FOR UPDATE SQL contains table name and required crypto columns", async () => {
@@ -789,10 +870,16 @@ describe("PUT /api/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    expect(txMock.$queryRaw).toHaveBeenCalled();
-    // Extract the TemplateStringsArray (first arg) and join its static parts
-    const [tpl] = txMock.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-    const sql = tpl.join("?");
+    expect(txMock.$queryRaw).toHaveBeenCalledTimes(2);
+    // Two distinct queryRaw reads now fire: assertCurrentKeyVersion's `FROM
+    // users` guard, then the entry FOR UPDATE snapshot — find the latter by
+    // SQL text rather than assuming call index.
+    const entryCall = txMock.$queryRaw.mock.calls.find(([tpl]) => {
+      const sqlText = (tpl as TemplateStringsArray).join("?");
+      return /FROM password_entries/i.test(sqlText);
+    }) as [TemplateStringsArray, ...unknown[]] | undefined;
+    expect(entryCall).toBeDefined();
+    const sql = entryCall![0].join("?");
     expect(sql).toMatch(/FOR UPDATE/i);
     expect(sql).toMatch(/password_entries/i);
     expect(sql).toMatch(/encrypted_blob/i);
@@ -827,7 +914,16 @@ describe("PUT /api/passwords/[id]", () => {
   // F1: race — entry deleted between early read and FOR UPDATE lock
   it("F1: returns 404 when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
-    txMock.$queryRaw.mockResolvedValue([]); // row gone by the time the lock fires
+    // Only the entry FOR UPDATE read returns empty (row gone by the time the
+    // lock fires) — the users guard read must still resolve normally so this
+    // test isolates the entry-delete race, not a keyVersion mismatch.
+    txMock.$queryRaw.mockImplementation((tpl: TemplateStringsArray) => {
+      const sql = tpl.join("?");
+      if (/FROM users/i.test(sql)) {
+        return Promise.resolve([{ key_version: 1 }]);
+      }
+      return Promise.resolve([]);
+    });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),

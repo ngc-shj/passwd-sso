@@ -9,7 +9,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
-import { randomUUID } from "node:crypto";
+import { randomUUID, randomBytes } from "node:crypto";
 
 // ─── Role connection strings ────────────────────────────────────
 
@@ -292,6 +292,60 @@ export class Deferred<T = void> {
       this.reject = rej;
     });
   }
+}
+
+// ─── Vault-user seed helper ──────────────────────────────────────
+
+/**
+ * Seed a minimal vault-enabled user (sets encrypted_secret_key, key_version,
+ * vault_setup_at, account_salt, etc.) directly via the superuser pool so
+ * tests do not need a real passphrase-setup flow.
+ *
+ * vault_setup_at + account_salt are read by the rotation tuple-CAS
+ * (applyVaultRotation's pre-write FOR UPDATE check), so both must be set
+ * here and returned for callers to pass as the CAS snapshot.
+ */
+export async function seedVaultUser(
+  ctx: TestContext,
+  tenantId: string,
+): Promise<{ userId: string; keyVersion: number; vaultSetupAt: Date; accountSalt: string }> {
+  const userId = await ctx.createUser(tenantId);
+  const keyVersion = 1;
+  const accountSalt = randomBytes(16).toString("hex");
+  const vaultSetupAt = new Date();
+
+  await ctx.su.prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    await tx.$executeRawUnsafe(
+      `UPDATE users SET
+         encrypted_secret_key = $2,
+         secret_key_iv = $3,
+         secret_key_auth_tag = $4,
+         account_salt = $5,
+         master_password_server_hash = $6,
+         master_password_server_salt = $7,
+         key_version = $8,
+         encrypted_ecdh_private_key = $9,
+         ecdh_private_key_iv = $10,
+         ecdh_private_key_auth_tag = $11,
+         vault_setup_at = $12
+       WHERE id = $1::uuid`,
+      userId,
+      "placeholder-esk",
+      randomBytes(12).toString("hex"),
+      randomBytes(16).toString("hex"),
+      accountSalt,
+      randomBytes(32).toString("hex"),
+      randomBytes(32).toString("hex"),
+      keyVersion,
+      "placeholder-ecdh",
+      randomBytes(12).toString("hex"),
+      randomBytes(16).toString("hex"),
+      vaultSetupAt,
+    );
+  });
+
+  return { userId, keyVersion, vaultSetupAt, accountSalt };
 }
 
 // ─── Statistical concurrency primitive ──────────────────────────

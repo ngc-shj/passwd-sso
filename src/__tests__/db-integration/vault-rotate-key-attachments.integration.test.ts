@@ -28,6 +28,7 @@ import {
   LegacyAttachmentsResidualError,
   AttachmentCekManifestMismatchError,
   LegacyAttachmentInconsistentVersionError,
+  AttachmentCekWrapAadVersionMismatchError,
   type AttachmentCekRewrap,
   type RotationPayload,
   type AttachmentMigrationPayload,
@@ -38,6 +39,7 @@ import {
   createTestContext,
   createPrismaForRole,
   setBypassRlsGucs,
+  seedVaultUser,
   type TestContext,
 } from "./helpers";
 
@@ -171,50 +173,6 @@ async function rewrapCek(
 }
 
 // ── Seed helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Seed a minimal vault-enabled user (sets encrypted_secret_key, key_version, etc.)
- * directly via superuser pool so the test does not need a real passphrase flow.
- */
-async function seedVaultUser(
-  ctx: TestContext,
-  tenantId: string,
-): Promise<{ userId: string; keyVersion: number }> {
-  const userId = await ctx.createUser(tenantId);
-  const keyVersion = 1;
-
-  await ctx.su.prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    // Populate minimum vault columns so applyVaultRotation can update them.
-    await tx.$executeRawUnsafe(
-      `UPDATE users SET
-         encrypted_secret_key = $2,
-         secret_key_iv = $3,
-         secret_key_auth_tag = $4,
-         account_salt = $5,
-         master_password_server_hash = $6,
-         master_password_server_salt = $7,
-         key_version = $8,
-         encrypted_ecdh_private_key = $9,
-         ecdh_private_key_iv = $10,
-         ecdh_private_key_auth_tag = $11
-       WHERE id = $1::uuid`,
-      userId,
-      "placeholder-esk",
-      randomBytes(12).toString("hex"),
-      randomBytes(16).toString("hex"),
-      randomBytes(32).toString("hex"),
-      randomBytes(32).toString("hex"),
-      randomBytes(32).toString("hex"),
-      keyVersion,
-      "placeholder-ecdh",
-      randomBytes(12).toString("hex"),
-      randomBytes(16).toString("hex"),
-    );
-  });
-
-  return { userId, keyVersion };
-}
 
 /**
  * Seed a PasswordEntry row (minimum columns, no encrypted blob needed for
@@ -433,7 +391,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.1 — rotation against vault with only mode-2 attachments succeeds; all rows have newKeyVersion", async () => {
     const vaultKey = await generateVaultKey();
     const newVaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
 
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
@@ -474,7 +432,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
     const effects = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
     });
 
     expect(effects.cekRewrapsAttempted).toBe(3);
@@ -498,7 +456,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.2 — 5 mode-0 + 5 mode-2: after migration + rotation all rows are mode-2 with newKeyVersion; plaintext round-trips", async () => {
     const vaultKey = await generateVaultKey();
     const newVaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
 
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
@@ -658,7 +616,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
     });
 
     // Verify all 10 rows are mode-2 with newKeyVersion.
@@ -704,7 +662,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
   it("T12.3 — residual mode-0 attachment causes LegacyAttachmentsResidualError; no VAULT_KEY_ROTATION audit row written", async () => {
     const vaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -720,7 +678,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
       }),
     ).rejects.toThrow(LegacyAttachmentsResidualError);
 
@@ -735,7 +693,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   // ── T12.4: manifest references non-existent ID ────────────────────────────
 
   it("T12.4 — manifest references non-existent attachment id → AttachmentCekManifestMismatchError", async () => {
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -757,7 +715,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
       }),
     ).rejects.toThrow(AttachmentCekManifestMismatchError);
   });
@@ -766,7 +724,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
   it("T12.4b — attachment cekKeyVersion desynced → LegacyAttachmentInconsistentVersionError", async () => {
     const vaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -798,9 +756,86 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
       }),
     ).rejects.toThrow(LegacyAttachmentInconsistentVersionError);
+  });
+
+  // ── RT7/F3: manifest entry carries a stale/future cekWrapAadVersion ───────
+
+  it("RT7/F3 — attachmentCekRewraps entry with cekWrapAadVersion=2 → AttachmentCekWrapAadVersionMismatchError; cek columns unchanged", async () => {
+    // CURRENT_CEK_WRAP_AAD_VERSION is pinned to 1. The upload/migrate route
+    // boundaries already reject cekWrapAadVersion !== 1 before a manifest can
+    // ever be built this way — this test targets applyVaultRotation's OWN
+    // defense-in-depth check (rotate-key-server.ts, just above the
+    // attachment.updateMany call), which exists precisely so a bad value
+    // can never reach the DB via rotation even if the upstream boundary is
+    // ever bypassed. Reverting the
+    // `if (rewrap.cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION) throw`
+    // guard would let this rewrap silently write the row to a mismatched
+    // format, only surfacing on the NEXT rotation's own guard/post-condition
+    // check.
+    const vaultKey = await generateVaultKey();
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
+    const newKeyVersion = oldKeyVersion + 1;
+    const entryId = await seedPasswordEntry(ctx, userId, tenantId);
+
+    const { id: attId } = await seedAttachmentRow(ctx, {
+      entryId, userId, tenantId,
+      plaintext: Buffer.from("aad-version-guard"),
+      vaultKey,
+      encryptionMode: 2,
+      keyVersion: oldKeyVersion,
+      cekKeyVersion: oldKeyVersion,
+      cekWrapAadVersion: 1,
+    });
+
+    const before = await ctx.su.pool.query<{
+      cek_encrypted: Buffer; cek_iv: string; cek_auth_tag: string;
+      cek_key_version: number; cek_wrap_aad_version: number;
+    }>(
+      `SELECT cek_encrypted, cek_iv, cek_auth_tag, cek_key_version, cek_wrap_aad_version
+       FROM attachments WHERE id = $1::uuid`,
+      [attId],
+    );
+
+    const rewrap: AttachmentCekRewrap = {
+      id: attId,
+      cekEncrypted: randomBytes(48).toString("base64"),
+      cekIv: randomBytes(12).toString("hex"),
+      cekAuthTag: randomBytes(16).toString("hex"),
+      cekKeyVersion: newKeyVersion,
+      cekWrapAadVersion: 2, // exceeds CURRENT_CEK_WRAP_AAD_VERSION (1)
+    };
+
+    const payload = buildRotationPayload({
+      entryIds: [entryId],
+      historyIds: [],
+      attachmentCekRewraps: [rewrap],
+    });
+
+    await expect(
+      ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
+      }),
+    ).rejects.toThrow(AttachmentCekWrapAadVersionMismatchError);
+
+    // The whole rotation transaction must have rolled back — the attachment's
+    // cek columns must be byte-for-byte unchanged from before the attempt.
+    const after = await ctx.su.pool.query<{
+      cek_encrypted: Buffer; cek_iv: string; cek_auth_tag: string;
+      cek_key_version: number; cek_wrap_aad_version: number;
+    }>(
+      `SELECT cek_encrypted, cek_iv, cek_auth_tag, cek_key_version, cek_wrap_aad_version
+       FROM attachments WHERE id = $1::uuid`,
+      [attId],
+    );
+    expect(after.rows[0].cek_key_version).toBe(before.rows[0].cek_key_version);
+    expect(after.rows[0].cek_wrap_aad_version).toBe(before.rows[0].cek_wrap_aad_version);
+    expect(Buffer.compare(after.rows[0].cek_encrypted, before.rows[0].cek_encrypted)).toBe(0);
+    expect(after.rows[0].cek_iv).toBe(before.rows[0].cek_iv);
+    expect(after.rows[0].cek_auth_tag).toBe(before.rows[0].cek_auth_tag);
   });
 
   // ── T12.4c: new mode-2 row arrives between data-fetch and POST ────────────
@@ -814,7 +849,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     // include ALL existing mode-2 rows in the manifest.
     const vaultKey = await generateVaultKey();
     const newVaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -858,7 +893,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+        return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
       }),
     ).rejects.toThrow(RotationPostConditionError);
   });
@@ -1083,7 +1118,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.6a — rotation holds advisory lock; concurrent migrate queues and sees post-rotation state", async () => {
     const vaultKey = await generateVaultKey();
     const newVaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -1163,7 +1198,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
           // Apply rotation under the lock
           const result = await ctx.su.prisma.$transaction(async (tx) => {
             await setBypassRlsGucs(tx);
-            return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotationPayload);
+            return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotationPayload, vaultSetupAt, accountSalt);
           });
 
           await client.query("COMMIT");
@@ -1207,7 +1242,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.6b — migrate holds advisory lock; rotation queues and sees post-migrate state", async () => {
     const vaultKey = await generateVaultKey();
     const newVaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -1260,7 +1295,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
     // Rotation runs after migration has committed — should succeed
     const effects = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotationPayload);
+      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotationPayload, vaultSetupAt, accountSalt);
     });
 
     expect(effects.cekRewrapsSucceeded).toBe(1);
@@ -1284,7 +1319,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.6c — contested rotate+migrate loop: mutual exclusion holds across 50 iterations", async () => {
     const ITERATIONS = 50;
 
-    const { userId, keyVersion: baseKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: baseKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
     const instanceA = createPrismaForRole("app");
@@ -1435,7 +1470,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
                 historyIds: [],
                 attachmentCekRewraps: [rewrapIter],
               });
-              return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotPayload);
+              return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", rotPayload, vaultSetupAt, accountSalt);
             });
             return true;
           } catch {
@@ -1509,7 +1544,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
   it("T12.7 — RotationEffects carries all forensic metadata fields with correct types (T24 pattern)", async () => {
     const vaultKey = await generateVaultKey();
     const newVaultKey = await generateVaultKey();
-    const { userId, keyVersion: oldKeyVersion } = await seedVaultUser(ctx, tenantId);
+    const { userId, keyVersion: oldKeyVersion, vaultSetupAt, accountSalt } = await seedVaultUser(ctx, tenantId);
     const newKeyVersion = oldKeyVersion + 1;
     const entryId = await seedPasswordEntry(ctx, userId, tenantId);
 
@@ -1544,7 +1579,7 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
 
     const effects = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload);
+      return applyVaultRotation(tx, userId, tenantId, oldKeyVersion, newKeyVersion, "hash", "salt", payload, vaultSetupAt, accountSalt);
     });
 
     // T24: field-presence-then-equality for all forensic numeric fields

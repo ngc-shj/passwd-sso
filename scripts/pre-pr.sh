@@ -195,6 +195,8 @@ run_step "Static: count-then-create-lock" node scripts/checks/check-count-then-c
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 run_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
+run_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
+run_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
 # if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
 # required" contract for the static checks above).

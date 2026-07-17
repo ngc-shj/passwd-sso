@@ -18,6 +18,7 @@ import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -126,9 +127,17 @@ async function handlePOST(req: NextRequest) {
   const result = await parseBody(req, createE2EPasswordSchema);
   if (!result.ok) return result.response;
 
-  const createResult = await withUserTenantRls(userId, async (tenantId) =>
-    createPersonalPasswordEntry(prisma, userId, tenantId, result.data),
-  );
+  let createResult;
+  try {
+    createResult = await withUserTenantRls(userId, async (tenantId) =>
+      createPersonalPasswordEntry(prisma, userId, tenantId, result.data),
+    );
+  } catch (e) {
+    if (e instanceof KeyVersionMismatchError) {
+      return errorResponse(API_ERROR.KEY_VERSION_MISMATCH);
+    }
+    throw e;
+  }
 
   if (!createResult.ok) {
     const message = createResult.reason === "FOLDER_NOT_FOUND" ? "Invalid folderId" : "Invalid tagIds";

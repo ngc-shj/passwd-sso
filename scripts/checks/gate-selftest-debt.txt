@@ -1,0 +1,52 @@
+# Gate self-test debt allowlist (check-gate-selftest-coverage.sh).
+#
+# Every executable security gate under scripts/checks/ (and every inline
+# `run_step "Static: ..." bash -c '...'` gate in scripts/pre-pr.sh) must have
+# a sibling scripts/__tests__/<base>.test.mjs|.test.ts self-test OR an entry
+# here. An entry here is a conscious decision to accept the gate as untested
+# for now — it is NOT a blanket exemption; each line must state, in a
+# trailing comment, why the gate is debt rather than tested.
+#
+# Format: `<entry>  # reason` — one entry per line. Path entries are
+# `scripts/checks/<file>`; inline pre-pr.sh gates are `pre-pr:<run_step label>`
+# (the exact "Static: ..." string passed as run_step's first argument).
+# Lines beginning with `#` are full-line comments.
+
+# --- Non-security-scoped checks (C3): UI/doc/test-hygiene gates, no direct
+# --- security invariant, test debt acceptable at this scope.
+scripts/checks/check-api-error-body-drift.sh  # reason: non-security scope, test debt
+scripts/checks/check-api-error-codes.sh  # reason: non-security scope, test debt
+scripts/checks/check-e2e-selectors.sh  # reason: non-security scope, test debt
+scripts/checks/check-security-doc-exists.sh  # reason: non-security scope, test debt
+scripts/checks/check-settings-card-layout.sh  # reason: non-security scope, test debt
+scripts/checks/check-test-hygiene.sh  # reason: non-security scope, test debt
+scripts/checks/check-doc-paths.mjs  # reason: non-security scope, test debt
+scripts/checks/check-dynamic-import-specifiers.mjs  # reason: non-security scope, test debt
+scripts/checks/check-mjs-imports.mjs  # reason: non-security scope, test debt
+scripts/checks/check-vitest-coverage-include.mjs  # reason: non-security scope, test debt
+
+# check-security-matrices.sh shells out to the matrix generator, which makes
+# it awkward to fixture in isolation without duplicating the generator's own
+# test. It is exercised indirectly: any drift between the committed matrices
+# and the generator's output is caught by generate-security-matrices.test.mjs,
+# which already asserts the generator produces the exact committed content.
+scripts/checks/check-security-matrices.sh  # reason: covered by generate-security-matrices.test.mjs (shells out to real generator, not fixturable)
+
+# --- Inline `run_step "Static: ..." bash -c '...'` gates in pre-pr.sh (~13
+# --- today). Extraction into tested scripts/checks/ files is SC7 (future
+# --- hardening, out of scope this round). Seeding these now satisfies the
+# --- meta-gate's anti-evasion guarantee for EXISTING inline gates; a NEW
+# --- inline Static: gate landing without a debt entry (or extraction) fails.
+pre-pr:Static: rls-cross-tenant SQL parse  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: no-deprecated-logAudit  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: prf-salt-migration-script-readonly  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: prf-salt-immutable  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: no-argon2-browser-reintroduce  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: dcr-public-only-literal  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: client-secret-hash-non-null  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: no-authjs-builtin-webauthn-provider  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: master-key-rotation-dual-approval-uses-helper  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: master-key-rotation-execute-cas  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: master-key-rotation-legacy-endpoint-gone  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: master-key-rotation-revokedShares-execute-only  # reason: inline gate, extraction deferred (SC7)
+pre-pr:Static: fetch basePath compliance  # reason: inline gate, extraction deferred (SC7)

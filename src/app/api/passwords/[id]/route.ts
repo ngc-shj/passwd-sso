@@ -15,6 +15,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { assertCurrentKeyVersion, KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import { dedupeTagIds, tagSet } from "@/lib/services/tag-relation";
@@ -165,9 +166,24 @@ async function handlePUT(
   if ((keyVersionChanged || aadVersionChanged) && !encryptedBlob) {
     return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
   }
+  // A blob write MUST carry its keyVersion so the stale-write guard below always
+  // runs. Without this, a blob-without-keyVersion PUT skips assertCurrentKeyVersion
+  // and could overwrite a freshly-rotated v(N+1) blob with vN ciphertext while the
+  // column stays N+1 — permanently undecryptable. Honest clients always send it.
+  if (encryptedBlob && keyVersion === undefined) {
+    return errorResponse(API_ERROR.KEY_VERSION_WITHOUT_REENCRYPT);
+  }
 
-  if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
-  if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
+  // keyVersion/aadVersion are ONLY written on the re-encrypt (blob) path. On the
+  // metadata-only path they cannot legitimately change (the guard above rejects a
+  // differing value), and writing an equal value is a no-op EXCEPT under a
+  // concurrent rotation, where it would relabel a freshly re-keyed blob back to
+  // the old version and render it permanently undecryptable. So strip them here
+  // and only assign inside the blob transaction below.
+  if (encryptedBlob) {
+    if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
+    if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
+  }
   if (folderId !== undefined) updateData.folderId = folderId;
   if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
   if (isArchived !== undefined) updateData.isArchived = isArchived;
@@ -191,9 +207,17 @@ async function handlePUT(
   // acquire a PK row lock inside the same tenant-scoped transaction so concurrent
   // PUTs serialise here and each writer snapshots the immediately-preceding committed
   // blob (not the outside-tx `existing` read, which may be stale under contention).
-  const updated = await (encryptedBlob
+  let updated;
+  try {
+    updated = await (encryptedBlob
     ? withUserTenantRls(userId, async () =>
         prisma.$transaction(async (tx) => {
+          // Lock order: users FOR SHARE first, then the entry FOR UPDATE. Rejects
+          // a stale keyVersion (rotation-vs-write race) and blocks a concurrent
+          // rotation from committing between this read and the entry write.
+          if (keyVersion !== undefined) {
+            await assertCurrentKeyVersion(tx, userId, keyVersion);
+          }
           const [cur] = await tx.$queryRaw<PersonalBlobRow[]>`
             SELECT encrypted_blob, blob_iv, blob_auth_tag, key_version, aad_version
             FROM password_entries
@@ -239,6 +263,12 @@ async function handlePUT(
           include: { tags: { select: { id: true } } },
         }),
       ));
+  } catch (e) {
+    if (e instanceof KeyVersionMismatchError) {
+      return errorResponse(API_ERROR.KEY_VERSION_MISMATCH);
+    }
+    throw e;
+  }
 
   // Null sentinel: the blob-tx path returns null when the entry was concurrently
   // deleted between the early findUnique and the FOR UPDATE lock.
