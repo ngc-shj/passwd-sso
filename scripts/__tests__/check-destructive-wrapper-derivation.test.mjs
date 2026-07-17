@@ -1005,6 +1005,212 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
       expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
       expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
     });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for `export * from` via the @/ path alias", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/reexport-alias-star.ts",
+        'export * from "@/lib/vault/vault-reset";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/reexport-alias-star.ts re-exports executeVaultReset from @/lib/vault/vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for `export * as ns from` via the @/ path alias", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault/vault-reset.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/reexport-alias-ns.ts",
+        'export * as vaultReset from "@/lib/vault/vault-reset";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/reexport-alias-ns.ts re-exports executeVaultReset from @/lib/vault/vault-reset",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a directory-index barrel (`export * from \"./dir\"` resolving dir/index.ts)", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/vault-reset-dir/index.ts",
+        "export async function executeVaultReset(userId) {\n  await tx.passwordEntry.deleteMany({ where: { userId } });\n}\n",
+      );
+      writeSource(
+        "src/lib/reexport-dir-barrel.ts",
+        'export * from "./vault-reset-dir";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/reexport-dir-barrel.ts re-exports executeVaultReset from ./vault-reset-dir",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a named re-export of an exported OBJECT binding carrying a destructive member", () => {
+      seedWrapperStubs();
+      writeFileSync(
+        patternsFile,
+        JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|vaultService\\.purgeUserEntries\\(` }),
+        "utf8",
+      );
+      writeSource(
+        "src/lib/vault-service.ts",
+        [
+          "export const vaultService = {",
+          "  async purgeUserEntries(userId) {",
+          "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+      );
+      writeSource(
+        "src/lib/reexport-object-binding.ts",
+        'export { vaultService } from "./vault-service";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/reexport-object-binding.ts re-exports vaultService.purgeUserEntries from ./vault-service",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a 2-hop ALIASED object-binding chain, propagating the member under each hop's local name", () => {
+      seedWrapperStubs();
+      writeFileSync(
+        patternsFile,
+        JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|vaultService\\.purgeUserEntries\\(` }),
+        "utf8",
+      );
+      writeSource(
+        "src/lib/vault-service.ts",
+        [
+          "export const vaultService = {",
+          "  async purgeUserEntries(userId) {",
+          "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+          "  },",
+          "};",
+          "",
+        ].join("\n"),
+      );
+      writeSource(
+        "src/lib/obj-chain-b.ts",
+        'export { vaultService as service } from "./vault-service";\n',
+      );
+      writeSource(
+        "src/lib/obj-chain-a.ts",
+        'export { service as apiService } from "./obj-chain-b";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/obj-chain-b.ts re-exports vaultService.purgeUserEntries from ./vault-service",
+      );
+      expect(stderr).toContain(
+        "src/lib/obj-chain-a.ts re-exports service.purgeUserEntries from ./obj-chain-b",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for a named re-export of a STATIC-class binding carrying a destructive member", () => {
+      seedWrapperStubs();
+      writeFileSync(
+        patternsFile,
+        JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|VaultService\\.purgeAll\\(` }),
+        "utf8",
+      );
+      writeSource(
+        "src/lib/vault-service-static.ts",
+        [
+          "export class VaultService {",
+          "  static async purgeAll(userId) {",
+          "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeSource(
+        "src/lib/reexport-class-binding.ts",
+        'export { VaultService } from "./vault-service-static";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/reexport-class-binding.ts re-exports VaultService.purgeAll from ./vault-service-static",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("FAILS (REEXPORTED_DESTRUCTIVE_WRAPPER) for an ALIASED static-class binding re-export", () => {
+      seedWrapperStubs();
+      writeFileSync(
+        patternsFile,
+        JSON.stringify({ deleteSignal: `${FIXTURE_DELETE_SIGNAL}|VaultService\\.purgeAll\\(` }),
+        "utf8",
+      );
+      writeSource(
+        "src/lib/vault-service-static.ts",
+        [
+          "export class VaultService {",
+          "  static async purgeAll(userId) {",
+          "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+      );
+      writeSource(
+        "src/lib/reexport-class-alias.ts",
+        'export { VaultService as DestructiveService } from "./vault-service-static";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+      expect(stderr).toContain(
+        "src/lib/reexport-class-alias.ts re-exports VaultService.purgeAll from ./vault-service-static",
+      );
+      expect(stderr).not.toContain("ROUTE_DESTRUCTIVE_NO_STEPUP");
+      expect(stderr).not.toContain("UNDECLARED_DESTRUCTIVE_WRAPPER");
+    });
+
+    it("passes (no REEXPORTED_DESTRUCTIVE_WRAPPER) for a same-named re-export from a TRUE PACKAGE import (skipped, not flat-matched)", () => {
+      seedWrapperStubs();
+      writeSource(
+        "src/lib/reexport-package.ts",
+        'export { executeVaultReset } from "some-npm-package";\n',
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(0);
+      expect(stderr).not.toContain("REEXPORTED_DESTRUCTIVE_WRAPPER");
+    });
   });
 
   describe("env-pollution guard (sec-F6)", () => {

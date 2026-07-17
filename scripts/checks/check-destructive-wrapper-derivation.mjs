@@ -694,14 +694,21 @@ if (staleExempt.length > 0) {
 //
 // Detection cases (ExportDeclaration with a moduleSpecifier):
 //   (a) named re-export: `export { x } from "..."` / `export { x as y } from "..."`
-//       — flag when the SOURCE-side name `x` matches the destructive set.
-//   (b) `export * from "<relative>"` — flag when the one-hop-resolved target
-//       file is a destructive-exporting module.
-//   (c) `export * as ns from "<relative>"` — same lookup as (b); a namespace
-//       re-export binds the whole module, so any destructive export in the
-//       target counts.
-// Non-relative specifiers (package imports) are skipped — destructive
-// wrappers are all in-repo.
+//       — flag when the SOURCE-side name `x` matches the destructive set as a
+//       bare name OR as the binding prefix of a member key
+//       (`vaultService.purge` matches `export { vaultService }` — the binding
+//       carries its members); the member path is propagated under the
+//       post-alias local name.
+//   (b) `export * from "<in-repo specifier>"` — flag when the one-hop-resolved
+//       target file is a destructive-exporting module. Both relative and `@/`
+//       alias specifiers resolve (see resolveSpecifierToRel), including
+//       directory-index barrels.
+//   (c) `export * as ns from "<in-repo specifier>"` — same lookup as (b); a
+//       namespace re-export binds the whole module, so any destructive export
+//       in the target counts.
+// True package imports are skipped — destructive wrappers are all in-repo.
+// Repo-shaped specifiers that fail to resolve (target outside the .ts scan
+// scope) keep the fail-closed flat-name fallback for named re-exports.
 //
 // Scan scope: production src/**/*.ts INCLUDING route.ts (a re-export hosted
 // inside route.ts is invisible to the route pass's import-walk below, since
@@ -734,27 +741,52 @@ function allDestructiveNames() {
   return names;
 }
 
+// `@/*` maps to `<scan root>/*` (tsconfig paths: `"@/*": ["./src/*"]`).
+// Derived from SCAN_ROOT so fixture trees (which relocate the scan root)
+// resolve the alias against their own root exactly like production resolves
+// against src/.
+const SCAN_ROOT_REL = SCAN_ROOT.slice(PATH_ROOT.length).replace(/^\/+/, "");
+
 /**
- * Resolve a relative import specifier (`./x`, `../y/z`) from the importing
- * file's PATH_ROOT-relative path to the target file's PATH_ROOT-relative path.
- * POSIX string logic only (rel paths are always `/`-separated regardless of
- * OS) — no reliance on node:path's OS-specific separator handling. Returns
- * undefined for non-relative specifiers or a target that doesn't resolve to a
- * known scanned file (`.ts`, optionally already carrying the extension).
+ * Resolve a module specifier to a PATH_ROOT-relative file in the scan set.
+ * Handles relative specifiers (`./x`, `../y/z`) AND the repo's `@/` path
+ * alias — the alias is the dominant import style in this codebase, so a
+ * relative-only resolver would let `export * from "@/lib/..."` barrels evade
+ * (external review, Major). Candidate forms tried: the path as written (when
+ * it already carries `.ts`/`.tsx`), `<p>.ts`, `<p>.tsx`, `<p>/index.ts`,
+ * `<p>/index.tsx` — directory-index barrels resolve too.
+ *
+ * Returns { targetRel, inRepo }:
+ *   - targetRel: resolved rel path, or undefined when no candidate is in the
+ *     scan set;
+ *   - inRepo: true for repo-shaped specifiers (relative or `@/`). Callers use
+ *     it to keep the fail-closed flat-name fallback for repo-shaped
+ *     specifiers that do not resolve (e.g. a `.tsx`/generated target), while
+ *     true package imports are skipped entirely — a same-named symbol from an
+ *     npm package is not this repo's destructive wrapper.
+ * POSIX string logic only — rel paths are always `/`-separated.
  */
-function resolveRelativeSpecifierToRel(fromRel, spec, knownRels) {
-  if (!spec.startsWith("./") && !spec.startsWith("../")) return undefined;
-  const fromDir = fromRel.split("/").slice(0, -1);
-  const parts = [...fromDir, ...spec.split("/")];
+function resolveSpecifierToRel(fromRel, spec, knownRels) {
+  let baseParts;
+  if (spec.startsWith("@/")) {
+    baseParts = [...SCAN_ROOT_REL.split("/"), ...spec.slice(2).split("/")];
+  } else if (spec.startsWith("./") || spec.startsWith("../")) {
+    baseParts = [...fromRel.split("/").slice(0, -1), ...spec.split("/")];
+  } else {
+    return { targetRel: undefined, inRepo: false };
+  }
   const stack = [];
-  for (const part of parts) {
+  for (const part of baseParts) {
     if (part === "" || part === ".") continue;
     if (part === "..") stack.pop();
     else stack.push(part);
   }
-  const joined = stack.join("/");
-  const candidate = joined.endsWith(".ts") ? joined : `${joined}.ts`;
-  return knownRels.has(candidate) ? candidate : undefined;
+  const base = stack.join("/");
+  const candidates =
+    base.endsWith(".ts") || base.endsWith(".tsx")
+      ? [base]
+      : [`${base}.ts`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.tsx`];
+  return { targetRel: candidates.find((c) => knownRels.has(c)), inRepo: true };
 }
 
 /** Every module ExportDeclaration whose moduleSpecifier is set, for a source file. */
@@ -803,7 +835,7 @@ for (let iteration = 0; iteration <= reExportScanTargets.length; iteration++) {
       // trains reflexive exemption (review F1).
       if (decl.isTypeOnly()) continue;
       const specifier = decl.getModuleSpecifierValue();
-      const targetRel = resolveRelativeSpecifierToRel(rel, specifier, knownRels);
+      const { targetRel, inRepo } = resolveSpecifierToRel(rel, specifier, knownRels);
       const targetSet = targetRel !== undefined ? destructiveExportsByModule.get(targetRel) : undefined;
       const isStarLike = decl.getNamedExports().length === 0; // `export * from` or `export * as ns from`
 
@@ -823,23 +855,37 @@ for (let iteration = 0; iteration <= reExportScanTargets.length; iteration++) {
       for (const named of decl.getNamedExports()) {
         if (named.isTypeOnly()) continue; // `export { type x } from` — erased, no call surface
         const sourceName = named.getName(); // the SOURCE-side name (before `as`)
-        // When the specifier resolves to an in-scope file, match ONLY against
-        // that file's own registered destructive exports — a same-named but
-        // unrelated symbol in a different module must not flag (review F2).
-        // The flat cross-module fallback applies only when resolution fails
-        // (target outside the .ts scan scope, e.g. .tsx or generated code):
-        // fail closed there, since we cannot inspect the target.
-        const isDestructive =
-          targetRel !== undefined
-            ? targetSet !== undefined && targetSet.has(sourceName)
-            : destructiveNames.has(sourceName);
-        if (!isDestructive) continue;
-        // Register the re-exporting file's OWN locally-visible export name
-        // (the alias if present, else the source name unchanged) — NOT the
-        // source-side name — so a further named hop matches correctly.
+        // Match pool: resolved target → that module's own registered exports
+        // only — a same-named but unrelated symbol in a different module must
+        // not flag (review F2). Repo-shaped but unresolved (target outside
+        // the .ts scan scope, e.g. .tsx or generated code) → flat
+        // cross-module fallback, fail closed since we cannot inspect the
+        // target. True package import → skip (not this repo's wrapper).
+        let pool;
+        if (targetRel !== undefined) pool = targetSet ?? new Set();
+        else if (inRepo) pool = destructiveNames;
+        else continue;
+        // A destructive export is either the bare binding itself
+        // (`executeVaultReset`) or a member behind an exported binding
+        // (`vaultService.purge`, `VaultService.purgeAll`). Re-exporting the
+        // binding re-exports every member, so match by binding prefix — bare
+        // name comparison alone lets `export { vaultService } from ...`
+        // evade (external review, Major).
+        const memberPrefix = `${sourceName}.`;
+        const matching = [...pool].filter(
+          (n) => n === sourceName || n.startsWith(memberPrefix),
+        );
+        if (matching.length === 0) continue;
+        // Register under the re-exporting file's OWN locally-visible binding
+        // name (the alias if present) with each member path preserved —
+        // `vaultService.purge` re-exported `as service` propagates as
+        // `service.purge` so a further hop (and the route pass) matches the
+        // name its own specifier actually uses.
         const localName = named.getAliasNode()?.getText() ?? sourceName;
-        recordDestructiveExport(rel, localName);
-        flagged = { name: sourceName, specifier };
+        for (const n of matching) {
+          recordDestructiveExport(rel, localName + n.slice(sourceName.length));
+        }
+        flagged = { name: matching.sort().join(", "), specifier };
         break;
       }
       if (flagged !== undefined) break;
