@@ -117,6 +117,25 @@ describe("check-gate-selftest-coverage.sh", () => {
     expect(stdout).toContain("STALE_DEBT_ENTRY: scripts/checks/check-does-not-exist.sh");
   });
 
+  it("FAILS (STALE_DEBT_ENTRY) when a debt-listed check has SINCE gained a sibling test", () => {
+    // The check still exists AND is debt-listed, but a sibling self-test was
+    // since added — the test now satisfies coverage, so the debt exemption is
+    // stale and must be removed (otherwise debt never shrinks and a later test
+    // deletion would be masked by the lingering entry). External-review Low.
+    writeFileSync(join(checksDir, "check-foo.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+    writeFileSync(join(testsDir, "check-foo.test.mjs"), "// fixture test\n", "utf8");
+    writeFileSync(
+      debtFile,
+      "scripts/checks/check-foo.sh  # reason: was untested, debt entry now stale\n",
+      "utf8",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain(
+      "STALE_DEBT_ENTRY: scripts/checks/check-foo.sh (a sibling self-test now exists",
+    );
+  });
+
   it("passes when fully covered: mixed tested + debt-listed checks", () => {
     writeFileSync(join(checksDir, "check-foo.sh"), "#!/usr/bin/env bash\nexit 0\n", "utf8");
     writeFileSync(join(testsDir, "check-foo.test.mjs"), "// fixture test\n", "utf8");

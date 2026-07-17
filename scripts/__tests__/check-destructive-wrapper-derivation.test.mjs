@@ -245,6 +245,132 @@ describe("check-destructive-wrapper-derivation.mjs", () => {
     expect(exitCode).toBe(0);
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Object/class-method wrappers (external review Major): a destructive
+  // primitive reached through a DIRECTLY-EXPORTED object literal or class must
+  // be caught under a qualified `Receiver.method` key — not silently skipped as
+  // it was when only top-level exported functions/const-arrows were recognized.
+  // The auth-adapter shape above (object as a function RETURN value) still
+  // resolves to its enclosing exported function, so those two cases don't clash.
+  // ─────────────────────────────────────────────────────────────────────────
+  it("catches a destructive method on a directly-exported object literal (qualified key)", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/vault-service.ts",
+      [
+        "export const vaultService = {",
+        "  async purgeUserEntries(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "UNDECLARED_DESTRUCTIVE_WRAPPER: src/lib/vault-service.ts#vaultService.purgeUserEntries",
+    );
+  });
+
+  it("catches a destructive method on a directly-exported class (qualified key)", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/vault-service-class.ts",
+      [
+        "export class VaultService {",
+        "  async purgeUserEntries(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "UNDECLARED_DESTRUCTIVE_WRAPPER: src/lib/vault-service-class.ts#VaultService.purgeUserEntries",
+    );
+  });
+
+  it("catches an exported object property whose value is an arrow function", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/account-service.ts",
+      [
+        "export const accountService = {",
+        "  deleteAccount: async (userId) => {",
+        "    await tx.user.delete({ where: { id: userId } });",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "UNDECLARED_DESTRUCTIVE_WRAPPER: src/lib/account-service.ts#accountService.deleteAccount",
+    );
+  });
+
+  it("catches an anonymous default export via a file-scoped #default sentinel (cannot silently escape)", () => {
+    seedWrapperStubs();
+    writeSource(
+      "src/lib/purge-default.ts",
+      [
+        "export default async function () {",
+        "  await tx.user.delete({ where: {} });",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      "UNDECLARED_DESTRUCTIVE_WRAPPER: src/lib/purge-default.ts#default",
+    );
+  });
+
+  it("a qualified deleteSignal alternative (Receiver.method) declares an object-method wrapper", () => {
+    seedWrapperStubs();
+    // Register the qualified wrapper in the fixture deleteSignal so a route
+    // calling `vaultService.purgeUserEntries(` classifies as destructive.
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({
+        deleteSignal: `${FIXTURE_DELETE_SIGNAL}|vaultService\\.purgeUserEntries\\(`,
+      }),
+      "utf8",
+    );
+    writeSource(
+      "src/lib/vault-service.ts",
+      [
+        "export const vaultService = {",
+        "  async purgeUserEntries(userId) {",
+        "    await tx.passwordEntry.deleteMany({ where: { userId } });",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const { exitCode } = runGuard();
+    expect(exitCode).toBe(0);
+  });
+
+  it("FAILS (STALE_DELETE_SIGNAL_NAME) when a qualified deleteSignal wrapper resolves to nothing", () => {
+    seedWrapperStubs();
+    writeFileSync(
+      patternsFile,
+      JSON.stringify({
+        deleteSignal: `${FIXTURE_DELETE_SIGNAL}|goneService\\.wipe\\(`,
+      }),
+      "utf8",
+    );
+    const { exitCode, stderr } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("STALE_DELETE_SIGNAL_NAME: goneService.wipe");
+  });
+
   describe("env-pollution guard (sec-F6)", () => {
     it("FAILS when CI=true and an override is set without DESTRUCTIVE_WRAPPER_FIXTURE_MODE=1", () => {
       const { exitCode, stderr } = runGuard({ CI: "true" });

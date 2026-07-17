@@ -159,8 +159,17 @@ function extractDeleteSignalWrapperNames(deleteSignalSource) {
   const alternatives = deleteSignalSource.split("|");
   const names = [];
   for (const alt of alternatives) {
-    const m = /^([A-Za-z0-9_]+)\\?\($/.exec(alt);
-    if (m) names.push(m[1]);
+    // Bare wrapper: `deleteTeamPassword\(` -> "deleteTeamPassword".
+    const bare = /^([A-Za-z0-9_]+)\\?\($/.exec(alt);
+    if (bare) {
+      names.push(bare[1]);
+      continue;
+    }
+    // Qualified wrapper (object/class method): `vaultService\.purge\(` ->
+    // "vaultService.purge". Matches the qualified key resolveEnclosingExported-
+    // Function produces, so the inverse STALE check covers these too.
+    const qualified = /^([A-Za-z0-9_]+)\\\.([A-Za-z0-9_]+)\\?\($/.exec(alt);
+    if (qualified) names.push(`${qualified[1]}.${qualified[2]}`);
   }
   return names;
 }
@@ -276,15 +285,117 @@ function exportedFunctionName(node) {
   return undefined;
 }
 
-/** Walk up from `node` to the nearest ancestor that is an exported function. */
+/**
+ * A wrapper can be an exported top-level function OR a method reachable through
+ * an exported object/class. The route-side call shape differs:
+ *   - top-level function:      `purgeUserEntries(`      -> key `purgeUserEntries`
+ *   - exported object method:  `vaultService.purge(`    -> key `vaultService.purge`
+ *   - exported class method:   `new VaultService().purge(` or instance.purge(`
+ *                                                       -> key `VaultService.purge`
+ * The qualified `Receiver.method` key mirrors the actual route call token and
+ * avoids same-name collisions across different services. deleteSignal / the
+ * exempt file are matched against this same key. Anonymous default exports get
+ * a file-scoped sentinel so they can never silently escape.
+ */
+function methodName(node) {
+  // MethodDeclaration (class or object shorthand method) or a
+  // PropertyAssignment whose initializer is an arrow/function expression
+  // (object property arrow: `{ purge: async () => {} }`).
+  if (Node.isMethodDeclaration(node)) {
+    const name = node.getName();
+    return name || undefined;
+  }
+  if (Node.isPropertyAssignment(node)) {
+    const init = node.getInitializer();
+    if (init && (Node.isArrowFunction(init) || Node.isFunctionExpression(init))) {
+      const name = node.getName();
+      return name || undefined;
+    }
+  }
+  return undefined;
+}
+
+/** For a class-method node, the enclosing exported class name (or undefined). */
+function enclosingExportedClassName(node) {
+  let c = node;
+  while (c) {
+    if (Node.isClassDeclaration(c) && c.isExported()) return c.getName();
+    c = c.getParent();
+  }
+  return undefined;
+}
+
+/**
+ * For an object-method / object-property-arrow node, the name of the exported
+ * `const <name> = { ... }` variable the object literal is bound to (or
+ * undefined if the object literal is not directly bound to an exported const).
+ */
+function enclosingExportedObjectVarName(node) {
+  let c = node;
+  while (c) {
+    if (Node.isVariableDeclaration(c)) {
+      const init = c.getInitializer();
+      if (init && Node.isObjectLiteralExpression(init)) {
+        const stmt = c.getVariableStatement();
+        if (stmt && stmt.isExported()) return c.getName();
+      }
+      return undefined; // bound to a non-exported / non-object decl — not reachable
+    }
+    c = c.getParent();
+  }
+  return undefined;
+}
+
+/** Walk up from `node` to the nearest ancestor that is an exported callable. */
 function resolveEnclosingExportedFunction(node) {
   let current = node;
   while (current) {
-    const name = exportedFunctionName(current);
-    if (name !== undefined) return name;
+    // 1. Top-level exported function / const-arrow.
+    const fnName = exportedFunctionName(current);
+    if (fnName !== undefined) return fnName;
+
+    // 2. Class or object method reachable through an exported class/object.
+    const mName = methodName(current);
+    if (mName !== undefined) {
+      const cls = enclosingExportedClassName(current);
+      if (cls !== undefined) return `${cls}.${mName}`;
+      const objVar = enclosingExportedObjectVarName(current);
+      if (objVar !== undefined) return `${objVar}.${mName}`;
+      // A method not reachable via an exported class/object is not
+      // route-callable on its own — keep walking (it may sit inside an
+      // exported outer function).
+    }
+
+    // 3. Anonymous default export: `export default async function () {…}` /
+    //    `export default () => {…}`. Route-callable via the default import;
+    //    give it a file-scoped sentinel so it can never silently escape.
+    if (
+      (Node.isFunctionDeclaration(current) ||
+        Node.isArrowFunction(current) ||
+        Node.isFunctionExpression(current)) &&
+      isDefaultExported(current)
+    ) {
+      return "default";
+    }
+
     current = current.getParent();
   }
   return undefined;
+}
+
+/** True when `node` is (or is the initializer of) an `export default`. */
+function isDefaultExported(node) {
+  // `export default function () {}` — the FunctionDeclaration has the modifier.
+  if (
+    Node.isFunctionDeclaration(node) &&
+    node.getModifiers?.().some((m) => m.getKind() === SyntaxKind.DefaultKeyword)
+  ) {
+    return true;
+  }
+  // `export default () => {}` / `export default function(){}` as an expression:
+  // the immediate parent is an ExportAssignment.
+  const parent = node.getParent();
+  return parent !== undefined && Node.isExportAssignment(parent);
 }
 
 const undeclaredWrappers = []; // { file, fn }

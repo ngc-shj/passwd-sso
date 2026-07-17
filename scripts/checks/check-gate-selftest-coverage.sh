@@ -199,6 +199,19 @@ while IFS= read -r debt_entry; do
       if ! printf '%s' "$check_keys" | grep -qxF "$debt_entry"; then
         echo "STALE_DEBT_ENTRY: $debt_entry (no such file under $CHECKS_DIR)"
         DEBT_DRIFT=1
+      else
+        # A debt entry whose check has SINCE gained a sibling self-test is
+        # stale: the test now satisfies coverage, so the debt exemption must
+        # be removed (otherwise debt never shrinks, and a later test deletion
+        # would be masked by the lingering debt entry). Mirrors the header's
+        # "a test since added" clause.
+        debt_base="$(basename "$debt_entry")"
+        debt_noext="${debt_base%.sh}"
+        debt_noext="${debt_noext%.mjs}"
+        if [ -f "$TESTS_DIR/${debt_noext}.test.mjs" ] || [ -f "$TESTS_DIR/${debt_noext}.test.ts" ]; then
+          echo "STALE_DEBT_ENTRY: $debt_entry (a sibling self-test now exists — remove the debt entry)"
+          DEBT_DRIFT=1
+        fi
       fi
       ;;
   esac
