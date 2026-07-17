@@ -53,6 +53,7 @@
   "memberKeyNotFound": "Member encryption key not found.",
   "vaultNotReady": "Member's vault is not set up yet.",
   "teamKeyVersionMismatch": "Encryption key version is outdated. Please refresh and try again.",
+  "keyVersionMismatch": "Your vault key was rotated. Please unlock the vault again and retry.",
   "entryCountMismatch": "The number of submitted entries does not match the total. Please refresh and try again.",
   "onlyOwnEntries": "You can only modify your own entries.",
   "invalidDateRange": "The expiry date must be after the issue date.",

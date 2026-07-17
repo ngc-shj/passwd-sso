@@ -71,6 +71,18 @@ vi.mock("@/lib/vault/rotate-key-server", () => {
       this.name = "Mode2InvariantViolationError";
     }
   }
+  class RotationCasConflictError extends Error {
+    constructor() {
+      super("ROTATION_CAS_CONFLICT");
+      this.name = "RotationCasConflictError";
+    }
+  }
+  class AttachmentCekWrapAadVersionMismatchError extends Error {
+    constructor() {
+      super("ATTACHMENT_CEK_WRAP_AAD_VERSION_MISMATCH");
+      this.name = "AttachmentCekWrapAadVersionMismatchError";
+    }
+  }
   return {
     applyVaultRotation: mockApplyVaultRotation,
     LegacyAttachmentsResidualError,
@@ -78,6 +90,8 @@ vi.mock("@/lib/vault/rotate-key-server", () => {
     LegacyAttachmentInconsistentVersionError,
     RotationPostConditionError,
     Mode2InvariantViolationError,
+    RotationCasConflictError,
+    AttachmentCekWrapAadVersionMismatchError,
   };
 });
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -145,6 +159,7 @@ describe("POST /api/vault/rotate-key", () => {
       masterPasswordServerHash: serverHash,
       masterPasswordServerSalt: serverSalt,
       keyVersion: 1,
+      accountSalt: "e".repeat(64),
     });
     // Interactive transaction mock: execute the callback with txMock
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
@@ -239,6 +254,8 @@ describe("POST /api/vault/rotate-key", () => {
       expect.any(String),
       expect.any(String),
       expect.objectContaining({ entries: [], historyEntries: [] }),
+      expect.any(Date),
+      "e".repeat(64),
     );
     // Verify ALL user-bound auth artifacts are revoked after key rotation
     expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
@@ -284,6 +301,8 @@ describe("POST /api/vault/rotate-key", () => {
         entries: expect.arrayContaining([expect.objectContaining({ id: entryId })]),
         historyEntries: expect.arrayContaining([expect.objectContaining({ id: historyId })]),
       }),
+      expect.any(Date),
+      "e".repeat(64),
     );
   });
 
@@ -317,6 +336,7 @@ describe("POST /api/vault/rotate-key", () => {
       masterPasswordServerHash: serverHash,
       masterPasswordServerSalt: serverSalt,
       keyVersion: 5,
+      accountSalt: "e".repeat(64),
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
@@ -332,6 +352,8 @@ describe("POST /api/vault/rotate-key", () => {
       expect.any(String),
       expect.any(String),
       expect.any(Object),
+      expect.any(Date),
+      "e".repeat(64),
     );
   });
 
@@ -471,6 +493,8 @@ describe("POST /api/vault/rotate-key", () => {
       expect.objectContaining({
         attachmentCekRewraps: [expect.objectContaining({ cekEncrypted: "Y2Vr" })],
       }),
+      expect.any(Date), // oldVaultSetupAt
+      "e".repeat(64), // oldAccountSalt
     );
   });
 

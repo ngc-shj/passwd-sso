@@ -4,8 +4,13 @@ const {
   mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction, mockWithBypassRls,
+  mockPrismaTransaction, mockWithBypassRls, mockQueryRaw,
 } = vi.hoisted(() => {
+  // assertCurrentKeyVersion-style row lock — the early users FOR UPDATE
+  // added for lock-order consistency with rotation. Result value is
+  // irrelevant (the reset body doesn't read it), so any resolved value works.
+  const mockQueryRaw = vi.fn().mockResolvedValue([{ id: "user-1" }]);
+
   // Shared tx client mock — used inside the $transaction callback
   const txClient = {
     user: { update: vi.fn() },
@@ -18,6 +23,7 @@ const {
     emergencyAccessGrant: { updateMany: vi.fn() },
     teamMemberKey: { deleteMany: vi.fn() },
     teamMember: { updateMany: vi.fn() },
+    $queryRaw: mockQueryRaw,
   };
 
   return {
@@ -31,6 +37,7 @@ const {
     mockPrismaEmergencyGrant: txClient.emergencyAccessGrant,
     mockPrismaTeamMemberKey: txClient.teamMemberKey,
     mockPrismaTeamMember: txClient.teamMember,
+    mockQueryRaw,
     // Execute the callback with the tx client so individual model mocks are invoked
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockPrismaTransaction: vi.fn((cb: any) => cb(txClient)),
@@ -53,6 +60,7 @@ vi.mock("@/lib/prisma", () => ({
     teamMemberKey: mockPrismaTeamMemberKey,
     teamMember: mockPrismaTeamMember,
     $transaction: mockPrismaTransaction,
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -82,6 +90,7 @@ describe("executeVaultReset", () => {
     mockPrismaTeamMemberKey.deleteMany.mockResolvedValue({ count: 1 });
     mockPrismaTeamMember.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
+    mockQueryRaw.mockResolvedValue([{ id: "user-1" }]);
     // Re-bind withBypassRls to invoke its callback (cleared by clearAllMocks)
     mockWithBypassRls.mockImplementation(
       (prismaArg: unknown, fn: (tx: unknown) => unknown) => fn(prismaArg),
@@ -99,6 +108,7 @@ describe("executeVaultReset", () => {
         teamMemberKey: mockPrismaTeamMemberKey,
         teamMember: mockPrismaTeamMember,
         user: mockPrismaUser,
+        $queryRaw: mockQueryRaw,
       })
     );
   });

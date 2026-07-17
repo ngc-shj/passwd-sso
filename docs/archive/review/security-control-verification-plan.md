@@ -629,3 +629,26 @@ vault-wrapping-writer set. All contracts locked.
    route can ship unclassified.
 5. Two admins race approve/revoke on a master-key rotation → exactly one transition wins; the
    loser sees the standard 409; no double-execution of the system-wide share revocation.
+
+## Implementation Checklist (Phase 2 Step 2-1)
+
+### Reusable helpers (MUST reuse — R1/R17)
+- `advisoryXactLock(client: Pick<Prisma.TransactionClient,"$executeRaw">, key)` — `src/lib/tenant-rls.ts:88` (precedent for the narrowed-tx-client param type; new `assertCurrentKeyVersion` mirrors it with `$queryRaw`)
+- `withUserTenantRls<T>(userId, fn)` — `src/lib/tenant-context.ts:38` (opens the RLS tx that the ambient-proxy folds service calls into)
+- Error envelope: `API_ERROR` (`api-error-codes.ts:19`), `API_ERROR_STATUS` (:285), `API_ERROR_I18N` (:517) — all three are `satisfies`-exhaustive; adding a code requires all three + `messages/{en,ja}/ApiErrors.json`
+- `TeamPasswordServiceError` pattern (`team-password-service.ts:87`) — precedent for the typed `KeyVersionMismatchError`
+- Check self-test fixture harness: `scripts/__tests__/fixtures/` + env-override idiom (`STEPUP_GUARD_*` in `check-permanent-delete-stepup.sh`)
+- `CURRENT_CEK_WRAP_AAD_VERSION` — `src/lib/crypto/crypto-aad.ts:329` (C11, no new literal)
+- `deleteSignal`/`writePrimitive`/`rawSql` regex source — `scripts/checks/route-class-patterns.json`
+
+### CI gate parity (Step 2-1 item 7)
+CI static-checks runs `PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh`. New C1/C4 checks wired into the pre-pr static section propagate to CI automatically — NO parity gap. New `.test.mjs` files run via `vitest.config.ts` include (`scripts/__tests__/**`). New `*.integration.test.ts` run via the CI integration job path filters. Env-parity: new checks are pure source/schema grep — no generated-artifact dependency.
+
+### Files to create/modify (by contract)
+- C1: `scripts/checks/check-gate-selftest-coverage.sh` (new) + `scripts/checks/gate-selftest-debt.txt` (new) + `scripts/__tests__/check-gate-selftest-coverage.test.mjs` (new) + `scripts/pre-pr.sh` (wire)
+- C2: 8 new `scripts/__tests__/check-*.test.mjs` + scan-root/fixture-mode overrides in the 8 gate scripts + `scripts/__tests__/fixtures/gate-selftest/*`
+- C3: `scripts/checks/gate-selftest-debt.txt` content (10 non-security + ~17 inline gate entries)
+- C4: `scripts/checks/check-destructive-wrapper-derivation.mjs` (new) + `scripts/checks/destructive-wrapper-exempt.txt` (new) + `scripts/checks/route-class-patterns.json` (add `user.delete`) + `scripts/__tests__/check-destructive-wrapper-derivation.test.mjs` (new) + `scripts/pre-pr.sh` (wire)
+- C5: `src/lib/vault/key-version-guard.ts` (new helper + `KeyVersionMismatchError`) + `api-error-codes.ts` (KEY_VERSION_MISMATCH + 3 maps) + `messages/{en,ja}/ApiErrors.json` + `passwords/[id]/route.ts` + `v1/passwords/[id]/route.ts` + `v1/passwords/route.ts` + `personal-password-service.ts` + `bulk-import/route.ts` + `history/[historyId]/restore/route.ts` + `rotate-key-server.ts` (tuple-CAS) + `rotate-key/route.ts` (add accountSalt to select, pass snapshot) + `vault-reset.ts` (early user FOR UPDATE) + `scripts/checks/raw-sql-usage.txt` (3 entries) + route/service tests
+- C6-C10: `src/__tests__/db-integration/*.integration.test.ts` (new)
+- C11: `rotate-key-server.ts` (rewrap equality) + `attachments/route.ts` + migrate route (equality checks) + integration tests

@@ -12,6 +12,7 @@ import type { TxOrPrisma } from "@/lib/prisma";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { dedupeTagIds, tagConnect } from "@/lib/services/tag-relation";
 import type { createE2EPasswordSchema } from "@/lib/validations";
+import { assertCurrentKeyVersion } from "@/lib/vault/key-version-guard";
 
 type CreatePersonalPasswordInput = z.infer<typeof createE2EPasswordSchema>;
 
@@ -48,6 +49,11 @@ export async function createPersonalPasswordEntry(
     requireReprompt,
     expiresAt,
   } = input;
+
+  // MUST run inside the caller's open transaction — see key-version-guard.ts
+  // header. The ambient-RLS Prisma proxy folds this call into the surrounding
+  // withUserTenantRls transaction at every current call site.
+  await assertCurrentKeyVersion(db, userId, keyVersion);
 
   if (folderId) {
     const folder = await db.folder.findFirst({ where: { id: folderId, userId } });

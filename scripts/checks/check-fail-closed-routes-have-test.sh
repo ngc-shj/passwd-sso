@@ -26,7 +26,29 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-DEBT_FILE="$REPO_ROOT/scripts/checks/fail-closed-test-debt.txt"
+# FIXTURE_ROOT is a SINGLE override covering BOTH inputs (the route-scan
+# root under src/app/api AND the debt file) so the self-test
+# (scripts/__tests__/check-fail-closed-routes-have-test.test.mjs) can never
+# end up scanning fixture routes against the real repo's debt file or vice
+# versa (test-F10, multi-input gate). Production CI uses the default (repo
+# root / scripts/checks/fail-closed-test-debt.txt).
+FIXTURE_ROOT="${FAIL_CLOSED_TEST_ROOT:-$REPO_ROOT}"
+DEBT_FILE="${FAIL_CLOSED_TEST_DEBT_FILE:-$FIXTURE_ROOT/scripts/checks/fail-closed-test-debt.txt}"
+
+# CI-auditable: print effective scan path on one line.
+echo "check-fail-closed-routes-have-test: FIXTURE_ROOT=$FIXTURE_ROOT DEBT_FILE=$DEBT_FILE"
+
+# sec-F6: env-pollution guard. Any override + CI=true requires an explicit
+# fixture-mode acknowledgement, so a stray `export` leaking into a real CI
+# run cannot silently point the gate at an empty fixture dir and green it.
+if [ "${CI:-}" = "true" ]; then
+  if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ] || [ -n "${FAIL_CLOSED_TEST_DEBT_FILE:-}" ]; then
+    if [ "${FAIL_CLOSED_TEST_FIXTURE_MODE:-}" != "1" ]; then
+      echo "ENV_POLLUTION_GUARD: FAIL_CLOSED_TEST_* override set under CI=true without FAIL_CLOSED_TEST_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
+      exit 1
+    fi
+  fi
+fi
 
 # Build allowlist (paths only, no comments, no blanks). bash 3.2 has no
 # associative arrays (`declare -A`), so keep a newline-delimited list and
@@ -56,8 +78,8 @@ routes=()
 while IFS= read -r route_line; do
   [ -n "$route_line" ] && routes+=("$route_line")
 done < <(
-  grep -rln 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" 2>/dev/null \
-    | sed "s|^$REPO_ROOT/||" \
+  grep -rln 'failClosedOnRedisError: true' "$FIXTURE_ROOT/src/app/api" 2>/dev/null \
+    | sed "s|^$FIXTURE_ROOT/||" \
     | sort
 )
 
@@ -73,10 +95,10 @@ for route in ${routes[@]+"${routes[@]}"}; do
   rel_no_route="${rel_path%/route.ts}" # X
   alt_test="src/__tests__/api/${rel_no_route}.test.ts"
 
-  if grep -q "redisErrored" "$REPO_ROOT/$adjacent_test" 2>/dev/null; then
+  if grep -q "redisErrored" "$FIXTURE_ROOT/$adjacent_test" 2>/dev/null; then
     continue # has fail-closed test
   fi
-  if grep -q "redisErrored" "$REPO_ROOT/$alt_test" 2>/dev/null; then
+  if grep -q "redisErrored" "$FIXTURE_ROOT/$alt_test" 2>/dev/null; then
     continue
   fi
   if is_debt "$route"; then
@@ -92,6 +114,15 @@ if [ "$fail" -ne 0 ]; then
   echo "Add a fail-closed test case OR add the route to scripts/checks/fail-closed-test-debt.txt."
   echo "See docs/archive/review/rate-limit-fail-closed-on-redis-plan.md AC4.3."
   exit 1
+fi
+
+# AC4.4/AC4.5 are a whole-repo invariant (an exact expected limiter/callsite
+# count for THIS codebase) — meaningless against an isolated fixture tree, so
+# they are skipped whenever FIXTURE_ROOT is overridden (self-test scope is
+# the MISSING_FAIL_CLOSED_TEST pass criterion above, not these repo-wide
+# counts; the "real repo, no overrides" self-test case still exercises them).
+if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ] || [ -n "${FAIL_CLOSED_TEST_DEBT_FILE:-}" ]; then
+  exit 0
 fi
 
 # AC4.4 / AC4.5 — limiter / branch count parity. Plan locks 50 limiter

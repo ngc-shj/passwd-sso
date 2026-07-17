@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
@@ -7,6 +7,7 @@ import {
 } from "@/lib/validations/common";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
 // ── Error classes ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,19 @@ export class LegacyAttachmentInconsistentVersionError extends Error {
 }
 
 /**
+ * A rewrap manifest entry carries a cekWrapAadVersion that does not match
+ * the current format. Written at upload/migrate time, this defends the
+ * rotation write itself (in addition to the pre-write validation at those
+ * boundaries) so a bad value can never reach the DB via rotation either.
+ */
+export class AttachmentCekWrapAadVersionMismatchError extends Error {
+  constructor() {
+    super("ATTACHMENT_CEK_WRAP_AAD_VERSION_MISMATCH");
+    this.name = "AttachmentCekWrapAadVersionMismatchError";
+  }
+}
+
+/**
  * Post-write sanity check failed — some mode-2 attachments still have the
  * old cekKeyVersion. Transaction must be rolled back.
  */
@@ -45,6 +59,22 @@ export class RotationPostConditionError extends Error {
   constructor() {
     super("ROTATION_POST_CONDITION_FAILED");
     this.name = "RotationPostConditionError";
+  }
+}
+
+/**
+ * Pre-write CAS failed on the users row: the in-tx (key_version,
+ * vault_setup_at, account_salt) tuple no longer matches the caller's pre-tx
+ * snapshot, or vault_setup_at is NULL (vault reset mid-flight). The
+ * discriminator is derived from the full set of vault-wrapping writers
+ * (setup, change-passphrase, recover, rotation itself), not just keyVersion —
+ * account_salt catches change-passphrase/recover rewraps that leave
+ * keyVersion unchanged.
+ */
+export class RotationCasConflictError extends Error {
+  constructor() {
+    super("ROTATION_CAS_CONFLICT");
+    this.name = "RotationCasConflictError";
   }
 }
 
@@ -132,6 +162,8 @@ export interface RotationEffects {
  * @param newServerHash - Pre-computed PBKDF2+salt hash of newAuthHash
  * @param newServerSalt - Fresh random salt used for newServerHash
  * @param payload     - Validated rotation request payload
+ * @param oldVaultSetupAt - Pre-tx snapshot of users.vaultSetupAt (CAS tuple member)
+ * @param oldAccountSalt  - Pre-tx snapshot of users.accountSalt (CAS tuple member)
  */
 export async function applyVaultRotation(
   tx: Prisma.TransactionClient,
@@ -142,6 +174,8 @@ export async function applyVaultRotation(
   newServerHash: string,
   newServerSalt: string,
   payload: RotationPayload,
+  oldVaultSetupAt: Date | null,
+  oldAccountSalt: string,
 ): Promise<RotationEffects> {
   const {
     entries,
@@ -152,6 +186,32 @@ export async function applyVaultRotation(
     attachmentCekRewraps,
     legacyAttachmentsMigratedThisCycle,
   } = payload;
+
+  // ── Pre-write CAS on the users row (FIRST statement, lock order users→
+  // password_entries) ──────────────────────────────────────────────────────
+  // Reject if the wrapping state has moved since the caller's pre-tx read —
+  // catches a concurrent rotation, reset, change-passphrase, or recover that
+  // committed in between. account_salt is included because change-passphrase
+  // and recover rewrite it without touching keyVersion/vaultSetupAt.
+  type UsersCasRow = { key_version: number; vault_setup_at: Date | null; account_salt: string | null };
+  const [casRow] = await tx.$queryRaw<UsersCasRow[]>`
+    SELECT key_version, vault_setup_at, account_salt FROM users WHERE id = ${userId}::uuid FOR UPDATE
+  `;
+  const casVaultSetupAtMatches =
+    casRow?.vault_setup_at === null
+      ? oldVaultSetupAt === null
+      : casRow?.vault_setup_at !== undefined &&
+        oldVaultSetupAt !== null &&
+        casRow.vault_setup_at.getTime() === oldVaultSetupAt.getTime();
+  if (
+    !casRow ||
+    casRow.vault_setup_at === null ||
+    casRow.key_version !== oldKeyVersion ||
+    !casVaultSetupAtMatches ||
+    casRow.account_salt !== oldAccountSalt
+  ) {
+    throw new RotationCasConflictError();
+  }
 
   // ── Defensive guard A: no mode-0 residual ───────────────────────────────
   const mode0Residual = await tx.attachment.count({
@@ -301,6 +361,13 @@ export async function applyVaultRotation(
   let cekRewrapsFailed = 0;
 
   for (const rewrap of attachmentCekRewraps) {
+    // Defense-in-depth: the upload/migrate boundaries already pin this to
+    // the current format, but assert again here so a rewrap can never write
+    // a stale value — closes the deferred-failure DoS where a bad value
+    // written elsewhere only surfaces at the NEXT rotation's post-write sweep.
+    if (rewrap.cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION) {
+      throw new AttachmentCekWrapAadVersionMismatchError();
+    }
     const updateResult = await tx.attachment.updateMany({
       where: {
         id: rewrap.id,
@@ -360,16 +427,28 @@ export async function applyVaultRotation(
     },
   });
 
-  await tx.vaultKey.create({
-    data: {
-      userId,
-      tenantId,
-      version: newKeyVersion,
-      verificationCiphertext: payload.verificationArtifact.ciphertext,
-      verificationIv: payload.verificationArtifact.iv,
-      verificationAuthTag: payload.verificationArtifact.authTag,
-    },
-  });
+  try {
+    await tx.vaultKey.create({
+      data: {
+        userId,
+        tenantId,
+        version: newKeyVersion,
+        verificationCiphertext: payload.verificationArtifact.ciphertext,
+        verificationIv: payload.verificationArtifact.iv,
+        verificationAuthTag: payload.verificationArtifact.authTag,
+      },
+    });
+  } catch (err) {
+    // A retried rotation whose newKeyVersion collides with an existing
+    // VaultKey row (@@unique([userId, version])) — e.g. a client retry after
+    // a response was lost, replaying the same target version — must map to
+    // the same rotation-conflict error as the CAS above, not surface a bare
+    // Prisma unique-violation as an unhandled 500 with no envelope.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      throw new RotationCasConflictError();
+    }
+    throw err;
+  }
 
   // ── Clear PRF wrapping ─────────────────────────────────────────────────
   const prfClearResult = await tx.webAuthnCredential.updateMany({

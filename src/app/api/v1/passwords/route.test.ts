@@ -11,6 +11,7 @@ const {
   mockTagCount,
   mockLogAudit,
   mockWithTenantRls,
+  mockQueryRaw,
 } = vi.hoisted(() => ({
   mockValidateApiKeyOnly: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
@@ -21,6 +22,9 @@ const {
   mockTagCount: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE` —
+  // default matches validBody.keyVersion (1) so the guard passes.
+  mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
 }));
 
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
@@ -33,6 +37,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: { findMany: mockEntryFindMany, create: mockEntryCreate },
     folder: { findFirst: mockFolderFindFirst },
     tag: { count: mockTagCount },
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
@@ -328,6 +333,7 @@ describe("POST /api/v1/passwords", () => {
     mockFolderFindFirst.mockResolvedValue({ id: "folder-1" });
     mockTagCount.mockResolvedValue(1);
     mockEntryCreate.mockResolvedValue(createdEntry);
+    mockQueryRaw.mockResolvedValue([{ key_version: 1 }]);
   });
 
   it("returns 401 when API key is missing or invalid", async () => {

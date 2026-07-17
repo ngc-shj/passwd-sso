@@ -27,8 +27,32 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-API_DIR="$REPO_ROOT/src/app/api"
-ALLOWLIST="$REPO_ROOT/scripts/checks/raw-body-read-allowlist.txt"
+# API_DIR / ALLOWLIST are overridable so the self-test
+# (scripts/__tests__/check-raw-body-read.test.mjs) can point the guard at a
+# fixture tree. Production CI uses the defaults. Mirrors the STEPUP_GUARD_*
+# scan-root idiom (check-permanent-delete-stepup.sh).
+API_DIR="${RAW_BODY_READ_API_DIR:-$REPO_ROOT/src/app/api}"
+ALLOWLIST="${RAW_BODY_READ_ALLOWLIST:-$REPO_ROOT/scripts/checks/raw-body-read-allowlist.txt}"
+# PATH_ROOT: reported/allowlisted paths are stripped of PATH_ROOT/ so they
+# print repo-relative even when API_DIR is a fixture tree outside the repo
+# (mirrors STEPUP_GUARD_PATH_ROOT).
+PATH_ROOT="${RAW_BODY_READ_PATH_ROOT:-$REPO_ROOT}"
+
+# CI-auditable: print effective scan path on one line.
+echo "check-raw-body-read: API_DIR=$API_DIR ALLOWLIST=$ALLOWLIST PATH_ROOT=$PATH_ROOT"
+
+# sec-F6: env-pollution guard. Any override + CI=true requires an explicit
+# fixture-mode acknowledgement, so a stray `export` leaking into a real CI
+# run cannot silently point the gate at an empty fixture dir and green it.
+if [ "${CI:-}" = "true" ]; then
+  if [ -n "${RAW_BODY_READ_API_DIR:-}" ] || [ -n "${RAW_BODY_READ_ALLOWLIST:-}" ] || \
+     [ -n "${RAW_BODY_READ_PATH_ROOT:-}" ]; then
+    if [ "${RAW_BODY_READ_FIXTURE_MODE:-}" != "1" ]; then
+      echo "ENV_POLLUTION_GUARD: RAW_BODY_READ_* override set under CI=true without RAW_BODY_READ_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
+      exit 1
+    fi
+  fi
+fi
 
 # Normalize allowlist into a newline-delimited list (bash 3.2: no assoc arrays).
 ALLOW_LIST=""
@@ -50,7 +74,7 @@ is_allowed() {
 fail=0
 while IFS= read -r file; do
   [ -n "$file" ] || continue
-  rel="${file#"$REPO_ROOT"/}"
+  rel="${file#"$PATH_ROOT"/}"
   is_allowed "$rel" && continue
 
   # (1) + (2): text() / arrayBuffer() are never allowed in routes.

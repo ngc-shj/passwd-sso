@@ -1,0 +1,20 @@
+# Destructive-wrapper exempt allowlist (check-destructive-wrapper-derivation.mjs).
+#
+# Every exported function that wraps a raw destructive-delete primitive
+# (passwordEntry.delete(Many)?, teamPasswordEntry.delete(Many)?, team.delete,
+# user.delete) must EITHER be matched by route-class-patterns.json#deleteSignal
+# (so any route calling it classifies as a vault-destruction route for
+# check-permanent-delete-stepup.sh) OR be listed here with a reason.
+#
+# Format: `<path>#<functionName>  # reason` — exact path#function match
+# (grep -qxF semantics), NOT a bare function name (a bare name would silently
+# exempt a same-named function in another file). One entry per line. Lines
+# beginning with `#` are full-line comments.
+#
+# Adding an entry here is a security decision: it declares the wrapper is
+# NOT route-reachable (so step-up classification does not apply to it), not a
+# convenience to silence the guard.
+
+src/lib/auth/session/auth-adapter.ts#createCustomAdapter  # Auth.js adapter callback (deleteUser, via tx.user.delete) — invoked only by the Auth.js session-deletion lifecycle hook, not reachable from an application route handler; not classified by deleteSignal.
+
+src/workers/retention-gc-worker/sweep.ts#sweepTrashEntry  # retention-gc-worker sweep function (tx.teamPasswordEntry.deleteMany / tx.passwordEntry.deleteMany, trash-retention purge) — worker-only, not route-reachable; governed by scripts/checks/worker-policy-manifest.json (retention-gc-worker entry), not the route-level step-up guard.

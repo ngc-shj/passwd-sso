@@ -18,7 +18,7 @@ import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-q
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
+import { AAD_VERSION, CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, notFound, unauthorized, rateLimited, validationError } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
@@ -188,7 +188,11 @@ async function handlePOST(
     return validationError();
   }
   const cekWrapAadVersion = parseInt(cekWrapAadVersionStr, 10);
-  if (Number.isNaN(cekWrapAadVersion) || cekWrapAadVersion < 1) {
+  // Pinned to exactly the current format (mirrors the sibling aadVersion
+  // check below) — a floor-only check would let a bad value lie dormant
+  // until the next rotation, which aborts with RotationPostConditionError
+  // and leaves the user's vault permanently stuck short of a DB row edit.
+  if (Number.isNaN(cekWrapAadVersion) || cekWrapAadVersion !== CURRENT_CEK_WRAP_AAD_VERSION) {
     return validationError();
   }
   // Cap cekEncrypted base64 length at the trust boundary so a malformed

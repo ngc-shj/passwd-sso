@@ -11,6 +11,7 @@ const {
   mockWithUserTenantRls,
   mockRateLimiterCheck,
   mockLogAudit,
+  mockQueryRaw,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -23,6 +24,9 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
   mockLogAudit: vi.fn(),
+  // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE`
+  // — default matches makeEntry()'s keyVersion (1) so the guard passes.
+  mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -33,6 +37,7 @@ vi.mock("@/lib/prisma", () => ({
     tag: mockPrismaTag,
     user: mockPrismaUser,
     auditLog: { create: mockAuditCreate },
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -84,6 +89,7 @@ describe("POST /api/passwords/bulk-import", () => {
     mockPrismaPasswordEntry.create.mockImplementation(({ data }: { data: { id?: string } }) =>
       Promise.resolve({ id: data.id ?? "generated-id" }),
     );
+    mockQueryRaw.mockResolvedValue([{ key_version: 1 }]);
   });
 
   it("returns 401 when unauthenticated", async () => {

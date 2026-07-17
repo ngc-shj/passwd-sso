@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockTransaction, mockHistoryCreate, mockHistoryFindMany, mockHistoryDeleteMany, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockTransaction, mockHistoryCreate, mockHistoryFindMany, mockHistoryDeleteMany, mockPrismaUser, mockWithUserTenantRls, mockQueryRaw } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockCreate: vi.fn(),
@@ -13,6 +13,10 @@ const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockT
   mockHistoryDeleteMany: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE`
+  // (createPersonalPasswordEntry, POST path) — default matches validBody's
+  // keyVersion (1) so the guard passes.
+  mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -36,6 +40,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     user: mockPrismaUser,
     $transaction: mockTransaction,
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -70,6 +75,7 @@ describe("passwords:write scope", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockQueryRaw.mockResolvedValue([{ key_version: 1 }]);
   });
 
   describe("POST /api/passwords", () => {

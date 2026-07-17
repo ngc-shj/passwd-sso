@@ -17,6 +17,7 @@ const {
   mockWithBypassRls,
   mockRateLimiterCheck,
   mockVerifyDpop,
+  mockQueryRaw,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockValidateSaToken: vi.fn(),
@@ -39,6 +40,9 @@ const {
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockRateLimiterCheck: vi.fn(),
   mockVerifyDpop: vi.fn(),
+  // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE`
+  // — default matches this file's keyVersion: 1 fixtures so the guard passes.
+  mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/tokens/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
@@ -62,6 +66,7 @@ vi.mock("@/lib/prisma", () => ({
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
     // C13: active membership by default so token validation passes the deactivation check.
     tenantMember: { findUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }) },
+    $queryRaw: mockQueryRaw,
   },
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

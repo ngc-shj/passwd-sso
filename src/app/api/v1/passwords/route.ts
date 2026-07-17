@@ -17,6 +17,7 @@ import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { dedupeTagIds, tagConnect } from "@/lib/services/tag-relation";
 import type { EntryType } from "@prisma/client";
 import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
+import { assertCurrentKeyVersion, KeyVersionMismatchError } from "@/lib/vault/key-version-guard";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -146,43 +147,53 @@ async function handlePOST(req: NextRequest) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, entryType, requireReprompt, expiresAt } = result.data;
 
-  const createResult = await withTenantRls(prisma, tenantId, async (tx) => {
-    if (folderId) {
-      const folder = await tx.folder.findFirst({ where: { id: folderId, userId } });
-      if (!folder) return { error: "INVALID_FOLDER" as const };
-    }
+  let createResult;
+  try {
+    createResult = await withTenantRls(prisma, tenantId, async (tx) => {
+      await assertCurrentKeyVersion(tx, userId, keyVersion);
 
-    // Normalize duplicates: a caller-supplied duplicate (e.g. ["t1","t1"])
-    // should not count as a missing tag — tag.count returns distinct row count,
-    // so compare against the deduped input length, not the raw array length.
-    // Mirrors team-password-service.ts.
-    if (tagIds?.length) {
-      const uniqueTagIds = dedupeTagIds(tagIds);
-      const ownedCount = await tx.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
-      if (ownedCount !== uniqueTagIds.length) return { error: "INVALID_TAGS" as const };
-    }
+      if (folderId) {
+        const folder = await tx.folder.findFirst({ where: { id: folderId, userId } });
+        if (!folder) return { error: "INVALID_FOLDER" as const };
+      }
 
-    const entry = await tx.passwordEntry.create({
-      data: {
-        ...(clientId ? { id: clientId } : {}),
-        ...toBlobColumns(encryptedBlob),
-        ...toOverviewColumns(encryptedOverview),
-        keyVersion,
-        aadVersion,
-        entryType,
-        ...(isFavorite !== undefined ? { isFavorite } : {}),
-        ...(requireReprompt !== undefined ? { requireReprompt } : {}),
-        ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
-        ...(folderId ? { folderId } : {}),
-        userId,
-        tenantId,
-        ...(tagIds?.length ? { tags: tagConnect(tagIds) } : {}),
-      },
-      include: { tags: { select: { id: true } } },
+      // Normalize duplicates: a caller-supplied duplicate (e.g. ["t1","t1"])
+      // should not count as a missing tag — tag.count returns distinct row count,
+      // so compare against the deduped input length, not the raw array length.
+      // Mirrors team-password-service.ts.
+      if (tagIds?.length) {
+        const uniqueTagIds = dedupeTagIds(tagIds);
+        const ownedCount = await tx.tag.count({ where: { id: { in: uniqueTagIds }, userId } });
+        if (ownedCount !== uniqueTagIds.length) return { error: "INVALID_TAGS" as const };
+      }
+
+      const entry = await tx.passwordEntry.create({
+        data: {
+          ...(clientId ? { id: clientId } : {}),
+          ...toBlobColumns(encryptedBlob),
+          ...toOverviewColumns(encryptedOverview),
+          keyVersion,
+          aadVersion,
+          entryType,
+          ...(isFavorite !== undefined ? { isFavorite } : {}),
+          ...(requireReprompt !== undefined ? { requireReprompt } : {}),
+          ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
+          ...(folderId ? { folderId } : {}),
+          userId,
+          tenantId,
+          ...(tagIds?.length ? { tags: tagConnect(tagIds) } : {}),
+        },
+        include: { tags: { select: { id: true } } },
+      });
+
+      return { entry };
     });
-
-    return { entry };
-  });
+  } catch (e) {
+    if (e instanceof KeyVersionMismatchError) {
+      return errorResponse(API_ERROR.KEY_VERSION_MISMATCH);
+    }
+    throw e;
+  }
 
   if ("error" in createResult) {
     const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";

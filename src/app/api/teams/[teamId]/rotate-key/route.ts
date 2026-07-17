@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -231,6 +232,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
+      return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
+    }
+    // A concurrent rotation that lost the CAS race can still collide on the
+    // teamMemberKey @@unique([teamId, userId, keyVersion]) createMany before its
+    // non-locking findUnique re-read observes the winner's bump. Map that P2002
+    // to the same 409 conflict shape as the CAS, not a bare unhandled 500 —
+    // mirrors the personal VaultKey P2002 mapping in rotate-key-server.ts.
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
       return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH);
     }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {

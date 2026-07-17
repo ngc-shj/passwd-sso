@@ -26,7 +26,16 @@ const {
     key_version: 9,
     aad_version: 7,
   };
-  const mockQueryRaw = vi.fn().mockResolvedValue([curRow]);
+  // Discriminate by SQL text: assertCurrentKeyVersion's `FROM users` guard
+  // read must return a DIFFERENT row than the entry `FOR UPDATE` snapshot
+  // read — a single blanket mock would vacuously satisfy both (test-F4).
+  const mockQueryRaw = vi.fn().mockImplementation((tpl: TemplateStringsArray) => {
+    const sql = tpl.join("?");
+    if (/FROM users/i.test(sql)) {
+      return Promise.resolve([{ key_version: 2 }]);
+    }
+    return Promise.resolve([curRow]);
+  });
 
   return {
     mockValidateApiKeyOnly: vi.fn(),
@@ -248,8 +257,16 @@ describe("PUT /api/v1/passwords/[id]", () => {
     mockHistoryFindMany.mockResolvedValue([]);
     mockHistoryDeleteMany.mockResolvedValue({ count: 0 });
     mockEntryUpdate.mockResolvedValue(updatedEntry);
-    // Restore default FOR UPDATE result (clearAllMocks clears it each run)
-    mockQueryRaw.mockResolvedValue([V1_CUR_ROW]);
+    // Restore the discriminated default (clearAllMocks clears it each run):
+    // `FROM users` (assertCurrentKeyVersion) → key_version matching
+    // updateBody.keyVersion (2) so the guard passes; entry FOR UPDATE → V1_CUR_ROW.
+    mockQueryRaw.mockImplementation((tpl: TemplateStringsArray) => {
+      const sql = tpl.join("?");
+      if (/FROM users/i.test(sql)) {
+        return Promise.resolve([{ key_version: 2 }]);
+      }
+      return Promise.resolve([V1_CUR_ROW]);
+    });
   });
 
   it("returns 401 when API key is missing or invalid", async () => {
@@ -375,8 +392,13 @@ describe("PUT /api/v1/passwords/[id]", () => {
   // C1: FOR UPDATE snapshot source and SQL text guard
   it("C1: $queryRaw FOR UPDATE is issued before History.create on blob-changing PUT", async () => {
     const callOrder: string[] = [];
-    mockQueryRaw.mockImplementation(() => {
-      callOrder.push("$queryRaw");
+    mockQueryRaw.mockImplementation((tpl: TemplateStringsArray) => {
+      const sql = tpl.join("?");
+      if (/FROM users/i.test(sql)) {
+        callOrder.push("$queryRaw:users");
+        return Promise.resolve([{ key_version: 2 }]);
+      }
+      callOrder.push("$queryRaw:entries");
       return Promise.resolve([V1_CUR_ROW]);
     });
     mockHistoryCreate.mockImplementation(() => {
@@ -389,7 +411,9 @@ describe("PUT /api/v1/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    expect(callOrder.indexOf("$queryRaw")).toBeLessThan(callOrder.indexOf("historyCreate"));
+    // Both queryRaw reads (user guard, then entry FOR UPDATE) precede History.create.
+    expect(callOrder.indexOf("$queryRaw:users")).toBeLessThan(callOrder.indexOf("$queryRaw:entries"));
+    expect(callOrder.indexOf("$queryRaw:entries")).toBeLessThan(callOrder.indexOf("historyCreate"));
   });
 
   it("C1: FOR UPDATE SQL contains table name and required crypto columns", async () => {
@@ -398,9 +422,16 @@ describe("PUT /api/v1/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
 
-    expect(mockQueryRaw).toHaveBeenCalled();
-    const [tpl] = mockQueryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-    const sql = tpl.join("?");
+    expect(mockQueryRaw).toHaveBeenCalledTimes(2);
+    // Two distinct queryRaw reads now fire: assertCurrentKeyVersion's `FROM
+    // users` guard, then the entry FOR UPDATE snapshot — find the latter by
+    // SQL text rather than assuming call index.
+    const entryCall = mockQueryRaw.mock.calls.find(([tpl]) => {
+      const sqlText = (tpl as TemplateStringsArray).join("?");
+      return /FROM password_entries/i.test(sqlText);
+    }) as [TemplateStringsArray, ...unknown[]] | undefined;
+    expect(entryCall).toBeDefined();
+    const sql = entryCall![0].join("?");
     expect(sql).toMatch(/FOR UPDATE/i);
     expect(sql).toMatch(/password_entries/i);
     expect(sql).toMatch(/encrypted_blob/i);
@@ -429,7 +460,16 @@ describe("PUT /api/v1/passwords/[id]", () => {
 
   // F1: race — entry deleted between early read and FOR UPDATE lock
   it("F1: returns 404 when $queryRaw FOR UPDATE returns empty (concurrent delete)", async () => {
-    mockQueryRaw.mockResolvedValue([]); // row gone by the time the lock fires
+    // Only the entry FOR UPDATE read returns empty (row gone by the time the
+    // lock fires) — the users guard read must still resolve normally so this
+    // test isolates the entry-delete race, not a keyVersion mismatch.
+    mockQueryRaw.mockImplementation((tpl: TemplateStringsArray) => {
+      const sql = tpl.join("?");
+      if (/FROM users/i.test(sql)) {
+        return Promise.resolve([{ key_version: 2 }]);
+      }
+      return Promise.resolve([]);
+    });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost/api/v1/passwords/${PW_ID}`, { body: updateBody }),

@@ -13,7 +13,24 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IOS_DIR="$REPO_ROOT/ios"
+# IOS_DIR is overridable so the self-test
+# (scripts/__tests__/check-ios-no-diagnostic-logging.test.mjs) can point the
+# guard at a fixture tree. Production CI uses the default. Mirrors the
+# STEPUP_GUARD_* scan-root idiom (check-permanent-delete-stepup.sh).
+IOS_DIR="${IOS_DIAG_GUARD_IOS_DIR:-$REPO_ROOT/ios}"
+
+# CI-auditable: print effective scan path on one line.
+echo "check-ios-no-diagnostic-logging: IOS_DIR=$IOS_DIR"
+
+# sec-F6: env-pollution guard. Any override + CI=true requires an explicit
+# fixture-mode acknowledgement, so a stray `export` leaking into a real CI
+# run cannot silently point the gate at an empty fixture dir and green it.
+if [ "${CI:-}" = "true" ] && [ -n "${IOS_DIAG_GUARD_IOS_DIR:-}" ]; then
+  if [ "${IOS_DIAG_GUARD_FIXTURE_MODE:-}" != "1" ]; then
+    echo "ENV_POLLUTION_GUARD: IOS_DIAG_GUARD_IOS_DIR override set under CI=true without IOS_DIAG_GUARD_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path." >&2
+    exit 1
+  fi
+fi
 
 fail=0
 
