@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockCheckAuth,
@@ -10,6 +11,7 @@ const {
   mockWithUserTenantRls,
   mockRateLimitCheck,
   mockRequireRecentSession,
+  mockCreateRateLimiter,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaApiKey: {
@@ -22,13 +24,14 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimitCheck, clear: vi.fn() })),
 }));
 
 vi.mock("@/lib/auth/session/check-auth", () => ({
   checkAuth: mockCheckAuth,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -69,6 +72,19 @@ vi.mock("@/lib/constants/auth/api-key", async (importOriginal) => {
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "./route";
+import { snapshotFactory } from "@/__tests__/helpers/fail-closed";
+
+// The module-level `apiKeyCreateLimiter = createRateLimiter(...)` call in
+// route.ts runs once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original call/result to inspect after clearAllMocks runs.
+const apiKeyCreateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const apiKeyCreateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimitCheck;
+};
 
 function authFail(status = 401) {
   return {
@@ -320,5 +336,26 @@ describe("POST /api/api-keys", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     // The count-then-create runs under a per-user advisory lock (TOCTOU fix).
     expectAdvisoryLockAcquired(mockExecuteRaw);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "session", userId: "u1" },
+    });
+
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost:3000/api/api-keys", {
+            body: { name: "Test", scope: ["passwords:read"] },
+          }),
+        ),
+      limiter: apiKeyCreateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaApiKey.create],
+      failure: { allowed: false, redisErrored: true },
+      limiterFactory: apiKeyCreateLimiterFactorySnapshot.replay(),
+    });
   });
 });

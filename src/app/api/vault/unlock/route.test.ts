@@ -2,26 +2,32 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createHash } from "crypto";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
   mockPrismaUser,
   mockPrismaVaultKey,
   mockRateLimiter,
+  mockCreateRateLimiter,
   mockCheckLockout,
   mockRecordFailure,
   mockResetLockout,
   mockWithUserTenantRls,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn(), updateMany: vi.fn() },
-  mockPrismaVaultKey: { findUnique: vi.fn() },
-  mockRateLimiter: { check: vi.fn(), clear: vi.fn() },
-  mockCheckLockout: vi.fn(),
-  mockRecordFailure: vi.fn(),
-  mockResetLockout: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiter = { check: vi.fn(), clear: vi.fn() };
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaUser: { findUnique: vi.fn(), updateMany: vi.fn() },
+    mockPrismaVaultKey: { findUnique: vi.fn() },
+    mockRateLimiter,
+    mockCreateRateLimiter: vi.fn(() => mockRateLimiter),
+    mockCheckLockout: vi.fn(),
+    mockRecordFailure: vi.fn(),
+    mockResetLockout: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  };
+});
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -30,7 +36,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn().mockReturnValue("a".repeat(64)),
@@ -49,6 +55,12 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 import { POST } from "./route";
+
+// Captured immediately after import (before any beforeEach clears mocks) —
+// the module-level `const unlockLimiter = createRateLimiter(...)` call
+// happens at import time, so this is the only point where
+// mockCreateRateLimiter.mock.calls/.results reflect that real invocation.
+const unlockLimiterFactoryRecord = snapshotFactory(mockCreateRateLimiter);
 
 const AUTH_HASH = "a".repeat(64);
 const SERVER_SALT = "b".repeat(64);
@@ -178,6 +190,20 @@ describe("POST /api/vault/unlock", () => {
     const res = await POST(makeUnlockRequest());
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    // checkLockout must resolve unlocked (default beforeEach arrangement) so
+    // the handler reaches the rate limiter before this fixture's failure
+    // takes effect.
+    await assertRedisFailClosed({
+      invoke: () => POST(makeUnlockRequest()),
+      limiter: mockRateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.updateMany, mockRecordFailure, mockResetLockout],
+      limiterFactory: unlockLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("clears rate limit on successful unlock", async () => {

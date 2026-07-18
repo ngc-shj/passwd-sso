@@ -6,19 +6,26 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 const {
   mockAuth,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockWithUserTenantRls,
   mockVerifyAuthenticationAssertion,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockWithUserTenantRls: vi.fn(),
-  mockVerifyAuthenticationAssertion: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockRateLimiterCheck,
+    // T4: recording factory so tests can attribute the limiter instance
+    // back to the failClosedOnRedisError option it was constructed with.
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
+    mockWithUserTenantRls: vi.fn(),
+    mockVerifyAuthenticationAssertion: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -59,6 +66,23 @@ vi.mock("@/lib/http/parse-body", () => ({
 }));
 
 import { POST } from "./route";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+
+// The route constructs its rate limiter once at module load
+// (`const rateLimiter = createRateLimiter({...})`). `beforeEach` clears all
+// mocks each test, wiping `mockCreateRateLimiter.mock.calls`/`.mock.results`
+// — snapshotFactory captures the real construction call/result here (module
+// scope, before any beforeEach runs) so `.replay()` can rebuild it after
+// each clear for the fail-closed helper's identity-based attribution.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiterInstance = mockCreateRateLimiter.mock.results[0]?.value as
+  | { check: typeof mockRateLimiterCheck }
+  | undefined;
+if (!rateLimiterInstance) {
+  throw new Error(
+    "route.test.ts: expected createRateLimiter to have been called once at module load",
+  );
+}
 
 // ── Test data ────────────────────────────────────────────────
 
@@ -191,6 +215,23 @@ describe("POST /api/webauthn/authenticate/verify", () => {
       prfEncryptedSecretKey: "encrypted-key",
       prfSecretKeyIv: "iv-hex",
       prfSecretKeyAuthTag: "tag-hex",
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    const req = createRequest("POST", ROUTE_URL, { body: validBody });
+
+    // verifyAuthenticationAssertion is the assertion-verify/session write
+    // primitive for this route (it performs the credential lookup + counter
+    // CAS write internally; the route itself holds no DB mock of its own —
+    // see vi.mock("@/lib/prisma", () => ({ prisma: {} })) above).
+    await assertRedisFailClosed({
+      invoke: () => POST(req),
+      limiter: rateLimiterInstance,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockVerifyAuthenticationAssertion],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
     });
   });
 });

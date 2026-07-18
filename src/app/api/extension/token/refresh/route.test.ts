@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -7,6 +8,7 @@ const {
   mockValidateExtensionToken,
   mockRevokeExtensionTokenFamily,
   mockCheck,
+  mockCreateRateLimiter,
   mockSessionFindFirst,
   mockTenantFindUnique,
   mockExtTokenUpdateMany,
@@ -18,10 +20,15 @@ const {
   mockDerivePasskeyState,
   mockRecordPasskeyAuditEmit,
   mockLogAuditAsync,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockValidateExtensionToken: vi.fn(),
   mockRevokeExtensionTokenFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheck,
+  // T4: recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
   mockSessionFindFirst: vi.fn(),
   // Returns null for idle timeout to exercise the production fallback to
   // EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT — keeps the fixture decoupled from any
@@ -46,7 +53,8 @@ const {
   }),
   mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
-}));
+  };
+});
 
 vi.mock("@/lib/auth/tokens/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
@@ -86,7 +94,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -112,9 +120,32 @@ vi.mock("@/lib/audit/audit", () => ({
     userAgent: "test",
     acceptLanguage: null,
   }),
+  // Used by emitRateLimitFailClosed (rate-limit-audit.ts) on the redisErrored
+  // path — required so the fail-closed test's void async audit emission
+  // doesn't throw inside the mock module.
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
 }));
 
 import { POST } from "./route";
+
+// The module-level `refreshLimiter = createRateLimiter(...)` call in
+// route.ts runs once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original call/result to inspect after clearAllMocks runs.
+const refreshLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const refreshLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -140,6 +171,7 @@ function validTokenResult(overrides?: Record<string, unknown>) {
 describe("POST /api/extension/token/refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCheck.mockResolvedValue({ allowed: true });
     mockExtTokenUpdateMany.mockResolvedValue({ count: 1 });
     mockExtTokenCreate.mockResolvedValue({
       expiresAt: new Date("2030-01-01"),
@@ -225,6 +257,24 @@ describe("POST /api/extension/token/refresh", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/extension/token/refresh", {
+            headers: { Authorization: "Bearer valid-token" },
+          }),
+        ),
+      limiter: refreshLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockExtTokenUpdateMany, mockExtTokenCreate],
+      limiterFactory: refreshLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 401 when Auth.js session has expired", async () => {

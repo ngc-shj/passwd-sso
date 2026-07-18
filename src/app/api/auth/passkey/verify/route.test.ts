@@ -6,6 +6,7 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 const {
   mockAssertOrigin,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockAuthorizeWebAuthn,
   mockLogAudit,
   mockPrismaFindUnique,
@@ -17,37 +18,43 @@ const {
   mockInvalidateCachedSessions,
   mockResolveEffectiveSessionTimeouts,
   mockInvalidateUserSessions,
-} = vi.hoisted(() => ({
-  mockAssertOrigin: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockAuthorizeWebAuthn: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockPrismaFindUnique: vi.fn(),
-  mockPrismaSessionDeleteMany: vi.fn(),
-  mockPrismaSessionFindMany: vi.fn(),
-  mockPrismaSessionCreate: vi.fn(),
-  mockPrismaTransaction: vi.fn(),
-  mockWithBypassRls: vi.fn(),
-  mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
-  mockResolveEffectiveSessionTimeouts: vi.fn(),
-  mockInvalidateUserSessions: vi.fn().mockResolvedValue({
-    sessions: 0,
-    extensionTokens: 0,
-    apiKeys: 0,
-    mcpAccessTokens: 0,
-    mcpRefreshTokens: 0,
-    delegationSessions: 0,
-    operatorTokens: 0,
-    cacheTombstoneFailures: 0,
-  }),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAssertOrigin: vi.fn(),
+    mockRateLimiterCheck,
+    // T4: recording factory so tests can attribute a limiter instance back
+    // to the failClosedOnRedisError option it was constructed with.
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockAuthorizeWebAuthn: vi.fn(),
+    mockLogAudit: vi.fn(),
+    mockPrismaFindUnique: vi.fn(),
+    mockPrismaSessionDeleteMany: vi.fn(),
+    mockPrismaSessionFindMany: vi.fn(),
+    mockPrismaSessionCreate: vi.fn(),
+    mockPrismaTransaction: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+    mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
+    mockResolveEffectiveSessionTimeouts: vi.fn(),
+    mockInvalidateUserSessions: vi.fn().mockResolvedValue({
+      sessions: 0,
+      extensionTokens: 0,
+      apiKeys: 0,
+      mcpAccessTokens: 0,
+      mcpRefreshTokens: 0,
+      delegationSessions: 0,
+      operatorTokens: 0,
+      cacheTombstoneFailures: 0,
+    }),
+  };
+});
 
 vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/auth/webauthn/webauthn-authorize", () => ({
@@ -118,6 +125,23 @@ import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
 } from "@/__tests__/helpers/session-cache-assertions";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+
+// The route constructs its rate limiter once at module load
+// (`const rateLimiter = createRateLimiter({...})`). `beforeEach` clears all
+// mocks each test, wiping `mockCreateRateLimiter.mock.calls`/`.mock.results`
+// — snapshotFactory captures the real construction call/result here (module
+// scope, before any beforeEach runs) so `.replay()` can rebuild it after
+// each clear for the fail-closed helper's identity-based attribution.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiterInstance = mockCreateRateLimiter.mock.results[0]?.value as
+  | { check: typeof mockRateLimiterCheck }
+  | undefined;
+if (!rateLimiterInstance) {
+  throw new Error(
+    "route.test.ts: expected createRateLimiter to have been called once at module load",
+  );
+}
 
 // ── Test data ────────────────────────────────────────────────
 
@@ -377,6 +401,24 @@ describe("POST /api/auth/passkey/verify", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      // checkIpRateLimit fails-open when extractClientIp returns null; provide
+      // an IP so the limiter is actually consulted.
+      headers: { origin: "http://localhost:3000", "x-forwarded-for": "203.0.113.5" },
+    });
+
+    await assertRedisFailClosed({
+      invoke: () => POST(req),
+      limiter: rateLimiterInstance,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaSessionCreate, mockPrismaSessionDeleteMany],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 for invalid JSON body", async () => {

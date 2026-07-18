@@ -22,27 +22,36 @@ const {
   mockSaExecuteRaw,
   mockHashToken,
   mockRequireRecentSession,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockRequireTenantPermission: vi.fn(),
-  // withTenantRls IS the transaction boundary in production: it opens the tx
-  // and passes it to fn. The mock passes the prisma mock as the tx so both the
-  // read path (accessRequest.findUnique) and the write path
-  // (serviceAccountToken.{count,create} + accessRequest.{updateMany,update})
-  // resolve to the configured mocks — no separate $transaction indirection.
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockLogAudit: vi.fn(),
-  mockAccessRequestFindUnique: vi.fn(),
-  mockAccessRequestUpdateMany: vi.fn(),
-  mockAccessRequestUpdate: vi.fn(),
-  mockTenantFindUnique: vi.fn(),
-  mockSaTokenCount: vi.fn(),
-  mockSaTokenCreate: vi.fn(),
-  mockSaExecuteRaw: vi.fn().mockResolvedValue(0),
-  mockHashToken: vi.fn().mockReturnValue("hashed-token"),
-  mockRequireRecentSession: vi.fn().mockResolvedValue(null),
-}));
+  mockRateLimiterCheck,
+  mockCreateRateLimiter,
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockAuth: vi.fn(),
+    mockRequireTenantPermission: vi.fn(),
+    // withTenantRls IS the transaction boundary in production: it opens the tx
+    // and passes it to fn. The mock passes the prisma mock as the tx so both the
+    // read path (accessRequest.findUnique) and the write path
+    // (serviceAccountToken.{count,create} + accessRequest.{updateMany,update})
+    // resolve to the configured mocks — no separate $transaction indirection.
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockLogAudit: vi.fn(),
+    mockAccessRequestFindUnique: vi.fn(),
+    mockAccessRequestUpdateMany: vi.fn(),
+    mockAccessRequestUpdate: vi.fn(),
+    mockTenantFindUnique: vi.fn(),
+    mockSaTokenCount: vi.fn(),
+    mockSaTokenCreate: vi.fn(),
+    mockSaExecuteRaw: vi.fn().mockResolvedValue(0),
+    mockHashToken: vi.fn().mockReturnValue("hashed-token"),
+    mockRequireRecentSession: vi.fn().mockResolvedValue(null),
+    mockRateLimiterCheck,
+    // T4: recording factory so tests can attribute the limiter instance
+    // back to the failClosedOnRedisError option it was constructed with.
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
@@ -96,18 +105,33 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentSession,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({
-    check: vi.fn().mockResolvedValue({ allowed: true }),
-    clear: vi.fn(),
-  }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  emitRateLimitFailClosed: vi.fn(),
-  checkRateLimitOrFail: vi.fn().mockResolvedValue(null),
-}));
+// T1 (fail-closed-tranche1): the rate-limit-audit stub is REMOVED — production
+// checkRateLimitOrFail now runs in the tested path (limiter-layer mock only,
+// via mockCreateRateLimiter above). Existing cases arrange
+// mockRateLimiterCheck to resolve { allowed: true } in beforeEach so they are
+// unaffected by the real fail-closed mapping.
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/approve/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+
+// The route constructs its rate limiter once at module load
+// (`const approveLimiter = createRateLimiter({...})`). `beforeEach` clears
+// all mocks each test, wiping `mockCreateRateLimiter.mock.calls`/`.mock.results`
+// — snapshotFactory captures the real construction call/result here (module
+// scope, before any beforeEach runs) so `.replay()` can rebuild it after
+// each clear for the fail-closed helper's identity-based attribution.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiterInstance = mockCreateRateLimiter.mock.results[0]?.value as
+  | { check: typeof mockRateLimiterCheck }
+  | undefined;
+if (!rateLimiterInstance) {
+  throw new Error(
+    "route.test.ts: expected createRateLimiter to have been called once at module load",
+  );
+}
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const REQUEST_ID = "req-00000001";
@@ -148,6 +172,7 @@ const makeTransactionSuccess = () => {
 describe("POST /api/tenant/access-requests/[id]/approve", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockRequireRecentSession.mockResolvedValue(null);
     mockSaExecuteRaw.mockResolvedValue(0);
   });
@@ -441,5 +466,24 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     // The write path that would issue the JIT token MUST NOT have started.
     expect(mockSaTokenCount).not.toHaveBeenCalled();
     expect(mockSaTokenCreate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+
+    await assertRedisFailClosed({
+      invoke: () => POST(req, createParams({ id: REQUEST_ID })),
+      limiter: rateLimiterInstance,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockSaTokenCreate, mockAccessRequestUpdate],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

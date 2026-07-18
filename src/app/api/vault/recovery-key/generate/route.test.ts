@@ -1,20 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
-  mockRateLimiter: { check: vi.fn() },
-  mockLogAudit: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-}));
+const { mockAuth, mockPrismaUser, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => {
+  const mockRateLimiter = { check: vi.fn() };
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+    mockRateLimiter,
+    mockCreateRateLimiter: vi.fn(() => mockRateLimiter),
+    mockLogAudit: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
@@ -43,6 +48,11 @@ vi.mock("@/lib/logger", () => ({
 
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { POST } from "./route";
+
+// Captured immediately after import (before any beforeEach clears mocks) —
+// the module-level `const generateLimiter = createRateLimiter(...)` call
+// happens at import time.
+const generateLimiterFactoryRecord = snapshotFactory(mockCreateRateLimiter);
 
 const validBody = {
   currentVerifierHash: "a".repeat(64),
@@ -84,6 +94,17 @@ describe("POST /api/vault/recovery-key/generate", () => {
     mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(createRequest("POST", URL, { body: validBody }));
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL, { body: validBody })),
+      limiter: mockRateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.update],
+      limiterFactory: generateLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 on invalid body", async () => {

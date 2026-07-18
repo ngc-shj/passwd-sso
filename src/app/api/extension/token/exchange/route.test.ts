@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -11,6 +12,7 @@ const {
   mockExtensionTokenUpdateMany,
   mockTransaction,
   mockCheck,
+  mockCreateRateLimiter,
   mockWithBypassRls,
   mockWithUserTenantRls,
   mockLogAudit,
@@ -19,14 +21,19 @@ const {
   mockExtractClientIp,
   mockVerifyDpop,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockBridgeCodeUpdateMany: vi.fn(),
   mockBridgeCodeFindUnique: vi.fn(),
   mockExtensionTokenCreate: vi.fn(),
   mockExtensionTokenFindMany: vi.fn(),
   mockExtensionTokenUpdateMany: vi.fn(),
   mockTransaction: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheck,
+  // T4: recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
@@ -35,7 +42,8 @@ const {
   mockExtractClientIp: vi.fn(() => "1.2.3.4"),
   mockVerifyDpop: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-}));
+  };
+});
 
 vi.mock("@/lib/auth/dpop/verify", () => ({
   verifyDpopProof: mockVerifyDpop,
@@ -69,7 +77,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: () => "h".repeat(64),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
@@ -101,6 +109,18 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+
+// The module-level `exchangeLimiter = createRateLimiter(...)` call in
+// route.ts runs once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original call/result to inspect after clearAllMocks runs.
+const exchangeLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const exchangeLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const VALID_CODE = "f".repeat(64);
 
@@ -272,6 +292,17 @@ describe("POST /api/extension/token/exchange", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makeRequest()),
+      limiter: exchangeLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockBridgeCodeUpdateMany],
+      limiterFactory: exchangeLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // ── 7. Replay protection (2-call sequence) ──

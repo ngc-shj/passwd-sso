@@ -5,21 +5,28 @@ const {
   mockAuth,
   mockAssertOrigin,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockVerifyAuthenticationAssertion,
   mockSessionUpdate,
   mockPrismaTransaction,
   mockWithBypassRls,
   mockLogAudit,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockAssertOrigin: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockVerifyAuthenticationAssertion: vi.fn(),
-  mockSessionUpdate: vi.fn(),
-  mockPrismaTransaction: vi.fn(),
-  mockWithBypassRls: vi.fn(),
-  mockLogAudit: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockAssertOrigin: vi.fn(),
+    mockRateLimiterCheck,
+    // T4: recording factory so tests can attribute the limiter instance
+    // back to the failClosedOnRedisError option it was constructed with.
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockVerifyAuthenticationAssertion: vi.fn(),
+    mockSessionUpdate: vi.fn(),
+    mockPrismaTransaction: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+    mockLogAudit: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({
   auth: mockAuth,
@@ -30,7 +37,7 @@ vi.mock("@/lib/auth/session/csrf", () => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
@@ -68,8 +75,25 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const ROUTE_URL = "http://localhost:3000/api/auth/passkey/reauth/verify";
+
+// The route constructs its rate limiter once at module load
+// (`const rateLimiter = createRateLimiter({...})`). `beforeEach` clears all
+// mocks each test, wiping `mockCreateRateLimiter.mock.calls`/`.mock.results`
+// — snapshotFactory captures the real construction call/result here (module
+// scope, before any beforeEach runs) so `.replay()` can rebuild it after
+// each clear for the fail-closed helper's identity-based attribution.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiterInstance = mockCreateRateLimiter.mock.results[0]?.value as
+  | { check: typeof mockRateLimiterCheck }
+  | undefined;
+if (!rateLimiterInstance) {
+  throw new Error(
+    "route.test.ts: expected createRateLimiter to have been called once at module load",
+  );
+}
 
 describe("POST /api/auth/passkey/reauth/verify", () => {
   beforeEach(() => {
@@ -225,5 +249,28 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     expect(res.status).toBe(429);
     expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
     expect(mockSessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    const req = createRequest("POST", ROUTE_URL, {
+      headers: {
+        origin: "http://localhost:3000",
+        cookie: "authjs.session-token=sess-1",
+        "Content-Type": "application/json",
+      },
+      body: {
+        credentialResponse: JSON.stringify({ id: "cred-1", type: "public-key" }),
+        challengeId: "a".repeat(32),
+      },
+    });
+
+    await assertRedisFailClosed({
+      invoke: () => POST(req),
+      limiter: rateLimiterInstance,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockSessionUpdate],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

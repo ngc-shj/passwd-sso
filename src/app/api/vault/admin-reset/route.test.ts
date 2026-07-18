@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth, mockLogAudit, mockExecuteVaultReset,
   mockAdminVaultResetFindUnique, mockAdminVaultResetUpdateMany,
-  mockRateLimitCheck, mockInvalidateUserSessions,
+  mockRateLimitCheck, mockInvalidateUserSessions, mockCreateRateLimiter,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockLogAudit: vi.fn(),
@@ -14,6 +15,10 @@ const {
   mockAdminVaultResetUpdateMany: vi.fn(),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockInvalidateUserSessions: vi.fn(),
+  mockCreateRateLimiter: vi.fn(() => ({
+    check: mockRateLimitCheck,
+    clear: vi.fn(),
+  })),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -38,10 +43,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: vi.fn((prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({
-    check: mockRateLimitCheck,
-    clear: vi.fn(),
-  })),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
@@ -54,6 +56,17 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST } from "./route";
 import { VAULT_CONFIRMATION_PHRASE } from "@/lib/constants/vault";
+
+// Captured immediately after import (before any beforeEach clears mocks) —
+// the module-level `const vaultAdminResetLimiter = createRateLimiter(...)`
+// call happens at import time. `adminResetLimiter` is the actual factory
+// return value (identity-matched by assertRedisFailClosed); the record
+// preserves attribution data across vi.clearAllMocks() in beforeEach.
+const adminResetLimiterFactoryRecord = snapshotFactory(mockCreateRateLimiter);
+const adminResetLimiter = mockCreateRateLimiter.mock.results[0]?.value as {
+  check: typeof mockRateLimitCheck;
+  clear: ReturnType<typeof vi.fn>;
+};
 
 const URL = "http://localhost/api/vault/admin-reset";
 const TOKEN = "a".repeat(64);
@@ -114,6 +127,19 @@ describe("POST /api/vault/admin-reset", () => {
       body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(401);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL, {
+        body: { token: TOKEN, confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+      })),
+      limiter: adminResetLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockAdminVaultResetUpdateMany],
+      limiterFactory: adminResetLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 on missing body", async () => {

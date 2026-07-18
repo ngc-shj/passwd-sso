@@ -11,50 +11,34 @@
 #   - Future PRs that author the fail-closed test MUST also remove the
 #     route's entry from this file (atomic "test added + debt removed").
 #
-# Single route — `mcp/authorize` — has its fail-closed test case in the
-# initial PR (src/__tests__/api/mcp/authorize.test.ts). All other 41
-# opt-in route files are listed below pending follow-up coverage.
+# `mcp/authorize` had its fail-closed test case in the initial PR
+# (src/__tests__/api/mcp/authorize.test.ts). Tranche 1
+# (fail-closed-tranche1-plan.md) burned down 18 high-sensitivity routes
+# via the shared assertRedisFailClosed helper. The remaining opt-in route
+# files are listed below pending follow-up coverage (tranche 2+).
 #
 # Format: one route path per line, relative to repo root, sorted.
 
-src/app/api/api-keys/route.ts
 src/app/api/auth/passkey/options/email/route.ts
 src/app/api/auth/passkey/options/route.ts
 src/app/api/auth/passkey/reauth/options/route.ts
-src/app/api/auth/passkey/reauth/verify/route.ts
-src/app/api/auth/passkey/verify/route.ts
 src/app/api/emergency-access/accept/route.ts
 src/app/api/extension/bridge-code/route.ts
 src/app/api/extension/key/reset/route.ts
-src/app/api/extension/token/exchange/route.ts
-src/app/api/extension/token/refresh/route.ts
-src/app/api/extension/token/route.ts
 src/app/api/mcp/register/route.ts
 src/app/api/mcp/revoke/route.ts
-src/app/api/mcp/token/route.ts
-src/app/api/mobile/token/refresh/route.ts
-src/app/api/mobile/token/route.ts
 src/app/api/share-links/[id]/content/route.ts
 src/app/api/share-links/verify-access/route.ts
 src/app/api/teams/invitations/accept/route.ts
-src/app/api/tenant/access-requests/[id]/approve/route.ts
-src/app/api/tenant/access-requests/[id]/deny/route.ts
 src/app/api/tenant/access-requests/route.ts
 src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts
-src/app/api/vault/admin-reset/route.ts
 src/app/api/vault/change-passphrase/route.ts
 src/app/api/vault/delegation/check/route.ts
 src/app/api/vault/delegation/route.ts
-src/app/api/vault/recovery-key/generate/route.ts
-src/app/api/vault/recovery-key/recover/route.ts
-src/app/api/vault/reset/route.ts
 src/app/api/vault/rotate-key/data/route.ts
 src/app/api/vault/rotate-key/route.ts
-src/app/api/vault/setup/route.ts
 src/app/api/vault/unlock/data/route.ts
-src/app/api/vault/unlock/route.ts
 src/app/api/webauthn/authenticate/options/route.ts
-src/app/api/webauthn/authenticate/verify/route.ts
 src/app/api/webauthn/credentials/[id]/prf/options/route.ts
 src/app/api/webauthn/credentials/[id]/prf/route.ts
 src/app/api/webauthn/register/options/route.ts

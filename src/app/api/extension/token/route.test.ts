@@ -4,6 +4,7 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -14,22 +15,30 @@ const {
   mockEnforceAccessRestriction,
   mockLogAudit,
   mockExtractClientIp,
-  mockCheckIpRateLimit,
-  mockCheckRateLimit,
+  mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockWarn,
   mockVerifyDpop,
-} = vi.hoisted(() => ({
-  mockFindUnique: vi.fn(),
-  mockUpdate: vi.fn(),
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
-  mockLogAudit: vi.fn(),
-  mockExtractClientIp: vi.fn(() => "1.2.3.4"),
-  mockCheckIpRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
-  mockCheckRateLimit: vi.fn().mockResolvedValue(null),
-  mockWarn: vi.fn(),
-  mockVerifyDpop: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockFindUnique: vi.fn(),
+    mockUpdate: vi.fn(),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+    mockLogAudit: vi.fn(),
+    mockExtractClientIp: vi.fn(() => "1.2.3.4"),
+    mockRateLimiterCheck,
+    // createRateLimiter must be a RECORDING vi.fn (T4) — assertRedisFailClosed's
+    // factory-attribution step reads mockCreateRateLimiter.mock.{calls,results}
+    // to prove the limiter under test was constructed with the fail-closed
+    // option enabled (the gate counts the literal option text, so this comment
+    // deliberately avoids it).
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockWarn: vi.fn(),
+    mockVerifyDpop: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/auth/dpop/verify", () => ({
   verifyDpopProof: mockVerifyDpop,
@@ -62,9 +71,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: () => "h".repeat(64),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  // POST handler delegates rate-limit decisions to `checkIpRateLimit` (mocked
-  // separately); the returned shape is unused, hence inline vi.fn().
-  createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }), clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
@@ -86,12 +93,10 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
   rateLimitKeyFromIp: (ip: string) => `ip:${ip}`,
 }));
-vi.mock("@/lib/security/ip-rate-limit", () => ({
-  checkIpRateLimit: mockCheckIpRateLimit,
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimit,
-}));
+// checkIpRateLimit and checkRateLimitOrFail are NOT mocked (T1) — both run
+// as production code so the real limiter.check() -> redisErrored -> 503
+// mapping stays in the tested path. checkIpRateLimit itself just calls
+// legacyDeprecatedLimiter.check(key), so this is limiter-layer control only.
 vi.mock("@/lib/logger", () => ({
   default: { warn: mockWarn, error: vi.fn(), info: vi.fn() },
   getLogger: () => ({ warn: mockWarn, error: vi.fn(), info: vi.fn() }),
@@ -99,14 +104,25 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST, DELETE } from "./route";
 
+// The module-level `legacyDeprecatedLimiter = createRateLimiter(...)` call
+// in route.ts runs once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original call/result to inspect after clearAllMocks runs.
+const legacyDeprecatedLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const legacyDeprecatedLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
+
 // ─── POST ────────────────────────────────────────────────────
 
 describe("POST /api/extension/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExtractClientIp.mockReturnValue("1.2.3.4");
-    mockCheckIpRateLimit.mockResolvedValue({ allowed: true });
-    mockCheckRateLimit.mockResolvedValue(null);
+    legacyDeprecatedLimiter.check.mockResolvedValue({ allowed: true });
     mockLogAudit.mockResolvedValue(undefined);
   });
 
@@ -150,11 +166,10 @@ describe("POST /api/extension/token", () => {
   });
 
   it("returns 429 when IP rate limit exceeded", async () => {
-    const rateLimitedResponse = new Response(
-      JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }),
-      { status: 429, headers: { "Content-Type": "application/json" } },
-    );
-    mockCheckRateLimit.mockResolvedValueOnce(rateLimitedResponse);
+    // Drives the real checkIpRateLimit -> legacyDeprecatedLimiter.check ->
+    // checkRateLimitOrFail chain (T1: no more rate-limit-audit stub); the
+    // limiter-layer mock is the only arrangement needed.
+    legacyDeprecatedLimiter.check.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
 
     const res = await POST(createRequest("POST", "http://localhost/api/extension/token"));
     const { status, json } = await parseResponse(res);
@@ -163,6 +178,19 @@ describe("POST /api/extension/token", () => {
     // Critical invariant: rate-limit blocks before audit emission, capping
     // audit-row write rate at the limiter's threshold per IP.
     expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    // assertRedisFailClosed asserts the production checkRateLimitOrFail
+    // mapping + no-mutation contract.
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", "http://localhost/api/extension/token")),
+      limiter: legacyDeprecatedLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockUpdate],
+      limiterFactory: legacyDeprecatedLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -8,17 +9,23 @@ const {
   mockTenantMemberFindUnique,
   mockWithBypassRls,
   mockCheck,
+  mockCreateRateLimiter,
   mockRefreshIosToken,
   mockVerifyDpop,
   mockEnforceAccessRestriction,
   mockDerivePasskeyState,
   mockRecordPasskeyAuditEmit,
   mockLogAuditAsync,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockExtensionTokenFindUnique: vi.fn(),
   mockTenantMemberFindUnique: vi.fn().mockResolvedValue({ deactivatedAt: null }),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheck,
+  // T4: recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
   mockRefreshIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
@@ -31,7 +38,8 @@ const {
   }),
   mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
-}));
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -50,7 +58,7 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -105,6 +113,18 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+
+// The module-level `refreshLimiter = createRateLimiter(...)` call in
+// route.ts runs once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original call/result to inspect after clearAllMocks runs.
+const refreshLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const refreshLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const REFRESH_TOKEN = "r".repeat(64);
 const USER_ID = "11111111-1111-1111-1111-111111111111";
@@ -306,6 +326,21 @@ describe("POST /api/mobile/token/refresh", () => {
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
     expect(mockRefreshIosToken).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    // The token-rotation write primitive is entirely encapsulated inside the
+    // mocked refreshIosToken service call (route.ts does no direct Prisma
+    // write) — assertNoMutation targets that mock, matching every other
+    // rate-limit test in this file (e.g. "returns 429...").
+    await assertRedisFailClosed({
+      invoke: () => POST(makeRequest()),
+      limiter: refreshLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockRefreshIosToken],
+      limiterFactory: refreshLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 403 when the tenant access restriction denies the client IP", async () => {

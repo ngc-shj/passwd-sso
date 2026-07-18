@@ -1,34 +1,44 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
-  mockVerifyCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockResetCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockResetClear: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockInvalidateUserSessions: vi.fn().mockResolvedValue({
-    sessions: 0,
-    extensionTokens: 0,
-    apiKeys: 0,
-    mcpAccessTokens: 0,
-    mcpRefreshTokens: 0,
-    delegationSessions: 0,
-    operatorTokens: 0,
-    cacheTombstoneFailures: 0,
-  }),
-}));
+const { mockAuth, mockPrismaUser, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions, mockCreateRateLimiter } = vi.hoisted(() => {
+  const mockVerifyCheck = vi.fn().mockResolvedValue({ allowed: true });
+  const mockResetCheck = vi.fn().mockResolvedValue({ allowed: true });
+  const mockResetClear = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+    mockVerifyCheck,
+    mockResetCheck,
+    mockResetClear,
+    mockLogAudit: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockInvalidateUserSessions: vi.fn().mockResolvedValue({
+      sessions: 0,
+      extensionTokens: 0,
+      apiKeys: 0,
+      mcpAccessTokens: 0,
+      mcpRefreshTokens: 0,
+      delegationSessions: 0,
+      operatorTokens: 0,
+      cacheTombstoneFailures: 0,
+    }),
+    // Recording factory: verifyLimiter created first (route.ts :49), then
+    // resetLimiter (route.ts :54) — mockReturnValueOnce chain preserves
+    // that creation-order mapping while giving each a distinct check mock.
+    mockCreateRateLimiter: vi.fn()
+      .mockReturnValueOnce({ check: mockVerifyCheck, clear: vi.fn() })
+      .mockReturnValueOnce({ check: mockResetCheck, clear: mockResetClear }),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn()
-    .mockReturnValueOnce({ check: mockVerifyCheck, clear: vi.fn() })
-    .mockReturnValueOnce({ check: mockResetCheck, clear: mockResetClear }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
@@ -55,6 +65,20 @@ vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
 
 import { POST } from "./route";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
+
+// Captured immediately after import (before any beforeEach clears mocks) —
+// both module-level limiter constructions (verifyLimiter then resetLimiter,
+// route.ts :49/:54) happen once at import time. mock.results[0]/[1] map to
+// creation order, matching the mockReturnValueOnce chain above.
+const recoverLimiterFactoryRecord = snapshotFactory(mockCreateRateLimiter);
+const verifyLimiter = mockCreateRateLimiter.mock.results[0]?.value as {
+  check: typeof mockVerifyCheck;
+  clear: ReturnType<typeof vi.fn>;
+};
+const resetLimiterUnderTest = mockCreateRateLimiter.mock.results[1]?.value as {
+  check: typeof mockResetCheck;
+  clear: typeof mockResetClear;
+};
 
 const URL = "http://localhost/api/vault/recovery-key/recover";
 
@@ -111,6 +135,30 @@ describe("POST /api/vault/recovery-key/recover", () => {
     }));
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — verify", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL, {
+        body: { step: "verify", verifierHash: "a".repeat(64) },
+      })),
+      limiter: verifyLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.update],
+      limiterFactory: recoverLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — reset", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL, { body: resetBody })),
+      limiter: resetLimiterUnderTest,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.update],
+      limiterFactory: recoverLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // ─── Step: verify ─────────────────────────────────────────
