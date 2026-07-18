@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "../../../../__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 import {
   MCP_AUTHORIZATION_CODE_MAX_LENGTH,
   MCP_CLIENT_SECRET_MAX_LENGTH,
@@ -11,7 +12,10 @@ const {
   mockCreateRefreshToken,
   mockExchangeRefreshToken,
   mockHashToken,
+  mockTokenLimiterCheck,
+  mockIpLimiterCheck,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockMcpRefreshTokenFindUnique,
   mockWithBypassRls,
@@ -20,33 +24,54 @@ const {
   mockResolveCodeTenantId,
   mockResolveRefreshTokenGate,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
-  mockExchangeCodeForToken: vi.fn(),
-  mockCreateRefreshToken: vi.fn().mockResolvedValue({ refreshToken: "mcp_rt_refreshtoken", expiresAt: new Date() }),
-  mockExchangeRefreshToken: vi.fn(),
-  // IP-access gate resolvers (read-only tenant lookup) + enforcement. Default:
-  // resolve a tenant, live (not replayed), and ALLOW (enforce returns null).
-  // Deny tests override; the refresh gate carries alreadyRotated so a replayed
-  // token can skip the IP gate and fall through to family-revoking exchange.
-  mockResolveCodeTenantId: vi.fn().mockResolvedValue("tenant-1"),
-  mockResolveRefreshTokenGate: vi.fn().mockResolvedValue({ tenantId: "tenant-1", alreadyRotated: false }),
-  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-  mockHashToken: vi.fn((token: string) => `hashed:${token}`),
-  mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockLogAudit: vi.fn(),
-  // C8: McpRefreshToken pre-read mock
-  mockMcpRefreshTokenFindUnique: vi.fn(),
-  // C8: withBypassRls — passes tx (first arg = prisma) through to fn
-  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
-  // C8: passkey enforcement mocks
-  mockDerivePasskeyState: vi.fn().mockResolvedValue({
-    requirePasskey: false,
-    hasPasskey: false,
-    requirePasskeyEnabledAt: null,
-    passkeyGracePeriodDays: null,
-  }),
-  mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
-}));
+} = vi.hoisted(() => {
+  // T4 carve-out (R3): the route constructs TWO independent limiters —
+  // tokenRateLimiter (route.ts:33, created FIRST) and ipRateLimiter
+  // (route.ts:38, created SECOND). A single shared check mock cannot
+  // distinguish which limiter a test is driving, so the factory is a
+  // RECORDING vi.fn with a mockReturnValueOnce chain in route-creation
+  // order: first call -> token limiter, second call -> ip limiter.
+  // mockRateLimiterCheck is kept as an alias to mockTokenLimiterCheck so
+  // every PRE-EXISTING test in this file (which only ever exercises the
+  // client-scoped token limiter — createRequest() sets no client IP, so
+  // the `if (ip)` gate is never entered) continues to compile/pass
+  // unchanged.
+  const mockTokenLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  const mockIpLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockExchangeCodeForToken: vi.fn(),
+    mockCreateRefreshToken: vi.fn().mockResolvedValue({ refreshToken: "mcp_rt_refreshtoken", expiresAt: new Date() }),
+    mockExchangeRefreshToken: vi.fn(),
+    // IP-access gate resolvers (read-only tenant lookup) + enforcement. Default:
+    // resolve a tenant, live (not replayed), and ALLOW (enforce returns null).
+    // Deny tests override; the refresh gate carries alreadyRotated so a replayed
+    // token can skip the IP gate and fall through to family-revoking exchange.
+    mockResolveCodeTenantId: vi.fn().mockResolvedValue("tenant-1"),
+    mockResolveRefreshTokenGate: vi.fn().mockResolvedValue({ tenantId: "tenant-1", alreadyRotated: false }),
+    mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+    mockHashToken: vi.fn((token: string) => `hashed:${token}`),
+    mockTokenLimiterCheck,
+    mockIpLimiterCheck,
+    mockRateLimiterCheck: mockTokenLimiterCheck,
+    mockCreateRateLimiter: vi
+      .fn()
+      .mockReturnValueOnce({ check: mockTokenLimiterCheck, clear: vi.fn() })
+      .mockReturnValueOnce({ check: mockIpLimiterCheck, clear: vi.fn() }),
+    mockLogAudit: vi.fn(),
+    // C8: McpRefreshToken pre-read mock
+    mockMcpRefreshTokenFindUnique: vi.fn(),
+    // C8: withBypassRls — passes tx (first arg = prisma) through to fn
+    mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+    // C8: passkey enforcement mocks
+    mockDerivePasskeyState: vi.fn().mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    }),
+    mockRecordPasskeyAuditEmit: vi.fn().mockReturnValue(true),
+  };
+});
 
 vi.mock("@/lib/mcp/oauth-server", () => ({
   exchangeCodeForToken: mockExchangeCodeForToken,
@@ -62,7 +87,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -91,6 +116,24 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => ({
 import { POST } from "@/app/api/mcp/token/route";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
+// The module-level `tokenRateLimiter = createRateLimiter(...)` (route.ts:33,
+// FIRST call) and `ipRateLimiter = createRateLimiter(...)` (route.ts:38,
+// SECOND call) run once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original calls/results to inspect after clearAllMocks runs.
+const mcpTokenLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+// results[0] = token limiter (first factory call), results[1] = ip limiter
+// (second factory call) — per the plan's case-map identity mapping.
+const mcpTokenRateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockTokenLimiterCheck;
+};
+const mcpIpRateLimiter = mockCreateRateLimiter.mock.results[1]!.value as {
+  check: typeof mockIpLimiterCheck;
+};
+
 const VALID_BODY = {
   grant_type: "authorization_code",
   code: "test-code-abc",
@@ -114,6 +157,7 @@ describe("POST /api/mcp/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockIpLimiterCheck.mockResolvedValue({ allowed: true });
     // Default: withBypassRls passes the prisma object with mcpRefreshToken mock
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => {
       // Provide a tx that has mcpRefreshToken.findUnique + webAuthnCredential.count + tenant.findUnique
@@ -486,6 +530,46 @@ describe("POST /api/mcp/token", () => {
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
+  it("fails closed (503, no mutation) when Redis is unavailable — ip", async () => {
+    // Case A (plan case map): the IP-scoped limiter (route.ts:68, checked
+    // BEFORE grant-type dispatch) errors. Requires a client IP on the
+    // request so the `if (ip)` gate is entered — existing tests in this file
+    // never set one, so this is the only case that exercises the ip limiter.
+    // The oauth envelope check confirms the production checkRateLimitOrFail
+    // mapping stayed in path.
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/mcp/token", {
+            body: VALID_BODY,
+            headers: { "x-forwarded-for": "203.0.113.7" },
+          }),
+        ),
+      limiter: mcpIpRateLimiter,
+      expectation: { envelope: "oauth" },
+      assertNoMutation: [mockExchangeCodeForToken, mockExchangeRefreshToken],
+      limiterFactory: mcpTokenLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — token (authorization_code)", async () => {
+    // Case B (plan case map): ip limiter allows, token limiter (route.ts:122)
+    // errors inside the authorization_code branch. No client IP on the
+    // request, so the ip gate is skipped entirely (mcpIpRateLimiter.check
+    // is not even reached) — arranging it to allow is defensive parity with
+    // the plan's "arrange the sibling ip check {allowed:true}" instruction.
+    mockIpLimiterCheck.mockResolvedValue({ allowed: true });
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_BODY })),
+      limiter: mcpTokenRateLimiter,
+      expectation: { envelope: "oauth" },
+      assertNoMutation: [mockExchangeCodeForToken, mockExchangeRefreshToken],
+      limiterFactory: mcpTokenLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
   it("authorization_code: denies off-network IP BEFORE minting (no exchange, no code consumed)", async () => {
     // Tenant network restriction (allowedCidrs / Tailscale) must gate the token
     // endpoint like the MCP gateway — a stolen code redeemed from a blocked IP is
@@ -686,6 +770,23 @@ describe("POST /api/mcp/token", () => {
     // RT8: the rate-limit reject must block the exchange from running, not just
     // return 429 — a status-only assertion stays green if the gate is removed.
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — token (refresh_token)", async () => {
+    // Case C (plan case map): ip limiter allows, token limiter (route.ts:237)
+    // errors inside the refresh_token branch. No client IP on the request,
+    // so the ip gate is skipped — arranging it to allow is defensive parity
+    // with the plan's "arrange the sibling ip check {allowed:true}" instruction.
+    mockIpLimiterCheck.mockResolvedValue({ allowed: true });
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_REFRESH_BODY })),
+      limiter: mcpTokenRateLimiter,
+      expectation: { envelope: "oauth" },
+      assertNoMutation: [mockExchangeCodeForToken, mockExchangeRefreshToken],
+      limiterFactory: mcpTokenLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // T-13: replay detection audit log

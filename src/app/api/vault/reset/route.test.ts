@@ -1,29 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction, mockRateLimiter, mockLogAudit, mockExecuteVaultReset,
+  mockPrismaTransaction, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockExecuteVaultReset,
   mockInvalidateUserSessions,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaUser: { update: vi.fn() },
-  mockPrismaPasswordEntry: { count: vi.fn(), deleteMany: vi.fn() },
-  mockPrismaAttachment: { count: vi.fn(), deleteMany: vi.fn() },
-  mockPrismaPasswordShare: { deleteMany: vi.fn() },
-  mockPrismaVaultKey: { deleteMany: vi.fn() },
-  mockPrismaTag: { deleteMany: vi.fn() },
-  mockPrismaFolder: { deleteMany: vi.fn() },
-  mockPrismaEmergencyGrant: { updateMany: vi.fn() },
-  mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
-  mockPrismaTeamMember: { updateMany: vi.fn() },
-  mockPrismaTransaction: vi.fn(),
-  mockRateLimiter: { check: vi.fn() },
-  mockLogAudit: vi.fn(),
-  mockExecuteVaultReset: vi.fn(),
-  mockInvalidateUserSessions: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiter = { check: vi.fn() };
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaUser: { update: vi.fn() },
+    mockPrismaPasswordEntry: { count: vi.fn(), deleteMany: vi.fn() },
+    mockPrismaAttachment: { count: vi.fn(), deleteMany: vi.fn() },
+    mockPrismaPasswordShare: { deleteMany: vi.fn() },
+    mockPrismaVaultKey: { deleteMany: vi.fn() },
+    mockPrismaTag: { deleteMany: vi.fn() },
+    mockPrismaFolder: { deleteMany: vi.fn() },
+    mockPrismaEmergencyGrant: { updateMany: vi.fn() },
+    mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
+    mockPrismaTeamMember: { updateMany: vi.fn() },
+    mockPrismaTransaction: vi.fn(),
+    mockRateLimiter,
+    mockCreateRateLimiter: vi.fn(() => mockRateLimiter),
+    mockLogAudit: vi.fn(),
+    mockExecuteVaultReset: vi.fn(),
+    mockInvalidateUserSessions: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -42,7 +47,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -83,6 +88,11 @@ import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-curren
 
 const mockRequireRecent = vi.mocked(requireRecentCurrentAuthMethod);
 
+// Captured immediately after import (before any beforeEach clears mocks) —
+// the module-level `const resetLimiter = createRateLimiter(...)` call
+// happens at import time.
+const resetLimiterFactoryRecord = snapshotFactory(mockCreateRateLimiter);
+
 const URL = "http://localhost/api/vault/reset";
 
 describe("POST /api/vault/reset", () => {
@@ -120,6 +130,19 @@ describe("POST /api/vault/reset", () => {
       body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
     }));
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL, {
+        body: { confirmation: VAULT_CONFIRMATION_PHRASE.DELETE_VAULT },
+      })),
+      limiter: mockRateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockExecuteVaultReset, mockInvalidateUserSessions],
+      limiterFactory: resetLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("rejects with 403 and does NOT wipe the vault when session is stale (step-up)", async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -9,6 +10,7 @@ const {
   mockMobileBridgeCodeUpdateMany,
   mockWithBypassRls,
   mockCheck,
+  mockCreateRateLimiter,
   mockIssueIosToken,
   mockVerifyDpop,
   mockVerifyPkceS256,
@@ -17,7 +19,9 @@ const {
   mockWarn,
   mockError,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockMobileBridgeCodeFindUnique: vi.fn(),
   mockMobileBridgeCodeUpdateMany: vi.fn(),
   mockWithBypassRls: vi.fn(
@@ -28,7 +32,10 @@ const {
       },
     }),
   ),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockCheck,
+  // T4: recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
   mockIssueIosToken: vi.fn(),
   mockVerifyDpop: vi.fn(),
   mockVerifyPkceS256: vi.fn(),
@@ -37,7 +44,8 @@ const {
   mockWarn: vi.fn(),
   mockError: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-}));
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -54,7 +62,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -117,6 +125,18 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+
+// The module-level `tokenLimiter = createRateLimiter(...)` call in route.ts
+// runs once at import time, above. The global `beforeEach` in
+// src/__tests__/setup.ts calls `vi.clearAllMocks()` before the FIRST test
+// runs, wiping `mockCreateRateLimiter.mock.calls`/`.results` recorded during
+// that import. Snapshot them here (module scope, before any test/beforeEach
+// executes) so `assertRedisFailClosed`'s factory-attribution check still has
+// the original call/result to inspect after clearAllMocks runs.
+const tokenLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const tokenLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const VALID_CODE = "f".repeat(64);
 const VALID_VERIFIER = "v".repeat(43);
@@ -333,6 +353,17 @@ describe("POST /api/mobile/token", () => {
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
     expect(mockIssueIosToken).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makeReq()),
+      limiter: tokenLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockMobileBridgeCodeUpdateMany],
+      limiterFactory: tokenLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 403 when the tenant access restriction denies the client IP", async () => {

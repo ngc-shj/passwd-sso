@@ -1,14 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
-  mockPrismaVaultKey: { create: vi.fn() },
-  mockTransaction: vi.fn(),
-  mockRateLimiter: { check: vi.fn() },
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-}));
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter, mockCreateRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => {
+  const mockRateLimiter = { check: vi.fn() };
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+    mockPrismaVaultKey: { create: vi.fn() },
+    mockTransaction: vi.fn(),
+    mockRateLimiter,
+    mockCreateRateLimiter: vi.fn(() => mockRateLimiter),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  };
+});
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -18,7 +23,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn().mockReturnValue("a".repeat(64)),
@@ -38,6 +43,11 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { POST } from "./route";
+
+// Captured immediately after import (before any beforeEach clears mocks) —
+// the module-level `const setupLimiter = createRateLimiter(...)` call
+// happens at import time.
+const setupLimiterFactoryRecord = snapshotFactory(mockCreateRateLimiter);
 
 const validBody = {
   encryptedSecretKey: "encrypted-key-data",
@@ -70,6 +80,18 @@ describe("POST /api/vault/setup", () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody }));
     expect(res.status).toBe(401);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null });
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody })),
+      limiter: mockRateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.update, mockPrismaVaultKey.create],
+      limiterFactory: setupLimiterFactoryRecord.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 409 when vault already set up", async () => {
