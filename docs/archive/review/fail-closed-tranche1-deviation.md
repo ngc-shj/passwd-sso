@@ -87,3 +87,18 @@ residual: dead branches inside a RUNNING callback (e.g. `if (false)`) still
 count — static reachability in an executing test is out of scope; pinned as
 an explicit boundary self-test. Classifier self-test 18 cases; gate
 self-test 26 (execution-binding red fixtures + alias-import green).
+
+## D11 — Registration-symbol binding + modifier allowlist (2026-07-18, review round 4)
+D10 bound helper CALLS by symbol but matched it/test/describe registrations by
+NAME — a fake local `it` (never registers anything vitest runs) and
+conditional registrations (it.skipIf(true), it.runIf(false), describe.skipIf)
+still classified as helper mode; both reproduced by the reviewer. Fixed:
+registration root identifiers now resolve to the "vitest" import's local
+symbols (alias-aware — `it as vitestIt` counts; fake locals never do; files
+on implicit globals yield zero registrations, fail-loud for this repo's
+explicit-import convention), and modifiers are an ALLOWLIST
+(only/concurrent/sequential/each) — skip/todo/skipIf/runIf/fails/unknown all
+mean not-counted, rather than enumerating skip-flavored APIs. Documented
+residuals: statically-empty it.each([]) and dead branches inside a running
+callback (both pinned as boundary self-tests). Classifier self-test 22
+cases; gate self-test 28.

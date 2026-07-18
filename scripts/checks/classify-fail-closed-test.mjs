@@ -92,17 +92,41 @@ function classify(path) {
     SyntaxKind.FunctionDeclaration,
     SyntaxKind.MethodDeclaration,
   ]);
-  const TEST_BASES = new Set(["it", "test"]);
-  const SUITE_BASES = new Set(["describe", "suite"]);
-  const SKIP_ALIASES = new Set(["xit", "xtest", "xdescribe"]);
+
+  // Registration identifiers are bound to the "vitest" import's local symbols
+  // (alias-aware), NOT matched by name — a local fake `it` or another
+  // library's `test` has a different symbol and never registers anything
+  // vitest would run (PR #680 review round 4, Major 1). Files using implicit
+  // globals (no vitest import) yield zero registrations — fail-LOUD for this
+  // repo, whose tests import from "vitest" explicitly.
+  const vitestBindings = new Map(); // localSymbol -> imported name
+  for (const imp of sf.getImportDeclarations()) {
+    if (imp.getModuleSpecifierValue() !== "vitest") continue;
+    for (const spec of imp.getNamedImports()) {
+      const imported = spec.getName();
+      if (imported !== "it" && imported !== "test" && imported !== "describe" && imported !== "suite") {
+        continue;
+      }
+      const sym = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
+      if (sym !== undefined) vitestBindings.set(sym, imported);
+    }
+  }
+
+  // Modifier ALLOWLIST: anything else (skip, todo, skipIf, runIf, fails,
+  // unknown future APIs) means the callback is conditionally or never run —
+  // treated as skipped rather than enumerating every skip-flavored API
+  // (PR #680 review round 4, Major 2). Known residual (documented):
+  // `it.each([])` with a statically empty array never runs its callback but
+  // still counts — array-emptiness is the next rung, not taken here.
+  const ALLOWED_MODIFIERS = new Set(["only", "concurrent", "sequential", "each"]);
 
   // Classify a CallExpression as a vitest registration: {kind, skipped} or null.
-  // Handles `it(...)`, `it.only/concurrent/sequential(...)`, `it.skip/todo(...)`,
-  // `it.each(cases)(...)` (callee is itself a CallExpression), and x-aliases.
+  // Handles `it(...)`, allowed modifiers, and the double-call shapes
+  // `it.each(cases)(...)` / `it.skipIf(cond)(...)` (callee is a CallExpression).
   function registrationInfo(callExpr) {
     let expr = callExpr.getExpression();
     if (expr.getKind() === SyntaxKind.CallExpression) {
-      expr = expr.getExpression(); // unwrap it.each(cases)(...)
+      expr = expr.getExpression(); // unwrap it.each(cases)(...) / it.skipIf(c)(...)
     }
     const modifiers = [];
     while (expr.getKind() === SyntaxKind.PropertyAccessExpression) {
@@ -110,12 +134,11 @@ function classify(path) {
       expr = expr.getExpression();
     }
     if (expr.getKind() !== SyntaxKind.Identifier) return null;
-    const base = expr.getText();
-    const skipped =
-      modifiers.includes("skip") || modifiers.includes("todo") || SKIP_ALIASES.has(base);
-    if (SUITE_BASES.has(base) || base === "xdescribe") return { kind: "suite", skipped };
-    if (TEST_BASES.has(base) || base === "xit" || base === "xtest") return { kind: "test", skipped };
-    return null;
+    const imported = vitestBindings.get(expr.getSymbol());
+    if (imported === undefined) return null; // not a vitest binding (fake/local `it`)
+    const skipped = modifiers.some((m) => !ALLOWED_MODIFIERS.has(m));
+    if (imported === "describe" || imported === "suite") return { kind: "suite", skipped };
+    return { kind: "test", skipped };
   }
 
   // A helper call counts ONLY when it executes from a real test: its nearest

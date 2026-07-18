@@ -37,7 +37,9 @@ function classify(content) {
   }
 }
 
-const IMPORT_LINE = `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";\n`;
+const IMPORT_LINE = `import { describe, it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+`;
 
 describe("classify-fail-closed-test.mjs", () => {
   it("recognizes a genuine helper contract test (import + calls inside it(), no mock)", () => {
@@ -65,7 +67,8 @@ it.only("focused", async () => {
   });
 
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
-    const f = classify(`import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
 it("aliased", async () => {
   await assertFailClosed({ failure: { allowed: false, redisErrored: true } });
 });
@@ -118,6 +121,49 @@ it("shadowed", async () => {
 });
 `);
     expect(f).toMatchObject({ import: 1, calls: 0 });
+  });
+
+  it("does NOT count a call registered via a fake local `it` (vitest symbol binding)", () => {
+    const f = classify(`import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const it = (_name, _callback) => undefined;
+it("not a vitest test", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 0 });
+  });
+
+  it("counts a vitest ALIAS registration (it as vitestIt)", () => {
+    const f = classify(`import { it as vitestIt } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+vitestIt("real", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f.calls).toBe(1);
+  });
+
+  it("does NOT count calls under it.skipIf(...) / it.runIf(...) (modifier allowlist)", () => {
+    const f = classify(`${IMPORT_LINE}
+it.skipIf(true)("conditionally skipped", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+it.runIf(false)("conditionally run", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f.calls).toBe(0);
+  });
+
+  it("does NOT count calls inside a describe.skipIf(...) suite", () => {
+    const f = classify(`${IMPORT_LINE}
+describe.skipIf(true)("suite", () => {
+  it("inside conditionally skipped suite", async () => {
+    await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+  });
+});
+`);
+    expect(f.calls).toBe(0);
   });
 
   it("documented residual: a call in a dead branch of a RUNNING test still counts", () => {

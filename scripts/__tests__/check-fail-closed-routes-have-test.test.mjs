@@ -65,7 +65,8 @@ const FAIL_CLOSED_LINE =
   'const limiter = rateLimiter({ failClosedOnRedisError: true });\n';
 
 // A minimal, well-formed shared-helper contract test (helper mode).
-const HELPER_CONTRACT_TEST = `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const HELPER_CONTRACT_TEST = `import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
 it("fails closed (503, no mutation) when Redis is unavailable", async () => {
   await assertRedisFailClosed({
     invoke: () => POST(req),
@@ -251,7 +252,8 @@ it("placeholder", () => { expect(true).toBe(true); });
       const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
       writeAdjacentTest(
         "widgets/purge",
-        `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+        `import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
 it.skip("fails closed", async () => {
   await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
 });
@@ -267,7 +269,8 @@ it.skip("fails closed", async () => {
       const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
       writeAdjacentTest(
         "widgets/purge",
-        `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+        `import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
 it("shadowed", async () => {
   const assertRedisFailClosed = async () => undefined;
   await assertRedisFailClosed();
@@ -284,7 +287,8 @@ it("shadowed", async () => {
       writeRoute("widgets/purge", FAIL_CLOSED_LINE);
       writeAdjacentTest(
         "widgets/purge",
-        `import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
+        `import { it } from "vitest";
+import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
 it("fails closed", async () => {
   await assertFailClosed({ failure: { allowed: false, redisErrored: true } });
 });
@@ -292,6 +296,40 @@ it("fails closed", async () => {
       );
       const { exitCode, stdout } = runGuard();
       expect(exitCode, stdout).toBe(0);
+    });
+
+    it("FAILS when the contract is registered via a fake local `it` (vitest symbol binding)", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const it = (_name, _callback) => undefined;
+it("not a vitest test", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("FAILS when the only contract sits under it.skipIf(true) (modifier allowlist)", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+it.skipIf(true)("conditionally skipped", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
+      expect(stdout).toContain(rel);
     });
 
     it("FAILS (LEGACY_TEST_MISSING) when a legacy entry's redisErrored is only a describe label (AST, not text)", () => {
