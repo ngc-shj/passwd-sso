@@ -103,14 +103,14 @@ export async function assertRedisFailClosed(options: {
   if (expectation.envelope === "canonical") {
     expect(res.status).toBe(503);
     expect(body).toMatchObject({ error: "SERVICE_UNAVAILABLE" });
-    expect(retryAfter).not.toBeNull();
-    expect(Number(retryAfter)).not.toBeNaN();
+    // Retry-After delay-seconds is a non-negative integer string (RFC 9110);
+    // Number() coercion would accept "", whitespace, negatives, and decimals.
+    expect(retryAfter).toMatch(/^\d+$/);
   } else if (expectation.envelope === "oauth") {
     expect(res.status).toBe(503);
     expect(body).toMatchObject({ error: "temporarily_unavailable" });
     expect(body).not.toHaveProperty("error_description");
-    expect(retryAfter).not.toBeNull();
-    expect(Number(retryAfter)).not.toBeNaN();
+    expect(retryAfter).toMatch(/^\d+$/);
   } else {
     expect(res.status).toBe(expectation.status);
     expect(body).toEqual(expectation.body);

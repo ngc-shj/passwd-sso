@@ -180,7 +180,14 @@ describe("assertRedisFailClosed", () => {
     ).rejects.toThrow();
   });
 
-  it("case 7b: correct status/body but Retry-After non-numeric — rejects", async () => {
+  // Number() coercion would accept "" (→ 0), negatives, and decimals — the
+  // helper must reject every non-delay-seconds shape, not just NaN inputs.
+  it.each([
+    ["non-numeric", "not-a-number"],
+    ["empty string", ""],
+    ["negative", "-1"],
+    ["decimal", "1.5"],
+  ])("case 7b: correct status/body but Retry-After %s — rejects", async (_label, value) => {
     await expect(
       assertRedisFailClosed({
         invoke: fakeRoute(
@@ -188,7 +195,7 @@ describe("assertRedisFailClosed", () => {
           () =>
             new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), {
               status: 503,
-              headers: { "Retry-After": "not-a-number" },
+              headers: { "Retry-After": value },
             }),
         ),
         limiter,

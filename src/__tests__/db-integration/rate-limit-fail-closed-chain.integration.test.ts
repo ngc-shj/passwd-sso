@@ -154,8 +154,9 @@ describe.skipIf(!dbAvailable)(
       const body = await res?.json();
       expect(body).toEqual({ error: "SERVICE_UNAVAILABLE" });
       const retryAfter = res?.headers.get("Retry-After");
-      expect(retryAfter).not.toBeNull();
-      expect(Number(retryAfter)).not.toBeNaN();
+      // RFC 9110 delay-seconds: non-negative integer string (Number() would
+      // accept "", whitespace, negatives, decimals).
+      expect(retryAfter).toMatch(/^\d+$/);
     });
 
     it("checkRateLimitOrFail maps redisErrored to the oauth 503 envelope with Retry-After, no error_description", async () => {
@@ -182,8 +183,9 @@ describe.skipIf(!dbAvailable)(
       expect(body).toEqual({ error: "temporarily_unavailable" });
       expect(body).not.toHaveProperty("error_description");
       const retryAfter = res?.headers.get("Retry-After");
-      expect(retryAfter).not.toBeNull();
-      expect(Number(retryAfter)).not.toBeNaN();
+      // RFC 9110 delay-seconds: non-negative integer string (Number() would
+      // accept "", whitespace, negatives, decimals).
+      expect(retryAfter).toMatch(/^\d+$/);
     });
 
     // Red-proof (RT7): same broken Redis, but the limiter did NOT opt into
