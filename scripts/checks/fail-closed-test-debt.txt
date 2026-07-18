@@ -16,22 +16,32 @@
 #   - Authoring the contract test MUST remove the route's entry from this
 #     file in the same PR (STALE_DEBT_ENTRY enforces atomicity).
 #
-# `mcp/authorize` had its fail-closed test case in the initial PR
-# (src/__tests__/api/mcp/authorize.test.ts). Tranche 1
-# (fail-closed-tranche1-plan.md) burned down 18 high-sensitivity routes
-# via the shared assertRedisFailClosed helper. The remaining opt-in route
-# files are listed below pending follow-up coverage (tranche 2+).
+# Tranche 1 (fail-closed-tranche1-plan.md) burned down 18 high-sensitivity
+# routes via the shared assertRedisFailClosed helper. The AST reclassification
+# (PR #680 review follow-up) then moved 7 routes BACK into this file whose
+# only `redisErrored` reference was a describe label or comment — i.e. the
+# old text gate had been counting them as tested when no code-level
+# fail-closed assertion exists: rotate-master-key (4), mcp/authorize,
+# mobile/authorize, mobile/autofill-token. The remaining opt-in route files
+# are listed below pending follow-up coverage (tranche 2+).
 #
 # Format: one route path per line, relative to repo root, sorted.
 
+src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts
+src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts
+src/app/api/admin/rotate-master-key/[rotationId]/revoke/route.ts
+src/app/api/admin/rotate-master-key/initiate/route.ts
 src/app/api/auth/passkey/options/email/route.ts
 src/app/api/auth/passkey/options/route.ts
 src/app/api/auth/passkey/reauth/options/route.ts
 src/app/api/emergency-access/accept/route.ts
 src/app/api/extension/bridge-code/route.ts
 src/app/api/extension/key/reset/route.ts
+src/app/api/mcp/authorize/route.ts
 src/app/api/mcp/register/route.ts
 src/app/api/mcp/revoke/route.ts
+src/app/api/mobile/authorize/route.ts
+src/app/api/mobile/autofill-token/route.ts
 src/app/api/share-links/[id]/content/route.ts
 src/app/api/share-links/verify-access/route.ts
 src/app/api/teams/invitations/accept/route.ts

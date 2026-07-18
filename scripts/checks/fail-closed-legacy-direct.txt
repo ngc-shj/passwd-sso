@@ -19,10 +19,6 @@
 #
 # Format: one route path per line, relative to repo root, sorted.
 
-src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts
-src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts
-src/app/api/admin/rotate-master-key/[rotationId]/revoke/route.ts
-src/app/api/admin/rotate-master-key/initiate/route.ts
 src/app/api/auth/[...nextauth]/route.ts
 src/app/api/maintenance/audit-chain-verify/route.ts
 src/app/api/maintenance/audit-outbox-metrics/route.ts
@@ -30,9 +26,6 @@ src/app/api/maintenance/audit-outbox-purge-failed/route.ts
 src/app/api/maintenance/dcr-cleanup/route.ts
 src/app/api/maintenance/purge-audit-logs/route.ts
 src/app/api/maintenance/purge-history/route.ts
-src/app/api/mcp/authorize/route.ts
-src/app/api/mobile/authorize/route.ts
-src/app/api/mobile/autofill-token/route.ts
 src/app/api/tenant/breakglass/route.ts
 src/app/api/tenant/members/[userId]/reset-vault/route.ts
 src/app/api/tenant/operator-tokens/route.ts

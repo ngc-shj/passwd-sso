@@ -57,3 +57,20 @@ the bridge-code shape is pinned as a regression fixture (20 cases).
 Also applied the review's minor items: Retry-After must be > 0 (delay-seconds
 "0" rejected; stampede guard) and the custom envelope now carries an explicit
 retryAfter: required|forbidden|ignore policy (self-tested).
+
+## D9 — AST-first classification (2026-07-18, user directive)
+The D8 gate fix was still text-based (tightened greps). Per the user's
+standing point that code-classifying gates must be AST from the start,
+classification moved to scripts/checks/classify-fail-closed-test.mjs
+(ts-morph, in-memory FS; classifier failure fails the gate closed — no text
+fallback). Immediate payoff: 7 legacy-direct entries (rotate-master-key×4,
+mcp/authorize, mobile/authorize, mobile/autofill-token) had redisErrored ONLY
+in describe labels/comments — moved to debt (24→31; honest count the old
+text gate had been hiding). Grep remains only for fail-LOUD uses (route
+enumeration, AC4.4/AC4.5 literal counts). Also fixed a load-dependent
+SIGPIPE(141) race in the gate's `printf | grep -q` membership helpers
+(herestrings now; surfaced by pre-pr's parallel vitest). Classifier has its
+own 10-case self-test (meta-gate demanded it); gate self-test grew to 22
+cases incl. AST-only red fixtures (comment-wrapped import+call, label-only
+redisErrored). Rule persisted as feedback memory
+(feedback_ast_first_for_code_classification_gates).

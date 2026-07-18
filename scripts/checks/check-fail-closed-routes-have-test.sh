@@ -8,17 +8,20 @@
 #                  `checkRateLimitOrFail` mapping. This is the target state.
 #   legacy mode  — route listed in fail-closed-legacy-direct.txt: a direct
 #                  (pre-helper) test asserts the 503 behavior; the sibling
-#                  test must still contain the literal `redisErrored`.
+#                  test must still reference `redisErrored` in CODE.
 #                  Migration to helper mode removes the entry (atomic).
 #   debt mode    — route listed in fail-closed-test-debt.txt: no adequate
 #                  test yet; tracked for a future tranche.
 #
-# History: the original pass criterion was a bare `grep -q "redisErrored"`
-# over the sibling test. External review of PR #680 demonstrated this is
-# false-green-able (a comment, a describe label, or a mapping-stubbed test
-# all satisfied it — extension/bridge-code was already misclassified as
-# tested). The mode model above replaces it; the self-test pins the
-# false-green shapes as red fixtures.
+# Test classification is AST-BASED (scripts/checks/classify-fail-closed-test.mjs,
+# ts-morph): comments, describe labels, and string literals never satisfy any
+# criterion. History: the original pass criterion was a bare
+# `grep -q "redisErrored"`; the PR #680 external review demonstrated it was
+# false-green-able (comment / label / mapping-stubbed test — extension/
+# bridge-code was already misclassified), and the first fix's tightened greps
+# were still text-based. Text matching remains ONLY where its failure mode is
+# fail-LOUD, not fail-green: route enumeration and the AC4.4/AC4.5 literal
+# counts (a stray literal there breaks the count and fails CI visibly).
 #
 # Anti-drift rules (each is a distinct failure token, self-tested):
 #   MAPPING_MOCKED_CONTRACT_TEST — helper call present but the test stubs
@@ -26,9 +29,12 @@
 #   STALE_DEBT_ENTRY   — helper-mode test exists but the debt entry remains.
 #   STALE_LEGACY_ENTRY — helper-mode test exists but the legacy entry remains.
 #   LEGACY_DEBT_CONFLICT — route listed in BOTH legacy and debt files.
-#   LEGACY_TEST_MISSING — legacy entry whose sibling test lost `redisErrored`.
+#   LEGACY_TEST_MISSING — legacy entry whose sibling test lost the
+#     code-level redisErrored reference.
 #   DANGLING_ENTRY — debt/legacy entry whose route no longer opts in
 #     (flag removal must be a visible manifest diff, parent-plan M2).
+#   CLASSIFIER_FAILURE — the AST classifier itself failed; the gate fails
+#     closed rather than falling back to any text match.
 #   MISSING_FAIL_CLOSED_TEST — no mode covers the route.
 #
 # Path-derivation rule (adjacent route.test.ts):
@@ -46,6 +52,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 FIXTURE_ROOT="${FAIL_CLOSED_TEST_ROOT:-$REPO_ROOT}"
 DEBT_FILE="${FAIL_CLOSED_TEST_DEBT_FILE:-$FIXTURE_ROOT/scripts/checks/fail-closed-test-debt.txt}"
 LEGACY_FILE="${FAIL_CLOSED_TEST_LEGACY_FILE:-$FIXTURE_ROOT/scripts/checks/fail-closed-legacy-direct.txt}"
+CLASSIFIER="$REPO_ROOT/scripts/checks/classify-fail-closed-test.mjs"
 
 # CI-auditable: print effective scan paths on one line.
 echo "check-fail-closed-routes-have-test: FIXTURE_ROOT=$FIXTURE_ROOT DEBT_FILE=$DEBT_FILE LEGACY_FILE=$LEGACY_FILE"
@@ -83,16 +90,12 @@ read_manifest() {
 DEBT_LIST="$(read_manifest "$DEBT_FILE")"
 LEGACY_LIST="$(read_manifest "$LEGACY_FILE")"
 
-is_debt()   { printf '%s' "$DEBT_LIST"   | grep -qxF "$1"; }
-is_legacy() { printf '%s' "$LEGACY_LIST" | grep -qxF "$1"; }
-
-# Production-mapping stub patterns (RT5 anti-pattern; roadmap R2-6/R3-1).
-MAPPING_MOCK_RE='vi\.mock\("@/lib/security/rate-limit-audit"|checkRateLimitOrFail:[[:space:]]*vi\.fn|mockCheckRateLimitOrFail'
-
-has_helper_call() { [ -f "$1" ] && grep -q 'assertRedisFailClosed(' "$1"; }
-has_helper_import() { [ -f "$1" ] && grep -q '@/__tests__/helpers/fail-closed' "$1"; }
-has_mapping_mock() { [ -f "$1" ] && grep -qE "$MAPPING_MOCK_RE" "$1"; }
-has_redis_errored() { [ -f "$1" ] && grep -q 'redisErrored' "$1"; }
+# NOTE: membership/lookup helpers use herestrings, NOT `printf | grep -q`
+# pipelines — `grep -q` closes the pipe on first match, and under load
+# (parallel vitest workers) printf then dies with SIGPIPE (141), which
+# `set -o pipefail` turns into a spurious gate failure. No pipe, no race.
+is_debt()   { grep -qxF "$1" <<<"$DEBT_LIST"; }
+is_legacy() { grep -qxF "$1" <<<"$LEGACY_LIST"; }
 
 # Enumerate opt-in routes. bash 3.2 has no `mapfile`.
 fail=0
@@ -106,10 +109,35 @@ done < <(
 )
 
 ROUTE_LIST=""
+candidate_tests=()
 for route in ${routes[@]+"${routes[@]}"}; do
   ROUTE_LIST="${ROUTE_LIST}${route}
 "
+  dir="$(dirname "$route")"
+  rel_path="${route#src/app/api/}"
+  rel_no_route="${rel_path%/route.ts}"
+  candidate_tests+=("$FIXTURE_ROOT/$dir/route.test.ts")
+  candidate_tests+=("$FIXTURE_ROOT/src/__tests__/api/${rel_no_route}.test.ts")
 done
+
+# Batch-classify every candidate sibling test with the AST classifier.
+# A classifier failure fails the gate (never fall back to text matching).
+CLASSIFY_OUT=""
+if [ "${#candidate_tests[@]}" -gt 0 ]; then
+  if ! CLASSIFY_OUT="$(node "$CLASSIFIER" ${candidate_tests[@]+"${candidate_tests[@]}"})"; then
+    echo "CLASSIFIER_FAILURE: scripts/checks/classify-fail-closed-test.mjs failed — gate fails closed (no text fallback)."
+    exit 1
+  fi
+fi
+
+# lookup <abs-path> → record string ("exists=1 import=1 calls=2 mock=0 redis=1")
+lookup() {
+  awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' <<<"$CLASSIFY_OUT"
+}
+# field <record> <key> → value (empty when record/key absent)
+field() {
+  awk -v k="$2" '{ for (i = 1; i <= NF; i++) { split($i, a, "="); if (a[1] == k) { print a[2]; exit } } }' <<<"$1"
+}
 
 for route in ${routes[@]+"${routes[@]}"}; do
   dir="$(dirname "$route")"
@@ -118,23 +146,27 @@ for route in ${routes[@]+"${routes[@]}"}; do
   rel_no_route="${rel_path%/route.ts}"    # X
   alt_test="$FIXTURE_ROOT/src/__tests__/api/${rel_no_route}.test.ts"
 
-  # Pick the sibling test that carries the helper call, if any.
+  rec_adj="$(lookup "$adjacent_test")"
+  rec_alt="$(lookup "$alt_test")"
+
+  # Pick the sibling test that carries real helper calls, if any.
   contract_test=""
-  if has_helper_call "$adjacent_test"; then
-    contract_test="$adjacent_test"
-  elif has_helper_call "$alt_test"; then
-    contract_test="$alt_test"
+  contract_rec=""
+  if [ "$(field "$rec_adj" calls)" != "" ] && [ "$(field "$rec_adj" calls)" -gt 0 ] 2>/dev/null; then
+    contract_test="$adjacent_test"; contract_rec="$rec_adj"
+  elif [ "$(field "$rec_alt" calls)" != "" ] && [ "$(field "$rec_alt" calls)" -gt 0 ] 2>/dev/null; then
+    contract_test="$alt_test"; contract_rec="$rec_alt"
   fi
 
   if [ -n "$contract_test" ]; then
     # helper mode candidate — reject the RT5 stub anti-pattern outright.
-    if has_mapping_mock "$contract_test"; then
+    if [ "$(field "$contract_rec" mock)" = "1" ]; then
       echo "MAPPING_MOCKED_CONTRACT_TEST: $route (${contract_test#$FIXTURE_ROOT/} calls assertRedisFailClosed but stubs the production checkRateLimitOrFail mapping)"
       fail=1
       continue
     fi
-    if ! has_helper_import "$contract_test"; then
-      echo "MISSING_FAIL_CLOSED_TEST: $route (assertRedisFailClosed( appears in ${contract_test#$FIXTURE_ROOT/} without importing @/__tests__/helpers/fail-closed — a comment or a local re-implementation does not count)"
+    if [ "$(field "$contract_rec" import)" != "1" ]; then
+      echo "MISSING_FAIL_CLOSED_TEST: $route (assertRedisFailClosed is called in ${contract_test#$FIXTURE_ROOT/} without importing it from @/__tests__/helpers/fail-closed — a local re-implementation does not count)"
       fail=1
       continue
     fi
@@ -158,19 +190,18 @@ for route in ${routes[@]+"${routes[@]}"}; do
       fail=1
       continue
     fi
-    if has_redis_errored "$adjacent_test" || has_redis_errored "$alt_test"; then
-      continue # documented legacy-direct coverage
+    if [ "$(field "$rec_adj" redis)" = "1" ] || [ "$(field "$rec_alt" redis)" = "1" ]; then
+      continue # documented legacy-direct coverage (code-level reference)
     fi
-    echo "LEGACY_TEST_MISSING: $route (listed in fail-closed-legacy-direct.txt but no sibling test contains redisErrored)"
+    echo "LEGACY_TEST_MISSING: $route (listed in fail-closed-legacy-direct.txt but no sibling test references redisErrored in code)"
     fail=1
     continue
   fi
 
   if is_debt "$route"; then
-    continue # documented debt — a bare redisErrored string in the sibling
-             # test does NOT flip a debt route to "tested" (that requires the
-             # shared-helper contract; see extension/bridge-code false-green
-             # in the PR #680 external review).
+    continue # documented debt — a redisErrored reference alone does NOT flip
+             # a debt route to "tested" (that requires the shared-helper
+             # contract; see extension/bridge-code false-green, PR #680 review).
   fi
 
   echo "MISSING_FAIL_CLOSED_TEST: $route (expected: assertRedisFailClosed contract in ${adjacent_test#$FIXTURE_ROOT/} or ${alt_test#$FIXTURE_ROOT/}, OR a fail-closed-legacy-direct.txt / fail-closed-test-debt.txt entry)"
@@ -184,7 +215,7 @@ check_dangling() {
   local list="$1" name="$2" entry
   while IFS= read -r entry; do
     [ -z "$entry" ] && continue
-    if ! printf '%s' "$ROUTE_LIST" | grep -qxF "$entry"; then
+    if ! grep -qxF "$entry" <<<"$ROUTE_LIST"; then
       echo "DANGLING_ENTRY: $entry ($name lists it but the route no longer contains failClosedOnRedisError: true — remove the entry, or restore the opt-in)"
       fail=1
     fi

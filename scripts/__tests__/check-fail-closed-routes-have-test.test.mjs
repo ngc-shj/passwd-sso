@@ -210,6 +210,41 @@ ${HELPER_CONTRACT_TEST}`,
       expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
       expect(stdout).toContain(rel);
     });
+
+    it("FAILS when the entire helper import + call lives inside a block comment (AST, not text)", () => {
+      // A text-based gate (even one requiring import + call) passes this
+      // shape; only AST classification rejects it.
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `/*
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+*/
+it("placeholder", () => { expect(true).toBe(true); });
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("FAILS (LEGACY_TEST_MISSING) when a legacy entry's redisErrored is only a describe label (AST, not text)", () => {
+      // The exact shape found in the real repo (mcp/authorize:345 et al.)
+      // when the classifier went AST-based: label-only references moved 7
+      // routes back into debt.
+      const rel = writeRoute("widgets/legacy", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/legacy",
+        'describe("rate limiting (redisErrored)", () => { it("stub 503", () => { expect(s).toBe(503); }); });\n',
+      );
+      writeFileSync(legacyFile, `${rel}\n`, "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("LEGACY_TEST_MISSING:");
+      expect(stdout).toContain(rel);
+    });
   });
 
   describe("anti-drift: stale / conflicting / dangling manifest entries", () => {
