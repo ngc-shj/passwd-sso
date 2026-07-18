@@ -37,13 +37,100 @@ function classify(content) {
   }
 }
 
+const IMPORT_LINE = `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";\n`;
+
 describe("classify-fail-closed-test.mjs", () => {
-  it("recognizes a genuine helper contract test (import + calls, no mock)", () => {
-    const f = classify(`import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
-await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
-await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+  it("recognizes a genuine helper contract test (import + calls inside it(), no mock)", () => {
+    const f = classify(`${IMPORT_LINE}
+it("case 1", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+it("case 2", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
 `);
     expect(f).toMatchObject({ exists: 1, import: 1, calls: 2, mock: 0, redis: 1 });
+  });
+
+  it("counts calls under it.each(...)(...) and it.only(...)", () => {
+    const f = classify(`${IMPORT_LINE}
+it.each([1, 2])("case %s", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+it.only("focused", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f.calls).toBe(2);
+  });
+
+  it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
+    const f = classify(`import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
+it("aliased", async () => {
+  await assertFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 1 });
+  });
+
+  it("does NOT count a call parked in a function no test invokes (execution binding)", () => {
+    const f = classify(`${IMPORT_LINE}
+async function neverCalled() {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+}
+it("placeholder", () => { expect(true).toBe(true); });
+`);
+    expect(f).toMatchObject({ import: 1, calls: 0 });
+  });
+
+  it("does NOT count a top-level call outside any test callback", () => {
+    const f = classify(`${IMPORT_LINE}
+await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+`);
+    expect(f.calls).toBe(0);
+  });
+
+  it("does NOT count calls inside it.skip / test.skip", () => {
+    const f = classify(`${IMPORT_LINE}
+it.skip("skipped", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f.calls).toBe(0);
+  });
+
+  it("does NOT count calls inside a describe.skip suite", () => {
+    const f = classify(`${IMPORT_LINE}
+describe.skip("suite", () => {
+  it("inside skipped suite", async () => {
+    await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+  });
+});
+`);
+    expect(f.calls).toBe(0);
+  });
+
+  it("does NOT count a shadowing local function with the helper's name", () => {
+    const f = classify(`${IMPORT_LINE}
+it("shadowed", async () => {
+  const assertRedisFailClosed = async () => undefined;
+  await assertRedisFailClosed();
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 0 });
+  });
+
+  it("documented residual: a call in a dead branch of a RUNNING test still counts", () => {
+    // Static reachability inside an executing callback is out of scope; this
+    // case pins the boundary so a behavior change here is a conscious one.
+    const f = classify(`${IMPORT_LINE}
+it("dead branch", async () => {
+  if (false) {
+    await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+  }
+});
+`);
+    expect(f.calls).toBe(1);
   });
 
   it("ignores import + call inside a block comment (calls=0, import=0)", () => {

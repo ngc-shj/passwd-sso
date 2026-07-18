@@ -230,6 +230,70 @@ it("placeholder", () => { expect(true).toBe(true); });
       expect(stdout).toContain(rel);
     });
 
+    it("FAILS when the helper call is parked in a function no test invokes (execution binding)", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+async function neverCalled() {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+}
+it("placeholder", () => { expect(true).toBe(true); });
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("FAILS when the only helper contract lives inside it.skip", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+it.skip("fails closed", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("FAILS when a local function shadows the imported helper", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+it("shadowed", async () => {
+  const assertRedisFailClosed = async () => undefined;
+  await assertRedisFailClosed();
+});
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MISSING_FAIL_CLOSED_TEST:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("passes with an alias import called from a real test (symbol binding)", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "widgets/purge",
+        `import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
+it("fails closed", async () => {
+  await assertFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+
     it("FAILS (LEGACY_TEST_MISSING) when a legacy entry's redisErrored is only a describe label (AST, not text)", () => {
       // The exact shape found in the real repo (mcp/authorize:345 et al.)
       // when the classifier went AST-based: label-only references moved 7

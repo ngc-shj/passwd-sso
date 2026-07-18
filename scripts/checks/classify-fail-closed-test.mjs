@@ -16,7 +16,13 @@
  * Field semantics:
  *   import — ImportDeclaration from "@/__tests__/helpers/fail-closed"
  *            whose named imports include assertRedisFailClosed
- *   calls  — CallExpression count with callee Identifier assertRedisFailClosed
+ *   calls  — count of CallExpressions whose callee SYMBOL is the helper's
+ *            local import binding (alias-aware; shadowing local functions
+ *            never count) AND which execute from a real test: nearest
+ *            enclosing function is the callback of a non-skipped it/test
+ *            registration with no skipped suite ancestor. Calls in unused
+ *            functions, at top level, or under it.skip/describe.skip do not
+ *            count.
  *   mock   — production-mapping stub present as CODE (RT5 anti-pattern):
  *            vi.mock("@/lib/security/rate-limit-audit", ...), a property
  *            assignment `checkRateLimitOrFail: <vi.fn…>`, or any use of an
@@ -57,24 +63,106 @@ function classify(path) {
     return { exists: 0, import: 0, calls: 0, mock: 0, redis: 0 };
   }
 
-  const sf = project.createSourceFile(`/virtual/${path.replaceAll("/", "_")}.ts`, text, {
-    overwrite: true,
-  });
+  const sf = project.createSourceFile(
+    `/virtual/${path.replaceAll("\\", "_").replaceAll("/", "_")}.ts`,
+    text,
+    { overwrite: true },
+  );
 
+  // Resolve the LOCAL binding symbol of the helper's named import (alias-aware:
+  // `{ assertRedisFailClosed as assertFailClosed }` binds the alias). Calls are
+  // then matched by SYMBOL, not by name text — a local function shadowing the
+  // imported name has a different symbol and never counts, while a legitimate
+  // alias call does (PR #680 review round 3, 7.1).
   let hasImport = false;
+  let helperSymbol;
   for (const imp of sf.getImportDeclarations()) {
     if (imp.getModuleSpecifierValue() !== HELPER_MODULE) continue;
-    if (imp.getNamedImports().some((n) => n.getName() === HELPER_NAME)) {
+    const spec = imp.getNamedImports().find((n) => n.getName() === HELPER_NAME);
+    if (spec !== undefined) {
       hasImport = true;
+      helperSymbol = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
       break;
     }
+  }
+
+  const FUNCTION_LIKE = new Set([
+    SyntaxKind.ArrowFunction,
+    SyntaxKind.FunctionExpression,
+    SyntaxKind.FunctionDeclaration,
+    SyntaxKind.MethodDeclaration,
+  ]);
+  const TEST_BASES = new Set(["it", "test"]);
+  const SUITE_BASES = new Set(["describe", "suite"]);
+  const SKIP_ALIASES = new Set(["xit", "xtest", "xdescribe"]);
+
+  // Classify a CallExpression as a vitest registration: {kind, skipped} or null.
+  // Handles `it(...)`, `it.only/concurrent/sequential(...)`, `it.skip/todo(...)`,
+  // `it.each(cases)(...)` (callee is itself a CallExpression), and x-aliases.
+  function registrationInfo(callExpr) {
+    let expr = callExpr.getExpression();
+    if (expr.getKind() === SyntaxKind.CallExpression) {
+      expr = expr.getExpression(); // unwrap it.each(cases)(...)
+    }
+    const modifiers = [];
+    while (expr.getKind() === SyntaxKind.PropertyAccessExpression) {
+      modifiers.push(expr.getName());
+      expr = expr.getExpression();
+    }
+    if (expr.getKind() !== SyntaxKind.Identifier) return null;
+    const base = expr.getText();
+    const skipped =
+      modifiers.includes("skip") || modifiers.includes("todo") || SKIP_ALIASES.has(base);
+    if (SUITE_BASES.has(base) || base === "xdescribe") return { kind: "suite", skipped };
+    if (TEST_BASES.has(base) || base === "xit" || base === "xtest") return { kind: "test", skipped };
+    return null;
+  }
+
+  // A helper call counts ONLY when it executes from a real test: its nearest
+  // enclosing function must be a callback argument of a non-skipped it/test
+  // registration, with no skipped suite/test ancestor. Calls parked in unused
+  // functions, at top level, or under it.skip/describe.skip never run in CI
+  // and therefore never count (PR #680 review round 3, 7.2). Known residual
+  // (documented): a call inside dead branches of a RUNNING test callback
+  // (e.g. `if (false)`) still counts — static reachability inside a running
+  // test is out of scope; deliberate evasion of that shape is a review matter.
+  function isExecutedFromTest(call) {
+    let node = call.getParent();
+    let nearestFn;
+    while (node !== undefined) {
+      if (FUNCTION_LIKE.has(node.getKind())) {
+        nearestFn = node;
+        break;
+      }
+      node = node.getParent();
+    }
+    if (nearestFn === undefined) return false; // top-level call — vitest never runs it
+    const parent = nearestFn.getParent();
+    if (parent === undefined || parent.getKind() !== SyntaxKind.CallExpression) return false;
+    if (!parent.getArguments().includes(nearestFn)) return false;
+    const reg = registrationInfo(parent);
+    if (reg === null || reg.kind !== "test" || reg.skipped) return false;
+    let anc = parent.getParent();
+    while (anc !== undefined) {
+      if (anc.getKind() === SyntaxKind.CallExpression) {
+        const ancReg = registrationInfo(anc);
+        if (ancReg !== null && ancReg.skipped) return false;
+      }
+      anc = anc.getParent();
+    }
+    return true;
   }
 
   let calls = 0;
   let mock = false;
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
-    if (callee.getKind() === SyntaxKind.Identifier && callee.getText() === HELPER_NAME) {
+    if (
+      helperSymbol !== undefined &&
+      callee.getKind() === SyntaxKind.Identifier &&
+      callee.getSymbol() === helperSymbol &&
+      isExecutedFromTest(call)
+    ) {
       calls += 1;
     }
     // vi.mock("@/lib/security/rate-limit-audit", ...)

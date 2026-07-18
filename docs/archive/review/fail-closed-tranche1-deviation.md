@@ -74,3 +74,16 @@ own 10-case self-test (meta-gate demanded it); gate self-test grew to 22
 cases incl. AST-only red fixtures (comment-wrapped import+call, label-only
 redisErrored). Rule persisted as feedback memory
 (feedback_ast_first_for_code_classification_gates).
+
+## D10 — Execution binding for helper calls (2026-07-18, review round 3)
+D9's AST classifier verified node EXISTENCE only — a helper call parked in an
+uninvoked function, under it.skip/describe.skip, at top level, or a local
+function shadowing the imported name all classified as helper mode. Fixed per
+review 7.1+7.2: calls now match by import-binding SYMBOL (alias-aware;
+shadowing never counts) and must execute from a real test (nearest enclosing
+function is the callback of a non-skipped it/test registration — incl.
+it.each/only/concurrent — with no skipped suite ancestor). Documented
+residual: dead branches inside a RUNNING callback (e.g. `if (false)`) still
+count — static reachability in an executing test is out of scope; pinned as
+an explicit boundary self-test. Classifier self-test 18 cases; gate
+self-test 26 (execution-binding red fixtures + alias-import green).
