@@ -25,7 +25,17 @@ export type RedisErroredFailure = RateLimitResult & { redisErrored: true };
 export type FailClosedExpectation =
   | { envelope: "canonical" }
   | { envelope: "oauth" }
-  | { envelope: "custom"; status: number; body: Record<string, unknown> };
+  | {
+      envelope: "custom";
+      status: number;
+      body: Record<string, unknown>;
+      /**
+       * Retry-After policy for the bespoke envelope. Explicit so future
+       * custom-envelope consumers must decide instead of silently skipping
+       * the header contract that canonical/oauth enforce.
+       */
+      retryAfter: "required" | "forbidden" | "ignore";
+    };
 
 /**
  * Snapshot a `createRateLimiter` factory mock's recorded (args, returnValue)
@@ -100,20 +110,32 @@ export async function assertRedisFailClosed(options: {
   const body: unknown = await res.json();
   const retryAfter = res.headers.get("Retry-After");
 
+  // Retry-After delay-seconds is an integer string (RFC 9110); Number()
+  // coercion would accept "", whitespace, negatives, and decimals. Also
+  // require > 0: a 0-second retry hint during an outage is a client-stampede
+  // invitation (production default is 30s).
+  const expectRetryAfterDelaySeconds = () => {
+    expect(retryAfter).toMatch(/^\d+$/);
+    expect(Number(retryAfter)).toBeGreaterThan(0);
+  };
+
   if (expectation.envelope === "canonical") {
     expect(res.status).toBe(503);
     expect(body).toMatchObject({ error: "SERVICE_UNAVAILABLE" });
-    // Retry-After delay-seconds is a non-negative integer string (RFC 9110);
-    // Number() coercion would accept "", whitespace, negatives, and decimals.
-    expect(retryAfter).toMatch(/^\d+$/);
+    expectRetryAfterDelaySeconds();
   } else if (expectation.envelope === "oauth") {
     expect(res.status).toBe(503);
     expect(body).toMatchObject({ error: "temporarily_unavailable" });
     expect(body).not.toHaveProperty("error_description");
-    expect(retryAfter).toMatch(/^\d+$/);
+    expectRetryAfterDelaySeconds();
   } else {
     expect(res.status).toBe(expectation.status);
     expect(body).toEqual(expectation.body);
+    if (expectation.retryAfter === "required") {
+      expectRetryAfterDelaySeconds();
+    } else if (expectation.retryAfter === "forbidden") {
+      expect(retryAfter).toBeNull();
+    }
   }
 
   // 5. Assert no mutation

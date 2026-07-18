@@ -1,0 +1,41 @@
+# Fail-closed legacy-direct test manifest (external review of PR #680)
+#
+# Routes here have `failClosedOnRedisError: true` AND a fail-closed test that
+# predates the shared `assertRedisFailClosed` contract helper. Their tests
+# assert the 503 behavior directly; some stub the production
+# `checkRateLimitOrFail` mapping (the SC1 stub-migration backlog).
+#
+# check-fail-closed-routes-have-test.sh treats these entries as "tested"
+# WITHOUT requiring the shared-helper contract. Rules enforced by the gate:
+#   - An entry here MUST NOT also appear in fail-closed-test-debt.txt
+#     (LEGACY_DEBT_CONFLICT).
+#   - The entry's sibling test MUST still contain `redisErrored`
+#     (LEGACY_TEST_MISSING).
+#   - When a route's test is migrated to `assertRedisFailClosed`, its entry
+#     here MUST be removed in the same PR (STALE_LEGACY_ENTRY) — migration is
+#     atomic, entries cannot linger.
+#   - An entry whose route no longer opts into fail-closed is rejected
+#     (DANGLING_ENTRY) so flag removal is always a visible manifest diff.
+#
+# Format: one route path per line, relative to repo root, sorted.
+
+src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts
+src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts
+src/app/api/admin/rotate-master-key/[rotationId]/revoke/route.ts
+src/app/api/admin/rotate-master-key/initiate/route.ts
+src/app/api/auth/[...nextauth]/route.ts
+src/app/api/maintenance/audit-chain-verify/route.ts
+src/app/api/maintenance/audit-outbox-metrics/route.ts
+src/app/api/maintenance/audit-outbox-purge-failed/route.ts
+src/app/api/maintenance/dcr-cleanup/route.ts
+src/app/api/maintenance/purge-audit-logs/route.ts
+src/app/api/maintenance/purge-history/route.ts
+src/app/api/mcp/authorize/route.ts
+src/app/api/mobile/authorize/route.ts
+src/app/api/mobile/autofill-token/route.ts
+src/app/api/tenant/breakglass/route.ts
+src/app/api/tenant/members/[userId]/reset-vault/route.ts
+src/app/api/tenant/operator-tokens/route.ts
+src/app/api/tenant/scim-tokens/route.ts
+src/app/api/tenant/service-accounts/route.ts
+src/app/api/vault/ssh/sign-authorize/route.ts

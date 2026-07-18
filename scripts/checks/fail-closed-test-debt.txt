@@ -5,11 +5,16 @@
 # the correct 503 envelope when the limiter returns `{ redisErrored: true }`.
 #
 # `scripts/checks/check-fail-closed-routes-have-test.sh` is the CI gate:
-#   - Routes with `failClosedOnRedisError: true` MUST have a sibling test
-#     containing the literal token `redisErrored`, OR appear in this file.
-#   - Adding a new opt-in route without test or allowlist entry fails CI.
-#   - Future PRs that author the fail-closed test MUST also remove the
-#     route's entry from this file (atomic "test added + debt removed").
+#   - Routes with `failClosedOnRedisError: true` MUST have a sibling
+#     `assertRedisFailClosed` contract test (shared helper, production
+#     mapping unmocked), OR appear in fail-closed-legacy-direct.txt
+#     (pre-helper direct test), OR appear in this file.
+#   - A bare `redisErrored` string in the sibling test does NOT count as
+#     tested (false-green class found by the PR #680 external review).
+#   - Adding a new opt-in route without a contract test or manifest entry
+#     fails CI.
+#   - Authoring the contract test MUST remove the route's entry from this
+#     file in the same PR (STALE_DEBT_ENTRY enforces atomicity).
 #
 # `mcp/authorize` had its fail-closed test case in the initial PR
 # (src/__tests__/api/mcp/authorize.test.ts). Tranche 1

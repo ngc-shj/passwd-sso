@@ -157,6 +157,7 @@ describe.skipIf(!dbAvailable)(
       // RFC 9110 delay-seconds: non-negative integer string (Number() would
       // accept "", whitespace, negatives, decimals).
       expect(retryAfter).toMatch(/^\d+$/);
+      expect(Number(retryAfter)).toBeGreaterThan(0);
     });
 
     it("checkRateLimitOrFail maps redisErrored to the oauth 503 envelope with Retry-After, no error_description", async () => {
@@ -186,6 +187,7 @@ describe.skipIf(!dbAvailable)(
       // RFC 9110 delay-seconds: non-negative integer string (Number() would
       // accept "", whitespace, negatives, decimals).
       expect(retryAfter).toMatch(/^\d+$/);
+      expect(Number(retryAfter)).toBeGreaterThan(0);
     });
 
     // Red-proof (RT7): same broken Redis, but the limiter did NOT opt into

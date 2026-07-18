@@ -182,11 +182,14 @@ describe("assertRedisFailClosed", () => {
 
   // Number() coercion would accept "" (→ 0), negatives, and decimals — the
   // helper must reject every non-delay-seconds shape, not just NaN inputs.
+  // "0" is well-formed per RFC 9110 but rejected: a 0-second retry hint
+  // during an outage invites a client stampede (production default is 30s).
   it.each([
     ["non-numeric", "not-a-number"],
     ["empty string", ""],
     ["negative", "-1"],
     ["decimal", "1.5"],
+    ["zero", "0"],
   ])("case 7b: correct status/body but Retry-After %s — rejects", async (_label, value) => {
     await expect(
       assertRedisFailClosed({
@@ -200,6 +203,64 @@ describe("assertRedisFailClosed", () => {
         ),
         limiter,
         expectation: { envelope: "canonical" },
+        assertNoMutation: [mutationSpy],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).rejects.toThrow();
+  });
+
+  // Custom-envelope Retry-After policy is explicit (required/forbidden/ignore)
+  // so bespoke consumers cannot silently skip the header contract.
+  const CUSTOM_BODY = { authorized: false, reason: "service_unavailable" };
+
+  it("case 8: custom envelope with retryAfter required — passes when header is valid", async () => {
+    await assertRedisFailClosed({
+      invoke: fakeRoute(
+        limiter,
+        () =>
+          new Response(JSON.stringify(CUSTOM_BODY), {
+            status: 503,
+            headers: { "Retry-After": "30" },
+          }),
+      ),
+      limiter,
+      expectation: { envelope: "custom", status: 503, body: CUSTOM_BODY, retryAfter: "required" },
+      assertNoMutation: [mutationSpy],
+      limiterFactory,
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("case 8b: custom envelope with retryAfter required — rejects when header is absent", async () => {
+    await expect(
+      assertRedisFailClosed({
+        invoke: fakeRoute(
+          limiter,
+          () => new Response(JSON.stringify(CUSTOM_BODY), { status: 503 }),
+        ),
+        limiter,
+        expectation: { envelope: "custom", status: 503, body: CUSTOM_BODY, retryAfter: "required" },
+        assertNoMutation: [mutationSpy],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("case 8c: custom envelope with retryAfter forbidden — rejects when header is present", async () => {
+    await expect(
+      assertRedisFailClosed({
+        invoke: fakeRoute(
+          limiter,
+          () =>
+            new Response(JSON.stringify(CUSTOM_BODY), {
+              status: 503,
+              headers: { "Retry-After": "30" },
+            }),
+        ),
+        limiter,
+        expectation: { envelope: "custom", status: 503, body: CUSTOM_BODY, retryAfter: "forbidden" },
         assertNoMutation: [mutationSpy],
         limiterFactory,
         failure: { allowed: false, redisErrored: true },
