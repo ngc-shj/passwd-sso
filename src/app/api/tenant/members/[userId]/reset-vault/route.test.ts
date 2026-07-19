@@ -36,6 +36,11 @@ const {
       this.status = status;
     }
   }
+  // Declared before the return object so mockCreateRateLimiter's callbacks can
+  // reference them without a self-referential-object TS7022 (mirrors the
+  // approve-route sibling test).
+  const mockAdminLimiterCheck = vi.fn();
+  const mockTargetLimiterCheck = vi.fn();
   return {
     mockAuth: vi.fn(),
     mockPrismaTenantMemberFindFirst: vi.fn(),
@@ -49,8 +54,8 @@ const {
     // in creation order so assertRedisFailClosed's strict-identity attribution
     // resolves each. Testing one limiter twice would not satisfy the gate's
     // HELPER_CALLS_BELOW_LIMITER_COUNT distinct-arg rule (declared count 2).
-    mockAdminLimiterCheck: vi.fn(),
-    mockTargetLimiterCheck: vi.fn(),
+    mockAdminLimiterCheck,
+    mockTargetLimiterCheck,
     mockCreateRateLimiter: vi
       .fn()
       .mockImplementationOnce((_opts: unknown) => ({ check: mockAdminLimiterCheck, clear: vi.fn() }))

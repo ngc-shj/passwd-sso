@@ -37,6 +37,20 @@ recording `vi.fn()` returning two distinct objects, both delegating to the share
 (callback + magic-link) were removed as superseded by the stronger helper contract.
 Classifier confirms `calls=2 mock=0 distinct=2`.
 
+## D4 — reset-vault vi.hoisted self-reference (R20 self-check fix)
+
+**Found by**: Phase-2 self-R-check (Functionality expert, R20). The initial
+reset-vault edit placed `mockAdminLimiterCheck`/`mockTargetLimiterCheck` as sibling
+properties of the `vi.hoisted` return object while `mockCreateRateLimiter`'s
+`mockImplementationOnce` callbacks referenced them — a self-referential object
+literal that TypeScript cannot type (TS7022/TS7024/TS7031). Vitest passed (esbuild
+skips type-check) but `tsc --noEmit` / `next build` failed.
+
+**Fixed**: declared the two check mocks as `const` inside the `vi.hoisted` function
+body BEFORE the return object (mirroring the approve-route sibling test), then
+referenced them via shorthand. Zero tsc errors project-wide after the fix; 30/30
+reset-vault tests still green; classifier still `distinct=2`.
+
 ## D3 — reset-vault distinct-limiter split
 
 **Applied** (C1 M-refactor, as planned): split the shared `mockRateLimiterCheck` into
