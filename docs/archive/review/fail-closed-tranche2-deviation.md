@@ -173,3 +173,25 @@ the legitimate factory-mock pattern the Response/silent-drop tiers rely on).
 The check closes the specific "inline fixed-result object" weakening; deeper
 semantic identity (is this the PROD singleton?) remains beyond AST reach and a
 review matter for the single direct-result member.
+
+## D13 — External-review round 4: allowlist-module mock + factory-result alias (2026-07-19)
+Two evasions survived the D12 symbol-based checks:
+- The direct-result whitelist verified the import BINDING but not whether the
+  allowlisted module was itself mocked: `vi.mock("@/lib/security/rate-limiters",
+  ...)` leaves `v1ApiKeyLimiter` looking production-legitimate while replacing
+  it with a fake. Fix: a pre-pass flags a mock (vi.mock/doMock, string or
+  relative specifier normalized) of the rate-limiters module; a direct-result
+  call in such a file is resultfake=1.
+- Alias-chain normalization keyed a factory-result root by the ALIAS's text
+  (`call:aliasA` vs `call:aliasB`) instead of the root declaration, so two
+  aliases of one `const shared = make()` counted as distinct=2. Fix:
+  resolveRootBinding now keys every non-import root (object/call/opaque) on the
+  ROOT VariableDeclaration's source position (declKey), so all aliases of one
+  root collapse.
+Proactively closed the same class: vi.doMock of the module, and relative-
+specifier mocks (./rate-limiters), both verified caught; a relative import that
+is NOT mocked stays resultfake=0 (no false positive). Removed a pre-existing
+unused MAPPING_MODULE constant (lint zero-warning). Also fixed a self-inflicted
+lint error (a local var named `module`, forbidden by @next/next). Self-tests:
+classifier +4 (factory-alias distinct, module vi.mock, module vi.doMock, plus
+the round-4 evasion cases), all green; real gate + meta-gate EXIT 0.

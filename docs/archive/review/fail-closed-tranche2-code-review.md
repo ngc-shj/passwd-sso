@@ -330,3 +330,35 @@ unmapped); per-DISTINCT-limiter coverage in multi-limiter files; a real
 (non-fake) limiter for the direct-result tier; and stub-scan reach into
 multiline-configured setup files — all symbol-based, all mutation-verified in
 the self-tests.
+
+---
+
+# Code Review Round 7 (external-review round 4)
+Date: 2026-07-19
+
+## Changes from Previous Round
+Two evasions survived the symbol-based checks (deviation D13): (1) mocking the
+allowlisted rate-limiters module itself left the import binding
+production-legitimate while faking v1ApiKeyLimiter; (2) two aliases of one
+factory-result were keyed by alias text, counting as distinct=2.
+
+## Fix
+- Direct-result tier now also fails resultfake=1 when the rate-limiters module
+  is vi.mock/doMock'd (pre-pass, string + relative specifier normalized).
+- resolveRootBinding keys every non-import root on the root VariableDeclaration
+  position (declKey), so factory-result aliases collapse to distinct=1.
+- Proactively closed the same class before re-review: vi.doMock and
+  relative-specifier module mocks; relative import unmocked stays resultfake=0.
+- Removed a pre-existing unused MAPPING_MODULE constant; fixed a self-inflicted
+  `module` variable-name lint error.
+
+## Verification
+Classifier self-test 42→46 (factory-alias distinct=1, module vi.mock/doMock
+resultfake=1), gate self-test 53, real gate + meta-gate EXIT 0, lint clean.
+
+## Note on process
+This round and R6 were the same defect class (limiter identity by AST) that
+should have been closed comprehensively in one pass; the piecemeal fixes were an
+implementation-thoroughness gap, not an inherent AST limitation. The self-audit
+(doMock/relative variants) was added to this round to close the class rather
+than wait for the next report.

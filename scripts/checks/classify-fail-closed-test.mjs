@@ -67,7 +67,15 @@ const HELPER_NAMES = new Set([
   "assertRedisFailClosedSilentDrop",
   "assertRedisFailClosedResult",
 ]);
-const MAPPING_MODULE = "@/lib/security/rate-limit-audit";
+// WHITELIST of production limiter bindings accepted by the direct-result tier
+// (assertRedisFailClosedResult). The limiter argument MUST resolve — following
+// alias chains to its root binding — to a named import of one of these exports
+// from the rate-limiters module. Anything else (inline/const fake, factory
+// result, import from a test module) is rejected as resultfake=1. A whitelist,
+// not a fake-shape blacklist, so novel fake constructions cannot slip through
+// (external review 2026-07-19, round 4).
+const RESULT_LIMITER_MODULE_SUFFIX = "lib/security/rate-limiters";
+const RESULT_LIMITER_EXPORTS = new Set(["v1ApiKeyLimiter"]);
 // Suffix match target after normalization (extension stripped, relative
 // specifiers resolved against the test file's directory) — catches alias
 // forms (`@/lib/...`) and relative forms (`../../../lib/security/...`) alike.
@@ -340,13 +348,10 @@ function classify(path) {
     return undefined;
   }
 
-  // Resolve an identifier's underlying binding declarations. A shorthand
-  // property `{ limiter }` yields a symbol whose declaration is the
-  // ShorthandPropertyAssignment itself — follow it to the referenced binding
-  // (`getAliasedSymbol`, else the value declaration) so both distinct-limiter
-  // accounting and fake-detection see the real `const limiter = ...`.
+  // Resolve the underlying binding declarations of an identifier, following a
+  // shorthand property `{ limiter }` to its referenced binding.
   function bindingDeclsOf(idNode) {
-    let sym = idNode.getSymbol();
+    const sym = idNode.getSymbol();
     if (sym === undefined) return [];
     const decls = sym.getDeclarations() ?? [];
     if (decls.length === 1 && decls[0].getKind() === SyntaxKind.ShorthandPropertyAssignment) {
@@ -358,42 +363,116 @@ function classify(path) {
     return decls;
   }
 
-  // Whether a limiter-argument expression is a LOCALLY-CONSTRUCTED fake (an
-  // inline object literal, or an identifier whose declaration initializes it to
-  // an object literal) rather than a production import / factory-mock result.
-  // Used only for the direct-result tier, whose limiter must be the real module
-  // singleton (external review 2026-07-19, round 3) — a fake `{ check }` object
-  // would let a fixed result masquerade as a fail-closed probe.
-  function isFakeLimiterExpr(expr) {
-    if (expr === undefined) return false;
-    if (expr.getKind() === SyntaxKind.ObjectLiteralExpression) return true;
-    if (expr.getKind() === SyntaxKind.Identifier) {
-      const decls = bindingDeclsOf(expr);
-      for (const decl of decls) {
-        // Imported binding (import specifier / clause) → production, not fake.
-        if (
-          decl.getKind() === SyntaxKind.ImportSpecifier ||
-          decl.getKind() === SyntaxKind.ImportClause
-        ) {
-          return false;
+  // A stable identity key for a declaration node: its kind + start position in
+  // the source. Two aliases resolving to the SAME `const shared = ...` share
+  // this key, so they collapse even when the initializer is a call/object whose
+  // value the AST cannot compare (external review 2026-07-19, round 5).
+  function declKey(decl) {
+    return `decl@${decl.getStart()}`;
+  }
+
+  // Normalize a limiter-argument expression to its ROOT binding, following
+  // `const b = a` alias chains (with a visited guard against cycles) until the
+  // initializer is no longer a bare identifier. Returns a descriptor:
+  //   { kind: "import", moduleSpec, name }  — a named import (production candidate)
+  //   { kind: "object", key }               — an inline/const object literal (fake)
+  //   { kind: "call", key }                 — initialized by a call (factory result)
+  //   { kind: "identity", key }             — an opaque root binding, keyed stably
+  //   { kind: "unknown", key }              — unresolved; keyed by text
+  // The `key` is the ROOT declaration's identity (not the alias's text), so
+  // aliases of one root collapse. Used for BOTH distinct-limiter accounting and
+  // the direct-result whitelist (external review 2026-07-19, rounds 4-5).
+  function resolveRootBinding(expr, visited = new Set()) {
+    if (expr === undefined) return { kind: "unknown", key: "undefined" };
+    if (expr.getKind() === SyntaxKind.ObjectLiteralExpression) {
+      return { kind: "object", key: `objlit@${expr.getStart()}` };
+    }
+    if (expr.getKind() !== SyntaxKind.Identifier) {
+      return { kind: "unknown", key: `text:${expr.getText()}` };
+    }
+    for (const decl of bindingDeclsOf(expr)) {
+      const dk = decl.getKind();
+      if (dk === SyntaxKind.ImportSpecifier) {
+        const imp = decl.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration);
+        const moduleSpec = imp !== undefined ? normalizeSpecifier(imp.getModuleSpecifierValue()) : "";
+        // The IMPORTED name (not the local alias) identifies the export.
+        const name = decl.getNameNode?.().getText() ?? expr.getText();
+        return { kind: "import", moduleSpec, name };
+      }
+      if (dk === SyntaxKind.ImportClause) {
+        return { kind: "import", moduleSpec: "", name: expr.getText() };
+      }
+      if (dk === SyntaxKind.VariableDeclaration) {
+        const init = decl.getInitializer?.();
+        if (init === undefined) return { kind: "identity", key: declKey(decl) };
+        if (init.getKind() === SyntaxKind.ObjectLiteralExpression) {
+          return { kind: "object", key: declKey(decl) };
         }
-        // `const x = { check: ... }` → fake.
-        if (decl.getKind() === SyntaxKind.VariableDeclaration) {
-          const init = decl.getInitializer?.();
-          if (init !== undefined && init.getKind() === SyntaxKind.ObjectLiteralExpression) {
-            return true;
-          }
+        if (init.getKind() === SyntaxKind.Identifier) {
+          // Alias chain: `const b = a` — recurse into `a` with a cycle guard.
+          const initSym = init.getSymbol();
+          const guardKey = initSym !== undefined ? initSym : init.getText();
+          if (visited.has(guardKey)) return { kind: "identity", key: declKey(decl) };
+          visited.add(guardKey);
+          return resolveRootBinding(init, visited);
         }
+        // Any other initializer (call/factory result, member access, etc.):
+        // the ROOT is this variable declaration — key on IT, not the alias.
+        return { kind: "call", key: declKey(decl) };
       }
     }
-    return false;
+    // No resolvable declaration (e.g. an ambient/global) — key by symbol text.
+    const s = expr.getSymbol();
+    return { kind: "identity", key: s !== undefined ? `sym:${expr.getText()}` : `text:${expr.getText()}` };
+  }
+
+  // Stable distinct-key for a limiter argument: its ROOT binding identity, so
+  // two aliases of the SAME limiter (`const x = realLimiter; limiter: x`, or
+  // `const s = make(); const a = s; const b = s`) count once, and two genuinely
+  // different limiters count twice.
+  function distinctKeyOf(expr) {
+    const root = resolveRootBinding(expr);
+    if (root.kind === "import") return `import:${root.moduleSpec}#${root.name}`;
+    return root.key;
+  }
+
+  // Direct-result tier: the limiter must resolve to a WHITELISTED production
+  // import (a named export from the rate-limiters module). Everything else —
+  // inline/const fake, factory result, import from a test module — is rejected.
+  function isProductionResultLimiter(expr) {
+    const root = resolveRootBinding(expr);
+    if (root.kind !== "import") return false;
+    return (
+      root.moduleSpec.endsWith(RESULT_LIMITER_MODULE_SUFFIX) &&
+      RESULT_LIMITER_EXPORTS.has(root.name)
+    );
+  }
+
+  // Pre-pass: is the rate-limiters module itself mocked? A `vi.mock(
+  // "@/lib/security/rate-limiters", ...)` leaves the import binding looking
+  // production-legitimate while replacing v1ApiKeyLimiter with a fake — so a
+  // production-import allowlist alone is bypassable (external review
+  // 2026-07-19, round 5). When the module is mocked, a direct-result test using
+  // it is NOT a genuine fail-closed probe.
+  let resultLimiterModuleMocked = false;
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (resolveMockCallee(call.getExpression()) === null) continue;
+    const firstArg = call.getArguments()[0];
+    if (
+      firstArg !== undefined &&
+      (firstArg.getKind() === SyntaxKind.StringLiteral ||
+        firstArg.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral) &&
+      normalizeSpecifier(firstArg.getLiteralText()).endsWith(RESULT_LIMITER_MODULE_SUFFIX)
+    ) {
+      resultLimiterModuleMocked = true;
+    }
   }
 
   let calls = 0;
   let mock = false;
   let dynspec = false;
-  const distinctLimiterSymbols = new Set(); // distinct `limiter:` arg symbols
-  let resultFakeLimiter = false; // a direct-result call passed a fake limiter
+  const distinctLimiterKeys = new Set(); // distinct ROOT-binding keys
+  let resultFakeLimiter = false; // a direct-result call passed a non-prod limiter
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     if (
@@ -405,20 +484,20 @@ function classify(path) {
       calls += 1;
       const tierName = helperSymbols.get(callee.getSymbol());
       const limiterExpr = limiterArgOf(call);
-      // Distinct-limiter accounting: identify each limiter arg by its symbol so
-      // testing the SAME limiter twice does not satisfy a 2-limiter file
-      // (external review 2026-07-19, round 3). A limiter arg with no resolvable
-      // symbol (object literal / call expression) is keyed by its node text so
-      // two syntactically-distinct inline limiters still count as distinct.
+      // Distinct-limiter accounting keyed on the ROOT binding, so aliases of the
+      // SAME limiter collapse to one and genuinely different limiters count
+      // separately (external review 2026-07-19, round 4).
       if (limiterExpr !== undefined) {
-        const sym = limiterExpr.getKind() === SyntaxKind.Identifier
-          ? limiterExpr.getSymbol()
-          : undefined;
-        distinctLimiterSymbols.add(sym ?? `text:${limiterExpr.getText()}`);
+        distinctLimiterKeys.add(distinctKeyOf(limiterExpr));
       }
-      // Direct-result tier: the limiter must be the production singleton, not a
-      // locally-built fake returning a fixed result.
-      if (tierName === "assertRedisFailClosedResult" && isFakeLimiterExpr(limiterExpr)) {
+      // Direct-result tier: the limiter must resolve to a whitelisted production
+      // import AND that module must not be mocked out from under the binding —
+      // anything else (fake, factory result, test-module import, mocked module)
+      // is rejected, so novel fake constructions cannot slip past a blacklist.
+      if (
+        tierName === "assertRedisFailClosedResult" &&
+        (!isProductionResultLimiter(limiterExpr) || resultLimiterModuleMocked)
+      ) {
         resultFakeLimiter = true;
       }
     }
@@ -507,7 +586,7 @@ function classify(path) {
     mock: mock ? 1 : 0,
     redis: redis ? 1 : 0,
     dynspec: dynspec ? 1 : 0,
-    distinct: distinctLimiterSymbols.size,
+    distinct: distinctLimiterKeys.size,
     resultfake: resultFakeLimiter ? 1 : 0,
   };
 }

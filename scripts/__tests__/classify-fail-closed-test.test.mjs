@@ -142,6 +142,81 @@ it("x", async () => {
     expect(f.resultfake).toBe(0);
   });
 
+  it("flags a FACTORY-PRODUCED fake limiter (blacklist would miss it, whitelist catches it)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+const makeFake = () => ({ check: vi.fn() });
+const limiter = makeFake();
+it("x", async () => { await assertRedisFailClosedResult({ limiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a fake IMPORTED from a non-production module (resultfake=1)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { fakeLimiter } from "@/__tests__/helpers/fakes";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: fakeLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("does NOT flag a production limiter reached through an alias chain (resultfake=0)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+const limiter = v1ApiKeyLimiter;
+it("x", async () => { await assertRedisFailClosedResult({ limiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(0);
+  });
+
+  it("collapses two aliases of the SAME limiter to distinct=1 (alias-chain normalization)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+import { realLimiter } from "@/lib/security/rate-limiters";
+const shared = realLimiter;
+const aliasA = shared;
+const aliasB = shared;
+it("1", async () => { await assertRedisFailClosed({ limiter: aliasA, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: aliasB, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 1 });
+  });
+
+  it("collapses two aliases of the SAME FACTORY-RESULT to distinct=1 (root keyed on the declaration, not the alias text)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const makeLimiter = () => ({});
+const shared = makeLimiter();
+const aliasA = shared;
+const aliasB = shared;
+it("1", async () => { await assertRedisFailClosed({ limiter: aliasA, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: aliasB, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 1 });
+  });
+
+  it("flags a production import when the allowlist MODULE ITSELF is vi.mock'd (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+vi.mock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a production import when the allowlist module is vi.doMock'd (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+vi.doMock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
     const f = classify(`import { it } from "vitest";
 import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
