@@ -158,6 +158,34 @@ field() {
   awk -v k="$2" '{ for (i = 1; i <= NF; i++) { split($i, a, "="); if (a[1] == k) { print a[2]; exit } } }' <<<"$1"
 }
 
+# manifest_declared_count <repo-rel-path> → the limiter count declared for that
+# path in the manifest (empty when the path is absent). Used to require a
+# helper-mode member's contract test to cover EVERY limiter in a multi-limiter
+# file, not just one — a single assertRedisFailClosed call in a count=2 file
+# leaves the second limiter's fail-closed path untested (external review
+# 2026-07-19, round 2).
+manifest_declared_count() {
+  [ -f "$MANIFEST_FILE" ] || return 0
+  awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' "$MANIFEST_FILE"
+}
+
+# assert_covers_all_limiters <route> <test-rel> <calls> — fail when a
+# helper-mode file has fewer helper calls than its declared limiter count.
+# Sets `fail=1` and echoes HELPER_CALLS_BELOW_LIMITER_COUNT; returns 1 so the
+# caller can `continue`. A missing/blank manifest count is treated as 1 (the
+# common single-limiter case) so the check never under-counts.
+assert_covers_all_limiters() {
+  local route="$1" test_rel="$2" calls="$3" declared
+  declared="$(manifest_declared_count "$route")"
+  [ -n "$declared" ] || declared=1
+  if [ "$calls" -lt "$declared" ] 2>/dev/null; then
+    echo "HELPER_CALLS_BELOW_LIMITER_COUNT: $route (manifest declares $declared fail-closed limiter(s) but ${test_rel} has only $calls assertRedisFailClosed* call(s) — every limiter's fail-closed path needs its own contract assertion)"
+    fail=1
+    return 1
+  fi
+  return 0
+}
+
 for route in ${routes[@]+"${routes[@]}"}; do
   dir="$(dirname "$route")"
   adjacent_test="$FIXTURE_ROOT/$dir/route.test.ts"
@@ -187,6 +215,10 @@ for route in ${routes[@]+"${routes[@]}"}; do
     if [ "$(field "$contract_rec" import)" != "1" ]; then
       echo "MISSING_FAIL_CLOSED_TEST: $route (assertRedisFailClosed is called in ${contract_test#$FIXTURE_ROOT/} without importing it from @/__tests__/helpers/fail-closed — a local re-implementation does not count)"
       fail=1
+      continue
+    fi
+    # Every declared limiter in the file must have its own contract assertion.
+    if ! assert_covers_all_limiters "$route" "${contract_test#$FIXTURE_ROOT/}" "$(field "$contract_rec" calls)"; then
       continue
     fi
     # Genuine helper-mode contract test: manifests must not linger.
@@ -293,6 +325,9 @@ while IFS= read -r member; do
     if [ "$(field "$member_rec" mock)" = "1" ]; then
       echo "MAPPING_MOCKED_CONTRACT_TEST: $member (${member_test} calls the fail-closed helper but stubs the production checkRateLimitOrFail mapping)"
       fail=1
+      continue
+    fi
+    if ! assert_covers_all_limiters "$member" "$member_test" "$(field "$member_rec" calls)"; then
       continue
     fi
     if is_debt "$member"; then
@@ -506,9 +541,27 @@ for vitest_config in "$FIXTURE_ROOT/vitest.config.ts" "$FIXTURE_ROOT/vitest.inte
     SETUP_FILES="${SETUP_FILES}${setup_entry}
 "
   done < <(
-    grep -oE "setupFiles.*" "$vitest_config" \
-      | grep -oE '"[^"]+\.tsx?"|'"'"'[^'"'"']+\.tsx?'"'"'' \
-      | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'\$//"
+    # Extract setupFiles path literals across BOTH the inline form
+    # (`setupFiles: "x.ts"` / `setupFiles: ["x.ts"]`) and the MULTILINE array
+    # form, where the paths sit on lines after `setupFiles:` (external review
+    # 2026-07-19, round 2 — the old same-line grep missed multiline arrays and
+    # a stub parked in an unlisted setup file evaded the C6 scan). awk enters
+    # a collecting state at `setupFiles`, harvests every .ts/.tsx string
+    # literal, and stops at the closing `]` (array form) or end of the same
+    # logical line (inline scalar form).
+    awk '
+      /setupFiles/ { collecting = 1; inline_only = ($0 !~ /\[/) }
+      collecting {
+        line = $0
+        while (match(line, /"[^"]+\.tsx?"|'"'"'[^'"'"']+\.tsx?'"'"'/)) {
+          lit = substr(line, RSTART, RLENGTH)
+          gsub(/^["'"'"']|["'"'"']$/, "", lit)
+          print lit
+          line = substr(line, RSTART + RLENGTH)
+        }
+        if (inline_only || $0 ~ /\]/) collecting = 0
+      }
+    ' "$vitest_config"
   )
 done
 

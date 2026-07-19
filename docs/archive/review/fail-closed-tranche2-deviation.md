@@ -113,3 +113,32 @@ Verified: classifier self-test 34, gate self-test 47, helper self-test 25, real
 gate + meta-gate EXIT 0, pre-pr 51/51. All 3 members classify calls=1.
 Note on the reviewer's "duplicate check_dangling" item: NOT a bug — the two
 calls take different lists (DEBT_LIST vs LEGACY_LIST), same as upstream.
+
+## D11 — External-review round 2: 3 residual gate gaps (2026-07-19)
+Three follow-up findings after the D10 tier migration:
+- Medium (new): assertRedisFailClosedResult took an arbitrary `invoke` thunk, so
+  a test could pass a fixed `{allowed:false,redisErrored:true}` object and still
+  classify as helper mode — the direct-result tier's semantic weakening was not
+  closed. Fix: the helper now takes the REAL `limiter` object + `key` and runs
+  `limiter.check(key)` itself; a fixed result object can no longer be
+  substituted (the caller must pass a limiter). rate-limiters.test.ts passes the
+  production v1ApiKeyLimiter. Residual (accepted, documented): the AST gate
+  cannot statically prove the passed limiter is the PRODUCTION singleton vs a
+  same-shaped fake — that is a semantic property beyond AST reach; the signature
+  change closes the specific arbitrary-object weakening the review identified,
+  and the real test wiring (getRedis→null + production limiter) is a review
+  matter for the one direct-result member.
+- Medium (pre-existing): a multi-limiter file passed on ONE helper call. Fix:
+  helper-mode files must have `calls >= manifest limiter count`
+  (HELPER_CALLS_BELOW_LIMITER_COUNT); verified all real count>=2 helper-mode
+  files already satisfy it (bridge-code 2, mcp/token 3, verify-access 2,
+  reset-vault-approve 2, recover 2). Applied to BOTH route and non-route
+  helper branches.
+- Low (pre-existing): multiline `setupFiles: [ \n "x.ts" \n ]` arrays evaded the
+  C6 stub scan (same-line grep). Fix: awk-based multiline extractor collects
+  every .ts/.tsx literal from `setupFiles` until the array closes. Red-proven:
+  a stub in a multiline-listed setup file now fires STUB_MOCKED_RATE_LIMIT_AUDIT.
+Verified: gate self-test 47→50 (+multiline-setupFiles, +2 multi-limiter),
+classifier 34, helper self-test (result cases rewired to limiter+key), real gate
++ meta-gate EXIT 0, pre-pr 51/51 (typecheck caught a missing RateLimitResult
+import in the self-test, fixed).

@@ -231,3 +231,56 @@ R3 external (Major non-route coverage gap, fixed) → R4 external (Major non-rou
 weakening + tier migration, fixed). The R42 convergence artifact now verifies
 the WHOLE class — route AND non-route — for coverage AND semantic strength, with
 mutation-verified self-tests.
+
+---
+
+# Code Review Round 5 (external-review round 2)
+Date: 2026-07-19
+
+## Changes from Previous Round
+External review round 2 raised 3 residual gate gaps (see deviation D11):
+Medium (new) — assertRedisFailClosedResult accepted an arbitrary result thunk
+so a fixed object could masquerade as a direct-result contract; Medium
+(pre-existing) — multi-limiter files passed on 1 helper call; Low
+(pre-existing) — multiline setupFiles arrays evaded the C6 stub scan.
+
+## Fix
+- fail-closed.ts: assertRedisFailClosedResult now takes { limiter, key } and
+  runs limiter.check(key) itself (no arbitrary thunk). rate-limiters.test.ts
+  passes the production v1ApiKeyLimiter.
+- check-fail-closed-routes-have-test.sh: helper-mode files must have
+  calls >= declared limiter count (HELPER_CALLS_BELOW_LIMITER_COUNT), on both
+  route and non-route branches; multiline setupFiles now parsed by an awk
+  multiline extractor.
+- Self-tests: HELPER_CALLS_BELOW_LIMITER_COUNT (fail + pass), multiline
+  setupFiles stub (STUB_MOCKED_RATE_LIMIT_AUDIT), result-helper cases rewired
+  to limiter+key. Gate self-test 47→50, classifier 34, helper self-test with
+  limiter-driven result cases.
+
+## Verification (orchestrator, direct red-proofs)
+- Fix 1: signature requires a real limiter object; the old arbitrary-thunk form
+  no longer exists. rate-limiters.test.ts green against production v1ApiKeyLimiter.
+- Fix 2: count=2 file with 1 call → HELPER_CALLS_BELOW_LIMITER_COUNT; with 2
+  calls → passes. All real count>=2 helper-mode files already satisfy it.
+- Fix 3: a stub in a multiline setupFiles array → STUB_MOCKED_RATE_LIMIT_AUDIT
+  (was missed by the same-line grep).
+- Regression: gate self-test 50, real gate + meta-gate EXIT 0, pre-pr 51/51
+  (typecheck caught + fixed a missing RateLimitResult import).
+
+## Adjudicated residual (documented, accepted)
+The AST gate cannot statically prove the limiter passed to
+assertRedisFailClosedResult is the PRODUCTION singleton rather than a
+same-shaped fake — a semantic property beyond AST reach. The signature change
+closes the specific arbitrary-object weakening; correct production wiring
+(getRedis→null + the real limiter) for the single direct-result member is a
+review matter, not a mechanically-verifiable one. The two carried-over Mediums
+from the prior review (multi-limiter, setupFiles) are now resolved.
+
+## Convergence
+Code review converged in 5 rounds: R1 (Major aliased-vi) → R2 (clean) → R3
+(Major non-route coverage) → R4 (Major non-route weakening + tier migration) →
+R5 (3 residual gaps: result-helper binding, multi-limiter count, multiline
+setupFiles). The R42 convergence artifact now enforces, per fail-closed member:
+existence, semantic strength (real helper, mapping unmapped, limiter-bound
+result), per-limiter coverage in multi-limiter files, and stub-scan reach into
+multiline-configured setup files.

@@ -45,7 +45,8 @@ describe("rate-limiters", () => {
     it("fails closed (redisErrored) when Redis is unreachable — no in-memory fallback (M1)", async () => {
       mockGetRedis.mockReturnValue(null);
       await assertRedisFailClosedResult({
-        invoke: () => v1ApiKeyLimiter.check("test:v1:fail-closed"),
+        limiter: v1ApiKeyLimiter,
+        key: "test:v1:fail-closed",
       });
     });
 

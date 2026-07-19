@@ -229,16 +229,24 @@ export async function assertRedisFailClosedSilentDrop(options: {
  * (helper mode), so the direct-result tier is no longer verified by the weak
  * "a `redisErrored` identifier appears somewhere in the file" legacy check —
  * an unrelated placeholder can no longer masquerade as coverage (external
- * review 2026-07-19). `invoke` runs the real `limiter.check(...)` against a
- * limiter whose Redis is unreachable; the helper asserts the fail-closed
- * result shape.
+ * review 2026-07-19).
+ *
+ * The helper takes the REAL limiter object (not an arbitrary result thunk) and
+ * runs `limiter.check(key)` itself, so the assertion cannot be neutralized by
+ * substituting a fixed `{ allowed: false, redisErrored: true }` object — the
+ * test must exercise the production limiter under an unreachable Redis
+ * (arrange `getRedis` → null before calling). This closes the direct-result
+ * semantic-weakening gap the arbitrary-thunk form left open (external review
+ * 2026-07-19, round 2).
  */
 export async function assertRedisFailClosedResult(options: {
-  /** Runs the real limiter.check(...) and returns its RateLimitResult. */
-  invoke: () => Promise<RateLimitResult>;
+  /** The REAL limiter under test (e.g. v1ApiKeyLimiter) — not a stub result. */
+  limiter: { check: (key: string) => Promise<RateLimitResult> };
+  /** Rate-limit key to probe (any stable string; Redis is unreachable). */
+  key: string;
 }): Promise<void> {
-  const { invoke } = options;
-  const result = await invoke();
+  const { limiter, key } = options;
+  const result = await limiter.check(key);
   // Fail-closed: unreachable Redis MUST deny (no in-memory fallback) and flag
   // redisErrored so the caller maps it to 503, not 429.
   expect(result.redisErrored).toBe(true);

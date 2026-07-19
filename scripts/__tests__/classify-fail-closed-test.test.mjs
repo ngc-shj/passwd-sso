@@ -90,10 +90,11 @@ it("silent drop", async () => {
   });
 
   it("counts assertRedisFailClosedResult as a helper call (direct-result tier)", () => {
-    const f = classify(`import { it } from "vitest";
+    const f = classify(`import { it, vi } from "vitest";
 import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
 it("direct result", async () => {
-  await assertRedisFailClosedResult({ invoke: async () => ({ allowed: false, redisErrored: true }) });
+  const limiter = { check: vi.fn(async () => ({ allowed: false, redisErrored: true })) };
+  await assertRedisFailClosedResult({ limiter, key: "k" });
 });
 `);
     expect(f).toMatchObject({ import: 1, calls: 1 });

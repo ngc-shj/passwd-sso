@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Mock } from "vitest";
+import type { RateLimitResult } from "@/lib/security/rate-limit";
 import {
   assertRedisFailClosed,
   assertRedisFailClosedSilentDrop,
@@ -416,26 +417,32 @@ describe("snapshotFactory", () => {
 });
 
 describe("assertRedisFailClosedResult", () => {
-  it("passes when the limiter result is { allowed: false, redisErrored: true }", async () => {
-    await expect(
-      assertRedisFailClosedResult({
-        invoke: async () => ({ allowed: false, redisErrored: true }),
-      }),
-    ).resolves.toBeUndefined();
+  // A fake limiter whose check() returns a fixed result — stands in for the
+  // real v1ApiKeyLimiter. The helper drives check(key) itself; the point is
+  // that the caller cannot pass an arbitrary result object, only a limiter.
+  const fakeLimiter = (result: RateLimitResult) => ({
+    check: vi.fn(async (_key: string) => result),
   });
 
-  it("rejects when the result is missing redisErrored (in-memory fallback allowed the request)", async () => {
+  it("passes when the limiter denies with redisErrored under an unreachable Redis", async () => {
+    const limiter = fakeLimiter({ allowed: false, redisErrored: true });
     await expect(
-      assertRedisFailClosedResult({
-        invoke: async () => ({ allowed: true }),
-      }),
+      assertRedisFailClosedResult({ limiter, key: "k" }),
+    ).resolves.toBeUndefined();
+    expect(limiter.check).toHaveBeenCalledWith("k");
+  });
+
+  it("rejects when the limiter allows the request (in-memory fallback bypass)", async () => {
+    await expect(
+      assertRedisFailClosedResult({ limiter: fakeLimiter({ allowed: true }), key: "k" }),
     ).rejects.toThrow();
   });
 
-  it("rejects when the result denies but does NOT flag redisErrored (a 429, not fail-closed)", async () => {
+  it("rejects when the limiter denies but does NOT flag redisErrored (a 429, not fail-closed)", async () => {
     await expect(
       assertRedisFailClosedResult({
-        invoke: async () => ({ allowed: false, retryAfterMs: 5_000 }),
+        limiter: fakeLimiter({ allowed: false, retryAfterMs: 5_000 }),
+        key: "k",
       }),
     ).rejects.toThrow();
   });

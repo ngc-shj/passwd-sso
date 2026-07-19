@@ -109,10 +109,11 @@ function writeNonRouteMember(memberPath, testPath, testBody, { legacy = true } =
 
 // A genuine shared-helper contract test for a non-route member (helper mode,
 // production mapping NOT stubbed) — the real coverage shape the 3 members use.
-const NON_ROUTE_HELPER_TEST = `import { it } from "vitest";
+const NON_ROUTE_HELPER_TEST = `import { it, vi } from "vitest";
 import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
 it("fails closed when Redis is unreachable", async () => {
-  await assertRedisFailClosedResult({ invoke: async () => ({ allowed: false, redisErrored: true }) });
+  const limiter = { check: vi.fn(async () => ({ allowed: false, redisErrored: true })) };
+  await assertRedisFailClosedResult({ limiter, key: "k" });
 });
 `;
 
@@ -135,6 +136,19 @@ it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     limiterFactory,
     failure: { allowed: false, redisErrored: true },
   });
+});
+`;
+
+// A helper contract test with TWO assertRedisFailClosed calls — the shape a
+// count=2 (multi-limiter) file must have so every limiter's fail-closed path
+// is asserted, not just the first.
+const HELPER_CONTRACT_TEST_TWO_CALLS = `import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+it("limiter 1 fails closed", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+});
+it("limiter 2 fails closed", async () => {
+  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
 });
 `;
 
@@ -719,6 +733,39 @@ it("placeholder", () => { expect(true).toBe(true); });
       expect(stdout).toContain("STUB_CONFIG_SEAM:");
     });
 
+    it("FAILS (STUB_MOCKED_RATE_LIMIT_AUDIT) for a stub in a MULTILINE setupFiles array", () => {
+      // A setup file listed across multiple lines (the common prettier shape)
+      // must still be scanned — the old same-line grep missed it, letting a
+      // stub parked there evade C6 (external review 2026-07-19, round 2).
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      const setupAbs = join(root, "src/__tests__/evil-setup.ts");
+      mkdirSync(dirname(setupAbs), { recursive: true });
+      writeFileSync(
+        setupAbs,
+        `import { vi } from "vitest";
+vi.mock("@/lib/security/rate-limit-audit", () => ({ checkRateLimitOrFail: vi.fn() }));
+`,
+        "utf8",
+      );
+      writeFileSync(
+        join(root, "vitest.config.ts"),
+        `export default {
+  test: {
+    setupFiles: [
+      "src/__tests__/evil-setup.ts",
+    ],
+  },
+};
+`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+      expect(stdout).toContain("src/__tests__/evil-setup.ts");
+    });
+
     it("passes for a stub in an EXEMPT frozen-list file (tenant/service-accounts sibling shape)", () => {
       const rel = writeRoute("tenant/service-accounts", FAIL_CLOSED_LINE);
       writeAdjacentTest(
@@ -732,6 +779,30 @@ it("legacy direct", () => { expect(rl.redisErrored).toBe(true); });
       const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
       expect(exitCode, stdout).toBe(0);
       expect(stdout).not.toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+    });
+  });
+
+  // Multi-limiter coverage (external review 2026-07-19, round 2): a helper-mode
+  // file must have at least as many assertRedisFailClosed* calls as the limiter
+  // count the manifest declares — one call in a 2-limiter file leaves the
+  // second limiter's fail-closed path untested.
+  describe("multi-limiter files require a contract per limiter", () => {
+    it("FAILS (HELPER_CALLS_BELOW_LIMITER_COUNT) when a count=2 file has only 1 helper call", () => {
+      const rel = writeRoute("widgets/multi", `${FAIL_CLOSED_LINE}${FAIL_CLOSED_LINE}`, {
+        count: 2,
+      });
+      writeAdjacentTest("widgets/multi", HELPER_CONTRACT_TEST); // 1 call only
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("HELPER_CALLS_BELOW_LIMITER_COUNT:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("passes when a count=2 file has one helper call per limiter", () => {
+      writeRoute("widgets/multi", `${FAIL_CLOSED_LINE}${FAIL_CLOSED_LINE}`, { count: 2 });
+      writeAdjacentTest("widgets/multi", HELPER_CONTRACT_TEST_TWO_CALLS);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
     });
   });
 
