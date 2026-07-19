@@ -448,22 +448,49 @@ function classify(path) {
     );
   }
 
+  // The static module specifier of a `vi.mock`/`vi.doMock` call's first arg, or
+  // undefined when it is not a recognized static form. Handles the string /
+  // template-literal forms AND the vitest-3 typed form `vi.mock(import("..."))`
+  // — the single source of truth for BOTH the mapping-stub scan and the
+  // rate-limiters module-mock pre-pass, so neither can lag the other on a new
+  // arg shape (external review 2026-07-19, round 6). `dynamic` is set (via the
+  // out-param object) when the arg exists but is not a static specifier, so the
+  // caller can flag STUB_DYNAMIC_SPECIFIER.
+  function mockSpecifierOf(call, flags) {
+    const firstArg = call.getArguments()[0];
+    if (firstArg === undefined) {
+      if (flags !== undefined) flags.dynamic = true;
+      return undefined;
+    }
+    if (
+      firstArg.getKind() === SyntaxKind.StringLiteral ||
+      firstArg.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral
+    ) {
+      return firstArg.getLiteralText();
+    }
+    if (
+      firstArg.getKind() === SyntaxKind.CallExpression &&
+      firstArg.getExpression().getKind() === SyntaxKind.ImportKeyword &&
+      firstArg.getArguments()[0]?.getKind() === SyntaxKind.StringLiteral
+    ) {
+      // vitest 3 typed form: vi.mock(import("<specifier>"), ...)
+      return firstArg.getArguments()[0].getLiteralText();
+    }
+    if (flags !== undefined) flags.dynamic = true;
+    return undefined;
+  }
+
   // Pre-pass: is the rate-limiters module itself mocked? A `vi.mock(
-  // "@/lib/security/rate-limiters", ...)` leaves the import binding looking
-  // production-legitimate while replacing v1ApiKeyLimiter with a fake — so a
-  // production-import allowlist alone is bypassable (external review
-  // 2026-07-19, round 5). When the module is mocked, a direct-result test using
-  // it is NOT a genuine fail-closed probe.
+  // "@/lib/security/rate-limiters", ...)` — in ANY static form — leaves the
+  // import binding looking production-legitimate while replacing v1ApiKeyLimiter
+  // with a fake, so a production-import allowlist alone is bypassable (external
+  // review 2026-07-19, rounds 5-6). When the module is mocked, a direct-result
+  // test using it is NOT a genuine fail-closed probe.
   let resultLimiterModuleMocked = false;
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     if (resolveMockCallee(call.getExpression()) === null) continue;
-    const firstArg = call.getArguments()[0];
-    if (
-      firstArg !== undefined &&
-      (firstArg.getKind() === SyntaxKind.StringLiteral ||
-        firstArg.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral) &&
-      normalizeSpecifier(firstArg.getLiteralText()).endsWith(RESULT_LIMITER_MODULE_SUFFIX)
-    ) {
+    const spec = mockSpecifierOf(call);
+    if (spec !== undefined && normalizeSpecifier(spec).endsWith(RESULT_LIMITER_MODULE_SUFFIX)) {
       resultLimiterModuleMocked = true;
     }
   }
@@ -503,26 +530,9 @@ function classify(path) {
     }
     // vi.mock(...) / vi.doMock(...) / <ns>.vi.mock(...) / <ns>.vi.doMock(...)
     if (resolveMockCallee(callee) !== null) {
-      const firstArg = call.getArguments()[0];
-      let specifier;
-      if (firstArg === undefined) {
-        // No first arg at all is not a recognized literal form either.
-        dynspec = true;
-      } else if (
-        firstArg.getKind() === SyntaxKind.StringLiteral ||
-        firstArg.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral
-      ) {
-        specifier = firstArg.getLiteralText();
-      } else if (
-        firstArg.getKind() === SyntaxKind.CallExpression &&
-        firstArg.getExpression().getKind() === SyntaxKind.ImportKeyword &&
-        firstArg.getArguments()[0]?.getKind() === SyntaxKind.StringLiteral
-      ) {
-        // vitest 3 typed form: vi.mock(import("<specifier>"), ...)
-        specifier = firstArg.getArguments()[0].getLiteralText();
-      } else {
-        dynspec = true;
-      }
+      const flags = { dynamic: false };
+      const specifier = mockSpecifierOf(call, flags);
+      if (flags.dynamic) dynspec = true;
       if (specifier !== undefined && isMappingSpecifier(specifier)) {
         mock = true;
       }

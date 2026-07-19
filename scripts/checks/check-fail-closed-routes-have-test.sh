@@ -541,14 +541,25 @@ else
   done < <(git -C "$REPO_ROOT" ls-files 'src' | grep -E '\.test\.tsx?$' | sort)
 fi
 
-# Config-seam guard (Round 2 S2-4/F-R2-3): (a) any `rate-limit-audit` mention
-# in either vitest config is fail-loud (resolve.alias redirect evasion); (b)
-# setupFiles scan list is DERIVED from those configs, not hardcoded.
+# Config-seam guard (Round 2 S2-4/F-R2-3; extended round 6): any reference in a
+# vitest config to a fail-closed-critical module is fail-loud, because a
+# resolve.alias redirect swaps the module for a fake while every import binding
+# still looks production-legitimate. Two modules are guarded:
+#   - rate-limit-audit — the checkRateLimitOrFail mapping (503 envelope).
+#   - security/rate-limiters — the direct-result limiter singleton
+#     (v1ApiKeyLimiter); aliasing it defeats the resultfake allowlist the same
+#     way mocking the module does (external review 2026-07-19, round 6).
+# `security/rate-limiters` (the path segment) is matched, not a bare
+# `rate-limiter`, to avoid false-positives on unrelated limiter helpers.
 SETUP_FILES=""
 for vitest_config in "$FIXTURE_ROOT/vitest.config.ts" "$FIXTURE_ROOT/vitest.integration.config.ts"; do
   [ -f "$vitest_config" ] || continue
   if grep -q 'rate-limit-audit' "$vitest_config"; then
     echo "STUB_CONFIG_SEAM: ${vitest_config#$FIXTURE_ROOT/} references rate-limit-audit (resolve.alias / setupFiles redirect evasion)"
+    fail=1
+  fi
+  if grep -q 'security/rate-limiters' "$vitest_config"; then
+    echo "STUB_CONFIG_SEAM: ${vitest_config#$FIXTURE_ROOT/} references security/rate-limiters (resolve.alias redirect swaps the direct-result limiter for a fake)"
     fail=1
   fi
   while IFS= read -r setup_entry; do

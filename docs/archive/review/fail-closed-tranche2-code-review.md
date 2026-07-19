@@ -362,3 +362,35 @@ should have been closed comprehensively in one pass; the piecemeal fixes were an
 implementation-thoroughness gap, not an inherent AST limitation. The self-audit
 (doMock/relative variants) was added to this round to close the class rather
 than wait for the next report.
+
+---
+
+# Code Review Round 8 (external-review round 5)
+Date: 2026-07-19
+
+## Changes from Previous Round
+The module-substitution class had two members left (deviation D14): the
+resultfake pre-pass missed the vitest-3 typed form vi.mock(import("...")), and
+the config-seam guard only flagged rate-limit-audit, not the rate-limiters
+module.
+
+## Fix
+- Factored mock-specifier extraction (string / template / typed import() form)
+  into one mockSpecifierOf helper shared by the mapping-stub scan AND the
+  module-mock pre-pass — a single source of truth so a new arg shape cannot lag.
+- STUB_CONFIG_SEAM now also fails on a security/rate-limiters reference in a
+  vitest config (path-segment match, no false positive on the real config).
+
+## Verification (self-audited the full class before submit)
+typed-form module mock caught in vi.mock / vi.doMock / relative variants;
+mapping-mock + dynspec unregressed; config alias of rate-limiters →
+STUB_CONFIG_SEAM. classifier self-test +3, gate +1, all green; real gate +
+meta-gate EXIT 0, lint clean.
+
+## Class closed
+Module substitution of the fail-closed-critical modules (rate-limit-audit,
+security/rate-limiters) is now covered across: specifier form
+(string / template / typed import()), mock verb (vi.mock / vi.doMock), specifier
+kind (absolute / relative), and config-level resolve.alias. This was the class I
+should have enumerated and closed in round 6; it took rounds 6-8 instead, a
+thoroughness failure recorded in the retrospective memory.

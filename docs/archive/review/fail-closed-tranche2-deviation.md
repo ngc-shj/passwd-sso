@@ -195,3 +195,25 @@ unused MAPPING_MODULE constant (lint zero-warning). Also fixed a self-inflicted
 lint error (a local var named `module`, forbidden by @next/next). Self-tests:
 classifier +4 (factory-alias distinct, module vi.mock, module vi.doMock, plus
 the round-4 evasion cases), all green; real gate + meta-gate EXIT 0.
+
+## D14 — External-review round 5: typed-form module mock + config alias of rate-limiters (2026-07-19)
+The module-substitution class had two remaining members after D13:
+- The resultfake module-mock pre-pass only handled string / template-literal
+  specifiers, so the vitest-3 typed form `vi.mock(import("@/lib/security/
+  rate-limiters"), ...)` evaded it. Fix: factored the specifier extraction
+  (string, template, AND typed import() form) into one `mockSpecifierOf`
+  helper used by BOTH the mapping-stub scan and the module-mock pre-pass, so
+  neither can lag the other on a new arg shape. Proactively verified the typed
+  form is caught in vi.mock, vi.doMock, and relative-specifier variants, and
+  that mapping-mock detection + dynspec are unregressed.
+- The vitest-config alias guard (STUB_CONFIG_SEAM) only flagged rate-limit-audit.
+  A resolve.alias redirect of @/lib/security/rate-limiters swaps v1ApiKeyLimiter
+  for a fake while every import binding stays production-legitimate. Fix: the
+  guard now also fails on a `security/rate-limiters` reference in either vitest
+  config (path-segment match to avoid false-positives on unrelated limiters);
+  the real config references neither, so no false positive.
+Self-tests: classifier +3 (typed module-mock resultfake, typed mapping-mock
+regression), gate +1 (rate-limiters config-seam). Real gate + meta-gate EXIT 0,
+lint clean. This closes the module-substitution class (string/template/typed ×
+mock/doMock × absolute/relative specifier, plus config alias) for both the
+mapping and direct-result modules.

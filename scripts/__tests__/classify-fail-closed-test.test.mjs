@@ -217,6 +217,24 @@ it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimit
     expect(f.resultfake).toBe(1);
   });
 
+  it("flags a production import when the allowlist module is mocked via the TYPED form vi.mock(import(...)) (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+vi.mock(import("@/lib/security/rate-limiters"), () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("still detects a TYPED-form mapping mock as mock=1 (shared specifier extraction, no regression)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+vi.mock(import("@/lib/security/rate-limit-audit"), () => ({ checkRateLimitOrFail: vi.fn() }));
+it("x", () => {});
+`);
+    expect(f.mock).toBe(1);
+  });
+
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
     const f = classify(`import { it } from "vitest";
 import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";

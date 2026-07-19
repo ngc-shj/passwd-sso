@@ -746,6 +746,26 @@ it("placeholder", () => { expect(true).toBe(true); });
       expect(stdout).toContain("STUB_CONFIG_SEAM:");
     });
 
+    it("FAILS (STUB_CONFIG_SEAM) when a fixture vitest config aliases security/rate-limiters", () => {
+      // Aliasing the direct-result limiter module swaps v1ApiKeyLimiter for a
+      // fake while every import binding still looks production-legitimate —
+      // same evasion class as aliasing rate-limit-audit (external review round 6).
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      writeFileSync(
+        join(root, "vitest.config.ts"),
+        `export default {
+  resolve: { alias: { "@/lib/security/rate-limiters": "./test/fake-limiters.ts" } },
+};
+`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STUB_CONFIG_SEAM:");
+      expect(stdout).toContain("security/rate-limiters");
+    });
+
     it("FAILS (STUB_MOCKED_RATE_LIMIT_AUDIT) for a stub in a MULTILINE setupFiles array", () => {
       // A setup file listed across multiple lines (the common prettier shape)
       // must still be scanned — the old same-line grep missed it, letting a
