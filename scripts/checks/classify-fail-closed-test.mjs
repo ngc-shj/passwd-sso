@@ -407,9 +407,11 @@ function classify(path) {
       throw new Error(`${path}: semantic node not found at ${node.getStart()} (parse divergence)`);
     }
     // getDescendantAtPos returns the deepest node starting at/covering pos;
-    // walk up to the node whose start matches exactly and kind agrees.
+    // walk up to the node whose start matches exactly and kind agrees. `cur`
+    // starts non-undefined (n) and is only reassigned to a non-undefined
+    // parent, so it never becomes undefined inside the loop.
     let cur = n;
-    while (cur !== undefined && cur.getStart() === node.getStart()) {
+    while (cur.getStart() === node.getStart()) {
       if (cur.getKind() === node.getKind()) return cur;
       const parent = cur.getParent();
       if (parent === undefined || parent.getStart() !== node.getStart()) break;
@@ -558,14 +560,14 @@ function classify(path) {
   // undefined when it is not a recognized static form. Handles the string /
   // template-literal forms AND the vitest-3 typed form `vi.mock(import("..."))`
   // — the single source of truth for BOTH the mapping-stub scan and the
-  // rate-limiters module-mock pre-pass, so neither can lag the other on a new
-  // arg shape (external review 2026-07-19, round 6). `dynamic` is set (via the
-  // out-param object) when the arg exists but is not a static specifier, so the
-  // caller can flag STUB_DYNAMIC_SPECIFIER.
+  // rate-limiters module-mock detection, so neither can lag the other on a new
+  // arg shape (external review 2026-07-19, round 6). `flags.dynamic` is set when
+  // the arg exists but is not a static specifier, so the caller can flag
+  // STUB_DYNAMIC_SPECIFIER.
   function mockSpecifierOf(call, flags) {
     const firstArg = call.getArguments()[0];
     if (firstArg === undefined) {
-      if (flags !== undefined) flags.dynamic = true;
+      flags.dynamic = true;
       return undefined;
     }
     if (
@@ -582,7 +584,7 @@ function classify(path) {
       // vitest 3 typed form: vi.mock(import("<specifier>"), ...)
       return firstArg.getArguments()[0].getLiteralText();
     }
-    if (flags !== undefined) flags.dynamic = true;
+    flags.dynamic = true;
     return undefined;
   }
 
