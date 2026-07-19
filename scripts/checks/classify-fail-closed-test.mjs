@@ -12,7 +12,7 @@
  *
  * Usage: node scripts/checks/classify-fail-closed-test.mjs <file...>
  * Output (one line per input, tab-separated, stable order):
- *   <path>\texists=0|1 import=0|1 calls=<n> mock=0|1 redis=0|1 dynspec=0|1 distinct=<n> resultfake=0|1
+ *   <path>\texists=0|1 import=0|1 calls=<n> mock=0|1 redis=0|1 dynspec=0|1 distinct=<n> resultfake=0|1 resultmodulemock=0|1
  * Field semantics:
  *   import — ImportDeclaration from "@/__tests__/helpers/fail-closed"
  *            whose named imports include assertRedisFailClosed
@@ -598,6 +598,12 @@ function classify(path) {
     dynspec: dynspec ? 1 : 0,
     distinct: distinctLimiterKeys.size,
     resultfake: resultFakeLimiter ? 1 : 0,
+    // Independent of any helper call: 1 iff this file mocks the rate-limiters
+    // module. A setup file carries no helper call, so resultfake stays 0 there
+    // even though registering the file in setupFiles replaces the production
+    // limiter for EVERY test — the C6 whole-file/setup scan rejects this flag
+    // directly (external review 2026-07-19, round 7).
+    resultmodulemock: resultLimiterModuleMocked ? 1 : 0,
   };
 }
 
@@ -605,7 +611,7 @@ try {
   for (const file of files) {
     const r = classify(file);
     process.stdout.write(
-      `${file}\texists=${r.exists} import=${r.import} calls=${r.calls} mock=${r.mock} redis=${r.redis} dynspec=${r.dynspec} distinct=${r.distinct} resultfake=${r.resultfake}\n`,
+      `${file}\texists=${r.exists} import=${r.import} calls=${r.calls} mock=${r.mock} redis=${r.redis} dynspec=${r.dynspec} distinct=${r.distinct} resultfake=${r.resultfake} resultmodulemock=${r.resultmodulemock}\n`,
     );
   }
 } catch (err) {

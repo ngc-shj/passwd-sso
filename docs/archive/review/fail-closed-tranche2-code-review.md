@@ -394,3 +394,36 @@ security/rate-limiters) is now covered across: specifier form
 kind (absolute / relative), and config-level resolve.alias. This was the class I
 should have enumerated and closed in round 6; it took rounds 6-8 instead, a
 thoroughness failure recorded in the retrospective memory.
+
+---
+
+# Code Review Round 9 (external-review round 6)
+Date: 2026-07-19
+
+## Changes from Previous Round
+Last placement axis of the module-substitution class (deviation D15): a
+rate-limiters mock in a GLOBAL setup file. resultfake needs a co-located helper
+call; a setup file has none, so the mock reached no output field, and the C6
+setup scan only checked mock+dynspec.
+
+## Fix
+- New helper-call-independent classifier field resultmodulemock=1 iff the file
+  mocks security/rate-limiters (all specifier forms, shared mockSpecifierOf).
+- C6 scan rejects resultmodulemock=1 ONLY in setup files
+  (STUB_MOCKED_RATE_LIMITERS_MODULE), scoped by SETUP_FILE_SET — a per-file
+  mock in an ordinary test only affects that file's own limiter (real example:
+  migrate/route.test.ts mocks it for migrateLimiter) and stays legitimate.
+
+## Verification
+Setup file mocking rate-limiters (string + typed) → fail; ordinary test mocking
+it → pass; real repo (with the legitimate per-file migrate mock) green.
+classifier self-test +3, gate +2, all green; real gate + meta-gate EXIT 0, lint
+clean.
+
+## Class fully closed
+Module substitution of the fail-closed-critical modules is now covered across
+all four axes: module (rate-limit-audit, rate-limiters), specifier form
+(string/template/typed import()), mock verb (mock/doMock) & config resolve.alias,
+and PLACEMENT (inline test vs global setup file). The scope guard distinguishes a
+fleet-wide setup-file mock (rejected) from a legitimate per-file mock of an
+unrelated limiter (allowed).

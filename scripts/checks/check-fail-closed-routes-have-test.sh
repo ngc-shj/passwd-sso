@@ -592,7 +592,12 @@ for vitest_config in "$FIXTURE_ROOT/vitest.config.ts" "$FIXTURE_ROOT/vitest.inte
 done
 
 # Resolve setupFiles path literals (relative to the config's directory) to
-# fixture/repo-relative paths and fold them into the scan list.
+# fixture/repo-relative paths and fold them into the scan list. SETUP_FILE_SET
+# records exactly which scanned files are GLOBAL setup files — a rate-limiters
+# module mock in one of these replaces the limiter for EVERY test, so it is
+# rejected there (below); a per-file mock in an ordinary test only affects that
+# file's own unrelated limiter and is legitimate.
+SETUP_FILE_SET=""
 while IFS= read -r setup_rel; do
   [ -z "$setup_rel" ] && continue
   case "$setup_rel" in
@@ -600,9 +605,13 @@ while IFS= read -r setup_rel; do
   esac
   STUB_TEST_FILES="${STUB_TEST_FILES}${setup_rel}
 "
+  SETUP_FILE_SET="${SETUP_FILE_SET}${setup_rel}
+"
 done <<EOF
 $SETUP_FILES
 EOF
+
+is_setup_file() { grep -qxF "$1" <<<"$SETUP_FILE_SET"; }
 
 if [ -n "$STUB_TEST_FILES" ]; then
   stub_files_array=()
@@ -623,12 +632,24 @@ EOF
         stub_rec="$(awk -F'\t' -v p="$stub_abs" '$1 == p { print $2; exit }' <<<"$STUB_CLASSIFY_OUT")"
         stub_mock="$(field "$stub_rec" mock)"
         stub_dynspec="$(field "$stub_rec" dynspec)"
+        stub_modulemock="$(field "$stub_rec" resultmodulemock)"
         if [ "$stub_dynspec" = "1" ]; then
           echo "STUB_DYNAMIC_SPECIFIER: $stub_rel (vi.mock/vi.doMock with a non-literal specifier)"
           fail=1
         fi
         if [ "$stub_mock" = "1" ] && ! is_stub_exempt "$stub_rel"; then
           echo "STUB_MOCKED_RATE_LIMIT_AUDIT: $stub_rel (mocks the production rate-limit-audit mapping — not in the frozen exemption list)"
+          fail=1
+        fi
+        # Mocking the direct-result limiter module (rate-limiters) in a GLOBAL
+        # setup file replaces v1ApiKeyLimiter for EVERY test that loads it,
+        # silently neutralizing the direct-result fail-closed probe fleet-wide.
+        # Rejected in setup files regardless of any helper call (external review
+        # 2026-07-19, round 7). A per-file mock in an ordinary test only affects
+        # that file's own unrelated limiter (e.g. migrateLimiter) and is fine —
+        # so this fires ONLY for setup files.
+        if [ "$stub_modulemock" = "1" ] && is_setup_file "$stub_rel"; then
+          echo "STUB_MOCKED_RATE_LIMITERS_MODULE: $stub_rel (a global setup file mocks security/rate-limiters — swaps the direct-result limiter for a fake across every test)"
           fail=1
         fi
       done <<EOF

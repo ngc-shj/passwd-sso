@@ -799,6 +799,53 @@ vi.mock("@/lib/security/rate-limit-audit", () => ({ checkRateLimitOrFail: vi.fn(
       expect(stdout).toContain("src/__tests__/evil-setup.ts");
     });
 
+    it("FAILS (STUB_MOCKED_RATE_LIMITERS_MODULE) when a SETUP FILE mocks the rate-limiters module", () => {
+      // A setup file carries no helper call, so resultfake stays 0 — but
+      // registering it in setupFiles swaps v1ApiKeyLimiter for a fake across
+      // every test. The C6 scan rejects resultmodulemock=1 in setup files
+      // regardless of helper calls (external review 2026-07-19, round 7).
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      const setupAbs = join(root, "src/__tests__/limiter-setup.ts");
+      mkdirSync(dirname(setupAbs), { recursive: true });
+      writeFileSync(
+        setupAbs,
+        `import { vi } from "vitest";
+vi.mock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+`,
+        "utf8",
+      );
+      writeFileSync(
+        join(root, "vitest.config.ts"),
+        `export default { test: { setupFiles: ["src/__tests__/limiter-setup.ts"] } };\n`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STUB_MOCKED_RATE_LIMITERS_MODULE:");
+      expect(stdout).toContain("src/__tests__/limiter-setup.ts");
+    });
+
+    it("passes when an ORDINARY test file mocks rate-limiters for its own limiter (not a setup file)", () => {
+      // A per-file rate-limiters mock only affects that file's own unrelated
+      // limiter (e.g. migrateLimiter) — legitimate, must NOT fire.
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      const otherDir = join(root, "src/__tests__/api/other");
+      mkdirSync(otherDir, { recursive: true });
+      writeFileSync(
+        join(otherDir, "migrate.test.ts"),
+        `import { it, vi } from "vitest";
+vi.mock("@/lib/security/rate-limiters", () => ({ migrateLimiter: { check: vi.fn() } }));
+it("x", () => {});
+`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).not.toContain("STUB_MOCKED_RATE_LIMITERS_MODULE:");
+    });
+
     it("passes for a stub in an EXEMPT frozen-list file (tenant/service-accounts sibling shape)", () => {
       const rel = writeRoute("tenant/service-accounts", FAIL_CLOSED_LINE);
       writeAdjacentTest(

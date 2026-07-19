@@ -217,3 +217,25 @@ regression), gate +1 (rate-limiters config-seam). Real gate + meta-gate EXIT 0,
 lint clean. This closes the module-substitution class (string/template/typed ×
 mock/doMock × absolute/relative specifier, plus config alias) for both the
 mapping and direct-result modules.
+
+## D15 — External-review round 6: rate-limiters mock in a global setup file (2026-07-19)
+The module-substitution class had one placement axis left: a rate-limiters
+module mock in a GLOBAL setup file. resultfake only surfaces when the same file
+has an assertRedisFailClosedResult call; a setup file has none, so
+resultLimiterModuleMocked never reached the output (calls=0 resultfake=0), and
+the C6 setup scan only checked mock (rate-limit-audit) + dynspec. A setup file
+mocking rate-limiters swaps v1ApiKeyLimiter for a fake across EVERY test.
+Fix: added an independent classifier field `resultmodulemock` (1 iff the file
+mocks security/rate-limiters, helper-call-independent, all specifier forms via
+the shared mockSpecifierOf). The C6 scan rejects resultmodulemock=1 — but ONLY
+in setup files (STUB_MOCKED_RATE_LIMITERS_MODULE): a per-file mock in an
+ordinary test only affects that file's own unrelated limiter (a real example:
+passwords/.../migrate/route.test.ts mocks rate-limiters for migrateLimiter),
+which is legitimate and must not false-positive. Scoped via a SETUP_FILE_SET
+membership check.
+Red-proven: setup file mocking rate-limiters (string + typed form) fires
+STUB_MOCKED_RATE_LIMITERS_MODULE; an ordinary test mocking it does not; the real
+repo (with the legitimate migrate per-file mock) stays green. Self-tests:
+classifier +3 (resultmodulemock string/typed/negative), gate +2 (setup-file
+fail, ordinary-file pass). This closes the placement axis (inline test vs global
+setup file) for the module-substitution class.

@@ -235,6 +235,28 @@ it("x", () => {});
     expect(f.mock).toBe(1);
   });
 
+  it("sets resultmodulemock=1 for a rate-limiters mock with NO helper call (setup-file shape)", () => {
+    const f = classify(`import { vi } from "vitest";
+vi.mock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+`);
+    expect(f).toMatchObject({ calls: 0, resultfake: 0, resultmodulemock: 1 });
+  });
+
+  it("sets resultmodulemock=1 for a TYPED-form rate-limiters mock with no helper call", () => {
+    const f = classify(`import { vi } from "vitest";
+vi.mock(import("@/lib/security/rate-limiters"), () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+`);
+    expect(f.resultmodulemock).toBe(1);
+  });
+
+  it("sets resultmodulemock=0 for a file that does not mock rate-limiters", () => {
+    const f = classify(`import { it, vi } from "vitest";
+vi.mock("@/lib/redis", () => ({ getRedis: vi.fn() }));
+it("x", () => {});
+`);
+    expect(f.resultmodulemock).toBe(0);
+  });
+
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
     const f = classify(`import { it } from "vitest";
 import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
