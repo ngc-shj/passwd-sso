@@ -154,8 +154,13 @@ tier of the 13 routes' sibling tests changes.
     below): its factory fires only after the first dynamic import, so the
     module-scope snapshot pattern does not apply; capture + snapshot after the first
     `await import(...)` instead.
-  - `expectation`: `{ envelope: "canonical" }` for all 15 cases (every route maps
-    redisErrored → `serviceUnavailable()` / canonical 503 + Retry-After). Note this
+  - `expectation`: `{ envelope: "canonical" }` for 14 of 15 cases (every route maps
+    redisErrored → `serviceUnavailable()` / canonical 503 + Retry-After). The sole
+    exception is **#13 ssh/sign-authorize**, which supplies a bespoke
+    `checkRateLimitOrFail` `envelope` returning `{ authorized: false, reason:
+    "service_unavailable" }` (status 503, Retry-After 30) — its case uses
+    `{ envelope: "custom", status: 503, body: { authorized: false, reason:
+    "service_unavailable" }, retryAfter: "required" }` (deviation D1). Note this
     STRENGTHENS the assertion set beyond the current direct-503 tests (which assert
     status only): the helper additionally asserts the body `{ error:
     "SERVICE_UNAVAILABLE" }` and a strictly-positive integer `Retry-After`. Every
@@ -200,7 +205,7 @@ the four it was originally written on.
 | 10 | operator-tokens | scoped create limiter | operatorToken.create (+ advisory-lock $executeRaw if present) | admin session + step-up; NOT logAuditAsync |
 | 11 | scim-tokens | scimTokenCreateLimiter | scimToken.create | admin session + step-up; NOT logAuditAsync |
 | 12 | service-accounts | saCreateLimiter | serviceAccount.create | admin session + step-up; NOT logAuditAsync |
-| 13 | ssh/sign-authorize | signRateLimiter | shareAccessLog/sign-authorize downstream svc spy | authed session; NOT logAuditAsync |
+| 13 | ssh/sign-authorize | signRateLimiter | prisma.sSHAgentKey.findFirst (or the downstream key-lookup/authorize svc spy) | authed session; NOT logAuditAsync; **CUSTOM envelope** — `{ envelope: "custom", status: 503, body: { authorized: false, reason: "service_unavailable" }, retryAfter: "required" }` (verified route.ts:87-91; NOT canonical — deviation D1) |
 
 - Refactor sub-tasks per file:
   - **F (factory→recording)**: the current factory form varies — some files use a

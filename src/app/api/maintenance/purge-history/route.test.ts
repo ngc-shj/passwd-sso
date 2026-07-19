@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockVerifyAdminToken,
@@ -8,20 +9,25 @@ const {
   mockTenantFindUnique,
   mockRequireMaintenanceOperator,
   mockCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockWithBypassRls,
-} = vi.hoisted(() => ({
-  mockVerifyAdminToken: vi.fn(),
-  mockDeleteMany: vi.fn(),
-  mockCount: vi.fn(),
-  mockTenantFindUnique: vi.fn(),
-  mockRequireMaintenanceOperator: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockLogAudit: vi.fn(),
-  mockWithBypassRls: vi.fn(
-    async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
-  ),
-}));
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockVerifyAdminToken: vi.fn(),
+    mockDeleteMany: vi.fn(),
+    mockCount: vi.fn(),
+    mockTenantFindUnique: vi.fn(),
+    mockRequireMaintenanceOperator: vi.fn(),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockWithBypassRls: vi.fn(
+      async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
+    ),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
   verifyAdminToken: mockVerifyAdminToken,
@@ -33,7 +39,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -69,6 +75,13 @@ const VALID_AUTH = {
   tenantId: TENANT_ID,
   tokenId: TOKEN_ID,
   scopes: ["maintenance"] as const,
+};
+
+// Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
+// at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
+const purgeHistoryLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const purgeHistoryLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
 };
 
 function createRequest(body: unknown, token?: string): NextRequest {
@@ -126,13 +139,16 @@ describe("POST /api/maintenance/purge-history", () => {
     expect(res.status).toBe(429);
   });
 
-  it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockCheck.mockResolvedValue({ redisErrored: true });
-    const req = createRequest({}, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(503);
-    expect(mockDeleteMany).not.toHaveBeenCalled();
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest({}, VALID_OP_TOKEN)),
+      limiter: purgeHistoryLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockDeleteMany],
+      limiterFactory: purgeHistoryLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("keys the rate limiter on the operator-token's tenantId (tenant-scoped, exact key)", async () => {

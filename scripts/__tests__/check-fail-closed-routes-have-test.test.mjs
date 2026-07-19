@@ -846,7 +846,10 @@ it("x", () => {});
       expect(stdout).not.toContain("STUB_MOCKED_RATE_LIMITERS_MODULE:");
     });
 
-    it("passes for a stub in an EXEMPT frozen-list file (tenant/service-accounts sibling shape)", () => {
+    it("flags a rate-limit-audit stub in the formerly-exempt tenant/service-accounts file (exemption list emptied by SC-T3-1)", () => {
+      // The frozen exemption list is empty as of tranche 3 — the 4 tenant/*
+      // stubs were migrated to helper mode. A stub re-introduced into the
+      // formerly-exempt sibling now fails the C6 scan (no cover remains).
       const rel = writeRoute("tenant/service-accounts", FAIL_CLOSED_LINE);
       writeAdjacentTest(
         "tenant/service-accounts",
@@ -857,8 +860,8 @@ it("legacy direct", () => { expect(rl.redisErrored).toBe(true); });
       );
       writeFileSync(legacyFile, `${rel}\n`, "utf8");
       const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
-      expect(exitCode, stdout).toBe(0);
-      expect(stdout).not.toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+      expect(exitCode, stdout).not.toBe(0);
+      expect(stdout).toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
     });
   });
 
@@ -962,14 +965,14 @@ it("2", async () => { await assertRedisFailClosed({ limiter: onlyLimiter, failur
   });
 
   describe("real repo (no overrides)", () => {
-    // End-state assertion (fail-closed-tranche2, all batches landed): the real
-    // repo now passes the gate cleanly — debt burned to 0, legacy pinned at 16
-    // (13 routes + 3 lib members), the manifest set-equality + per-file counts
-    // match the tree, and every rate-limit-audit stub is either migrated
-    // (C7/C8b) or one of the 4 frozen tenant/* legacy exemptions. This test
-    // pins the clean state so ANY regression — a re-added debt entry, a
+    // End-state assertion (fail-closed-tranche3, SC-T3-1 landed): the real repo
+    // passes the gate cleanly — debt burned to 0, legacy burned to 0 too (the
+    // former 13 route members migrated to helper mode), the manifest
+    // set-equality + per-file counts match the tree, and ZERO rate-limit-audit
+    // stubs remain anywhere under src (the frozen exemption list is empty). This
+    // test pins the clean state so ANY regression — a re-added debt entry, a
     // dropped opt-in flag, a new stub, manifest drift — fails loudly.
-    it("passes cleanly with the tranche-2 burndown applied", () => {
+    it("passes cleanly with the tranche-3 legacy burndown applied", () => {
       // The real-repo run classifies the whole src/app/api sibling-test set
       // PLUS every *.test.ts(x) under src for the C6 stub scan (~2 batched
       // ts-morph invocations over hundreds of files) — slower than the

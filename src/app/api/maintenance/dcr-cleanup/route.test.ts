@@ -1,23 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockVerifyAdminToken,
   mockRequireMaintenanceOperator,
   mockCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
-} = vi.hoisted(() => ({
-  mockVerifyAdminToken: vi.fn(),
-  mockRequireMaintenanceOperator: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockLogAudit: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockVerifyAdminToken: vi.fn(),
+    mockRequireMaintenanceOperator: vi.fn(),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
   verifyAdminToken: mockVerifyAdminToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -37,6 +43,13 @@ vi.mock("@/lib/auth/access/maintenance-auth", () => ({
 import { POST } from "./route";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
+
+// Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
+// at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
+const dcrCleanupLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const dcrCleanupLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
 const TOKEN_ID = "op-token-id-1";
@@ -111,12 +124,19 @@ describe("POST /api/maintenance/dcr-cleanup (410 deprecation stub)", () => {
     expect(mockCheck).toHaveBeenCalledWith(`rl:maintenance:dcr-cleanup:${TENANT_ID}`);
   });
 
-  it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockCheck.mockResolvedValue({ redisErrored: true });
-    const req = createRequest(VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(503);
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest(VALID_OP_TOKEN)),
+      limiter: dcrCleanupLimiter,
+      expectation: { envelope: "canonical" },
+      // No DB write exists on this 410 stub route; requireMaintenanceOperator
+      // is the first effect AFTER the limiter, so its non-invocation proves
+      // the 503 short-circuited before any downstream work (including audit).
+      assertNoMutation: [mockRequireMaintenanceOperator],
+      limiterFactory: dcrCleanupLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("checks rate limit after auth (401 before 429 for unauthenticated requests)", async () => {

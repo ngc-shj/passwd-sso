@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { __resetThrottleForTests } from "@/lib/security/rate-limit-audit";
 
 const {
   mockAuth,
@@ -8,7 +10,9 @@ const {
   mockPrismaAdminVaultResetCount,
   mockPrismaAdminVaultResetCreate,
   mockPrismaAdminVaultResetFindMany,
-  mockRateLimiterCheck,
+  mockAdminLimiterCheck,
+  mockTargetLimiterCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockCreateNotification,
   mockSendEmail,
@@ -39,7 +43,18 @@ const {
     mockPrismaAdminVaultResetCount: vi.fn(),
     mockPrismaAdminVaultResetCreate: vi.fn(),
     mockPrismaAdminVaultResetFindMany: vi.fn(),
-    mockRateLimiterCheck: vi.fn(),
+    // Two distinct limiters checked in one request via Promise.all
+    // (route.ts:123-124: adminResetLimiter THEN targetResetLimiter). The
+    // recording factory returns a distinct object per createRateLimiter call
+    // in creation order so assertRedisFailClosed's strict-identity attribution
+    // resolves each. Testing one limiter twice would not satisfy the gate's
+    // HELPER_CALLS_BELOW_LIMITER_COUNT distinct-arg rule (declared count 2).
+    mockAdminLimiterCheck: vi.fn(),
+    mockTargetLimiterCheck: vi.fn(),
+    mockCreateRateLimiter: vi
+      .fn()
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockAdminLimiterCheck, clear: vi.fn() }))
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockTargetLimiterCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
@@ -85,13 +100,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
-}));
-// The route emits the fail-closed audit directly; stub it to a no-op so the
-// 503 path does not pull the emit helper's transitive deps.
-vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
-  ...(await importOriginal()) as Record<string, unknown>,
-  emitRateLimitFailClosed: vi.fn(),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -135,6 +144,18 @@ vi.mock("@/lib/logger", () => ({
 import { POST, GET } from "./route";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
+// Module-scope snapshot: route.ts:40 `adminResetLimiter = createRateLimiter(...)`
+// then :46 `targetResetLimiter = createRateLimiter(...)` run at import time above,
+// in that order — matching mockCreateRateLimiter's two queued implementations.
+const adminLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const adminResetLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockAdminLimiterCheck;
+};
+const targetLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const targetResetLimiter = mockCreateRateLimiter.mock.results[1]!.value as {
+  check: typeof mockTargetLimiterCheck;
+};
+
 const TENANT_ID = "tenant-1";
 const TARGET_USER_ID = "user-target";
 const ACTOR_USER_ID = "test-user-id";
@@ -172,6 +193,10 @@ function expectAdvisoryLockAcquired(mock: ReturnType<typeof vi.fn>) {
 describe("POST /api/tenant/members/[userId]/reset-vault", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Real emitRateLimitFailClosed now runs on the 503 path (rate-limit-audit
+    // stub removed); reset its module-scoped throttle so a prior test's
+    // emission does not swallow this test's (5-min window, per-scope key).
+    __resetThrottleForTests();
     mockAuth.mockResolvedValue({ user: { id: ACTOR_USER_ID, name: "Admin User", email: "admin@example.com" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockIsTenantRoleAbove.mockReturnValue(true);
@@ -195,7 +220,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     mockPrismaAdminVaultResetCreate.mockImplementation(({ data }) =>
       Promise.resolve({ id: data.id ?? "reset-1" }),
     );
-    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockAdminLimiterCheck.mockResolvedValue({ allowed: true });
+    mockTargetLimiterCheck.mockResolvedValue({ allowed: true });
     mockResolveUserLocale.mockReturnValue("en");
     mockEncryptResetToken.mockReturnValue("psoenc1:0:cipher");
     mockAdminVaultResetPendingEmail.mockReturnValue({
@@ -279,10 +305,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
   });
 
   it("returns 429 when admin rate limit is exceeded", async () => {
-    // First call (admin limiter) returns false, second (target limiter) returns true
-    mockRateLimiterCheck
-      .mockResolvedValueOnce({ allowed: false })
-      .mockResolvedValueOnce({ allowed: true });
+    mockAdminLimiterCheck.mockResolvedValue({ allowed: false });
+    mockTargetLimiterCheck.mockResolvedValue({ allowed: true });
     const res = await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
       createParams({ userId: TARGET_USER_ID }),
@@ -293,35 +317,43 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
   });
 
-  it("returns 503 (fail-closed) when the admin limiter signals redisErrored", async () => {
-    mockRateLimiterCheck
-      .mockResolvedValueOnce({ allowed: false, redisErrored: true })
-      .mockResolvedValueOnce({ allowed: true });
-    const res = await POST(
-      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
-      createParams({ userId: TARGET_USER_ID }),
-    );
-    expect(res.status).toBe(503);
-    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable — admin limiter", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+          createParams({ userId: TARGET_USER_ID }),
+        ),
+      limiter: adminResetLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaAdminVaultResetCreate, mockCreateNotification],
+      limiterFactory: adminLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
-  it("returns 503 (fail-closed) when the target limiter signals redisErrored", async () => {
-    mockRateLimiterCheck
-      .mockResolvedValueOnce({ allowed: true })
-      .mockResolvedValueOnce({ allowed: false, redisErrored: true });
-    const res = await POST(
-      createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
-      createParams({ userId: TARGET_USER_ID }),
-    );
-    expect(res.status).toBe(503);
-    expect(mockPrismaAdminVaultResetCreate).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable — target limiter", async () => {
+    // Helper arranges only the target limiter; keep the sibling (admin) healthy
+    // so this case isolates the target-limiter redisErrored branch (both
+    // .check() run concurrently via Promise.all).
+    mockAdminLimiterCheck.mockResolvedValue({ allowed: true });
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+          createParams({ userId: TARGET_USER_ID }),
+        ),
+      limiter: targetResetLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaAdminVaultResetCreate, mockCreateNotification],
+      limiterFactory: targetLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 429 when target rate limit is exceeded", async () => {
-    // First call (admin limiter) returns true, second (target limiter) returns false
-    mockRateLimiterCheck
-      .mockResolvedValueOnce({ allowed: true })
-      .mockResolvedValueOnce({ allowed: false });
+    mockAdminLimiterCheck.mockResolvedValue({ allowed: true });
+    mockTargetLimiterCheck.mockResolvedValue({ allowed: false });
     const res = await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
       createParams({ userId: TARGET_USER_ID }),
