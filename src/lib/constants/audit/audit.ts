@@ -222,7 +222,7 @@ export const AUDIT_ACTION = {
   MOBILE_TOKEN_REPLAY_DETECTED: "MOBILE_TOKEN_REPLAY_DETECTED",
   MOBILE_CACHE_ROLLBACK_REJECTED: "MOBILE_CACHE_ROLLBACK_REJECTED",
   MOBILE_CACHE_FLAG_FORGED: "MOBILE_CACHE_FLAG_FORGED",
-  // Emitted by opt-in rate-limiters (failClosedOnRedisError: true) when
+  // Emitted by rate-limiters with the fail-closed opt-in flag set when
   // Redis is unavailable AND the caller's 503 response was sent. Audit
   // emission is throttled per (scope, userId|ipBucket) per 5 min; pre-auth
   // routes with no resolvable tenantId skip the audit row and emit a warn

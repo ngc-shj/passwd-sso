@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentCurrentAuthMethod, mockEmitFailClosed, mockCheckRateLimitOrFail, mockDerivePasskeyState } =
+const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls, mockServerAppUrl, mockDetectLocale, mockRateLimiterCheck, mockRequireRecentCurrentAuthMethod, mockDerivePasskeyState } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockMcpClientFindFirst: vi.fn(),
@@ -10,12 +9,11 @@ const { mockAuth, mockMcpClientFindFirst, mockUserFindUnique, mockWithBypassRls,
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockServerAppUrl: vi.fn((path: string) => `http://localhost:3000${path}`),
     mockDetectLocale: vi.fn(() => "en"),
+    // Limiter-layer mock: default allowed:true keeps the production
+    // checkRateLimitOrFail mapping in path (fail-closed contracts live in
+    // the colocated route.test.ts).
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
-    mockEmitFailClosed: vi.fn(),
-    // Default: helper returns null → route proceeds. Per-test overrides set
-    // it to return a response when the test exercises the rate-limited path.
-    mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
     mockDerivePasskeyState: vi.fn(),
   }));
 
@@ -41,10 +39,6 @@ vi.mock("@/i18n/locale-utils", () => ({
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  emitRateLimitFailClosed: mockEmitFailClosed,
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
 }));
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "127.0.0.1",
@@ -337,49 +331,6 @@ describe("GET /api/mcp/authorize", () => {
     });
   });
 
-  // AC4.1 / AC4.4 / AC4.5 — proof-of-pattern fail-closed test (plan
-  // rate-limit-fail-closed-on-redis). The 41 other opt-in routes have
-  // their fail-closed test case tracked in
-  // scripts/checks/fail-closed-test-debt.txt and will be authored in
-  // follow-up PRs (one debt-list entry removed per PR).
-  describe("redisErrored fail-closed (rate-limiter Redis unavailable)", () => {
-    beforeEach(() => {
-      mockAuth.mockResolvedValue(null); // pre-auth path is fine for limiter check
-    });
-
-    it("returns 503 + Retry-After: 30 + body { error: temporarily_unavailable } when helper returns the OAuth 503 envelope", async () => {
-      // Helper handles emit + envelope internally; route just returns
-      // whatever the helper hands back. Stub the helper to return the
-      // canonical OAuth 503 we'd see in production under Redis-outage.
-      mockCheckRateLimitOrFail.mockResolvedValueOnce(
-        NextResponse.json(
-          { error: "temporarily_unavailable" },
-          { status: 503, headers: { "Retry-After": "30" } },
-        ),
-      );
-
-      const res = await GET(createRequest("GET", authorizeUrl()));
-
-      expect(res.status).toBe(503);
-      expect(res.headers.get("Retry-After")).toBe("30");
-      const json = await res.json();
-      expect(json).toEqual({ error: "temporarily_unavailable" });
-      expect("error_description" in json).toBe(false);
-    });
-
-    // Pattern propagation: assert the route invokes the helper with the
-    // canonical args (scope, envelope, rateLimitedEnvelope) so the 41
-    // routes following this template copy the right shape.
-    it("invokes checkRateLimitOrFail with scope=mcp.authorize and envelope=oauth", async () => {
-      await GET(createRequest("GET", authorizeUrl()));
-
-      expect(mockCheckRateLimitOrFail).toHaveBeenCalledTimes(1);
-      expect(mockCheckRateLimitOrFail).toHaveBeenCalledWith(
-        expect.objectContaining({
-          scope: "mcp.authorize",
-          envelope: "oauth",
-        }),
-      );
-    });
-  });
+  // redisErrored fail-closed contract lives in the colocated
+  // src/app/api/mcp/authorize/route.test.ts (helper-mode ownership).
 });

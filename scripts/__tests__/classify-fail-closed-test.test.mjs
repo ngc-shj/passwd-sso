@@ -18,9 +18,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const CLASSIFIER = join(REPO_ROOT, "scripts/checks/classify-fail-closed-test.mjs");
 
-function classify(content) {
+function classify(content, filename = "route.test.ts") {
   const dir = mkdtempSync(join(tmpdir(), "classify-fc-"));
-  const file = join(dir, "route.test.ts");
+  const file = join(dir, filename);
   writeFileSync(file, content, "utf8");
   try {
     const r = spawnSync("node", [CLASSIFIER, file], { encoding: "utf8" });
@@ -32,6 +32,19 @@ function classify(content) {
       fields[k] = Number(v);
     }
     return fields;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Same as `classify` but returns the raw spawnSync result instead of
+// asserting status=0 — for cases that are expected to fail-loud (exit 1).
+function classifyExpectFailure(content, filename = "route.test.ts") {
+  const dir = mkdtempSync(join(tmpdir(), "classify-fc-"));
+  const file = join(dir, filename);
+  writeFileSync(file, content, "utf8");
+  try {
+    return spawnSync("node", [CLASSIFIER, file], { encoding: "utf8" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -64,6 +77,228 @@ it.only("focused", async () => {
 });
 `);
     expect(f.calls).toBe(2);
+  });
+
+  it("counts assertRedisFailClosedSilentDrop as a helper call (silent-drop tier)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedSilentDrop } from "@/__tests__/helpers/fail-closed";
+it("silent drop", async () => {
+  await assertRedisFailClosedSilentDrop({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 1 });
+  });
+
+  it("counts assertRedisFailClosedResult as a helper call (direct-result tier)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+it("direct result", async () => {
+  const limiter = { check: vi.fn(async () => ({ allowed: false, redisErrored: true })) };
+  await assertRedisFailClosedResult({ limiter, key: "k" });
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 1 });
+  });
+
+  it("counts DISTINCT limiter args (two distinct → distinct=2)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const a = {}; const b = {};
+it("1", async () => { await assertRedisFailClosed({ limiter: a, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: b, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 2 });
+  });
+
+  it("counts the SAME limiter twice as ONE distinct (calls=2, distinct=1)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const a = {};
+it("1", async () => { await assertRedisFailClosed({ limiter: a, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: a, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 1 });
+  });
+
+  it("flags a FAKE limiter passed to assertRedisFailClosedResult (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+it("x", async () => {
+  const limiter = { check: vi.fn() };
+  await assertRedisFailClosedResult({ limiter, key: "k" });
+});
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("does NOT flag a PRODUCTION-import limiter passed to assertRedisFailClosedResult (resultfake=0)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => {
+  await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" });
+});
+`);
+    expect(f.resultfake).toBe(0);
+  });
+
+  it("flags a FACTORY-PRODUCED fake limiter (blacklist would miss it, whitelist catches it)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+const makeFake = () => ({ check: vi.fn() });
+const limiter = makeFake();
+it("x", async () => { await assertRedisFailClosedResult({ limiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a fake IMPORTED from a non-production module (resultfake=1)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { fakeLimiter } from "@/__tests__/helpers/fakes";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: fakeLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("does NOT flag a production limiter reached through an alias chain (resultfake=0)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+const limiter = v1ApiKeyLimiter;
+it("x", async () => { await assertRedisFailClosedResult({ limiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(0);
+  });
+
+  // Scope-aware binding resolution (external review round 8 Major): a by-name
+  // file scan would bind the test's `limiter` to an unrelated same-name
+  // declaration in a sibling function and miss the fake. These pin that the
+  // classifier follows LEXICAL SCOPE (TypeScript symbol resolution), not text
+  // proximity.
+  it("flags a fake even when a SIBLING function has a same-name production alias (scope-blind evasion)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+function unused() { const limiter = v1ApiKeyLimiter; void limiter; }
+it("uses fake", async () => {
+  const limiter = { check: async () => ({ allowed: false, redisErrored: true }) };
+  await assertRedisFailClosedResult({ limiter });
+});
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a fake that INNER-shadows an outer production const (resultfake=1)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+const limiter = v1ApiKeyLimiter;
+it("x", async () => {
+  const limiter = { check: async () => ({}) };
+  await assertRedisFailClosedResult({ limiter });
+});
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("does NOT flag when the inner shadow is itself the production limiter (resultfake=0)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+const limiter = { check: async () => ({}) };
+it("x", async () => {
+  const limiter = v1ApiKeyLimiter;
+  await assertRedisFailClosedResult({ limiter });
+});
+`);
+    expect(f.resultfake).toBe(0);
+  });
+
+  it("collapses two aliases of the SAME limiter to distinct=1 (alias-chain normalization)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+import { realLimiter } from "@/lib/security/rate-limiters";
+const shared = realLimiter;
+const aliasA = shared;
+const aliasB = shared;
+it("1", async () => { await assertRedisFailClosed({ limiter: aliasA, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: aliasB, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 1 });
+  });
+
+  it("collapses two aliases of the SAME FACTORY-RESULT to distinct=1 (root keyed on the declaration, not the alias text)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const makeLimiter = () => ({});
+const shared = makeLimiter();
+const aliasA = shared;
+const aliasB = shared;
+it("1", async () => { await assertRedisFailClosed({ limiter: aliasA, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: aliasB, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 1 });
+  });
+
+  it("flags a production import when the allowlist MODULE ITSELF is vi.mock'd (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+vi.mock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a production import when the allowlist module is vi.doMock'd (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+vi.doMock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a production import when the allowlist module is mocked via the TYPED form vi.mock(import(...)) (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+vi.mock(import("@/lib/security/rate-limiters"), () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => { await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" }); });
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("still detects a TYPED-form mapping mock as mock=1 (shared specifier extraction, no regression)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+vi.mock(import("@/lib/security/rate-limit-audit"), () => ({ checkRateLimitOrFail: vi.fn() }));
+it("x", () => {});
+`);
+    expect(f.mock).toBe(1);
+  });
+
+  it("sets resultmodulemock=1 for a rate-limiters mock with NO helper call (setup-file shape)", () => {
+    const f = classify(`import { vi } from "vitest";
+vi.mock("@/lib/security/rate-limiters", () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+`);
+    expect(f).toMatchObject({ calls: 0, resultfake: 0, resultmodulemock: 1 });
+  });
+
+  it("sets resultmodulemock=1 for a TYPED-form rate-limiters mock with no helper call", () => {
+    const f = classify(`import { vi } from "vitest";
+vi.mock(import("@/lib/security/rate-limiters"), () => ({ v1ApiKeyLimiter: { check: vi.fn() } }));
+`);
+    expect(f.resultmodulemock).toBe(1);
+  });
+
+  it("sets resultmodulemock=0 for a file that does not mock rate-limiters", () => {
+    const f = classify(`import { it, vi } from "vitest";
+vi.mock("@/lib/redis", () => ({ getRedis: vi.fn() }));
+it("x", () => {});
+`);
+    expect(f.resultmodulemock).toBe(0);
   });
 
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
@@ -233,5 +468,90 @@ const s = "redisErrored";
   it("exits 1 when invoked without arguments (fail closed, no silent empty output)", () => {
     const r = spawnSync("node", [CLASSIFIER], { encoding: "utf8" });
     expect(r.status).toBe(1);
+  });
+
+  // C6 hardening (Round 1 M6 + Round 2 S2-1/S2-2): RECALL-first `vi`
+  // resolution, vi.doMock, specifier normalization, dynamic-specifier
+  // fail-loud, and .tsx virtual-path parsing.
+  describe("C6 hardening: vi resolution + doMock + specifier normalization", () => {
+    it("flags a stub via the GLOBAL `vi` (no vitest import — globals: true precedent, mock=1)", () => {
+      const f = classify(`it("stub", () => {
+  vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+});
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a stub via a NAMESPACE `vi` (import * as V from \"vitest\"; V.vi.doMock(...), mock=1)", () => {
+      const f = classify(`import * as V from "vitest";
+V.vi.doMock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a stub via an ALIASED named `vi` (import { vi as viz }; viz.mock(...), mock=1)", () => {
+      const f = classify(`import { vi as viz } from "vitest";
+viz.mock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a stub via an ALIASED named `vi` using doMock (viz.doMock(...), mock=1)", () => {
+      const f = classify(`import { vi as viz } from "vitest";
+viz.doMock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("fails loud (nonzero exit) when a LOCAL declaration shadows the `vi` binding", () => {
+      const r = classifyExpectFailure(`it("stub", () => {
+  const vi = { mock: () => {} };
+  vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+});
+`);
+      expect(r.status).not.toBe(0);
+    });
+
+    it("flags a RELATIVE specifier that resolves to the mapping module (mock=1)", () => {
+      const f = classify(`import { vi } from "vitest";
+vi.mock("../../../lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags vi.doMock the same as vi.mock (mock=1)", () => {
+      const f = classify(`import { vi } from "vitest";
+vi.doMock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags vi.mock(import(\"<spec>\")) — vitest 3 typed form (mock=1)", () => {
+      const f = classify(`import { vi } from "vitest";
+vi.mock(import("@/lib/security/rate-limit-audit"), () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a DYNAMIC (non-literal) mock specifier as dynspec=1, NOT a silent mock=0 pass", () => {
+      const f = classify(`import { vi } from "vitest";
+const m = "@/lib/security/rate-limit-audit";
+vi.doMock(m, () => ({}));
+`);
+      expect(f).toMatchObject({ mock: 0, dynspec: 1 });
+    });
+
+    it("parses a .tsx file with JSX and still flags the stub (mock=1, no CLASSIFIER_FAILURE)", () => {
+      const f = classify(
+        `import { vi } from "vitest";
+vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+it("renders", () => {
+  const el = <div>hello</div>;
+});
+`,
+        "component.test.tsx",
+      );
+      expect(f.mock).toBe(1);
+    });
   });
 });

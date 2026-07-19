@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
@@ -9,22 +10,27 @@ const {
   mockCreate,
   mockTenantMemberFindMany,
   mockRequireMaintenanceOperator,
-  mockCheckRateLimitOrFail,
+  mockCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
   mockCreateNotification,
-} = vi.hoisted(() => ({
-  mockVerifyAdminToken: vi.fn(),
-  mockCreate: vi.fn(),
-  mockTenantMemberFindMany: vi.fn(),
-  mockRequireMaintenanceOperator: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
-  mockLogAudit: vi.fn(),
-  mockGetCurrentMasterKeyVersion: vi.fn(),
-  mockGetMasterKeyByVersion: vi.fn(),
-  mockCreateNotification: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockVerifyAdminToken: vi.fn(),
+    mockCreate: vi.fn(),
+    mockTenantMemberFindMany: vi.fn(),
+    mockRequireMaintenanceOperator: vi.fn(),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockGetCurrentMasterKeyVersion: vi.fn(),
+    mockGetMasterKeyByVersion: vi.fn(),
+    mockCreateNotification: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({ verifyAdminToken: mockVerifyAdminToken }));
 vi.mock("@/lib/prisma", () => ({
@@ -34,10 +40,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }) }),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -75,6 +78,11 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST } from "./route";
 
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
+
 const TENANT = "11111111-1111-1111-1111-111111111111";
 const SUBJECT = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
@@ -89,7 +97,7 @@ function makeRequest(body: unknown): NextRequest {
 describe("POST /api/admin/rotate-master-key/initiate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockCheck.mockResolvedValue({ allowed: true });
     mockGetCurrentMasterKeyVersion.mockReturnValue(2);
     mockGetMasterKeyByVersion.mockReturnValue("hexkey");
     mockRequireMaintenanceOperator.mockResolvedValue({ ok: true });
@@ -113,31 +121,19 @@ describe("POST /api/admin/rotate-master-key/initiate", () => {
   });
 
   it("returns 429 when rate limit exhausted", async () => {
-    const { NextResponse } = await import("next/server");
-    mockCheckRateLimitOrFail.mockResolvedValueOnce(
-      NextResponse.json({ error: "RATE_LIMIT_EXCEEDED" }, { status: 429 }),
-    );
+    mockCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST(makeRequest({ targetVersion: 2 }));
     expect(res.status).toBe(429);
   });
 
-  // redisErrored fail-closed: when the rate-limiter signals Redis is down,
-  // the route MUST surface a 503 (not 429) so operators can distinguish
-  // backend-down from over-budget. The route delegates to
-  // checkRateLimitOrFail which owns the emit + envelope.
-  describe("redisErrored fail-closed (rate-limiter Redis unavailable)", () => {
-    it("returns 503 when checkRateLimitOrFail hands back the canonical 503 envelope", async () => {
-      const { NextResponse } = await import("next/server");
-      mockCheckRateLimitOrFail.mockResolvedValueOnce(
-        NextResponse.json(
-          { error: "RATE_LIMITER_UNAVAILABLE" },
-          { status: 503, headers: { "Retry-After": "30" } },
-        ),
-      );
-      const res = await POST(makeRequest({ targetVersion: 2 }));
-      expect(res.status).toBe(503);
-      expect(res.headers.get("Retry-After")).toBe("30");
-      expect(mockCreate).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makeRequest({ targetVersion: 2 })),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockCreate],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
     });
   });
 

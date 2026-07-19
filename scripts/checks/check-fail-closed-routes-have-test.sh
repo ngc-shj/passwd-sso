@@ -52,18 +52,26 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 FIXTURE_ROOT="${FAIL_CLOSED_TEST_ROOT:-$REPO_ROOT}"
 DEBT_FILE="${FAIL_CLOSED_TEST_DEBT_FILE:-$FIXTURE_ROOT/scripts/checks/fail-closed-test-debt.txt}"
 LEGACY_FILE="${FAIL_CLOSED_TEST_LEGACY_FILE:-$FIXTURE_ROOT/scripts/checks/fail-closed-legacy-direct.txt}"
+MANIFEST_FILE="${FAIL_CLOSED_TEST_MANIFEST_FILE:-$FIXTURE_ROOT/scripts/checks/fail-closed-manifest.txt}"
 CLASSIFIER="$REPO_ROOT/scripts/checks/classify-fail-closed-test.mjs"
 
+# Ratchet constants (C3/C5) — fixture-overridable so red fixtures (a 1-entry
+# debt/17-entry legacy list vs the real-repo expectation) are executable
+# without mutating the real manifests. Real-repo defaults: debt burns down to
+# 0 (C3); legacy holds exactly 16 (13 routes + 3 lib members, C8d).
+EXPECTED_DEBT_COUNT="${FAIL_CLOSED_EXPECTED_DEBT_COUNT:-0}"
+EXPECTED_LEGACY_COUNT="${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-13}"
+
 # CI-auditable: print effective scan paths on one line.
-echo "check-fail-closed-routes-have-test: FIXTURE_ROOT=$FIXTURE_ROOT DEBT_FILE=$DEBT_FILE LEGACY_FILE=$LEGACY_FILE"
+echo "check-fail-closed-routes-have-test: FIXTURE_ROOT=$FIXTURE_ROOT DEBT_FILE=$DEBT_FILE LEGACY_FILE=$LEGACY_FILE MANIFEST_FILE=$MANIFEST_FILE EXPECTED_DEBT_COUNT=$EXPECTED_DEBT_COUNT EXPECTED_LEGACY_COUNT=$EXPECTED_LEGACY_COUNT"
 
 # sec-F6: env-pollution guard. Any override + CI=true requires an explicit
 # fixture-mode acknowledgement, so a stray `export` leaking into a real CI
 # run cannot silently point the gate at an empty fixture dir and green it.
 if [ "${CI:-}" = "true" ]; then
-  if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ] || [ -n "${FAIL_CLOSED_TEST_DEBT_FILE:-}" ] || [ -n "${FAIL_CLOSED_TEST_LEGACY_FILE:-}" ]; then
+  if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ] || [ -n "${FAIL_CLOSED_TEST_DEBT_FILE:-}" ] || [ -n "${FAIL_CLOSED_TEST_LEGACY_FILE:-}" ] || [ -n "${FAIL_CLOSED_TEST_MANIFEST_FILE:-}" ] || [ -n "${FAIL_CLOSED_EXPECTED_DEBT_COUNT:-}" ] || [ -n "${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-}" ]; then
     if [ "${FAIL_CLOSED_TEST_FIXTURE_MODE:-}" != "1" ]; then
-      echo "ENV_POLLUTION_GUARD: FAIL_CLOSED_TEST_* override set under CI=true without FAIL_CLOSED_TEST_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
+      echo "ENV_POLLUTION_GUARD: FAIL_CLOSED_TEST_* / FAIL_CLOSED_EXPECTED_* override set under CI=true without FAIL_CLOSED_TEST_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
       exit 1
     fi
   fi
@@ -96,6 +104,17 @@ LEGACY_LIST="$(read_manifest "$LEGACY_FILE")"
 # `set -o pipefail` turns into a spurious gate failure. No pipe, no race.
 is_debt()   { grep -qxF "$1" <<<"$DEBT_LIST"; }
 is_legacy() { grep -qxF "$1" <<<"$LEGACY_LIST"; }
+
+# manifest_count <list> — number of non-empty entries in a read_manifest
+# output string. Herestring, not a pipe (same SIGPIPE rationale as above).
+manifest_count() {
+  local list="$1"
+  if [ -z "$list" ]; then
+    echo 0
+  else
+    grep -c . <<<"$list"
+  fi
+}
 
 # Enumerate opt-in routes. bash 3.2 has no `mapfile`.
 fail=0
@@ -139,6 +158,36 @@ field() {
   awk -v k="$2" '{ for (i = 1; i <= NF; i++) { split($i, a, "="); if (a[1] == k) { print a[2]; exit } } }' <<<"$1"
 }
 
+# manifest_declared_count <repo-rel-path> → the limiter count declared for that
+# path in the manifest (empty when the path is absent). Used to require a
+# helper-mode member's contract test to cover EVERY limiter in a multi-limiter
+# file, not just one — a single assertRedisFailClosed call in a count=2 file
+# leaves the second limiter's fail-closed path untested (external review
+# 2026-07-19, round 2).
+manifest_declared_count() {
+  [ -f "$MANIFEST_FILE" ] || return 0
+  awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' "$MANIFEST_FILE"
+}
+
+# assert_covers_all_limiters <route> <test-rel> <distinct> — fail when a
+# helper-mode file asserts fewer DISTINCT limiters than its declared limiter
+# count. `distinct` counts distinct `limiter:` argument symbols across the
+# helper calls, so testing the SAME limiter twice does NOT satisfy a
+# 2-limiter file (external review 2026-07-19, round 3). Sets `fail=1` and
+# echoes HELPER_CALLS_BELOW_LIMITER_COUNT; returns 1 so the caller can
+# `continue`. A missing/blank manifest count is treated as 1.
+assert_covers_all_limiters() {
+  local route="$1" test_rel="$2" distinct="$3" declared
+  declared="$(manifest_declared_count "$route")"
+  [ -n "$declared" ] || declared=1
+  if [ "$distinct" -lt "$declared" ] 2>/dev/null; then
+    echo "HELPER_CALLS_BELOW_LIMITER_COUNT: $route (manifest declares $declared fail-closed limiter(s) but ${test_rel} asserts only $distinct distinct limiter(s) — every limiter needs its own contract assertion; testing one limiter N times does not count)"
+    fail=1
+    return 1
+  fi
+  return 0
+}
+
 for route in ${routes[@]+"${routes[@]}"}; do
   dir="$(dirname "$route")"
   adjacent_test="$FIXTURE_ROOT/$dir/route.test.ts"
@@ -168,6 +217,18 @@ for route in ${routes[@]+"${routes[@]}"}; do
     if [ "$(field "$contract_rec" import)" != "1" ]; then
       echo "MISSING_FAIL_CLOSED_TEST: $route (assertRedisFailClosed is called in ${contract_test#$FIXTURE_ROOT/} without importing it from @/__tests__/helpers/fail-closed — a local re-implementation does not count)"
       fail=1
+      continue
+    fi
+    # Direct-result tier: the limiter argument must be the production singleton,
+    # not a locally-built fake returning a fixed result.
+    if [ "$(field "$contract_rec" resultfake)" = "1" ]; then
+      echo "RESULT_HELPER_FAKE_LIMITER: $route (${contract_test#$FIXTURE_ROOT/} passes a locally-constructed fake to assertRedisFailClosedResult — it must probe the real limiter module, not a fixed-result object)"
+      fail=1
+      continue
+    fi
+    # Every declared limiter in the file must have its own contract assertion
+    # (distinct limiter args, not just call count).
+    if ! assert_covers_all_limiters "$route" "${contract_test#$FIXTURE_ROOT/}" "$(field "$contract_rec" distinct)"; then
       continue
     fi
     # Genuine helper-mode contract test: manifests must not linger.
@@ -208,15 +269,124 @@ for route in ${routes[@]+"${routes[@]}"}; do
   fail=1
 done
 
-# DANGLING_ENTRY — manifest entries whose route no longer opts into
+# Whole-src enumeration primitive (Round 1 M8). Built here (before the
+# dangling check) because debt/legacy manifests may list non-src/app/api
+# members (the 3 lib fail-closed limiters registered in tranche 2); the
+# api-only ROUTE_LIST would wrongly flag those as dangling. ENUM_LIST is the
+# class-defining set across all of src, so it is the correct opt-in oracle
+# for both the dangling check and the C5 manifest set-equality below.
+ENUM_LIST=""
+while IFS= read -r enum_line; do
+  [ -n "$enum_line" ] && ENUM_LIST="${ENUM_LIST}${enum_line#$FIXTURE_ROOT/}
+"
+done < <(
+  grep -rln 'failClosedOnRedisError: true' "$FIXTURE_ROOT/src" --include='*.ts' --include='*.tsx' 2>/dev/null \
+    | grep -Ev '\.test\.tsx?$' \
+    | grep -v '/src/__tests__/' \
+    | sort
+)
+
+# ── Non-route member coverage (external-review Major, 2026-07-19) ──────────
+# The route loop above enumerates ONLY src/app/api, so the non-route members
+# of the fail-closed class (lib limiters + auth.config) never had their
+# sibling test classified — the manifest pinned their opt-in flag but nothing
+# verified a live fail-closed test still exists. Deleting/weakening such a
+# test left the gate green (test-drift false-green). This block closes that
+# gap: every ENUM_LIST member outside src/app/api is classified through the
+# SAME helper/legacy/debt modes as a route, using an explicit member→test
+# map (the set is small, frozen, and pinned by EXPECTED_LEGACY_COUNT; the
+# contract test is not always adjacent — SCIM's lives in with-scim-auth).
+#
+# Map format: "<member-path>|<test-path>" per line. A member enumerated here
+# but absent from the map fails NON_ROUTE_COVERAGE_UNMAPPED (a new non-route
+# opt-in must declare where its fail-closed test lives — no silent bypass).
+NON_ROUTE_TEST_MAP="src/auth.config.ts|src/auth.config.test.ts
+src/lib/scim/rate-limit.ts|src/lib/scim/with-scim-auth.test.ts
+src/lib/security/rate-limiters.ts|src/lib/security/rate-limiters.test.ts"
+
+non_route_test_for() {
+  # Echo the mapped test path for member $1, or empty if unmapped.
+  awk -F'|' -v m="$1" '$1 == m { print $2; exit }' <<<"$NON_ROUTE_TEST_MAP"
+}
+
+while IFS= read -r member; do
+  [ -z "$member" ] && continue
+  case "$member" in src/app/api/*) continue ;; esac  # routes handled above
+
+  member_test="$(non_route_test_for "$member")"
+  if [ -z "$member_test" ]; then
+    echo "NON_ROUTE_COVERAGE_UNMAPPED: $member (opts into failClosedOnRedisError: true outside src/app/api but declares no fail-closed test in the gate's non-route map — add a <member>|<test> entry so its coverage is verified)"
+    fail=1
+    continue
+  fi
+
+  member_rec="$(node "$CLASSIFIER" "$FIXTURE_ROOT/$member_test" 2>/dev/null | awk -F'\t' 'NR==1{print $2}')"
+  if [ -z "$member_rec" ]; then
+    echo "CLASSIFIER_FAILURE: classifying $member_test for non-route member $member failed — gate fails closed."
+    exit 1
+  fi
+
+  # Helper mode: a real fail-closed contract call (assertRedisFailClosed /
+  # ...SilentDrop / ...Result — the classifier counts all three tiers as
+  # `calls`), imported, with the production mapping NOT stubbed. Symmetric
+  # with the route loop: a helper-migrated member must not linger in the
+  # debt/legacy manifests (STALE_* forces atomic removal in the same PR).
+  if [ "$(field "$member_rec" calls)" != "" ] && [ "$(field "$member_rec" calls)" -gt 0 ] 2>/dev/null; then
+    if [ "$(field "$member_rec" mock)" = "1" ]; then
+      echo "MAPPING_MOCKED_CONTRACT_TEST: $member (${member_test} calls the fail-closed helper but stubs the production checkRateLimitOrFail mapping)"
+      fail=1
+      continue
+    fi
+    if [ "$(field "$member_rec" resultfake)" = "1" ]; then
+      echo "RESULT_HELPER_FAKE_LIMITER: $member (${member_test} passes a locally-constructed fake to assertRedisFailClosedResult — it must probe the real limiter module, not a fixed-result object)"
+      fail=1
+      continue
+    fi
+    if ! assert_covers_all_limiters "$member" "$member_test" "$(field "$member_rec" distinct)"; then
+      continue
+    fi
+    if is_debt "$member"; then
+      echo "STALE_DEBT_ENTRY: $member (has a shared-helper fail-closed contract test — remove its fail-closed-test-debt.txt entry in the same PR)"
+      fail=1
+      continue
+    fi
+    if is_legacy "$member"; then
+      echo "STALE_LEGACY_ENTRY: $member (migrated to a shared-helper fail-closed contract — remove its fail-closed-legacy-direct.txt entry in the same PR)"
+      fail=1
+      continue
+    fi
+    continue
+  fi
+
+  # Legacy mode: the member is in the legacy manifest and its mapped test
+  # carries a code-level redisErrored reference. Absence of either → drift.
+  if is_legacy "$member"; then
+    if [ "$(field "$member_rec" redis)" = "1" ]; then
+      continue
+    fi
+    echo "LEGACY_TEST_MISSING: $member (fail-closed-legacy-direct.txt lists it but ${member_test} no longer references redisErrored in code — fail-closed test drift)"
+    fail=1
+    continue
+  fi
+
+  # Not helper-covered and not legacy-registered: a non-route opt-in with no
+  # recognized coverage mode.
+  echo "MISSING_FAIL_CLOSED_TEST: $member (non-route opt-in with no shared-helper contract in ${member_test} and no fail-closed-legacy-direct.txt entry)"
+  fail=1
+done <<EOF
+$ENUM_LIST
+EOF
+
+# DANGLING_ENTRY — manifest entries whose file no longer opts into
 # fail-closed (or no longer exists). Forces flag removal to be a visible,
-# reviewable manifest diff (parent-plan M2 blind spot).
+# reviewable manifest diff (parent-plan M2 blind spot). Validated against the
+# whole-src ENUM_LIST so a legitimately-opted-in lib member is not flagged.
 check_dangling() {
   local list="$1" name="$2" entry
   while IFS= read -r entry; do
     [ -z "$entry" ] && continue
-    if ! grep -qxF "$entry" <<<"$ROUTE_LIST"; then
-      echo "DANGLING_ENTRY: $entry ($name lists it but the route no longer contains failClosedOnRedisError: true — remove the entry, or restore the opt-in)"
+    if ! grep -qxF "$entry" <<<"$ENUM_LIST"; then
+      echo "DANGLING_ENTRY: $entry ($name lists it but the file no longer contains failClosedOnRedisError: true — remove the entry, or restore the opt-in)"
       fail=1
     fi
   done <<EOF
@@ -225,6 +395,320 @@ EOF
 }
 check_dangling "$DEBT_LIST" "fail-closed-test-debt.txt"
 check_dangling "$LEGACY_LIST" "fail-closed-legacy-direct.txt"
+
+# C3/C5 re-entry ratchets — exact equality, both growth AND shrink require
+# editing the constant in the same diff (a future debt/legacy entry, or a
+# migration removing one, is always a reviewable script diff). Per the
+# fixture-executability rules (Round 2 F-R2-1/S2-6) these run in fixture mode
+# too — only the repo-wide AC4.4/AC4.5/manifest-sum aggregates below skip
+# under FIXTURE_ROOT overrides.
+debt_count="$(manifest_count "$DEBT_LIST")"
+if [ "$debt_count" -ne "$EXPECTED_DEBT_COUNT" ]; then
+  echo "EXPECTED_DEBT_COUNT FAIL: expected $EXPECTED_DEBT_COUNT debt entries in ${DEBT_FILE#$FIXTURE_ROOT/}; found $debt_count"
+  fail=1
+fi
+legacy_count="$(manifest_count "$LEGACY_LIST")"
+if [ "$legacy_count" -ne "$EXPECTED_LEGACY_COUNT" ]; then
+  echo "EXPECTED_LEGACY_COUNT FAIL: expected $EXPECTED_LEGACY_COUNT legacy entries in ${LEGACY_FILE#$FIXTURE_ROOT/}; found $legacy_count"
+  fail=1
+fi
+
+# ---------------------------------------------------------------------------
+# C5 — class manifest pinning + whole-src enumeration.
+#
+# Whole-src enumeration (Round 1 M8): every file under src (any lane) that
+# opts into `failClosedOnRedisError: true`, excluding test files and the
+# src/__tests__ support tree (helper/ast-guard comments discuss the literal
+# without being class members — accepted residual, Round 2 S2-7).
+# ---------------------------------------------------------------------------
+# Emits `<file>\t<count>` per argument path — batchable so the manifest's ~65
+# per-file AST counts cost ONE node startup (+ ts-morph load) instead of ~65,
+# which was ~13s of the gate's runtime (CI timeout, external review round 7
+# follow-up). A missing/unreadable file yields count 0.
+AST_COUNT_SCRIPT='
+import { readFileSync } from "node:fs";
+import { Project, SyntaxKind, Node } from "ts-morph";
+const project = new Project({ useInMemoryFileSystem: true, skipFileDependencyResolution: true });
+for (const file of process.argv.slice(1)) {
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch { process.stdout.write(file + "\t0\n"); continue; }
+  const sf = project.createSourceFile("/virtual/x.ts", text, { overwrite: true });
+  let count = 0;
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const name = Node.isPropertyAccessExpression(expr) ? expr.getName() : expr.getText();
+    if (name !== "createRateLimiter") continue;
+    const arg0 = call.getArguments()[0];
+    if (!arg0 || !Node.isObjectLiteralExpression(arg0)) continue;
+    const prop = arg0.getProperty("failClosedOnRedisError");
+    if (!prop || !Node.isPropertyAssignment(prop)) continue;
+    const init = prop.getInitializer();
+    if (init && init.getKind() === SyntaxKind.TrueKeyword) count++;
+  }
+  sf.forget();
+  process.stdout.write(file + "\t" + count + "\n");
+}
+'
+# Batch-compute AST counts for many files at once → newline table of
+# "<abs-path>\t<count>". Empty input yields empty output.
+ast_count_batch() {
+  [ "$#" -gt 0 ] || return 0
+  (cd "$REPO_ROOT" && node --input-type=module -e "$AST_COUNT_SCRIPT" -- "$@")
+}
+
+MANIFEST_LIST=""
+manifest_paths_seen=""
+if [ -f "$MANIFEST_FILE" ]; then
+  # Pass 1: parse + validate every manifest line, collecting the valid
+  # (path, count) pairs. AST counts are NOT computed here — they are batched
+  # into a single node call after the loop (external review round 7 follow-up:
+  # a per-line ast_count spawned ~65 node processes, ~13s of gate runtime).
+  manifest_line_no=0
+  manifest_valid_paths=()
+  manifest_valid_counts=()
+  while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
+    manifest_line_no=$((manifest_line_no + 1))
+    manifest_line="${manifest_line%$'\r'}"
+    [ -z "$manifest_line" ] && continue
+    case "$manifest_line" in \#*) continue ;; esac
+    # bash-native tab split (no grep -P dependency, portable to bash 3.2 /
+    # BSD grep): absence of a tab leaves both halves equal to the whole line.
+    m_path="${manifest_line%%$'\t'*}"
+    m_count="${manifest_line#*$'\t'}"
+    if [ "$m_path" = "$manifest_line" ]; then
+      echo "MANIFEST_PARSE_ERROR: ${MANIFEST_FILE#$FIXTURE_ROOT/}:$manifest_line_no missing a tab separator ('$manifest_line')"
+      fail=1
+      continue
+    fi
+    case "$m_count" in
+      ''|*[!0-9]*)
+        echo "MANIFEST_PARSE_ERROR: ${MANIFEST_FILE#$FIXTURE_ROOT/}:$manifest_line_no non-numeric count ('$manifest_line')"
+        fail=1
+        continue
+        ;;
+    esac
+    MANIFEST_LIST="${MANIFEST_LIST}${m_path}
+"
+    manifest_paths_seen="${manifest_paths_seen}${m_path}=${m_count}
+"
+    manifest_valid_paths+=("$m_path")
+    manifest_valid_counts+=("$m_count")
+  done < "$MANIFEST_FILE"
+
+  # Batch AST-count all valid manifest files in ONE node call, into a lookup.
+  MANIFEST_AST_OUT=""
+  if [ "${#manifest_valid_paths[@]}" -gt 0 ]; then
+    manifest_abs=()
+    for m_path in "${manifest_valid_paths[@]}"; do
+      manifest_abs+=("$FIXTURE_ROOT/$m_path")
+    done
+    MANIFEST_AST_OUT="$(ast_count_batch "${manifest_abs[@]}")"
+  fi
+
+  # Pass 2: compare grep count (cheap, per-file) and the batched AST count.
+  idx=0
+  while [ "$idx" -lt "${#manifest_valid_paths[@]}" ]; do
+    m_path="${manifest_valid_paths[$idx]}"
+    m_count="${manifest_valid_counts[$idx]}"
+    idx=$((idx + 1))
+    abs_path="$FIXTURE_ROOT/$m_path"
+    grep_count=0
+    if [ -f "$abs_path" ]; then
+      grep_count="$(grep -c 'failClosedOnRedisError: true' "$abs_path" || true)"
+    fi
+    file_ast_count="$(awk -F'\t' -v p="$abs_path" '$1 == p { print $2; exit }' <<<"$MANIFEST_AST_OUT")"
+    [ -n "$file_ast_count" ] || file_ast_count=0
+    if [ "$grep_count" -gt "$file_ast_count" ]; then
+      echo "MANIFEST_COMMENT_LITERAL: $m_path (grep count $grep_count exceeds AST-authoritative count $file_ast_count — the literal appears in a comment/string; reword it, D4 rule)"
+      fail=1
+    elif [ "$file_ast_count" -ne "$m_count" ]; then
+      echo "MANIFEST_COUNT_MISMATCH: $m_path (manifest says $m_count; AST-authoritative count is $file_ast_count)"
+      fail=1
+    fi
+  done
+fi
+
+# ENUM_LIST (whole-src opt-in set) is built earlier, before the dangling
+# check, and reused here for the C5 manifest set-equality.
+while IFS= read -r enum_path; do
+  [ -z "$enum_path" ] && continue
+  if ! grep -qxF "$enum_path" <<<"$MANIFEST_LIST"; then
+    echo "MANIFEST_MISSING_ROUTE: $enum_path (opts into failClosedOnRedisError: true but has no fail-closed-manifest.txt entry)"
+    fail=1
+  fi
+done <<EOF
+$ENUM_LIST
+EOF
+
+while IFS= read -r manifest_path; do
+  [ -z "$manifest_path" ] && continue
+  if ! grep -qxF "$manifest_path" <<<"$ENUM_LIST"; then
+    echo "MANIFEST_STALE_ROUTE: $manifest_path (fail-closed-manifest.txt lists it but the file no longer opts in, or is gone)"
+    fail=1
+  fi
+done <<EOF
+$MANIFEST_LIST
+EOF
+
+# ---------------------------------------------------------------------------
+# C6 — structural stub-detection gate (SC1). Enumerate ALL test files under
+# src (both lanes) PLUS setupFiles derived from the vitest configs, batch-
+# classify, and reject any non-exempt production-mapping stub.
+# ---------------------------------------------------------------------------
+FROZEN_STUB_EXEMPTIONS='src/app/api/tenant/members/[userId]/reset-vault/route.test.ts
+src/app/api/tenant/operator-tokens/route.test.ts
+src/app/api/tenant/scim-tokens/route.test.ts
+src/app/api/tenant/service-accounts/route.test.ts'
+
+is_stub_exempt() { grep -qxF "$1" <<<"$FROZEN_STUB_EXEMPTIONS"; }
+
+STUB_TEST_FILES=""
+if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ]; then
+  # Fixture mode: temp fixture trees are not git repos — use find.
+  while IFS= read -r stub_line; do
+    [ -n "$stub_line" ] && STUB_TEST_FILES="${STUB_TEST_FILES}${stub_line#$FIXTURE_ROOT/}
+"
+  done < <(find "$FIXTURE_ROOT/src" \( -name '*.test.ts' -o -name '*.test.tsx' \) 2>/dev/null | sort)
+else
+  while IFS= read -r stub_line; do
+    [ -n "$stub_line" ] && STUB_TEST_FILES="${STUB_TEST_FILES}${stub_line}
+"
+  done < <(git -C "$REPO_ROOT" ls-files 'src' | grep -E '\.test\.tsx?$' | sort)
+fi
+
+# Config-seam guard (Round 2 S2-4/F-R2-3; extended round 6): any reference in a
+# vitest config to a fail-closed-critical module is fail-loud, because a
+# resolve.alias redirect swaps the module for a fake while every import binding
+# still looks production-legitimate. Two modules are guarded:
+#   - rate-limit-audit — the checkRateLimitOrFail mapping (503 envelope).
+#   - security/rate-limiters — the direct-result limiter singleton
+#     (v1ApiKeyLimiter); aliasing it defeats the resultfake allowlist the same
+#     way mocking the module does (external review 2026-07-19, round 6).
+# `security/rate-limiters` (the path segment) is matched, not a bare
+# `rate-limiter`, to avoid false-positives on unrelated limiter helpers.
+SETUP_FILES=""
+for vitest_config in "$FIXTURE_ROOT/vitest.config.ts" "$FIXTURE_ROOT/vitest.integration.config.ts"; do
+  [ -f "$vitest_config" ] || continue
+  if grep -q 'rate-limit-audit' "$vitest_config"; then
+    echo "STUB_CONFIG_SEAM: ${vitest_config#$FIXTURE_ROOT/} references rate-limit-audit (resolve.alias / setupFiles redirect evasion)"
+    fail=1
+  fi
+  if grep -q 'security/rate-limiters' "$vitest_config"; then
+    echo "STUB_CONFIG_SEAM: ${vitest_config#$FIXTURE_ROOT/} references security/rate-limiters (resolve.alias redirect swaps the direct-result limiter for a fake)"
+    fail=1
+  fi
+  while IFS= read -r setup_entry; do
+    [ -z "$setup_entry" ] && continue
+    SETUP_FILES="${SETUP_FILES}${setup_entry}
+"
+  done < <(
+    # Extract setupFiles path literals across BOTH the inline form
+    # (`setupFiles: "x.ts"` / `setupFiles: ["x.ts"]`) and the MULTILINE array
+    # form, where the paths sit on lines after `setupFiles:` (external review
+    # 2026-07-19, round 2 — the old same-line grep missed multiline arrays and
+    # a stub parked in an unlisted setup file evaded the C6 scan). awk enters
+    # a collecting state at `setupFiles`, harvests every .ts/.tsx string
+    # literal, and stops at the closing `]` (array form) or end of the same
+    # logical line (inline scalar form).
+    awk '
+      /setupFiles/ { collecting = 1; inline_only = ($0 !~ /\[/) }
+      collecting {
+        line = $0
+        while (match(line, /"[^"]+\.tsx?"|'"'"'[^'"'"']+\.tsx?'"'"'/)) {
+          lit = substr(line, RSTART, RLENGTH)
+          gsub(/^["'"'"']|["'"'"']$/, "", lit)
+          print lit
+          line = substr(line, RSTART + RLENGTH)
+        }
+        if (inline_only || $0 ~ /\]/) collecting = 0
+      }
+    ' "$vitest_config"
+  )
+done
+
+# Resolve setupFiles path literals (relative to the config's directory) to
+# fixture/repo-relative paths and fold them into the scan list. SETUP_FILE_SET
+# records exactly which scanned files are GLOBAL setup files — a rate-limiters
+# module mock in one of these replaces the limiter for EVERY test, so it is
+# rejected there (below); a per-file mock in an ordinary test only affects that
+# file's own unrelated limiter and is legitimate.
+SETUP_FILE_SET=""
+while IFS= read -r setup_rel; do
+  [ -z "$setup_rel" ] && continue
+  case "$setup_rel" in
+    ./*) setup_rel="${setup_rel#./}" ;;
+  esac
+  STUB_TEST_FILES="${STUB_TEST_FILES}${setup_rel}
+"
+  SETUP_FILE_SET="${SETUP_FILE_SET}${setup_rel}
+"
+done <<EOF
+$SETUP_FILES
+EOF
+
+is_setup_file() { grep -qxF "$1" <<<"$SETUP_FILE_SET"; }
+
+if [ -n "$STUB_TEST_FILES" ]; then
+  stub_files_array=()
+  while IFS= read -r stub_rel; do
+    [ -z "$stub_rel" ] && continue
+    stub_files_array+=("$FIXTURE_ROOT/$stub_rel")
+  done <<EOF
+$STUB_TEST_FILES
+EOF
+  if [ "${#stub_files_array[@]}" -gt 0 ]; then
+    if ! STUB_CLASSIFY_OUT="$(node "$CLASSIFIER" "${stub_files_array[@]}")"; then
+      echo "CLASSIFIER_FAILURE: scripts/checks/classify-fail-closed-test.mjs failed during the C6 stub scan — gate fails closed."
+      fail=1
+    else
+      # Single-pass evaluation: the classifier already emitted one record per
+      # file, so a per-file bash loop calling awk 3-4× (≈4000 subshells over
+      # ~1000 files) was the gate's dominant cost (CI timeout, external review
+      # round 7 follow-up). One awk pass over the classifier output emits only
+      # the offending `TOKEN<TAB>relpath` lines; the bash loop below then
+      # iterates findings (usually zero), not every file. `FROZEN_STUB_EXEMPTIONS`
+      # and `SETUP_FILE_SET` are passed in as newline sets for O(1) membership.
+      STUB_FINDINGS="$(awk -F'\t' \
+        -v root="$FIXTURE_ROOT/" \
+        -v exempt="$FROZEN_STUB_EXEMPTIONS" \
+        -v setups="$SETUP_FILE_SET" '
+        BEGIN {
+          n = split(exempt, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") EX[a[i]] = 1
+          m = split(setups, b, "\n"); for (i = 1; i <= m; i++) if (b[i] != "") SU[b[i]] = 1
+        }
+        {
+          path = $1; rec = $2
+          rel = path; sub("^" root, "", rel)
+          mock = dyn = modmock = 0
+          nf = split(rec, f, " ")
+          for (i = 1; i <= nf; i++) {
+            split(f[i], kv, "=")
+            if (kv[1] == "mock") mock = kv[2]
+            else if (kv[1] == "dynspec") dyn = kv[2]
+            else if (kv[1] == "resultmodulemock") modmock = kv[2]
+          }
+          if (dyn == 1) print "DYNSPEC\t" rel
+          if (mock == 1 && !(rel in EX)) print "MAPPING\t" rel
+          if (modmock == 1 && (rel in SU)) print "MODULEMOCK\t" rel
+        }
+      ' <<<"$STUB_CLASSIFY_OUT")"
+      while IFS=$'\t' read -r token stub_rel; do
+        [ -z "$token" ] && continue
+        case "$token" in
+          DYNSPEC)
+            echo "STUB_DYNAMIC_SPECIFIER: $stub_rel (vi.mock/vi.doMock with a non-literal specifier)" ;;
+          MAPPING)
+            echo "STUB_MOCKED_RATE_LIMIT_AUDIT: $stub_rel (mocks the production rate-limit-audit mapping — not in the frozen exemption list)" ;;
+          MODULEMOCK)
+            echo "STUB_MOCKED_RATE_LIMITERS_MODULE: $stub_rel (a global setup file mocks security/rate-limiters — swaps the direct-result limiter for a fake across every test)" ;;
+        esac
+        fail=1
+      done <<EOF
+$STUB_FINDINGS
+EOF
+    fi
+  fi
+fi
 
 if [ "$fail" -ne 0 ]; then
   echo
@@ -236,12 +720,13 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-# AC4.4/AC4.5 are a whole-repo invariant (an exact expected limiter/callsite
-# count for THIS codebase) — meaningless against an isolated fixture tree, so
-# they are skipped whenever FIXTURE_ROOT is overridden (self-test scope is
-# the mode/anti-drift criteria above, not these repo-wide counts; the
-# "real repo, no overrides" self-test case still exercises them).
-if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ] || [ -n "${FAIL_CLOSED_TEST_DEBT_FILE:-}" ] || [ -n "${FAIL_CLOSED_TEST_LEGACY_FILE:-}" ]; then
+# AC4.4/AC4.5/manifest-sum are whole-repo invariants (an exact expected
+# limiter/callsite count for THIS codebase) — meaningless against an
+# isolated fixture tree, so they are skipped whenever FIXTURE_ROOT is
+# overridden (self-test scope is the mode/anti-drift/manifest/stub criteria
+# above, not these repo-wide counts; the "real repo, no overrides" self-test
+# case still exercises them).
+if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ] || [ -n "${FAIL_CLOSED_TEST_DEBT_FILE:-}" ] || [ -n "${FAIL_CLOSED_TEST_LEGACY_FILE:-}" ] || [ -n "${FAIL_CLOSED_TEST_MANIFEST_FILE:-}" ] || [ -n "${FAIL_CLOSED_EXPECTED_DEBT_COUNT:-}" ] || [ -n "${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-}" ]; then
   exit 0
 fi
 
@@ -273,6 +758,21 @@ limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api"
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"
   echo "If you intentionally added/removed an opt-in limiter, update EXPECTED_LIMITER_COUNT in this script AND the plan's C4 table."
+  exit 1
+fi
+
+# C5 — manifest-sum cross-check (repo-only, skipped under overrides above):
+# the sum of src/app/api manifest entries must equal EXPECTED_LIMITER_COUNT,
+# so the AST-per-file primitive and the AC4.4 aggregate cannot drift apart
+# silently.
+manifest_sum=$(
+  awk -F'\t' '
+    !/^[[:space:]]*#/ && NF == 2 && $1 ~ /^src\/app\/api\// { s += $2 }
+    END { print s + 0 }
+  ' "$MANIFEST_FILE"
+)
+if [ "$manifest_sum" -ne "$EXPECTED_LIMITER_COUNT" ]; then
+  echo "MANIFEST_COUNT_MISMATCH: fail-closed-manifest.txt src/app/api sum is $manifest_sum; expected $EXPECTED_LIMITER_COUNT (must equal AC4.4's EXPECTED_LIMITER_COUNT)"
   exit 1
 fi
 

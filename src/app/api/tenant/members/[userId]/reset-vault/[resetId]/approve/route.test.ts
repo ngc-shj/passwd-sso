@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
   mockPrismaAdminVaultResetFindFirst,
   mockPrismaAdminVaultResetUpdateMany,
   mockPrismaTenantMemberFindFirst,
-  mockRateLimiterCheck,
+  mockActorLimiterCheck,
+  mockTargetLimiterCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockCreateNotification,
   mockSendEmail,
@@ -30,12 +33,22 @@ const {
       this.status = status;
     }
   }
+  const mockActorLimiterCheck = vi.fn();
+  const mockTargetLimiterCheck = vi.fn();
   return {
     mockAuth: vi.fn(),
     mockPrismaAdminVaultResetFindFirst: vi.fn(),
     mockPrismaAdminVaultResetUpdateMany: vi.fn(),
     mockPrismaTenantMemberFindFirst: vi.fn(),
-    mockRateLimiterCheck: vi.fn(),
+    mockActorLimiterCheck,
+    mockTargetLimiterCheck,
+    // Recording factory — creation order matches route.ts: approveLimiter
+    // (:47) THEN approveTargetLimiter (:55). assertRedisFailClosed's
+    // factory-attribution step reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi
+      .fn()
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockActorLimiterCheck, clear: vi.fn() }))
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockTargetLimiterCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
     mockCreateNotification: vi.fn(),
     mockSendEmail: vi.fn(),
@@ -66,7 +79,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -112,6 +125,19 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+
+// Module-scope snapshot (route.ts:47 `const approveLimiter = createRateLimiter(...)`
+// then :55 `const approveTargetLimiter = createRateLimiter(...)` run at
+// import time, above, in that order — matches mockCreateRateLimiter's two
+// queued implementations). See fail-closed.ts module doc.
+const approveLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const approveLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockActorLimiterCheck;
+};
+const approveTargetLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const approveTargetLimiter = mockCreateRateLimiter.mock.results[1]!.value as {
+  check: typeof mockTargetLimiterCheck;
+};
 
 const TENANT_ID = "tenant-1";
 const TARGET_USER_ID = "user-target";
@@ -185,7 +211,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     mockPrismaAdminVaultResetFindFirst.mockResolvedValue(RESET_RECORD);
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockPrismaAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
-    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockActorLimiterCheck.mockResolvedValue({ allowed: true });
+    mockTargetLimiterCheck.mockResolvedValue({ allowed: true });
     mockResolveUserLocale.mockReturnValue("en");
     mockServerAppUrl.mockReturnValue("http://localhost/en/vault-reset/admin");
     mockDecryptResetToken.mockReturnValue("plaintext-token");
@@ -290,7 +317,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
     // RT8: every guarded side effect must be skipped on the denial path.
     // The gate sits before the rate-limit block, so the limiter is untouched
     // (a stale session must not burn the low per-target cap — griefing lever).
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockActorLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTargetLimiterCheck).not.toHaveBeenCalled();
     expect(mockDecryptResetToken).not.toHaveBeenCalled();
     expect(mockPrismaAdminVaultResetUpdateMany).not.toHaveBeenCalled();
     expect(mockCreateNotification).not.toHaveBeenCalled();
@@ -306,19 +334,40 @@ describe("POST /api/tenant/members/[userId]/reset-vault/[resetId]/approve", () =
   });
 
   it("returns 429 when actor rate limit is exceeded", async () => {
-    mockRateLimiterCheck
-      .mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 })
-      .mockResolvedValueOnce({ allowed: true });
+    mockActorLimiterCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 });
+    mockTargetLimiterCheck.mockResolvedValueOnce({ allowed: true });
     const res = await POST(buildReq(), buildParams());
     expect(res.status).toBe(429);
   });
 
   it("returns 429 when target rate limit is exceeded", async () => {
-    mockRateLimiterCheck
-      .mockResolvedValueOnce({ allowed: true })
-      .mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 });
+    mockActorLimiterCheck.mockResolvedValueOnce({ allowed: true });
+    mockTargetLimiterCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 });
     const res = await POST(buildReq(), buildParams());
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — actor limiter", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(buildReq(), buildParams()),
+      limiter: approveLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaAdminVaultResetUpdateMany, mockCreateNotification],
+      limiterFactory: approveLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — target limiter", async () => {
+    mockActorLimiterCheck.mockResolvedValue({ allowed: true });
+    await assertRedisFailClosed({
+      invoke: () => POST(buildReq(), buildParams()),
+      limiter: approveTargetLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaAdminVaultResetUpdateMany, mockCreateNotification],
+      limiterFactory: approveTargetLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 409 RESET_NOT_APPROVABLE when decrypt fails (F7) and leaves row unchanged", async () => {

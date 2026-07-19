@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "../../../../__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockPrismaCount,
@@ -9,6 +10,7 @@ const {
   mockWithBypassRls,
   mockExecuteRaw,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockExtractClientIp,
   mockRateLimitKeyFromIp,
   mockLogAudit,
@@ -18,6 +20,7 @@ const {
   const mockDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const mockTxDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
   const mockWithBypassRls = vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
+  const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
     mockPrismaCount: mockCount,
     mockPrismaCreate: mockCreate,
@@ -25,7 +28,10 @@ const {
     mockTxDeleteMany,
     mockWithBypassRls,
     mockExecuteRaw: vi.fn().mockResolvedValue(1),
-    mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockRateLimiterCheck,
+    // Recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
     mockExtractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
     mockRateLimitKeyFromIp: vi.fn((ip: string) => ip),
     mockLogAudit: vi.fn(),
@@ -61,7 +67,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/auth/policy/ip-access", () => ({
@@ -76,6 +82,13 @@ vi.mock("@/lib/audit/audit", () => ({
 import { POST } from "@/app/api/mcp/register/route";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { MAX_UNCLAIMED_DCR_CLIENTS } from "@/lib/constants/auth/mcp";
+
+// Module-scope snapshot (route.ts:27 `const dcrRateLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const dcrLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const dcrLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 // A07-4: DCR is public-only — token_endpoint_auth_method must be the literal "none".
 const VALID_BODY = {
@@ -325,6 +338,22 @@ describe("POST /api/mcp/register", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("rate_limit_exceeded");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/mcp/register", {
+            body: VALID_BODY,
+          }),
+        ),
+      limiter: dcrLimiter,
+      expectation: { envelope: "oauth" },
+      assertNoMutation: [mockPrismaCreate, mockPrismaDeleteMany],
+      limiterFactory: dcrLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 503 when MAX_UNCLAIMED_DCR_CLIENTS cap is reached", async () => {

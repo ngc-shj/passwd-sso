@@ -20,7 +20,7 @@ const {
   mockUpdate,
   mockShareUpdateMany,
   mockRequireMaintenanceOperator,
-  mockCheckRateLimitOrFail,
+  mockRateLimitCheck,
   mockLogAudit,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
@@ -31,7 +31,7 @@ const {
   mockUpdate: vi.fn(),
   mockShareUpdateMany: vi.fn(),
   mockRequireMaintenanceOperator: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
+  mockRateLimitCheck: vi.fn(),
   mockLogAudit: vi.fn(),
   mockGetCurrentMasterKeyVersion: vi.fn(),
   mockGetMasterKeyByVersion: vi.fn(),
@@ -45,10 +45,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }), clear: vi.fn() }),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+  createRateLimiter: () => ({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -112,7 +109,9 @@ function makeRequest(): NextRequest {
 describe("POST /api/admin/rotate-master-key/[rotationId]/execute — partial-failure (C9b)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    // Limiter-layer mock: default allowed:true keeps the production
+    // checkRateLimitOrFail mapping in path.
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockRequireMaintenanceOperator.mockResolvedValue({ ok: true });
     mockGetCurrentMasterKeyVersion.mockReturnValue(2);
     mockGetMasterKeyByVersion.mockReturnValue("hexkey");

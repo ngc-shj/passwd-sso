@@ -5,7 +5,7 @@
 # the correct 503 envelope when the limiter returns `{ redisErrored: true }`.
 #
 # `scripts/checks/check-fail-closed-routes-have-test.sh` is the CI gate:
-#   - Routes with `failClosedOnRedisError: true` MUST have a sibling
+#   - Routes with the fail-closed opt-in flag MUST have a sibling
 #     `assertRedisFailClosed` contract test (shared helper, production
 #     mapping unmocked), OR appear in fail-closed-legacy-direct.txt
 #     (pre-helper direct test), OR appear in this file.
@@ -15,46 +15,14 @@
 #     fails CI.
 #   - Authoring the contract test MUST remove the route's entry from this
 #     file in the same PR (STALE_DEBT_ENTRY enforces atomicity).
+#   - The gate pins the entry count with EXPECTED_DEBT_COUNT (0 after the
+#     tranche-2 burn-down); a re-added entry requires editing that constant
+#     in the gate script — a visible, reviewable diff (no silent re-entry).
 #
 # Tranche 1 (fail-closed-tranche1-plan.md) burned down 18 high-sensitivity
-# routes via the shared assertRedisFailClosed helper. The AST reclassification
-# (PR #680 review follow-up) then moved 7 routes BACK into this file whose
-# only `redisErrored` reference was a describe label or comment — i.e. the
-# old text gate had been counting them as tested when no code-level
-# fail-closed assertion exists: rotate-master-key (4), mcp/authorize,
-# mobile/authorize, mobile/autofill-token. The remaining opt-in route files
-# are listed below pending follow-up coverage (tranche 2+).
+# routes. Tranche 2 (fail-closed-tranche2-plan.md) burned down the remaining
+# 31 routes via the shared assertRedisFailClosed helper and the committed
+# fail-closed-manifest.txt class pin. This file is now empty; it remains as
+# the registration target for future opt-ins pending coverage.
 #
 # Format: one route path per line, relative to repo root, sorted.
-
-src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts
-src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts
-src/app/api/admin/rotate-master-key/[rotationId]/revoke/route.ts
-src/app/api/admin/rotate-master-key/initiate/route.ts
-src/app/api/auth/passkey/options/email/route.ts
-src/app/api/auth/passkey/options/route.ts
-src/app/api/auth/passkey/reauth/options/route.ts
-src/app/api/emergency-access/accept/route.ts
-src/app/api/extension/bridge-code/route.ts
-src/app/api/extension/key/reset/route.ts
-src/app/api/mcp/authorize/route.ts
-src/app/api/mcp/register/route.ts
-src/app/api/mcp/revoke/route.ts
-src/app/api/mobile/authorize/route.ts
-src/app/api/mobile/autofill-token/route.ts
-src/app/api/share-links/[id]/content/route.ts
-src/app/api/share-links/verify-access/route.ts
-src/app/api/teams/invitations/accept/route.ts
-src/app/api/tenant/access-requests/route.ts
-src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts
-src/app/api/vault/change-passphrase/route.ts
-src/app/api/vault/delegation/check/route.ts
-src/app/api/vault/delegation/route.ts
-src/app/api/vault/rotate-key/data/route.ts
-src/app/api/vault/rotate-key/route.ts
-src/app/api/vault/unlock/data/route.ts
-src/app/api/webauthn/authenticate/options/route.ts
-src/app/api/webauthn/credentials/[id]/prf/options/route.ts
-src/app/api/webauthn/credentials/[id]/prf/route.ts
-src/app/api/webauthn/register/options/route.ts
-src/app/api/webauthn/register/verify/route.ts

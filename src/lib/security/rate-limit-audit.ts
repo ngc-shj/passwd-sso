@@ -1,5 +1,5 @@
 /**
- * Audit emission helper for the `failClosedOnRedisError: true` 503 path.
+ * Audit emission helper for the fail-closed opt-in flag's 503 path.
  *
  * Called by opt-in route handlers (see plan C4) when a rate limiter returns
  * `redisErrored: true`. Throttled by `(scope, userId ?? ipBucket)` per 5 min

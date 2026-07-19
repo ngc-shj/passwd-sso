@@ -1,18 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTxGrantUpdateMany, mockTxKeyPairCreate, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaGrant: {
-    findUnique: vi.fn(),
-    updateMany: vi.fn(),
-  },
-  mockPrismaUser: { findUnique: vi.fn() },
-  mockTxGrantUpdateMany: vi.fn(),
-  mockTxKeyPairCreate: vi.fn(),
-  mockSendEmail: vi.fn(),
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-}));
+const {
+  mockAuth,
+  mockPrismaGrant,
+  mockPrismaUser,
+  mockTxGrantUpdateMany,
+  mockTxKeyPairCreate,
+  mockSendEmail,
+  mockWithBypassRls,
+  mockCheck,
+  mockCreateRateLimiter,
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaGrant: {
+      findUnique: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    mockPrismaUser: { findUnique: vi.fn() },
+    mockTxGrantUpdateMany: vi.fn(),
+    mockTxKeyPairCreate: vi.fn(),
+    mockSendEmail: vi.fn(),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -32,7 +48,7 @@ vi.mock("@/lib/audit/audit", () => ({
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
@@ -40,6 +56,11 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 import { POST } from "./route";
 import { EA_STATUS } from "@/lib/constants";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const validBody = {
   token: "valid-token",
@@ -63,6 +84,7 @@ const validGrant = {
 describe("POST /api/emergency-access/accept", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCheck.mockResolvedValue({ allowed: true });
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@test.com" } });
     mockPrismaGrant.findUnique.mockResolvedValue(validGrant);
     mockTxGrantUpdateMany.mockResolvedValue({ count: 1 });
@@ -162,5 +184,19 @@ describe("POST /api/emergency-access/accept", () => {
         subject: expect.stringContaining("accepted"),
       })
     );
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(createRequest("POST", "http://localhost/api/emergency-access/accept", {
+          body: validBody,
+        })),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockTxKeyPairCreate, mockTxGrantUpdateMany],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

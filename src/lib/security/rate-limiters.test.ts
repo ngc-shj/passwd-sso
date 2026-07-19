@@ -11,6 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
 
 const mockGetRedis = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/redis", () => ({
@@ -43,9 +44,10 @@ describe("rate-limiters", () => {
 
     it("fails closed (redisErrored) when Redis is unreachable — no in-memory fallback (M1)", async () => {
       mockGetRedis.mockReturnValue(null);
-      const result = await v1ApiKeyLimiter.check("test:v1:fail-closed");
-      expect(result.allowed).toBe(false);
-      expect(result.redisErrored).toBe(true);
+      await assertRedisFailClosedResult({
+        limiter: v1ApiKeyLimiter,
+        key: "test:v1:fail-closed",
+      });
     });
 
     it("allows via the Redis path when INCR count <= max", async () => {

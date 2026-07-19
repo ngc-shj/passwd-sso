@@ -26,7 +26,6 @@ const {
   mockBridgeCodeCreate,
   mockUserFindUnique,
   mockLogAuditAsync,
-  mockCheckRateLimitOrFail,
   mockCheckIpRateLimit,
   mockCheckAccessRestrictionWithAudit,
   mockVerifyDpop,
@@ -42,7 +41,6 @@ const {
   mockBridgeCodeCreate: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockLogAuditAsync: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn(),
   mockCheckIpRateLimit: vi.fn(),
   mockCheckAccessRestrictionWithAudit: vi.fn(),
   mockVerifyDpop: vi.fn(),
@@ -55,9 +53,6 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
 }));
 vi.mock("@/lib/security/ip-rate-limit", () => ({
   checkIpRateLimit: mockCheckIpRateLimit,
@@ -142,7 +137,8 @@ describe("POST /api/extension/bridge-code — C4 rewrite", () => {
     __resetAllowlistForTests();
 
     mockCheckIpRateLimit.mockResolvedValue({ allowed: true });
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    // Limiter-layer mock: default allowed:true keeps the production
+    // checkRateLimitOrFail mapping in path.
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);

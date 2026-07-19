@@ -17,8 +17,8 @@
  *     `rateLimitKeyFromIp` (IPv6 → /64 normalization).
  *
  * Returns `RateLimitResult` (including the optional `redisErrored` field
- * propagated from `failClosedOnRedisError: true` limiters) so opt-in
- * call sites can branch on the fail-closed signal at the route handler.
+ * propagated from limiters with the fail-closed opt-in flag set) so
+ * opt-in call sites can branch on the fail-closed signal at the route handler.
  */
 
 import { getLogger } from "@/lib/logger";

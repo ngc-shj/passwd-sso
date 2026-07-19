@@ -1,23 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
   mockAssertOrigin,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockRedisSet,
   mockFindMany,
   mockGenerateAuthenticationOpts,
   mockWithBypassRls,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockAssertOrigin: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockRedisSet: vi.fn(),
-  mockFindMany: vi.fn(),
-  mockGenerateAuthenticationOpts: vi.fn(),
-  mockWithBypassRls: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockAssertOrigin: vi.fn(),
+    mockRateLimiterCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockRedisSet: vi.fn(),
+    mockFindMany: vi.fn(),
+    mockGenerateAuthenticationOpts: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({
   auth: mockAuth,
@@ -28,7 +34,7 @@ vi.mock("@/lib/auth/session/csrf", () => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -76,6 +82,11 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const ROUTE_URL = "http://localhost:3000/api/auth/passkey/reauth/options";
 
@@ -162,6 +173,22 @@ describe("POST /api/auth/passkey/reauth/options", () => {
     expect(res.status).toBe(429);
     expect(mockGenerateAuthenticationOpts).not.toHaveBeenCalled();
     expect(mockRedisSet).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", ROUTE_URL, {
+            headers: { origin: "http://localhost:3000" },
+          }),
+        ),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockRedisSet],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // ── A02-8: v1/v2/mixed PRF extension shape (T07/T09) ──────────────────

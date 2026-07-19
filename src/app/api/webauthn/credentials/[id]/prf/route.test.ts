@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockPrismaCredentialFindFirst,
   mockTransaction,
   mockTxExecuteRaw,
@@ -12,18 +14,24 @@ const {
   mockWithUserTenantRls,
   mockVerifyAuthenticationAssertion,
   mockLogAuditAsync,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockPrismaCredentialFindFirst: vi.fn(),
-  mockTransaction: vi.fn(),
-  mockTxExecuteRaw: vi.fn(),
-  mockTxUserFindUnique: vi.fn(),
-  mockTxCredentialUpdate: vi.fn(),
-  mockWithUserTenantRls: vi.fn(),
-  mockVerifyAuthenticationAssertion: vi.fn(),
-  mockLogAuditAsync: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockPrismaCredentialFindFirst: vi.fn(),
+    mockTransaction: vi.fn(),
+    mockTxExecuteRaw: vi.fn(),
+    mockTxUserFindUnique: vi.fn(),
+    mockTxCredentialUpdate: vi.fn(),
+    mockWithUserTenantRls: vi.fn(),
+    mockVerifyAuthenticationAssertion: vi.fn(),
+    mockLogAuditAsync: vi.fn(),
+  };
+});
 
 const txMock = {
   $executeRaw: mockTxExecuteRaw,
@@ -33,7 +41,7 @@ const txMock = {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -57,6 +65,16 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+
+// Module-level `rateLimiter = createRateLimiter(...)` runs at import time,
+// above. Snapshot the recorded factory call now (module scope, before any
+// test/beforeEach executes) — the global beforeEach's vi.clearAllMocks()
+// would otherwise wipe mockCreateRateLimiter.mock.calls/.results before the
+// first test runs.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const URL = "http://localhost:3000/api/webauthn/credentials/cred-row-1/prf";
 const params = { params: Promise.resolve({ id: "cred-row-1" }) };
@@ -104,6 +122,22 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
     const res = await POST(createRequest("POST", URL, { body: validBody }), params);
     expect(res.status).toBe(429);
     expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    // M9: logAuditAsync is NOT included in assertNoMutation — this route is
+    // post-auth, so the production 503 path itself fires
+    // emitRateLimitFailClosed -> logAuditAsync; spying it here would race
+    // the intended emission. mockTransaction/mockTxCredentialUpdate stand in
+    // for the guarded write.
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL, { body: validBody }), params),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockTransaction, mockTxCredentialUpdate],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 404 when credential is not owned by the user (existence-leak symmetric with DELETE)", async () => {

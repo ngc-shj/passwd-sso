@@ -1,17 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
-const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheckRateLimitOrFail, mockEnforceAccessRestriction } = vi.hoisted(() => ({
+const { mockCheckAuth, mockIssueAutofill, mockLogAudit, mockWarn, mockError, mockCheck, mockCreateRateLimiter, mockEnforceAccessRestriction } = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockCheckAuth: vi.fn(),
   mockIssueAutofill: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWarn: vi.fn(),
   mockError: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn(),
+  mockCheck,
+  // Recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
   mockEnforceAccessRestriction: vi.fn(),
-}));
+  };
+});
 
 vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
@@ -20,15 +27,29 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: () => ({}),
 }));
-// Mock the rate-limit translator so the real helper (and its transitive prisma
-// import) never loads; the 429/503 mapping itself is covered in rate-limit-audit.test.ts.
-vi.mock("@/lib/security/rate-limit-audit", () => ({ checkRateLimitOrFail: mockCheckRateLimitOrFail }));
+// checkRateLimitOrFail is un-mocked (production translator stays in path,
+// C6/RT5) — mocked at the limiter layer instead. rate-limit-audit.ts imports
+// resolveUserTenantId from @/lib/tenant-context, which transitively imports
+// @/lib/prisma; mock prisma defensively so that import-time chain resolves
+// even though the route always passes tenantId explicitly (never invoking
+// resolveUserTenantId at runtime).
+vi.mock("@/lib/prisma", () => ({ prisma: {} }));
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: mockCreateRateLimiter,
+}));
 vi.mock("@/lib/logger", () => ({
   logger: { warn: mockWarn, error: mockError, info: vi.fn(), debug: vi.fn() },
   getLogger: () => ({ warn: mockWarn, error: mockError, info: vi.fn(), debug: vi.fn() }),
 }));
 
 import { POST } from "./route";
+
+// Module-scope snapshot (route.ts:26 `const mintLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const mintLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const mintLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const VALID_JWK = { kty: "EC", crv: "P-256", x: "eHh4", y: "eXl5" };
 
@@ -40,8 +61,8 @@ describe("POST /api/mobile/autofill-token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogAudit.mockResolvedValue(undefined);
-    // Default: rate limit allows the request through (helper returns null).
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    // Default: rate limit allows the request through.
+    mockCheck.mockResolvedValue({ allowed: true });
     // Default: tenant IP access restriction allows (helper returns null).
     mockEnforceAccessRestriction.mockResolvedValue(null);
   });
@@ -62,15 +83,8 @@ describe("POST /api/mobile/autofill-token", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(json.token).toBe("secret-token");
     expect(json.scope).toEqual(["passwords:write"]);
-    // The mint is rate-limited per authenticated user under the correct scope.
-    expect(mockCheckRateLimitOrFail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        key: "rl:mobile_autofill_token:u1",
-        scope: "mobile.autofill_token",
-        userId: "u1",
-        tenantId: "t1",
-      }),
-    );
+    // The mint is rate-limited per authenticated user under the correct key.
+    expect(mockCheck).toHaveBeenCalledWith("rl:mobile_autofill_token:u1");
     // The route computes cnf.jkt from the body jwk and binds the token to it.
     const passed = mockIssueAutofill.mock.calls[0][0];
     expect(passed).toMatchObject({ userId: "u1", tenantId: "t1" });
@@ -152,26 +166,26 @@ describe("POST /api/mobile/autofill-token", () => {
       ok: true,
       auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
     });
-    mockCheckRateLimitOrFail.mockResolvedValueOnce(
-      Response.json({ error: "RATE_LIMIT_EXCEEDED" }, { status: 429 }),
-    );
+    mockCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 });
 
     const res = await POST(post({ jwk: VALID_JWK }));
     expect(res.status).toBe(429);
     expect(mockIssueAutofill).not.toHaveBeenCalled();
   });
 
-  it("fails closed with 503 when the limiter reports redisErrored (does NOT mint)", async () => {
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
       auth: { type: "token", userId: "u-rl", tenantId: "t1", clientKind: "IOS_APP" },
     });
-    mockCheckRateLimitOrFail.mockResolvedValueOnce(
-      Response.json({ error: "SERVICE_UNAVAILABLE" }, { status: 503 }),
-    );
 
-    const res = await POST(post({ jwk: VALID_JWK }));
-    expect(res.status).toBe(503);
-    expect(mockIssueAutofill).not.toHaveBeenCalled();
+    await assertRedisFailClosed({
+      invoke: () => POST(post({ jwk: VALID_JWK })),
+      limiter: mintLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockIssueAutofill],
+      limiterFactory: mintLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

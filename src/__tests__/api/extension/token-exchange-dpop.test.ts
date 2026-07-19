@@ -11,7 +11,6 @@ const {
   mockIssueExtensionToken,
   mockLogAuditAsync,
   mockCheckIpRateLimit,
-  mockCheckRateLimitOrFail,
   mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockVerifyDpop: vi.fn(),
@@ -20,7 +19,6 @@ const {
   mockIssueExtensionToken: vi.fn(),
   mockLogAuditAsync: vi.fn(),
   mockCheckIpRateLimit: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn(),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
@@ -44,9 +42,6 @@ vi.mock("@/lib/tenant-rls", () => ({
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
 }));
 vi.mock("@/lib/security/ip-rate-limit", () => ({
   checkIpRateLimit: mockCheckIpRateLimit,
@@ -88,7 +83,9 @@ describe("POST /api/extension/token/exchange — DPoP enforcement (C3)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheckIpRateLimit.mockResolvedValue({ allowed: true });
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    // Limiter-layer mock: default allowed:true keeps the production
+    // checkRateLimitOrFail mapping in path.
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockIssueExtensionToken.mockResolvedValue(ISSUED_TOKEN);
     // Tenant IP access restriction allows by default (helper returns null).

@@ -1,18 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockTransaction, mockApplyVaultRotation, mockWithUserTenantRls, mockRateLimiterCheck, mockInvalidateUserSessions } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaUser: {
-    findUnique: vi.fn(),
-    update: vi.fn(),
-  },
-  mockTransaction: vi.fn(),
-  mockApplyVaultRotation: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockRateLimiterCheck: vi.fn(),
-  mockInvalidateUserSessions: vi.fn(),
-}));
+const { mockAuth, mockPrismaUser, mockTransaction, mockApplyVaultRotation, mockWithUserTenantRls, mockRateLimiterCheck, mockCreateRateLimiter, mockInvalidateUserSessions } = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaUser: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    mockTransaction: vi.fn(),
+    mockApplyVaultRotation: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockInvalidateUserSessions: vi.fn(),
+  };
+});
 
 // Transaction mock (txMock) for advisory lock assertion
 const txMock = {
@@ -95,7 +102,7 @@ vi.mock("@/lib/vault/rotate-key-server", () => {
   };
 });
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -116,6 +123,16 @@ vi.mock("@/lib/audit/audit", () => ({
 
 import { createHash } from "crypto";
 import { POST } from "./route";
+
+// Module-level `rotateLimiter = createRateLimiter(...)` runs at import time,
+// above. Snapshot the recorded factory call now (module scope, before any
+// test/beforeEach executes) — the global beforeEach's vi.clearAllMocks()
+// would otherwise wipe mockCreateRateLimiter.mock.calls/.results before the
+// first test runs.
+const rotateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rotateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const serverSalt = "a".repeat(64);
 const currentAuthHash = "b".repeat(64);
@@ -192,6 +209,18 @@ describe("POST /api/vault/rotate-key", () => {
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
     expect(res.status).toBe(401);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })),
+      limiter: rotateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockApplyVaultRotation, mockInvalidateUserSessions],
+      limiterFactory: rotateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 404 when vault not set up", async () => {

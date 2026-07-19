@@ -1,10 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => {
+  const mockRateLimiter = { check: vi.fn() };
+  return {
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
-  mockRateLimiter: { check: vi.fn() },
+  mockRateLimiter,
+  // Recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => mockRateLimiter),
   mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockInvalidateUserSessions: vi.fn().mockResolvedValue({
@@ -17,14 +23,15 @@ const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTen
     operatorTokens: 0,
     cacheTombstoneFailures: 0,
   }),
-}));
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => v),
@@ -54,6 +61,13 @@ vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
 }));
 
 import { POST } from "./route";
+
+// Module-scope snapshot (route.ts:33 `const changeLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const changeLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const changeLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiter.check;
+};
 
 const validBody = {
   currentVerifierHash: "a".repeat(64),
@@ -90,6 +104,18 @@ describe("POST /api/vault/change-passphrase", () => {
     mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody })),
+      limiter: changeLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.update, mockInvalidateUserSessions],
+      limiterFactory: changeLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 on malformed JSON", async () => {
