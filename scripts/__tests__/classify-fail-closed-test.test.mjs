@@ -171,6 +171,50 @@ it("x", async () => { await assertRedisFailClosedResult({ limiter, key: "k" }); 
     expect(f.resultfake).toBe(0);
   });
 
+  // Scope-aware binding resolution (external review round 8 Major): a by-name
+  // file scan would bind the test's `limiter` to an unrelated same-name
+  // declaration in a sibling function and miss the fake. These pin that the
+  // classifier follows LEXICAL SCOPE (TypeScript symbol resolution), not text
+  // proximity.
+  it("flags a fake even when a SIBLING function has a same-name production alias (scope-blind evasion)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+function unused() { const limiter = v1ApiKeyLimiter; void limiter; }
+it("uses fake", async () => {
+  const limiter = { check: async () => ({ allowed: false, redisErrored: true }) };
+  await assertRedisFailClosedResult({ limiter });
+});
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("flags a fake that INNER-shadows an outer production const (resultfake=1)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+const limiter = v1ApiKeyLimiter;
+it("x", async () => {
+  const limiter = { check: async () => ({}) };
+  await assertRedisFailClosedResult({ limiter });
+});
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("does NOT flag when the inner shadow is itself the production limiter (resultfake=0)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+const limiter = { check: async () => ({}) };
+it("x", async () => {
+  const limiter = v1ApiKeyLimiter;
+  await assertRedisFailClosedResult({ limiter });
+});
+`);
+    expect(f.resultfake).toBe(0);
+  });
+
   it("collapses two aliases of the SAME limiter to distinct=1 (alias-chain normalization)", () => {
     const f = classify(`import { it } from "vitest";
 import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";

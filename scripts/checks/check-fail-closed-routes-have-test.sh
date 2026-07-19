@@ -421,36 +421,51 @@ fi
 # src/__tests__ support tree (helper/ast-guard comments discuss the literal
 # without being class members — accepted residual, Round 2 S2-7).
 # ---------------------------------------------------------------------------
+# Emits `<file>\t<count>` per argument path — batchable so the manifest's ~65
+# per-file AST counts cost ONE node startup (+ ts-morph load) instead of ~65,
+# which was ~13s of the gate's runtime (CI timeout, external review round 7
+# follow-up). A missing/unreadable file yields count 0.
 AST_COUNT_SCRIPT='
 import { readFileSync } from "node:fs";
 import { Project, SyntaxKind, Node } from "ts-morph";
 const project = new Project({ useInMemoryFileSystem: true, skipFileDependencyResolution: true });
-const file = process.argv[1];
-let text;
-try { text = readFileSync(file, "utf8"); } catch { console.log(0); process.exit(0); }
-const sf = project.createSourceFile("/virtual/x.ts", text, { overwrite: true });
-let count = 0;
-for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-  const expr = call.getExpression();
-  const name = Node.isPropertyAccessExpression(expr) ? expr.getName() : expr.getText();
-  if (name !== "createRateLimiter") continue;
-  const arg0 = call.getArguments()[0];
-  if (!arg0 || !Node.isObjectLiteralExpression(arg0)) continue;
-  const prop = arg0.getProperty("failClosedOnRedisError");
-  if (!prop || !Node.isPropertyAssignment(prop)) continue;
-  const init = prop.getInitializer();
-  if (init && init.getKind() === SyntaxKind.TrueKeyword) count++;
+for (const file of process.argv.slice(1)) {
+  let text;
+  try { text = readFileSync(file, "utf8"); } catch { process.stdout.write(file + "\t0\n"); continue; }
+  const sf = project.createSourceFile("/virtual/x.ts", text, { overwrite: true });
+  let count = 0;
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const name = Node.isPropertyAccessExpression(expr) ? expr.getName() : expr.getText();
+    if (name !== "createRateLimiter") continue;
+    const arg0 = call.getArguments()[0];
+    if (!arg0 || !Node.isObjectLiteralExpression(arg0)) continue;
+    const prop = arg0.getProperty("failClosedOnRedisError");
+    if (!prop || !Node.isPropertyAssignment(prop)) continue;
+    const init = prop.getInitializer();
+    if (init && init.getKind() === SyntaxKind.TrueKeyword) count++;
+  }
+  sf.forget();
+  process.stdout.write(file + "\t" + count + "\n");
 }
-console.log(count);
 '
-ast_count() {
-  (cd "$REPO_ROOT" && node --input-type=module -e "$AST_COUNT_SCRIPT" -- "$1")
+# Batch-compute AST counts for many files at once → newline table of
+# "<abs-path>\t<count>". Empty input yields empty output.
+ast_count_batch() {
+  [ "$#" -gt 0 ] || return 0
+  (cd "$REPO_ROOT" && node --input-type=module -e "$AST_COUNT_SCRIPT" -- "$@")
 }
 
 MANIFEST_LIST=""
 manifest_paths_seen=""
 if [ -f "$MANIFEST_FILE" ]; then
+  # Pass 1: parse + validate every manifest line, collecting the valid
+  # (path, count) pairs. AST counts are NOT computed here — they are batched
+  # into a single node call after the loop (external review round 7 follow-up:
+  # a per-line ast_count spawned ~65 node processes, ~13s of gate runtime).
   manifest_line_no=0
+  manifest_valid_paths=()
+  manifest_valid_counts=()
   while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
     manifest_line_no=$((manifest_line_no + 1))
     manifest_line="${manifest_line%$'\r'}"
@@ -476,13 +491,33 @@ if [ -f "$MANIFEST_FILE" ]; then
 "
     manifest_paths_seen="${manifest_paths_seen}${m_path}=${m_count}
 "
+    manifest_valid_paths+=("$m_path")
+    manifest_valid_counts+=("$m_count")
+  done < "$MANIFEST_FILE"
 
+  # Batch AST-count all valid manifest files in ONE node call, into a lookup.
+  MANIFEST_AST_OUT=""
+  if [ "${#manifest_valid_paths[@]}" -gt 0 ]; then
+    manifest_abs=()
+    for m_path in "${manifest_valid_paths[@]}"; do
+      manifest_abs+=("$FIXTURE_ROOT/$m_path")
+    done
+    MANIFEST_AST_OUT="$(ast_count_batch "${manifest_abs[@]}")"
+  fi
+
+  # Pass 2: compare grep count (cheap, per-file) and the batched AST count.
+  idx=0
+  while [ "$idx" -lt "${#manifest_valid_paths[@]}" ]; do
+    m_path="${manifest_valid_paths[$idx]}"
+    m_count="${manifest_valid_counts[$idx]}"
+    idx=$((idx + 1))
     abs_path="$FIXTURE_ROOT/$m_path"
     grep_count=0
     if [ -f "$abs_path" ]; then
       grep_count="$(grep -c 'failClosedOnRedisError: true' "$abs_path" || true)"
     fi
-    file_ast_count="$(ast_count "$abs_path")"
+    file_ast_count="$(awk -F'\t' -v p="$abs_path" '$1 == p { print $2; exit }' <<<"$MANIFEST_AST_OUT")"
+    [ -n "$file_ast_count" ] || file_ast_count=0
     if [ "$grep_count" -gt "$file_ast_count" ]; then
       echo "MANIFEST_COMMENT_LITERAL: $m_path (grep count $grep_count exceeds AST-authoritative count $file_ast_count — the literal appears in a comment/string; reword it, D4 rule)"
       fail=1
@@ -490,7 +525,7 @@ if [ -f "$MANIFEST_FILE" ]; then
       echo "MANIFEST_COUNT_MISMATCH: $m_path (manifest says $m_count; AST-authoritative count is $file_ast_count)"
       fail=1
     fi
-  done < "$MANIFEST_FILE"
+  done
 fi
 
 # ENUM_LIST (whole-src opt-in set) is built earlier, before the dangling
@@ -626,34 +661,50 @@ EOF
       echo "CLASSIFIER_FAILURE: scripts/checks/classify-fail-closed-test.mjs failed during the C6 stub scan — gate fails closed."
       fail=1
     else
-      while IFS= read -r stub_rel; do
-        [ -z "$stub_rel" ] && continue
-        stub_abs="$FIXTURE_ROOT/$stub_rel"
-        stub_rec="$(awk -F'\t' -v p="$stub_abs" '$1 == p { print $2; exit }' <<<"$STUB_CLASSIFY_OUT")"
-        stub_mock="$(field "$stub_rec" mock)"
-        stub_dynspec="$(field "$stub_rec" dynspec)"
-        stub_modulemock="$(field "$stub_rec" resultmodulemock)"
-        if [ "$stub_dynspec" = "1" ]; then
-          echo "STUB_DYNAMIC_SPECIFIER: $stub_rel (vi.mock/vi.doMock with a non-literal specifier)"
-          fail=1
-        fi
-        if [ "$stub_mock" = "1" ] && ! is_stub_exempt "$stub_rel"; then
-          echo "STUB_MOCKED_RATE_LIMIT_AUDIT: $stub_rel (mocks the production rate-limit-audit mapping — not in the frozen exemption list)"
-          fail=1
-        fi
-        # Mocking the direct-result limiter module (rate-limiters) in a GLOBAL
-        # setup file replaces v1ApiKeyLimiter for EVERY test that loads it,
-        # silently neutralizing the direct-result fail-closed probe fleet-wide.
-        # Rejected in setup files regardless of any helper call (external review
-        # 2026-07-19, round 7). A per-file mock in an ordinary test only affects
-        # that file's own unrelated limiter (e.g. migrateLimiter) and is fine —
-        # so this fires ONLY for setup files.
-        if [ "$stub_modulemock" = "1" ] && is_setup_file "$stub_rel"; then
-          echo "STUB_MOCKED_RATE_LIMITERS_MODULE: $stub_rel (a global setup file mocks security/rate-limiters — swaps the direct-result limiter for a fake across every test)"
-          fail=1
-        fi
+      # Single-pass evaluation: the classifier already emitted one record per
+      # file, so a per-file bash loop calling awk 3-4× (≈4000 subshells over
+      # ~1000 files) was the gate's dominant cost (CI timeout, external review
+      # round 7 follow-up). One awk pass over the classifier output emits only
+      # the offending `TOKEN<TAB>relpath` lines; the bash loop below then
+      # iterates findings (usually zero), not every file. `FROZEN_STUB_EXEMPTIONS`
+      # and `SETUP_FILE_SET` are passed in as newline sets for O(1) membership.
+      STUB_FINDINGS="$(awk -F'\t' \
+        -v root="$FIXTURE_ROOT/" \
+        -v exempt="$FROZEN_STUB_EXEMPTIONS" \
+        -v setups="$SETUP_FILE_SET" '
+        BEGIN {
+          n = split(exempt, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") EX[a[i]] = 1
+          m = split(setups, b, "\n"); for (i = 1; i <= m; i++) if (b[i] != "") SU[b[i]] = 1
+        }
+        {
+          path = $1; rec = $2
+          rel = path; sub("^" root, "", rel)
+          mock = dyn = modmock = 0
+          nf = split(rec, f, " ")
+          for (i = 1; i <= nf; i++) {
+            split(f[i], kv, "=")
+            if (kv[1] == "mock") mock = kv[2]
+            else if (kv[1] == "dynspec") dyn = kv[2]
+            else if (kv[1] == "resultmodulemock") modmock = kv[2]
+          }
+          if (dyn == 1) print "DYNSPEC\t" rel
+          if (mock == 1 && !(rel in EX)) print "MAPPING\t" rel
+          if (modmock == 1 && (rel in SU)) print "MODULEMOCK\t" rel
+        }
+      ' <<<"$STUB_CLASSIFY_OUT")"
+      while IFS=$'\t' read -r token stub_rel; do
+        [ -z "$token" ] && continue
+        case "$token" in
+          DYNSPEC)
+            echo "STUB_DYNAMIC_SPECIFIER: $stub_rel (vi.mock/vi.doMock with a non-literal specifier)" ;;
+          MAPPING)
+            echo "STUB_MOCKED_RATE_LIMIT_AUDIT: $stub_rel (mocks the production rate-limit-audit mapping — not in the frozen exemption list)" ;;
+          MODULEMOCK)
+            echo "STUB_MOCKED_RATE_LIMITERS_MODULE: $stub_rel (a global setup file mocks security/rate-limiters — swaps the direct-result limiter for a fake across every test)" ;;
+        esac
+        fail=1
       done <<EOF
-$STUB_TEST_FILES
+$STUB_FINDINGS
 EOF
     fi
   fi

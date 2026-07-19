@@ -87,7 +87,27 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// SYNTACTIC project — used for the whole-file scans (mock / dynspec / redis /
+// vitest-`vi` resolution) on every one of the ~1000 scanned files. These never
+// call getSymbol, so this project's language service never initializes and each
+// file is cheap.
 const project = new Project({
+  useInMemoryFileSystem: true,
+  skipFileDependencyResolution: true,
+  compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
+});
+
+// SEMANTIC project — a SEPARATE project used ONLY for the limiter binding
+// resolution (alias chains, shorthand `{ limiter }`, production-import
+// whitelist) that genuinely needs TypeScript's scope-aware symbol resolution
+// rather than a name scan (which ignores lexical scope — external review round 8
+// Major). Only the ~54 files that import the fail-closed helper ever get a
+// source file here, so the language service's whole-project cost is bounded to
+// that set; a single shared semantic project (created once) is far cheaper than
+// one project per file (measured 0.7s vs 5.4s over the 54 files). Isolating it
+// from the syntactic project keeps the 950+ non-helper files off the language
+// service entirely.
+const semanticProject = new Project({
   useInMemoryFileSystem: true,
   skipFileDependencyResolution: true,
   compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
@@ -104,11 +124,8 @@ function classify(path) {
   // .tsx inputs need a .tsx virtual path so JSX syntax parses (a .ts
   // virtual path on JSX content is a CLASSIFIER_FAILURE upstream).
   const virtualExt = path.endsWith(".tsx") ? ".tsx" : ".ts";
-  const sf = project.createSourceFile(
-    `/virtual/${path.replaceAll("\\", "_").replaceAll("/", "_")}${virtualExt}`,
-    text,
-    { overwrite: true },
-  );
+  const virtualName = `/virtual/${path.replaceAll("\\", "_").replaceAll("/", "_")}${virtualExt}`;
+  const sf = project.createSourceFile(virtualName, text, { overwrite: true });
 
   // Resolve which CallExpressions are `vi.mock`/`vi.doMock` (or namespaced
   // `<ns>.vi.mock`) calls. RECALL-first (plan C6): both vitest configs run
@@ -122,74 +139,80 @@ function classify(path) {
   // A locally-declared `vi` shadow (e.g. `const vi = { mock() {} };`) is
   // fail-loud (VI_SHADOWED), never a silent pass — see the resolveMockCallee /
   // viShadowed resolution below.
-  let viImportSymbol; // symbol of the named `vi` import binding, if any
-  let viNamespaceSymbol; // symbol of `import * as ns from "vitest"`, if any
-  let viLocallyDeclared = false; // true if `vi` is declared by non-import code
+  // Resolve the `vi` binding SYNTACTICALLY (by name) from the "vitest" imports.
+  // `viImportName` = the local name of a named `vi` import (`vi`, or the alias
+  // in `{ vi as viz }`). `viNamespaceName` = the binding of `import * as ns`.
+  let viImportName; // local name of the named `vi` import, if any
+  let viNamespaceName; // local name of the `import * as ns from "vitest"`, if any
   for (const imp of sf.getImportDeclarations()) {
     if (imp.getModuleSpecifierValue() !== "vitest") continue;
     const nsImport = imp.getNamespaceImport();
     if (nsImport !== undefined) {
-      viNamespaceSymbol = nsImport.getSymbol();
+      viNamespaceName = nsImport.getText();
     }
     for (const spec of imp.getNamedImports()) {
       if (spec.getName() !== "vi") continue;
-      const localSym = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
-      if (localSym !== undefined) viImportSymbol = localSym;
+      viImportName = (spec.getAliasNode() ?? spec.getNameNode()).getText();
     }
   }
-  // Detect a LOCAL (non-import) declaration of an identifier named `vi` —
-  // variable/function/class declarations and parameters — which shadows the
-  // global and must not silently count as the real `vi`.
+  // Collect every LOCAL (non-import) declaration name — variable / function /
+  // class declarations and parameters — in one pass. A name here shadows a
+  // same-named import (`vi`, `it`, a helper), so the by-name binding resolution
+  // below must treat it as NOT the import. Replaces per-name getSymbol shadow
+  // checks (which forced the language service; see the note above).
+  const localDeclaredNames = new Set();
   for (const decl of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
-    if (decl.getName() === "vi") viLocallyDeclared = true;
+    const n = decl.getName();
+    if (n) localDeclaredNames.add(n);
   }
   for (const decl of sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration)) {
-    if (decl.getName() === "vi") viLocallyDeclared = true;
+    const n = decl.getName();
+    if (n) localDeclaredNames.add(n);
   }
   for (const decl of sf.getDescendantsOfKind(SyntaxKind.Parameter)) {
-    if (decl.getName() === "vi") viLocallyDeclared = true;
+    const n = decl.getName();
+    if (n) localDeclaredNames.add(n);
   }
+  const viLocallyDeclared = localDeclaredNames.has("vi");
   let viShadowed = false;
 
   // Returns the mock-call callee kind for a CallExpression's outer
-  // PropertyAccessExpression callee (`X.mock` / `X.doMock`), or null.
-  // `method` is "mock" or "doMock".
+  // PropertyAccessExpression callee (`X.mock` / `X.doMock`), or null. `method`
+  // is "mock" or "doMock". Resolution is by NAME (no getSymbol) — see the
+  // language-service note above.
   function resolveMockCallee(callee) {
     if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
     const method = callee.getName();
     if (method !== "mock" && method !== "doMock") return null;
     const target = callee.getExpression();
     if (target.getKind() === SyntaxKind.Identifier) {
-      const sym = target.getSymbol();
-      if (viImportSymbol !== undefined) {
-        // A named `vitest` import of `vi` exists (aliased or not): resolve by
-        // SYMBOL, not by the callee's surface text. `import { vi as viz }`
-        // means `viz.mock(...)` is the real vi — matching viImportSymbol —
-        // even though its text is "viz". A same-text `vi` that resolves to a
-        // different symbol (a local shadow) fails loud.
-        if (sym === viImportSymbol) return method;
-        if (target.getText() === "vi") {
-          // Text says `vi` but it binds elsewhere — a local shadow of the
-          // name. Fail-loud rather than silently counting or ignoring it.
-          viShadowed = true;
-        }
+      const text = target.getText();
+      if (viImportName !== undefined) {
+        // A named `vitest` import of `vi` exists (aliased or not): its local
+        // name is the real vi. `import { vi as viz }` → `viz.mock(...)` counts.
+        if (text === viImportName) return method;
+        // A callee spelled `vi` that is NOT the import's local name is a local
+        // shadow of the global name — fail loud rather than miscount.
+        if (text === "vi") viShadowed = true;
         return null;
       }
       // No named `vi` import in this file. Only the bare global `vi` counts
       // (globals:true), and only when nothing locally shadows the name.
-      if (target.getText() !== "vi") return null;
-      if (viLocallyDeclared && sym !== undefined) {
+      if (text !== "vi") return null;
+      if (viLocallyDeclared) {
+        // A local `vi` declaration exists — the callee's `vi` binds to it, not
+        // the global. Fail loud rather than silently (mis)counting.
         viShadowed = true;
         return null;
       }
-      return viLocallyDeclared ? null : method;
+      return method;
     }
     if (target.getKind() === SyntaxKind.PropertyAccessExpression) {
       // `<ns>.vi.mock` — target is `<ns>.vi`.
       if (target.getName() !== "vi") return null;
       const nsExpr = target.getExpression();
       if (nsExpr.getKind() !== SyntaxKind.Identifier) return null;
-      if (viNamespaceSymbol !== undefined && nsExpr.getSymbol() === viNamespaceSymbol) {
+      if (viNamespaceName !== undefined && nsExpr.getText() === viNamespaceName) {
         return method;
       }
       return null;
@@ -219,15 +242,23 @@ function classify(path) {
   // then matched by SYMBOL, not by name text — a local function shadowing the
   // imported name has a different symbol and never counts, while a legitimate
   // alias call does (PR #680 review round 3, 7.1).
+  // Binding resolution is done SYNTACTICALLY (by local name within this file),
+  // never via getSymbol()/getDefinitionNodes(): those invoke the ts-morph
+  // language service, and once it initializes on the shared in-memory project
+  // every subsequent symbol lookup type-checks the whole ~1000-file scan set —
+  // a ~600× slowdown that timed out CI (external review round 7 follow-up).
+  // The classifier only ever resolves SAME-FILE bindings (vitest imports,
+  // helper imports, local limiter consts), for which a name+shadow scan is
+  // equivalent to symbol resolution.
   let hasImport = false;
-  const helperSymbols = new Map(); // local binding symbol -> imported tier name
+  const helperNames = new Map(); // local binding NAME -> imported tier name
   for (const imp of sf.getImportDeclarations()) {
     if (imp.getModuleSpecifierValue() !== HELPER_MODULE) continue;
     for (const spec of imp.getNamedImports()) {
       if (!HELPER_NAMES.has(spec.getName())) continue;
       hasImport = true;
-      const sym = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
-      if (sym !== undefined) helperSymbols.set(sym, spec.getName());
+      const local = (spec.getAliasNode() ?? spec.getNameNode()).getText();
+      helperNames.set(local, spec.getName());
     }
   }
 
@@ -244,7 +275,7 @@ function classify(path) {
   // vitest would run (PR #680 review round 4, Major 1). Files using implicit
   // globals (no vitest import) yield zero registrations — fail-LOUD for this
   // repo, whose tests import from "vitest" explicitly.
-  const vitestBindings = new Map(); // localSymbol -> imported name
+  const vitestBindings = new Map(); // local NAME -> imported name
   for (const imp of sf.getImportDeclarations()) {
     if (imp.getModuleSpecifierValue() !== "vitest") continue;
     for (const spec of imp.getNamedImports()) {
@@ -252,8 +283,8 @@ function classify(path) {
       if (imported !== "it" && imported !== "test" && imported !== "describe" && imported !== "suite") {
         continue;
       }
-      const sym = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
-      if (sym !== undefined) vitestBindings.set(sym, imported);
+      const local = (spec.getAliasNode() ?? spec.getNameNode()).getText();
+      vitestBindings.set(local, imported);
     }
   }
 
@@ -279,7 +310,11 @@ function classify(path) {
       expr = expr.getExpression();
     }
     if (expr.getKind() !== SyntaxKind.Identifier) return null;
-    const imported = vitestBindings.get(expr.getSymbol());
+    // A local declaration of the same name shadows the vitest import — not a
+    // real registration. Match by name against the vitest import bindings.
+    const nm = expr.getText();
+    if (localDeclaredNames.has(nm)) return null;
+    const imported = vitestBindings.get(nm);
     if (imported === undefined) return null; // not a vitest binding (fake/local `it`)
     const skipped = modifiers.some((m) => !ALLOWED_MODIFIERS.has(m));
     if (imported === "describe" || imported === "suite") return { kind: "suite", skipped };
@@ -348,19 +383,87 @@ function classify(path) {
     return undefined;
   }
 
-  // Resolve the underlying binding declarations of an identifier, following a
-  // shorthand property `{ limiter }` to its referenced binding.
-  function bindingDeclsOf(idNode) {
-    const sym = idNode.getSymbol();
-    if (sym === undefined) return [];
-    const decls = sym.getDeclarations() ?? [];
-    if (decls.length === 1 && decls[0].getKind() === SyntaxKind.ShorthandPropertyAssignment) {
-      const aliased = sym.getAliasedSymbol?.();
-      if (aliased !== undefined) return aliased.getDeclarations() ?? [];
-      const valueDecl = decls[0].getNameNode?.().getDefinitionNodes?.() ?? [];
-      if (valueDecl.length > 0) return valueDecl;
+  // The SAME file loaded into the semantic project, created lazily on first use
+  // (only helper files ever reach limiter resolution). A parse failure here is
+  // FAIL-CLOSED: the classifier throws rather than silently falling back to a
+  // scope-blind scan (external review round 8). Reused for every limiter lookup
+  // in this file.
+  let semanticSf;
+  function getSemanticSf() {
+    if (semanticSf === undefined) {
+      semanticSf = semanticProject.createSourceFile(virtualName, text, { overwrite: true });
     }
-    return decls;
+    return semanticSf;
+  }
+
+  // Locate the node in the SEMANTIC source file that corresponds to a node from
+  // the syntactic `sf` — same source text and position, so getStart() is a
+  // stable key. Throws (fail-closed) if the semantic file lacks a node at that
+  // position, which would mean the two parses diverged.
+  function toSemantic(node) {
+    const semSf = getSemanticSf();
+    const n = semSf.getDescendantAtPos(node.getStart());
+    if (n === undefined) {
+      throw new Error(`${path}: semantic node not found at ${node.getStart()} (parse divergence)`);
+    }
+    // getDescendantAtPos returns the deepest node starting at/covering pos;
+    // walk up to the node whose start matches exactly and kind agrees.
+    let cur = n;
+    while (cur !== undefined && cur.getStart() === node.getStart()) {
+      if (cur.getKind() === node.getKind()) return cur;
+      const parent = cur.getParent();
+      if (parent === undefined || parent.getStart() !== node.getStart()) break;
+      cur = parent;
+    }
+    return n;
+  }
+
+  // Resolve the binding declaration(s) an identifier refers to using
+  // TypeScript's SCOPE-AWARE symbol resolution on the semantic project. A pure
+  // by-name file scan is WRONG — it ignores lexical scope and would bind a
+  // reference to an unrelated same-name declaration in a sibling function
+  // (external review round 8 Major). The symbol lookup runs only for helper
+  // files (bounded to the semantic project's ~54 members), so the language
+  // service cost does not touch the ~1000-file syntactic scan.
+  function bindingDeclsOf(semIdNode) {
+    // A shorthand property `{ limiter }`: the name node's own symbol is the
+    // ShorthandPropertyAssignment, not the referenced binding. The type
+    // checker's getShorthandAssignmentValueSymbol yields the value binding
+    // (the referenced `const`/import), scope-correctly.
+    let sym;
+    const parent = semIdNode.getParent();
+    if (parent !== undefined && parent.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
+      const tc = semanticProject.getTypeChecker().compilerObject;
+      const valueSym = tc.getShorthandAssignmentValueSymbol(parent.compilerNode);
+      const compilerDecls = valueSym?.declarations ?? [];
+      if (compilerDecls.length > 0) {
+        // Re-locate each declaration as a ts-morph node via its source position
+        // (consistent with toSemantic — the semantic sf is the same text).
+        const semSf = getSemanticSf();
+        const out = [];
+        for (const d of compilerDecls) {
+          const node = semSf.getDescendantAtPos(d.getStart(semSf.compilerNode));
+          const match = node?.getFirstAncestorByKind?.(d.kind) ?? node;
+          if (match !== undefined) out.push(match);
+        }
+        if (out.length > 0) return out;
+      }
+    }
+    sym = semIdNode.getSymbol();
+    if (sym === undefined) return [];
+    // The LOCAL binding's own declarations (e.g. the ImportSpecifier for an
+    // imported name, or the VariableDeclaration for a local const). These are
+    // available WITHOUT resolving the imported module — the in-memory project
+    // has no node_modules / cross-file targets, so `@/lib/...` imports never
+    // resolve to their definition, but the local import specifier still tells
+    // us the module + exported name (external review round 8: track the local
+    // import binding even when the target module is unresolvable).
+    const local = sym.getDeclarations() ?? [];
+    if (local.length > 0) return local;
+    // Only when the local symbol itself has no declarations (a pure alias whose
+    // target is unresolvable) fall back to the aliased symbol.
+    const aliased = sym.getAliasedSymbol?.();
+    return aliased?.getDeclarations() ?? [];
   }
 
   // A stable identity key for a declaration node: its kind + start position in
@@ -382,7 +485,10 @@ function classify(path) {
   // The `key` is the ROOT declaration's identity (not the alias's text), so
   // aliases of one root collapse. Used for BOTH distinct-limiter accounting and
   // the direct-result whitelist (external review 2026-07-19, rounds 4-5).
-  function resolveRootBinding(expr, visited = new Set()) {
+  // `expr` may be a syntactic-project node (the first call from limiterArgOf) or
+  // an already-semantic node (recursive alias-chain calls). `semantic` marks
+  // which, so the top-level call bridges to the semantic project exactly once.
+  function resolveRootBinding(expr, visited = new Set(), semantic = false) {
     if (expr === undefined) return { kind: "unknown", key: "undefined" };
     if (expr.getKind() === SyntaxKind.ObjectLiteralExpression) {
       return { kind: "object", key: `objlit@${expr.getStart()}` };
@@ -390,17 +496,18 @@ function classify(path) {
     if (expr.getKind() !== SyntaxKind.Identifier) {
       return { kind: "unknown", key: `text:${expr.getText()}` };
     }
-    for (const decl of bindingDeclsOf(expr)) {
+    const semExpr = semantic ? expr : toSemantic(expr);
+    for (const decl of bindingDeclsOf(semExpr)) {
       const dk = decl.getKind();
       if (dk === SyntaxKind.ImportSpecifier) {
         const imp = decl.getFirstAncestorByKind?.(SyntaxKind.ImportDeclaration);
         const moduleSpec = imp !== undefined ? normalizeSpecifier(imp.getModuleSpecifierValue()) : "";
         // The IMPORTED name (not the local alias) identifies the export.
-        const name = decl.getNameNode?.().getText() ?? expr.getText();
+        const name = decl.getNameNode?.().getText() ?? semExpr.getText();
         return { kind: "import", moduleSpec, name };
       }
       if (dk === SyntaxKind.ImportClause) {
-        return { kind: "import", moduleSpec: "", name: expr.getText() };
+        return { kind: "import", moduleSpec: "", name: semExpr.getText() };
       }
       if (dk === SyntaxKind.VariableDeclaration) {
         const init = decl.getInitializer?.();
@@ -409,21 +516,20 @@ function classify(path) {
           return { kind: "object", key: declKey(decl) };
         }
         if (init.getKind() === SyntaxKind.Identifier) {
-          // Alias chain: `const b = a` — recurse into `a` with a cycle guard.
-          const initSym = init.getSymbol();
-          const guardKey = initSym !== undefined ? initSym : init.getText();
-          if (visited.has(guardKey)) return { kind: "identity", key: declKey(decl) };
+          // Alias chain: `const b = a` — recurse into `a` (already a semantic
+          // node) with a cycle guard keyed on the resolved declaration.
+          const guardKey = declKey(decl);
+          if (visited.has(guardKey)) return { kind: "identity", key: guardKey };
           visited.add(guardKey);
-          return resolveRootBinding(init, visited);
+          return resolveRootBinding(init, visited, true);
         }
         // Any other initializer (call/factory result, member access, etc.):
         // the ROOT is this variable declaration — key on IT, not the alias.
         return { kind: "call", key: declKey(decl) };
       }
     }
-    // No resolvable declaration (e.g. an ambient/global) — key by symbol text.
-    const s = expr.getSymbol();
-    return { kind: "identity", key: s !== undefined ? `sym:${expr.getText()}` : `text:${expr.getText()}` };
+    // No resolvable declaration (e.g. an ambient/global) — key by name.
+    return { kind: "identity", key: `name:${semExpr.getText()}` };
   }
 
   // Stable distinct-key for a limiter argument: its ROOT binding identity, so
@@ -480,36 +586,33 @@ function classify(path) {
     return undefined;
   }
 
-  // Pre-pass: is the rate-limiters module itself mocked? A `vi.mock(
-  // "@/lib/security/rate-limiters", ...)` — in ANY static form — leaves the
-  // import binding looking production-legitimate while replacing v1ApiKeyLimiter
-  // with a fake, so a production-import allowlist alone is bypassable (external
-  // review 2026-07-19, rounds 5-6). When the module is mocked, a direct-result
-  // test using it is NOT a genuine fail-closed probe.
-  let resultLimiterModuleMocked = false;
-  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    if (resolveMockCallee(call.getExpression()) === null) continue;
-    const spec = mockSpecifierOf(call);
-    if (spec !== undefined && normalizeSpecifier(spec).endsWith(RESULT_LIMITER_MODULE_SUFFIX)) {
-      resultLimiterModuleMocked = true;
-    }
-  }
-
   let calls = 0;
   let mock = false;
   let dynspec = false;
   const distinctLimiterKeys = new Set(); // distinct ROOT-binding keys
-  let resultFakeLimiter = false; // a direct-result call passed a non-prod limiter
+  // Whether the rate-limiters module is itself mocked — a `vi.mock(
+  // "@/lib/security/rate-limiters", ...)` in any static form leaves the import
+  // binding looking production-legitimate while replacing v1ApiKeyLimiter with
+  // a fake (external review rounds 5-6). Detected in the single CallExpression
+  // pass below (a separate pre-pass doubled the whole-tree walk over ~1000
+  // files and timed out CI, round 7 follow-up). Direct-result limiter exprs are
+  // stashed and re-checked against this flag AFTER the loop, since a mock can
+  // syntactically follow the helper call.
+  let resultLimiterModuleMocked = false;
+  const directResultLimiterExprs = [];
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
+    // Match the helper call by the import's local NAME (alias-aware); a local
+    // declaration of that name shadows the import and does not count.
+    const calleeName = callee.getKind() === SyntaxKind.Identifier ? callee.getText() : undefined;
     if (
-      helperSymbols.size > 0 &&
-      callee.getKind() === SyntaxKind.Identifier &&
-      helperSymbols.has(callee.getSymbol()) &&
+      calleeName !== undefined &&
+      helperNames.has(calleeName) &&
+      !localDeclaredNames.has(calleeName) &&
       isExecutedFromTest(call)
     ) {
       calls += 1;
-      const tierName = helperSymbols.get(callee.getSymbol());
+      const tierName = helperNames.get(calleeName);
       const limiterExpr = limiterArgOf(call);
       // Distinct-limiter accounting keyed on the ROOT binding, so aliases of the
       // SAME limiter collapse to one and genuinely different limiters count
@@ -517,15 +620,8 @@ function classify(path) {
       if (limiterExpr !== undefined) {
         distinctLimiterKeys.add(distinctKeyOf(limiterExpr));
       }
-      // Direct-result tier: the limiter must resolve to a whitelisted production
-      // import AND that module must not be mocked out from under the binding —
-      // anything else (fake, factory result, test-module import, mocked module)
-      // is rejected, so novel fake constructions cannot slip past a blacklist.
-      if (
-        tierName === "assertRedisFailClosedResult" &&
-        (!isProductionResultLimiter(limiterExpr) || resultLimiterModuleMocked)
-      ) {
-        resultFakeLimiter = true;
+      if (tierName === "assertRedisFailClosedResult") {
+        directResultLimiterExprs.push(limiterExpr);
       }
     }
     // vi.mock(...) / vi.doMock(...) / <ns>.vi.mock(...) / <ns>.vi.doMock(...)
@@ -533,38 +629,73 @@ function classify(path) {
       const flags = { dynamic: false };
       const specifier = mockSpecifierOf(call, flags);
       if (flags.dynamic) dynspec = true;
+      if (
+        specifier !== undefined &&
+        normalizeSpecifier(specifier).endsWith(RESULT_LIMITER_MODULE_SUFFIX)
+      ) {
+        resultLimiterModuleMocked = true;
+      }
       if (specifier !== undefined && isMappingSpecifier(specifier)) {
         mock = true;
       }
     }
   }
 
-  let redis = false;
-  for (const node of sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
-    const name = node.getNameNode();
-    if (name.getKind() === SyntaxKind.Identifier) {
-      const id = name.getText();
-      if (id === "redisErrored") redis = true;
-      // `checkRateLimitOrFail: <anything>` inside a module-factory object is
-      // the return-value-stub shape regardless of the initializer's spelling.
-      if (id === "checkRateLimitOrFail") mock = true;
+  // Direct-result tier verdict (deferred until the full mock set is known): the
+  // limiter must resolve to a whitelisted production import AND the rate-limiters
+  // module must not be mocked out from under the binding. Anything else (fake,
+  // factory result, test-module import, mocked module) is rejected.
+  let resultFakeLimiter = false;
+  for (const limiterExpr of directResultLimiterExprs) {
+    if (!isProductionResultLimiter(limiterExpr) || resultLimiterModuleMocked) {
+      resultFakeLimiter = true;
+      break;
     }
   }
-  for (const node of sf.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment)) {
-    const id = node.getName();
-    if (id === "redisErrored") redis = true;
-    if (id === "checkRateLimitOrFail") mock = true;
-  }
-  if (!redis) {
-    for (const node of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
-      if (node.getName() === "redisErrored") {
-        redis = true;
-        break;
+
+  // redis / mock property detection. Each getDescendantsOfKind(...) below wraps
+  // a whole node kind across the file; skip the walks entirely for files whose
+  // raw text contains neither token (the vast majority), so only relevant files
+  // pay the AST cost — the ~1000-file scan otherwise timed out CI (external
+  // review round 7 follow-up). The AST walks still run for files that DO contain
+  // the token, preserving comment/string exclusion.
+  let redis = false;
+  const hasRedisText = text.includes("redisErrored");
+  const hasMapText = text.includes("checkRateLimitOrFail");
+  if (hasRedisText || hasMapText) {
+    for (const node of sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
+      const name = node.getNameNode();
+      if (name.getKind() === SyntaxKind.Identifier) {
+        const id = name.getText();
+        if (id === "redisErrored") redis = true;
+        // `checkRateLimitOrFail: <anything>` inside a module-factory object is
+        // the return-value-stub shape regardless of the initializer's spelling.
+        if (id === "checkRateLimitOrFail") mock = true;
+      }
+    }
+    for (const node of sf.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment)) {
+      const id = node.getName();
+      if (id === "redisErrored") redis = true;
+      if (id === "checkRateLimitOrFail") mock = true;
+    }
+    if (!redis && hasRedisText) {
+      for (const node of sf.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+        if (node.getName() === "redisErrored") {
+          redis = true;
+          break;
+        }
       }
     }
   }
-  if (!redis) {
-    // Destructuring / standalone identifier bindings (e.g. `const { redisErrored } = rl`).
+  // Last-resort presence checks (destructuring / standalone identifier bindings
+  // such as `const { redisErrored } = rl`, or a `mockCheckRateLimitOrFail`
+  // reference). getDescendantsOfKind(Identifier) wraps EVERY identifier node in
+  // the file (thousands per test file); running that over the ~1000-file scan
+  // dominated runtime and timed out CI (external review round 7 follow-up).
+  // Gate the AST walk behind a cheap raw-text prefilter: only the rare files
+  // that actually contain the token pay for the identifier-precise scan (which
+  // still excludes comments/strings, preserving exact prior behavior).
+  if (!redis && text.includes("redisErrored")) {
     for (const node of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
       if (node.getText() === "redisErrored") {
         redis = true;
@@ -572,7 +703,7 @@ function classify(path) {
       }
     }
   }
-  if (!mock) {
+  if (!mock && text.includes("mockCheckRateLimitOrFail")) {
     for (const node of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
       if (node.getText() === "mockCheckRateLimitOrFail") {
         mock = true;
@@ -582,6 +713,9 @@ function classify(path) {
   }
 
   sf.forget();
+  // Drop the semantic source file too (helper files only) so the semantic
+  // project does not accumulate across the scan.
+  if (semanticSf !== undefined) semanticProject.removeSourceFile(semanticSf);
 
   // A locally-declared `vi` shadow is a suspicious construct — fail-loud
   // rather than silently classifying its mock calls as mock=0 (C6).

@@ -239,3 +239,64 @@ repo (with the legitimate migrate per-file mock) stays green. Self-tests:
 classifier +3 (resultmodulemock string/typed/negative), gate +2 (setup-file
 fail, ordinary-file pass). This closes the placement axis (inline test vs global
 setup file) for the module-substitution class.
+
+## D16 — CI timeout: classifier language-service + doubled tree walks (perf, 2026-07-20)
+The App CI "Lint → Test → Build" job timed out: two gate self-tests
+(EXPECTED_LEGACY_COUNT at 10s default, "passes cleanly" at 60s) exceeded their
+timeouts. Not a logic failure — a performance regression I introduced across the
+anti-evasion rounds (D1, D9-D15). Root causes, found by bisection:
+1. getSymbol / getAliasedSymbol / getDefinitionNodes (added for the aliased-vi
+   and limiter-identity checks) invoke the ts-morph LANGUAGE SERVICE. Once it
+   initializes on the shared in-memory project, EVERY subsequent symbol lookup
+   type-checks the whole ~1000-file scan set — a ~640× slowdown (0.02s → 13s for
+   the whole-src classify).
+2. The module-mock pre-pass added a SECOND getDescendantsOfKind(CallExpression)
+   walk over every file, doubling the tree traversal.
+3. The redis/mock presence checks used getDescendantsOfKind(Identifier), which
+   wraps every identifier node (thousands per test file) on all ~1000 files.
+Fix (behavior-preserving — classifier self-test 50/50, gate self-test 56/56
+unchanged): resolve ALL bindings SYNTACTICALLY by name (helper/vitest imports
+and local limiter consts are same-file; a name+shadow scan equals symbol
+resolution for them) — no getSymbol/getDefinitionNodes anywhere; merge the
+module-mock detection into the single CallExpression loop (direct-result verdict
+deferred until after the loop); and gate the redis/mock AST walks behind cheap
+raw-text prefilters so only files containing the token pay the AST cost.
+Also batched the manifest per-file AST count into ONE node call (was ~65
+processes) and collapsed the C6 per-file awk loop (~4000 subshells) into a
+single awk pass.
+Result: full gate 42s → 7.7s; the two timing-out tests now 1.8s / 8.4s (10s /
+60s limits) with comfortable CI-runner margin. Note: D12's description of the
+limiter-identity mechanism as getDefinitionNodes-based is superseded here — the
+same distinct/resultfake semantics are now computed syntactically.
+
+## D17 — External-review round 8: scope-aware limiter resolution (semantic-project hybrid, 2026-07-20)
+The D16 perf fix replaced symbol resolution with a by-NAME file scan, which was
+scope-BLIND: it collected all same-name declarations across the whole file and
+took the first, so a fake `const limiter` in a test bound to an unrelated
+same-name production alias in a sibling function — the fake read as production
+(resultfake=0). A real security regression.
+Fix (hybrid, per the user's guidance that the essence is using the TypeChecker
+for limiter binding, not the project-split granularity):
+- The ~1000-file whole-file scans (mock / dynspec / redis / vitest-vi) stay on
+  the SYNTACTIC project with no getSymbol — no language service, fast.
+- Limiter binding resolution (alias chains, shorthand `{ limiter }`, the
+  production-import whitelist) runs on a SEPARATE semantic project that only the
+  ~54 helper-importing files ever enter, so TypeScript's scope-aware symbol
+  resolution is used where correctness needs it while the language-service cost
+  stays bounded to that set. Measured: a single shared semantic project (created
+  once, 0.7s over the 54 files) beats one-project-per-file (5.4s) — chosen the
+  single shared project.
+- Shorthand `{ limiter }` resolves via getShorthandAssignmentValueSymbol (the
+  name node's own symbol is the property, not the referenced binding). Local
+  import bindings are tracked from the local symbol's ImportSpecifier even when
+  the target module is unresolvable (the in-memory project has no node_modules).
+  A semantic-parse divergence throws (fail-closed, no syntactic fallback); an
+  unresolvable limiter is treated as non-production (resultfake=1, fail-closed).
+Regression tests added (mandatory, external review): sibling-function same-name
+production alias + test fake → resultfake=1; inner fake shadows outer production
+→ 1; inner production shadows outer fake → 0; production import / alias-chain /
+shorthand-alias → 0; two aliases of one limiter → distinct=1; two different →
+distinct=2. classifier self-test 50→53. Performance: full gate ~9.4s (semantic
+project adds ~1.7s); the two previously-timing-out tests now 1.7s / 9.75s
+(10s / 60s limits). D16's "fully syntactic" description is superseded by this
+hybrid.
