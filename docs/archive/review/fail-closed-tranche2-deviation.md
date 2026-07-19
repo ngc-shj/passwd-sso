@@ -142,3 +142,34 @@ Verified: gate self-test 47→50 (+multiline-setupFiles, +2 multi-limiter),
 classifier 34, helper self-test (result cases rewired to limiter+key), real gate
 + meta-gate EXIT 0, pre-pr 51/51 (typecheck caught a missing RateLimitResult
 import in the self-test, fixed).
+
+## D12 — External-review round 3: symbol-based limiter verification (2026-07-19)
+The D11 fixes closed the arbitrary-thunk and raw-count gaps but two Mediums
+remained, both because the gate checked call COUNT, not limiter IDENTITY:
+- direct-result helper still passed with a fake `{ check }` object (the D11
+  signature required a limiter object but not a REAL one);
+- a count=2 file passed by asserting the SAME limiter twice.
+Fix (classifier now resolves each helper call's `limiter:` argument by AST
+symbol, shorthand-aware via getDefinitionNodes):
+- new `distinct` field = count of distinct limiter-arg symbols; the gate's
+  multi-limiter check compares `distinct >= manifest count` (not `calls`), so
+  testing one limiter N times no longer satisfies an N-limiter file.
+- new `resultfake` field = 1 when an assertRedisFailClosedResult call's limiter
+  arg is a locally-constructed object literal (inline, or a `const` bound to
+  one) rather than a production import; the gate fires RESULT_HELPER_FAKE_LIMITER.
+- shorthand `{ limiter }` resolution: getSymbol on a ShorthandPropertyAssignment
+  yields the property, not the referenced binding — bindingDeclsOf follows it to
+  the real `const` (getAliasedSymbol / getDefinitionNodes) so auth.config's
+  `limiter,` shorthand resolves correctly (was distinct=0 → now 1).
+Real-file audit: every count>=2 helper file already asserts distinct limiters
+(bridge-code/mcp-token/verify-access/reset-vault-approve/recover); the
+direct-result member (rate-limiters) imports the production v1ApiKeyLimiter
+(resultfake=0). Self-tests: classifier 34→38 (distinct×2, resultfake×2), gate
+50→53 (same-limiter-twice, RESULT_HELPER_FAKE_LIMITER fail+pass). Real gate +
+meta-gate EXIT 0, pre-pr 51/51.
+Accepted residual: resultfake rejects inline/const object-literal fakes; a fake
+returned from a factory-call expression is not classified as fake (that shape is
+the legitimate factory-mock pattern the Response/silent-drop tiers rely on).
+The check closes the specific "inline fixed-result object" weakening; deeper
+semantic identity (is this the PROD singleton?) remains beyond AST reach and a
+review matter for the single direct-result member.

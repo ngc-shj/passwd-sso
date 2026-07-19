@@ -169,17 +169,19 @@ manifest_declared_count() {
   awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' "$MANIFEST_FILE"
 }
 
-# assert_covers_all_limiters <route> <test-rel> <calls> — fail when a
-# helper-mode file has fewer helper calls than its declared limiter count.
-# Sets `fail=1` and echoes HELPER_CALLS_BELOW_LIMITER_COUNT; returns 1 so the
-# caller can `continue`. A missing/blank manifest count is treated as 1 (the
-# common single-limiter case) so the check never under-counts.
+# assert_covers_all_limiters <route> <test-rel> <distinct> — fail when a
+# helper-mode file asserts fewer DISTINCT limiters than its declared limiter
+# count. `distinct` counts distinct `limiter:` argument symbols across the
+# helper calls, so testing the SAME limiter twice does NOT satisfy a
+# 2-limiter file (external review 2026-07-19, round 3). Sets `fail=1` and
+# echoes HELPER_CALLS_BELOW_LIMITER_COUNT; returns 1 so the caller can
+# `continue`. A missing/blank manifest count is treated as 1.
 assert_covers_all_limiters() {
-  local route="$1" test_rel="$2" calls="$3" declared
+  local route="$1" test_rel="$2" distinct="$3" declared
   declared="$(manifest_declared_count "$route")"
   [ -n "$declared" ] || declared=1
-  if [ "$calls" -lt "$declared" ] 2>/dev/null; then
-    echo "HELPER_CALLS_BELOW_LIMITER_COUNT: $route (manifest declares $declared fail-closed limiter(s) but ${test_rel} has only $calls assertRedisFailClosed* call(s) — every limiter's fail-closed path needs its own contract assertion)"
+  if [ "$distinct" -lt "$declared" ] 2>/dev/null; then
+    echo "HELPER_CALLS_BELOW_LIMITER_COUNT: $route (manifest declares $declared fail-closed limiter(s) but ${test_rel} asserts only $distinct distinct limiter(s) — every limiter needs its own contract assertion; testing one limiter N times does not count)"
     fail=1
     return 1
   fi
@@ -217,8 +219,16 @@ for route in ${routes[@]+"${routes[@]}"}; do
       fail=1
       continue
     fi
-    # Every declared limiter in the file must have its own contract assertion.
-    if ! assert_covers_all_limiters "$route" "${contract_test#$FIXTURE_ROOT/}" "$(field "$contract_rec" calls)"; then
+    # Direct-result tier: the limiter argument must be the production singleton,
+    # not a locally-built fake returning a fixed result.
+    if [ "$(field "$contract_rec" resultfake)" = "1" ]; then
+      echo "RESULT_HELPER_FAKE_LIMITER: $route (${contract_test#$FIXTURE_ROOT/} passes a locally-constructed fake to assertRedisFailClosedResult — it must probe the real limiter module, not a fixed-result object)"
+      fail=1
+      continue
+    fi
+    # Every declared limiter in the file must have its own contract assertion
+    # (distinct limiter args, not just call count).
+    if ! assert_covers_all_limiters "$route" "${contract_test#$FIXTURE_ROOT/}" "$(field "$contract_rec" distinct)"; then
       continue
     fi
     # Genuine helper-mode contract test: manifests must not linger.
@@ -327,7 +337,12 @@ while IFS= read -r member; do
       fail=1
       continue
     fi
-    if ! assert_covers_all_limiters "$member" "$member_test" "$(field "$member_rec" calls)"; then
+    if [ "$(field "$member_rec" resultfake)" = "1" ]; then
+      echo "RESULT_HELPER_FAKE_LIMITER: $member (${member_test} passes a locally-constructed fake to assertRedisFailClosedResult — it must probe the real limiter module, not a fixed-result object)"
+      fail=1
+      continue
+    fi
+    if ! assert_covers_all_limiters "$member" "$member_test" "$(field "$member_rec" distinct)"; then
       continue
     fi
     if is_debt "$member"; then

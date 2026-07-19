@@ -284,3 +284,49 @@ setupFiles). The R42 convergence artifact now enforces, per fail-closed member:
 existence, semantic strength (real helper, mapping unmapped, limiter-bound
 result), per-limiter coverage in multi-limiter files, and stub-scan reach into
 multiline-configured setup files.
+
+---
+
+# Code Review Round 6 (external-review round 3)
+Date: 2026-07-19
+
+## Changes from Previous Round
+External review round 3: both prior Mediums remained because the gate checked
+call COUNT, not limiter IDENTITY. (1) The direct-result helper still accepted a
+fake `{ check }` object. (2) A count=2 file passed by asserting the SAME
+limiter twice. See deviation D12.
+
+## Fix (classifier symbol-based limiter resolution)
+- `distinct` field: count of distinct `limiter:` argument symbols across helper
+  calls (shorthand-aware). Gate multi-limiter check now compares
+  `distinct >= manifest count`, not `calls` — same-limiter-twice fails
+  HELPER_CALLS_BELOW_LIMITER_COUNT.
+- `resultfake` field: 1 when an assertRedisFailClosedResult limiter arg is a
+  locally-constructed object literal (inline or const-bound) instead of a
+  production import. Gate fires RESULT_HELPER_FAKE_LIMITER.
+- bindingDeclsOf follows a `{ limiter }` shorthand to its real const binding
+  (getAliasedSymbol / getDefinitionNodes).
+
+## Verification
+- distinct: two distinct → distinct=2; same twice → distinct=1 (self-tested).
+- resultfake: inline/const fake → 1; production import → 0 (self-tested).
+- All real count>=2 helper files assert distinct limiters; rate-limiters
+  imports production v1ApiKeyLimiter (resultfake=0).
+- classifier self-test 34→38, gate self-test 50→53, meta-gate EXIT 0,
+  pre-pr 51/51.
+
+## Accepted residual (documented)
+resultfake rejects inline/const object-literal fakes. A fake returned from a
+factory-CALL expression is not classified as fake — that is the legitimate
+factory-mock pattern the Response/silent-drop tiers rely on, and the
+direct-result tier has exactly one member (rate-limiters) whose production
+wiring is verified. Deeper "is this the PROD singleton" identity is beyond AST
+reach and remains a review matter for that single member.
+
+## Convergence
+Code review converged in 6 rounds. The R42 convergence artifact now verifies,
+per fail-closed member: existence; semantic strength (real helper, mapping
+unmapped); per-DISTINCT-limiter coverage in multi-limiter files; a real
+(non-fake) limiter for the direct-result tier; and stub-scan reach into
+multiline-configured setup files — all symbol-based, all mutation-verified in
+the self-tests.

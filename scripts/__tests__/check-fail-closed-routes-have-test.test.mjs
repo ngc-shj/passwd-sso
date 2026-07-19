@@ -109,7 +109,17 @@ function writeNonRouteMember(memberPath, testPath, testBody, { legacy = true } =
 
 // A genuine shared-helper contract test for a non-route member (helper mode,
 // production mapping NOT stubbed) — the real coverage shape the 3 members use.
-const NON_ROUTE_HELPER_TEST = `import { it, vi } from "vitest";
+const NON_ROUTE_HELPER_TEST = `import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("fails closed when Redis is unreachable", async () => {
+  await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" });
+});
+`;
+
+// The same-shape test but passing a locally-built FAKE limiter — the
+// direct-result weakening the resultfake guard rejects (RESULT_HELPER_FAKE_LIMITER).
+const NON_ROUTE_RESULT_FAKE_TEST = `import { it, vi } from "vitest";
 import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
 it("fails closed when Redis is unreachable", async () => {
   const limiter = { check: vi.fn(async () => ({ allowed: false, redisErrored: true })) };
@@ -144,11 +154,13 @@ it("fails closed (503, no mutation) when Redis is unavailable", async () => {
 // is asserted, not just the first.
 const HELPER_CONTRACT_TEST_TWO_CALLS = `import { it } from "vitest";
 import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const ipLimiter = {};
+const tokenLimiter = {};
 it("limiter 1 fails closed", async () => {
-  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+  await assertRedisFailClosed({ limiter: ipLimiter, failure: { allowed: false, redisErrored: true } });
 });
 it("limiter 2 fails closed", async () => {
-  await assertRedisFailClosed({ failure: { allowed: false, redisErrored: true } });
+  await assertRedisFailClosed({ limiter: tokenLimiter, failure: { allowed: false, redisErrored: true } });
 });
 `;
 
@@ -456,8 +468,9 @@ it("shadowed", async () => {
         "widgets/purge",
         `import { it } from "vitest";
 import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";
+const limiter = {};
 it("fails closed", async () => {
-  await assertFailClosed({ failure: { allowed: false, redisErrored: true } });
+  await assertFailClosed({ limiter, failure: { allowed: false, redisErrored: true } });
 });
 `,
       );
@@ -798,9 +811,59 @@ it("legacy direct", () => { expect(rl.redisErrored).toBe(true); });
       expect(stdout).toContain(rel);
     });
 
-    it("passes when a count=2 file has one helper call per limiter", () => {
+    it("FAILS (HELPER_CALLS_BELOW_LIMITER_COUNT) when a count=2 file asserts the SAME limiter twice", () => {
+      // Two helper calls but the SAME limiter symbol → distinct=1 < 2. Call
+      // count alone would be satisfied; distinct-limiter accounting is what
+      // catches the second limiter going untested (external review round 3).
+      const rel = writeRoute("widgets/multi", `${FAIL_CLOSED_LINE}${FAIL_CLOSED_LINE}`, {
+        count: 2,
+      });
+      writeAdjacentTest(
+        "widgets/multi",
+        `import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const onlyLimiter = {};
+it("1", async () => { await assertRedisFailClosed({ limiter: onlyLimiter, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: onlyLimiter, failure: { allowed: false, redisErrored: true } }); });
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("HELPER_CALLS_BELOW_LIMITER_COUNT:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("passes when a count=2 file asserts one DISTINCT limiter per limiter", () => {
       writeRoute("widgets/multi", `${FAIL_CLOSED_LINE}${FAIL_CLOSED_LINE}`, { count: 2 });
       writeAdjacentTest("widgets/multi", HELPER_CONTRACT_TEST_TWO_CALLS);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+  });
+
+  // Direct-result tier must probe the real limiter, not a fixed-result fake
+  // (external review 2026-07-19, round 3).
+  describe("direct-result helper requires a real limiter", () => {
+    it("FAILS (RESULT_HELPER_FAKE_LIMITER) when a non-route member passes a fake to assertRedisFailClosedResult", () => {
+      writeNonRouteMember(
+        "src/lib/security/rate-limiters.ts",
+        "src/lib/security/rate-limiters.test.ts",
+        NON_ROUTE_RESULT_FAKE_TEST,
+        { legacy: false },
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("RESULT_HELPER_FAKE_LIMITER:");
+      expect(stdout).toContain("src/lib/security/rate-limiters.ts");
+    });
+
+    it("passes when the direct-result member imports the production limiter", () => {
+      writeNonRouteMember(
+        "src/lib/security/rate-limiters.ts",
+        "src/lib/security/rate-limiters.test.ts",
+        NON_ROUTE_HELPER_TEST,
+        { legacy: false },
+      );
       const { exitCode, stdout } = runGuard();
       expect(exitCode, stdout).toBe(0);
     });

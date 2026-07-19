@@ -100,6 +100,48 @@ it("direct result", async () => {
     expect(f).toMatchObject({ import: 1, calls: 1 });
   });
 
+  it("counts DISTINCT limiter args (two distinct → distinct=2)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const a = {}; const b = {};
+it("1", async () => { await assertRedisFailClosed({ limiter: a, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: b, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 2 });
+  });
+
+  it("counts the SAME limiter twice as ONE distinct (calls=2, distinct=1)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+const a = {};
+it("1", async () => { await assertRedisFailClosed({ limiter: a, failure: { allowed: false, redisErrored: true } }); });
+it("2", async () => { await assertRedisFailClosed({ limiter: a, failure: { allowed: false, redisErrored: true } }); });
+`);
+    expect(f).toMatchObject({ calls: 2, distinct: 1 });
+  });
+
+  it("flags a FAKE limiter passed to assertRedisFailClosedResult (resultfake=1)", () => {
+    const f = classify(`import { it, vi } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+it("x", async () => {
+  const limiter = { check: vi.fn() };
+  await assertRedisFailClosedResult({ limiter, key: "k" });
+});
+`);
+    expect(f.resultfake).toBe(1);
+  });
+
+  it("does NOT flag a PRODUCTION-import limiter passed to assertRedisFailClosedResult (resultfake=0)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+it("x", async () => {
+  await assertRedisFailClosedResult({ limiter: v1ApiKeyLimiter, key: "k" });
+});
+`);
+    expect(f.resultfake).toBe(0);
+  });
+
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
     const f = classify(`import { it } from "vitest";
 import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";

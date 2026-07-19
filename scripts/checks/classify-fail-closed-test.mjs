@@ -12,7 +12,7 @@
  *
  * Usage: node scripts/checks/classify-fail-closed-test.mjs <file...>
  * Output (one line per input, tab-separated, stable order):
- *   <path>\texists=0|1 import=0|1 calls=<n> mock=0|1 redis=0|1 dynspec=0|1
+ *   <path>\texists=0|1 import=0|1 calls=<n> mock=0|1 redis=0|1 dynspec=0|1 distinct=<n> resultfake=0|1
  * Field semantics:
  *   import — ImportDeclaration from "@/__tests__/helpers/fail-closed"
  *            whose named imports include assertRedisFailClosed
@@ -212,14 +212,14 @@ function classify(path) {
   // imported name has a different symbol and never counts, while a legitimate
   // alias call does (PR #680 review round 3, 7.1).
   let hasImport = false;
-  const helperSymbols = new Set(); // local binding symbols of ANY helper tier
+  const helperSymbols = new Map(); // local binding symbol -> imported tier name
   for (const imp of sf.getImportDeclarations()) {
     if (imp.getModuleSpecifierValue() !== HELPER_MODULE) continue;
     for (const spec of imp.getNamedImports()) {
       if (!HELPER_NAMES.has(spec.getName())) continue;
       hasImport = true;
       const sym = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
-      if (sym !== undefined) helperSymbols.add(sym);
+      if (sym !== undefined) helperSymbols.set(sym, spec.getName());
     }
   }
 
@@ -313,9 +313,87 @@ function classify(path) {
     return true;
   }
 
+  // Extract the `limiter:` property value node from a helper call's first
+  // (options-object) argument, or undefined when absent / not an object literal.
+  // Handles both `limiter: expr` (PropertyAssignment) and the shorthand
+  // `limiter` (ShorthandPropertyAssignment → the shorthand identifier is the
+  // value node itself, whose symbol resolves to the referenced binding).
+  function limiterArgOf(call) {
+    const arg = call.getArguments()[0];
+    if (arg === undefined || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) {
+      return undefined;
+    }
+    for (const prop of arg.getProperties()) {
+      if (
+        prop.getKind() === SyntaxKind.PropertyAssignment &&
+        prop.getName() === "limiter"
+      ) {
+        return prop.getInitializer();
+      }
+      if (
+        prop.getKind() === SyntaxKind.ShorthandPropertyAssignment &&
+        prop.getName() === "limiter"
+      ) {
+        return prop.getNameNode();
+      }
+    }
+    return undefined;
+  }
+
+  // Resolve an identifier's underlying binding declarations. A shorthand
+  // property `{ limiter }` yields a symbol whose declaration is the
+  // ShorthandPropertyAssignment itself — follow it to the referenced binding
+  // (`getAliasedSymbol`, else the value declaration) so both distinct-limiter
+  // accounting and fake-detection see the real `const limiter = ...`.
+  function bindingDeclsOf(idNode) {
+    let sym = idNode.getSymbol();
+    if (sym === undefined) return [];
+    const decls = sym.getDeclarations() ?? [];
+    if (decls.length === 1 && decls[0].getKind() === SyntaxKind.ShorthandPropertyAssignment) {
+      const aliased = sym.getAliasedSymbol?.();
+      if (aliased !== undefined) return aliased.getDeclarations() ?? [];
+      const valueDecl = decls[0].getNameNode?.().getDefinitionNodes?.() ?? [];
+      if (valueDecl.length > 0) return valueDecl;
+    }
+    return decls;
+  }
+
+  // Whether a limiter-argument expression is a LOCALLY-CONSTRUCTED fake (an
+  // inline object literal, or an identifier whose declaration initializes it to
+  // an object literal) rather than a production import / factory-mock result.
+  // Used only for the direct-result tier, whose limiter must be the real module
+  // singleton (external review 2026-07-19, round 3) — a fake `{ check }` object
+  // would let a fixed result masquerade as a fail-closed probe.
+  function isFakeLimiterExpr(expr) {
+    if (expr === undefined) return false;
+    if (expr.getKind() === SyntaxKind.ObjectLiteralExpression) return true;
+    if (expr.getKind() === SyntaxKind.Identifier) {
+      const decls = bindingDeclsOf(expr);
+      for (const decl of decls) {
+        // Imported binding (import specifier / clause) → production, not fake.
+        if (
+          decl.getKind() === SyntaxKind.ImportSpecifier ||
+          decl.getKind() === SyntaxKind.ImportClause
+        ) {
+          return false;
+        }
+        // `const x = { check: ... }` → fake.
+        if (decl.getKind() === SyntaxKind.VariableDeclaration) {
+          const init = decl.getInitializer?.();
+          if (init !== undefined && init.getKind() === SyntaxKind.ObjectLiteralExpression) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   let calls = 0;
   let mock = false;
   let dynspec = false;
+  const distinctLimiterSymbols = new Set(); // distinct `limiter:` arg symbols
+  let resultFakeLimiter = false; // a direct-result call passed a fake limiter
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     if (
@@ -325,6 +403,24 @@ function classify(path) {
       isExecutedFromTest(call)
     ) {
       calls += 1;
+      const tierName = helperSymbols.get(callee.getSymbol());
+      const limiterExpr = limiterArgOf(call);
+      // Distinct-limiter accounting: identify each limiter arg by its symbol so
+      // testing the SAME limiter twice does not satisfy a 2-limiter file
+      // (external review 2026-07-19, round 3). A limiter arg with no resolvable
+      // symbol (object literal / call expression) is keyed by its node text so
+      // two syntactically-distinct inline limiters still count as distinct.
+      if (limiterExpr !== undefined) {
+        const sym = limiterExpr.getKind() === SyntaxKind.Identifier
+          ? limiterExpr.getSymbol()
+          : undefined;
+        distinctLimiterSymbols.add(sym ?? `text:${limiterExpr.getText()}`);
+      }
+      // Direct-result tier: the limiter must be the production singleton, not a
+      // locally-built fake returning a fixed result.
+      if (tierName === "assertRedisFailClosedResult" && isFakeLimiterExpr(limiterExpr)) {
+        resultFakeLimiter = true;
+      }
     }
     // vi.mock(...) / vi.doMock(...) / <ns>.vi.mock(...) / <ns>.vi.doMock(...)
     if (resolveMockCallee(callee) !== null) {
@@ -411,6 +507,8 @@ function classify(path) {
     mock: mock ? 1 : 0,
     redis: redis ? 1 : 0,
     dynspec: dynspec ? 1 : 0,
+    distinct: distinctLimiterSymbols.size,
+    resultfake: resultFakeLimiter ? 1 : 0,
   };
 }
 
@@ -418,7 +516,7 @@ try {
   for (const file of files) {
     const r = classify(file);
     process.stdout.write(
-      `${file}\texists=${r.exists} import=${r.import} calls=${r.calls} mock=${r.mock} redis=${r.redis} dynspec=${r.dynspec}\n`,
+      `${file}\texists=${r.exists} import=${r.import} calls=${r.calls} mock=${r.mock} redis=${r.redis} dynspec=${r.dynspec} distinct=${r.distinct} resultfake=${r.resultfake}\n`,
     );
   }
 } catch (err) {
