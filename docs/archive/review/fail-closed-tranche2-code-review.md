@@ -127,3 +127,50 @@ Major) → fix + red fixture → Round 2 (No findings). All contracts C1–C10
 implemented and verified. R42 class convergence artifact
 (check-fail-closed-routes-have-test.sh, mutation-verified self-test, wired
 into pre-pr.sh) is the mechanical guard that keeps the class closed.
+
+---
+
+# Code Review Round 3 (external-review follow-up)
+Date: 2026-07-19
+
+## Changes from Previous Round
+Two external reviews (post-push) raised one convergent Major: the gate verified
+test coverage only for src/app/api routes, so the 3 non-route members
+(auth.config.ts, scim/rate-limit.ts, rate-limiters.ts) had their opt-in flag
+manifest-pinned but their fail-closed TESTS unclassified — test drift
+(delete/stub the test) stayed green. See deviation D9.
+
+## Fix
+scripts/checks/check-fail-closed-routes-have-test.sh: new "Non-route member
+coverage" block iterates whole-src ENUM_LIST members outside src/app/api, maps
+each to its contract test via a hardcoded NON_ROUTE_TEST_MAP (SCIM's contract
+is non-adjacent: with-scim-auth.test.ts), classifies with the AST classifier,
+applies helper/legacy/debt modes. New token NON_ROUTE_COVERAGE_UNMAPPED forces
+a new non-route opt-in to declare its test. 5 red-proven self-test fixtures
+(gate self-test 41→46). Manifest header + D9 document it.
+
+## Security re-review: No findings — gap resolved, no regression
+Independently reproduced all 4 ex-false-greens now failing with the right token
+(LEGACY_TEST_MISSING ×2, MAPPING_MOCKED_CONTRACT_TEST, NON_ROUTE_COVERAGE_UNMAPPED).
+R43 pure tightening (zero false-positive on the 3 real members). Regression-free:
+gate self-test 46 pass, real gate EXIT 0, meta-gate EXIT 0, pre-pr 51/51.
+
+## Adjudicated Low observations (no change)
+- STALE_LEGACY asymmetry: the non-route helper-mode branch does not force
+  atomic legacy-entry removal, UNLIKE the route loop. This is deliberate, not
+  lax: SCIM (scim/rate-limit.ts) currently rides BOTH a helper test AND a
+  legacy entry because helper mode is not yet the canonical mode for non-route
+  members (plan SC-T3-6, deferred). Adding STALE_LEGACY_ENTRY here would force
+  SCIM's legacy entry off and break EXPECTED_LEGACY_COUNT=16. Left as-is by
+  design; revisited when SC-T3-6 makes non-route helper mode canonical. Cannot
+  false-green real fail-closed coverage.
+- Non-route MISSING_FAIL_CLOSED_TEST tail branch (mapped + non-legacy +
+  calls==0) has no dedicated fixture: all 3 real members are legacy, and
+  writeNonRouteMember always registers legacy, so it is a defensive tail
+  unreachable via the current harness. Accepted.
+
+## Convergence
+Code review converged in 3 rounds: R1 (1 Major aliased-vi, fixed) → R2 (clean) →
+external-review R3 (1 Major non-route coverage, fixed + re-reviewed clean). The
+R42 convergence artifact (check-fail-closed-routes-have-test.sh) now covers the
+WHOLE class — route AND non-route members — with mutation-verified self-tests.

@@ -86,6 +86,25 @@ function writeManifest(entries) {
   writeFileSync(manifestFile, `${lines.length > 0 ? `${lines.join("\n")}\n` : ""}`, "utf8");
 }
 
+// Write a NON-ROUTE fail-closed member (a lib limiter / auth.config) plus its
+// mapped sibling test, at the exact repo-relative paths the gate's hardcoded
+// NON_ROUTE_TEST_MAP recognizes. Registers the member in the manifest AND the
+// legacy manifest (non-route members ride legacy mode). `testBody` is the
+// contents of the mapped test; omit to write no test file at all.
+function writeNonRouteMember(memberPath, testPath, testBody) {
+  const memberAbs = join(root, memberPath);
+  mkdirSync(dirname(memberAbs), { recursive: true });
+  writeFileSync(memberAbs, FAIL_CLOSED_LINE, "utf8");
+  manifestEntries.push([memberPath, 1]);
+  writeManifest(manifestEntries);
+  writeFileSync(legacyFile, `${memberPath}\n`, "utf8");
+  if (testBody !== undefined) {
+    const testAbs = join(root, testPath);
+    mkdirSync(dirname(testAbs), { recursive: true });
+    writeFileSync(testAbs, testBody, "utf8");
+  }
+}
+
 // Matches the real production shape (`createRateLimiter({ ... })`) — the C5
 // AST-authoritative per-file counter only recognizes this callee name, so a
 // lookalike helper name (e.g. `rateLimiter(...)`) would count as zero real
@@ -149,6 +168,67 @@ describe("check-fail-closed-routes-have-test.sh", () => {
     writeFileSync(join(altDir, "purge.test.ts"), HELPER_CONTRACT_TEST, "utf8");
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
+  });
+
+  // ── Non-route member coverage (external-review Major, 2026-07-19) ────────
+  // The 3 non-route fail-closed members (auth.config + 2 lib limiters) live
+  // outside src/app/api, so the route loop never classified their tests — the
+  // manifest pinned the opt-in flag but nothing verified a live fail-closed
+  // test still existed. These fixtures pin that the gate now catches test
+  // drift on a non-route member: a removed redisErrored reference, a stubbed
+  // mapping, an absent test, and an unmapped new opt-in.
+  describe("non-route member coverage", () => {
+    const CODE_REDIS_TEST = 'it("x", () => { const r = { redisErrored: true }; void r; });\n';
+    const NO_REDIS_TEST = 'it("x", () => { /* no code-level redisErrored */ });\n';
+
+    it("passes when a non-route legacy member's mapped test references redisErrored in code", () => {
+      writeNonRouteMember("src/auth.config.ts", "src/auth.config.test.ts", CODE_REDIS_TEST);
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+      expect(exitCode, stdout).toBe(0);
+    });
+
+    it("FAILS (LEGACY_TEST_MISSING) when a non-route member's mapped test drops its redisErrored reference", () => {
+      writeNonRouteMember("src/auth.config.ts", "src/auth.config.test.ts", NO_REDIS_TEST);
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("LEGACY_TEST_MISSING:");
+      expect(stdout).toContain("src/auth.config.ts");
+    });
+
+    it("FAILS (LEGACY_TEST_MISSING) when a non-route member's mapped test is deleted entirely", () => {
+      // testBody omitted → no test file written at the mapped path.
+      writeNonRouteMember("src/lib/security/rate-limiters.ts", "src/lib/security/rate-limiters.test.ts");
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("LEGACY_TEST_MISSING:");
+      expect(stdout).toContain("src/lib/security/rate-limiters.ts");
+    });
+
+    it("FAILS (MAPPING_MOCKED_CONTRACT_TEST) when a non-route member's helper test stubs the production mapping", () => {
+      const stubHelperTest = `import { it, vi } from "vitest";
+import { assertRedisFailClosed } from "@/__tests__/helpers/fail-closed";
+vi.mock("@/lib/security/rate-limit-audit", () => ({ checkRateLimitOrFail: vi.fn() }));
+it("x", async () => { await assertRedisFailClosed({}); });
+`;
+      writeNonRouteMember("src/lib/scim/rate-limit.ts", "src/lib/scim/with-scim-auth.test.ts", stubHelperTest);
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MAPPING_MOCKED_CONTRACT_TEST:");
+      expect(stdout).toContain("src/lib/scim/rate-limit.ts");
+    });
+
+    it("FAILS (NON_ROUTE_COVERAGE_UNMAPPED) when a new non-route file opts in but is not in the gate's member→test map", () => {
+      // A non-route member the hardcoded map does not know about.
+      const memberAbs = join(root, "src/lib/security/mystery-limiter.ts");
+      mkdirSync(dirname(memberAbs), { recursive: true });
+      writeFileSync(memberAbs, FAIL_CLOSED_LINE, "utf8");
+      manifestEntries.push(["src/lib/security/mystery-limiter.ts", 1]);
+      writeManifest(manifestEntries);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("NON_ROUTE_COVERAGE_UNMAPPED:");
+      expect(stdout).toContain("src/lib/security/mystery-limiter.ts");
+    });
   });
 
   it("passes when the opt-in route is listed in the debt file", () => {

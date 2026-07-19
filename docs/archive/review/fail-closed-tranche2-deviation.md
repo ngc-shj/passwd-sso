@@ -61,3 +61,24 @@ residue / suppression / timing-safe / hardcoded-reuse mechanical hooks all
 clean. Per tranche-1 D5, the separate 3-agent self-R-check pass is folded into
 Phase 3 Round 1 (whose experts run the full R1–R44/RS/RT checklist over the same
 diff) to avoid a duplicate pass over an unchanged diff.
+
+## D9 — External-review Major: non-route member test-coverage gap (post-push fix, 2026-07-19)
+Two external reviews (post-push) converged on a Major: the gate's coverage loop
+enumerates ONLY src/app/api, so the 3 non-route members (auth.config.ts,
+scim/rate-limit.ts, rate-limiters.ts) had their opt-in flag pinned by the
+whole-src manifest but their fail-closed TESTS were never classified. Deleting
+or stubbing a member's test left the gate green (test-drift false-green) — the
+whole-src manifest widened the CLASS scope without widening the COVERAGE scope
+to match. Root cause: my Round-1 D1 fix extended ENUM_LIST (manifest/dangling)
+to whole-src but left the coverage loop api-only.
+Fix: added a "Non-route member coverage" block that iterates ENUM_LIST members
+outside src/app/api, maps each to its contract-test path via a hardcoded
+NON_ROUTE_TEST_MAP (SCIM's contract is non-adjacent — with-scim-auth.test.ts —
+so pure adjacent derivation was insufficient), and classifies that test through
+the same helper/legacy/debt modes. New tokens: NON_ROUTE_COVERAGE_UNMAPPED (a
+new non-route opt-in must declare its test). 5 red-proven self-test fixtures
+added (redisErrored removed → LEGACY_TEST_MISSING; test deleted →
+LEGACY_TEST_MISSING; helper+mapping-stub → MAPPING_MOCKED_CONTRACT_TEST;
+unmapped opt-in → NON_ROUTE_COVERAGE_UNMAPPED; good member passes). Gate
+self-test 41→46; real-repo gate + meta-gate green. This closes the last
+test-drift path opened by burning debt to 0.

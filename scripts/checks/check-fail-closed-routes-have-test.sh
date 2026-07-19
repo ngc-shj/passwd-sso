@@ -244,6 +244,77 @@ done < <(
     | sort
 )
 
+# ── Non-route member coverage (external-review Major, 2026-07-19) ──────────
+# The route loop above enumerates ONLY src/app/api, so the non-route members
+# of the fail-closed class (lib limiters + auth.config) never had their
+# sibling test classified — the manifest pinned their opt-in flag but nothing
+# verified a live fail-closed test still exists. Deleting/weakening such a
+# test left the gate green (test-drift false-green). This block closes that
+# gap: every ENUM_LIST member outside src/app/api is classified through the
+# SAME helper/legacy/debt modes as a route, using an explicit member→test
+# map (the set is small, frozen, and pinned by EXPECTED_LEGACY_COUNT; the
+# contract test is not always adjacent — SCIM's lives in with-scim-auth).
+#
+# Map format: "<member-path>|<test-path>" per line. A member enumerated here
+# but absent from the map fails NON_ROUTE_COVERAGE_UNMAPPED (a new non-route
+# opt-in must declare where its fail-closed test lives — no silent bypass).
+NON_ROUTE_TEST_MAP="src/auth.config.ts|src/auth.config.test.ts
+src/lib/scim/rate-limit.ts|src/lib/scim/with-scim-auth.test.ts
+src/lib/security/rate-limiters.ts|src/lib/security/rate-limiters.test.ts"
+
+non_route_test_for() {
+  # Echo the mapped test path for member $1, or empty if unmapped.
+  awk -F'|' -v m="$1" '$1 == m { print $2; exit }' <<<"$NON_ROUTE_TEST_MAP"
+}
+
+while IFS= read -r member; do
+  [ -z "$member" ] && continue
+  case "$member" in src/app/api/*) continue ;; esac  # routes handled above
+
+  member_test="$(non_route_test_for "$member")"
+  if [ -z "$member_test" ]; then
+    echo "NON_ROUTE_COVERAGE_UNMAPPED: $member (opts into failClosedOnRedisError: true outside src/app/api but declares no fail-closed test in the gate's non-route map — add a <member>|<test> entry so its coverage is verified)"
+    fail=1
+    continue
+  fi
+
+  member_rec="$(node "$CLASSIFIER" "$FIXTURE_ROOT/$member_test" 2>/dev/null | awk -F'\t' 'NR==1{print $2}')"
+  if [ -z "$member_rec" ]; then
+    echo "CLASSIFIER_FAILURE: classifying $member_test for non-route member $member failed — gate fails closed."
+    exit 1
+  fi
+
+  # Helper mode: a real assertRedisFailClosed(SilentDrop) call, imported,
+  # with the production mapping NOT stubbed. (The classifier counts both the
+  # 503 helper and — once SC-T3-6 lands — the silent-drop variant as `calls`;
+  # today auth.config's silent-drop test satisfies legacy mode via redis=1.)
+  if [ "$(field "$member_rec" calls)" != "" ] && [ "$(field "$member_rec" calls)" -gt 0 ] 2>/dev/null; then
+    if [ "$(field "$member_rec" mock)" = "1" ]; then
+      echo "MAPPING_MOCKED_CONTRACT_TEST: $member (${member_test} calls the fail-closed helper but stubs the production checkRateLimitOrFail mapping)"
+      fail=1
+    fi
+    continue
+  fi
+
+  # Legacy mode: the member is in the legacy manifest and its mapped test
+  # carries a code-level redisErrored reference. Absence of either → drift.
+  if is_legacy "$member"; then
+    if [ "$(field "$member_rec" redis)" = "1" ]; then
+      continue
+    fi
+    echo "LEGACY_TEST_MISSING: $member (fail-closed-legacy-direct.txt lists it but ${member_test} no longer references redisErrored in code — fail-closed test drift)"
+    fail=1
+    continue
+  fi
+
+  # Not helper-covered and not legacy-registered: a non-route opt-in with no
+  # recognized coverage mode.
+  echo "MISSING_FAIL_CLOSED_TEST: $member (non-route opt-in with no shared-helper contract in ${member_test} and no fail-closed-legacy-direct.txt entry)"
+  fail=1
+done <<EOF
+$ENUM_LIST
+EOF
+
 # DANGLING_ENTRY — manifest entries whose file no longer opts into
 # fail-closed (or no longer exists). Forces flag removal to be a visible,
 # reviewable manifest diff (parent-plan M2 blind spot). Validated against the
