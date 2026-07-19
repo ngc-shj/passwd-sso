@@ -60,7 +60,7 @@ CLASSIFIER="$REPO_ROOT/scripts/checks/classify-fail-closed-test.mjs"
 # without mutating the real manifests. Real-repo defaults: debt burns down to
 # 0 (C3); legacy holds exactly 16 (13 routes + 3 lib members, C8d).
 EXPECTED_DEBT_COUNT="${FAIL_CLOSED_EXPECTED_DEBT_COUNT:-0}"
-EXPECTED_LEGACY_COUNT="${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-16}"
+EXPECTED_LEGACY_COUNT="${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-13}"
 
 # CI-auditable: print effective scan paths on one line.
 echo "check-fail-closed-routes-have-test: FIXTURE_ROOT=$FIXTURE_ROOT DEBT_FILE=$DEBT_FILE LEGACY_FILE=$LEGACY_FILE MANIFEST_FILE=$MANIFEST_FILE EXPECTED_DEBT_COUNT=$EXPECTED_DEBT_COUNT EXPECTED_LEGACY_COUNT=$EXPECTED_LEGACY_COUNT"
@@ -284,14 +284,26 @@ while IFS= read -r member; do
     exit 1
   fi
 
-  # Helper mode: a real assertRedisFailClosed(SilentDrop) call, imported,
-  # with the production mapping NOT stubbed. (The classifier counts both the
-  # 503 helper and — once SC-T3-6 lands — the silent-drop variant as `calls`;
-  # today auth.config's silent-drop test satisfies legacy mode via redis=1.)
+  # Helper mode: a real fail-closed contract call (assertRedisFailClosed /
+  # ...SilentDrop / ...Result — the classifier counts all three tiers as
+  # `calls`), imported, with the production mapping NOT stubbed. Symmetric
+  # with the route loop: a helper-migrated member must not linger in the
+  # debt/legacy manifests (STALE_* forces atomic removal in the same PR).
   if [ "$(field "$member_rec" calls)" != "" ] && [ "$(field "$member_rec" calls)" -gt 0 ] 2>/dev/null; then
     if [ "$(field "$member_rec" mock)" = "1" ]; then
       echo "MAPPING_MOCKED_CONTRACT_TEST: $member (${member_test} calls the fail-closed helper but stubs the production checkRateLimitOrFail mapping)"
       fail=1
+      continue
+    fi
+    if is_debt "$member"; then
+      echo "STALE_DEBT_ENTRY: $member (has a shared-helper fail-closed contract test — remove its fail-closed-test-debt.txt entry in the same PR)"
+      fail=1
+      continue
+    fi
+    if is_legacy "$member"; then
+      echo "STALE_LEGACY_ENTRY: $member (migrated to a shared-helper fail-closed contract — remove its fail-closed-legacy-direct.txt entry in the same PR)"
+      fail=1
+      continue
     fi
     continue
   fi

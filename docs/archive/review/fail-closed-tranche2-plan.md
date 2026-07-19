@@ -257,11 +257,12 @@ export async function assertRedisFailClosedSilentDrop(options: {
   `limiterFactory` = recorded factory mock (snapshot-replayed), `failure` =
   inline literal. The variant returns void; the consumer reads nothing from
   it — violations surface as thrown expectation errors.
-- Classifier note (Round 1 m17): the classifier's `calls` field counts only
-  `assertRedisFailClosed` — variant calls do NOT flip a file to helper mode.
-  The auth.config member therefore stays in legacy mode (its sibling gains
-  code-level `redisErrored` via the variant's `failure` literal); variant
-  awareness in the classifier is SC-T3-6.
+- Classifier note (Round 1 m17; SUPERSEDED by D10): originally the `calls`
+  field counted only `assertRedisFailClosed`, so variant calls did not flip a
+  file to helper mode and auth.config stayed legacy. The external-review
+  follow-up (D10) generalized `calls` to all 3 helper tiers, so auth.config
+  (silent-drop), SCIM (Response), and rate-limiters (direct-result) are now
+  helper mode. SC-T3-6 is resolved in-tranche.
 - Self-test (C7 extends `fail-closed.test.ts`): passing case; rejects when
   (a) effect spy fired, (b) empty `assertNoEffect`, (c) limiter never reached,
   (d) attributed factory call lacks the flag (incl. sibling-masking shape).
@@ -580,11 +581,11 @@ export async function assertRedisFailClosedSilentDrop(options: {
   3. The 4 tenant/* partial stubs are tolerated solely via the C6 frozen
      exemption list; their migration (stub removal + helper contract) is the
      bulk of tranche 3 (SC-T3-1).
-  4. Target end-state (Round 1 m17): all 13 legacy ROUTE entries migrate to
-     helper mode and the C6 exemption list empties with them. The 3 lib
-     members stay legacy until SC-T3-6 (classifier variant awareness) makes
-     helper mode expressible for non-Response members; C9.4 explicitly does
-     NOT promise "empty legacy file" while SC-T3-6 is open.
+  4. Target end-state (Round 1 m17; updated by D10): all 13 legacy ROUTE
+     entries migrate to helper mode and the C6 exemption list empties with
+     them (tranche 3, SC-T3-1). The 3 lib members were migrated to helper mode
+     in-tranche (D10, SC-T3-6 resolved) and removed from legacy — so the legacy
+     file now holds exactly the 13 ROUTE members (EXPECTED_LEGACY_COUNT=13).
 
 ### C10 — Route-handler-level integration proof (SC3, reduced)
 
@@ -655,7 +656,11 @@ export async function assertRedisFailClosedSilentDrop(options: {
   as-is.
 - SC-T3-6: classifier awareness of `assertRedisFailClosedSilentDrop` as a
   helper call (enables helper mode for non-Response members; prerequisite
-  for retiring the 3 lib members' legacy entries) — owner: tranche 3.
+  for retiring the 3 lib members' legacy entries) — **RESOLVED in-tranche**
+  (external-review follow-up, deviation D10): classifier now recognizes all 3
+  helper tiers (Response / silent-drop / direct-result via the new
+  `assertRedisFailClosedResult`); all 3 lib members migrated to helper mode
+  and removed from legacy (EXPECTED_LEGACY_COUNT 16→13).
 
 ### Risks
 

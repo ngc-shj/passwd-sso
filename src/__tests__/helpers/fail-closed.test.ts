@@ -9,7 +9,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Mock } from "vitest";
-import { assertRedisFailClosed, assertRedisFailClosedSilentDrop, snapshotFactory } from "./fail-closed";
+import {
+  assertRedisFailClosed,
+  assertRedisFailClosedSilentDrop,
+  assertRedisFailClosedResult,
+  snapshotFactory,
+} from "./fail-closed";
 
 function makeLimiter(): { check: Mock } {
   return { check: vi.fn() };
@@ -407,5 +412,31 @@ describe("snapshotFactory", () => {
         failure: { allowed: false, redisErrored: true },
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("assertRedisFailClosedResult", () => {
+  it("passes when the limiter result is { allowed: false, redisErrored: true }", async () => {
+    await expect(
+      assertRedisFailClosedResult({
+        invoke: async () => ({ allowed: false, redisErrored: true }),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects when the result is missing redisErrored (in-memory fallback allowed the request)", async () => {
+    await expect(
+      assertRedisFailClosedResult({
+        invoke: async () => ({ allowed: true }),
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects when the result denies but does NOT flag redisErrored (a 429, not fail-closed)", async () => {
+    await expect(
+      assertRedisFailClosedResult({
+        invoke: async () => ({ allowed: false, retryAfterMs: 5_000 }),
+      }),
+    ).rejects.toThrow();
   });
 });

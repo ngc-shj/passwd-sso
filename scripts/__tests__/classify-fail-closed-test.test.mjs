@@ -79,6 +79,26 @@ it.only("focused", async () => {
     expect(f.calls).toBe(2);
   });
 
+  it("counts assertRedisFailClosedSilentDrop as a helper call (silent-drop tier)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedSilentDrop } from "@/__tests__/helpers/fail-closed";
+it("silent drop", async () => {
+  await assertRedisFailClosedSilentDrop({ failure: { allowed: false, redisErrored: true } });
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 1 });
+  });
+
+  it("counts assertRedisFailClosedResult as a helper call (direct-result tier)", () => {
+    const f = classify(`import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+it("direct result", async () => {
+  await assertRedisFailClosedResult({ invoke: async () => ({ allowed: false, redisErrored: true }) });
+});
+`);
+    expect(f).toMatchObject({ import: 1, calls: 1 });
+  });
+
   it("counts an ALIAS import call by symbol (import binding, not name text)", () => {
     const f = classify(`import { it } from "vitest";
 import { assertRedisFailClosed as assertFailClosed } from "@/__tests__/helpers/fail-closed";

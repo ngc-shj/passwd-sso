@@ -54,7 +54,19 @@ import { dirname, posix as posixPath } from "node:path";
 import { Project, SyntaxKind, ts } from "ts-morph";
 
 const HELPER_MODULE = "@/__tests__/helpers/fail-closed";
-const HELPER_NAME = "assertRedisFailClosed";
+// All shared fail-closed contract helpers count as a real helper-mode call.
+// Three tiers, one per fail-closed call-site shape: the Response 503 helper
+// (route handlers), the silent-drop helper (non-Response producers like
+// auth.config's magic-link send), and the direct-result helper (limiter
+// modules that return RateLimitResult rather than a Response, e.g.
+// v1ApiKeyLimiter). A test using ANY of them is a genuine contract test —
+// the gate must not misclassify the silent-drop / result tiers as the
+// weaker "legacy redisErrored-reference" mode (external review 2026-07-19).
+const HELPER_NAMES = new Set([
+  "assertRedisFailClosed",
+  "assertRedisFailClosedSilentDrop",
+  "assertRedisFailClosedResult",
+]);
 const MAPPING_MODULE = "@/lib/security/rate-limit-audit";
 // Suffix match target after normalization (extension stripped, relative
 // specifiers resolved against the test file's directory) — catches alias
@@ -200,14 +212,14 @@ function classify(path) {
   // imported name has a different symbol and never counts, while a legitimate
   // alias call does (PR #680 review round 3, 7.1).
   let hasImport = false;
-  let helperSymbol;
+  const helperSymbols = new Set(); // local binding symbols of ANY helper tier
   for (const imp of sf.getImportDeclarations()) {
     if (imp.getModuleSpecifierValue() !== HELPER_MODULE) continue;
-    const spec = imp.getNamedImports().find((n) => n.getName() === HELPER_NAME);
-    if (spec !== undefined) {
+    for (const spec of imp.getNamedImports()) {
+      if (!HELPER_NAMES.has(spec.getName())) continue;
       hasImport = true;
-      helperSymbol = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
-      break;
+      const sym = (spec.getAliasNode() ?? spec.getNameNode()).getSymbol();
+      if (sym !== undefined) helperSymbols.add(sym);
     }
   }
 
@@ -307,9 +319,9 @@ function classify(path) {
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     if (
-      helperSymbol !== undefined &&
+      helperSymbols.size > 0 &&
       callee.getKind() === SyntaxKind.Identifier &&
-      callee.getSymbol() === helperSymbol &&
+      helperSymbols.has(callee.getSymbol()) &&
       isExecutedFromTest(call)
     ) {
       calls += 1;

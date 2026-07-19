@@ -174,3 +174,60 @@ Code review converged in 3 rounds: R1 (1 Major aliased-vi, fixed) → R2 (clean)
 external-review R3 (1 Major non-route coverage, fixed + re-reviewed clean). The
 R42 convergence artifact (check-fail-closed-routes-have-test.sh) now covers the
 WHOLE class — route AND non-route members — with mutation-verified self-tests.
+
+---
+
+# Code Review Round 4 (external-review follow-up 2)
+Date: 2026-07-19
+
+## Changes from Previous Round
+External review noted D9 caught non-route test DELETION but not WEAKENING: a
+member's mapped test could keep a bare `redisErrored` identifier while its real
+fail-closed assertion was gutted, because (1) the classifier didn't recognize
+assertRedisFailClosedSilentDrop as a helper call (auth.config's strong
+silent-drop test fell to the weak legacy tier) and (2) the non-route helper
+branch lacked STALE_LEGACY. See deviation D10.
+
+## Fix
+- classify-fail-closed-test.mjs: HELPER_NAME → HELPER_NAMES set (3 tiers:
+  assertRedisFailClosed / ...SilentDrop / ...Result); import + call counting
+  match any tier.
+- src/__tests__/helpers/fail-closed.ts: new assertRedisFailClosedResult
+  (direct-result tier; asserts redisErrored===true && allowed===false) + 3
+  self-test red cases. rate-limiters.test.ts migrated to it.
+- check-fail-closed-routes-have-test.sh: non-route helper branch fires
+  STALE_DEBT_ENTRY / STALE_LEGACY_ENTRY (route parity); EXPECTED_LEGACY_COUNT
+  16→13.
+- All 3 non-route members migrated to HELPER MODE, removed from legacy
+  (legacy = 13 routes now). Resolves plan SC-T3-6.
+- Self-test: non-route positive fixture uses a real helper (not
+  {redisErrored:true}); STALE_LEGACY non-route red fixture added; classifier +
+  helper self-tests gain the new-tier cases.
+
+## Verification (orchestrator, direct)
+Red-proof reproduced first-hand: a helper-mode non-route member whose mapped
+test is a bare `{redisErrored:true}` placeholder (NOT in legacy) now fails
+MISSING_FAIL_CLOSED_TEST — the placeholder no longer counts as coverage. All 3
+real members classify calls=1 (helper mode). classifier self-test 34, gate
+self-test 47, helper self-test 25, real gate + meta-gate EXIT 0, pre-pr 51/51.
+The security re-review agent for this round was interrupted by a session
+restart; every check it was tasked with was independently reproduced by the
+orchestrator (member classification, the 4 drift/weakening red-proofs, gate +
+meta-gate + pre-pr green), so its findings are not required to close the round.
+
+## Adjudicated (no change)
+- Reviewer's "duplicate check_dangling" item: NOT a bug — the two calls pass
+  different lists (DEBT_LIST vs LEGACY_LIST); same as the upstream tranche-1
+  gate. No edit.
+- Route legacy tier (13 route members) still passes on a code-level
+  redisErrored reference: unchanged and acceptable — routes are the documented
+  weaker legacy tier tracked for migration (plan T3-1). The external review's
+  concern was specifically the NON-route members, which are now ALL helper
+  mode; no non-route member can ride the weak legacy path.
+
+## Convergence
+Code review converged in 4 rounds: R1 (Major aliased-vi, fixed) → R2 (clean) →
+R3 external (Major non-route coverage gap, fixed) → R4 external (Major non-route
+weakening + tier migration, fixed). The R42 convergence artifact now verifies
+the WHOLE class — route AND non-route — for coverage AND semantic strength, with
+mutation-verified self-tests.

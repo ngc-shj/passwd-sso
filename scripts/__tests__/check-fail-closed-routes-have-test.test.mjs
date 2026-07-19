@@ -88,22 +88,33 @@ function writeManifest(entries) {
 
 // Write a NON-ROUTE fail-closed member (a lib limiter / auth.config) plus its
 // mapped sibling test, at the exact repo-relative paths the gate's hardcoded
-// NON_ROUTE_TEST_MAP recognizes. Registers the member in the manifest AND the
-// legacy manifest (non-route members ride legacy mode). `testBody` is the
-// contents of the mapped test; omit to write no test file at all.
-function writeNonRouteMember(memberPath, testPath, testBody) {
+// NON_ROUTE_TEST_MAP recognizes. Registers the member in the manifest and,
+// when `legacy: true`, in the legacy manifest. `testBody` is the contents of
+// the mapped test; omit to write no test file at all. The 3 real members are
+// helper-mode (legacy: false); the legacy path is still exercised for the
+// route-parity drift fixtures.
+function writeNonRouteMember(memberPath, testPath, testBody, { legacy = true } = {}) {
   const memberAbs = join(root, memberPath);
   mkdirSync(dirname(memberAbs), { recursive: true });
   writeFileSync(memberAbs, FAIL_CLOSED_LINE, "utf8");
   manifestEntries.push([memberPath, 1]);
   writeManifest(manifestEntries);
-  writeFileSync(legacyFile, `${memberPath}\n`, "utf8");
+  if (legacy) writeFileSync(legacyFile, `${memberPath}\n`, "utf8");
   if (testBody !== undefined) {
     const testAbs = join(root, testPath);
     mkdirSync(dirname(testAbs), { recursive: true });
     writeFileSync(testAbs, testBody, "utf8");
   }
 }
+
+// A genuine shared-helper contract test for a non-route member (helper mode,
+// production mapping NOT stubbed) — the real coverage shape the 3 members use.
+const NON_ROUTE_HELPER_TEST = `import { it } from "vitest";
+import { assertRedisFailClosedResult } from "@/__tests__/helpers/fail-closed";
+it("fails closed when Redis is unreachable", async () => {
+  await assertRedisFailClosedResult({ invoke: async () => ({ allowed: false, redisErrored: true }) });
+});
+`;
 
 // Matches the real production shape (`createRateLimiter({ ... })`) — the C5
 // AST-authoritative per-file counter only recognizes this callee name, so a
@@ -178,16 +189,39 @@ describe("check-fail-closed-routes-have-test.sh", () => {
   // drift on a non-route member: a removed redisErrored reference, a stubbed
   // mapping, an absent test, and an unmapped new opt-in.
   describe("non-route member coverage", () => {
-    const CODE_REDIS_TEST = 'it("x", () => { const r = { redisErrored: true }; void r; });\n';
     const NO_REDIS_TEST = 'it("x", () => { /* no code-level redisErrored */ });\n';
 
-    it("passes when a non-route legacy member's mapped test references redisErrored in code", () => {
-      writeNonRouteMember("src/auth.config.ts", "src/auth.config.test.ts", CODE_REDIS_TEST);
-      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+    it("passes when a non-route member's mapped test is a genuine shared-helper contract (helper mode)", () => {
+      // The real coverage shape: a fail-closed helper call, mapping not stubbed,
+      // NOT in the legacy manifest. This is how the 3 real members classify.
+      writeNonRouteMember(
+        "src/auth.config.ts",
+        "src/auth.config.test.ts",
+        NON_ROUTE_HELPER_TEST,
+        { legacy: false },
+      );
+      const { exitCode, stdout } = runGuard();
       expect(exitCode, stdout).toBe(0);
     });
 
-    it("FAILS (LEGACY_TEST_MISSING) when a non-route member's mapped test drops its redisErrored reference", () => {
+    it("FAILS (STALE_LEGACY_ENTRY) when a helper-migrated non-route member still has a legacy entry", () => {
+      // Route-parity: a helper-mode member must drop its legacy entry in the
+      // same PR (mirrors the route loop's STALE_LEGACY_ENTRY). Without this,
+      // a member could migrate to helper mode yet keep inflating the legacy
+      // count and mislabeling its migration state.
+      writeNonRouteMember(
+        "src/auth.config.ts",
+        "src/auth.config.test.ts",
+        NON_ROUTE_HELPER_TEST,
+        { legacy: true },
+      );
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STALE_LEGACY_ENTRY:");
+      expect(stdout).toContain("src/auth.config.ts");
+    });
+
+    it("FAILS (LEGACY_TEST_MISSING) when a legacy-mode non-route member's mapped test drops its redisErrored reference", () => {
       writeNonRouteMember("src/auth.config.ts", "src/auth.config.test.ts", NO_REDIS_TEST);
       const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
       expect(exitCode).toBe(1);
@@ -195,7 +229,7 @@ describe("check-fail-closed-routes-have-test.sh", () => {
       expect(stdout).toContain("src/auth.config.ts");
     });
 
-    it("FAILS (LEGACY_TEST_MISSING) when a non-route member's mapped test is deleted entirely", () => {
+    it("FAILS (LEGACY_TEST_MISSING) when a legacy-mode non-route member's mapped test is deleted entirely", () => {
       // testBody omitted → no test file written at the mapped path.
       writeNonRouteMember("src/lib/security/rate-limiters.ts", "src/lib/security/rate-limiters.test.ts");
       const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });

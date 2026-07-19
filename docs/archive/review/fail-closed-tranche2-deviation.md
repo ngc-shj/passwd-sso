@@ -82,3 +82,34 @@ LEGACY_TEST_MISSING; helper+mapping-stub → MAPPING_MOCKED_CONTRACT_TEST;
 unmapped opt-in → NON_ROUTE_COVERAGE_UNMAPPED; good member passes). Gate
 self-test 41→46; real-repo gate + meta-gate green. This closes the last
 test-drift path opened by burning debt to 0.
+
+## D10 — External-review follow-up: non-route test-WEAKENING detection + tier migration (2026-07-19)
+The D9 non-route coverage block caught test DELETION but not test WEAKENING: a
+member's mapped test could keep a bare `redisErrored` identifier (legacy tier
+`redis=1`) while its real fail-closed assertion was gutted. Two sub-causes:
+(1) the classifier's single HELPER_NAME didn't recognize
+assertRedisFailClosedSilentDrop, so auth.config's strong silent-drop test fell
+to the weak legacy tier; (2) the non-route helper branch lacked STALE_LEGACY,
+so a helper-migrated member could keep a legacy entry.
+Fix (3 tiers of shared helper, one per fail-closed call-site shape):
+- classifier: HELPER_NAME → HELPER_NAMES set {assertRedisFailClosed (Response),
+  assertRedisFailClosedSilentDrop (non-Response producer),
+  assertRedisFailClosedResult (direct RateLimitResult)}; import + call counting
+  match any tier.
+- new assertRedisFailClosedResult helper (asserts redisErrored===true &&
+  allowed===false); rate-limiters.test.ts migrated to it.
+- non-route helper branch now fires STALE_DEBT_ENTRY / STALE_LEGACY_ENTRY
+  (route parity).
+- Migration: all 3 non-route members are now HELPER MODE, removed from the
+  legacy manifest → EXPECTED_LEGACY_COUNT 16→13 (legacy now = 13 routes only).
+  This resolves plan SC-T3-6 (non-route helper mode is now expressible) and
+  the direct-result tier no longer rides the weak legacy redisErrored-reference
+  check.
+- Self-test hardened: the non-route positive fixture uses a real helper (not a
+  bare {redisErrored:true} placeholder); added a STALE_LEGACY non-route red
+  fixture; classifier gains silent-drop + result recognition cases; helper
+  self-test gains 3 result-tier red cases.
+Verified: classifier self-test 34, gate self-test 47, helper self-test 25, real
+gate + meta-gate EXIT 0, pre-pr 51/51. All 3 members classify calls=1.
+Note on the reviewer's "duplicate check_dangling" item: NOT a bug — the two
+calls take different lists (DEBT_LIST vs LEGACY_LIST), same as upstream.

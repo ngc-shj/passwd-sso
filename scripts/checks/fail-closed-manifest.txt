@@ -28,14 +28,18 @@
 #
 # 65 entries: 62 route files under src/app/api + 3 non-route lib members
 # (src/auth.config.ts, src/lib/scim/rate-limit.ts,
-# src/lib/security/rate-limiters.ts) whose siblings are registered in
-# fail-closed-legacy-direct.txt (helper mode is not yet expressible for
-# these non-Response call sites — see plan SC-T3-6). The non-route members'
-# fail-closed TESTS are verified by the gate's NON_ROUTE_TEST_MAP (each
-# member → its contract test path), classified through the same
-# helper/legacy/debt modes as a route — so deleting or stubbing a member's
-# test fails the gate (LEGACY_TEST_MISSING / MAPPING_MOCKED_CONTRACT_TEST),
-# not just editing its manifest count. Sum of all counts here
+# src/lib/security/rate-limiters.ts). Each non-route member is covered by a
+# tier-appropriate shared helper — silent-drop (auth.config magic-link),
+# response (SCIM), direct-result (v1ApiKeyLimiter) — so all three are
+# HELPER MODE, not legacy (external review 2026-07-19: the direct-result
+# helper replaced the weak "a redisErrored identifier appears in the file"
+# legacy check). The gate verifies their tests via NON_ROUTE_TEST_MAP (each
+# member → its contract test path, since SCIM's is non-adjacent), classified
+# through the same helper/legacy/debt modes as a route — so deleting the
+# test (LEGACY_TEST_MISSING), stubbing the mapping
+# (MAPPING_MOCKED_CONTRACT_TEST), or leaving a stale legacy entry after
+# migration (STALE_LEGACY_ENTRY) all fail the gate, not just an edit to the
+# manifest count. Sum of all counts here
 # is 72 (69 across the 62 route files, matching AC4.4's
 # EXPECTED_LIMITER_COUNT, + 3 for the lib members) — the gate cross-checks
 # the src/app/api subset sum against EXPECTED_LIMITER_COUNT so the two

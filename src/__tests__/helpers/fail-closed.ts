@@ -215,3 +215,32 @@ export async function assertRedisFailClosedSilentDrop(options: {
   const factoryOptions = factoryArgs[0] as { failClosedOnRedisError?: boolean };
   expect(factoryOptions.failClosedOnRedisError).toBe(true);
 }
+
+/**
+ * Direct-result fail-closed contract for a limiter MODULE (not a route or a
+ * producer) — a call site that returns a `RateLimitResult` for its own caller
+ * to map, rather than emitting a Response or a side effect. `v1ApiKeyLimiter`
+ * (src/lib/security/rate-limiters.ts) is the canonical member: on an
+ * unreachable Redis it must return `{ allowed: false, redisErrored: true }`
+ * WITHOUT the in-memory fallback, so the consuming route (checkRateLimitOrFail)
+ * can map it to a 503.
+ *
+ * The gate counts a call to this helper as a genuine fail-closed contract
+ * (helper mode), so the direct-result tier is no longer verified by the weak
+ * "a `redisErrored` identifier appears somewhere in the file" legacy check —
+ * an unrelated placeholder can no longer masquerade as coverage (external
+ * review 2026-07-19). `invoke` runs the real `limiter.check(...)` against a
+ * limiter whose Redis is unreachable; the helper asserts the fail-closed
+ * result shape.
+ */
+export async function assertRedisFailClosedResult(options: {
+  /** Runs the real limiter.check(...) and returns its RateLimitResult. */
+  invoke: () => Promise<RateLimitResult>;
+}): Promise<void> {
+  const { invoke } = options;
+  const result = await invoke();
+  // Fail-closed: unreachable Redis MUST deny (no in-memory fallback) and flag
+  // redisErrored so the caller maps it to 503, not 429.
+  expect(result.redisErrored).toBe(true);
+  expect(result.allowed).toBe(false);
+}
