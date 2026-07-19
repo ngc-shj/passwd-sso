@@ -11,7 +11,6 @@ const {
   mockTenantFindUnique,
   mockTransaction,
   mockRateLimitCheck,
-  mockCheckRateLimitOrFail,
   mockEnforceAccessRestriction,
   mockRevokeExtensionTokenFamily,
   mockDerivePasskeyState,
@@ -23,7 +22,6 @@ const {
   mockTenantFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
   mockRateLimitCheck: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn(),
   mockEnforceAccessRestriction: vi.fn(),
   mockRevokeExtensionTokenFamily: vi.fn(),
   mockDerivePasskeyState: vi.fn(),
@@ -49,9 +47,6 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
@@ -86,7 +81,9 @@ describe("POST /api/extension/token/refresh — cnfJkt preservation (C10)", () =
   beforeEach(() => {
     vi.clearAllMocks();
     _resetPasskeyAuditForTests();
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    // Limiter-layer mock: default allowed:true keeps the production
+    // checkRateLimitOrFail mapping in path.
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockEnforceAccessRestriction.mockResolvedValue(null);
 
     mockWithUserTenantRls.mockImplementation(

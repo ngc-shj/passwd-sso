@@ -1,27 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockGetRedis,
   mockRedisSet,
   mockPrismaCredential,
   mockWithUserTenantRls,
   mockGenerateAuthenticationOpts,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockGetRedis: vi.fn(),
-  mockRedisSet: vi.fn(),
-  mockPrismaCredential: { findFirst: vi.fn() },
-  mockWithUserTenantRls: vi.fn(),
-  mockGenerateAuthenticationOpts: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockGetRedis: vi.fn(),
+    mockRedisSet: vi.fn(),
+    mockPrismaCredential: { findFirst: vi.fn() },
+    mockWithUserTenantRls: vi.fn(),
+    mockGenerateAuthenticationOpts: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/redis", () => ({ getRedis: mockGetRedis }));
 vi.mock("@/lib/prisma", () => ({
@@ -56,6 +64,16 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+
+// Module-level `rateLimiter = createRateLimiter(...)` runs at import time,
+// above. Snapshot the recorded factory call now (module scope, before any
+// test/beforeEach executes) — the global beforeEach's vi.clearAllMocks()
+// would otherwise wipe mockCreateRateLimiter.mock.calls/.results before the
+// first test runs.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const URL = "http://localhost:3000/api/webauthn/credentials/cred-row-1/prf/options";
 const params = { params: Promise.resolve({ id: "cred-row-1" }) };
@@ -98,6 +116,17 @@ describe("POST /api/webauthn/credentials/[id]/prf/options", () => {
     mockGetRedis.mockReturnValue(null);
     const res = await POST(createRequest("POST", URL), params);
     expect(res.status).toBe(503);
+  });
+
+  it("fails closed (503, no mutation) when Redis rate-limit check errors", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", URL), params),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockRedisSet, mockPrismaCredential.findFirst],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 404 when credential not found / not owned by user", async () => {

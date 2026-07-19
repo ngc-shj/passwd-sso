@@ -716,3 +716,33 @@ export async function assertRedisFailClosedSilentDrop(options: {
 | C8  | Out-of-scan member coverage + v1 envelope fix (throttle-reset pinned) | locked |
 | C9  | Legacy migration policy                                        | locked |
 | C10 | Route-handler integration proof (2 families, red-proven)       | locked |
+
+## Implementation Checklist (Phase 2-1)
+
+### CI parity
+- `check-fail-closed-routes-have-test.sh` and `check-gate-selftest-coverage.sh`
+  both run in `scripts/pre-pr.sh` (:164, :198) and are within the CI gate set
+  (extract-ci-checks: 13 gates, all pre-pr subset). No parity gap.
+- Both modified scripts already have sibling self-tests → meta-gate satisfied,
+  no gate-selftest-debt entries.
+
+### Reusable assets (must reuse, not reimplement)
+- `assertRedisFailClosed` + `snapshotFactory` (src/__tests__/helpers/fail-closed.ts) — C1 extends this file.
+- `__resetThrottleForTests` (rate-limit-audit.ts:264), `AUDIT_ACTION.RATE_LIMIT_FAIL_CLOSED`, `logAuditAsync`/`tenantAuditBase` (src/lib/audit/audit.ts) — C8b.
+- AST matchers `parseRouteSource` / `hasCallWithObjectFlag` / object-flag helpers (src/__tests__/proxy/ast-guards.ts) — precedent for C5 AST per-file count.
+- ts-morph in-memory project pattern (classify-fail-closed-test.mjs) — C6 classifier hardening extends this.
+- Gate seams: ENV_POLLUTION_GUARD (check-fail-closed-routes-have-test.sh:63-70), aggregate-skip (:244), read_manifest/grep -qxF (:75-98) — reuse for the manifest override.
+
+### Files to modify/create
+- CREATE: scripts/checks/fail-closed-manifest.txt (path<TAB>count, 65 entries)
+- MODIFY: scripts/checks/check-fail-closed-routes-have-test.sh (C3 ratchet, C5 manifest+whole-src+config-seam, C6 stub scan)
+- MODIFY: scripts/checks/classify-fail-closed-test.mjs (C6 hardening: recall-first vi, doMock, dynamic-specifier fail-loud, .tsx virtual path)
+- MODIFY: scripts/__tests__/check-fail-closed-routes-have-test.test.mjs (red fixtures FIRST)
+- MODIFY: scripts/__tests__/classify-fail-closed-test.test.mjs (classifier red fixtures FIRST)
+- MODIFY: src/__tests__/helpers/fail-closed.ts (C1 variant) + fail-closed.test.ts (C1 self-test)
+- MODIFY: 31 route.test.ts (C2) + key-reset rename (#10) + 5 central stubs (C7) + execute-partial-failure
+- MODIFY: src/lib/scim/with-scim-auth.test.ts (C8b), src/auth.config.test.ts (C8a)
+- MODIFY: src/app/api/v1/vault/status/route.ts + route.test.ts, src/app/api/v1/tags/route.ts + route.test.ts (C8c)
+- MODIFY: scripts/checks/fail-closed-test-debt.txt (31→0, C3), fail-closed-legacy-direct.txt (+3, C8d)
+- MODIFY: 3 src/lib comment rewordings (C5: audit.ts:225, ip-rate-limit.ts:20, rate-limit-audit.ts:2)
+- CREATE: src/__tests__/db-integration/rate-limit-fail-closed-routes.integration.test.ts (C10)

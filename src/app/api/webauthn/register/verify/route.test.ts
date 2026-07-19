@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import type { verifyRegistration } from "@/lib/auth/webauthn/webauthn-server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // T6 (Round-1 plan): mockVerifyRegistration typed against verifyRegistration's
 // real signature so a future @simplewebauthn major bump that changes
@@ -12,6 +13,7 @@ import type { verifyRegistration } from "@/lib/auth/webauthn/webauthn-server";
 const {
   mockAuth,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockGetRedis,
   mockRedisGetdel,
   mockVerifyRegistration,
@@ -23,26 +25,32 @@ const {
   mockWithUserTenantRls,
   mockSendEmail,
   mockParseDeviceFromUserAgent,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockGetRedis: vi.fn(),
-  mockRedisGetdel: vi.fn(),
-  mockVerifyRegistration: vi.fn() as Mock<typeof verifyRegistration>,
-  mockUint8ArrayToBase64url: vi.fn((b: Uint8Array) => Buffer.from(b).toString("base64url")),
-  mockGetRpOrigin: vi.fn(() => "https://example.com"),
-  mockLogAudit: vi.fn(),
-  mockPrismaUserFindUnique: vi.fn(),
-  mockPrismaCredentialCreate: vi.fn(),
-  mockWithUserTenantRls: vi.fn(),
-  mockSendEmail: vi.fn(),
-  mockParseDeviceFromUserAgent: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockGetRedis: vi.fn(),
+    mockRedisGetdel: vi.fn(),
+    mockVerifyRegistration: vi.fn() as Mock<typeof verifyRegistration>,
+    mockUint8ArrayToBase64url: vi.fn((b: Uint8Array) => Buffer.from(b).toString("base64url")),
+    mockGetRpOrigin: vi.fn(() => "https://example.com"),
+    mockLogAudit: vi.fn(),
+    mockPrismaUserFindUnique: vi.fn(),
+    mockPrismaCredentialCreate: vi.fn(),
+    mockWithUserTenantRls: vi.fn(),
+    mockSendEmail: vi.fn(),
+    mockParseDeviceFromUserAgent: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -115,6 +123,16 @@ vi.mock("@/lib/http/parse-body", () => ({
 }));
 
 import { POST } from "./route";
+
+// Module-level `rateLimiter = createRateLimiter(...)` runs at import time,
+// above. Snapshot the recorded factory call now (module scope, before any
+// test/beforeEach executes) — the global beforeEach's vi.clearAllMocks()
+// would otherwise wipe mockCreateRateLimiter.mock.calls/.results before the
+// first test runs.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 // ── Test data ────────────────────────────────────────────────
 
@@ -419,6 +437,17 @@ describe("POST /api/webauthn/register/verify", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("fails closed (503, no mutation) when Redis rate-limit check errors", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest("POST", ROUTE_URL, { body: makeBody() })),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockRedisGetdel, mockPrismaCredentialCreate, mockSendEmail],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // ── Transport allowlist ──────────────────────────────────

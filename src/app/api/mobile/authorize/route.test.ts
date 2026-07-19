@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -11,10 +12,13 @@ const {
   mockGetAppOrigin,
   mockRequireRecentCurrentAuthMethod,
   mockEnforceAccessRestriction,
-  mockCheckRateLimitOrFail,
+  mockCheck,
+  mockCreateRateLimiter,
   mockLogAuditAsync,
   mockDerivePasskeyState,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockAuth: vi.fn(),
   mockMobileBridgeCodeCreate: vi.fn(),
   mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
@@ -25,10 +29,14 @@ const {
   mockGetAppOrigin: vi.fn(() => "https://example.test"),
   mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
   mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
+  mockCheck,
+  // Recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
   mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
   mockDerivePasskeyState: vi.fn(),
-}));
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
@@ -70,8 +78,8 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -96,6 +104,13 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
 
 import { GET } from "./route";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
+
+// Module-scope snapshot (route.ts:59 `const authorizeLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const authorizeLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const authorizeLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 // C6: device_jkt is the RFC 7638 JWK thumbprint (43 base64url chars). The
 // legacy device_pubkey field (base64url SPKI-DER) was removed because the
@@ -128,7 +143,7 @@ describe("GET /api/mobile/authorize", () => {
     );
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
     mockEnforceAccessRestriction.mockResolvedValue(null);
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockCheck.mockResolvedValue({ allowed: true });
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockMobileBridgeCodeCreate.mockResolvedValue({ id: "00000000-0000-4000-8000-000000000003" });
     // Default: passkey enforcement off (does not block).
@@ -190,25 +205,21 @@ describe("GET /api/mobile/authorize", () => {
   });
 
   it("returns the rate-limit response and writes no code when the per-user limiter blocks", async () => {
-    mockCheckRateLimitOrFail.mockResolvedValueOnce(
-      Response.json({ error: "RATE_LIMITED" }, { status: 429 }),
-    );
+    mockCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 5_000 });
     const res = await GET(createRequest("GET", buildUrl(VALID)));
     expect(res.status).toBe(429);
     expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
   });
 
-  it("fails closed with 503 and writes no code when the limiter reports redisErrored", async () => {
-    // The authorize limiter is fail-closed on Redis error, so when Redis is
-    // unavailable (redisErrored) checkRateLimitOrFail returns a 503
-    // SERVICE_UNAVAILABLE response. The route must propagate it before issuing
-    // any bridge code (fail closed, not open).
-    mockCheckRateLimitOrFail.mockResolvedValueOnce(
-      Response.json({ error: "SERVICE_UNAVAILABLE" }, { status: 503 }),
-    );
-    const res = await GET(createRequest("GET", buildUrl(VALID)));
-    expect(res.status).toBe(503);
-    expect(mockMobileBridgeCodeCreate).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => GET(createRequest("GET", buildUrl(VALID))),
+      limiter: authorizeLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockMobileBridgeCodeCreate],
+      limiterFactory: authorizeLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 500 when no app origin is configured and the request is unauthenticated", async () => {

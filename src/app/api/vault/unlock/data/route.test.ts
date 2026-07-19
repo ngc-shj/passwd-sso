@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockCheckAuth,
@@ -9,22 +10,27 @@ const {
   mockWithUserTenantRls,
   mockWithTenantRls,
   mockRateLimitCheck,
+  mockCreateRateLimiter,
   mockCheckLockout,
-} = vi.hoisted(() => ({
-  mockCheckAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn() },
-  mockPrismaVaultKey: { findUnique: vi.fn() },
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockCheckLockout: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimitCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockCheckAuth: vi.fn(),
+    mockPrismaUser: { findUnique: vi.fn() },
+    mockPrismaVaultKey: { findUnique: vi.fn() },
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockRateLimitCheck,
+    mockCreateRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
+    mockCheckLockout: vi.fn(),
+  };
+});
 vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/auth/policy/account-lockout", () => ({
   checkLockout: mockCheckLockout,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -45,6 +51,16 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET } from "./route";
+
+// Module-level `vaultUnlockDataLimiter = createRateLimiter(...)` runs at
+// import time, above. Snapshot the recorded factory call now (module scope,
+// before any test/beforeEach executes) — the global beforeEach's
+// vi.clearAllMocks() would otherwise wipe
+// mockCreateRateLimiter.mock.calls/.results before the first test runs.
+const vaultUnlockDataLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const vaultUnlockDataLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimitCheck;
+};
 
 function authOk(userId = "test-user-id", type = "session", tenantId = "tenant-1") {
   const auth = type === "token"
@@ -85,6 +101,21 @@ describe("GET /api/vault/unlock/data", () => {
     expect(json.lockedUntil).toBe(lockedUntil.toISOString());
     // No key-material lookup should occur when locked
     expect(mockPrismaUser.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    // checkLockout precedes the limiter — arrange unlocked so the request
+    // reaches the rate-limit check.
+    mockCheckLockout.mockResolvedValue({ locked: false, lockedUntil: null });
+
+    await assertRedisFailClosed({
+      invoke: () => GET(req()),
+      limiter: vaultUnlockDataLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaUser.findUnique, mockPrismaVaultKey.findUnique],
+      limiterFactory: vaultUnlockDataLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("accepts extension token with vault:unlock-data scope", async () => {

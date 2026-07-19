@@ -83,9 +83,6 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   }),
 }));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: vi.fn().mockResolvedValue(null),
-}));
 
 // ─── Stub: audit logging (not the focus) ────────────────────────────────────
 

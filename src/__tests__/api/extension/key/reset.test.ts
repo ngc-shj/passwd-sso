@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRequest, parseResponse } from "../../helpers/request-builder";
+import { createRequest, parseResponse } from "../../../helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const VALID_CNF_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
 const OTHER_CNF_JKT  = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbc";
@@ -8,20 +9,23 @@ const {
   mockValidateExtensionToken,
   mockWithBypassRls,
   mockRateLimitCheck,
-  mockCheckRateLimitOrFail,
+  mockCreateRateLimiter,
   mockLogAuditAsync,
   mockTokenUpdateMany,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
-  mockValidateExtensionToken: vi.fn(),
-  mockWithBypassRls: vi.fn(),
-  mockRateLimitCheck: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn(),
-  mockLogAuditAsync: vi.fn(),
-  mockTokenUpdateMany: vi.fn(),
-  // Tenant IP-restriction gate — allow by default (null = pass).
-  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimitCheck = vi.fn();
+  return {
+    mockValidateExtensionToken: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+    mockRateLimitCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimitCheck, clear: vi.fn() })),
+    mockLogAuditAsync: vi.fn(),
+    mockTokenUpdateMany: vi.fn(),
+    // Tenant IP-restriction gate — allow by default (null = pass).
+    mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+  };
+});
 
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
@@ -34,14 +38,21 @@ vi.mock("@/lib/tenant-rls", () => ({
   BYPASS_PURPOSE: { TOKEN_LIFECYCLE: "TOKEN_LIFECYCLE" },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAuditAsync,
   personalAuditBase: vi.fn(() => ({ scope: "personal", userId: "user-1" })),
+  // Required so emitRateLimitFailClosed (rate-limit-audit.ts, real module
+  // in-path per S) doesn't throw inside the mock module on the redisErrored
+  // 503 branch.
+  tenantAuditBase: vi.fn((_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+  })),
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -50,6 +61,11 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { POST } from "@/app/api/extension/key/reset/route";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimitCheck;
+};
 
 const VALIDATED_TOKEN = {
   tokenId: "token-id-1",
@@ -82,7 +98,7 @@ describe("POST /api/extension/key/reset (C12)", () => {
     vi.clearAllMocks();
     mockValidateExtensionToken.mockResolvedValue({ ok: true, data: VALIDATED_TOKEN });
     mockEnforceAccessRestriction.mockResolvedValue(null);
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockLogAuditAsync.mockResolvedValue(undefined);
     mockWithBypassRls.mockImplementation(
       (_prisma: unknown, fn: (tx: unknown) => unknown) =>
@@ -202,17 +218,24 @@ describe("POST /api/extension/key/reset (C12)", () => {
   });
 
   it("fires rate limit after max calls", async () => {
-    const rateLimitResponse = new Response(
-      JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }),
-      { status: 429 },
-    );
-    mockCheckRateLimitOrFail.mockResolvedValue(rateLimitResponse);
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false });
 
     const req = makeReq({ cnfJkt: VALID_CNF_JKT });
     const res = await POST(req);
 
     expect(res.status).toBe(429);
     expect(mockTokenUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makeReq({ cnfJkt: VALID_CNF_JKT })),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockTokenUpdateMany],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("negative control — cnfJkt=Y tokens are NOT revoked when call targets cnfJkt=X", async () => {

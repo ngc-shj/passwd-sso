@@ -32,3 +32,6 @@ src/app/api/tenant/operator-tokens/route.ts
 src/app/api/tenant/scim-tokens/route.ts
 src/app/api/tenant/service-accounts/route.ts
 src/app/api/vault/ssh/sign-authorize/route.ts
+src/auth.config.ts
+src/lib/scim/rate-limit.ts
+src/lib/security/rate-limiters.ts

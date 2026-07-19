@@ -5,9 +5,10 @@ import { validateV1Auth } from "@/lib/auth/session/v1-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
@@ -36,10 +37,15 @@ async function handleGET(req: NextRequest) {
     if (denied) return denied;
   }
 
-  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: v1ApiKeyLimiter,
+    key: `rl:api_key:${rateLimitKey}`,
+    scope: "v1.vault_status",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   if (!userId) {
     return NextResponse.json({ initialized: false, keyVersion: null });

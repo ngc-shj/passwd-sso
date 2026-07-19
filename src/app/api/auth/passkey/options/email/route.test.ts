@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { NIL_UUID } from "@/lib/constants/app";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -8,21 +9,26 @@ const {
   mockGetRedis,
   mockRedisSet,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockGenerateAuthenticationOpts,
   mockAssertOrigin,
   mockPrismaUserFindFirst,
   mockPrismaWebAuthnFindMany,
   mockWithBypassRls,
-} = vi.hoisted(() => ({
-  mockGetRedis: vi.fn(),
-  mockRedisSet: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockGenerateAuthenticationOpts: vi.fn(),
-  mockAssertOrigin: vi.fn(),
-  mockPrismaUserFindFirst: vi.fn(),
-  mockPrismaWebAuthnFindMany: vi.fn(),
-  mockWithBypassRls: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockGetRedis: vi.fn(),
+    mockRedisSet: vi.fn(),
+    mockRateLimiterCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockGenerateAuthenticationOpts: vi.fn(),
+    mockAssertOrigin: vi.fn(),
+    mockPrismaUserFindFirst: vi.fn(),
+    mockPrismaWebAuthnFindMany: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
@@ -30,7 +36,7 @@ vi.mock("@/lib/redis", () => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 // A02-8: route now calls buildPrfExtensions. Default mock returns the v1
@@ -77,6 +83,11 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 // ── Test data ────────────────────────────────────────────────
 
@@ -380,6 +391,25 @@ describe("POST /api/auth/passkey/options/email", () => {
 
     expect(status).toBe(503);
     expect(json.error).toBe("SERVICE_UNAVAILABLE");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", ROUTE_URL, {
+            body: { email: "test@example.com" },
+            // checkIpRateLimit fails-open when extractClientIp returns null; provide
+            // an IP so the limiter is actually consulted in this test.
+            headers: { origin: "http://localhost:3000", "x-forwarded-for": "203.0.113.5" },
+          }),
+        ),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockRedisSet],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 503 when WEBAUTHN_RP_ID is not set", async () => {

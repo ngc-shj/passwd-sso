@@ -1,24 +1,49 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockValidateApiKeyOnly,
   mockEnforceAccessRestriction,
   mockCheck,
+  mockCreateRateLimiter,
   mockTagFindMany,
   mockWithTenantRls,
-} = vi.hoisted(() => ({
-  mockValidateApiKeyOnly: vi.fn(),
-  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockTagFindMany: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-}));
+  mockLogAuditAsync,
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockValidateApiKeyOnly: vi.fn(),
+    mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+    mockCheck,
+    // Recording factory: assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}. @/lib/security/rate-limiters
+    // stays REAL so v1ApiKeyLimiter is this factory's recorded module-load result.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
+    mockTagFindMany: vi.fn(),
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck }),
+  createRateLimiter: mockCreateRateLimiter,
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAuditAsync,
+  // Used by emitRateLimitFailClosed (rate-limit-audit.ts) on the
+  // redisErrored path — required so the fail-closed test's void async audit
+  // emission doesn't dead-letter inside the mock module.
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "10.0.0.1",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -37,6 +62,15 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { GET } from "./route";
+
+// v1ApiKeyLimiter (src/lib/security/rate-limiters.ts) is instantiated once
+// at module load time, above. Snapshot the recorded factory call/result
+// here (module scope, before any test/beforeEach clears mocks) so
+// assertRedisFailClosed's factory-attribution step still has it.
+const v1ApiKeyLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const v1ApiKeyLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const USER_ID = "user-1";
 const TENANT_ID = "tenant-1";
@@ -102,6 +136,17 @@ describe("GET /api/v1/tags", () => {
     );
     const res = await GET(createRequest("GET", "http://localhost/api/v1/tags"));
     expect(res.status).toBe(403);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => GET(createRequest("GET", "http://localhost/api/v1/tags")),
+      limiter: v1ApiKeyLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockTagFindMany],
+      limiterFactory: v1ApiKeyLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns tags with correct shape", async () => {

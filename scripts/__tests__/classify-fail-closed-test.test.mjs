@@ -18,9 +18,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const CLASSIFIER = join(REPO_ROOT, "scripts/checks/classify-fail-closed-test.mjs");
 
-function classify(content) {
+function classify(content, filename = "route.test.ts") {
   const dir = mkdtempSync(join(tmpdir(), "classify-fc-"));
-  const file = join(dir, "route.test.ts");
+  const file = join(dir, filename);
   writeFileSync(file, content, "utf8");
   try {
     const r = spawnSync("node", [CLASSIFIER, file], { encoding: "utf8" });
@@ -32,6 +32,19 @@ function classify(content) {
       fields[k] = Number(v);
     }
     return fields;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Same as `classify` but returns the raw spawnSync result instead of
+// asserting status=0 — for cases that are expected to fail-loud (exit 1).
+function classifyExpectFailure(content, filename = "route.test.ts") {
+  const dir = mkdtempSync(join(tmpdir(), "classify-fc-"));
+  const file = join(dir, filename);
+  writeFileSync(file, content, "utf8");
+  try {
+    return spawnSync("node", [CLASSIFIER, file], { encoding: "utf8" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -233,5 +246,90 @@ const s = "redisErrored";
   it("exits 1 when invoked without arguments (fail closed, no silent empty output)", () => {
     const r = spawnSync("node", [CLASSIFIER], { encoding: "utf8" });
     expect(r.status).toBe(1);
+  });
+
+  // C6 hardening (Round 1 M6 + Round 2 S2-1/S2-2): RECALL-first `vi`
+  // resolution, vi.doMock, specifier normalization, dynamic-specifier
+  // fail-loud, and .tsx virtual-path parsing.
+  describe("C6 hardening: vi resolution + doMock + specifier normalization", () => {
+    it("flags a stub via the GLOBAL `vi` (no vitest import — globals: true precedent, mock=1)", () => {
+      const f = classify(`it("stub", () => {
+  vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+});
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a stub via a NAMESPACE `vi` (import * as V from \"vitest\"; V.vi.doMock(...), mock=1)", () => {
+      const f = classify(`import * as V from "vitest";
+V.vi.doMock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a stub via an ALIASED named `vi` (import { vi as viz }; viz.mock(...), mock=1)", () => {
+      const f = classify(`import { vi as viz } from "vitest";
+viz.mock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a stub via an ALIASED named `vi` using doMock (viz.doMock(...), mock=1)", () => {
+      const f = classify(`import { vi as viz } from "vitest";
+viz.doMock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("fails loud (nonzero exit) when a LOCAL declaration shadows the `vi` binding", () => {
+      const r = classifyExpectFailure(`it("stub", () => {
+  const vi = { mock: () => {} };
+  vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+});
+`);
+      expect(r.status).not.toBe(0);
+    });
+
+    it("flags a RELATIVE specifier that resolves to the mapping module (mock=1)", () => {
+      const f = classify(`import { vi } from "vitest";
+vi.mock("../../../lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags vi.doMock the same as vi.mock (mock=1)", () => {
+      const f = classify(`import { vi } from "vitest";
+vi.doMock("@/lib/security/rate-limit-audit", () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags vi.mock(import(\"<spec>\")) — vitest 3 typed form (mock=1)", () => {
+      const f = classify(`import { vi } from "vitest";
+vi.mock(import("@/lib/security/rate-limit-audit"), () => ({}));
+`);
+      expect(f.mock).toBe(1);
+    });
+
+    it("flags a DYNAMIC (non-literal) mock specifier as dynspec=1, NOT a silent mock=0 pass", () => {
+      const f = classify(`import { vi } from "vitest";
+const m = "@/lib/security/rate-limit-audit";
+vi.doMock(m, () => ({}));
+`);
+      expect(f).toMatchObject({ mock: 0, dynspec: 1 });
+    });
+
+    it("parses a .tsx file with JSX and still flags the stub (mock=1, no CLASSIFIER_FAILURE)", () => {
+      const f = classify(
+        `import { vi } from "vitest";
+vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+it("renders", () => {
+  const el = <div>hello</div>;
+});
+`,
+        "component.test.tsx",
+      );
+      expect(f.mock).toBe(1);
+    });
   });
 });

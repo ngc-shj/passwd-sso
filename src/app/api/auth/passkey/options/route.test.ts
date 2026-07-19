@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -7,15 +8,20 @@ const {
   mockGetRedis,
   mockRedisSet,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockGenerateDiscoverableAuthOpts,
   mockAssertOrigin,
-} = vi.hoisted(() => ({
-  mockGetRedis: vi.fn(),
-  mockRedisSet: vi.fn(),
-  mockRateLimiterCheck: vi.fn(),
-  mockGenerateDiscoverableAuthOpts: vi.fn(),
-  mockAssertOrigin: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockGetRedis: vi.fn(),
+    mockRedisSet: vi.fn(),
+    mockRateLimiterCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockGenerateDiscoverableAuthOpts: vi.fn(),
+    mockAssertOrigin: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
@@ -23,7 +29,7 @@ vi.mock("@/lib/redis", () => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
@@ -42,6 +48,11 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { POST } from "./route";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 // ── Setup ────────────────────────────────────────────────────
 
@@ -139,5 +150,23 @@ describe("POST /api/auth/passkey/options", () => {
 
     expect(status).toBe(503);
     expect(json.error).toBe("SERVICE_UNAVAILABLE");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", ROUTE_URL, {
+            // checkIpRateLimit fails-open when extractClientIp returns null; provide
+            // an IP so the limiter is actually consulted in this test.
+            headers: { origin: "http://localhost:3000", "x-forwarded-for": "203.0.113.5" },
+          }),
+        ),
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockRedisSet],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

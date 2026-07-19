@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Mock } from "vitest";
-import { assertRedisFailClosed, snapshotFactory } from "./fail-closed";
+import { assertRedisFailClosed, assertRedisFailClosedSilentDrop, snapshotFactory } from "./fail-closed";
 
 function makeLimiter(): { check: Mock } {
   return { check: vi.fn() };
@@ -262,6 +262,108 @@ describe("assertRedisFailClosed", () => {
         limiter,
         expectation: { envelope: "custom", status: 503, body: CUSTOM_BODY, retryAfter: "forbidden" },
         assertNoMutation: [mutationSpy],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("assertRedisFailClosedSilentDrop", () => {
+  let limiter: { check: Mock };
+  let limiterFactory: Mock;
+  let effectSpy: Mock;
+
+  beforeEach(() => {
+    limiterFactory = makeLimiterFactory();
+    limiter = limiterFactory({ windowMs: 1000, max: 1, failClosedOnRedisError: true }) as {
+      check: Mock;
+    };
+    effectSpy = vi.fn();
+  });
+
+  /** Fake silent-drop producer: consults the limiter, never returns a Response. */
+  function fakeSilentDropProducer(
+    limiterUnderTest: { check: Mock },
+    onRedisErrored: () => void = () => {},
+  ): () => Promise<void> {
+    return async () => {
+      const result = await limiterUnderTest.check("k");
+      if (result.redisErrored) {
+        onRedisErrored();
+        return;
+      }
+      effectSpy();
+    };
+  }
+
+  it("case (passing): silent drop with no effect spy fired succeeds", async () => {
+    await expect(
+      assertRedisFailClosedSilentDrop({
+        invoke: fakeSilentDropProducer(limiter),
+        limiter,
+        assertNoEffect: [effectSpy],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("case (a): effect spy fired — rejects", async () => {
+    await expect(
+      assertRedisFailClosedSilentDrop({
+        // Producer ignores redisErrored and fires the effect anyway.
+        invoke: async () => {
+          effectSpy();
+        },
+        limiter,
+        assertNoEffect: [effectSpy],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("case (b): empty assertNoEffect array — rejects", async () => {
+    await expect(
+      assertRedisFailClosedSilentDrop({
+        invoke: fakeSilentDropProducer(limiter),
+        limiter,
+        assertNoEffect: [],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).rejects.toThrow("assertNoEffect must be non-empty");
+  });
+
+  it("case (c): limiter never reached — rejects", async () => {
+    await expect(
+      assertRedisFailClosedSilentDrop({
+        // Producer never calls limiter.check at all.
+        invoke: async () => {},
+        limiter,
+        assertNoEffect: [effectSpy],
+        limiterFactory,
+        failure: { allowed: false, redisErrored: true },
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("case (d): attributed factory call lacks the flag (sibling-masking) — rejects", async () => {
+    // The limiter under test is constructed WITHOUT failClosedOnRedisError...
+    const limiterUnderTest = limiterFactory({ windowMs: 1000, max: 1 }) as {
+      check: Mock;
+    };
+    // ...but a sibling limiter from the SAME factory mock DOES have the flag.
+    // Attribution must key on which call produced `limiterUnderTest`
+    // specifically, not any-call existence.
+    limiterFactory({ windowMs: 1000, max: 1, failClosedOnRedisError: true });
+
+    await expect(
+      assertRedisFailClosedSilentDrop({
+        invoke: fakeSilentDropProducer(limiterUnderTest),
+        limiter: limiterUnderTest,
+        assertNoEffect: [effectSpy],
         limiterFactory,
         failure: { allowed: false, redisErrored: true },
       }),

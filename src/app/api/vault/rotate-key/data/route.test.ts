@@ -1,16 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { ATTACHMENT_MANIFEST_CAP } from "@/lib/validations/common";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaPasswordEntry: { findMany: vi.fn() },
-  mockPrismaPasswordEntryHistory: { findMany: vi.fn() },
-  mockPrismaUser: { findUnique: vi.fn() },
-  mockPrismaAttachment: { findMany: vi.fn() },
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockRateLimiterCheck: vi.fn(),
-}));
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaPasswordEntryHistory, mockPrismaUser, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimiterCheck, mockCreateRateLimiter } = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuth: vi.fn(),
+    mockPrismaPasswordEntry: { findMany: vi.fn() },
+    mockPrismaPasswordEntryHistory: { findMany: vi.fn() },
+    mockPrismaUser: { findUnique: vi.fn() },
+    mockPrismaAttachment: { findMany: vi.fn() },
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -22,7 +29,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -34,6 +41,16 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET } from "./route";
+
+// Module-level `rotateLimiter = createRateLimiter(...)` runs at import time,
+// above. Snapshot the recorded factory call now (module scope, before any
+// test/beforeEach executes) — the global beforeEach's vi.clearAllMocks()
+// would otherwise wipe mockCreateRateLimiter.mock.calls/.results before the
+// first test runs.
+const rotateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rotateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const sampleEntry = {
   id: "00000000-0000-4000-a000-000000000001",
@@ -106,6 +123,18 @@ describe("GET /api/vault/rotate-key/data", () => {
       createRequest("GET", "http://localhost/api/vault/rotate-key/data")
     );
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        GET(createRequest("GET", "http://localhost/api/vault/rotate-key/data")),
+      limiter: rotateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaPasswordEntry.findMany, mockPrismaUser.findUnique],
+      limiterFactory: rotateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns entries, historyEntries, ecdhPrivateKey, and attachment arrays on success", async () => {

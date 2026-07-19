@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockPasswordShareFindUnique,
@@ -11,7 +12,10 @@ const {
   mockLogAudit,
   mockIpCheck,
   mockTokenCheck,
+  mockCreateRateLimiter,
 } = vi.hoisted(() => {
+  const mockIpCheck = vi.fn().mockResolvedValue({ allowed: true });
+  const mockTokenCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
     mockPasswordShareFindUnique: vi.fn(),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
@@ -19,8 +23,12 @@ const {
     mockVerifyAccessPassword: vi.fn(),
     mockCreateShareAccessToken: vi.fn().mockReturnValue("access-token-xyz"),
     mockLogAudit: vi.fn(),
-    mockIpCheck: vi.fn().mockResolvedValue({ allowed: true }),
-    mockTokenCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockIpCheck,
+    mockTokenCheck,
+    mockCreateRateLimiter: vi
+      .fn()
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockIpCheck, clear: vi.fn() }))
+      .mockImplementationOnce((_opts: unknown) => ({ check: mockTokenCheck, clear: vi.fn() })),
   };
 });
 
@@ -40,9 +48,7 @@ vi.mock("@/lib/auth/tokens/share-access-token", () => ({
   createShareAccessToken: mockCreateShareAccessToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn()
-    .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
-    .mockReturnValueOnce({ check: mockTokenCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
@@ -65,6 +71,19 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { POST } from "./route";
+
+// Module-scope snapshot (route.ts:22-31 `const ipLimiter = createRateLimiter(...)`
+// then `const tokenLimiter = createRateLimiter(...)` run at import time,
+// above, in that order — matches mockCreateRateLimiter's two queued
+// implementations). See fail-closed.ts module doc.
+const ipLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const ipLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockIpCheck;
+};
+const tokenLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const tokenLimiter = mockCreateRateLimiter.mock.results[1]!.value as {
+  check: typeof mockTokenCheck;
+};
 
 const futureDate = new Date("2099-12-31T00:00:00Z");
 
@@ -153,6 +172,39 @@ describe("POST /api/share-links/verify-access", () => {
     const { status } = await parseResponse(res);
     expect(status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — ip limiter", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/share-links/verify-access", {
+            body: validBody,
+          }),
+        ),
+      limiter: ipLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPasswordShareFindUnique, mockCreateShareAccessToken],
+      limiterFactory: ipLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — token limiter", async () => {
+    mockIpCheck.mockResolvedValue({ allowed: true });
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/share-links/verify-access", {
+            body: validBody,
+          }),
+        ),
+      limiter: tokenLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPasswordShareFindUnique, mockCreateShareAccessToken],
+      limiterFactory: tokenLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 404 when share not found", async () => {

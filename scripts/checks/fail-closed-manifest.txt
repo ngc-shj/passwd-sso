@@ -1,0 +1,108 @@
+# Fail-closed class manifest (C5 — plan fail-closed-tranche2-plan.md)
+#
+# Pins the exact (path, count) set of `failClosedOnRedisError: true`
+# instantiations across the whole of `src`. Consumed by
+# `scripts/checks/check-fail-closed-routes-have-test.sh`, which enumerates
+# every opted-in file under src (route handlers + lib members) and compares
+# it against this manifest with exact set equality in both directions:
+#   - a file that opts in but is absent here fails MANIFEST_MISSING_ROUTE
+#   - an entry here whose file no longer opts in (or is gone) fails
+#     MANIFEST_STALE_ROUTE
+#   - a file's actual (AST-authoritative) instantiation count differing from
+#     its manifest count fails MANIFEST_COUNT_MISMATCH
+#
+# Format: one entry per line, `path<TAB>count` (a single literal tab
+# character separates the fields). `path` is relative to the repo root.
+# `count` is the number of `failClosedOnRedisError: true` PropertyAssignments
+# (TrueKeyword initializer) inside a `createRateLimiter` call in that file —
+# i.e. the AST-authoritative count, not a raw text match. `#` comments and
+# blank lines are skipped by the gate.
+#
+# D4 rule: production comments must never contain the literal
+# `failClosedOnRedisError: true` string — the gate cross-checks `grep -c`
+# against the AST count and fails MANIFEST_COMMENT_LITERAL whenever the
+# grep count exceeds the AST count (i.e. a comment/string inflates the text
+# match beyond the real code-level instantiations). Rewording an existing
+# comment that discusses the flag (e.g. writing "the fail-closed opt-in
+# flag" instead of the literal) is the required fix, not a manifest change.
+#
+# 65 entries: 62 route files under src/app/api + 3 non-route lib members
+# (src/auth.config.ts, src/lib/scim/rate-limit.ts,
+# src/lib/security/rate-limiters.ts) whose siblings are registered in
+# fail-closed-legacy-direct.txt (helper mode is not yet expressible for
+# these non-Response call sites — see plan SC-T3-6). Sum of all counts here
+# is 72 (69 across the 62 route files, matching AC4.4's
+# EXPECTED_LIMITER_COUNT, + 3 for the lib members) — the gate cross-checks
+# the src/app/api subset sum against EXPECTED_LIMITER_COUNT so the two
+# primitives cannot drift apart silently.
+#
+# Removing a `failClosedOnRedisError: true` instantiation from ANY member —
+# including the 2nd limiter of a multi-limiter file — requires editing this
+# manifest in the same PR; adding a new opt-in anywhere under src requires
+# adding an entry here.
+
+src/app/api/admin/rotate-master-key/[rotationId]/approve/route.ts	1
+src/app/api/admin/rotate-master-key/[rotationId]/execute/route.ts	1
+src/app/api/admin/rotate-master-key/[rotationId]/revoke/route.ts	1
+src/app/api/admin/rotate-master-key/initiate/route.ts	1
+src/app/api/api-keys/route.ts	1
+src/app/api/auth/[...nextauth]/route.ts	2
+src/app/api/auth/passkey/options/email/route.ts	1
+src/app/api/auth/passkey/options/route.ts	1
+src/app/api/auth/passkey/reauth/options/route.ts	1
+src/app/api/auth/passkey/reauth/verify/route.ts	1
+src/app/api/auth/passkey/verify/route.ts	1
+src/app/api/emergency-access/accept/route.ts	1
+src/app/api/extension/bridge-code/route.ts	2
+src/app/api/extension/key/reset/route.ts	1
+src/app/api/extension/token/exchange/route.ts	1
+src/app/api/extension/token/refresh/route.ts	1
+src/app/api/extension/token/route.ts	1
+src/app/api/maintenance/audit-chain-verify/route.ts	1
+src/app/api/maintenance/audit-outbox-metrics/route.ts	1
+src/app/api/maintenance/audit-outbox-purge-failed/route.ts	1
+src/app/api/maintenance/dcr-cleanup/route.ts	1
+src/app/api/maintenance/purge-audit-logs/route.ts	1
+src/app/api/maintenance/purge-history/route.ts	1
+src/app/api/mcp/authorize/route.ts	1
+src/app/api/mcp/register/route.ts	1
+src/app/api/mcp/revoke/route.ts	1
+src/app/api/mcp/token/route.ts	2
+src/app/api/mobile/authorize/route.ts	1
+src/app/api/mobile/autofill-token/route.ts	1
+src/app/api/mobile/token/refresh/route.ts	1
+src/app/api/mobile/token/route.ts	1
+src/app/api/share-links/[id]/content/route.ts	1
+src/app/api/share-links/verify-access/route.ts	2
+src/app/api/teams/invitations/accept/route.ts	1
+src/app/api/tenant/access-requests/[id]/approve/route.ts	1
+src/app/api/tenant/access-requests/[id]/deny/route.ts	1
+src/app/api/tenant/access-requests/route.ts	1
+src/app/api/tenant/breakglass/route.ts	1
+src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts	2
+src/app/api/tenant/members/[userId]/reset-vault/route.ts	2
+src/app/api/tenant/operator-tokens/route.ts	1
+src/app/api/tenant/scim-tokens/route.ts	1
+src/app/api/tenant/service-accounts/route.ts	1
+src/app/api/vault/admin-reset/route.ts	1
+src/app/api/vault/change-passphrase/route.ts	1
+src/app/api/vault/delegation/check/route.ts	1
+src/app/api/vault/delegation/route.ts	1
+src/app/api/vault/recovery-key/generate/route.ts	1
+src/app/api/vault/recovery-key/recover/route.ts	2
+src/app/api/vault/reset/route.ts	1
+src/app/api/vault/rotate-key/data/route.ts	1
+src/app/api/vault/rotate-key/route.ts	1
+src/app/api/vault/setup/route.ts	1
+src/app/api/vault/ssh/sign-authorize/route.ts	1
+src/app/api/vault/unlock/data/route.ts	1
+src/app/api/vault/unlock/route.ts	1
+src/app/api/webauthn/authenticate/options/route.ts	1
+src/app/api/webauthn/authenticate/verify/route.ts	1
+src/app/api/webauthn/credentials/[id]/prf/options/route.ts	1
+src/app/api/webauthn/credentials/[id]/prf/route.ts	1
+src/app/api/webauthn/register/options/route.ts	1
+src/app/api/webauthn/register/verify/route.ts	1
+src/auth.config.ts	1
+src/lib/scim/rate-limit.ts	1
+src/lib/security/rate-limiters.ts	1

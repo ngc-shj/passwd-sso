@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { DEFAULT_SESSION } from "@/__tests__/helpers/mock-auth";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -11,9 +12,9 @@ const {
   mockBridgeCodeUpdateMany,
   mockUserFindUnique,
   mockExecuteRaw,
-  mockCheck,
-  mockCheckIpRateLimit,
-  mockCheckRateLimitOrFail,
+  mockIpCheck,
+  mockUserCheck,
+  mockCreateRateLimiter,
   mockWithUserTenantRls,
   mockWithBypassRls,
   mockLogAudit,
@@ -22,25 +23,38 @@ const {
   mockRequireRecentCurrentAuthMethod,
   mockVerifyDpop,
   mockDerivePasskeyState,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockBridgeCodeCreate: vi.fn(),
-  mockBridgeCodeFindMany: vi.fn(),
-  mockBridgeCodeUpdateMany: vi.fn(),
-  mockUserFindUnique: vi.fn(),
-  mockExecuteRaw: vi.fn().mockResolvedValue(1),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockCheckIpRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
-  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockLogAudit: vi.fn(),
-  mockExtractClientIp: vi.fn(() => "1.2.3.4"),
-  mockCheckAccessRestrictionWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
-  mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
-  mockVerifyDpop: vi.fn(),
-  mockDerivePasskeyState: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockIpCheck = vi.fn().mockResolvedValue({ allowed: true });
+  const mockUserCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockAuth: vi.fn(),
+    mockBridgeCodeCreate: vi.fn(),
+    mockBridgeCodeFindMany: vi.fn(),
+    mockBridgeCodeUpdateMany: vi.fn(),
+    mockUserFindUnique: vi.fn(),
+    mockExecuteRaw: vi.fn().mockResolvedValue(1),
+    mockIpCheck,
+    mockUserCheck,
+    // T4/T9/M: recording factory — the route creates TWO limiters at module
+    // scope in order (ipLimiter then bridgeCodeLimiter, route.ts:77/:85).
+    // mockReturnValueOnce chain (defined here, inside vi.hoisted, so it runs
+    // BEFORE the hoisted route import triggers module-scope instantiation)
+    // gives each limiter its own check mock so the ip-case and user-case
+    // fail-closed tests can arrange them independently.
+    mockCreateRateLimiter: vi
+      .fn()
+      .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
+      .mockReturnValueOnce({ check: mockUserCheck, clear: vi.fn() }),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockLogAudit: vi.fn(),
+    mockExtractClientIp: vi.fn(() => "1.2.3.4"),
+    mockCheckAccessRestrictionWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
+    mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+    mockVerifyDpop: vi.fn(),
+    mockDerivePasskeyState: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -63,14 +77,11 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: () => "h".repeat(64),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
-}));
-vi.mock("@/lib/security/ip-rate-limit", () => ({
-  checkIpRateLimit: mockCheckIpRateLimit,
-}));
+// S: no rate-limit-audit stub — production checkRateLimitOrFail stays in path.
+// U: no ip-rate-limit stub — production checkIpRateLimit stays in path (it
+// calls ipLimiter.check() directly, which is the mocked ipLimiter above).
 vi.mock("@/lib/redis", () => ({
   getRedis: () => null,
   validateRedisConfig: () => {},
@@ -91,8 +102,19 @@ vi.mock("@/lib/audit/audit", () => ({
     ip: "1.2.3.4",
     userAgent: "test",
   }),
+  // Required so emitRateLimitFailClosed (rate-limit-audit.ts, real module
+  // in-path per S) doesn't throw inside the mock module on the post-auth
+  // redisErrored branch.
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+  }),
 }));
-vi.mock("@/lib/auth/policy/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   extractClientIp: mockExtractClientIp,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
@@ -123,6 +145,17 @@ import { POST } from "./route";
 import { __resetAllowlistForTests } from "@/lib/http/cors";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 
+// Single snapshot shared by both limiters — both were produced by the same
+// mockCreateRateLimiter, and assertRedisFailClosed's attribution step finds
+// the right entry by identity match on the `limiter` object itself.
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const ipLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockIpCheck;
+};
+const bridgeCodeLimiter = mockCreateRateLimiter.mock.results[1]!.value as {
+  check: typeof mockUserCheck;
+};
+
 const ALLOWED_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 const VERIFIER_JKT = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabb";
 
@@ -139,9 +172,8 @@ describe("POST /api/extension/bridge-code", () => {
     _resetPasskeyAuditForTests();
     vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", ALLOWED_ORIGIN);
     __resetAllowlistForTests();
-    mockCheck.mockResolvedValue({ allowed: true });
-    mockCheckIpRateLimit.mockResolvedValue({ allowed: true });
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockIpCheck.mockResolvedValue({ allowed: true });
+    mockUserCheck.mockResolvedValue({ allowed: true });
     mockExtractClientIp.mockReturnValue("1.2.3.4");
     mockCheckAccessRestrictionWithAudit.mockResolvedValue({ allowed: true });
     mockWithBypassRls.mockImplementation(async (p, fn) => fn(p));
@@ -192,23 +224,21 @@ describe("POST /api/extension/bridge-code", () => {
   }
 
   it("emits failure audit with ip_rate_limit when IP rate-limit returns 429", async () => {
-    mockCheckIpRateLimit.mockResolvedValueOnce({ allowed: false });
-    mockCheckRateLimitOrFail.mockImplementationOnce(async () =>
-      new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), { status: 429 }),
-    );
+    mockIpCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST(makeRequest());
-    expect(res.status).toBe(429);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(429);
+    expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
     expectFailureEmit("ip_rate_limit");
     expect(mockAuth).not.toHaveBeenCalled();
   });
 
   it("emits failure audit with ip_rate_limit_redis_fail when IP limiter Redis-fails", async () => {
-    mockCheckIpRateLimit.mockResolvedValueOnce({ allowed: false, redisErrored: true });
-    mockCheckRateLimitOrFail.mockImplementationOnce(async () =>
-      new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), { status: 503 }),
-    );
+    mockIpCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
     const res = await POST(makeRequest());
-    expect(res.status).toBe(503);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
     expectFailureEmit("ip_rate_limit_redis_fail");
   });
 
@@ -286,17 +316,9 @@ describe("POST /api/extension/bridge-code", () => {
 
   it("returns 429 and emits failure audit with rate_limit when per-user rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    // mockCheck is bridgeCodeLimiter.check — default { allowed: true } returns;
+    // mockUserCheck is bridgeCodeLimiter.check — default { allowed: true } returns;
     // override to {allowed: false} for the per-user gate.
-    mockCheck.mockResolvedValueOnce({ allowed: false });
-    mockCheckRateLimitOrFail.mockImplementation(async (args: { scope: string }) => {
-      if (args.scope === "extension.bridge_code") {
-        return new Response(JSON.stringify({ error: "RATE_LIMIT_EXCEEDED" }), {
-          status: 429,
-        });
-      }
-      return null;
-    });
+    mockUserCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
@@ -306,15 +328,7 @@ describe("POST /api/extension/bridge-code", () => {
 
   it("emits failure audit with rate_limit_redis_fail when per-user limiter Redis-fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
-    mockCheckRateLimitOrFail.mockImplementation(async (args: { scope: string }) => {
-      if (args.scope === "extension.bridge_code") {
-        return new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), {
-          status: 503,
-        });
-      }
-      return null;
-    });
+    mockUserCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
     const res = await POST(makeRequest());
     expect(res.status).toBe(503);
     expectFailureEmit("rate_limit_redis_fail", { userId: DEFAULT_SESSION.user.id, tenantId: "tenant-1" });
@@ -514,5 +528,33 @@ describe("POST /api/extension/bridge-code", () => {
     mockDerivePasskeyState.mockRejectedValue(new Error("DB error"));
     await expect(POST(makeRequest())).rejects.toThrow("DB error");
     expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
+  // ── Fail-closed contract (C2 plan row 9): 2 cases — ip gate (:77) and
+  // per-user gate (:85). U: real checkIpRateLimit is in-path; the ip case
+  // needs a non-null client IP (mockExtractClientIp default "1.2.3.4"),
+  // since checkIpRateLimit fails-open on a null IP.
+
+  it("fails closed (503, no mutation) when Redis is unavailable — ip limiter", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makeRequest()),
+      limiter: ipLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockBridgeCodeCreate, mockBridgeCodeUpdateMany],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — per-user limiter", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    await assertRedisFailClosed({
+      invoke: () => POST(makeRequest()),
+      limiter: bridgeCodeLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockBridgeCodeCreate, mockBridgeCodeUpdateMany],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

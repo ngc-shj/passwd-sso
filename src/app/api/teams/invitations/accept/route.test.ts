@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockWithUserTenantRls, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser, mockTransaction, mockRateLimiter, mockCreateRateLimiter, mockWithUserTenantRls, mockWithTeamTenantRls, mockWithBypassRls } = vi.hoisted(() => {
+  const mockRateLimiter = { check: vi.fn() };
+  return {
   mockAuth: vi.fn(),
   mockPrismaTeamInvitation: {
     findUnique: vi.fn(),
@@ -15,11 +18,15 @@ const { mockAuth, mockPrismaTeamInvitation, mockPrismaTeamMember, mockPrismaUser
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
-  mockRateLimiter: { check: vi.fn() },
+  mockRateLimiter,
+  // Recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => mockRateLimiter),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-}));
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -31,7 +38,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -43,6 +50,13 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 import { POST } from "./route";
 import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
+
+// Module-scope snapshot (route.ts:16 `const acceptLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const acceptLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const acceptLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiter.check;
+};
 
 const futureDate = new Date("2099-01-01T00:00:00Z");
 
@@ -74,6 +88,26 @@ describe("POST /api/teams/invitations/accept", () => {
         : [{}, {}],
     );
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(createRequest("POST", "http://localhost:3000/api/teams/invitations/accept", {
+          body: { token: "valid-token" },
+        })),
+      limiter: acceptLimiter,
+      expectation: { envelope: "canonical" },
+      // The route reaches teamInvitation.updateMany / teamMember.upsert only
+      // inside prisma.$transaction — asserting the transaction itself never
+      // ran is the correct "no mutation" proxy for the tx-scoped mocks
+      // (route.ts wires fresh vi.fn() per-call inside mockTransaction's
+      // implementation, so the top-level teamMember mock is never touched
+      // by the real transaction path either).
+      assertNoMutation: [mockTransaction, mockPrismaTeamInvitation.updateMany],
+      limiterFactory: acceptLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 401 when unauthenticated", async () => {

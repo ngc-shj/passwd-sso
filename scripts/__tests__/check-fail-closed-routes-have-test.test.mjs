@@ -32,6 +32,7 @@ let root;
 let apiDir;
 let debtFile;
 let legacyFile;
+let manifestFile;
 
 function runGuard(extraEnv = {}) {
   const r = spawnSync("bash", [GUARD], {
@@ -41,28 +42,56 @@ function runGuard(extraEnv = {}) {
       FAIL_CLOSED_TEST_ROOT: root,
       FAIL_CLOSED_TEST_DEBT_FILE: debtFile,
       FAIL_CLOSED_TEST_LEGACY_FILE: legacyFile,
+      FAIL_CLOSED_TEST_MANIFEST_FILE: manifestFile,
       // Fixture-mode default so the env-pollution guard does not fire under
       // CI=true; the pollution-guard test overrides it back to "".
       FAIL_CLOSED_TEST_FIXTURE_MODE: "1",
+      // Real-repo defaults (0 debt / 16 legacy) are meaningless against an
+      // empty fixture tree — default fixture expectations to 0/0 so plain
+      // fixtures (no debt, no legacy entries) pass without every test
+      // needing to pass these explicitly. Individual ratchet tests override.
+      FAIL_CLOSED_EXPECTED_DEBT_COUNT: "0",
+      FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "0",
       ...extraEnv,
     },
   });
   return { exitCode: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 
-function writeRoute(rel, body) {
+// manifestEntries accumulates (path, count) pairs across writeRoute() calls
+// within a single test; flushed to MANIFEST_FILE by writeRoute itself so
+// every route fixture is self-registering (count=1, matching FAIL_CLOSED_LINE's
+// single `createRateLimiter(...)` instantiation) unless a test overwrites the
+// manifest explicitly via writeManifest() for a C5-specific scenario.
+let manifestEntries;
+
+function writeRoute(rel, body, { count = 1, registerManifest = true } = {}) {
   const dir = join(apiDir, rel);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "route.ts"), body, "utf8");
-  return `src/app/api/${rel}/route.ts`;
+  const routePath = `src/app/api/${rel}/route.ts`;
+  if (registerManifest) {
+    manifestEntries.push([routePath, count]);
+    writeManifest(manifestEntries);
+  }
+  return routePath;
 }
 
 function writeAdjacentTest(rel, body) {
   writeFileSync(join(apiDir, rel, "route.test.ts"), body, "utf8");
 }
 
+function writeManifest(entries) {
+  const lines = entries.map(([path, count]) => `${path}\t${count}`);
+  writeFileSync(manifestFile, `${lines.length > 0 ? `${lines.join("\n")}\n` : ""}`, "utf8");
+}
+
+// Matches the real production shape (`createRateLimiter({ ... })`) — the C5
+// AST-authoritative per-file counter only recognizes this callee name, so a
+// lookalike helper name (e.g. `rateLimiter(...)`) would count as zero real
+// instantiations despite the text literal being present (MANIFEST_COMMENT_LITERAL).
 const FAIL_CLOSED_LINE =
-  'const limiter = rateLimiter({ failClosedOnRedisError: true });\n';
+  'const limiter = createRateLimiter({ failClosedOnRedisError: true });\n';
 
 // A minimal, well-formed shared-helper contract test (helper mode).
 const HELPER_CONTRACT_TEST = `import { it } from "vitest";
@@ -84,10 +113,13 @@ beforeEach(() => {
   apiDir = join(root, "src/app/api");
   debtFile = join(root, "scripts/checks/fail-closed-test-debt.txt");
   legacyFile = join(root, "scripts/checks/fail-closed-legacy-direct.txt");
+  manifestFile = join(root, "scripts/checks/fail-closed-manifest.txt");
+  manifestEntries = [];
   mkdirSync(apiDir, { recursive: true });
   mkdirSync(dirname(debtFile), { recursive: true });
   writeFileSync(debtFile, "# fixture debt list\n", "utf8");
   writeFileSync(legacyFile, "# fixture legacy list\n", "utf8");
+  writeFileSync(manifestFile, "# fixture manifest\n", "utf8");
 });
 
 afterEach(() => {
@@ -122,7 +154,7 @@ describe("check-fail-closed-routes-have-test.sh", () => {
   it("passes when the opt-in route is listed in the debt file", () => {
     const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
     writeFileSync(debtFile, `${rel}\n`, "utf8");
-    const { exitCode } = runGuard();
+    const { exitCode } = runGuard({ FAIL_CLOSED_EXPECTED_DEBT_COUNT: "1" });
     expect(exitCode).toBe(0);
   });
 
@@ -171,16 +203,23 @@ mockCheckRateLimitOrFail.mockImplementationOnce(async () =>
       expect(stdout).toContain(rel);
     });
 
-    it("bridge-code shape stays green while its debt entry exists, and FAILS the moment the entry is dropped", () => {
-      // The exact drift path the review demonstrated: debt says untested,
-      // the old gate said tested. Now the debt entry is load-bearing.
+    it("bridge-code shape: the debt entry no longer masks the stub once C6 lands (structural gate, SC1)", () => {
+      // Pre-C6 drift path the review demonstrated: debt says untested, the
+      // old (C3-only) gate said tested while the entry existed, and only
+      // failed once the entry was dropped. C6 closes that gap structurally:
+      // the mockCheckRateLimitOrFail stub now fails EITHER way, because a
+      // debt entry never licenses the anti-pattern (only the frozen
+      // exemption list does).
       const rel = writeRoute("widgets/bridge", FAIL_CLOSED_LINE);
       writeAdjacentTest(
         "widgets/bridge",
         'mockCheckRateLimitOrFail.mockResolvedValueOnce(null); // redisErrored\n',
       );
       writeFileSync(debtFile, `${rel}\n`, "utf8");
-      expect(runGuard().exitCode).toBe(0);
+      const withDebt = runGuard({ FAIL_CLOSED_EXPECTED_DEBT_COUNT: "1" });
+      expect(withDebt.exitCode).toBe(1);
+      expect(withDebt.stdout).toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+
       writeFileSync(debtFile, "# emptied\n", "utf8");
       const { exitCode, stdout } = runGuard();
       expect(exitCode).toBe(1);
@@ -377,7 +416,7 @@ it.skipIf(true)("conditionally skipped", async () => {
         'it("503s when redis errors", () => { expect(rl.redisErrored).toBe(true); });\n',
       );
       writeFileSync(legacyFile, `${rel}\n`, "utf8");
-      const { exitCode, stdout } = runGuard();
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
       expect(exitCode, stdout).toBe(0);
     });
 
@@ -403,7 +442,7 @@ it.skipIf(true)("conditionally skipped", async () => {
     });
 
     it("FAILS (DANGLING_ENTRY) when a debt entry's route no longer opts into fail-closed", () => {
-      writeRoute("widgets/open", "const limiter = rateLimiter({});\n");
+      writeRoute("widgets/open", "const limiter = createRateLimiter({});\n", { registerManifest: false });
       writeFileSync(debtFile, "src/app/api/widgets/open/route.ts\n", "utf8");
       const { exitCode, stdout } = runGuard();
       expect(exitCode).toBe(1);
@@ -431,10 +470,208 @@ it.skipIf(true)("conditionally skipped", async () => {
     });
   });
 
-  describe("real repo (no overrides)", () => {
-    it("passes against the actual repo source tree (incl. AC4.4/AC4.5 counts)", () => {
-      const r = spawnSync("bash", [GUARD], { encoding: "utf8" });
-      expect(r.status, r.stdout + r.stderr).toBe(0);
+  // C5 — class manifest pinning + whole-src enumeration (Round 1 M2 actions
+  // 1/4). Red fixtures FIRST per the order-of-work invariant: each of these
+  // failed before the C5 gate section existed (no manifest checking at all).
+  describe("C5 manifest: set equality + AST-authoritative per-file counts", () => {
+    it("FAILS (MANIFEST_MISSING_ROUTE) when an opt-in file has no manifest entry", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE, { registerManifest: false });
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      writeManifest([]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MANIFEST_MISSING_ROUTE:");
+      expect(stdout).toContain(rel);
     });
+
+    it("FAILS (MANIFEST_STALE_ROUTE) when a manifest entry's file no longer opts in", () => {
+      writeRoute("widgets/purge", "const limiter = createRateLimiter({});\n", { registerManifest: false });
+      writeManifest([["src/app/api/widgets/purge/route.ts", 1]]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MANIFEST_STALE_ROUTE:");
+    });
+
+    it("FAILS (MANIFEST_COUNT_MISMATCH) when a 2-limiter file has a count-1 manifest entry", () => {
+      const rel = writeRoute(
+        "widgets/purge",
+        `const a = createRateLimiter({ failClosedOnRedisError: true });
+const b = createRateLimiter({ failClosedOnRedisError: true });
+`,
+        { registerManifest: false },
+      );
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      writeManifest([["src/app/api/widgets/purge/route.ts", 1]]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MANIFEST_COUNT_MISMATCH:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("FAILS (MANIFEST_COMMENT_LITERAL) when the literal only appears in a comment (grep count exceeds AST count)", () => {
+      const rel = writeRoute(
+        "widgets/purge",
+        '// failClosedOnRedisError: true was removed here\nconst limiter = createRateLimiter({});\n',
+        { registerManifest: false },
+      );
+      writeManifest([["src/app/api/widgets/purge/route.ts", 1]]);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MANIFEST_COMMENT_LITERAL:");
+      expect(stdout).toContain(rel);
+    });
+
+    it("FAILS (MANIFEST_PARSE_ERROR) on a malformed manifest line (missing tab)", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE, { registerManifest: false });
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      writeFileSync(manifestFile, "src/app/api/widgets/purge/route.ts 1\n", "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MANIFEST_PARSE_ERROR:");
+    });
+
+    it("FAILS (MANIFEST_PARSE_ERROR) on a malformed manifest line (non-numeric count)", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE, { registerManifest: false });
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      writeFileSync(manifestFile, "src/app/api/widgets/purge/route.ts\tone\n", "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("MANIFEST_PARSE_ERROR:");
+    });
+
+    it("passes when the manifest entry's count matches the AST-authoritative count", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+  });
+
+  // C6 — structural stub-detection gate (SC1 / parent R3-1). Red fixtures
+  // FIRST: none of these tokens existed before the C6 stub-scan section.
+  describe("C6 structural stub gate: RECALL-first vi resolution + config-seam guard", () => {
+    it("FAILS (STUB_MOCKED_RATE_LIMIT_AUDIT) for a CENTRAL non-sibling stub outside the frozen exemption list", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      const centralDir = join(root, "src/__tests__/api/other");
+      mkdirSync(centralDir, { recursive: true });
+      writeFileSync(
+        join(centralDir, "unrelated.test.ts"),
+        `import { vi, it } from "vitest";
+vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+it("placeholder", () => { expect(true).toBe(true); });
+`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+      expect(stdout).toContain("src/__tests__/api/other/unrelated.test.ts");
+    });
+
+    it("FAILS (STUB_DYNAMIC_SPECIFIER) for a vi.doMock with a non-literal specifier anywhere under src", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      const centralDir = join(root, "src/__tests__/api/other");
+      mkdirSync(centralDir, { recursive: true });
+      writeFileSync(
+        join(centralDir, "unrelated.test.ts"),
+        `import { vi, it } from "vitest";
+const modulePath = "@/lib/security/rate-limit-audit";
+vi.doMock(modulePath, () => ({}));
+it("placeholder", () => { expect(true).toBe(true); });
+`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STUB_DYNAMIC_SPECIFIER:");
+      expect(stdout).toContain("src/__tests__/api/other/unrelated.test.ts");
+    });
+
+    it("FAILS (STUB_CONFIG_SEAM) when a fixture vitest config aliases rate-limit-audit", () => {
+      writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeAdjacentTest("widgets/purge", HELPER_CONTRACT_TEST);
+      writeFileSync(
+        join(root, "vitest.config.ts"),
+        `export default {
+  resolve: { alias: { "@/lib/security/rate-limit-audit": "./test/stub-rate-limit-audit.ts" } },
+};
+`,
+        "utf8",
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("STUB_CONFIG_SEAM:");
+    });
+
+    it("passes for a stub in an EXEMPT frozen-list file (tenant/service-accounts sibling shape)", () => {
+      const rel = writeRoute("tenant/service-accounts", FAIL_CLOSED_LINE);
+      writeAdjacentTest(
+        "tenant/service-accounts",
+        `import { vi, it } from "vitest";
+vi.mock("@/lib/security/rate-limit-audit", () => ({}));
+it("legacy direct", () => { expect(rl.redisErrored).toBe(true); });
+`,
+      );
+      writeFileSync(legacyFile, `${rel}\n`, "utf8");
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "1" });
+      expect(exitCode, stdout).toBe(0);
+      expect(stdout).not.toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+    });
+  });
+
+  // C3/C5 re-entry ratchets (Round 1 m13, Round 2 S2-5) — exact equality,
+  // fixture-overridable per the Fixture-executability rules (F-R2-1/S2-6).
+  describe("C3/C5 re-entry ratchets: EXPECTED_DEBT_COUNT / EXPECTED_LEGACY_COUNT", () => {
+    it("FAILS (EXPECTED_DEBT_COUNT) when a 1-entry debt list mismatches the default expectation of 0", () => {
+      const rel = writeRoute("widgets/purge", FAIL_CLOSED_LINE);
+      writeFileSync(debtFile, `${rel}\n`, "utf8");
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("EXPECTED_DEBT_COUNT FAIL:");
+    });
+
+    it("FAILS (EXPECTED_LEGACY_COUNT) when a 17-entry legacy list mismatches an override of 16", () => {
+      const legacyRoutes = [];
+      for (let i = 0; i < 17; i++) {
+        const rel = writeRoute(`widgets/legacy${i}`, FAIL_CLOSED_LINE);
+        writeAdjacentTest(`widgets/legacy${i}`, `it("x", () => { expect(rl.redisErrored).toBe(true); });\n`);
+        legacyRoutes.push(rel);
+      }
+      writeFileSync(legacyFile, `${legacyRoutes.join("\n")}\n`, "utf8");
+      const { exitCode, stdout } = runGuard({ FAIL_CLOSED_EXPECTED_LEGACY_COUNT: "16" });
+      expect(exitCode).toBe(1);
+      expect(stdout).toContain("EXPECTED_LEGACY_COUNT FAIL:");
+    });
+  });
+
+  describe("real repo (no overrides)", () => {
+    // End-state assertion (fail-closed-tranche2, all batches landed): the real
+    // repo now passes the gate cleanly — debt burned to 0, legacy pinned at 16
+    // (13 routes + 3 lib members), the manifest set-equality + per-file counts
+    // match the tree, and every rate-limit-audit stub is either migrated
+    // (C7/C8b) or one of the 4 frozen tenant/* legacy exemptions. This test
+    // pins the clean state so ANY regression — a re-added debt entry, a
+    // dropped opt-in flag, a new stub, manifest drift — fails loudly.
+    it("passes cleanly with the tranche-2 burndown applied", () => {
+      // The real-repo run classifies the whole src/app/api sibling-test set
+      // PLUS every *.test.ts(x) under src for the C6 stub scan (~2 batched
+      // ts-morph invocations over hundreds of files) — slower than the
+      // isolated-fixture cases above; raised timeout accordingly.
+      const r = spawnSync("bash", [GUARD], { encoding: "utf8" });
+      expect(r.stdout + r.stderr).not.toContain("FAIL");
+      expect(r.stdout).not.toContain("MANIFEST_MISSING_ROUTE:");
+      expect(r.stdout).not.toContain("MANIFEST_STALE_ROUTE:");
+      expect(r.stdout).not.toContain("MANIFEST_COUNT_MISMATCH:");
+      expect(r.stdout).not.toContain("MANIFEST_COMMENT_LITERAL:");
+      expect(r.stdout).not.toContain("MANIFEST_PARSE_ERROR:");
+      expect(r.stdout).not.toContain("CLASSIFIER_FAILURE:");
+      expect(r.stdout).not.toContain("STUB_MOCKED_RATE_LIMIT_AUDIT:");
+      expect(r.stdout).not.toContain("STUB_DYNAMIC_SPECIFIER:");
+      expect(r.stdout).not.toContain("STUB_CONFIG_SEAM:");
+      expect(r.stdout).not.toContain("DANGLING_ENTRY:");
+      expect(r.status).toBe(0);
+    }, 60_000);
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const VALID_OP_TOKEN = `${OPERATOR_TOKEN_PREFIX}${"a".repeat(43)}`;
 
@@ -11,22 +12,27 @@ const {
   mockUpdate,
   mockShareUpdateMany,
   mockRequireMaintenanceOperator,
-  mockCheckRateLimitOrFail,
+  mockCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
-} = vi.hoisted(() => ({
-  mockVerifyAdminToken: vi.fn(),
-  mockFindFirst: vi.fn(),
-  mockUpdateMany: vi.fn(),
-  mockUpdate: vi.fn(),
-  mockShareUpdateMany: vi.fn(),
-  mockRequireMaintenanceOperator: vi.fn(),
-  mockCheckRateLimitOrFail: vi.fn().mockResolvedValue(null),
-  mockLogAudit: vi.fn(),
-  mockGetCurrentMasterKeyVersion: vi.fn(),
-  mockGetMasterKeyByVersion: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockVerifyAdminToken: vi.fn(),
+    mockFindFirst: vi.fn(),
+    mockUpdateMany: vi.fn(),
+    mockUpdate: vi.fn(),
+    mockShareUpdateMany: vi.fn(),
+    mockRequireMaintenanceOperator: vi.fn(),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockGetCurrentMasterKeyVersion: vi.fn(),
+    mockGetMasterKeyByVersion: vi.fn(),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({ verifyAdminToken: mockVerifyAdminToken }));
 vi.mock("@/lib/prisma", () => ({
@@ -36,10 +42,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }) }),
-}));
-vi.mock("@/lib/security/rate-limit-audit", () => ({
-  checkRateLimitOrFail: mockCheckRateLimitOrFail,
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -74,6 +77,11 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const TENANT = "11111111-1111-1111-1111-111111111111";
 const ALICE = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -117,7 +125,7 @@ function makeRequest(): NextRequest {
 describe("POST /api/admin/rotate-master-key/[rotationId]/execute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheckRateLimitOrFail.mockResolvedValue(null);
+    mockCheck.mockResolvedValue({ allowed: true });
     mockRequireMaintenanceOperator.mockResolvedValue({ ok: true });
     mockGetCurrentMasterKeyVersion.mockReturnValue(2);
     mockGetMasterKeyByVersion.mockReturnValue("hexkey");
@@ -234,20 +242,14 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/execute", () => {
     );
   });
 
-  describe("redisErrored fail-closed (rate-limiter Redis unavailable)", () => {
-    it("returns 503 without writing PasswordShare", async () => {
-      const { NextResponse } = await import("next/server");
-      mockCheckRateLimitOrFail.mockResolvedValueOnce(
-        NextResponse.json(
-          { error: "RATE_LIMITER_UNAVAILABLE" },
-          { status: 503, headers: { "Retry-After": "30" } },
-        ),
-      );
-      const res = await callPOST();
-      expect(res.status).toBe(503);
-      expect(res.headers.get("Retry-After")).toBe("30");
-      expect(mockShareUpdateMany).not.toHaveBeenCalled();
-      expect(mockUpdateMany).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: callPOST,
+      limiter: rateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockUpdateMany, mockShareUpdateMany],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
     });
   });
 

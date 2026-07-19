@@ -1,22 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuthOrToken,
   mockPrismaDelegationSession,
   mockWithBypassRls,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
-  mockAuthOrToken: vi.fn(),
-  mockPrismaDelegationSession: {
-    findFirst: vi.fn(),
-  },
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockRateLimiterCheck: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuthOrToken: vi.fn(),
+    mockPrismaDelegationSession: {
+      findFirst: vi.fn(),
+    },
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+  };
+});
 
 vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
@@ -31,7 +39,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -53,6 +61,16 @@ vi.mock("@/lib/logger", () => ({
 
 import { GET } from "./route";
 import { NextRequest } from "next/server";
+
+// Module-level `checkRateLimiter = createRateLimiter(...)` runs at import
+// time, above. Snapshot the recorded factory call now (module scope, before
+// any test/beforeEach executes) — the global beforeEach's vi.clearAllMocks()
+// would otherwise wipe mockCreateRateLimiter.mock.calls/.results before the
+// first test runs.
+const checkRateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const checkRateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const VALID_CLIENT_ID = "mcpc_f47ac10b58cc4372a5670e02b2c3d479";
 const VALID_ENTRY_ID = "entry-abc-123";
@@ -183,6 +201,27 @@ describe("GET /api/vault/delegation/check", () => {
     expect(json.authorized).toBe(false);
     expect(json.reason).toBe("rate_limit");
     expect(res.headers.get("Retry-After")).toBe("30");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID })),
+      limiter: checkRateLimiter,
+      expectation: {
+        envelope: "custom",
+        status: 503,
+        body: { authorized: false, reason: "service_unavailable" },
+        retryAfter: "required",
+      },
+      // M9: logAuditAsync is NOT included — the production 503 path itself
+      // fires emitRateLimitFailClosed -> logAuditAsync for authed users
+      // (rate-limit-audit.ts:240,:155); spying it as "no mutation" would
+      // race the intended emission.
+      assertNoMutation: [mockPrismaDelegationSession.findFirst],
+      limiterFactory: checkRateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 when clientId is missing", async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockPrismaPasswordShare,
@@ -10,7 +11,10 @@ const {
   mockDecryptShareData,
   mockExtractClientIp,
   mockContentLimiterCheck,
-} = vi.hoisted(() => ({
+  mockCreateRateLimiter,
+} = vi.hoisted(() => {
+  const mockContentLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockPrismaPasswordShare: { findUnique: vi.fn() },
   mockPrismaShareAccessLog: { create: vi.fn().mockResolvedValue({}) },
   mockPrismaExecuteRaw: vi.fn().mockResolvedValue(1),
@@ -18,8 +22,12 @@ const {
   mockVerifyShareAccessToken: vi.fn().mockReturnValue(true),
   mockDecryptShareData: vi.fn(),
   mockExtractClientIp: vi.fn().mockReturnValue("1.2.3.4"),
-  mockContentLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-}));
+  mockContentLimiterCheck,
+  // Recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockContentLimiterCheck, clear: vi.fn() })),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -42,7 +50,7 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockContentLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
@@ -56,6 +64,13 @@ vi.mock("@/lib/http/with-request-log", () => ({
 }));
 
 import { GET } from "./route";
+
+// Module-scope snapshot (route.ts:30 `const contentLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const contentLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const contentLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockContentLimiterCheck;
+};
 
 const SHARE_ID = "share-abc123";
 const ACCESS_TOKEN = "valid-token-xyz";
@@ -123,6 +138,17 @@ describe("GET /api/share-links/[id]/content", () => {
     mockContentLimiterCheck.mockResolvedValue({ allowed: false });
     const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
     expect(res.status).toBe(429);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => GET(createContentRequest(), createParams({ id: SHARE_ID })),
+      limiter: contentLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaExecuteRaw, mockPrismaShareAccessLog.create],
+      limiterFactory: contentLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 404 when share not found", async () => {

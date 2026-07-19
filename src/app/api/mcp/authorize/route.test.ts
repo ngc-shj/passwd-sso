@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
@@ -7,20 +8,25 @@ const {
   mockWithBypassRls,
   mockExtractClientIp,
   mockCheckRateLimit,
+  mockCreateRateLimiter,
   mockRequireRecentCurrentAuthMethod,
   mockLogAuditAsync,
   mockDerivePasskeyState,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockFindFirst: vi.fn(),
-  mockUserFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
-  mockExtractClientIp: vi.fn(() => "203.0.113.10"),
-  mockCheckRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
-  mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
-  mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
-  mockDerivePasskeyState: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockCheckRateLimit = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockAuth: vi.fn(),
+    mockFindFirst: vi.fn(),
+    mockUserFindUnique: vi.fn(),
+    mockWithBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+    mockExtractClientIp: vi.fn(() => "203.0.113.10"),
+    mockCheckRateLimit,
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheckRateLimit, clear: vi.fn() })),
+    mockRequireRecentCurrentAuthMethod: vi.fn().mockResolvedValue(null),
+    mockLogAuditAsync: vi.fn().mockResolvedValue(undefined),
+    mockDerivePasskeyState: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({
   auth: mockAuth,
@@ -43,7 +49,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheckRateLimit }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 vi.mock("@/lib/auth/policy/ip-access", () => ({
@@ -85,6 +91,11 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
 
 import { GET } from "@/app/api/mcp/authorize/route";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
+
+const rateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const rateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheckRateLimit;
+};
 
 // A07-4: isActive: true is part of the WHERE clause; fixture documents that
 // the test asserts a matching row exists (the Prisma mock returns whatever it
@@ -328,5 +339,19 @@ describe("GET /api/mcp/authorize", () => {
     await expect(
       GET(createRequest(VALID_AUTHZ_URL) as unknown as import("next/server").NextRequest),
     ).rejects.toThrow("DB error");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        GET(createRequest(VALID_AUTHZ_URL) as unknown as import("next/server").NextRequest),
+      limiter: rateLimiter,
+      expectation: { envelope: "oauth" },
+      // Read-only proxy route: nearest downstream read is the OAuth client
+      // lookup inside validateOAuthRequest — must never fire past the gate.
+      assertNoMutation: [mockFindFirst],
+      limiterFactory: rateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

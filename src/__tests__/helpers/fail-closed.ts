@@ -156,3 +156,62 @@ export async function assertRedisFailClosed(options: {
   const factoryOptions = factoryArgs[0] as { failClosedOnRedisError?: boolean };
   expect(factoryOptions.failClosedOnRedisError).toBe(true);
 }
+
+/**
+ * Non-Response variant of `assertRedisFailClosed` for producers that signal
+ * fail-closed via a silent drop (no Response object) — e.g.
+ * `sendVerificationRequest` on the magic-link provider, which treats
+ * `redisErrored` identically to over-limit: warn-log + no email sent.
+ *
+ * Deliberately does NOT touch `@/lib/security/rate-limit-audit` (same RT5
+ * rule as `assertRedisFailClosed`) and asserts no envelope — the producer
+ * returns no Response to inspect.
+ */
+export async function assertRedisFailClosedSilentDrop(options: {
+  /** Executes the non-Response producer (e.g. sendVerificationRequest). */
+  invoke: () => Promise<unknown>;
+  /** The mocked limiter under test — factory result object itself. */
+  limiter: { check: Mock };
+  /** Side-effect spies that MUST NOT fire (e.g. sendEmail). Non-empty. */
+  assertNoEffect: readonly Mock[];
+  /** Recorded factory mock; strict-identity attribution as in assertRedisFailClosed. */
+  limiterFactory: Mock;
+  /** Inline redisErrored fixture literal (gate literal must be code). */
+  failure: RedisErroredFailure;
+}): Promise<void> {
+  const { invoke, limiter, assertNoEffect, limiterFactory, failure } = options;
+
+  if (assertNoEffect.length === 0) {
+    throw new Error(
+      "assertRedisFailClosedSilentDrop: assertNoEffect must be non-empty — pass at least one side-effect spy",
+    );
+  }
+
+  // 1. Arrange: limiter-layer mock only.
+  limiter.check.mockResolvedValue(failure);
+
+  // 2. Act
+  await invoke();
+
+  // 3. Assert limiter reached
+  expect(limiter.check).toHaveBeenCalled();
+
+  // 4. Assert no side effect fired (no envelope — silent-drop contract)
+  for (const spy of assertNoEffect) {
+    expect(spy).not.toHaveBeenCalled();
+  }
+
+  // 5. Assert factory options (attributed, identity-only) — same as
+  // assertRedisFailClosed step 6.
+  const callIndex = limiterFactory.mock.results.findIndex(
+    (result) => result.value === limiter,
+  );
+  if (callIndex === -1) {
+    throw new Error(
+      "assertRedisFailClosedSilentDrop: limiter not produced by limiterFactory — pass the factory result object itself",
+    );
+  }
+  const factoryArgs = limiterFactory.mock.calls[callIndex] as unknown[];
+  const factoryOptions = factoryArgs[0] as { failClosedOnRedisError?: boolean };
+  expect(factoryOptions.failClosedOnRedisError).toBe(true);
+}

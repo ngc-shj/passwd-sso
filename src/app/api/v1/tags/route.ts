@@ -5,10 +5,11 @@ import { validateV1Auth } from "@/lib/auth/session/v1-auth";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
+import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { errorResponse, errorResponseWithMessage, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { errorResponse, errorResponseWithMessage, unauthorized } from "@/lib/http/api-response";
 
 
 // GET /api/v1/tags — List tags (API key or SA token)
@@ -30,10 +31,15 @@ async function handleGET(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
-  if (!rl.allowed) {
-    return rateLimited(rl.retryAfterMs);
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: v1ApiKeyLimiter,
+    key: `rl:api_key:${rateLimitKey}`,
+    scope: "v1.tags",
+    userId,
+    tenantId,
+  });
+  if (blocked) return blocked;
 
   const tags = await withTenantRls(prisma, tenantId, async (tx) =>
     tx.tag.findMany({

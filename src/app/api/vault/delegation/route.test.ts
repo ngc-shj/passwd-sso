@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
   mockResolveUserTenantId,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockWithBypassRls,
   mockPrismaMcpAccessToken,
@@ -24,11 +26,15 @@ const {
     updateMany: vi.fn(),
     deleteMany: vi.fn(),
   };
+  const mockRateLimiterCheck = vi.fn();
 
   return {
     mockAuth: vi.fn(),
     mockResolveUserTenantId: vi.fn(),
-    mockRateLimiterCheck: vi.fn(),
+    mockRateLimiterCheck,
+    // F: recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
     mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
     mockPrismaMcpAccessToken,
@@ -44,7 +50,7 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -82,6 +88,16 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST, GET, DELETE } from "./route";
 import { NextRequest } from "next/server";
+
+// Module-level `delegationRateLimiter = createRateLimiter(...)` runs at
+// import time, above. Snapshot the recorded factory call now (module scope,
+// before any test/beforeEach executes) — the POST describe block's
+// beforeEach calls vi.clearAllMocks(), which would otherwise wipe
+// mockCreateRateLimiter.mock.calls/.results before the first test runs.
+const delegationRateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const delegationRateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 // ─── Test Fixtures ───────────────────────────────────────────────
 
@@ -173,6 +189,17 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("30");
     expect(mockPrismaDelegationSession.create).not.toHaveBeenCalled();
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makePostRequest(VALID_POST_BODY)),
+      limiter: delegationRateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaDelegationSession.create, mockStoreDelegationEntries],
+      limiterFactory: delegationRateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 INVALID_JSON for malformed JSON body", async () => {

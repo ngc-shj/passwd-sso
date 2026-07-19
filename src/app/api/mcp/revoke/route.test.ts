@@ -1,19 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "../../../../__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockRevokeToken,
   mockRateLimiterCheck,
-} = vi.hoisted(() => ({
-  mockRevokeToken: vi.fn().mockResolvedValue(undefined),
-  mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-}));
+  mockCreateRateLimiter,
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockRevokeToken: vi.fn().mockResolvedValue(undefined),
+    mockRateLimiterCheck,
+    // Recording factory — assertRedisFailClosed's factory-attribution step
+    // reads mockCreateRateLimiter.mock.{calls,results}.
+    mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+  };
+});
 
 vi.mock("@/lib/mcp/oauth-server", () => ({
   revokeToken: mockRevokeToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
@@ -27,6 +35,13 @@ import {
   MCP_PRESENTED_TOKEN_MAX_LENGTH,
   MCP_TOKEN_TYPE_HINT_MAX_LENGTH,
 } from "@/lib/constants/auth/mcp";
+
+// Module-scope snapshot (route.ts:19 `const revokeLimiter = createRateLimiter(...)`
+// runs at import time, above). See fail-closed.ts module doc.
+const revokeLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const revokeLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const VALID_JSON_BODY = {
   token: "mcp_access_token_abc",
@@ -298,5 +313,21 @@ describe("POST /api/mcp/revoke", () => {
 
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toBe("60");
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/mcp/revoke", {
+            body: VALID_JSON_BODY,
+          }),
+        ),
+      limiter: revokeLimiter,
+      expectation: { envelope: "oauth" },
+      assertNoMutation: [mockRevokeToken],
+      limiterFactory: revokeLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

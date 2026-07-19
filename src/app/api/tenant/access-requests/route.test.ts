@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../../../__tests__/helpers/mock-auth";
 import { createRequest, parseResponse } from "../../../../__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
@@ -10,25 +11,32 @@ const {
   mockWithBypassRls,
   mockLogAudit,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockAccessRequestFindMany,
   mockAccessRequestCreate,
   mockServiceAccountFindUnique,
   mockDispatchTenantWebhook,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockLogAudit: vi.fn(),
-  mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockRateLimiterCheck,
+  // Recording factory — assertRedisFailClosed's factory-attribution step
+  // reads mockCreateRateLimiter.mock.{calls,results}.
+  mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
   mockAccessRequestFindMany: vi.fn(),
   mockAccessRequestCreate: vi.fn(),
   mockServiceAccountFindUnique: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
-}));
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
@@ -71,7 +79,7 @@ vi.mock("@/lib/audit/audit", () => ({
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -86,6 +94,14 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 import { GET, POST } from "@/app/api/tenant/access-requests/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MS_PER_HOUR } from "@/lib/constants/time";
+
+// Module-scope snapshot (route.ts:23 `const accessRequestCreateLimiter =
+// createRateLimiter(...)` runs at import time, above). See fail-closed.ts
+// module doc.
+const accessRequestCreateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const accessRequestCreateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const SA_ID = "00000000-0000-4000-a000-000000000001";
@@ -180,7 +196,12 @@ describe("GET /api/tenant/access-requests", () => {
 });
 
 describe("POST /api/tenant/access-requests", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // assertRedisFailClosed's arrange step uses mockResolvedValue (persistent,
+    // not Once) — restore the default allow so it doesn't leak into later tests.
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("creates access request with validated scope array", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -450,6 +471,64 @@ describe("POST /api/tenant/access-requests", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(403);
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — SA-bearer branch", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-1",
+      scopes: ["access-request:create"],
+    });
+    mockServiceAccountFindUnique.mockResolvedValue({
+      isActive: true,
+      createdById: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+    });
+
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/tenant/access-requests", {
+            headers: { Authorization: "Bearer sa_sometoken" },
+            body: { requestedScope: ["passwords:read"] },
+          }),
+        ),
+      limiter: accessRequestCreateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockAccessRequestCreate],
+      limiterFactory: accessRequestCreateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — session (admin) branch", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+    });
+
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/tenant/access-requests", {
+            body: {
+              serviceAccountId: SA_ID,
+              requestedScope: ["passwords:read"],
+            },
+          }),
+        ),
+      limiter: accessRequestCreateLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockAccessRequestCreate],
+      limiterFactory: accessRequestCreateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("SA self-service infers serviceAccountId from token (no serviceAccountId in body)", async () => {

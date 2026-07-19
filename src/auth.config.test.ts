@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { Mock } from "vitest";
 import { SEC_PER_MINUTE, MS_PER_MINUTE } from "@/lib/constants/time";
 import type { createRateLimiter } from "@/lib/security/rate-limit";
+import { assertRedisFailClosedSilentDrop, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 describe("auth.config basePath handling", () => {
   beforeEach(() => {
@@ -303,5 +305,64 @@ describe("auth.config magic-link provider settings", () => {
     const { MAGIC_LINK_TTL_MINUTES } = await import("@/lib/constants/auth/magic-link");
     // This constant is the single source of truth shared by the provider and the email template
     expect(MAGIC_LINK_TTL_MINUTES).toBe(15);
+  });
+});
+
+// C8a — magic-link silent-drop fail-closed contract (plan
+// fail-closed-tranche2, contract C8a). `sendVerificationRequest` treats
+// redisErrored identically to over-limit: warn-log + no email sent
+// (anti-enumeration). Production code is unchanged; this pins the
+// existing behavior with the non-Response helper variant.
+describe("auth.config magic-link: redisErrored silent-drop (C8a)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("fails closed (silent drop, no email) when Redis is unavailable", async () => {
+    vi.stubEnv("EMAIL_PROVIDER", "nodemailer");
+
+    const mockSendEmail = vi.fn();
+    vi.doMock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
+
+    const mockWarn = vi.fn();
+    vi.doMock("@/lib/logger", () => ({
+      getLogger: () => ({ warn: mockWarn, error: vi.fn(), info: vi.fn() }),
+    }));
+
+    const mockCheck = vi.fn();
+    const mockFactory: Mock = vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() }));
+    vi.doMock("@/lib/security/rate-limit", () => ({
+      createRateLimiter: mockFactory,
+    }));
+
+    const config = (await import("@/auth.config")).default;
+    // module-load-time factory invocation happened above, before any clear.
+    const factorySnapshot = snapshotFactory(mockFactory);
+    const limiter = mockFactory.mock.results[0]!.value as { check: Mock };
+
+    const nodemailerProvider = config.providers.find(
+      (p) => typeof p === "object" && p !== null && "id" in p && p.id === "nodemailer",
+    ) as { sendVerificationRequest: (args: { identifier: string; url: string }) => Promise<void> };
+    expect(nodemailerProvider).toBeDefined();
+
+    await assertRedisFailClosedSilentDrop({
+      invoke: () =>
+        nodemailerProvider.sendVerificationRequest({
+          identifier: "user@example.com",
+          url: "https://example.com/api/auth/callback/nodemailer?callbackUrl=/ja/dashboard&token=abc",
+        }),
+      limiter,
+      assertNoEffect: [mockSendEmail],
+      limiterFactory: factorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+
+    expect(mockWarn).toHaveBeenCalledWith("magic-link.rate-limited");
   });
 });
