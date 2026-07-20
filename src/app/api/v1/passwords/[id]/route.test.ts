@@ -115,9 +115,13 @@ const v1LimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
   ([opts]) =>
     opts.windowMs === RATE_WINDOW_MS && opts.max === 100 && opts.failClosedOnRedisError === true,
 );
-const v1Limiter = mockCreateRateLimiter.mock.results[v1LimiterCallIndex]!.value as {
-  check: typeof mockCheck;
-};
+const v1LimiterResult = mockCreateRateLimiter.mock.results[v1LimiterCallIndex];
+if (!v1LimiterResult) {
+  throw new Error(
+    "v1ApiKeyLimiter factory call not found — rate-limiters.ts options drifted from this test's match criteria (windowMs/max/failClosedOnRedisError)",
+  );
+}
+const v1Limiter = v1LimiterResult.value as { check: typeof mockCheck };
 
 const PW_ID = "pw-123";
 const USER_ID = "user-1";
