@@ -309,10 +309,12 @@ describe("auth.config magic-link provider settings", () => {
 });
 
 // C8a — magic-link silent-drop fail-closed contract (plan
-// fail-closed-tranche2, contract C8a). `sendVerificationRequest` treats
-// redisErrored identically to over-limit: warn-log + no email sent
-// (anti-enumeration). Production code is unchanged; this pins the
-// existing behavior with the non-Response helper variant.
+// fail-closed-tranche2, contract C8a; log-channel split per
+// fail-closed-sc-t3-remaining C3). `sendVerificationRequest` silently drops
+// on BOTH redisErrored and over-limit (anti-enumeration: no throw, no email),
+// but logs each on a distinct channel — error "magic-link.rate-limit.fail_closed"
+// for the operator-actionable outage vs warn "magic-link.rate-limited" for
+// expected over-limit noise.
 describe("auth.config magic-link: redisErrored silent-drop (C8a)", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -324,15 +326,16 @@ describe("auth.config magic-link: redisErrored silent-drop (C8a)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("fails closed (silent drop, no email) when Redis is unavailable", async () => {
+  async function arrangeMagicLinkProvider() {
     vi.stubEnv("EMAIL_PROVIDER", "nodemailer");
 
     const mockSendEmail = vi.fn();
     vi.doMock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 
     const mockWarn = vi.fn();
+    const mockError = vi.fn();
     vi.doMock("@/lib/logger", () => ({
-      getLogger: () => ({ warn: mockWarn, error: vi.fn(), info: vi.fn() }),
+      getLogger: () => ({ warn: mockWarn, error: mockError, info: vi.fn() }),
     }));
 
     const mockCheck = vi.fn();
@@ -351,18 +354,41 @@ describe("auth.config magic-link: redisErrored silent-drop (C8a)", () => {
     ) as { sendVerificationRequest: (args: { identifier: string; url: string }) => Promise<void> };
     expect(nodemailerProvider).toBeDefined();
 
+    return { mockSendEmail, mockWarn, mockError, limiter, factorySnapshot, nodemailerProvider };
+  }
+
+  const sendArgs = {
+    identifier: "user@example.com",
+    url: "https://example.com/api/auth/callback/nodemailer?callbackUrl=/ja/dashboard&token=abc",
+  };
+
+  it("fails closed (silent drop, no email) when Redis is unavailable, on the outage log channel", async () => {
+    const { mockSendEmail, mockWarn, mockError, limiter, factorySnapshot, nodemailerProvider } =
+      await arrangeMagicLinkProvider();
+
     await assertRedisFailClosedSilentDrop({
-      invoke: () =>
-        nodemailerProvider.sendVerificationRequest({
-          identifier: "user@example.com",
-          url: "https://example.com/api/auth/callback/nodemailer?callbackUrl=/ja/dashboard&token=abc",
-        }),
+      invoke: () => nodemailerProvider.sendVerificationRequest(sendArgs),
       limiter,
       assertNoEffect: [mockSendEmail],
       limiterFactory: factorySnapshot.replay(),
       failure: { allowed: false, redisErrored: true },
     });
 
+    expect(mockError).toHaveBeenCalledWith("magic-link.rate-limit.fail_closed");
+    expect(mockWarn).not.toHaveBeenCalledWith("magic-link.rate-limited");
+  });
+
+  it("silently drops over-limit sends on the warn channel (no email, no outage log)", async () => {
+    const { mockSendEmail, mockWarn, mockError, limiter, nodemailerProvider } =
+      await arrangeMagicLinkProvider();
+
+    limiter.check.mockResolvedValue({ allowed: false });
+
+    await nodemailerProvider.sendVerificationRequest(sendArgs);
+
+    expect(limiter.check).toHaveBeenCalled();
+    expect(mockSendEmail).not.toHaveBeenCalled();
     expect(mockWarn).toHaveBeenCalledWith("magic-link.rate-limited");
+    expect(mockError).not.toHaveBeenCalledWith("magic-link.rate-limit.fail_closed");
   });
 });
