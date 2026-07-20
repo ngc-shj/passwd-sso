@@ -56,11 +56,14 @@ MANIFEST_FILE="${FAIL_CLOSED_TEST_MANIFEST_FILE:-$FIXTURE_ROOT/scripts/checks/fa
 CLASSIFIER="$REPO_ROOT/scripts/checks/classify-fail-closed-test.mjs"
 
 # Ratchet constants (C3/C5) — fixture-overridable so red fixtures (a 1-entry
-# debt/17-entry legacy list vs the real-repo expectation) are executable
+# debt/1-entry legacy list vs the real-repo expectation) are executable
 # without mutating the real manifests. Real-repo defaults: debt burns down to
-# 0 (C3); legacy holds exactly 16 (13 routes + 3 lib members, C8d).
+# 0 (C3); legacy burns down to 0 too (SC-T3-1, tranche 3) — the former 13 route
+# members migrated to helper mode. The legacy tier now holds ZERO members; the
+# mechanism (manifest + this constant + STALE/DANGLING tokens) remains as the
+# registration path for any future pre-helper onboarding.
 EXPECTED_DEBT_COUNT="${FAIL_CLOSED_EXPECTED_DEBT_COUNT:-0}"
-EXPECTED_LEGACY_COUNT="${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-13}"
+EXPECTED_LEGACY_COUNT="${FAIL_CLOSED_EXPECTED_LEGACY_COUNT:-0}"
 
 # CI-auditable: print effective scan paths on one line.
 echo "check-fail-closed-routes-have-test: FIXTURE_ROOT=$FIXTURE_ROOT DEBT_FILE=$DEBT_FILE LEGACY_FILE=$LEGACY_FILE MANIFEST_FILE=$MANIFEST_FILE EXPECTED_DEBT_COUNT=$EXPECTED_DEBT_COUNT EXPECTED_LEGACY_COUNT=$EXPECTED_LEGACY_COUNT"
@@ -555,12 +558,15 @@ EOF
 # src (both lanes) PLUS setupFiles derived from the vitest configs, batch-
 # classify, and reject any non-exempt production-mapping stub.
 # ---------------------------------------------------------------------------
-FROZEN_STUB_EXEMPTIONS='src/app/api/tenant/members/[userId]/reset-vault/route.test.ts
-src/app/api/tenant/operator-tokens/route.test.ts
-src/app/api/tenant/scim-tokens/route.test.ts
-src/app/api/tenant/service-accounts/route.test.ts'
+# EMPTIED by SC-T3-1 (tranche 3): the 4 tenant/* siblings that partial-stubbed
+# rate-limit-audit have been migrated to helper mode and their stubs removed, so
+# no file needs an exemption. The variable is retained (empty) as the
+# registration surface for any future pre-helper onboarding — adding an entry is
+# a visible script diff. With an empty list the C6 stub scan requires ZERO
+# rate-limit-audit mocks anywhere under src across both lanes.
+FROZEN_STUB_EXEMPTIONS=''
 
-is_stub_exempt() { grep -qxF "$1" <<<"$FROZEN_STUB_EXEMPTIONS"; }
+is_stub_exempt() { [ -n "$FROZEN_STUB_EXEMPTIONS" ] && grep -qxF "$1" <<<"$FROZEN_STUB_EXEMPTIONS"; }
 
 STUB_TEST_FILES=""
 if [ -n "${FAIL_CLOSED_TEST_ROOT:-}" ]; then

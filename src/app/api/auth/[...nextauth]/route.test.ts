@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 // Mirrors the `RouteHandler` signature in route.ts (not exported). The
 // wrappers are generic `<H extends RouteHandler>(h: H): H`, so the inner
@@ -29,9 +30,16 @@ vi.mock("@/lib/auth/session/session-meta", () => ({
 }));
 
 // Controllable rate-limit mock used by the callback rate-limit tests.
+// Recording factory returns a DISTINCT object per createRateLimiter call
+// (route.ts:77 callbackRateLimiter THEN :127 magicLinkIpLimiter), both
+// delegating to the shared mockRateLimitCheck so the existing wrapper tests
+// (which only assert on mockRateLimitCheck) are unaffected. The distinct
+// objects let assertRedisFailClosed attribute each limiter to its
+// createRateLimiter call — see the "fail-closed contract" describe block.
 const mockRateLimitCheck = vi.fn();
+const mockCreateRateLimiter = vi.fn(() => ({ check: mockRateLimitCheck }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimitCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 
 const mockExtractClientIp = vi.fn();
@@ -278,19 +286,10 @@ describe("withCallbackRateLimit", () => {
     expect(inner).toHaveBeenCalledTimes(2);
   });
 
-  it("fails closed with 503 when the limiter reports redisErrored (does NOT invoke handler)", async () => {
-    mockRateLimitCheck.mockResolvedValue({ allowed: false, redisErrored: true });
-    const { _withCallbackRateLimit } = await import(
-      "@/app/api/auth/[...nextauth]/route"
-    );
-    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
-    const wrapped = _withCallbackRateLimit(inner);
-
-    const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
-
-    expect(res.status).toBe(503);
-    expect(inner).not.toHaveBeenCalled();
-  });
+  // Redis-unavailable fail-closed (503) for this limiter is covered by the
+  // stronger helper contract in the "fail-closed contract" describe block
+  // (envelope + Retry-After + factory attribution) — the former status-only
+  // direct case is superseded and removed to avoid duplication.
 
   it("skips the limiter and warn-logs when client IP cannot be determined", async () => {
     mockExtractClientIp.mockReturnValue(null);
@@ -395,19 +394,10 @@ describe("withMagicLinkIpRateLimit", () => {
     expect(inner).not.toHaveBeenCalled();
   });
 
-  it("fails closed with 503 when the limiter reports redisErrored (does NOT invoke handler)", async () => {
-    mockRateLimitCheck.mockResolvedValue({ allowed: false, redisErrored: true });
-    const { _withMagicLinkIpRateLimit } = await import(
-      "@/app/api/auth/[...nextauth]/route"
-    );
-    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
-    const wrapped = _withMagicLinkIpRateLimit(inner);
-
-    const res = await wrapped(makeReq("/api/auth/signin/nodemailer"));
-
-    expect(res.status).toBe(503);
-    expect(inner).not.toHaveBeenCalled();
-  });
+  // Redis-unavailable fail-closed (503) for this limiter is covered by the
+  // stronger helper contract in the "fail-closed contract" describe block
+  // (envelope + Retry-After + factory attribution) — the former status-only
+  // direct case is superseded and removed to avoid duplication.
 
   it("fail-OPEN: forwards when client IP cannot be determined (no 503)", async () => {
     mockExtractClientIp.mockReturnValue(null);
@@ -422,5 +412,89 @@ describe("withMagicLinkIpRateLimit", () => {
     expect(res.status).toBe(200);
     expect(inner).toHaveBeenCalledTimes(1);
     expect(mockRateLimitCheck).not.toHaveBeenCalled();
+  });
+});
+
+// Fail-closed contract (helper tier). The route's two limiters
+// (callbackRateLimiter, magicLinkIpLimiter) are both pre-auth `userId: null`
+// → checkRateLimitOrFail warn-logs (no logAuditAsync) and returns canonical
+// 503 on redisErrored. Because the route module is imported dynamically with
+// per-test resetModules elsewhere in this file, this block imports ONCE, then
+// captures the two distinct createRateLimiter results by creation order and
+// snapshots the factory for strict-identity attribution. assertNoMutation uses
+// the wrapped handler-proceed spy (tranche-2 read-only-route semantic
+// extension): the auth handler is the guarded side-effect, and its
+// non-invocation proves the 503 short-circuited before the handler ran.
+describe("fail-closed contract (Redis unavailable → 503)", () => {
+  beforeEach(() => {
+    mockRateLimitCheck.mockReset();
+    mockExtractClientIp.mockReturnValue("203.0.113.5");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  async function loadRoute() {
+    // Reset so this block owns the factory's call/result ledger, then import
+    // once — both createRateLimiter calls fire at module-load in creation order.
+    vi.resetModules();
+    mockCreateRateLimiter.mockClear();
+    const mod = await import("@/app/api/auth/[...nextauth]/route");
+    const callbackFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+    const callbackLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+      check: typeof mockRateLimitCheck;
+    };
+    const magicLinkFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+    const magicLinkLimiter = mockCreateRateLimiter.mock.results[1]!.value as {
+      check: typeof mockRateLimitCheck;
+    };
+    return {
+      mod,
+      callbackLimiter,
+      callbackFactorySnapshot,
+      magicLinkLimiter,
+      magicLinkFactorySnapshot,
+    };
+  }
+
+  it("fails closed (503, no mutation) when Redis is unavailable — callback", async () => {
+    const { mod, callbackLimiter, callbackFactorySnapshot } = await loadRoute();
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = mod._withCallbackRateLimit(inner);
+    await assertRedisFailClosed({
+      invoke: () =>
+        wrapped(
+          new NextRequest(
+            "http://localhost/api/auth/callback/google/",
+            { method: "POST" },
+          ),
+        ),
+      limiter: callbackLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [inner],
+      limiterFactory: callbackFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
+  });
+
+  it("fails closed (503, no mutation) when Redis is unavailable — magic-link", async () => {
+    const { mod, magicLinkLimiter, magicLinkFactorySnapshot } = await loadRoute();
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = mod._withMagicLinkIpRateLimit(inner);
+    await assertRedisFailClosed({
+      invoke: () =>
+        wrapped(
+          new NextRequest(
+            "http://localhost/api/auth/signin/nodemailer",
+            { method: "POST" },
+          ),
+        ),
+      limiter: magicLinkLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [inner],
+      limiterFactory: magicLinkFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { DEFAULT_SESSION } from "@/__tests__/helpers/mock-auth";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuth,
@@ -8,6 +9,7 @@ const {
   mockWithTenantRls,
   mockLogAudit,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockGrantFindMany,
   mockGrantFindFirst,
   mockGrantCreate,
@@ -25,12 +27,14 @@ const {
       this.status = status;
     }
   }
+  const mockRateLimiterCheck = vi.fn();
   return {
     mockAuth: vi.fn(),
     mockRequireTenantPermission: vi.fn(),
     mockWithTenantRls: vi.fn(async (p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(p)),
     mockLogAudit: vi.fn(),
-    mockRateLimiterCheck: vi.fn(),
+    mockRateLimiterCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
     mockGrantFindMany: vi.fn(),
     mockGrantFindFirst: vi.fn(),
     mockGrantCreate: vi.fn(),
@@ -77,7 +81,7 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
@@ -91,6 +95,13 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { GET, POST } from "./route";
 import { MS_PER_DAY } from "@/lib/constants/time";
+
+// Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
+// at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
+const breakglassLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const breakglassLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const TENANT_ID = "tenant-1";
 const ACTOR_USER_ID = "test-user-id";
@@ -394,18 +405,21 @@ describe("POST /api/tenant/breakglass", () => {
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
-  it("fails closed with 503 when the limiter reports redisErrored (no grant created)", async () => {
-    mockRateLimiterCheck.mockResolvedValue({ allowed: false, redisErrored: true });
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/tenant/breakglass", {
-        body: validBody,
-        headers: { origin: "http://localhost" },
-      }),
-    );
-    const { status, json } = await parseResponse(res);
-    expect(status).toBe(503);
-    expect(json.error).toBe("SERVICE_UNAVAILABLE");
-    expect(mockGrantCreate).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/tenant/breakglass", {
+            body: validBody,
+            headers: { origin: "http://localhost" },
+          }),
+        ),
+      limiter: breakglassLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockGrantCreate],
+      limiterFactory: breakglassLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 403 when target user is not a tenant member", async () => {

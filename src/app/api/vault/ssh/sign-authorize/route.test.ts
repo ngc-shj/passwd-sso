@@ -1,22 +1,28 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockAuthOrToken,
   mockPrismaPasswordEntry,
   mockWithBypassRls,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockEnforceAccessRestriction,
-} = vi.hoisted(() => ({
-  mockAuthOrToken: vi.fn(),
-  mockPrismaPasswordEntry: {
-    findFirst: vi.fn(),
-  },
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockRateLimiterCheck: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn();
+  return {
+    mockAuthOrToken: vi.fn(),
+    mockPrismaPasswordEntry: {
+      findFirst: vi.fn(),
+    },
+    mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockRateLimiterCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
+  };
+});
 
 vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
@@ -32,7 +38,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -57,6 +63,14 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST } from "./route";
 import { NextRequest } from "next/server";
+
+// Module-scope snapshot: route.ts's `signRateLimiter = createRateLimiter(...)`
+// runs at import time above, before any beforeEach's vi.clearAllMocks() can
+// wipe it.
+const signRateLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const signRateLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const VALID_KEY_ID = "entry-abc-123";
 const VALID_FINGERPRINT = "SHA256:abcdefghijklmnopqrstuvwxyz0123456789ABCDEF";
@@ -138,13 +152,20 @@ describe("POST /api/vault/ssh/sign-authorize", () => {
     expect(res.headers.get("Retry-After")).toBe("30");
   });
 
-  it("returns 503 when Redis is unavailable (fail-closed)", async () => {
-    mockRateLimiterCheck.mockResolvedValue({ redisErrored: true });
-    const res = await POST(makeRequest({ keyId: VALID_KEY_ID, fingerprint: VALID_FINGERPRINT }));
-    expect(res.status).toBe(503);
-    const json = await res.json();
-    expect(json.authorized).toBe(false);
-    expect(json.reason).toBe("service_unavailable");
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () => POST(makeRequest({ keyId: VALID_KEY_ID, fingerprint: VALID_FINGERPRINT })),
+      limiter: signRateLimiter,
+      expectation: {
+        envelope: "custom",
+        status: 503,
+        body: { authorized: false, reason: "service_unavailable" },
+        retryAfter: "required",
+      },
+      assertNoMutation: [mockPrismaPasswordEntry.findFirst],
+      limiterFactory: signRateLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // ── Body validation ───────────────────────────────────────────────────

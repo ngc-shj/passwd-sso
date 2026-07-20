@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { __resetThrottleForTests } from "@/lib/security/rate-limit-audit";
 
 const {
   mockAuth,
@@ -10,6 +12,7 @@ const {
   mockLogAudit,
   mockHashToken,
   mockRateLimitCheck,
+  mockCreateRateLimiter,
   mockRequireRecentCurrentAuthMethod,
   TenantAuthError,
 } = vi.hoisted(() => {
@@ -34,6 +37,10 @@ const {
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockCreateRateLimiter: vi.fn(() => ({
+      check: mockRateLimitCheck,
+      clear: vi.fn(),
+    })),
     mockRequireRecentCurrentAuthMethod: vi.fn(),
     TenantAuthError: _TenantAuthError,
   };
@@ -66,22 +73,21 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: vi.fn(() => ({
-    check: mockRateLimitCheck,
-    clear: vi.fn(),
-  })),
-}));
-// Keep the real checkRateLimitOrFail (so it maps redisErrored → 503) but
-// stub the audit emit to a no-op to avoid pulling its transitive deps.
-vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
-  ...(await importOriginal()) as Record<string, unknown>,
-  emitRateLimitFailClosed: vi.fn(),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
 import { GET, POST } from "./route";
+
+// Module-scope snapshot: route.ts's module-level `createRateLimiter(...)`
+// call runs at import time above. Must be captured before any
+// vi.clearAllMocks() in beforeEach wipes mock.calls/mock.results.
+const createLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const createLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimitCheck;
+};
 
 // Asserts the per-tenant advisory lock ($executeRaw with pg_advisory_xact_lock)
 // was acquired. Mutation-kill: deleting the lock line from the production
@@ -164,6 +170,10 @@ describe("GET /api/tenant/operator-tokens", () => {
 describe("POST /api/tenant/operator-tokens", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Real emitRateLimitFailClosed now runs on the 503 path (rate-limit-audit
+    // stub removed); reset its module-scoped throttle so a prior test's
+    // emission does not swallow this test's (5-min window, per-scope key).
+    __resetThrottleForTests();
     mockAuth.mockResolvedValue({ user: { id: USER_ID } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
@@ -279,16 +289,20 @@ describe("POST /api/tenant/operator-tokens", () => {
     expect(mockPrismaOperatorToken.create).not.toHaveBeenCalled();
   });
 
-  it("returns 503 (fail-closed) when the create limiter signals redisErrored", async () => {
-    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
-
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
-        body: { name: "Test token" },
-      }),
-    );
-    expect(res.status).toBe(503);
-    expect(mockPrismaOperatorToken.create).not.toHaveBeenCalled();
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/tenant/operator-tokens", {
+            body: { name: "Test token" },
+          }),
+        ),
+      limiter: createLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockPrismaOperatorToken.create],
+      limiterFactory: createLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("creates token and returns plaintext with 201 and Cache-Control: no-store", async () => {

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../../../__tests__/helpers/mock-auth";
 import { createRequest, parseResponse } from "../../../../__tests__/helpers/request-builder";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { __resetThrottleForTests } from "@/lib/security/rate-limit-audit";
 
 const {
   mockAuth,
@@ -8,23 +10,28 @@ const {
   mockWithTenantRls,
   mockLogAudit,
   mockRateLimiterCheck,
+  mockCreateRateLimiter,
   mockServiceAccountFindMany,
   mockServiceAccountCount,
   mockServiceAccountCreate,
   mockExecuteRaw,
   mockDispatchTenantWebhook,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockRequireTenantPermission: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockLogAudit: vi.fn(),
-  mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockServiceAccountFindMany: vi.fn(),
-  mockServiceAccountCount: vi.fn(),
-  mockServiceAccountCreate: vi.fn(),
-  mockExecuteRaw: vi.fn().mockResolvedValue(1),
-  mockDispatchTenantWebhook: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const mockRateLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockAuth: vi.fn(),
+    mockRequireTenantPermission: vi.fn(),
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    mockLogAudit: vi.fn(),
+    mockRateLimiterCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck, clear: vi.fn() })),
+    mockServiceAccountFindMany: vi.fn(),
+    mockServiceAccountCount: vi.fn(),
+    mockServiceAccountCreate: vi.fn(),
+    mockExecuteRaw: vi.fn().mockResolvedValue(1),
+    mockDispatchTenantWebhook: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/auth/access/tenant-auth", () => {
@@ -63,13 +70,7 @@ vi.mock("@/lib/audit/audit", () => ({
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
-}));
-// Keep the real checkRateLimitOrFail (so it maps redisErrored → 503) but
-// stub the audit emit to a no-op to avoid pulling its transitive deps.
-vi.mock("@/lib/security/rate-limit-audit", async (importOriginal) => ({
-  ...(await importOriginal()) as Record<string, unknown>,
-  emitRateLimitFailClosed: vi.fn(),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -81,6 +82,14 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 import { GET, POST } from "@/app/api/tenant/service-accounts/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
+
+// Module-scope snapshot: route.ts's module-level `createRateLimiter(...)`
+// call runs at import time above. Must be captured before any
+// vi.clearAllMocks() in beforeEach wipes mock.calls/mock.results.
+const createLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const createLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockRateLimiterCheck;
+};
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 
@@ -149,7 +158,13 @@ describe("GET /api/tenant/service-accounts", () => {
 });
 
 describe("POST /api/tenant/service-accounts", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Real emitRateLimitFailClosed now runs on the 503 path (rate-limit-audit
+    // stub removed); reset its module-scoped throttle so a prior test's
+    // emission does not swallow this test's (5-min window, per-scope key).
+    __resetThrottleForTests();
+  });
 
   it("creates a service account successfully", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
@@ -254,18 +269,21 @@ describe("POST /api/tenant/service-accounts", () => {
     expect(mockServiceAccountCreate).not.toHaveBeenCalled();
   });
 
-  it("returns 503 (fail-closed) when the create limiter signals redisErrored", async () => {
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockRateLimiterCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
-
-    const req = createRequest("POST", "http://localhost/api/tenant/service-accounts", {
-      body: { name: "ci-bot" },
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(
+          createRequest("POST", "http://localhost/api/tenant/service-accounts", {
+            body: { name: "ci-bot" },
+          }),
+        ),
+      limiter: createLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockServiceAccountCreate],
+      limiterFactory: createLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
     });
-    const res = await POST(req);
-    const { status } = await parseResponse(res);
-
-    expect(status).toBe(503);
-    expect(mockServiceAccountCreate).not.toHaveBeenCalled();
   });
 });

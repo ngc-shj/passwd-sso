@@ -17,18 +17,10 @@
 #   - An entry whose route no longer opts into fail-closed is rejected
 #     (DANGLING_ENTRY) so flag removal is always a visible manifest diff.
 #
+# EMPTIED by SC-T3-1 (tranche 3): all 13 former legacy routes were migrated to
+# helper mode (assertRedisFailClosed) in the same PR, and EXPECTED_LEGACY_COUNT
+# was dropped 13 -> 0. The whole fail-closed class is now machine-verified at
+# the strongest tier. This file remains (header + zero entries) as the
+# registration target for any future pre-helper onboarding.
+#
 # Format: one route path per line, relative to repo root, sorted.
-
-src/app/api/auth/[...nextauth]/route.ts
-src/app/api/maintenance/audit-chain-verify/route.ts
-src/app/api/maintenance/audit-outbox-metrics/route.ts
-src/app/api/maintenance/audit-outbox-purge-failed/route.ts
-src/app/api/maintenance/dcr-cleanup/route.ts
-src/app/api/maintenance/purge-audit-logs/route.ts
-src/app/api/maintenance/purge-history/route.ts
-src/app/api/tenant/breakglass/route.ts
-src/app/api/tenant/members/[userId]/reset-vault/route.ts
-src/app/api/tenant/operator-tokens/route.ts
-src/app/api/tenant/scim-tokens/route.ts
-src/app/api/tenant/service-accounts/route.ts
-src/app/api/vault/ssh/sign-authorize/route.ts

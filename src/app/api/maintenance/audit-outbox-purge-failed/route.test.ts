@@ -1,23 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockVerifyAdminToken,
   mockQueryRaw,
   mockRequireMaintenanceOperator,
   mockCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockWithBypassRls,
-} = vi.hoisted(() => ({
-  mockVerifyAdminToken: vi.fn(),
-  mockQueryRaw: vi.fn(),
-  mockRequireMaintenanceOperator: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockLogAudit: vi.fn(),
-  mockWithBypassRls: vi.fn(
-    async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
-  ),
-}));
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockVerifyAdminToken: vi.fn(),
+    mockQueryRaw: vi.fn(),
+    mockRequireMaintenanceOperator: vi.fn(),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockWithBypassRls: vi.fn(
+      async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
+    ),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
   verifyAdminToken: mockVerifyAdminToken,
@@ -28,7 +34,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -51,6 +57,13 @@ vi.mock("@/lib/auth/access/maintenance-auth", () => ({
 
 import { POST } from "./route";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
+
+// Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
+// at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
+const outboxPurgeLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const outboxPurgeLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
+};
 
 const SUBJECT_USER_ID = "660e8400-e29b-41d4-a716-446655440001";
 const TOKEN_ID = "op-token-id-1";
@@ -127,12 +140,16 @@ describe("POST /api/maintenance/audit-outbox-purge-failed", () => {
     expect(mockCheck).toHaveBeenCalledWith(`rl:maintenance:outbox-purge:${TENANT_ID}`);
   });
 
-  it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockCheck.mockResolvedValue({ redisErrored: true });
-    const req = createRequest({}, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(503);
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest({}, VALID_OP_TOKEN)),
+      limiter: outboxPurgeLimiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockQueryRaw],
+      limiterFactory: outboxPurgeLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   // ─── Operator Membership Check ────────────────────────────

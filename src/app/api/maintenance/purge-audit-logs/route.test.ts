@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
 const {
   mockVerifyAdminToken,
@@ -9,23 +10,28 @@ const {
   mockRequireMaintenanceOperator,
   mockTenantFindUnique,
   mockCheck,
+  mockCreateRateLimiter,
   mockLogAudit,
   mockWithBypassRls,
-} = vi.hoisted(() => ({
-  mockVerifyAdminToken: vi.fn(),
-  mockDeleteMany: vi.fn(),
-  mockCount: vi.fn(),
-  // C13: purge route now calls audit_log_purge() SECURITY DEFINER via
-  // $queryRaw. Stub returns the same shape the function emits.
-  mockQueryRaw: vi.fn(),
-  mockRequireMaintenanceOperator: vi.fn(),
-  mockTenantFindUnique: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockLogAudit: vi.fn(),
-  mockWithBypassRls: vi.fn(
-    async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
-  ),
-}));
+} = vi.hoisted(() => {
+  const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockVerifyAdminToken: vi.fn(),
+    mockDeleteMany: vi.fn(),
+    mockCount: vi.fn(),
+    // C13: purge route now calls audit_log_purge() SECURITY DEFINER via
+    // $queryRaw. Stub returns the same shape the function emits.
+    mockQueryRaw: vi.fn(),
+    mockRequireMaintenanceOperator: vi.fn(),
+    mockTenantFindUnique: vi.fn(),
+    mockCheck,
+    mockCreateRateLimiter: vi.fn(() => ({ check: mockCheck, clear: vi.fn() })),
+    mockLogAudit: vi.fn(),
+    mockWithBypassRls: vi.fn(
+      async (prisma: unknown, fn: (tx: unknown) => unknown, _purpose?: unknown) => fn(prisma),
+    ),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/admin-token", () => ({
   verifyAdminToken: mockVerifyAdminToken,
@@ -38,7 +44,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
@@ -74,6 +80,13 @@ const VALID_AUTH = {
   tenantId: TENANT_ID,
   tokenId: TOKEN_ID,
   scopes: ["maintenance"] as const,
+};
+
+// Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
+// at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
+const purgeAuditLogsLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const purgeAuditLogsLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
+  check: typeof mockCheck;
 };
 
 function createRequest(body: unknown, token?: string): NextRequest {
@@ -143,12 +156,18 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     expect(mockCheck).toHaveBeenCalledWith(`rl:maintenance:purge-audit-logs:${TENANT_ID}`);
   });
 
-  it("returns 503 when the rate limiter fails closed on a Redis error", async () => {
+  it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
-    mockCheck.mockResolvedValue({ redisErrored: true });
-    const req = createRequest({}, VALID_OP_TOKEN);
-    const res = await POST(req);
-    expect(res.status).toBe(503);
+    await assertRedisFailClosed({
+      invoke: () => POST(createRequest({}, VALID_OP_TOKEN)),
+      limiter: purgeAuditLogsLimiter,
+      expectation: { envelope: "canonical" },
+      // C13: the real purge executes via $queryRaw(audit_log_purge); deleteMany
+      // is legacy/unused on this path — assert on the primitive that actually runs.
+      assertNoMutation: [mockQueryRaw],
+      limiterFactory: purgeAuditLogsLimiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("checks rate limit after auth (401 before 429 for unauthenticated requests)", async () => {
