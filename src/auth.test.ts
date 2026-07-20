@@ -9,6 +9,7 @@ const {
   mockTenantClaimGetStore,
   mockSessionMetaGetStore,
   mockLogAudit,
+  mockLoggerWarn,
 } = vi.hoisted(() => {
   const mockPrisma = {
     tenant: {
@@ -78,6 +79,7 @@ const {
     },
     webAuthnCredential: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     team: {
       count: vi.fn(),
@@ -98,6 +100,10 @@ const {
     mockTenantClaimGetStore: vi.fn(),
     mockSessionMetaGetStore: vi.fn(),
     mockLogAudit: vi.fn(),
+    // Stable warn spy: the getLogger() mock must return THIS spy on every call
+    // so session-callback tests can observe getLogger().warn(...) (a fresh spy
+    // per getLogger() call would be unobservable).
+    mockLoggerWarn: vi.fn(),
   };
 });
 
@@ -148,7 +154,7 @@ vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
 }));
 
 vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+  getLogger: () => ({ info: vi.fn(), warn: mockLoggerWarn, error: vi.fn() }),
 }));
 
 vi.mock("./auth.config", () => ({
@@ -156,6 +162,9 @@ vi.mock("./auth.config", () => ({
 }));
 
 import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
+// Real production predicate (NOT mocked): the fail-closed test asserts the
+// actual enforcement verdict, not a re-implemented condition (RT5).
+import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
 
 // Capture the NextAuth call args at import time, before beforeEach clears mocks
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -760,5 +769,131 @@ describe("auth events", () => {
 
       expect(mockLogAudit).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("session callback — passkey enforcement fail-closed", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sessionCallback = (nextAuthInitArgs[0] as any).callbacks.session as (
+    params: {
+      session: { expires: string };
+      user: { id: string; name?: string | null; email?: string | null; image?: string | null };
+    },
+  ) => Promise<{
+    user: {
+      id: string;
+      hasPasskey: boolean;
+      requirePasskey: boolean;
+      requirePasskeyEnabledAt: string | null;
+      passkeyGracePeriodDays: number | null;
+      fetchFavicons: boolean;
+    };
+    expires: string;
+  }>;
+
+  // The safe-blocking bundle the catch must install on fetch failure. Kept in
+  // one place so the four-field expectation is stated once (RT3).
+  const FAIL_CLOSED = {
+    requirePasskey: true,
+    hasPasskey: false,
+    requirePasskeyEnabledAt: null,
+    passkeyGracePeriodDays: null,
+  } as const;
+
+  const baseParams = {
+    session: { expires: "2099-01-01T00:00:00.000Z" },
+    user: { id: "user-1", name: "U", email: "u@example.com", image: null },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWithBypassRls.mockImplementation(
+      async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
+    );
+  });
+
+  it("fails closed when the passkey-enforcement fetch throws (blocks, does not fail open)", async () => {
+    // Simulate a transient DB/Redis failure inside the withBypassRls fetch.
+    mockWithBypassRls.mockRejectedValueOnce(new Error("db down"));
+
+    const result = await sessionCallback(baseParams);
+
+    // All four enforcement fields fail closed (asserting all four, not just
+    // requirePasskey, is what makes the partial-fail-open guard provable: a
+    // stale non-null enabledAt would fail requirePasskeyEnabledAt === null).
+    expect(result.user.requirePasskey).toBe(FAIL_CLOSED.requirePasskey);
+    expect(result.user.hasPasskey).toBe(FAIL_CLOSED.hasPasskey);
+    expect(result.user.requirePasskeyEnabledAt).toBe(FAIL_CLOSED.requirePasskeyEnabledAt);
+    expect(result.user.passkeyGracePeriodDays).toBe(FAIL_CLOSED.passkeyGracePeriodDays);
+
+    // And the REAL production predicate confirms the enforcement gate blocks.
+    expect(passkeyEnforcementBlocks(result.user)).toBe(true);
+  });
+
+  it("fails closed when a successful fetch returns no tenant (row vanished / FK-orphaned)", async () => {
+    // User.tenantId is a non-null FK (onDelete: Restrict), so a null tenant on
+    // a SUCCESSFUL query means the user row disappeared mid-session — no policy
+    // to trust. Must fail closed (throw → catch bundle), not default to false.
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
+    mockPrisma.user.findUnique.mockResolvedValueOnce(null);
+
+    const result = await sessionCallback(baseParams);
+
+    expect(result.user.requirePasskey).toBe(FAIL_CLOSED.requirePasskey);
+    expect(result.user.hasPasskey).toBe(FAIL_CLOSED.hasPasskey);
+    expect(result.user.requirePasskeyEnabledAt).toBe(FAIL_CLOSED.requirePasskeyEnabledAt);
+    expect(result.user.passkeyGracePeriodDays).toBe(FAIL_CLOSED.passkeyGracePeriodDays);
+    expect(passkeyEnforcementBlocks(result.user)).toBe(true);
+  });
+
+  it("passes the real tenant values through on the happy path (fetch succeeds)", async () => {
+    const enabledAt = new Date("2020-01-01T00:00:00.000Z");
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
+    mockPrisma.user.findUnique.mockResolvedValueOnce({
+      fetchFavicons: true,
+      tenant: {
+        requirePasskey: true,
+        requirePasskeyEnabledAt: enabledAt,
+        passkeyGracePeriodDays: 7,
+      },
+    });
+
+    const result = await sessionCallback(baseParams);
+
+    expect(result.user.requirePasskey).toBe(true);
+    expect(result.user.hasPasskey).toBe(false);
+    expect(result.user.requirePasskeyEnabledAt).toBe(enabledAt.toISOString());
+    expect(result.user.passkeyGracePeriodDays).toBe(7);
+  });
+
+  it("does not block a passkey-holding user on the happy path (fail-closed, not always-closed)", async () => {
+    // requirePasskey tenant, grace expired, but the user HAS a passkey.
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(1);
+    mockPrisma.user.findUnique.mockResolvedValueOnce({
+      fetchFavicons: false,
+      tenant: {
+        requirePasskey: true,
+        requirePasskeyEnabledAt: null, // immediate enforcement window
+        passkeyGracePeriodDays: null,
+      },
+    });
+
+    const result = await sessionCallback(baseParams);
+
+    expect(result.user.hasPasskey).toBe(true);
+    // The real predicate must NOT block a user who has a passkey — proves the
+    // fix is fail-CLOSED (blocks the unknown state), not always-closed.
+    expect(passkeyEnforcementBlocks(result.user)).toBe(false);
+  });
+
+  it("still logs auth.session.passkey_data_fetch_failed on fetch failure (ops visibility)", async () => {
+    mockWithBypassRls.mockRejectedValueOnce(new Error("db down"));
+
+    await sessionCallback(baseParams);
+
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "auth.session.passkey_data_fetch_failed",
+    );
   });
 });
