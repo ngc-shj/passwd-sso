@@ -58,7 +58,7 @@ jobs:
       sha256: ${{ steps.pack.outputs.sha256 }}
       integrity: ${{ steps.pack.outputs.integrity }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Use the exact Node patch (and its bundled npm) that the publish job uses,
       # from the SHA-pinned setup-node — no `npm install -g` from the registry.
@@ -156,7 +156,7 @@ jobs:
             || { echo "::error::npm $(npm --version), expected ${PUBLISH_NPM_VERSION} bundled with Node ${PUBLISH_NODE_VERSION} (this OIDC job must use the bundled npm, not a registry fetch)"; exit 1; }
 
       - name: Download tarball artifact
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: cli-tarball
 
@@ -244,7 +244,7 @@ jobs:
       # Checkout so the provenance-source verifier script is available. This job
       # is unprivileged (contents:read, no id-token), so running repo code here
       # carries none of the publish job's risk.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
