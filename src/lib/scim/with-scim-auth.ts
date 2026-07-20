@@ -1,6 +1,7 @@
 import type { NextRequest, NextResponse } from "next/server";
 import { validateScimToken, type ValidatedScimToken } from "@/lib/auth/tokens/scim-token";
 import { scimError } from "@/lib/scim/response";
+import { retryAfterSecondsOrDefault } from "@/lib/http/api-response";
 import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { emitRateLimitFailClosed } from "@/lib/security/rate-limit-audit";
@@ -31,7 +32,12 @@ export async function authorizeScim(
   if (rl.redisErrored) {
     // fail-closed: Redis is the only place a global cap can hold across Pods.
     void emitRateLimitFailClosed({ req, scope: "scim", userId: null, tenantId });
-    return { ok: false, response: scimError(503, "Service temporarily unavailable") };
+    return {
+      ok: false,
+      response: scimError(503, "Service temporarily unavailable", undefined, {
+        "Retry-After": retryAfterSecondsOrDefault(),
+      }),
+    };
   }
   if (!rl.allowed) {
     return { ok: false, response: scimError(429, "Too many requests") };

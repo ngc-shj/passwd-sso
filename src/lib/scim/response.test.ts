@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { scimResponse, scimError, scimListResponse, getScimBaseUrl } from "./response";
 
 describe("scimResponse", () => {
@@ -46,6 +46,20 @@ describe("scimError", () => {
     const res = scimError(400, "Bad request");
     expect(res.headers.get("content-type")).toBe("application/scim+json");
   });
+
+  it("emits caller-supplied extra headers", () => {
+    const res = scimError(503, "Service temporarily unavailable", undefined, {
+      "Retry-After": "45",
+    });
+    expect(res.headers.get("retry-after")).toBe("45");
+  });
+
+  it("caller-supplied headers cannot override Content-Type", () => {
+    const res = scimError(503, "Service temporarily unavailable", undefined, {
+      "Content-Type": "text/html",
+    });
+    expect(res.headers.get("content-type")).toBe("application/scim+json");
+  });
 });
 
 describe("scimListResponse", () => {
@@ -67,33 +81,29 @@ describe("scimListResponse", () => {
 });
 
 describe("getScimBaseUrl", () => {
-  const originalAppUrl = process.env.APP_URL;
-  const originalAuthUrl = process.env.AUTH_URL;
-  const originalBasePath = process.env.NEXT_PUBLIC_BASE_PATH;
-
+  // vi.stubEnv with undefined unsets the variable (precedent: redis.test.ts);
+  // setup.ts wires the global unstub, the local afterEach keeps this block
+  // hermetic regardless of suite composition.
   function clearEnv() {
-    delete process.env.APP_URL;
-    delete process.env.AUTH_URL;
-    delete process.env.NEXT_PUBLIC_BASE_PATH;
+    vi.stubEnv("APP_URL", undefined);
+    vi.stubEnv("AUTH_URL", undefined);
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", undefined);
   }
 
   afterEach(() => {
-    clearEnv();
-    if (originalAppUrl !== undefined) process.env.APP_URL = originalAppUrl;
-    if (originalAuthUrl !== undefined) process.env.AUTH_URL = originalAuthUrl;
-    if (originalBasePath !== undefined) process.env.NEXT_PUBLIC_BASE_PATH = originalBasePath;
+    vi.unstubAllEnvs();
   });
 
   it("prefers APP_URL over AUTH_URL", () => {
     clearEnv();
-    process.env.APP_URL = "https://app.example.com";
-    process.env.AUTH_URL = "https://auth.example.com";
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
     expect(getScimBaseUrl()).toBe("https://app.example.com/api/scim/v2");
   });
 
   it("falls back to AUTH_URL when APP_URL is not set", () => {
     clearEnv();
-    process.env.AUTH_URL = "https://auth.example.com";
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
     expect(getScimBaseUrl()).toBe("https://auth.example.com/api/scim/v2");
   });
 
@@ -104,35 +114,35 @@ describe("getScimBaseUrl", () => {
 
   it("strips trailing slash from origin", () => {
     clearEnv();
-    process.env.AUTH_URL = "https://example.com/";
+    vi.stubEnv("AUTH_URL", "https://example.com/");
     expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
   });
 
   it("includes NEXT_PUBLIC_BASE_PATH in URL", () => {
     clearEnv();
-    process.env.AUTH_URL = "https://example.com";
-    process.env.NEXT_PUBLIC_BASE_PATH = "/passwd-sso";
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
   });
 
   it("strips trailing slash from NEXT_PUBLIC_BASE_PATH", () => {
     clearEnv();
-    process.env.AUTH_URL = "https://example.com";
-    process.env.NEXT_PUBLIC_BASE_PATH = "/passwd-sso/";
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso/");
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
   });
 
   it("prepends leading slash when NEXT_PUBLIC_BASE_PATH lacks one", () => {
     clearEnv();
-    process.env.AUTH_URL = "https://example.com";
-    process.env.NEXT_PUBLIC_BASE_PATH = "passwd-sso";
+    vi.stubEnv("AUTH_URL", "https://example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "passwd-sso");
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
   });
 
   it("uses APP_URL with basePath", () => {
     clearEnv();
-    process.env.APP_URL = "https://public.example.com";
-    process.env.NEXT_PUBLIC_BASE_PATH = "/passwd-sso";
+    vi.stubEnv("APP_URL", "https://public.example.com");
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
     expect(getScimBaseUrl()).toBe("https://public.example.com/passwd-sso/api/scim/v2");
   });
 });

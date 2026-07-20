@@ -115,6 +115,14 @@ export default {
               const rl = await magicLinkEmailLimiter.check(
                 `rl:magic_link:${email.toLowerCase()}`,
               );
+              if (rl.redisErrored) {
+                // Redis outage (fail-closed) — operator-actionable, so log on
+                // a channel distinct from expected over-limit noise. Same
+                // silent drop as over-limit: no throw, no email, and no PII
+                // in the log line (anti-enumeration is externally unchanged).
+                getLogger().error("magic-link.rate-limit.fail_closed");
+                return;
+              }
               if (!rl.allowed) {
                 getLogger().warn("magic-link.rate-limited");
                 return; // silently drop — no user enumeration

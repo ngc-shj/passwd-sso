@@ -43,7 +43,9 @@ import {
   beforeEach,
   afterEach,
 } from "vitest";
+import { randomBytes } from "node:crypto";
 import IORedis from "ioredis";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import type { NextRequest } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { createTestContext, type TestContext } from "./helpers";
@@ -72,6 +74,60 @@ realRedis?.on("error", () => {});
 // client without re-importing — sound because createRateLimiter calls
 // getRedis() per check (rate-limit.ts:54; Round 1 adjudication of Func-A1).
 let activeRedis: IORedis = brokenRedis;
+
+/**
+ * Selective-failure Redis (plan fail-closed-sc-t3-remaining, C4): routes each
+ * command to the broken or the real client by key predicate, so one limiter
+ * leg of a multi-limiter route can fail while its sibling succeeds. Covers
+ * exactly the surface createRateLimiter uses (rate-limit.ts:60-106):
+ * pipeline().incr/pexpire/pttl -> exec, plus del (limiter clear). The del
+ * branch is defensive surface-completeness — the 503/404 paths under test
+ * never call limiter.clear(). No command result is fabricated: everything
+ * delegates to a real ioredis client.
+ */
+function createSelectiveRedis(
+  broken: IORedis,
+  real: IORedis,
+  failKeyPredicate: (key: string) => boolean,
+): IORedis {
+  const pick = (key: string) => (failKeyPredicate(key) ? broken : real);
+  type PipelineCmd = { cmd: "incr" | "pexpire" | "pttl"; args: unknown[] };
+  const selective = {
+    pipeline() {
+      const commands: PipelineCmd[] = [];
+      let routeKey: string | null = null;
+      const shim = {
+        incr(key: string) {
+          routeKey ??= key;
+          commands.push({ cmd: "incr", args: [key] });
+          return shim;
+        },
+        pexpire(key: string, ms: number, mode?: string) {
+          routeKey ??= key;
+          commands.push({ cmd: "pexpire", args: mode !== undefined ? [key, ms, mode] : [key, ms] });
+          return shim;
+        },
+        pttl(key: string) {
+          routeKey ??= key;
+          commands.push({ cmd: "pttl", args: [key] });
+          return shim;
+        },
+        exec() {
+          const pipeline = pick(routeKey ?? "").pipeline();
+          for (const { cmd, args } of commands) {
+            (pipeline[cmd] as (...a: unknown[]) => unknown)(...args);
+          }
+          return pipeline.exec();
+        },
+      };
+      return shim;
+    },
+    del(key: string) {
+      return pick(key).del(key);
+    },
+  };
+  return selective as unknown as IORedis;
+}
 
 vi.mock("@/lib/redis", () => ({
   getRedis: () => activeRedis,
@@ -256,5 +312,109 @@ describe.skipIf(!dbAvailable)(
         },
       );
     });
+
+    // C4 (fail-closed-sc-t3-remaining): the whole-outage cases above cannot
+    // reach verify-access's tokenLimiter — the ipLimiter leg fails closed
+    // first. Selective failure (IP keys real, token keys broken) drives the
+    // request PAST a passing ipLimiter into the token leg, proving the
+    // route wires tokenLimiter's production checkRateLimitOrFail mapping.
+    // Requires a reachable real Redis for the IP leg -> redisAvailable guard.
+    describe.skipIf(!redisAvailable)(
+      "POST /api/share-links/verify-access — tokenLimiter leg (selective Redis failure)",
+      () => {
+        // Reserved IPs (plan C4 hygiene): unused elsewhere in db-integration;
+        // one request per case against the 5-req/min IP cap.
+        const GREEN_IP = "203.0.113.30";
+        const RED_IP = "203.0.113.31";
+
+        // Fresh random token per run: the red-proof's 404 is guaranteed by
+        // construction, not by fixture-absence convention. 64-hex satisfies
+        // verifyShareAccessSchema's token shape.
+        const randomHexToken = () => randomBytes(32).toString("hex");
+
+        // Exact-key cleanup ledger. A pattern KEYS + bulk DEL would delete
+        // counters this test never created (and KEYS blocks a large shared
+        // Redis) — if a developer points REDIS_URL at a shared/staging
+        // instance, that resets real protection state (external security
+        // review 2026-07-20, P2-2). Key shapes derived from the route:
+        // ip leg  rl:share_verify_ip:<ip>:<sha256(token)> (IPv4 passthrough
+        // in rateLimitKeyFromIp; checkIpRateLimit keySuffix = tokenHash),
+        // token leg rl:share_verify_token:<sha256(token)>.
+        const createdKeys: string[] = [];
+        const trackKeys = (ip: string, token: string) => {
+          const tokenHash = hashToken(token);
+          createdKeys.push(
+            `rl:share_verify_ip:${ip}:${tokenHash}`,
+            `rl:share_verify_token:${tokenHash}`,
+          );
+        };
+
+        afterEach(async () => {
+          // Drop exactly the counters this describe's cases created on the
+          // REAL Redis (the green case's token incr went to the broken
+          // client and never landed here — deleting its computed key is a
+          // no-op, kept for symmetry).
+          if (createdKeys.length > 0) {
+            await (realRedis as IORedis).del(...createdKeys.splice(0));
+          }
+        });
+
+        it("token leg broken, IP leg real -> 503 SERVICE_UNAVAILABLE with Retry-After, no shareAccessLog row", async () => {
+          activeRedis = createSelectiveRedis(brokenRedis, realRedis as IORedis, (key) =>
+            key.startsWith("rl:share_verify_token:"),
+          );
+
+          const countBefore = await ctx.su.prisma.shareAccessLog.count();
+
+          const token = randomHexToken();
+          trackKeys(GREEN_IP, token);
+          const req = requestWithIp(
+            "POST",
+            "http://localhost:3000/api/share-links/verify-access",
+            GREEN_IP,
+            { token, password: "test-password" },
+          );
+
+          const res = await verifyAccessPOST(req);
+
+          expect(res.status).toBe(503);
+          const body = await res.json();
+          expect(body).toEqual({ error: "SERVICE_UNAVAILABLE" });
+          const retryAfter = res.headers.get("Retry-After");
+          expect(retryAfter).toMatch(/^\d+$/);
+          expect(Number(retryAfter)).toBeGreaterThan(0);
+
+          const countAfter = await ctx.su.prisma.shareAccessLog.count();
+          expect(countAfter).toBe(countBefore);
+        });
+
+        it("red-proof: identical fixture with the token leg ALSO real -> non-503 domain response (404)", async () => {
+          // Whole path real. The IP leg is identical to the case above, so
+          // the 503 there is attributable ONLY to the token leg — a wrapper
+          // that failed every key (or was wired backwards) would 503 here
+          // too and fail this assertion.
+          activeRedis = realRedis as IORedis;
+
+          const countBefore = await ctx.su.prisma.shareAccessLog.count();
+
+          const token = randomHexToken();
+          trackKeys(RED_IP, token);
+          const req = requestWithIp(
+            "POST",
+            "http://localhost:3000/api/share-links/verify-access",
+            RED_IP,
+            { token, password: "test-password" },
+          );
+
+          const res = await verifyAccessPOST(req);
+
+          expect(res.status).not.toBe(503);
+          expect(res.status).toBe(404);
+
+          const countAfter = await ctx.su.prisma.shareAccessLog.count();
+          expect(countAfter).toBe(countBefore);
+        });
+      },
+    );
   },
 );
