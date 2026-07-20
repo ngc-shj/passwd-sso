@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Mock } from "vitest";
 import type { NextRequest } from "next/server";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 import { AUDIT_ACTION } from "@/lib/constants";

@@ -45,6 +45,7 @@ import {
 } from "vitest";
 import { randomBytes } from "node:crypto";
 import IORedis from "ioredis";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import type { NextRequest } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { createTestContext, type TestContext } from "./helpers";
@@ -331,13 +332,31 @@ describe.skipIf(!dbAvailable)(
         // verifyShareAccessSchema's token shape.
         const randomHexToken = () => randomBytes(32).toString("hex");
 
+        // Exact-key cleanup ledger. A pattern KEYS + bulk DEL would delete
+        // counters this test never created (and KEYS blocks a large shared
+        // Redis) — if a developer points REDIS_URL at a shared/staging
+        // instance, that resets real protection state (external security
+        // review 2026-07-20, P2-2). Key shapes derived from the route:
+        // ip leg  rl:share_verify_ip:<ip>:<sha256(token)> (IPv4 passthrough
+        // in rateLimitKeyFromIp; checkIpRateLimit keySuffix = tokenHash),
+        // token leg rl:share_verify_token:<sha256(token)>.
+        const createdKeys: string[] = [];
+        const trackKeys = (ip: string, token: string) => {
+          const tokenHash = hashToken(token);
+          createdKeys.push(
+            `rl:share_verify_ip:${ip}:${tokenHash}`,
+            `rl:share_verify_token:${tokenHash}`,
+          );
+        };
+
         afterEach(async () => {
-          // Drop the rl counters this describe wrote to the REAL Redis (IP
-          // legs of both cases + the red-proof's token leg; the green case's
-          // token incr went to the broken client and never landed here).
-          const real = realRedis as IORedis;
-          const keys = await real.keys("rl:share_verify_*");
-          if (keys.length > 0) await real.del(...keys);
+          // Drop exactly the counters this describe's cases created on the
+          // REAL Redis (the green case's token incr went to the broken
+          // client and never landed here — deleting its computed key is a
+          // no-op, kept for symmetry).
+          if (createdKeys.length > 0) {
+            await (realRedis as IORedis).del(...createdKeys.splice(0));
+          }
         });
 
         it("token leg broken, IP leg real -> 503 SERVICE_UNAVAILABLE with Retry-After, no shareAccessLog row", async () => {
@@ -347,11 +366,13 @@ describe.skipIf(!dbAvailable)(
 
           const countBefore = await ctx.su.prisma.shareAccessLog.count();
 
+          const token = randomHexToken();
+          trackKeys(GREEN_IP, token);
           const req = requestWithIp(
             "POST",
             "http://localhost:3000/api/share-links/verify-access",
             GREEN_IP,
-            { token: randomHexToken(), password: "test-password" },
+            { token, password: "test-password" },
           );
 
           const res = await verifyAccessPOST(req);
@@ -376,11 +397,13 @@ describe.skipIf(!dbAvailable)(
 
           const countBefore = await ctx.su.prisma.shareAccessLog.count();
 
+          const token = randomHexToken();
+          trackKeys(RED_IP, token);
           const req = requestWithIp(
             "POST",
             "http://localhost:3000/api/share-links/verify-access",
             RED_IP,
-            { token: randomHexToken(), password: "test-password" },
+            { token, password: "test-password" },
           );
 
           const res = await verifyAccessPOST(req);

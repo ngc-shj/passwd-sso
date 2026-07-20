@@ -116,3 +116,48 @@ change: the suite fails loudly in both worlds, only the error message
 differs); no security boundary touched (production rate-limit path and every
 assertion are byte-identical; the guard runs at test-module eval, before any
 rate-limit logic executes).
+
+---
+
+# Round 2 (external security review, 2026-07-20)
+
+## Changes from Previous Round
+User-provided security review of `origin/main...HEAD` reported 2 P2 findings
+(production-side C2/C3 changes explicitly cleared by the reviewer).
+
+## Findings and Resolution
+
+### P2-1 [Major-equivalent] v1 tests could not prove limiter-to-route wiring
+All `createRateLimiter` factory returns shared one `check` mock, so a route
+miswired to the fail-open `migrateLimiter` would still appear to call
+`v1Limiter.check` and pass the 503 + attribution assertions.
+- Action: factory now returns a DISTINCT `check: vi.fn()` (default
+  `allowed: true`) per call; `mockCheck` is re-bound to the args-matched v1
+  instance's own check, so only the limiter under test is armed with the
+  failure. A miswired route now fails both the "limiter reached" assertion
+  (v1 check never called) and `assertNoMutation` (sibling returns
+  allowed:true → mutation executes).
+- Modified files: src/app/api/v1/passwords/route.test.ts,
+  src/app/api/v1/passwords/[id]/route.test.ts
+
+### P2-2 [Major-equivalent] integration cleanup pattern-deleted shared-Redis keys
+`KEYS rl:share_verify_*` + bulk `DEL` in `afterEach` would delete counters
+the test never created (resetting real protection state on a shared/staging
+Redis) and `KEYS` blocks large instances.
+- Action: replaced with an exact-key ledger — each case registers
+  `rl:share_verify_ip:<ip>:<sha256(token)>` and
+  `rl:share_verify_token:<sha256(token)>` computed from its reserved IP and
+  per-run random token (key shapes verified against checkIpRateLimit /
+  route.ts); `afterEach` deletes only those keys. No KEYS scan remains.
+- Modified file: src/__tests__/db-integration/rate-limit-fail-closed-routes.integration.test.ts
+
+### ESLint warning (reviewer-noted): unused `Mock` type import
+- Action: removed the unused `import type { Mock }` from
+  src/lib/scim/with-scim-auth.test.ts (pre-existing in a touched file; root
+  fix, no suppression).
+
+## Verification after fixes
+- Unit: 13 files / 186 tests pass (v1/passwords + scim trees).
+- Integration: rate-limit-fail-closed-routes file 6/6 against real
+  Postgres+Redis with the exact-key cleanup in effect.
+- `tsc --noEmit` clean; ESLint clean on all touched files (warning gone).

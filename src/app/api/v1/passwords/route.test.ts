@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 const {
   mockValidateApiKeyOnly,
   mockEnforceAccessRestriction,
-  mockCheck,
   mockCreateRateLimiter,
   mockEntryFindMany,
   mockEntryCreate,
@@ -14,17 +13,19 @@ const {
   mockWithTenantRls,
   mockQueryRaw,
 } = vi.hoisted(() => {
-  // Bind `check` first — the factory closure must not reference the returned
-  // object's own properties (vi.hoisted TDZ self-reference, tranche-3 lesson).
-  const check = vi.fn().mockResolvedValue({ allowed: true });
   return {
     mockValidateApiKeyOnly: vi.fn(),
     mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-    mockCheck: check,
     // Recording factory: assertRedisFailClosed's factory-attribution step
     // reads mock.calls/mock.results (a plain arrow would record nothing).
+    // Each call returns a DISTINCT check mock (default allowed:true) so a
+    // route wired to the wrong limiter cannot borrow the arranged failure —
+    // the fail-closed cases arm only the v1 instance's check (external
+    // security review 2026-07-20, P2-1).
     mockCreateRateLimiter: vi.fn(
-      (_opts: { windowMs: number; max: number; failClosedOnRedisError?: boolean }) => ({ check }),
+      (_opts: { windowMs: number; max: number; failClosedOnRedisError?: boolean }) => ({
+        check: vi.fn().mockResolvedValue({ allowed: true }),
+      }),
     ),
     mockEntryFindMany: vi.fn(),
     mockEntryCreate: vi.fn(),
@@ -89,7 +90,12 @@ if (!v1LimiterResult) {
     "v1ApiKeyLimiter factory call not found — rate-limiters.ts options drifted from this test's match criteria (windowMs/max/failClosedOnRedisError)",
   );
 }
-const v1Limiter = v1LimiterResult.value as { check: typeof mockCheck };
+const v1Limiter = v1LimiterResult.value as { check: Mock };
+// The v1 instance's own check — arranging THIS mock (and only this one)
+// proves the route is wired to v1ApiKeyLimiter; sibling factory products
+// keep their allowed:true default, so a miswired route fails the
+// "limiter reached" assertion instead of borrowing the arranged result.
+const mockCheck = v1Limiter.check;
 
 const USER_ID = "user-1";
 const TENANT_ID = "tenant-1";
