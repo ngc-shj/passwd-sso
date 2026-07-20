@@ -2,7 +2,7 @@
 
 Date: 2026-07-20
 Branch: `feature/fail-closed-sc-t3-remaining` (from `main`)
-Predecessor: fail-closed tranche 3 (PR #682, `feature/fail-closed-tranche3`, OPEN at plan time)
+Predecessor: fail-closed tranche 3 (PR `#682`, `feature/fail-closed-tranche3`, OPEN at plan time)
 
 ## Project context
 
@@ -33,7 +33,7 @@ SC-T3-4:
    wrapper (IP key succeeds, token key fails).
 
 User decisions already taken (2026-07-20): independent branch from `main`
-(zero file overlap with PR #682, verified by `git diff main...feature/fail-closed-tranche3 --name-only`);
+(zero file overlap with PR `#682`, verified by `git diff main...feature/fail-closed-tranche3 --name-only`);
 ONE PR for all four items with per-item commits; SC-T3-4 is implemented, not
 deferred.
 
@@ -62,7 +62,7 @@ depends on isolation levels or locks).
 All four items ride existing primitives:
 - C1 reuses `assertRedisFailClosed` + `snapshotFactory`
   (`src/__tests__/helpers/fail-closed.ts`) exactly as the 13 routes migrated in
-  PR #682.
+  PR `#682`.
 - C2 extends `scimError` (additive optional param) and reuses the existing
   `retryAfterSecondsOrDefault` logic from `src/lib/http/api-response.ts`
   (currently module-private; exported by this change) so the 30 s default has a
@@ -358,7 +358,7 @@ spy on both branches, not just log lines), M9 (`logAuditAsync` never in
   `refactor` — use `fix` since release-please skips chore/docs and the log-split
   is operator-facing, C4 `test(security)`; release-please prefixes per repo
   rules). ONE PR at the end (user decision 2026-07-20).
-- PR #682 interplay: zero file overlap (verified); merge order free; no rebase
+- PR `#682` interplay: zero file overlap (verified); merge order free; no rebase
   dependency in either direction.
 
 ### Scope contract
@@ -408,7 +408,7 @@ spy on both branches, not just log lines), M9 (`logAuditAsync` never in
 
 ## Implementation Checklist (Phase 2 Step 2-1)
 
-Baseline (rebased onto main @ 709b6d9a8, post-#682): fail-closed gate exit 0,
+Baseline (rebased onto main @ `709b6d9a8`, post-`#682`): fail-closed gate exit 0,
 `EXPECTED_DEBT_COUNT=0`, `EXPECTED_LEGACY_COUNT=0`.
 
 Files to modify:
