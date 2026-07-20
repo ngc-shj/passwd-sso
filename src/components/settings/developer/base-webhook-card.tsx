@@ -264,7 +264,7 @@ export function BaseWebhookCard({ config }: Props) {
       className="flex items-center justify-between border rounded-md p-3"
     >
       <div className="space-y-1 min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-medium truncate">
             {w.url}
           </span>

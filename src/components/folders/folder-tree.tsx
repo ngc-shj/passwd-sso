@@ -62,7 +62,7 @@ function FolderNode({
           onClick={() => onNavigate?.()}
         >
           <FolderOpen className="h-4 w-4 shrink-0" />
-          <span className="truncate">{node.name}</span>
+          <span className="truncate min-w-0">{node.name}</span>
           {node.entryCount > 0 && (
             <span className="ml-auto text-xs text-muted-foreground">
               {node.entryCount}

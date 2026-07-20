@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { mockI18nNavigation } from "@/__tests__/helpers/mock-app-navigation";
+import { mockMatchMedia } from "@/__tests__/helpers/mock-match-media";
 
 const { mockUseVault, mockFetchApi, routerPush } = vi.hoisted(() => ({
   mockUseVault: vi.fn(),
@@ -40,6 +41,7 @@ import { VAULT_STATUS } from "@/lib/constants";
 describe("DelegationRevokeBanner", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockMatchMedia();
   });
 
   afterEach(() => {

@@ -10,6 +10,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Shield } from "lucide-react";
+import { DashboardBanner } from "./dashboard-banner";
 
 export function DelegationRevokeBanner() {
   const t = useTranslations("MachineIdentity.delegation");
@@ -48,18 +49,20 @@ export function DelegationRevokeBanner() {
   if (count === 0) return null;
 
   return (
-    <div className="mx-4 mt-4 flex items-center gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm md:mx-6 md:mt-6">
-      <Shield className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-      <p className="flex-1 text-amber-800 dark:text-amber-300">
-        {t("bannerActive", { count })}
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => router.push("/dashboard/settings/vault/delegation")}
-      >
-        {t("bannerManage")}
-      </Button>
-    </div>
+    <DashboardBanner>
+      <div className="flex items-center gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+        <Shield className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+        <p className="flex-1 text-amber-800 dark:text-amber-300">
+          {t("bannerActive", { count })}
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => router.push("/dashboard/settings/vault/delegation")}
+        >
+          {t("bannerManage")}
+        </Button>
+      </div>
+    </DashboardBanner>
   );
 }

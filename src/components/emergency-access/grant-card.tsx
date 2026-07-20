@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2, Info } from "lucide-react";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { useRouter } from "@/i18n/navigation";
@@ -317,9 +318,9 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
         {/* Header row: name + badge + actions */}
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               <span className="truncate font-medium">{displayName}</span>
-              <Badge variant="outline" className={statusColors[grant.status]}>
+              <Badge variant="outline" className={cn("shrink-0", statusColors[grant.status])}>
                 {t(`status${grant.status.charAt(0) + grant.status.slice(1).toLowerCase()}`)}
               </Badge>
             </div>

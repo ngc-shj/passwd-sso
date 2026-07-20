@@ -104,7 +104,7 @@ export function FolderTreeNode({
             ) : (
               <FolderOpen className="h-4 w-4 shrink-0" />
             )}
-            <span className="truncate">{folder.name}</span>
+            <span className="truncate min-w-0">{folder.name}</span>
           </Link>
         </Button>
         {showMenu !== false ? (
@@ -266,7 +266,7 @@ export function TagTreeNode({
                 className={cn("h-3 w-3 rounded-full p-0 shrink-0", colorClass && "tag-color-bg", colorClass)}
               />
             )}
-            <span className="truncate">{tag.name}</span>
+            <span className="truncate min-w-0">{tag.name}</span>
           </Link>
         </Button>
         {showMenu ? (
