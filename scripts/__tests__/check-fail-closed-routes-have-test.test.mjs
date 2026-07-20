@@ -46,7 +46,7 @@ function runGuard(extraEnv = {}) {
       // Fixture-mode default so the env-pollution guard does not fire under
       // CI=true; the pollution-guard test overrides it back to "".
       FAIL_CLOSED_TEST_FIXTURE_MODE: "1",
-      // Real-repo defaults (0 debt / 16 legacy) are meaningless against an
+      // Real-repo defaults (0 debt / 0 legacy) are meaningless against an
       // empty fixture tree — default fixture expectations to 0/0 so plain
       // fixtures (no debt, no legacy entries) pass without every test
       // needing to pass these explicitly. Individual ratchet tests override.
