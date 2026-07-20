@@ -171,7 +171,11 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
   deliverToWebhookRecords: mockDeliverToWebhookRecords,
 }));
 
-import { createWorker } from "./audit-outbox-worker";
+import { createWorker, purgeRetention } from "./audit-outbox-worker";
+// PrismaClient is mocked to MockPrismaClient by vi.mock("@prisma/client") above;
+// importing it here gives `new PrismaClient(...)` a real construct signature at
+// type-check time while resolving to the mock at runtime.
+import { PrismaClient } from "@prisma/client";
 import { NIL_UUID } from "@/lib/constants/app";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
@@ -1278,6 +1282,53 @@ describe("reaper — invoked on first loop tick", () => {
     const metadata = JSON.parse(purgeInsert![7] as string);
     expect(metadata.purgedCount).toBe(5);
   }, 15000);
+
+  it("purgeRetention runs the FAILED branch even when the SENT branch saturates its cap", async () => {
+    // S1 orchestration guard (Medium-2): the two purge branches must be
+    // unconditionally sequential. A regression that skipped the FAILED branch
+    // when the SENT branch saturated its `limit` would silently let PII-bearing
+    // FAILED rows outlive their retention. Drive purgeRetention directly with a
+    // SENT branch that returns exactly `limit` rows and assert the FAILED-branch
+    // DELETE is still issued.
+    const limit = 2;
+    const sentDeletes: string[] = [];
+    const failedDeletes: string[] = [];
+
+    // purgeRetention issues 4 sequential $transaction calls: SENT, FAILED,
+    // delivery-purge, webhook-purge. Route each branch's DELETE CTE by its
+    // status literal and record it; the SENT branch returns `limit` rows
+    // (per-tenant GROUP BY) to simulate a saturated cap.
+    mockTransaction.mockImplementation(async function (fn: TxFn) {
+      const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
+        if (sql.includes("DELETE FROM audit_outbox") && sql.includes("status = 'SENT'")) {
+          sentDeletes.push(sql);
+          return [{ tenant_id: TENANT_ID, purged: BigInt(limit) }];
+        }
+        if (sql.includes("DELETE FROM audit_outbox") && sql.includes("status = 'FAILED'")) {
+          failedDeletes.push(sql);
+          return [{ tenant_id: TENANT_ID, purged: BigInt(1) }];
+        }
+        return mockQueryRawUnsafe(sql, ...args);
+      });
+      return fn({
+        $executeRaw: mockExecuteRaw,
+        $queryRawUnsafe: txQueryRaw,
+        $executeRawUnsafe: mockExecuteRawUnsafe,
+        auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+        auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      });
+    });
+
+    const prisma = new PrismaClient();
+    const result = await purgeRetention(prisma, { limit });
+
+    // SENT branch saturated its cap...
+    expect(result.sentPurged).toBe(limit);
+    expect(sentDeletes).toHaveLength(1);
+    // ...and the FAILED branch still ran and purged its own row.
+    expect(failedDeletes).toHaveLength(1);
+    expect(result.failedPurged).toBe(1);
+  });
 
   it("reaper errors do not crash the worker loop", async () => {
     // If reapStuckRows throws, the worker should swallow the error (runReaper catches it)
