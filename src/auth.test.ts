@@ -830,6 +830,22 @@ describe("session callback — passkey enforcement fail-closed", () => {
     expect(passkeyEnforcementBlocks(result.user)).toBe(true);
   });
 
+  it("fails closed when a successful fetch returns no tenant (row vanished / FK-orphaned)", async () => {
+    // User.tenantId is a non-null FK (onDelete: Restrict), so a null tenant on
+    // a SUCCESSFUL query means the user row disappeared mid-session — no policy
+    // to trust. Must fail closed (throw → catch bundle), not default to false.
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
+    mockPrisma.user.findUnique.mockResolvedValueOnce(null);
+
+    const result = await sessionCallback(baseParams);
+
+    expect(result.user.requirePasskey).toBe(FAIL_CLOSED.requirePasskey);
+    expect(result.user.hasPasskey).toBe(FAIL_CLOSED.hasPasskey);
+    expect(result.user.requirePasskeyEnabledAt).toBe(FAIL_CLOSED.requirePasskeyEnabledAt);
+    expect(result.user.passkeyGracePeriodDays).toBe(FAIL_CLOSED.passkeyGracePeriodDays);
+    expect(passkeyEnforcementBlocks(result.user)).toBe(true);
+  });
+
   it("passes the real tenant values through on the happy path (fetch succeeds)", async () => {
     const enabledAt = new Date("2020-01-01T00:00:00.000Z");
     mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);

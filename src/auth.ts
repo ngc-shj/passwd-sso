@@ -414,13 +414,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               },
             }),
           ]);
-          return { credCount, tenant: tenant?.tenant ?? null, fetchFavicons: tenant?.fetchFavicons ?? false };
+          // FAIL-CLOSED on a null tenant: User.tenantId is a non-null FK
+          // (onDelete: Restrict), so a null tenant on a SUCCESSFUL query means
+          // the user row itself vanished mid-session (or FK-orphaned corruption)
+          // — there is no policy to trust. Throw so this flows through the
+          // fail-closed catch below (same stance as derivePasskeyState, which
+          // throws on a missing tenant) rather than defaulting requirePasskey
+          // to false (a fail-open on the success path).
+          if (!tenant?.tenant) {
+            throw new Error(`session passkey policy: tenant for user ${user.id} not found`);
+          }
+          return { credCount, tenant: tenant.tenant, fetchFavicons: tenant.fetchFavicons };
         }, BYPASS_PURPOSE.AUTH_FLOW);
 
         hasPasskey = passkeyData.credCount > 0;
-        requirePasskey = passkeyData.tenant?.requirePasskey ?? false;
-        requirePasskeyEnabledAt = passkeyData.tenant?.requirePasskeyEnabledAt?.toISOString() ?? null;
-        passkeyGracePeriodDays = passkeyData.tenant?.passkeyGracePeriodDays ?? null;
+        requirePasskey = passkeyData.tenant.requirePasskey;
+        requirePasskeyEnabledAt = passkeyData.tenant.requirePasskeyEnabledAt?.toISOString() ?? null;
+        passkeyGracePeriodDays = passkeyData.tenant.passkeyGracePeriodDays;
         fetchFavicons = passkeyData.fetchFavicons;
       } catch (err) {
         // FAIL-CLOSED: a passkey-enforcement fetch failure must NOT drop

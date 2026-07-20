@@ -51,7 +51,7 @@ Members and their status:
 
 | # | Site | Role | Fail-closed today? | Action |
 |---|------|------|--------------------|--------|
-| M1 | `src/auth.ts` session callback (~L400-449) | Produces the session enforcement fields | **NO — fail-open** | **FIX (C1)** |
+| M1 | `src/auth.ts` session callback (~L400-449) | Produces the session enforcement fields | **NO — fail-open** on fetch failure AND on a null-tenant success | **FIX (C1)** — catch bundle + null-tenant now throws into the same catch (SC-followup-1, folded into this PR) |
 | M2 | `src/lib/auth/policy/passkey-enforcement.ts` `derivePasskeyState` | Fresh re-derivation for token-issuance gates | YES — throws on error (does not catch) | none |
 | M3 | `src/lib/auth/tokens/mobile-token.ts:531` | Mint-point gate | YES — via `derivePasskeyState` throw → `PASSKEY_REQUIRED` | none |
 | M4 | `src/app/api/user/passkey-status/route.ts:52` | Banner/status display endpoint | YES — `catch` returns 500 `INTERNAL_ERROR`; not an enforcement decision | none |

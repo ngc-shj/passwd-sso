@@ -48,20 +48,15 @@ N/A — no environment constraints declared in Phase 1 (all contracts `verifiabl
 
 ## Resolution Status
 
-### F1 / MIN-1 (Minor) — Happy-path null-tenant fails open
-- Disposition: **Skipped — out of scope** (SC-followup-1).
-- Anti-Deferral:
-  - Worst case: a user whose `User` row disappears mid-session (or an FK-orphaned row from data corruption) gets `requirePasskey=false` on a *successful* fetch, bypassing passkey enforcement for that session.
-  - Likelihood: very low — `User.tenantId` is a non-null FK with `onDelete: Restrict`; a null tenant on a successful query requires the user row to vanish mid-session or explicit data corruption. Not reachable via normal operation, and unrelated to the fetch-failure path this PR fixes.
-  - Cost to fix: medium — needs a semantic decision (tenant-less vs FK-orphaned user) and alignment with `derivePasskeyState`'s throw-on-null-tenant stance; the session callback also lacks a `tenantId` to re-query by, so the fix is not a one-line default flip. Expanding this PR to cover it would broaden scope beyond C1 (catch-only) and both the functionality and security experts explicitly advised deferring.
-  - Owner: follow-up issue (SC-followup-1), separate from this PR.
+### F1 / MIN-1 (Minor) — Happy-path null-tenant fails open — FIXED
+- Disposition: **Fixed in this PR** (user opted to close the follow-up rather than defer).
+- Action: on the SUCCESS path, a null tenant (user row vanished mid-session / FK-orphaned) now throws inside the `withBypassRls` block, so it flows through the same fail-closed `catch` (installing the safe-blocking bundle) instead of defaulting `requirePasskey=false`. This aligns the session callback with `derivePasskeyState`'s throw-on-null-tenant stance. Since `User.tenantId` is a non-null FK (`onDelete: Restrict`), no legitimate user is affected — only the vanished-row / corruption cases, which SHOULD fail closed.
+- Modified file: `src/auth.ts` (the `withBypassRls` return + downstream non-null field reads).
+- Test: `src/auth.test.ts` — "fails closed when a successful fetch returns no tenant" (mock `user.findUnique → null`), asserts the four fail-closed fields + real `passkeyEnforcementBlocks === true`. Mutation-verified: reverting the throw fails the test.
 
-### MIN-2 (Minor) — Consumer `?? false` coupling in auth-gate
-- Disposition: **Accepted — documented, no code change** (SC-followup-2).
-- Anti-Deferral:
-  - Worst case: a future edit to the session callback that omits `requirePasskey` on some path silently re-opens the fail-open via the consumer's `?? false`.
-  - Likelihood: low — the callback currently always emits all four fields on both paths; the `SessionInfoSchema` Zod validation and the four-field-assertion tests would surface an omission.
-  - Cost to fix: trivial (a documenting comment) but touches an unrelated file (`auth-gate.ts`) outside this PR's C1 scope; a comment there is not load-bearing and would be scope creep.
-  - Owner: optional follow-up (SC-followup-2); not blocking.
+### MIN-2 (Minor) — Consumer `?? false` coupling in auth-gate — FIXED (documented)
+- Disposition: **Fixed in this PR** (documenting comment).
+- Action: added a comment at `auth-gate.ts` documenting that the `?? false` / `?? null` fallbacks are fail-open and safe only because the session callback always emits all four passkey fields on both paths; if that contract ever changes, tighten to a fail-closed default.
+- Modified file: `src/lib/proxy/auth-gate.ts` (comment above the `SessionInfo` construction).
 
-Both findings are pre-existing and outside the C1 (catch-only) contract. No code changes applied this round.
+Both findings were pre-existing; the user chose to fold both fixes into this PR. Both changes are fail-safe (tighten or document, never widen access).

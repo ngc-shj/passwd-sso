@@ -96,6 +96,12 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       }
     }
 
+    // The `?? false` / `?? null` defaults here are fail-open and are safe ONLY
+    // because the session callback (src/auth.ts) always emits all four passkey
+    // fields on BOTH its success and its fail-closed catch paths — so these
+    // fallbacks only ever fire when the field is genuinely absent from the JSON
+    // (never for a passkey-required tenant). If that callback contract ever
+    // changes to omit a field, tighten these to a fail-closed default instead.
     const info: SessionInfo = {
       valid,
       userId,
