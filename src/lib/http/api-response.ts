@@ -154,7 +154,9 @@ const DEFAULT_SERVICE_UNAVAILABLE_RETRY_AFTER_SEC = 30;
 // 503 envelopes ALWAYS set Retry-After (operator playbook requires a back-off
 // hint on service-unavailable; 429 may omit when the limiter cannot compute).
 // retryAfterMs of 0 / null / undefined → use the 30 s default, not "no header".
-function retryAfterSecondsOrDefault(retryAfterMs?: number): string {
+// Exported so bespoke 503 producers (e.g. the SCIM error envelope) reuse the
+// same delay-seconds conversion and 30 s default instead of a second literal.
+export function retryAfterSecondsOrDefault(retryAfterMs?: number): string {
   const sec =
     retryAfterMs != null && retryAfterMs > 0
       ? Math.ceil(retryAfterMs / MS_PER_SECOND)

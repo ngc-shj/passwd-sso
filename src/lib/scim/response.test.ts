@@ -46,6 +46,20 @@ describe("scimError", () => {
     const res = scimError(400, "Bad request");
     expect(res.headers.get("content-type")).toBe("application/scim+json");
   });
+
+  it("emits caller-supplied extra headers", () => {
+    const res = scimError(503, "Service temporarily unavailable", undefined, {
+      "Retry-After": "45",
+    });
+    expect(res.headers.get("retry-after")).toBe("45");
+  });
+
+  it("caller-supplied headers cannot override Content-Type", () => {
+    const res = scimError(503, "Service temporarily unavailable", undefined, {
+      "Content-Type": "text/html",
+    });
+    expect(res.headers.get("content-type")).toBe("application/scim+json");
+  });
 });
 
 describe("scimListResponse", () => {

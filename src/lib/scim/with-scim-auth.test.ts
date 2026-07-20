@@ -176,7 +176,7 @@ describe("authorizeScim", () => {
           status: "503",
           detail: "Service temporarily unavailable",
         },
-        retryAfter: "forbidden",
+        retryAfter: "required",
       },
       assertNoMutation: [tenantLookupSpy],
       limiterFactory: scimLimiterFactorySnapshot.replay(),

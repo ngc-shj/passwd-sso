@@ -48,6 +48,7 @@ export function scimError(
   status: number,
   detail: string,
   scimType?: string,
+  headers?: Record<string, string>,
 ): NextResponse {
   const body: Record<string, unknown> = {
     schemas: ["urn:ietf:params:scim:api:messages:2.0:Error"],
@@ -58,7 +59,9 @@ export function scimError(
 
   return NextResponse.json(body, {
     status,
-    headers: { "Content-Type": SCIM_CONTENT_TYPE },
+    // Content-Type last so a caller-supplied headers object can never
+    // override the SCIM media type.
+    headers: { ...headers, "Content-Type": SCIM_CONTENT_TYPE },
   });
 }
 
