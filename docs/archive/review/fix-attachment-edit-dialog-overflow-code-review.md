@@ -100,3 +100,47 @@ verifiable in local dev).
 
 All findings resolved. No Critical/Major findings in any round. Code diff unchanged by
 this round (both findings were plan documentation-accuracy notes).
+
+## Post-review scope expansion (2026-07-20)
+
+### Process note — R42 should have run at Phase 1, not after the user asked
+The original bug ("long attachment filename → horizontal scrollbar in the entry edit
+dialog") was treated as a single-instance fix, and the whole Phase-1 plan + 3-expert
+review ran inside that narrow scope. It is actually one member of a defect class:
+"a flex/grid item defaults to `min-width:auto`, so a descendant `truncate` cannot shrink
+and a long unbroken string overflows its container." Per R42 clause (b) — "a one-line
+user remark" can declare a class — the member-set grep should have run BEFORE writing the
+plan. It did not; the class-wide sweep only ran when the user asked "同様の箇所は他に
+ないですよね？". This is the process failure recorded in
+`feedback_r42_applies_to_review_findings_not_just_plan_classes` and
+`feedback_close_defect_class_not_instances`. Lesson folded back into those memories.
+
+### Class 1 — truncate-overflow, swept and closed
+Members found by grepping the class (flex/grid ancestor + `truncate` with a shrink-blocked
+intermediate) and fixed in this branch:
+- `EntryDialogShell` grid — `[&>*]:min-w-0` (original fix)
+- `base-webhook-card` (URL), `mcp-client-card` (name), `service-account-card` (4 sites:
+  SA name+description ×2, token name ×2), `emergency-access/grant-card` (member),
+  `tenant-audit-log-card` (actor), `member-info` (name/email — shared, broad coverage),
+  `folder-tree` + `sidebar-shared` (folder/tag names)
+
+Deliberately NOT changed (scope-out, verified):
+- `entry-secondary-line` — its truncate spans sit inside a `flex-1 min-w-0` boundary in
+  both call sites (`password-card.tsx:519`, `password-row.tsx:275`), so a long value clips
+  internally and never produces a pane-level scrollbar. Not a member of the reported class.
+- global `ui/dialog.tsx` primitive — blast radius; scoped fixes only.
+- `AlertDialogContent` — same grid shape as `DialogContent`, but its long-string case is
+  already handled by a different fix (`AlertDialogDescription` `wrap-anywhere` — wrap, not
+  truncate). Different class, out of scope here.
+
+### Class 2 — dashboard banner width
+Second class surfaced by the user: recovery-key and delegation-revoke banners rendered as
+direct `<main>` children with `mx-4 md:mx-6` and no max-width, spanning the full right
+pane instead of matching the entry list. Both use the identical shrink-less class → same
+class. Fixed by extracting `DashboardBanner` (reuses `useLayoutMode` for the entry area's
+layout-mode-dependent centered max-width) and wrapping both banners. Added `mockMatchMedia`
+test helper + `DashboardBanner` test (width-switch is a real `useLayoutMode` branch, not a
+decorative layout assertion).
+
+Verification: `npx vitest run` (12780 passed), `npx next build` (passed), pre-PR gate (51
+checks passed). PR #687.
