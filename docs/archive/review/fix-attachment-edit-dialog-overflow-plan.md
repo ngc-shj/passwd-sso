@@ -151,9 +151,15 @@ other code. No consumer reads a field from this change.
 - **Primary verification is visual** (CSS layout bug): run the dev server, open an entry
   that has an attachment with a deliberately long filename, confirm no horizontal
   scrollbar and single-line ellipsis truncation in both personal and team edit dialogs.
-- **Regression guard**: `npx vitest run` for the existing attachment-section and
-  team-attachment-section suites (they already mount the filename node) confirms no
-  markup regression. `npx next build` confirms no TS/build break.
+- **Regression guard (scope caveat)**: `npx next build` confirms no TS/build break, and
+  the full `npx vitest run` confirms nothing else regresses. Note that the
+  attachment-section / team-attachment-section suites do NOT render `EntryDialogShell`
+  (verified: neither test imports it), so they do not guard *this* change — the fix
+  touches only the shell, not the attachment-section markup. The test that renders the
+  changed component is `src/components/passwords/entry/entry-dialog-shell.test.tsx`, and
+  it correctly asserts only title/children presence, NOT the className (a class assertion
+  there would be decorative). Net: the layout effect of this change is intentionally
+  unguarded by automated tests — see the E2E decision below and RT6 acceptance.
 - **No new unit test asserting CSS classes**: asserting the literal presence of
   `[&>*]:min-w-0` in a snapshot would be a decorative test (it re-states the source, and
   removing the assertion would still leave the "test" green against the real bug — jsdom
@@ -166,12 +172,15 @@ other code. No consumer reads a field from this change.
   `scrollWidth <= clientWidth` on `[role='dialog']` with a long-filename fixture is the
   only test that would fail-before/pass-after. Resolved after checking the repo: an
   entry-edit-dialog E2E path exists (`e2e/page-objects/password-entry.page.ts`
-  `openEditDialog()`, driven by `e2e/tests/password-crud.spec.ts`), but **no
-  entry-attachment E2E fixture exists** — the only `setInputFiles` in `e2e/` is the CSV
-  *import* input (`import.page.ts`), and there is no attachment seed helper. Attachments
-  are client-side-encrypted, so a DB/blob seed is not a one-liner (it must produce a
-  decryptable blob or the row won't render). **Decision: adding an attachment-upload E2E
-  fixture is out of scope for this one-class CSS fix (SC3). Primary verification is
+  `openEditDialog()`, driven by `e2e/tests/password-crud.spec.ts`), and a
+  `seedAttachment` helper exists (`e2e/helpers/password-entry.ts:163`, encrypts +
+  DB-inserts an attachment row), but **no E2E spec opens the entry edit dialog and renders
+  a seeded attachment** — the only `setInputFiles` in `e2e/` is the CSV *import* input
+  (`import.page.ts`), and `seedAttachment` is exercised only by its own unit test. So the
+  remaining cost of an E2E is "one new spec that seeds a long-filename attachment via the
+  existing helper, opens the edit dialog, and asserts `scrollWidth <= clientWidth`" — not
+  building attachment fixtures from scratch. **Decision: adding that E2E spec is out of
+  scope for this one-class CSS fix (SC3). Primary verification is
   manual-visual per the User operation scenarios below + `npx vitest run` + `npx next
   build`.** The manual check MUST use a long UNBROKEN filename (≈200 chars, no
   whitespace) — a name with break opportunities won't reproduce the bug and would
