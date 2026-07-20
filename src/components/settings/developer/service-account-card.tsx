@@ -468,9 +468,9 @@ export function ServiceAccountCard() {
                         <ChevronDown
                           className={`h-4 w-4 shrink-0 transition-transform text-muted-foreground ${expandedSa.has(sa.id) ? "rotate-0" : "-rotate-90"}`}
                         />
-                        <span className="text-sm font-medium truncate">{sa.name}</span>
+                        <span className="text-sm font-medium truncate min-w-0">{sa.name}</span>
                         {sa.description && (
-                          <span className="text-xs text-muted-foreground truncate hidden sm:block">
+                          <span className="text-xs text-muted-foreground truncate hidden sm:block min-w-0">
                             {sa.description}
                           </span>
                         )}
@@ -550,7 +550,7 @@ export function ServiceAccountCard() {
                             className="flex items-center justify-between border rounded p-2 bg-background"
                           >
                             <div className="space-y-0.5 min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="text-xs font-medium truncate">
                                   {token.name}
                                 </span>
@@ -638,9 +638,9 @@ export function ServiceAccountCard() {
                               <ChevronDown
                                 className={`h-4 w-4 shrink-0 transition-transform text-muted-foreground ${expandedSa.has(sa.id) ? "rotate-0" : "-rotate-90"}`}
                               />
-                              <span className="text-sm font-medium truncate">{sa.name}</span>
+                              <span className="text-sm font-medium truncate min-w-0">{sa.name}</span>
                               {sa.description && (
-                                <span className="text-xs text-muted-foreground truncate hidden sm:block">
+                                <span className="text-xs text-muted-foreground truncate hidden sm:block min-w-0">
                                   {sa.description}
                                 </span>
                               )}

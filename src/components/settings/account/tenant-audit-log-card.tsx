@@ -186,7 +186,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
       detail={
         <>
           <AuditDelegationDetail action={log.action} metadata={log.metadata} />
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
             {log.user && (
               <span className="truncate">{formatUserName(log.user)}</span>
             )}
