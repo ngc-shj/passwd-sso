@@ -7,6 +7,7 @@ import { VAULT_STATUS, LOCAL_STORAGE_KEY } from "@/lib/constants";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, X } from "lucide-react";
+import { DashboardBanner } from "./dashboard-banner";
 import { RecoveryKeyDialog } from "./recovery-key-dialog";
 
 const DISMISS_DURATION_MS = MS_PER_DAY;
@@ -50,29 +51,31 @@ export function RecoveryKeyBanner() {
 
   return (
     <>
-      <div className="mx-4 mt-4 flex items-center gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm md:mx-6 md:mt-6">
-        <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-600 dark:text-yellow-400" />
-        <p className="flex-1 text-yellow-800 dark:text-yellow-300">
-          {recoveryKeyInvalidated
-            ? t("recoveryKeyBannerMessageInvalidated")
-            : t("recoveryKeyBannerMessage")}
-        </p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setDialogOpen(true)}
-        >
-          {t("recoveryKeyBannerAction")}
-        </Button>
-        <button
-          type="button"
-          onClick={handleDismiss}
-          aria-label={t("recoveryKeyBannerDismiss")}
-          className="ml-1 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+      <DashboardBanner>
+        <div className="flex items-center gap-3 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-600 dark:text-yellow-400" />
+          <p className="flex-1 text-yellow-800 dark:text-yellow-300">
+            {recoveryKeyInvalidated
+              ? t("recoveryKeyBannerMessageInvalidated")
+              : t("recoveryKeyBannerMessage")}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setDialogOpen(true)}
+          >
+            {t("recoveryKeyBannerAction")}
+          </Button>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            aria-label={t("recoveryKeyBannerDismiss")}
+            className="ml-1 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </DashboardBanner>
 
       <RecoveryKeyDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>
