@@ -1,16 +1,49 @@
 /**
  * C8: cap regression tests for C1 (reapStuckRows), C2 (reapStuckDeliveries),
- * and C3 (purgeRetention) — each must transition at most `limit` rows per
- * call, drain the remainder on a subsequent call, and (purgeRetention only)
+ * and C3 (purgeRetention) — each must transition/purge EXACTLY `limit` rows on
+ * one call, drain the remainder on a subsequent call, and (purgeRetention only)
  * never let a starved FAILED-aged budget be crowded out by SENT-aged rows
  * (S1 — the two-branch split gives FAILED its own cap).
+ *
+ * Determinism vs. the live worker: this suite runs against the shared dev DB,
+ * which a live audit-outbox-worker (30s reaper, REAP_BATCH_SIZE=1000) sweeps
+ * globally with no tenant/test-only marker. Asserting on the observed state of
+ * the test's own rows after a call is therefore racy — the worker can reap all
+ * of them at once. Asserting only `reaped <= limit` on the return value is
+ * deterministic but a false negative: if the worker reaps my rows first, my
+ * call returns 0 and `0 <= limit` passes even with a broken `LIMIT`.
+ *
+ * The fix: create the test's `limit + 1` eligible rows INSIDE a holding
+ * transaction that ALWAYS rolls back (runInRolledBackTx), and run the real
+ * sweep SQL (the exported `*InTx` seams) in that SAME transaction. Uncommitted
+ * rows are invisible to every other transaction (MVCC), so the live worker
+ * cannot see or reap them — the test is the sole sweeper of its own rows. The
+ * `LIMIT` is then the ONLY thing bounding the count, so we can assert it
+ * EXACTLY: one call returns `limit`, the next returns the remaining `1`. A
+ * removed `LIMIT` would return `limit + 1` and fail — no false negative.
+ * The rollback also guarantees zero side effects: the production sweep is
+ * global (not tenant-scoped, by design), so if it happens to catch another
+ * tenant's committed row, the rollback undoes that write.
+ *
+ * The S1 orchestration guard (FAILED branch runs even when the SENT branch
+ * saturates its cap) is a different concern — proven at the orchestrator level
+ * in the worker unit test, not here (this file exercises the branch helpers
+ * directly, so it proves per-branch cap independence, not their sequencing).
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX, AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { reapStuckRows, reapStuckDeliveries, purgeRetention } from "@/workers/audit-outbox-worker";
+import {
+  reapStuckRowsInTx,
+  reapStuckDeliveriesInTx,
+  purgeSentAgedInTx,
+  purgeFailedAgedInTx,
+} from "@/workers/audit-outbox-worker";
+
+type PrismaTx = Prisma.TransactionClient;
 
 describe("audit-outbox sweep caps (C8)", () => {
   let ctx: TestContext;
@@ -39,296 +72,185 @@ describe("audit-outbox sweep caps (C8)", () => {
       actorType: ACTOR_TYPE.HUMAN,
     });
 
+  // Run `body` inside a holding transaction that ALWAYS rolls back. Two
+  // guarantees this buys the cap assertions:
+  //   1. Rows created in `body` are never committed, so they are invisible
+  //      (MVCC) to the live audit-outbox-worker — the test is the sole sweeper
+  //      of its own rows and the `LIMIT` cap is the only thing bounding the
+  //      count, so it can be asserted exactly (2 → 1 → 0).
+  //   2. The production sweep is a GLOBAL sweep (no tenant scoping, by design).
+  //      If any other tenant's committed eligible rows happen to be caught by
+  //      the sweep here, the rollback undoes those writes — the test has zero
+  //      side effects on shared data. (Such rows can still consume the `LIMIT`
+  //      on a shared dev DB, which would make an assertion FAIL loudly, never
+  //      pass a broken cap; CI runs against a fresh DB with no other rows.)
+  // A vitest assertion failure inside `body` propagates out (the tx still
+  // rolls back), so failures are reported normally.
+  const ROLLBACK = Symbol("rollback");
+  async function runInRolledBackTx(
+    body: (tx: PrismaTx) => Promise<void>,
+  ): Promise<void> {
+    try {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await body(tx);
+        throw ROLLBACK;
+      });
+    } catch (err) {
+      if (err !== ROLLBACK) throw err;
+    }
+  }
+
   // ─── reapStuckRows ──────────────────────────────────────────────
 
   describe("reapStuckRows", () => {
-    async function insertStuckRow(): Promise<string> {
-      const outboxId = randomUUID();
+    // The cap is proven exactly: 3 eligible rows, LIMIT 2 → first call reaps
+    // exactly 2, second reaps the remaining 1. The 3 rows are created inside a
+    // rolled-back holding transaction (see runInRolledBackTx), so they are
+    // invisible (MVCC) to the live worker — the test is the sole reaper of its
+    // own rows. A removed production `LIMIT` would make the first call reap all
+    // 3 and fail `toBe(2)`.
+    it("reaps exactly `limit` of 3 eligible rows per call, draining the remainder next call", async () => {
       const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, processing_started_at, created_at, next_retry_at)
-           VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', 0, 8,
-                   now() - make_interval(secs => $4::double precision) - interval '60 seconds',
-                   now(), now())`,
-          outboxId,
-          tenantId,
-          makePayload(),
-          timeoutSeconds,
-        );
+
+      await runInRolledBackTx(async (txH) => {
+        for (let i = 0; i < 3; i++) {
+          await txH.$executeRawUnsafe(
+            `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, processing_started_at, created_at, next_retry_at)
+             VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', 0, 8,
+                     now() - make_interval(secs => $4::double precision) - interval '60 seconds',
+                     now(), now())`,
+            randomUUID(),
+            tenantId,
+            makePayload(),
+            timeoutSeconds,
+          );
+        }
+
+        // First call: exactly `limit` (2) of the 3 eligible rows. Broken LIMIT ⇒ 3.
+        expect(await reapStuckRowsInTx(txH, 2)).toBe(2);
+        // Second call: drains the last 1.
+        expect(await reapStuckRowsInTx(txH, 2)).toBe(1);
+        // Nothing left eligible in this fenced set.
+        expect(await reapStuckRowsInTx(txH, 2)).toBe(0);
       });
-      return outboxId;
-    }
-
-    async function getStatuses(ids: string[]): Promise<string[]> {
-      const rows = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<{ status: string }[]>(
-          `SELECT status::text FROM audit_outbox WHERE id = ANY($1::uuid[])`,
-          ids,
-        );
-      });
-      return rows.map((r) => r.status);
-    }
-
-    // reapStuckRows is a GLOBAL sweep (SC6 — no per-tenant partitioning), so
-    // in a shared dev DB another process (e.g. a live worker) can concurrently
-    // reap OTHER tenants' stuck rows and consume part of the `limit` budget.
-    // Scope assertions to THIS test's own row ids (never global counts) so
-    // the cap behavior is verified regardless of unrelated background
-    // activity in the database.
-    it("transitions exactly `limit` of 3 eligible stuck rows, and a 2nd call drains the remainder", async () => {
-      const ids = [await insertStuckRow(), await insertStuckRow(), await insertStuckRow()];
-
-      expect(await getStatuses(ids)).toEqual(["PROCESSING", "PROCESSING", "PROCESSING"]);
-
-      await reapStuckRows(ctx.su.prisma, 2);
-      const afterFirst = await getStatuses(ids);
-      const pendingAfterFirst = afterFirst.filter((s) => s === "PENDING").length;
-      const processingAfterFirst = afterFirst.filter((s) => s === "PROCESSING").length;
-      // At most `limit` (2) of MY 3 rows can have transitioned this call —
-      // a global cap can never reap more of mine than its own limit allows.
-      expect(pendingAfterFirst).toBeLessThanOrEqual(2);
-      expect(pendingAfterFirst + processingAfterFirst).toBe(3);
-      expect(processingAfterFirst).toBeGreaterThanOrEqual(1);
-
-      // Drain: repeat capped calls until all of mine have transitioned —
-      // bounded iteration count proves the cap, not an unbounded single call.
-      let iterations = 1;
-      while ((await getStatuses(ids)).some((s) => s === "PROCESSING") && iterations < 5) {
-        await reapStuckRows(ctx.su.prisma, 2);
-        iterations++;
-      }
-      expect(await getStatuses(ids)).toEqual(["PENDING", "PENDING", "PENDING"]);
-      // Draining 3 rows at cap=2 must take at least 2 calls (ceil(3/2)) —
-      // proves a single call could not have drained all 3 (RT7 cap evidence).
-      expect(iterations).toBeGreaterThanOrEqual(2);
     });
   });
 
   // ─── reapStuckDeliveries ────────────────────────────────────────
 
   describe("reapStuckDeliveries", () => {
-    async function insertOutboxRow(): Promise<string> {
-      const id = randomUUID();
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
-           VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', now())`,
-          id,
-          tenantId,
-          JSON.stringify({
-            scope: "PERSONAL",
-            action: "ENTRY_CREATE",
-            userId,
-            actorType: "HUMAN",
-          }),
-        );
-      });
-      return id;
-    }
+    // Same fenced-holding-transaction design as reapStuckRows: the target,
+    // outbox parents, and 3 stuck deliveries are all created inside `txH` and
+    // never committed, so the live worker cannot see or reap them. The cap is
+    // asserted exactly against the delivery reaper's own `LIMIT`.
+    it("reaps exactly `limit` of 3 eligible deliveries per call, draining the remainder next call", async () => {
+      const processingStartedAt = new Date(Date.now() - AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS - 60_000);
 
-    async function insertTarget(kind: string): Promise<string> {
-      const id = randomUUID();
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
+      await runInRolledBackTx(async (txH) => {
+        const targetId = randomUUID();
+        await txH.$executeRawUnsafe(
           `INSERT INTO audit_delivery_targets (
             id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag,
             master_key_version, is_active, created_at
-          ) VALUES ($1::uuid, $2::uuid, $3::"AuditDeliveryTargetKind", 'test_enc', 'test_iv', 'test_tag', 1, true, now())`,
-          id,
-          tenantId,
-          kind,
-        );
-      });
-      return id;
-    }
-
-    async function insertStuckDelivery(outboxId: string, targetId: string): Promise<string> {
-      const id = randomUUID();
-      const processingStartedAt = new Date(Date.now() - AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS - 60_000);
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO audit_deliveries (
-            id, outbox_id, target_id, tenant_id, status,
-            attempt_count, max_attempts, processing_started_at
-          ) VALUES (
-            $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PROCESSING',
-            0, 8, $5::timestamptz
-          )`,
-          id,
-          outboxId,
+          ) VALUES ($1::uuid, $2::uuid, 'WEBHOOK'::"AuditDeliveryTargetKind", 'test_enc', 'test_iv', 'test_tag', 1, true, now())`,
           targetId,
           tenantId,
-          processingStartedAt.toISOString(),
         );
+
+        for (let i = 0; i < 3; i++) {
+          const outboxId = randomUUID();
+          await txH.$executeRawUnsafe(
+            `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+             VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', now())`,
+            outboxId,
+            tenantId,
+            JSON.stringify({ scope: "PERSONAL", action: "ENTRY_CREATE", userId, actorType: "HUMAN" }),
+          );
+          await txH.$executeRawUnsafe(
+            `INSERT INTO audit_deliveries (
+              id, outbox_id, target_id, tenant_id, status,
+              attempt_count, max_attempts, processing_started_at
+            ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PROCESSING', 0, 8, $5::timestamptz)`,
+            randomUUID(),
+            outboxId,
+            targetId,
+            tenantId,
+            processingStartedAt.toISOString(),
+          );
+        }
+
+        // First call: exactly `limit` (2) of the 3 eligible deliveries. Broken LIMIT ⇒ 3.
+        expect(await reapStuckDeliveriesInTx(txH, 2)).toBe(2);
+        // Second call: drains the last 1.
+        expect(await reapStuckDeliveriesInTx(txH, 2)).toBe(1);
+        expect(await reapStuckDeliveriesInTx(txH, 2)).toBe(0);
       });
-      return id;
-    }
-
-    async function getDeliveryStatuses(ids: string[]): Promise<string[]> {
-      const rows = await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<{ status: string }[]>(
-          `SELECT status::text FROM "audit_deliveries" WHERE id = ANY($1::uuid[])`,
-          ids,
-        );
-      });
-      return rows.map((r) => r.status);
-    }
-
-    // Same GLOBAL-sweep caveat as reapStuckRows above — scope assertions to
-    // this test's own delivery ids, not tenant-wide counts.
-    it("transitions exactly `limit` of 3 eligible stuck deliveries, and a 2nd call drains the remainder", async () => {
-      const targetId = await insertTarget("WEBHOOK");
-      const outboxId1 = await insertOutboxRow();
-      const outboxId2 = await insertOutboxRow();
-      const outboxId3 = await insertOutboxRow();
-      const ids = [
-        await insertStuckDelivery(outboxId1, targetId),
-        await insertStuckDelivery(outboxId2, targetId),
-        await insertStuckDelivery(outboxId3, targetId),
-      ];
-
-      expect(await getDeliveryStatuses(ids)).toEqual(["PROCESSING", "PROCESSING", "PROCESSING"]);
-
-      await reapStuckDeliveries(ctx.su.prisma, 2);
-      const afterFirst = await getDeliveryStatuses(ids);
-      const pendingAfterFirst = afterFirst.filter((s) => s === "PENDING").length;
-      const processingAfterFirst = afterFirst.filter((s) => s === "PROCESSING").length;
-      expect(pendingAfterFirst).toBeLessThanOrEqual(2);
-      expect(pendingAfterFirst + processingAfterFirst).toBe(3);
-      expect(processingAfterFirst).toBeGreaterThanOrEqual(1);
-
-      let iterations = 1;
-      while ((await getDeliveryStatuses(ids)).some((s) => s === "PROCESSING") && iterations < 5) {
-        await reapStuckDeliveries(ctx.su.prisma, 2);
-        iterations++;
-      }
-      expect(await getDeliveryStatuses(ids)).toEqual(["PENDING", "PENDING", "PENDING"]);
-      expect(iterations).toBeGreaterThanOrEqual(2);
     });
   });
 
   // ─── purgeRetention ─────────────────────────────────────────────
 
   describe("purgeRetention", () => {
-    async function insertSentAgedRow(): Promise<string> {
-      const id = randomUUID();
-      const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, sent_at)
-           VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', 1, 8, now() - interval '48 hours', now(),
-                   now() - make_interval(hours => $4) - interval '1 hour')`,
-          id,
-          tenantId,
-          makePayload(),
-          retentionHours,
-        );
-      });
-      return id;
+    async function insertSentAgedRow(tx: PrismaTx): Promise<void> {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, sent_at)
+         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', 1, 8, now() - interval '48 hours', now(),
+                 now() - make_interval(hours => $4) - interval '1 hour')`,
+        randomUUID(),
+        tenantId,
+        makePayload(),
+        AUDIT_OUTBOX.RETENTION_HOURS,
+      );
     }
 
-    async function insertFailedAgedRow(): Promise<string> {
-      const id = randomUUID();
-      const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(
-          `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
-           VALUES ($1::uuid, $2::uuid, $3::jsonb, 'FAILED', 8, 8,
-                   now() - make_interval(days => $4) - interval '1 day', now())`,
-          id,
-          tenantId,
-          makePayload(),
-          failedRetentionDays,
-        );
-      });
-      return id;
+    async function insertFailedAgedRow(tx: PrismaTx): Promise<void> {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
+         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'FAILED', 8, 8,
+                 now() - make_interval(days => $4) - interval '1 day', now())`,
+        randomUUID(),
+        tenantId,
+        makePayload(),
+        AUDIT_OUTBOX.FAILED_RETENTION_DAYS,
+      );
     }
 
-    async function getRemainingIds(): Promise<{ id: string; status: string }[]> {
-      return ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<{ id: string; status: string }[]>(
-          `SELECT id, status::text FROM audit_outbox WHERE tenant_id = $1::uuid`,
-          tenantId,
-        );
+    // Same fenced-holding-transaction design: SENT-aged rows are created inside
+    // `txH` and never committed, so the live worker cannot purge them. The
+    // SENT branch's own `LIMIT` is asserted exactly.
+    it("purges exactly `limit` of 3 SENT-aged rows per call, draining the remainder next call", async () => {
+      await runInRolledBackTx(async (txH) => {
+        for (let i = 0; i < 3; i++) await insertSentAgedRow(txH);
+
+        // First call: exactly `limit` (2) of the 3 SENT-aged rows. Broken LIMIT ⇒ 3.
+        expect(await purgeSentAgedInTx(txH, 2)).toBe(2);
+        // Second call: drains the last 1.
+        expect(await purgeSentAgedInTx(txH, 2)).toBe(1);
+        expect(await purgeSentAgedInTx(txH, 2)).toBe(0);
       });
-    }
-
-    // purgeRetention is a GLOBAL sweep (SC6): in a shared dev DB, another
-    // tenant's eligible rows can share the same per-call budget as this
-    // test's own rows. Scope survival assertions to THIS test's own row ids
-    // (never a bare "exactly 1 remains" on the whole tenant-scoped result
-    // set beyond what's attributable to my own ids) so the cap behavior is
-    // verified regardless of unrelated background activity in the database.
-    it("caps SENT-aged purge at `limit` per call, draining the remainder on a 2nd call", async () => {
-      const myIds = [await insertSentAgedRow(), await insertSentAgedRow(), await insertSentAgedRow()];
-
-      await purgeRetention(ctx.su.prisma, { limit: 2 });
-
-      const survivingAfterFirst = (await getRemainingIds())
-        .map((r) => r.id)
-        .filter((id) => myIds.includes(id));
-      // At most `limit` (2) of MY 3 rows can have been purged this call.
-      expect(survivingAfterFirst.length).toBeGreaterThanOrEqual(1);
-      expect(survivingAfterFirst.length).toBeLessThanOrEqual(3);
-      expect(survivingAfterFirst.length).not.toBe(0);
-
-      // Drain: repeat capped calls until all of mine are gone.
-      let iterations = 1;
-      while (
-        (await getRemainingIds()).some((r) => myIds.includes(r.id)) &&
-        iterations < 5
-      ) {
-        await purgeRetention(ctx.su.prisma, { limit: 2 });
-        iterations++;
-      }
-      expect((await getRemainingIds()).filter((r) => myIds.includes(r.id))).toHaveLength(0);
-      // Draining 3 rows at cap=2 must take at least 2 calls (ceil(3/2)) —
-      // proves a single call could not have drained all 3 (RT7 cap evidence).
-      expect(iterations).toBeGreaterThanOrEqual(2);
     });
 
-    it("S1 starvation guard: a FAILED-aged row is purged in the same call even when >= limit SENT-aged rows are also eligible", async () => {
-      // 3 SENT-aged rows (>= limit=2) competing for the SENT branch's budget,
-      // plus 1 FAILED-aged row that must not be starved by the SENT backlog —
-      // the two-branch split gives FAILED its own independent cap.
-      const sentIds = [await insertSentAgedRow(), await insertSentAgedRow(), await insertSentAgedRow()];
-      const failedId = await insertFailedAgedRow();
+    // S1 per-branch cap independence: with 3 SENT-aged rows (> limit=2) the
+    // SENT branch purges exactly `limit` and leaves a backlog, yet the FAILED
+    // branch still purges its own aged row — the two branches carry independent
+    // caps, so a SENT backlog can never starve FAILED of its budget. (That the
+    // orchestrator *runs* the FAILED branch even after the SENT branch
+    // saturates is covered in the worker unit test — see "purgeRetention runs
+    // the FAILED branch even when the SENT branch saturates its cap".)
+    it("S1: the FAILED-aged branch purges its own row despite a SENT backlog exceeding the cap", async () => {
+      await runInRolledBackTx(async (txH) => {
+        for (let i = 0; i < 3; i++) await insertSentAgedRow(txH);
+        await insertFailedAgedRow(txH);
 
-      await purgeRetention(ctx.su.prisma, { limit: 2 });
-
-      const remainingIdsAfterFirst = (await getRemainingIds()).map((r) => r.id);
-
-      // The FAILED-aged row must be gone despite the SENT backlog exceeding the cap.
-      expect(remainingIdsAfterFirst).not.toContain(failedId);
-
-      // At most `limit` (2) of MY 3 SENT-aged rows can have been purged this
-      // call — at least 1 of mine must remain (proves the SENT branch is
-      // itself capped, not unbounded).
-      const survivingSentIds = sentIds.filter((id) => remainingIdsAfterFirst.includes(id));
-      expect(survivingSentIds.length).toBeGreaterThanOrEqual(1);
-
-      // A 2nd (and if needed further) call drains the remaining SENT-aged
-      // rows of mine — re-querying live state each iteration.
-      let iterations = 1;
-      while (iterations < 5) {
-        const stillRemaining = (await getRemainingIds()).map((r) => r.id);
-        if (!sentIds.some((id) => stillRemaining.includes(id))) break;
-        await purgeRetention(ctx.su.prisma, { limit: 2 });
-        iterations++;
-      }
-      const finalRemaining = (await getRemainingIds()).map((r) => r.id);
-      expect(sentIds.some((id) => finalRemaining.includes(id))).toBe(false);
-      expect(iterations).toBeGreaterThanOrEqual(2);
+        // SENT branch is capped at `limit` even with a backlog (leaves 1).
+        expect(await purgeSentAgedInTx(txH, 2)).toBe(2);
+        // FAILED branch has its own budget: its 1 aged row is purged, not starved.
+        expect(await purgeFailedAgedInTx(txH, 2)).toBe(1);
+        // Drain the remaining SENT-aged row.
+        expect(await purgeSentAgedInTx(txH, 2)).toBe(1);
+        expect(await purgeSentAgedInTx(txH, 2)).toBe(0);
+      });
     });
   });
 });

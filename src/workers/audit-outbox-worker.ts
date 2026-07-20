@@ -1275,63 +1275,79 @@ export async function reapStuckRows(
   prisma: PrismaClient,
   limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
 ): Promise<number> {
-  const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND;
-
-  // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
-  // those at or over max_attempts transition to FAILED (dead-letter).
   // The reap transition (FAILED/PENDING) and every row's audit event
   // (AUDIT_OUTBOX_DEAD_LETTER / AUDIT_OUTBOX_REAPED) commit in ONE tx via the
   // in-tx audit writer, so a reaped/dead-lettered row can never exist without
   // its audit record. If any audit insert throws, the whole batch rolls back and
-  // is retried on the next reaper tick. Both actions are in
-  // OUTBOX_BYPASS_AUDIT_ACTIONS, so the direct write never re-enters the outbox.
-  const reaped = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    const rows = await tx.$queryRawUnsafe<{
-      id: string;
-      tenant_id: string;
-      attempt_count: number;
-      new_status: string;
-    }[]>(
-      `UPDATE audit_outbox
-       SET status = CASE
-             WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditOutboxStatus"
-             ELSE 'PENDING'::"AuditOutboxStatus"
-           END,
-           processing_started_at = NULL,
-           attempt_count = attempt_count + 1,
-           last_error = LEFT('[reaped after timeout, attempt ' || (attempt_count + 1)::text || ']', 1024)
-       WHERE id IN (
-         SELECT id FROM audit_outbox
-         WHERE status = 'PROCESSING'
-           AND processing_started_at < now() - make_interval(secs => $1)
-         ORDER BY processing_started_at ASC
-         LIMIT $2
-         FOR UPDATE SKIP LOCKED
-       )
-       RETURNING id, tenant_id, attempt_count, status::text AS new_status`,
-      timeoutSeconds,
-      limit,
-    );
-    for (const row of rows) {
-      if (row.new_status === "FAILED") {
-        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
-          outboxId: row.id,
-          attemptCount: row.attempt_count,
-          reason: "reaped_max_attempts",
-        });
-      } else {
-        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_REAPED, {
-          outboxId: row.id,
-          attemptCount: row.attempt_count,
-        });
-      }
+  // is retried on the next reaper tick.
+  return prisma.$transaction((tx) => reapStuckRowsInTx(tx, limit));
+}
+
+/**
+ * In-transaction body of {@link reapStuckRows}. Runs the real reap UPDATE +
+ * co-committed audit writes on a caller-supplied transaction client instead of
+ * opening its own transaction.
+ *
+ * Exported so cap regression tests can run the real SQL inside a transaction
+ * that has already `FOR UPDATE`-locked the test's own rows, fencing the live
+ * worker out (its `FOR UPDATE SKIP LOCKED` skips the locked rows) so the cap
+ * can be asserted deterministically. Production always reaches this via the
+ * `reapStuckRows` wrapper above — behavior is identical.
+ */
+export async function reapStuckRowsInTx(
+  tx: Prisma.TransactionClient,
+  limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
+): Promise<number> {
+  const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND;
+
+  await setBypassRlsGucs(tx);
+  // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
+  // those at or over max_attempts transition to FAILED (dead-letter). Both
+  // actions are in OUTBOX_BYPASS_AUDIT_ACTIONS, so the direct write never
+  // re-enters the outbox.
+  const rows = await tx.$queryRawUnsafe<{
+    id: string;
+    tenant_id: string;
+    attempt_count: number;
+    new_status: string;
+  }[]>(
+    `UPDATE audit_outbox
+     SET status = CASE
+           WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditOutboxStatus"
+           ELSE 'PENDING'::"AuditOutboxStatus"
+         END,
+         processing_started_at = NULL,
+         attempt_count = attempt_count + 1,
+         last_error = LEFT('[reaped after timeout, attempt ' || (attempt_count + 1)::text || ']', 1024)
+     WHERE id IN (
+       SELECT id FROM audit_outbox
+       WHERE status = 'PROCESSING'
+         AND processing_started_at < now() - make_interval(secs => $1)
+       ORDER BY processing_started_at ASC
+       LIMIT $2
+       FOR UPDATE SKIP LOCKED
+     )
+     RETURNING id, tenant_id, attempt_count, status::text AS new_status`,
+    timeoutSeconds,
+    limit,
+  );
+  for (const row of rows) {
+    if (row.new_status === "FAILED") {
+      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
+        outboxId: row.id,
+        attemptCount: row.attempt_count,
+        reason: "reaped_max_attempts",
+      });
+    } else {
+      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_REAPED, {
+        outboxId: row.id,
+        attemptCount: row.attempt_count,
+      });
     }
-    return rows;
-  });
+  }
 
   const log = getLogger();
-  for (const row of reaped) {
+  for (const row of rows) {
     if (row.new_status === "FAILED") {
       log.warn({ outboxId: row.id, attemptCount: row.attempt_count }, "worker.reaped_dead_letter");
       deadLetterLogger.warn(
@@ -1343,7 +1359,7 @@ export async function reapStuckRows(
     }
   }
 
-  return reaped.length;
+  return rows.length;
 }
 
 /**
@@ -1357,53 +1373,63 @@ export async function reapStuckDeliveries(
   prisma: PrismaClient,
   limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
 ): Promise<number> {
-  const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
-  const cutoff = new Date(Date.now() - timeout);
-
   // Reap transition + dead-letter audit for rows that hit FAILED co-commit in one
   // tx (parity with reapStuckRows), so a reaper-driven delivery dead-letter can
   // never be silent in the audit trail.
-  const reaped = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    const rows = await tx.$queryRawUnsafe<{
-      id: string;
-      tenant_id: string;
-      attempt_count: number;
-      new_status: string;
-    }[]>(
-      `UPDATE "audit_deliveries"
-       SET "status" = CASE
-         WHEN "attempt_count" + 1 >= "max_attempts" THEN 'FAILED'::"AuditDeliveryStatus"
-         ELSE 'PENDING'::"AuditDeliveryStatus"
-       END,
-       "attempt_count" = "attempt_count" + 1,
-       "processing_started_at" = NULL,
-       "last_error" = 'reaped: processing timeout exceeded'
-       WHERE "id" IN (
-         SELECT "id" FROM "audit_deliveries"
-         WHERE "status" = 'PROCESSING'
-           AND "processing_started_at" < $1
-         ORDER BY "processing_started_at" ASC
-         LIMIT $2
-         FOR UPDATE SKIP LOCKED
-       )
-       RETURNING "id", "tenant_id", "attempt_count", "status"::text AS new_status`,
-      cutoff,
-      limit,
-    );
-    for (const row of rows) {
-      if (row.new_status === "FAILED") {
-        await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
-          deliveryId: row.id,
-          attemptCount: row.attempt_count,
-          reason: "reaped_max_attempts",
-        });
-      }
-    }
-    return rows;
-  });
+  return prisma.$transaction((tx) => reapStuckDeliveriesInTx(tx, limit));
+}
 
-  const count = reaped.length;
+/**
+ * In-transaction body of {@link reapStuckDeliveries}. See
+ * {@link reapStuckRowsInTx} for why this seam is exported (deterministic cap
+ * regression tests fence the live worker with a `FOR UPDATE` lock and run the
+ * real SQL inside the same transaction). Production reaches it via the wrapper.
+ */
+export async function reapStuckDeliveriesInTx(
+  tx: Prisma.TransactionClient,
+  limit: number = AUDIT_OUTBOX.REAP_BATCH_SIZE,
+): Promise<number> {
+  const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
+  const cutoff = new Date(Date.now() - timeout);
+
+  await setBypassRlsGucs(tx);
+  const rows = await tx.$queryRawUnsafe<{
+    id: string;
+    tenant_id: string;
+    attempt_count: number;
+    new_status: string;
+  }[]>(
+    `UPDATE "audit_deliveries"
+     SET "status" = CASE
+       WHEN "attempt_count" + 1 >= "max_attempts" THEN 'FAILED'::"AuditDeliveryStatus"
+       ELSE 'PENDING'::"AuditDeliveryStatus"
+     END,
+     "attempt_count" = "attempt_count" + 1,
+     "processing_started_at" = NULL,
+     "last_error" = 'reaped: processing timeout exceeded'
+     WHERE "id" IN (
+       SELECT "id" FROM "audit_deliveries"
+       WHERE "status" = 'PROCESSING'
+         AND "processing_started_at" < $1
+       ORDER BY "processing_started_at" ASC
+       LIMIT $2
+       FOR UPDATE SKIP LOCKED
+     )
+     RETURNING "id", "tenant_id", "attempt_count", "status"::text AS new_status`,
+    cutoff,
+    limit,
+  );
+  for (const row of rows) {
+    if (row.new_status === "FAILED") {
+      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
+        deliveryId: row.id,
+        attemptCount: row.attempt_count,
+        reason: "reaped_max_attempts",
+      });
+    }
+  }
+
+  const count = rows.length;
   if (count > 0) {
     getLogger().info({ count }, "reaped stuck delivery rows");
   }
@@ -1497,7 +1523,7 @@ export async function reapStuckWebhookDeliveries(
 export async function purgeRetention(
   prisma: PrismaClient,
   opts?: { limit?: number },
-): Promise<void> {
+): Promise<{ sentPurged: number; failedPurged: number }> {
   const limit = opts?.limit ?? AUDIT_OUTBOX.PURGE_BATCH_SIZE;
   const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
   const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
@@ -1509,84 +1535,8 @@ export async function purgeRetention(
   // atomically in the SAME tx. A destructive delete must never succeed without
   // a matching audit record: if the FAILED-branch tx later throws, the
   // SENT-branch delete + its audit event have already committed together.
-  const sentPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    // Aggregate the deleted rows per tenant (not MIN): a purge batch spans many
-    // tenants, and each tenant's own AUDIT_OUTBOX_RETENTION_PURGED event must be
-    // attributed to that tenant with only that tenant's count. Attributing the
-    // whole batch to MIN(tenant_id) both hid the purge from the other tenants
-    // and leaked their counts into one tenant's audit metadata.
-    const rows = await tx.$queryRawUnsafe<{ tenant_id: string; purged: bigint }[]>(
-      `WITH deleted AS (
-        DELETE FROM audit_outbox
-        WHERE id IN (
-          SELECT id FROM audit_outbox
-          WHERE status = 'SENT'
-            AND sent_at < now() - make_interval(hours => $1)
-            AND NOT EXISTS (
-              SELECT 1 FROM "audit_deliveries"
-              WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
-                AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM "webhook_deliveries"
-              WHERE "webhook_deliveries"."outbox_id" = "audit_outbox"."id"
-                AND "webhook_deliveries"."status" IN ('PENDING', 'PROCESSING')
-            )
-          ORDER BY sent_at ASC
-          LIMIT $2
-        )
-        RETURNING id, tenant_id
-      )
-      SELECT tenant_id::text AS tenant_id, COUNT(*) AS purged FROM deleted GROUP BY tenant_id`,
-      retentionHours,
-      limit,
-    );
-    let purged = 0;
-    for (const row of rows) {
-      const count = Number(row.purged);
-      purged += count;
-      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
-        purgedCount: count,
-        retentionHours,
-        failedRetentionDays,
-        branch: "SENT",
-      });
-    }
-    return purged;
-  });
-
-  const failedPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    const rows = await tx.$queryRawUnsafe<{ tenant_id: string; purged: bigint }[]>(
-      `WITH deleted AS (
-        DELETE FROM audit_outbox
-        WHERE id IN (
-          SELECT id FROM audit_outbox
-          WHERE status = 'FAILED'
-            AND created_at < now() - make_interval(days => $1)
-          ORDER BY created_at ASC
-          LIMIT $2
-        )
-        RETURNING id, tenant_id
-      )
-      SELECT tenant_id::text AS tenant_id, COUNT(*) AS purged FROM deleted GROUP BY tenant_id`,
-      failedRetentionDays,
-      limit,
-    );
-    let purged = 0;
-    for (const row of rows) {
-      const count = Number(row.purged);
-      purged += count;
-      await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
-        purgedCount: count,
-        retentionHours,
-        failedRetentionDays,
-        branch: "FAILED",
-      });
-    }
-    return purged;
-  });
+  const sentPurged = await prisma.$transaction((tx) => purgeSentAgedInTx(tx, limit));
+  const failedPurged = await prisma.$transaction((tx) => purgeFailedAgedInTx(tx, limit));
 
   const totalPurged = sentPurged + failedPurged;
   if (totalPurged > 0) {
@@ -1634,6 +1584,114 @@ export async function purgeRetention(
   if (Number(webhookDeliveryPurged) > 0) {
     getLogger().info({ webhookDeliveryPurged }, "purged webhook delivery retention rows");
   }
+
+  // Return the per-branch outbox purge counts. Each is bounded by `limit`
+  // (the SENT and FAILED DELETEs each carry their own `LIMIT $2`); cap
+  // regression tests read them to assert the bound on their own call.
+  return { sentPurged, failedPurged };
+}
+
+/**
+ * SENT-aged purge branch of {@link purgeRetention}, on a caller-supplied tx.
+ *
+ * Exported so cap regression tests can run the real DELETE inside a
+ * transaction that has already `FOR UPDATE`-locked the test's own SENT-aged
+ * rows, fencing the live worker out so the `LIMIT` cap is assertable exactly.
+ * Production reaches it via the `purgeRetention` wrapper.
+ */
+export async function purgeSentAgedInTx(
+  tx: Prisma.TransactionClient,
+  limit: number = AUDIT_OUTBOX.PURGE_BATCH_SIZE,
+): Promise<number> {
+  const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
+  const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
+
+  await setBypassRlsGucs(tx);
+  // Aggregate the deleted rows per tenant (not MIN): a purge batch spans many
+  // tenants, and each tenant's own AUDIT_OUTBOX_RETENTION_PURGED event must be
+  // attributed to that tenant with only that tenant's count. Attributing the
+  // whole batch to MIN(tenant_id) both hid the purge from the other tenants
+  // and leaked their counts into one tenant's audit metadata.
+  const rows = await tx.$queryRawUnsafe<{ tenant_id: string; purged: bigint }[]>(
+    `WITH deleted AS (
+      DELETE FROM audit_outbox
+      WHERE id IN (
+        SELECT id FROM audit_outbox
+        WHERE status = 'SENT'
+          AND sent_at < now() - make_interval(hours => $1)
+          AND NOT EXISTS (
+            SELECT 1 FROM "audit_deliveries"
+            WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
+              AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM "webhook_deliveries"
+            WHERE "webhook_deliveries"."outbox_id" = "audit_outbox"."id"
+              AND "webhook_deliveries"."status" IN ('PENDING', 'PROCESSING')
+          )
+        ORDER BY sent_at ASC
+        LIMIT $2
+      )
+      RETURNING id, tenant_id
+    )
+    SELECT tenant_id::text AS tenant_id, COUNT(*) AS purged FROM deleted GROUP BY tenant_id`,
+    retentionHours,
+    limit,
+  );
+  let purged = 0;
+  for (const row of rows) {
+    const count = Number(row.purged);
+    purged += count;
+    await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+      purgedCount: count,
+      retentionHours,
+      failedRetentionDays,
+      branch: "SENT",
+    });
+  }
+  return purged;
+}
+
+/**
+ * FAILED-aged purge branch of {@link purgeRetention}, on a caller-supplied tx.
+ * See {@link purgeSentAgedInTx} for why this seam is exported.
+ */
+export async function purgeFailedAgedInTx(
+  tx: Prisma.TransactionClient,
+  limit: number = AUDIT_OUTBOX.PURGE_BATCH_SIZE,
+): Promise<number> {
+  const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
+  const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
+
+  await setBypassRlsGucs(tx);
+  const rows = await tx.$queryRawUnsafe<{ tenant_id: string; purged: bigint }[]>(
+    `WITH deleted AS (
+      DELETE FROM audit_outbox
+      WHERE id IN (
+        SELECT id FROM audit_outbox
+        WHERE status = 'FAILED'
+          AND created_at < now() - make_interval(days => $1)
+        ORDER BY created_at ASC
+        LIMIT $2
+      )
+      RETURNING id, tenant_id
+    )
+    SELECT tenant_id::text AS tenant_id, COUNT(*) AS purged FROM deleted GROUP BY tenant_id`,
+    failedRetentionDays,
+    limit,
+  );
+  let purged = 0;
+  for (const row of rows) {
+    const count = Number(row.purged);
+    purged += count;
+    await writeDirectAuditLogInTx(tx, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+      purgedCount: count,
+      retentionHours,
+      failedRetentionDays,
+      branch: "FAILED",
+    });
+  }
+  return purged;
 }
 
 /**
