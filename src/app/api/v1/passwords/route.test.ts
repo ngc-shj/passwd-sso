@@ -5,6 +5,7 @@ const {
   mockValidateApiKeyOnly,
   mockEnforceAccessRestriction,
   mockCheck,
+  mockCreateRateLimiter,
   mockEntryFindMany,
   mockEntryCreate,
   mockFolderFindFirst,
@@ -12,25 +13,35 @@ const {
   mockLogAudit,
   mockWithTenantRls,
   mockQueryRaw,
-} = vi.hoisted(() => ({
-  mockValidateApiKeyOnly: vi.fn(),
-  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockEntryFindMany: vi.fn(),
-  mockEntryCreate: vi.fn(),
-  mockFolderFindFirst: vi.fn(),
-  mockTagCount: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE` —
-  // default matches validBody.keyVersion (1) so the guard passes.
-  mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
-}));
+} = vi.hoisted(() => {
+  // Bind `check` first — the factory closure must not reference the returned
+  // object's own properties (vi.hoisted TDZ self-reference, tranche-3 lesson).
+  const check = vi.fn().mockResolvedValue({ allowed: true });
+  return {
+    mockValidateApiKeyOnly: vi.fn(),
+    mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
+    mockCheck: check,
+    // Recording factory: assertRedisFailClosed's factory-attribution step
+    // reads mock.calls/mock.results (a plain arrow would record nothing).
+    mockCreateRateLimiter: vi.fn(
+      (_opts: { windowMs: number; max: number; failClosedOnRedisError?: boolean }) => ({ check }),
+    ),
+    mockEntryFindMany: vi.fn(),
+    mockEntryCreate: vi.fn(),
+    mockFolderFindFirst: vi.fn(),
+    mockTagCount: vi.fn(),
+    mockLogAudit: vi.fn(),
+    mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+    // assertCurrentKeyVersion's `SELECT key_version FROM users ... FOR SHARE` —
+    // default matches validBody.keyVersion (1) so the guard passes.
+    mockQueryRaw: vi.fn().mockResolvedValue([{ key_version: 1 }]),
+  };
+});
 
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -59,6 +70,22 @@ vi.mock("@/lib/logger", () => {
 });
 
 import { GET, POST } from "./route";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+
+// Module-scope snapshot: rate-limiters.ts's module-level createRateLimiter
+// calls ran at import time above; capture before beforeEach's
+// vi.clearAllMocks() wipes mock.calls/mock.results (see snapshotFactory doc).
+// Resolve the limiter under test by factory ARGS, not positional index —
+// the same mocked factory also constructs migrateLimiter et al. at load.
+const limiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const v1LimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
+  ([opts]) =>
+    opts.windowMs === RATE_WINDOW_MS && opts.max === 100 && opts.failClosedOnRedisError === true,
+);
+const v1Limiter = mockCreateRateLimiter.mock.results[v1LimiterCallIndex]!.value as {
+  check: typeof mockCheck;
+};
 
 const USER_ID = "user-1";
 const TENANT_ID = "tenant-1";
@@ -136,12 +163,14 @@ describe("GET /api/v1/passwords", () => {
   });
 
   it("fails closed with 503 when the limiter reports redisErrored (no DB access)", async () => {
-    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
-    const res = await GET(createRequest("GET", "http://localhost/api/v1/passwords"));
-    const { status, json } = await parseResponse(res);
-    expect(status).toBe(503);
-    expect(json).toEqual({ error: "SERVICE_UNAVAILABLE" });
-    expect(mockEntryFindMany).not.toHaveBeenCalled();
+    await assertRedisFailClosed({
+      invoke: () => GET(createRequest("GET", "http://localhost/api/v1/passwords")),
+      limiter: v1Limiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockEntryFindMany],
+      limiterFactory: limiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns access restriction response when denied", async () => {
@@ -366,14 +395,15 @@ describe("POST /api/v1/passwords", () => {
   });
 
   it("fails closed with 503 when the limiter reports redisErrored (no create)", async () => {
-    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/v1/passwords", { body: validBody }),
-    );
-    const { status, json } = await parseResponse(res);
-    expect(status).toBe(503);
-    expect(json).toEqual({ error: "SERVICE_UNAVAILABLE" });
-    expect(mockEntryCreate).not.toHaveBeenCalled();
+    await assertRedisFailClosed({
+      invoke: () =>
+        POST(createRequest("POST", "http://localhost/api/v1/passwords", { body: validBody })),
+      limiter: v1Limiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockEntryCreate],
+      limiterFactory: limiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 400 on invalid body (missing required fields)", async () => {

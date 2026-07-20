@@ -5,6 +5,7 @@ const {
   mockValidateApiKeyOnly,
   mockEnforceAccessRestriction,
   mockCheck,
+  mockCreateRateLimiter,
   mockEntryFindUnique,
   mockEntryUpdate,
   mockEntryDelete,
@@ -37,10 +38,19 @@ const {
     return Promise.resolve([curRow]);
   });
 
+  // Bind `check` first — the factory closure must not reference the returned
+  // object's own properties (vi.hoisted TDZ self-reference, tranche-3 lesson).
+  const check = vi.fn().mockResolvedValue({ allowed: true });
+
   return {
     mockValidateApiKeyOnly: vi.fn(),
     mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
-    mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockCheck: check,
+    // Recording factory: assertRedisFailClosed's factory-attribution step
+    // reads mock.calls/mock.results (a plain arrow would record nothing).
+    mockCreateRateLimiter: vi.fn(
+      (_opts: { windowMs: number; max: number; failClosedOnRedisError?: boolean }) => ({ check }),
+    ),
     mockEntryFindUnique: vi.fn(),
     mockEntryUpdate: vi.fn(),
     mockEntryDelete: vi.fn(),
@@ -67,7 +77,7 @@ const V1_CUR_ROW = {
 vi.mock("@/lib/auth/tokens/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/security/rate-limit", () => ({
-  createRateLimiter: () => ({ check: mockCheck }),
+  createRateLimiter: mockCreateRateLimiter,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -92,6 +102,22 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 
 import { GET, PUT, DELETE } from "./route";
+import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
+import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+
+// Module-scope snapshot: rate-limiters.ts's module-level createRateLimiter
+// calls ran at import time above; capture before beforeEach's
+// vi.clearAllMocks() wipes mock.calls/mock.results (see snapshotFactory doc).
+// Resolve the limiter under test by factory ARGS, not positional index —
+// the same mocked factory also constructs migrateLimiter et al. at load.
+const limiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
+const v1LimiterCallIndex = mockCreateRateLimiter.mock.calls.findIndex(
+  ([opts]) =>
+    opts.windowMs === RATE_WINDOW_MS && opts.max === 100 && opts.failClosedOnRedisError === true,
+);
+const v1Limiter = mockCreateRateLimiter.mock.results[v1LimiterCallIndex]!.value as {
+  check: typeof mockCheck;
+};
 
 const PW_ID = "pw-123";
 const USER_ID = "user-1";
@@ -165,15 +191,18 @@ describe("GET /api/v1/passwords/[id]", () => {
   });
 
   it("fails closed with 503 when the limiter reports redisErrored (no DB access)", async () => {
-    mockCheck.mockResolvedValue({ allowed: false, redisErrored: true });
-    const res = await GET(
-      createRequest("GET", `http://localhost/api/v1/passwords/${PW_ID}`),
-      createParams({ id: PW_ID }),
-    );
-    const { status, json } = await parseResponse(res);
-    expect(status).toBe(503);
-    expect(json).toEqual({ error: "SERVICE_UNAVAILABLE" });
-    expect(mockEntryFindUnique).not.toHaveBeenCalled();
+    await assertRedisFailClosed({
+      invoke: () =>
+        GET(
+          createRequest("GET", `http://localhost/api/v1/passwords/${PW_ID}`),
+          createParams({ id: PW_ID }),
+        ),
+      limiter: v1Limiter,
+      expectation: { envelope: "canonical" },
+      assertNoMutation: [mockEntryFindUnique],
+      limiterFactory: limiterFactorySnapshot.replay(),
+      failure: { allowed: false, redisErrored: true },
+    });
   });
 
   it("returns 404 when entry not found", async () => {

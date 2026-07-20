@@ -405,3 +405,34 @@ spy on both branches, not just log lines), M9 (`logAuditAsync` never in
 | C2  | SCIM fail-closed 503 carries Retry-After (last INV-C2 member)  | locked |
 | C3  | magic-link outage log channel split, silent-drop preserved     | locked |
 | C4  | verify-access tokenLimiter selective-failure integration proof | locked |
+
+## Implementation Checklist (Phase 2 Step 2-1)
+
+Baseline (rebased onto main @ 709b6d9a8, post-#682): fail-closed gate exit 0,
+`EXPECTED_DEBT_COUNT=0`, `EXPECTED_LEGACY_COUNT=0`.
+
+Files to modify:
+- C1: `src/app/api/v1/passwords/route.test.ts`, `src/app/api/v1/passwords/[id]/route.test.ts`
+- C2: `src/lib/http/api-response.ts` (visibility-only export), `src/lib/scim/response.ts`, `src/lib/scim/with-scim-auth.ts`, `src/lib/scim/response.test.ts`, `src/lib/scim/with-scim-auth.test.ts`
+- C3: `src/auth.config.ts`, `src/auth.config.test.ts`
+- C4: `src/__tests__/db-integration/rate-limit-fail-closed-routes.integration.test.ts`
+
+Shared assets to reuse (no reimplementation): `assertRedisFailClosed`,
+`snapshotFactory`, `assertRedisFailClosedSilentDrop`
+(`src/__tests__/helpers/fail-closed.ts`), `retryAfterSecondsOrDefault`
+(`src/lib/http/api-response.ts`), switchable `getRedis` harness + `requestWithIp`
+(`rate-limit-fail-closed-routes.integration.test.ts`), `createRequest`/`parseResponse`
+(`src/__tests__/helpers/request-builder`).
+
+R19 test-tree enumeration (all changed symbols): `scimError` →
+`src/lib/scim/response.test.ts` (+ `with-scim-auth.test.ts` behavioral);
+`serviceUnavailable`/`retryAfterSecondsOrDefault` → `src/lib/http/api-response.test.ts`
+(indirect, unchanged behavior); magic-link warn channel `"magic-link.rate-limited"` →
+`src/auth.config.test.ts` only (repo-wide grep: no other reference);
+no centralized/e2e tree references any changed selector/header/log channel.
+
+CI gate parity: pre-pr.sh covers lint/unit/build; integration tests run in
+`ci-integration.yml` (Postgres+Redis services) — mirrored locally via
+`npm run test:integration` per the plan's Testing strategy. This diff adds no
+new file class that CI-only gates (Extension jobs, static-checks-no-generate)
+scan; C4's file already belongs to the integration glob.
