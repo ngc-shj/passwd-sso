@@ -90,9 +90,16 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
     let tenantId: string | undefined;
     if (valid && userId) {
       try {
+        // A `null` return is a legitimate no-active-membership user (no tenant
+        // policy to enforce) → tenantId stays undefined, downstream IP gate is
+        // correctly skipped. A THROW (DB/RLS error, MULTI_TENANT anomaly) is
+        // NOT that case: swallowing it would drop the tenant's IP/CIDR gate for
+        // a user who DOES have a restricted tenant. Fail closed by returning an
+        // invalid (uncached) session, forcing re-auth — mirrors the !res.ok
+        // transient-error handling above.
         tenantId = (await resolveUserTenantId(userId)) ?? undefined;
       } catch {
-        // Non-critical: tenant resolution failure should not block session validation
+        return { valid: false };
       }
     }
 

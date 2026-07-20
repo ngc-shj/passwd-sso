@@ -218,7 +218,15 @@ async function handlePOST(req: NextRequest) {
   // Only enforced when the authenticator explicitly reports minPinLength.
   // Platform authenticators (Touch ID, Face ID, Windows Hello) do not report
   // this value — they are always allowed regardless of policy.
-  const requireMinPin = userInfo.tenant?.requireMinPinLength ?? null;
+  //
+  // FAIL-CLOSED: userInfo.tenantId is a non-null FK RESTRICT, so a null tenant
+  // relation here is data corruption, NOT "no policy" — an unset requirement is
+  // requireMinPinLength=null on a real row. Reading `tenant?.… ?? null` on a
+  // vanished tenant would silently skip the PIN-length gate. Refuse instead.
+  if (!userInfo.tenant) {
+    throw new Error(`webauthn register: tenant ${userInfo.tenantId} not found`);
+  }
+  const requireMinPin = userInfo.tenant.requireMinPinLength;
   if (requireMinPin !== null && minPinLength !== null && minPinLength < requireMinPin) {
     return errorResponse(API_ERROR.PIN_LENGTH_POLICY_NOT_SATISFIED);
   }

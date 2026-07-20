@@ -239,7 +239,15 @@ describe("getSessionInfo", () => {
     expect(mockResolveUserTenantId).not.toHaveBeenCalled();
   });
 
-  it("does not propagate resolveUserTenantId errors — tenantId is undefined", async () => {
+  // Regression (null-tenant fail-open class): a THROW from resolveUserTenantId
+  // (DB/RLS error, MULTI_TENANT anomaly) must FAIL CLOSED. Previously the throw
+  // was swallowed, leaving tenantId undefined — which makes the downstream proxy
+  // IP-restriction gate skip entirely, silently bypassing a restricted tenant's
+  // CIDR/Tailscale controls on a transient error. Now the session is treated as
+  // invalid (forcing re-auth) and NOT cached.
+  // Mutation check: restore the old `catch {}` swallow and this test flips from
+  // { valid: false } back to { valid: true, tenantId: undefined } — it fails.
+  it("fail-closed: resolveUserTenantId throws → { valid: false }, no cache write", async () => {
     mockGetCachedSession.mockResolvedValueOnce(null);
     fetchSpy.mockResolvedValueOnce(
       new Response(
@@ -256,11 +264,33 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: "authjs.session-token=tok-tenant-err" }),
     );
 
+    expect(result).toEqual({ valid: false });
+    expect(mockSetCachedSession).not.toHaveBeenCalled();
+  });
+
+  // Companion: a legitimate null return (no active membership) is NOT an error —
+  // the session stays valid with an undefined tenantId (no tenant policy to
+  // enforce), distinguishing it from the fail-closed throw path above.
+  it("null resolveUserTenantId (no active membership) → valid with undefined tenantId", async () => {
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          user: { id: "u-nomember" },
+          expires: new Date(Date.now() + 60_000).toISOString(),
+        }),
+        { status: 200 },
+      ),
+    );
+    mockResolveUserTenantId.mockResolvedValueOnce(null);
+
+    const result = await getSessionInfo(
+      makeRequest({ cookie: "authjs.session-token=tok-nomember" }),
+    );
+
     expect(result.valid).toBe(true);
-    expect(result.userId).toBe("u-err");
+    expect(result.userId).toBe("u-nomember");
     expect(result.tenantId).toBeUndefined();
-    // setCachedSession is still called — tenant resolution failure must not
-    // block session cache population.
     expect(mockSetCachedSession).toHaveBeenCalledTimes(1);
   });
 });

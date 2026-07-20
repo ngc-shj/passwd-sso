@@ -230,7 +230,15 @@ describe("POST /api/webauthn/register/verify", () => {
       verified: true,
       registrationInfo: mockRegistrationInfo,
     });
-    mockPrismaUserFindUnique.mockResolvedValue({ tenantId: "tenant-1", locale: "ja", tenant: null });
+    // Realistic default: the tenant relation is populated (User.tenantId is a
+    // non-null FK, so Prisma always joins the row) with requireMinPinLength
+    // unset (null) — the common "no PIN policy" case. A null tenant RELATION is
+    // reserved for the data-corruption regression test below.
+    mockPrismaUserFindUnique.mockResolvedValue({
+      tenantId: "tenant-1",
+      locale: "ja",
+      tenant: { requireMinPinLength: null },
+    });
     mockParseDeviceFromUserAgent.mockReturnValue("Chrome on macOS");
     // withUserTenantRls: execute the callback directly
     mockWithUserTenantRls.mockImplementation(
@@ -894,6 +902,27 @@ describe("POST /api/webauthn/register/verify", () => {
       });
       const res = await POST(req);
       expect(res.status).toBe(201);
+    });
+
+    // Regression (null-tenant fail-open class): userInfo.tenantId is a non-null
+    // FK, so a null tenant RELATION is data corruption, NOT "no policy". Reading
+    // `tenant?.requireMinPinLength ?? null` on a vanished tenant would silently
+    // skip the PIN-length gate, letting a short-PIN authenticator register under
+    // a tenant that required a longer PIN. Must FAIL CLOSED (throw → no credential).
+    // Mutation check: restore `tenant?.… ?? null` (no null-relation throw) and a
+    // sub-min-PIN registration succeeds instead of throwing — this test fails.
+    it("fails closed (throws) when the tenant relation is missing (corruption)", async () => {
+      mockPrismaUserFindUnique.mockResolvedValue({
+        tenantId: "tenant-gone",
+        locale: "ja",
+        tenant: null,
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 4 }),
+      });
+      await expect(POST(req)).rejects.toThrow(/tenant-gone not found/);
+      expect(mockPrismaCredentialCreate).not.toHaveBeenCalled();
     });
   });
 });

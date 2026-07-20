@@ -380,6 +380,32 @@ describe("createCustomAdapter", () => {
       ).toBe(true);
     });
 
+    // Regression (null-tenant fail-open class): tenantId is User.tenantId
+    // (non-null FK RESTRICT), so a null tenant row on createSession is data
+    // corruption, NOT "no limit configured" (an unconfigured limit is a real
+    // row with maxConcurrentSessions=null). Silently skipping the concurrent-
+    // session cap would let the corrupt-tenant user open unbounded sessions.
+    // Must FAIL CLOSED (throw → session creation refused).
+    // Mutation check: restore `tenant?.maxConcurrentSessions` and this test
+    // flips from throw to a successful create — it fails.
+    it("fails closed (throws) when the tenant row is missing", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: null, userAgent: null });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-gone" });
+      mockTxTenant.findUnique.mockResolvedValue(null);
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createSession!({
+          sessionToken: "tok-corrupt",
+          userId: "u-1",
+          expires,
+        }),
+      ).rejects.toThrow(/tenant-gone not found/);
+
+      // No session row is created when the cap cannot be evaluated.
+      expect(mockTxSession.create).not.toHaveBeenCalled();
+    });
+
     it("records provider from sessionMetaStorage on the session row", async () => {
       mockSessionMetaGetStore.mockReturnValue({
         ip: null,

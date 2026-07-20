@@ -603,6 +603,36 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     expect(result!.locked).toBe(true);
   });
 
+  // Regression (null-tenant fail-open class): a DB error while fetching the
+  // per-tenant thresholds must NOT be swallowed silently. The default is still
+  // returned (fail-safe — lockout stays enforced), but the enforcement
+  // degradation (a tenant that tightened its thresholds silently reverting to
+  // defaults) must be observable via a warn log.
+  // Mutation check: remove the getLogger().warn call and the log assertion
+  // below fails; the default-return assertion documents the fail-safe axis.
+  it("logs a warning and returns defaults when the threshold fetch throws", async () => {
+    invalidateLockoutThresholdCache("tenant-dberr");
+    mockPrismaTenant.findUnique.mockRejectedValue(new Error("DB down"));
+    setupTransaction({
+      failed_unlock_attempts: 4,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    const result = await recordFailure("user-1", undefined, "tenant-dberr");
+
+    // Fail-safe: default threshold still enforces the lock (5 → 15min).
+    expect(result).not.toBeNull();
+    expect(result!.attempts).toBe(5);
+    expect(result!.locked).toBe(true);
+    // Observable: the swallowed error is now logged.
+    expect(mockLoggerInstance.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-dberr" }),
+      "vault.lockout.thresholdsFetchFailed.usingDefaults",
+    );
+    invalidateLockoutThresholdCache("tenant-dberr");
+  });
+
   it("re-queries the DB after invalidateLockoutThresholdCache", async () => {
     // First call: return custom thresholds, cache them
     mockPrismaTenant.findUnique.mockResolvedValue({

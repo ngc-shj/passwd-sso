@@ -94,7 +94,15 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
       expiresAt: Date.now() + LOCKOUT_THRESHOLD_CACHE_TTL_MS,
     });
     return thresholds;
-  } catch {
+  } catch (err) {
+    // The default still ENFORCES lockout (fail-safe on the security axis), but a
+    // DB error here silently reverts a tenant that tightened its thresholds back
+    // to the defaults — log it so the enforcement degradation is observable
+    // rather than swallowed (matches the logged catches elsewhere in this file).
+    getLogger().warn(
+      { err, tenantId },
+      "vault.lockout.thresholdsFetchFailed.usingDefaults",
+    );
     return DEFAULT_LOCKOUT_THRESHOLDS;
   }
 }

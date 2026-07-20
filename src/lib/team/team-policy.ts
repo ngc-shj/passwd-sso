@@ -134,20 +134,31 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
 
   if (policy.inheritTenantCidrs) {
     const tenantId = await resolveTeamTenantId(teamId);
-    if (tenantId) {
-      const tenant = await withBypassRls(
-        prisma,
-        async (tx) =>
-          tx.tenant.findUnique({
-            where: { id: tenantId },
-            select: { allowedCidrs: true },
-          }),
-        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    // FAIL-CLOSED: Team.tenantId is a non-null FK, so a null tenant resolution
+    // (or a vanished tenant row) on the inherit path is data corruption, not
+    // "no restriction". When the team relies on inherited CIDRs as its sole
+    // restriction source (teamAllowedCidrs empty), silently dropping them would
+    // bypass the team's IP control. Refuse rather than allow.
+    if (!tenantId) {
+      throw new PolicyViolationError(
+        "Access denied: team tenant unresolved; access restricted",
       );
-      if (tenant?.allowedCidrs) {
-        combinedCidrs.push(...tenant.allowedCidrs);
-      }
     }
+    const tenant = await withBypassRls(
+      prisma,
+      async (tx) =>
+        tx.tenant.findUnique({
+          where: { id: tenantId },
+          select: { allowedCidrs: true },
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+    if (!tenant) {
+      throw new PolicyViolationError(
+        "Access denied: team tenant not found; access restricted",
+      );
+    }
+    combinedCidrs.push(...tenant.allowedCidrs);
   }
 
   if (combinedCidrs.length === 0) {
