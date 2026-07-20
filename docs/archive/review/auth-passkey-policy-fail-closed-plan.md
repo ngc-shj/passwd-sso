@@ -155,6 +155,20 @@ RT5/RT8 note: T1 asserts the **mutation** (all four fail-closed field values + t
 3. Tenant requires passkey; user has NO passkey; **DB fetch fails** in session callback → fail-closed: redirected to passkey setup (previously: fail-open, let through). (the fix)
 4. Tenant does NOT require passkey; **DB fetch fails** → user is over-blocked to passkey setup for ≤30 s until cache expiry / DB recovery, then normal. (accepted UX cost)
 
+## Implementation Checklist (Phase 2)
+
+Files modified:
+- `src/auth.ts` — session-callback `catch` now sets the fail-closed bundle (`requirePasskey=true, hasPasskey=false, requirePasskeyEnabledAt=null, passkeyGracePeriodDays=null`) + keeps the existing warn log. (C1)
+- `src/auth.test.ts` — added `describe("session callback — passkey enforcement fail-closed")` with T1 (fail-closed, all four fields + real `passkeyEnforcementBlocks`), T2 (happy-path pass-through), T2b (passkey-holder not blocked), T3 (warn log fired). Added `webAuthnCredential.count` to `mockPrisma`; hoisted stable `mockLoggerWarn` and wired it into the `getLogger` mock (review F5/RT1).
+
+Reused (no reimplementation):
+- Real `passkeyEnforcementBlocks` imported from `@/lib/auth/policy/passkey-enforcement` (not mocked, not re-implemented) — RT5.
+- Existing `mockWithBypassRls` / `nextAuthInitArgs[0].callbacks.session` topology.
+
+Contract conformance (forbidden patterns): both absent in the diff — `requirePasskey = false` (in catch) and newly-added `throw` in the session callback.
+
+Mutation evidence (RT7/RT8): reverting C1 to `requirePasskey=false` makes T1 fail; verified on the real file then restored (no residue).
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |

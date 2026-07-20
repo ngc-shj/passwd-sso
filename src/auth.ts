@@ -423,11 +423,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         passkeyGracePeriodDays = passkeyData.tenant?.passkeyGracePeriodDays ?? null;
         fetchFavicons = passkeyData.fetchFavicons;
       } catch (err) {
-        // Non-critical for session establishment but DO surface to ops:
-        // a silent catch hid Redis/DB issues that mattered for tenants
-        // with requirePasskey enforcement (audit-trail gap → A09).
-        // tenantId is included so operators can group by affected tenant
-        // when a single tenant's data path is degraded.
+        // FAIL-CLOSED: a passkey-enforcement fetch failure must NOT drop
+        // enforcement. Leaving the initial requirePasskey=false default would
+        // fail OPEN — a passkey-required tenant would lose enforcement on a
+        // transient DB/Redis blip. Instead force the safe-blocking bundle so
+        // the page-route gate blocks (redirect to the exempt passkey-setup
+        // page): requirePasskey=true + hasPasskey=false +
+        // requirePasskeyEnabledAt=null. The null enabledAt makes
+        // isPasskeyGracePeriodExpired() return true (immediate enforcement),
+        // so passkeyEnforcementBlocks() === true. The four fields move as an
+        // all-or-nothing bundle — a partial set (e.g. requirePasskey=true with
+        // a stale non-null enabledAt) could land in "still in grace" and NOT
+        // block, re-introducing a partial fail-open.
+        requirePasskey = true;
+        hasPasskey = false;
+        requirePasskeyEnabledAt = null;
+        passkeyGracePeriodDays = null;
+        // fetchFavicons stays false (cosmetic; not a security field).
+
+        // Still surface to ops: a silent catch hid Redis/DB issues that
+        // mattered for tenants with requirePasskey enforcement (audit-trail
+        // gap → A09). tenantId is included so operators can group by affected
+        // tenant when a single tenant's data path is degraded.
         getLogger().warn(
           {
             userId: user.id,
