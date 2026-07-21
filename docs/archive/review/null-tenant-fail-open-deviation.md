@@ -35,3 +35,14 @@ routes. Redesigned to a completeness manifest: every enforcement read carries a
 reviewed disposition (throw / failsafe-default / display-exempt); the guard fails
 on divergence (new unclassified read or vanished stale entry). This mechanizes
 completeness without falsely mandating one specific fail-closed spelling.
+
+## D5 — External review round: 3 fail-open/guard-strength findings fixed
+
+See Round 3 in the code-review doc. Summary of decisions:
+- auth-gate null-tenant → fail closed (deactivated member = revoked membership,
+  not a legit no-tenant user; symmetric with extension-token C13).
+- lockout fetch-failure → strictest threshold (lock at 1 / max duration), NOT the
+  schema-default and NOT a throw (throw would drop the unrecorded attempt).
+- CI guard → ts-morph AST per-read-site with disposition-vs-implementation
+  verification, replacing the file-set-only manifest (closed the 3 intra-file
+  mutation blind spots).

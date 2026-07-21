@@ -16,24 +16,31 @@ import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit/aud
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
+import { LOCKOUT_THRESHOLD_MIN, LOCKOUT_DURATION_MAX } from "@/lib/validations/common";
 import { notifyAdminsOfLockout } from "@/lib/auth/policy/lockout-admin-notify";
 import type { NextRequest } from "next/server";
 
 /** Observation window: reset counter if last failure was this long ago */
 const OBSERVATION_WINDOW_MS = MS_PER_DAY;
 
-/**
- * Default lockout thresholds — ordered descending by attempts.
- * First match wins (most severe threshold applied).
- * Used as fallback when tenant config is unavailable.
- */
-const DEFAULT_LOCKOUT_THRESHOLDS = [
-  { attempts: 15, lockMinutes: 1440 }, // 24h
-  { attempts: 10, lockMinutes: 60 },   // 1h
-  { attempts: 5, lockMinutes: 15 },    // 15min
-];
-
 type LockoutThreshold = { attempts: number; lockMinutes: number };
+
+/**
+ * FAIL-CLOSED fallback used when the per-tenant thresholds cannot be read
+ * (tenant/user row vanished, or the fetch errored). A tenant's own schema-
+ * default thresholds (5/10/15 attempts) are NOT a safe fallback here: a tenant
+ * may have tightened its policy below the default (e.g. lock at 1 attempt), so
+ * returning the default would GRANT extra attempts on an infra failure — a
+ * fail-open weakening. Instead apply the strictest policy any tenant could
+ * configure (lock at the minimum attempt count for the maximum duration), so a
+ * fetch failure can only make lockout MORE aggressive, never less. recordFailure
+ * cannot simply throw on this path: the failed attempt would then go unrecorded
+ * and the counter would never advance — itself fail-open — so it must record
+ * under a threshold guaranteed no weaker than the tenant's real policy.
+ */
+const STRICTEST_LOCKOUT_THRESHOLDS: LockoutThreshold[] = [
+  { attempts: LOCKOUT_THRESHOLD_MIN, lockMinutes: LOCKOUT_DURATION_MAX },
+];
 
 const lockoutThresholdCache = new Map<string, { thresholds: LockoutThreshold[]; expiresAt: number }>();
 const LOCKOUT_THRESHOLD_CACHE_TTL_MS = MS_PER_MINUTE;
@@ -75,11 +82,15 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
     );
 
     if (!tenant) {
-      lockoutThresholdCache.set(tenantId, {
-        thresholds: DEFAULT_LOCKOUT_THRESHOLDS,
-        expiresAt: Date.now() + LOCKOUT_THRESHOLD_CACHE_TTL_MS,
-      });
-      return DEFAULT_LOCKOUT_THRESHOLDS;
+      // FAIL-CLOSED: tenantId is FK-backed, so a missing row is corruption, not
+      // "no policy". Apply the strictest threshold (never weaker than the
+      // tenant's real policy) and do NOT cache it — caching would pin the
+      // aggressive fallback for the TTL even if the row reappears.
+      getLogger().warn(
+        { tenantId },
+        "vault.lockout.tenantRowMissing.usingStrictest",
+      );
+      return STRICTEST_LOCKOUT_THRESHOLDS;
     }
 
     // Build descending array: threshold3 (highest) → threshold1 (lowest)
@@ -95,15 +106,16 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
     });
     return thresholds;
   } catch (err) {
-    // The default still ENFORCES lockout (fail-safe on the security axis), but a
-    // DB error here silently reverts a tenant that tightened its thresholds back
-    // to the defaults — log it so the enforcement degradation is observable
-    // rather than swallowed (matches the logged catches elsewhere in this file).
+    // FAIL-CLOSED: a tenant may have tightened below the default (e.g. lock at 1
+    // attempt), so returning DEFAULT on a DB error would GRANT extra attempts —
+    // a fail-open weakening. Apply the strictest threshold instead (never weaker
+    // than the tenant's real policy) and do not cache it. Logged so the
+    // degradation is observable.
     getLogger().warn(
       { err, tenantId },
-      "vault.lockout.thresholdsFetchFailed.usingDefaults",
+      "vault.lockout.thresholdsFetchFailed.usingStrictest",
     );
-    return DEFAULT_LOCKOUT_THRESHOLDS;
+    return STRICTEST_LOCKOUT_THRESHOLDS;
   }
 }
 
@@ -187,10 +199,13 @@ export async function recordFailure(
     resolvedTenantId = userRow?.tenantId;
   }
 
-  // Fetch per-tenant thresholds before acquiring the row lock
+  // Fetch per-tenant thresholds before acquiring the row lock. An unresolved
+  // tenantId means the user row is missing (User.tenantId is a non-null FK) —
+  // corruption on a failed-unlock side effect — so apply the strictest fallback
+  // rather than the (possibly-weaker-than-configured) default.
   const thresholds = resolvedTenantId
     ? await getLockoutThresholds(resolvedTenantId)
-    : DEFAULT_LOCKOUT_THRESHOLDS;
+    : STRICTEST_LOCKOUT_THRESHOLDS;
 
   try {
     // withBypassRls required: called outside tenant RLS context (post-auth side effect).

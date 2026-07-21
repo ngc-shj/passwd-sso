@@ -80,3 +80,47 @@ scripts/pre-pr.sh + CI static-checks.`
 All 7 members fixed fail-safe (throw / restrictive-default / log). All fixes
 mutation-verified. CI guard authored, red-proven, wired. Anti-Deferral: no
 findings deferred. No boundary widened (R43).
+
+---
+
+## Round 3 — external review follow-up (3 findings addressed)
+
+An external security review of PR #693 raised 3 findings; all fixed.
+
+### F-EXT-1 [High] Deactivated member's session cached as valid, bypassing IP restriction
+`auth-gate.ts getSessionInfo` treated `resolveUserTenantId → null` as a legitimate
+no-tenant user (`valid:true, tenantId:undefined`). But that null means NO active
+`TenantMember` (deactivatedAt != null) — a de-provisioned member — and
+`User.tenantId` is a non-null FK, so it is a revoked membership, not a no-tenant
+user. A stale cookie (or a session whose deletion was missed on deactivation)
+then passed session validation AND skipped the tenant CIDR/Tailscale gate
+(undefined tenantId → the api-route/page-route gate is bypassed). The extension-
+token path already rejects deactivated members (C13); the session path did not.
+**Fix**: `resolved === null` → `{ valid: false }` (fail closed, uncached). The
+prior test that fixed the unsafe behavior was inverted to assert the block.
+Mutation-verified. Blast radius checked: signup creates user + TenantMember in
+one tx (no window); proxy/CSRF tests updated to a real-membership default.
+
+### F-EXT-2 [Medium] Lockout fetch-failure reverted a tightened tenant to a weaker default
+`getLockoutThresholds` fell back to the schema-default (lock at 5) on a missing
+row / DB error. A tenant may tighten to lock-at-1, so the default GRANTS extra
+attempts — fail-open. **Fix**: `STRICTEST_LOCKOUT_THRESHOLDS`
+(`{ attempts: LOCKOUT_THRESHOLD_MIN, lockMinutes: LOCKOUT_DURATION_MAX }`) on all
+three fallback paths (missing row, catch, unresolved user tenant), never cached.
+A throw is NOT viable here: `recordFailure` is a post-failure side effect, so
+throwing would leave the attempt unrecorded (the counter never advances — itself
+fail-open). Strictest fallback records the attempt under a threshold guaranteed
+no weaker than the tenant's real policy. Mutation-verified.
+
+### F-EXT-3 [Medium] CI guard detected only file add/remove, not intra-file mutations
+The manifest guard tracked only the SET of files with an enforcement read, so:
+reverting a `throw` to a permissive coalesce in a listed file, adding a fail-open
+read to a listed file, or adding an access decision to a `display-exempt` file
+all passed; the disposition values were unused. **Fix**: rewrote the guard as
+ts-morph AST, per-read-site. It now verifies each read's declared disposition
+against the implementation — `throw` requires a null-tenant `if (!tenant)
+{ throw|return }` guard in the enclosing function; `failsafe-default` forbids a
+permissive `tenant?.<enforcementField> ?? <lenient>` coalesce; `display-exempt`
+forbids an access-restriction / deny call. The self-test grew to 7 cases
+including the 3 intra-file mutations, each red-proven. (Aligns with the AST-first
+rule for code-classifying gates.)

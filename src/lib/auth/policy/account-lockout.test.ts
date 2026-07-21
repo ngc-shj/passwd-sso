@@ -125,7 +125,24 @@ describe("checkLockout", () => {
 describe("recordFailure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    invalidateLockoutThresholdCache("tenant-default");
   });
+
+  // Resolve the user's tenant + its schema-default thresholds so recordFailure
+  // exercises the NORMAL (5/10/15) path via the tenant-scoped audit (logAuditInTx).
+  // Without a resolvable tenant the code now fails closed to the strictest
+  // threshold (lock at 1) — covered by its own dedicated tests below.
+  function mockDefaultTenantThresholds() {
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-default" });
+    mockPrismaTenant.findUnique.mockResolvedValue({
+      lockoutThreshold1: 5,
+      lockoutDuration1Minutes: 15,
+      lockoutThreshold2: 10,
+      lockoutDuration2Minutes: 60,
+      lockoutThreshold3: 15,
+      lockoutDuration3Minutes: 1440,
+    });
+  }
 
   function setupTransaction(row: {
     failed_unlock_attempts: number;
@@ -135,6 +152,7 @@ describe("recordFailure", () => {
     mockTxState.executeRawImpl.mockResolvedValue(undefined);
     mockTxState.queryRawImpl.mockResolvedValue([row]);
     mockPrismaUser.update.mockResolvedValue(undefined);
+    mockDefaultTenantThresholds();
   }
 
   it("increments counter on first failure", async () => {
@@ -228,7 +246,11 @@ describe("recordFailure", () => {
     });
 
     await recordFailure("user-1");
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    // With a resolved tenant, the audit is written atomically via logAuditInTx
+    // (tx, tenantId, auditObj) — the tenant-scoped path.
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      "tenant-default",
       expect.objectContaining({
         action: "VAULT_UNLOCK_FAILED",
         userId: "user-1",
@@ -245,7 +267,9 @@ describe("recordFailure", () => {
     });
 
     await recordFailure("user-1");
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      "tenant-default",
       expect.objectContaining({
         action: "VAULT_LOCKOUT_TRIGGERED",
         userId: "user-1",
@@ -433,13 +457,14 @@ describe("recordFailure", () => {
     expect(result!.lockedUntil).toEqual(activeLock);
   });
 
-  it("swallows logAuditAsync error in VAULT_UNLOCK_FAILED block", async () => {
+  it("swallows the atomic audit error in the VAULT_UNLOCK_FAILED block", async () => {
     setupTransaction({
       failed_unlock_attempts: 0,
       last_failed_unlock_at: null,
       account_locked_until: null,
     });
-    mockLogAudit.mockImplementationOnce(() => {
+    // With a resolved tenant the audit uses logAuditInTx (mockLogAuditInTx).
+    mockLogAuditInTx.mockImplementationOnce(() => {
       throw new Error("audit write failed");
     });
 
@@ -452,14 +477,14 @@ describe("recordFailure", () => {
     );
   });
 
-  it("swallows logAuditAsync error in VAULT_LOCKOUT_TRIGGERED block", async () => {
+  it("swallows the atomic audit error in the VAULT_LOCKOUT_TRIGGERED block", async () => {
     setupTransaction({
       failed_unlock_attempts: 4,
       last_failed_unlock_at: new Date(),
       account_locked_until: null,
     });
-    // First call (VAULT_UNLOCK_FAILED) succeeds; second call (VAULT_LOCKOUT_TRIGGERED) throws
-    mockLogAudit
+    // First call (VAULT_UNLOCK_FAILED) succeeds; second (VAULT_LOCKOUT_TRIGGERED) throws
+    mockLogAuditInTx
       .mockImplementationOnce(() => undefined)
       .mockImplementationOnce(() => {
         throw new Error("audit write failed on lockout");
@@ -588,47 +613,56 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     invalidateLockoutThresholdCache("tenant-abc");
   });
 
-  it("falls back to default thresholds when tenant is not found", async () => {
+  // Regression (null-tenant fail-open class): a missing tenant row is corruption
+  // (tenantId is FK-backed), NOT "no policy". Returning the schema-default
+  // thresholds (lock at 5) would GRANT extra attempts to a tenant that had
+  // tightened to lock-at-1 — a fail-open weakening. Fail closed to the strictest
+  // configurable threshold (lock at 1 attempt), and log it.
+  // Mutation check: revert to DEFAULT_LOCKOUT_THRESHOLDS and this locks at 5 not
+  // 1 — the single-attempt lock assertion fails.
+  it("fails closed to the strictest threshold (lock at 1) when the tenant row is missing", async () => {
+    invalidateLockoutThresholdCache("tenant-missing");
     mockPrismaTenant.findUnique.mockResolvedValue(null);
     setupTransaction({
-      failed_unlock_attempts: 4,
-      last_failed_unlock_at: new Date(),
+      failed_unlock_attempts: 0, // first failure → 1 attempt must already lock
+      last_failed_unlock_at: null,
       account_locked_until: null,
     });
 
     const result = await recordFailure("user-1", undefined, "tenant-missing");
     expect(result).not.toBeNull();
-    // Default threshold: 5 attempts → 15min lock
-    expect(result!.attempts).toBe(5);
+    expect(result!.attempts).toBe(1);
     expect(result!.locked).toBe(true);
+    expect(mockLoggerInstance.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-missing" }),
+      "vault.lockout.tenantRowMissing.usingStrictest",
+    );
+    invalidateLockoutThresholdCache("tenant-missing");
   });
 
-  // Regression (null-tenant fail-open class): a DB error while fetching the
-  // per-tenant thresholds must NOT be swallowed silently. The default is still
-  // returned (fail-safe — lockout stays enforced), but the enforcement
-  // degradation (a tenant that tightened its thresholds silently reverting to
-  // defaults) must be observable via a warn log.
-  // Mutation check: remove the getLogger().warn call and the log assertion
-  // below fails; the default-return assertion documents the fail-safe axis.
-  it("logs a warning and returns defaults when the threshold fetch throws", async () => {
+  // Regression (null-tenant fail-open class): a DB error must not be swallowed to
+  // the schema-default (which could be weaker than a tightened tenant policy).
+  // Fail closed to the strictest threshold (lock at 1) and log the degradation.
+  // Mutation check: revert to DEFAULT_LOCKOUT_THRESHOLDS and this locks at 5 not
+  // 1 — the single-attempt lock assertion fails; remove the warn and the log
+  // assertion fails.
+  it("fails closed to the strictest threshold (lock at 1) when the threshold fetch throws", async () => {
     invalidateLockoutThresholdCache("tenant-dberr");
     mockPrismaTenant.findUnique.mockRejectedValue(new Error("DB down"));
     setupTransaction({
-      failed_unlock_attempts: 4,
-      last_failed_unlock_at: new Date(),
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
       account_locked_until: null,
     });
 
     const result = await recordFailure("user-1", undefined, "tenant-dberr");
 
-    // Fail-safe: default threshold still enforces the lock (5 → 15min).
     expect(result).not.toBeNull();
-    expect(result!.attempts).toBe(5);
+    expect(result!.attempts).toBe(1);
     expect(result!.locked).toBe(true);
-    // Observable: the swallowed error is now logged.
     expect(mockLoggerInstance.warn).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: "tenant-dberr" }),
-      "vault.lockout.thresholdsFetchFailed.usingDefaults",
+      "vault.lockout.thresholdsFetchFailed.usingStrictest",
     );
     invalidateLockoutThresholdCache("tenant-dberr");
   });

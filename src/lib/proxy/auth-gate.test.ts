@@ -268,10 +268,16 @@ describe("getSessionInfo", () => {
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 
-  // Companion: a legitimate null return (no active membership) is NOT an error —
-  // the session stays valid with an undefined tenantId (no tenant policy to
-  // enforce), distinguishing it from the fail-closed throw path above.
-  it("null resolveUserTenantId (no active membership) → valid with undefined tenantId", async () => {
+  // A null resolveUserTenantId return means NO active TenantMember row
+  // (deactivatedAt != null — a de-provisioned member). Since User.tenantId is a
+  // non-null FK, this is a REVOKED membership, not a legitimate no-tenant user.
+  // Fail closed so a stale cookie (or a session whose deletion was missed on
+  // deactivation) cannot pass validation AND skip the tenant IP restriction
+  // (undefined tenantId bypasses the downstream gate). Session-path analogue of
+  // the extension-token C13 deactivated-member rejection.
+  // Mutation check: revert to `tenantId = resolved ?? undefined` (keep the
+  // session valid) and this test flips from valid:false to valid:true — it fails.
+  it("fail-closed: null resolveUserTenantId (deactivated member) → { valid: false }, no cache write", async () => {
     mockGetCachedSession.mockResolvedValueOnce(null);
     fetchSpy.mockResolvedValueOnce(
       new Response(
@@ -288,9 +294,7 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: "authjs.session-token=tok-nomember" }),
     );
 
-    expect(result.valid).toBe(true);
-    expect(result.userId).toBe("u-nomember");
-    expect(result.tenantId).toBeUndefined();
-    expect(mockSetCachedSession).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ valid: false });
+    expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
 });
