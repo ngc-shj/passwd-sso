@@ -114,29 +114,143 @@ function findEnforcementReads(sf) {
     if (callee.getName?.() !== "findUnique") continue;
     const recvText = callee.getExpression?.()?.getText?.() ?? "";
     if (!/(^|\.)tenant$/.test(recvText)) continue;
-    if (selectNamesEnforcementField(call.getArguments()[0])) reads.push({ node: call });
+    if (!selectNamesEnforcementField(call.getArguments()[0])) continue;
+    // The variable this tenant row is bound to: `const <v> = await <...>.findUnique(...)`
+    // (or `= <...>.findUnique(...)`). The null guard must key on <v>.tenant.
+    reads.push({ node: call, guardVar: bindingVarName(call), joinField: null });
   }
   for (const pa of sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
     if (pa.getName() !== "tenant") continue;
     const init = pa.getInitializerIfKind?.(SyntaxKind.ObjectLiteralExpression);
-    if (init && selectNamesEnforcementField(init)) reads.push({ node: pa });
+    if (!init || !selectNamesEnforcementField(init)) continue;
+    // Relation join `tenant: { select: {...} }` nested in a parent findUnique
+    // select: the row is bound to the parent's variable and the enforcement
+    // fields live under `<v>.tenant`. Guard must be `if (!<v>) | if (!<v>.tenant)`.
+    const parentCall = pa.getFirstAncestorByKind(SyntaxKind.CallExpression);
+    reads.push({ node: pa, guardVar: parentCall ? bindingVarName(parentCall) : null, joinField: "tenant" });
   }
   return reads;
 }
 
-function hasNullTenantThrowGuard(node) {
+// The identifier a tenant read is ultimately bound to. Handles two real shapes:
+//   (1) direct / RLS-wrapped: `const t = await withBypassRls(prisma, (tx) =>
+//       tx.tenant.findUnique(...))` — climb through await/arrow/wrapper layers to
+//       the enclosing VariableDeclaration and take its name.
+//   (2) Promise.all array-destructuring: `const [c, t] = await Promise.all([
+//       count(...), tx.tenant.findUnique(...)])` — the read is the Nth array
+//       element, bound to the Nth name of the ArrayBindingPattern.
+// Returns null when not bound to a simple identifier (the caller treats a null
+// guardVar as UNGUARDED — fail closed on the guard check).
+function bindingVarName(call) {
+  const viaPromiseAll = promiseAllDestructuredName(call);
+  if (viaPromiseAll !== undefined) return viaPromiseAll;
+
+  let cur = call;
+  while (cur) {
+    const parent = cur.getParent?.();
+    if (!parent) return null;
+    const pk = parent.getKind();
+    if (pk === SyntaxKind.VariableDeclaration) {
+      const nameNode = parent.getNameNode?.();
+      if (nameNode && nameNode.getKind() === SyntaxKind.Identifier) return nameNode.getText();
+      return null; // destructuring binding handled above; otherwise unguardable
+    }
+    if (
+      pk === SyntaxKind.AwaitExpression ||
+      pk === SyntaxKind.ParenthesizedExpression ||
+      pk === SyntaxKind.CallExpression ||
+      pk === SyntaxKind.ArrowFunction ||
+      pk === SyntaxKind.PropertyAccessExpression ||
+      pk === SyntaxKind.ReturnStatement ||
+      pk === SyntaxKind.Block ||
+      pk === SyntaxKind.SyntaxList
+    ) {
+      cur = parent;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+// If `call` is the Nth element of an array literal passed to `Promise.all(...)`
+// whose result is destructured (`const [a, b] = await Promise.all([...])`),
+// return the Nth binding name. Returns undefined when this shape does not apply
+// (so the caller falls through to the generic climb), or null when the shape
+// applies but the Nth binding is not a simple identifier.
+function promiseAllDestructuredName(call) {
+  // The array literal directly containing `call` as an element.
+  const arrayLit = call.getParentIfKind?.(SyntaxKind.ArrayLiteralExpression);
+  if (!arrayLit) return undefined;
+  const elemIndex = arrayLit.getElements().findIndex((e) => e === call);
+  if (elemIndex < 0) return undefined;
+  // The array must be the sole arg to a `Promise.all(...)` call.
+  const paCall = arrayLit.getParentIfKind?.(SyntaxKind.CallExpression);
+  if (!paCall) return undefined;
+  const callee = paCall.getExpression();
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return undefined;
+  if (callee.getName?.() !== "all") return undefined;
+  if (callee.getExpression?.().getText?.() !== "Promise") return undefined;
+  // Walk out to the VariableDeclaration with an array-binding pattern.
+  let cur = paCall;
+  while (cur) {
+    const parent = cur.getParent?.();
+    if (!parent) return null;
+    const pk = parent.getKind();
+    if (pk === SyntaxKind.VariableDeclaration) {
+      const nameNode = parent.getNameNode?.();
+      if (!nameNode || nameNode.getKind() !== SyntaxKind.ArrayBindingPattern) return null;
+      const el = nameNode.getElements()[elemIndex];
+      const nn = el?.getNameNode?.();
+      if (nn && nn.getKind() === SyntaxKind.Identifier) return nn.getText();
+      return null;
+    }
+    if (
+      pk === SyntaxKind.AwaitExpression ||
+      pk === SyntaxKind.ParenthesizedExpression ||
+      pk === SyntaxKind.CallExpression ||
+      pk === SyntaxKind.ArrowFunction ||
+      pk === SyntaxKind.ConditionalExpression ||
+      pk === SyntaxKind.ReturnStatement ||
+      pk === SyntaxKind.Block ||
+      pk === SyntaxKind.SyntaxList
+    ) {
+      cur = parent;
+      continue;
+    }
+    return null;
+  }
+  return null;
+}
+
+// Does the enclosing function of `read.node` contain a null guard on the SAME
+// variable the read is bound to, that throws / returns (fail closed)?
+//   plain read `const t = ...findUnique(...)`  -> guard `if (!t) { throw|return }`
+//   relation join bound to `const u = ...`      -> guard `if (!u) | if (!u.tenant)`
+// A read with no bindable variable (guardVar null) is treated as UNGUARDED.
+function hasNullTenantThrowGuard(read) {
+  const v = read.guardVar;
+  if (!v) return false; // inline / unbindable read cannot be proven guarded
   const fn =
-    node.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration) ??
-    node.getFirstAncestorByKind(SyntaxKind.ArrowFunction) ??
-    node.getFirstAncestorByKind(SyntaxKind.FunctionExpression) ??
-    node.getFirstAncestorByKind(SyntaxKind.MethodDeclaration) ??
-    node.getSourceFile();
+    read.node.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration) ??
+    read.node.getFirstAncestorByKind(SyntaxKind.ArrowFunction) ??
+    read.node.getFirstAncestorByKind(SyntaxKind.FunctionExpression) ??
+    read.node.getFirstAncestorByKind(SyntaxKind.MethodDeclaration) ??
+    read.node.getSourceFile();
+
+  // Accepted guard operand texts for this read's variable.
+  const wanted = new Set([v]);
+  if (read.joinField) wanted.add(`${v}.${read.joinField}`);
+
   for (const ifStmt of fn.getDescendantsOfKind(SyntaxKind.IfStatement)) {
     const cond = ifStmt.getExpression();
     if (cond.getKind() !== SyntaxKind.PrefixUnaryExpression) continue;
     if (cond.getOperatorToken?.() !== SyntaxKind.ExclamationToken) continue;
     const operand = cond.getOperand?.();
-    if (!operand || !/tenant/i.test(operand.getText())) continue;
+    if (!operand) continue;
+    // Strip optional-chaining/whitespace differences: compare the text.
+    const opText = operand.getText().replace(/\s+/g, "");
+    if (!wanted.has(opText) && !wanted.has(opText.replace(/\?\./g, "."))) continue;
     const body = ifStmt.getThenStatement();
     const bk = body.getKind();
     if (bk === SyntaxKind.ThrowStatement ||
@@ -201,7 +315,7 @@ for (const file of targets) {
   }
 
   if (disposition === "throw") {
-    if (!reads.every((r) => hasNullTenantThrowGuard(r.node))) {
+    if (!reads.every((r) => hasNullTenantThrowGuard(r))) {
       violations.push(`${rel}: disposition "throw" but an enforcement read has no null-tenant guard (if (!tenant) { throw|return }). A reverted throw is a fail-open regression.`);
     }
   } else if (disposition === "failsafe-default") {

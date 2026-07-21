@@ -124,3 +124,20 @@ permissive `tenant?.<enforcementField> ?? <lenient>` coalesce; `display-exempt`
 forbids an access-restriction / deny call. The self-test grew to 7 cases
 including the 3 intra-file mutations, each red-proven. (Aligns with the AST-first
 rule for code-classifying gates.)
+
+## Round 4 — external review follow-up (guard read-site precision)
+
+The AST guard's `throw`-disposition check accepted a file as long as SOME
+`if (!<tenant-ish>) { throw|return }` existed in the enclosing function — so a
+guarded read plus a SIBLING unguarded enforcement read in the same function
+passed (external review Medium). **Fix**: per-read variable tracking. Each
+enforcement read now records the exact variable it is bound to
+(`bindingVarName`), including the two real binding shapes — RLS-wrapped
+(`const t = await withBypassRls(prisma, (tx) => tx.tenant.findUnique(...))`) and
+`Promise.all` array-destructuring (`const [c, t] = await Promise.all([...])`).
+`hasNullTenantThrowGuard(read)` now requires an `if (!<that var>)` /
+`if (!<that var>.tenant)` guard that throws/returns — a guard on a different
+variable, or a sibling unguarded read, no longer vouches for it. Self-test grew
+to 10 cases (added: sibling-unguarded → red, wrong-variable guard → red,
+Promise.all relation-join `if (!user?.tenant)` → accepted). Real tree still green
+at 16 reads.

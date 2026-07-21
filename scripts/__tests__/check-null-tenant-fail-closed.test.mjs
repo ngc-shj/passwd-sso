@@ -181,6 +181,61 @@ describe("check-null-tenant-fail-closed (AST)", () => {
     expect(r.stderr).toContain('disposition "display-exempt"');
   });
 
+  // External review follow-up: per-read variable tracking. A guard on ONE tenant
+  // read must not vouch for a SIBLING unguarded enforcement read in the same
+  // function — the earlier "any if(!tenant) throw in the function" check missed
+  // this. The guard must key on the exact variable each read is bound to.
+  it("fails a throw file with a guarded read AND a sibling unguarded enforcement read", () => {
+    writeFile(
+      "src/lib/auth/policy/access-restriction.ts",
+      `import { prisma } from "@/lib/prisma";
+       export async function read(id: string) {
+         const tenant = await prisma.tenant.findUnique({ where: { id }, select: { allowedCidrs: true } });
+         if (!tenant) throw new Error("x");
+         const other = await prisma.tenant.findUnique({ where: { id }, select: { requirePasskey: true } });
+         return { a: tenant.allowedCidrs, b: other?.requirePasskey ?? false };
+       }`,
+    );
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('disposition "throw"');
+    expect(r.stderr).toContain("src/lib/auth/policy/access-restriction.ts");
+  });
+
+  it("fails a throw file whose null guard keys on a DIFFERENT variable than the read", () => {
+    writeFile(
+      "src/lib/auth/policy/access-restriction.ts",
+      `import { prisma } from "@/lib/prisma";
+       export async function read(id: string) {
+         const other = { x: 1 };
+         const tenant = await prisma.tenant.findUnique({ where: { id }, select: { allowedCidrs: true } });
+         if (!other) throw new Error("wrong var");
+         return tenant?.allowedCidrs ?? [];
+       }`,
+    );
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('disposition "throw"');
+  });
+
+  it("accepts a Promise.all-destructured relation-join read guarded by if (!user?.tenant)", () => {
+    // Mirrors the real src/auth.ts session-passkey-policy shape.
+    writeFile(
+      "src/lib/auth/session/auth-adapter.ts",
+      `import { prisma } from "@/lib/prisma";
+       export async function read(id: string) {
+         const [c, user] = await Promise.all([
+           prisma.x.count(),
+           prisma.user.findUnique({ where: { id }, select: { tenant: { select: { requirePasskey: true } } } }),
+         ]);
+         if (!user?.tenant) throw new Error("x");
+         return user.tenant.requirePasskey;
+       }`,
+    );
+    const r = run();
+    expect(r.code).toBe(0);
+  });
+
   it("does not flag a file that reads tenant but no enforcement field", () => {
     writeFile(
       "src/lib/benign.ts",
