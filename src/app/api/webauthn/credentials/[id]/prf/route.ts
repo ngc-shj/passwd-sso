@@ -18,7 +18,7 @@ import {
   hexAuthTag,
   PRF_ENCRYPTED_KEY_MAX_LENGTH,
 } from "@/lib/validations/common";
-import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

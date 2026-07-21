@@ -10,7 +10,7 @@
  * while leaving the other passing (#433 / C5).
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import type { verifyAuthenticationResponse } from "@simplewebauthn/server";
 
 type VerifiedAuth = Awaited<ReturnType<typeof verifyAuthenticationResponse>>;
