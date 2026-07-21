@@ -23,13 +23,6 @@
       "owners": ["security"],
       "category": "signature"
     },
-    "@simplewebauthn/types": {
-      "workspace": "root",
-      "reason": "WebAuthn type contracts used at the passkey verification boundary.",
-      "detectedBy": ["static-import"],
-      "owners": ["security"],
-      "category": "signature"
-    },
     "hash-wasm": {
       "workspace": "root",
       "reason": "Argon2id password KDF (WASM) for vault wrapping-key derivation.",

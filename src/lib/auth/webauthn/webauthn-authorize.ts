@@ -17,7 +17,7 @@ import {
   base64urlToUint8Array,
   CHALLENGE_ID_RE,
 } from "@/lib/auth/webauthn/webauthn-server";
-import type { WebAuthnCredential, AuthenticationResponseJSON } from "@simplewebauthn/types";
+import type { WebAuthnCredential, AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MS_PER_SECOND } from "@/lib/constants/time";

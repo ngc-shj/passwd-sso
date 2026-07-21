@@ -23,13 +23,11 @@ import type {
   VerifyAuthenticationResponseOpts,
   VerifiedRegistrationResponse,
   VerifiedAuthenticationResponse,
-} from "@simplewebauthn/server";
-import type {
   AuthenticatorTransportFuture,
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
   WebAuthnCredential,
-} from "@simplewebauthn/types";
+} from "@simplewebauthn/server";
 import { hkdfSync, randomBytes } from "node:crypto";
 import type { TxOrPrisma } from "@/lib/prisma";
 import { getKeyProviderSync } from "@/lib/key-provider";
@@ -374,7 +372,7 @@ export async function generateDiscoverableAuthOpts() {
 
 // ── Helpers ─────────────────────────────────────────────────
 
-export function base64urlToUint8Array(base64url: string): Uint8Array {
+export function base64urlToUint8Array(base64url: string): Uint8Array<ArrayBuffer> {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (base64.length % 4)) % 4;
   const padded = base64 + "=".repeat(pad);
