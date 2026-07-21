@@ -59,6 +59,16 @@ updates:
           - "nodemailer"
           - "resend"
           - "otpauth"
+    # ESLint 10 and TypeScript 6+ break peer tooling that has not caught up:
+    # eslint-config-next (^16) targets the ESLint 9 API and crashes on 10
+    # ("reading 'Cjs'"); TypeScript majors churn the lib.dom typings the app
+    # depends on. Ignore the major line here; drop the entry once the peer
+    # deps declare support.
+    ignore:
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
@@ -77,6 +87,12 @@ updates:
         exclude-patterns:
           - "bcrypt-pbkdf"
           - "otpauth"
+    # TypeScript 6+ regresses the Node type surface the CLI relies on
+    # (e.g. global Buffer under the bundler moduleResolution). Stay on 5.x
+    # until the toolchain is validated against the new major.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
   - package-ecosystem: "npm"
@@ -93,4 +109,8 @@ updates:
           - "*"
         exclude-patterns:
           - "otpauth"
+    # Keep TypeScript on the 5.x line here too (see /cli note).
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
