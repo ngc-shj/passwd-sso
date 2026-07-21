@@ -10,15 +10,15 @@
  *    validateKeys() throws.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   randomBytes,
   sign as nodeSign,
   verify as nodeVerify,
   createPrivateKey,
-  createPublicKey,
 } from "node:crypto";
 import { getKeyProvider, _resetKeyProvider } from "@/lib/key-provider";
+import { derivePublicKey } from "@/lib/audit/anchor-manifest";
 
 // Stable 64-char hex test keys (32 bytes each)
 const SIGNING_KEY_HEX = randomBytes(32).toString("hex");
@@ -38,44 +38,23 @@ function buildPrivateKeyObject(seedHex: string) {
 
 function buildPublicKeyFromSeed(seedHex: string) {
   // Node crypto has no direct "seed → public key" — derive via private key object.
-  return createPublicKey(buildPrivateKeyObject(seedHex));
+  return derivePublicKey(buildPrivateKeyObject(seedHex));
 }
 
 describe("anchor-publisher KeyProvider — env loading", () => {
-  // Store original env values to restore after each test
-  let savedEnv: Record<string, string | undefined>;
-
+  // Env is mutated via vi.stubEnv; setup.ts wires the afterEach unstub. Only the
+  // KeyProvider singleton needs manual reset between tests.
   beforeEach(() => {
-    savedEnv = {
-      AUDIT_ANCHOR_PUBLISHER_ENABLED: process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED,
-      AUDIT_ANCHOR_SIGNING_KEY: process.env.AUDIT_ANCHOR_SIGNING_KEY,
-      AUDIT_ANCHOR_TAG_SECRET: process.env.AUDIT_ANCHOR_TAG_SECRET,
-      SHARE_MASTER_KEY: process.env.SHARE_MASTER_KEY,
-      SHARE_MASTER_KEY_V1: process.env.SHARE_MASTER_KEY_V1,
-      KEY_PROVIDER: process.env.KEY_PROVIDER,
-    };
-    _resetKeyProvider();
-  });
-
-  afterEach(() => {
-    // Restore original env
-    for (const [k, v] of Object.entries(savedEnv)) {
-      if (v === undefined) {
-        delete process.env[k as keyof NodeJS.ProcessEnv];
-      } else {
-        process.env[k] = v;
-      }
-    }
     _resetKeyProvider();
   });
 
   it("returns signing key and tag-secret buffers matching env vars; sign/verify roundtrip succeeds", async () => {
     // Ensure a SHARE_MASTER_KEY is set for validateKeys() not to fail on that path
-    process.env.SHARE_MASTER_KEY = "a".repeat(64);
-    process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED = "true";
-    process.env.AUDIT_ANCHOR_SIGNING_KEY = SIGNING_KEY_HEX;
-    process.env.AUDIT_ANCHOR_TAG_SECRET = TAG_SECRET_HEX;
-    process.env.KEY_PROVIDER = "env";
+    vi.stubEnv("SHARE_MASTER_KEY", "a".repeat(64));
+    vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "true");
+    vi.stubEnv("AUDIT_ANCHOR_SIGNING_KEY", SIGNING_KEY_HEX);
+    vi.stubEnv("AUDIT_ANCHOR_TAG_SECRET", TAG_SECRET_HEX);
+    vi.stubEnv("KEY_PROVIDER", "env");
 
     const provider = await getKeyProvider();
 
@@ -104,11 +83,11 @@ describe("anchor-publisher KeyProvider — env loading", () => {
   });
 
   it("validateKeys() does NOT throw when AUDIT_ANCHOR_PUBLISHER_ENABLED is unset (publisher disabled)", async () => {
-    process.env.SHARE_MASTER_KEY = "a".repeat(64);
-    delete process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED;
-    delete process.env.AUDIT_ANCHOR_SIGNING_KEY;
-    delete process.env.AUDIT_ANCHOR_TAG_SECRET;
-    process.env.KEY_PROVIDER = "env";
+    vi.stubEnv("SHARE_MASTER_KEY", "a".repeat(64));
+    vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", undefined);
+    vi.stubEnv("AUDIT_ANCHOR_SIGNING_KEY", undefined);
+    vi.stubEnv("AUDIT_ANCHOR_TAG_SECRET", undefined);
+    vi.stubEnv("KEY_PROVIDER", "env");
 
     const provider = await getKeyProvider();
     // Must not throw when publisher is disabled
@@ -116,33 +95,33 @@ describe("anchor-publisher KeyProvider — env loading", () => {
   });
 
   it("validateKeys() does NOT throw when AUDIT_ANCHOR_PUBLISHER_ENABLED=false", async () => {
-    process.env.SHARE_MASTER_KEY = "a".repeat(64);
-    process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED = "false";
-    delete process.env.AUDIT_ANCHOR_SIGNING_KEY;
-    delete process.env.AUDIT_ANCHOR_TAG_SECRET;
-    process.env.KEY_PROVIDER = "env";
+    vi.stubEnv("SHARE_MASTER_KEY", "a".repeat(64));
+    vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "false");
+    vi.stubEnv("AUDIT_ANCHOR_SIGNING_KEY", undefined);
+    vi.stubEnv("AUDIT_ANCHOR_TAG_SECRET", undefined);
+    vi.stubEnv("KEY_PROVIDER", "env");
 
     const provider = await getKeyProvider();
     await expect(provider.validateKeys()).resolves.toBeUndefined();
   });
 
   it("validateKeys() throws when AUDIT_ANCHOR_PUBLISHER_ENABLED=true but AUDIT_ANCHOR_SIGNING_KEY is unset", async () => {
-    process.env.SHARE_MASTER_KEY = "a".repeat(64);
-    process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED = "true";
-    delete process.env.AUDIT_ANCHOR_SIGNING_KEY;
-    process.env.AUDIT_ANCHOR_TAG_SECRET = TAG_SECRET_HEX;
-    process.env.KEY_PROVIDER = "env";
+    vi.stubEnv("SHARE_MASTER_KEY", "a".repeat(64));
+    vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "true");
+    vi.stubEnv("AUDIT_ANCHOR_SIGNING_KEY", undefined);
+    vi.stubEnv("AUDIT_ANCHOR_TAG_SECRET", TAG_SECRET_HEX);
+    vi.stubEnv("KEY_PROVIDER", "env");
 
     const provider = await getKeyProvider();
     await expect(provider.validateKeys()).rejects.toThrow("AUDIT_ANCHOR_SIGNING_KEY");
   });
 
   it("validateKeys() throws when AUDIT_ANCHOR_PUBLISHER_ENABLED=true but AUDIT_ANCHOR_TAG_SECRET is unset", async () => {
-    process.env.SHARE_MASTER_KEY = "a".repeat(64);
-    process.env.AUDIT_ANCHOR_PUBLISHER_ENABLED = "true";
-    process.env.AUDIT_ANCHOR_SIGNING_KEY = SIGNING_KEY_HEX;
-    delete process.env.AUDIT_ANCHOR_TAG_SECRET;
-    process.env.KEY_PROVIDER = "env";
+    vi.stubEnv("SHARE_MASTER_KEY", "a".repeat(64));
+    vi.stubEnv("AUDIT_ANCHOR_PUBLISHER_ENABLED", "true");
+    vi.stubEnv("AUDIT_ANCHOR_SIGNING_KEY", SIGNING_KEY_HEX);
+    vi.stubEnv("AUDIT_ANCHOR_TAG_SECRET", undefined);
+    vi.stubEnv("KEY_PROVIDER", "env");
 
     const provider = await getKeyProvider();
     await expect(provider.validateKeys()).rejects.toThrow("AUDIT_ANCHOR_TAG_SECRET");

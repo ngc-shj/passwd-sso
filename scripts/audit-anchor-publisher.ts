@@ -2,7 +2,7 @@
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
-import { createPrivateKey, createPublicKey } from "node:crypto";
+import { createPrivateKey } from "node:crypto";
 
 // Import from env-schema (side-effect-free) — not @/lib/env, which would run
 // parseEnv() on the full schema at module load and fail the worker boot when
@@ -17,6 +17,7 @@ import { S3Destination } from "@/lib/audit/anchor-destinations/s3-destination";
 import { GitHubReleaseDestination } from "@/lib/audit/anchor-destinations/github-release-destination";
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
+import { derivePublicKey } from "@/lib/audit/anchor-manifest";
 import {
   AUDIT_ANCHOR_CADENCE_MS,
   AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
@@ -111,7 +112,7 @@ const _privateKeyObj = createPrivateKey({
   format: "der",
   type: "pkcs8",
 });
-const _publicKeySpki = createPublicKey(_privateKeyObj).export({
+const _publicKeySpki = derivePublicKey(_privateKeyObj).export({
   format: "der",
   type: "spki",
 }) as Buffer;

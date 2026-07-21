@@ -97,7 +97,7 @@ RUN TAR_VER=7.5.19 && \
     SIGSTORE_VER=4.1.1 && \
     BE_VER=5.0.7 && \
     NPM_VER=11.12.1 && \
-    PRISMA_VER=7.8.0 && \
+    PRISMA_VER=7.9.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
     npm install "prisma@${PRISMA_VER}" --no-save --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
