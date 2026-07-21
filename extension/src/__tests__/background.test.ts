@@ -464,6 +464,48 @@ describe("background message flow", () => {
     );
   });
 
+  // The vault-lock alarm branches on cachedVaultTimeoutAction: LOGOUT clears the
+  // token (hasToken → false), the default LOCK only clears the vault (token
+  // kept). These exercise the onChanged narrowing that caches the action —
+  // "logout" is accepted, and a non-member / non-string value must be rejected
+  // so the cache stays on the safe LOCK default.
+  it("caches vaultTimeoutAction=logout so the lock alarm logs the session out", async () => {
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    storageChangeHandlers[0]({ vaultTimeoutAction: { newValue: "logout" } }, "local");
+    alarmHandlers[0]({ name: ALARM_VAULT_LOCK });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ hasToken: false }));
+  });
+
+  it("rejects a non-member vaultTimeoutAction and keeps the LOCK default", async () => {
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    storageChangeHandlers[0]({ vaultTimeoutAction: { newValue: "delete" } }, "local");
+    alarmHandlers[0]({ name: ALARM_VAULT_LOCK });
+    await new Promise((r) => setTimeout(r, 50));
+
+    // LOCK path only clears the vault, so the token is retained.
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ hasToken: true }));
+  });
+
+  it("rejects a non-string vaultTimeoutAction and keeps the LOCK default", async () => {
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    storageChangeHandlers[0]({ vaultTimeoutAction: { newValue: 5 } }, "local");
+    alarmHandlers[0]({ name: ALARM_VAULT_LOCK });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(expect.objectContaining({ hasToken: true }));
+  });
+
   it("registers token bridge content script on startup", async () => {
     expect(chromeMock?.scripting.unregisterContentScripts).toHaveBeenCalled();
     expect(chromeMock?.scripting.registerContentScripts).toHaveBeenCalled();
