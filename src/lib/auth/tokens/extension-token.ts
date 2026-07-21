@@ -8,8 +8,8 @@ import {
   EXTENSION_TOKEN_MAX_ACTIVE,
   type ExtensionTokenScope,
 } from "@/lib/constants";
-import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT } from "@/lib/validations/common";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { validateExtensionTokenDpop } from "@/lib/auth/dpop/validate-token-dpop";
@@ -201,15 +201,26 @@ export async function issueExtensionToken(params: {
   const { userId, tenantId, scope, cnfJkt } = params;
   const now = new Date();
 
-  // Read tenant extension-token idle TTL. Fall back to the policy ceiling if
-  // the tenant row is missing (defensive — should not happen in practice).
+  // Read tenant extension-token idle TTL.
+  // FAIL-CLOSED: tenantId is a non-null FK RESTRICT source, so a null tenant row
+  // is data corruption, NOT "no policy". The column is non-nullable with a
+  // schema default, so `tenant?.… ?? DEFAULT` only ever fires on a vanished
+  // tenant — where defaulting to the 7-day ceiling could grant a longer-lived
+  // token than a tenant that had tightened its TTL. Refuse issuance instead.
   const tenant = await withBypassRls(prisma, async (tx) =>
     tx.tenant.findUnique({
       where: { id: tenantId },
       select: { extensionTokenIdleTimeoutMinutes: true },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
-  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
+  if (!tenant) {
+    throw new Error(`issueExtensionToken: tenant ${tenantId} not found`);
+  }
+  // The column is non-nullable with a schema default; the `?? DEFAULT` is a
+  // defensive floor for a field-null that cannot occur in practice (and is
+  // fail-safe — a null would otherwise yield a 0-minute TTL).
+  const idleMinutes =
+    tenant.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
   const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
 
   const plaintext = generateShareToken();

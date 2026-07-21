@@ -239,3 +239,60 @@ describe("checkTeamAccessRestriction — sentinel fallback", () => {
     );
   });
 });
+
+// Regression (null-tenant fail-open class): when a team relies on inherited
+// tenant CIDRs as its sole restriction source (inheritTenantCidrs=true,
+// teamAllowedCidrs empty), a null tenant resolution or vanished tenant row is
+// data corruption (Team.tenantId is a non-null FK), NOT "no restriction".
+// Silently dropping the inherited CIDRs would bypass the team's IP control —
+// must FAIL CLOSED (throw).
+// Mutation check: restore the `if (tenant?.allowedCidrs)` silent-skip and these
+// tests flip from throw to resolve — they fail.
+describe("checkTeamAccessRestriction — inherit fail-closed on null tenant", () => {
+  const inheritOnlyPolicy: TeamPolicyData = {
+    minPasswordLength: 0,
+    requireUppercase: false,
+    requireLowercase: false,
+    requireNumbers: false,
+    requireSymbols: false,
+    sessionIdleTimeoutMinutes: null,
+    sessionAbsoluteTimeoutMinutes: null,
+    requireRepromptForAll: false,
+    allowExport: true,
+    allowSharing: true,
+    requireSharePassword: false,
+    passwordHistoryCount: 0,
+    inheritTenantCidrs: true,
+    teamAllowedCidrs: [], // sole restriction is the inherited tenant CIDRs
+  };
+
+  it("throws when resolveTeamTenantId returns null (default mock)", async () => {
+    // resolveTeamTenantId mock returns null (module-level default)
+    await expect(
+      checkTeamAccessRestriction("team-1", "5.6.7.8", "user-xyz", inheritOnlyPolicy),
+    ).rejects.toThrow(/team tenant unresolved/);
+  });
+
+  it("throws when the tenant row is missing (resolved id, null row)", async () => {
+    const { resolveTeamTenantId } = await import("@/lib/tenant-context");
+    (resolveTeamTenantId as ReturnType<typeof vi.fn>).mockResolvedValueOnce("tenant-x");
+    (prisma.tenant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+
+    await expect(
+      checkTeamAccessRestriction("team-1", "5.6.7.8", "user-xyz", inheritOnlyPolicy),
+    ).rejects.toThrow(/team tenant not found/);
+  });
+
+  it("allows (no restriction) when tenant exists but has no CIDRs", async () => {
+    const { resolveTeamTenantId } = await import("@/lib/tenant-context");
+    (resolveTeamTenantId as ReturnType<typeof vi.fn>).mockResolvedValueOnce("tenant-x");
+    (prisma.tenant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      allowedCidrs: [],
+    });
+
+    // Empty inherited CIDRs is a legitimate "no restriction configured" state.
+    await expect(
+      checkTeamAccessRestriction("team-1", "5.6.7.8", "user-xyz", inheritOnlyPolicy),
+    ).resolves.toBeUndefined();
+  });
+});

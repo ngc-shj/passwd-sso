@@ -148,8 +148,11 @@ describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () =>
     // withBypassRls callback runs against the tx — give it a tx-shape that
     // routes the bridge-code mocks AND the tenant lookup that
     // enforceAccessRestriction → getTenantAccessPolicy performs (the
-    // /api/mobile/token issuance now enforces tenant IP restriction). A null
-    // tenant resolves to "no restriction configured" → request allowed.
+    // /api/mobile/token issuance now enforces tenant IP restriction). Return a
+    // REAL unrestricted tenant row (empty allowedCidrs, tailscale off) — a
+    // configured tenant with no restrictions is a populated row, not null. A
+    // null row now means data corruption and fails closed (getTenantAccessPolicy
+    // throws), so a partial mock returning null would wrongly break this flow.
     mockWithBypassRls.mockImplementation(async (_p, fn) =>
       typeof fn === "function"
         ? fn({
@@ -157,7 +160,13 @@ describe("POST /api/mobile/token — real-key DPoP (C10 sentinel for C6)", () =>
               findUnique: mockMobileBridgeCodeFindUnique,
               updateMany: mockMobileBridgeCodeUpdateMany,
             },
-            tenant: { findUnique: async () => null },
+            tenant: {
+              findUnique: async () => ({
+                allowedCidrs: [],
+                tailscaleEnabled: false,
+                tailscaleTailnet: null,
+              }),
+            },
           })
         : undefined,
     );

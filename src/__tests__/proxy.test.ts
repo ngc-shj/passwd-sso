@@ -889,7 +889,12 @@ describe("proxy — access restriction", () => {
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
   });
 
-  it("skips access restriction when tenant is null", async () => {
+  it("fails closed (401) when the user has no active tenant membership (deactivated)", async () => {
+    // resolveUserTenantId returns null (deactivatedAt != null). Since
+    // User.tenantId is a non-null FK, this is a revoked membership, not a
+    // legitimate no-tenant user. getSessionInfo fails closed, so the request is
+    // rejected BEFORE the access-restriction check — a stale/deactivated session
+    // can no longer both pass validation AND skip the tenant IP gate.
     mockResolveUserTenantId.mockResolvedValue(null);
 
     const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
@@ -898,7 +903,7 @@ describe("proxy — access restriction", () => {
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
     expect(mockCheckAccessWithAudit).not.toHaveBeenCalled();
   });
 
@@ -972,7 +977,9 @@ describe("proxy — CSRF gate", () => {
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
     );
-    mockResolveUserTenantId.mockResolvedValue(null);
+    // A normal user WITH an active membership (a null return now fails session
+    // validation, which these CSRF-gate tests don't intend to exercise).
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
   });
 
@@ -1137,7 +1144,7 @@ describe("auth-gate session cache miss path", () => {
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ user: { id: "u-miss" } }), { status: 200 }),
     );
-    mockResolveUserTenantId.mockResolvedValue(null);
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
   });
 
   afterEach(() => {

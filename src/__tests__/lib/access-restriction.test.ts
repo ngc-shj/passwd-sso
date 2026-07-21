@@ -150,6 +150,32 @@ describe("checkAccessRestriction", () => {
     await checkAccessRestriction("tenant1", "192.168.1.3");
     expect(mockWithBypassRls).toHaveBeenCalledTimes(2);
   });
+
+  // Regression (null-tenant fail-open class): a missing tenant row on a
+  // successful query is data corruption (tenantId is FK-RESTRICT-backed), NOT
+  // "no restriction configured". Must FAIL CLOSED (throw → caller denies)
+  // instead of defaulting to an empty permissive policy that bypasses the
+  // tenant's IP/CIDR + Tailscale controls.
+  // Mutation check: revert getTenantAccessPolicy to `tenant?.allowedCidrs ?? []`
+  // and this test flips from throw to `{ allowed: true }` — it fails.
+  it("fails closed (throws) when the tenant row is missing", async () => {
+    mockTenantFindUnique.mockResolvedValue(null);
+    await expect(
+      checkAccessRestriction("tenant-gone", "1.2.3.4"),
+    ).rejects.toThrow(/tenant-gone not found/);
+  });
+
+  it("does not cache a policy derived from a missing tenant row", async () => {
+    mockTenantFindUnique.mockResolvedValue(null);
+    await expect(
+      checkAccessRestriction("tenant-gone", "1.2.3.4"),
+    ).rejects.toThrow();
+    // A second call must hit the DB again (no permissive policy cached).
+    await expect(
+      checkAccessRestriction("tenant-gone", "1.2.3.4"),
+    ).rejects.toThrow();
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("wouldIpBeAllowed", () => {

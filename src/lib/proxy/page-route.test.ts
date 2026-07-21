@@ -100,7 +100,10 @@ describe("handlePageRoute — protected routes auth check", () => {
 
   beforeEach(() => {
     _resetPasskeyAuditForTests();
-    mockResolveUserTenantId.mockResolvedValue(null);
+    // Default: a normal user WITH an active tenant membership. A null return
+    // (deactivated member) now fails session validation, so it is no longer a
+    // valid baseline for a session that should reach access/passkey checks.
+    mockResolveUserTenantId.mockResolvedValue("t-1");
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
     fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ user: null }), { status: 200 }),
@@ -119,6 +122,25 @@ describe("handlePageRoute — protected routes auth check", () => {
     const location = res.headers.get("location") ?? "";
     expect(location).toContain("/auth/signin");
     expect(location).toContain("callbackUrl=");
+  });
+
+  it("redirects a deactivated member (no active tenant membership) to signin", async () => {
+    // Valid Auth.js session response, but resolveUserTenantId returns null
+    // (deactivatedAt != null) → getSessionInfo fails closed → protected page
+    // redirects to signin instead of rendering with the tenant IP gate skipped.
+    // A cookie is required so getSessionInfo reaches the fetch + resolve path
+    // (a cookieless request short-circuits to {valid:false} before either).
+    mockValidSession(fetchSpy, { id: "u-deactivated" });
+    mockResolveUserTenantId.mockResolvedValueOnce(null);
+
+    const res = await handlePageRoute(
+      makePageRequest("/ja/dashboard/passwords", {
+        cookie: "authjs.session-token=sess-deactivated",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location") ?? "").toContain("/auth/signin");
   });
 
   it("emits Set-Cookie deletions with full attribute set (Secure on https)", async () => {
@@ -216,7 +238,10 @@ describe("handlePageRoute — passkey enforcement", () => {
 
   beforeEach(() => {
     _resetPasskeyAuditForTests();
-    mockResolveUserTenantId.mockResolvedValue(null);
+    // Default: a normal user WITH an active tenant membership. A null return
+    // (deactivated member) now fails session validation, so it is no longer a
+    // valid baseline for a session that should reach access/passkey checks.
+    mockResolveUserTenantId.mockResolvedValue("t-1");
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
@@ -345,7 +370,10 @@ describe("handlePageRoute — passkey audit dedup over consecutive requests", ()
 
   beforeEach(() => {
     _resetPasskeyAuditForTests();
-    mockResolveUserTenantId.mockResolvedValue(null);
+    // Default: a normal user WITH an active tenant membership. A null return
+    // (deactivated member) now fails session validation, so it is no longer a
+    // valid baseline for a session that should reach access/passkey checks.
+    mockResolveUserTenantId.mockResolvedValue("t-1");
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });

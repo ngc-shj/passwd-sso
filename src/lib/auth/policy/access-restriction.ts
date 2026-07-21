@@ -76,10 +76,22 @@ async function getTenantAccessPolicy(
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
+  // FAIL-CLOSED: tenantId always comes from a server-trusted source (session /
+  // token row) backed by an FK RESTRICT to Tenant, so a null here on a
+  // successful query means the tenant row vanished (data corruption / orphan),
+  // NOT "no restriction configured" — a configured tenant with no restrictions
+  // returns a real row with allowedCidrs=[]. Defaulting to an empty permissive
+  // policy would silently bypass a tenant's IP/CIDR + Tailscale controls (and
+  // cache that bypass for the TTL). Throw so callers deny rather than allow.
+  // Matches derivePasskeyState's throw-on-null-tenant stance (PR #685).
+  if (!tenant) {
+    throw new Error(`getTenantAccessPolicy: tenant ${tenantId} not found`);
+  }
+
   const policy: TenantAccessPolicy = {
-    allowedCidrs: tenant?.allowedCidrs ?? [],
-    tailscaleEnabled: tenant?.tailscaleEnabled ?? false,
-    tailscaleTailnet: tenant?.tailscaleTailnet ?? null,
+    allowedCidrs: tenant.allowedCidrs,
+    tailscaleEnabled: tenant.tailscaleEnabled,
+    tailscaleTailnet: tenant.tailscaleTailnet,
   };
 
   policyCache.set(tenantId, {

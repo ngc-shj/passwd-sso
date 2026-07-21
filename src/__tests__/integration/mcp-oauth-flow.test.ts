@@ -332,10 +332,17 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
           count: vi.fn().mockResolvedValue(1), // hasPasskey = true → never blocks
         },
         tenant: {
+          // Shared by derivePasskeyState AND getTenantAccessPolicy (via the
+          // pre-mint enforceAccessRestriction). A real tenant row carries the
+          // access-restriction fields too — include them so the IP gate reads a
+          // populated (unrestricted) policy instead of a partial row.
           findUnique: vi.fn().mockResolvedValue({
             requirePasskey: false,
             requirePasskeyEnabledAt: null,
             passkeyGracePeriodDays: null,
+            allowedCidrs: [],
+            tailscaleEnabled: false,
+            tailscaleTailnet: null,
           }),
         },
       };
@@ -406,6 +413,16 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
           update: vi.fn(),
         },
         mcpAccessToken: { create: vi.fn() },
+        // A real tenant row for the pre-mint enforceAccessRestriction IP gate
+        // (getTenantAccessPolicy); unrestricted so the failure path under test
+        // is reached rather than an IP denial.
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            allowedCidrs: [],
+            tailscaleEnabled: false,
+            tailscaleTailnet: null,
+          }),
+        },
       };
       return fn(tx);
     });
@@ -446,6 +463,16 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
           update: vi.fn(),
         },
         mcpAccessToken: { create: vi.fn() },
+        // A real tenant row for the pre-mint enforceAccessRestriction IP gate
+        // (getTenantAccessPolicy); unrestricted so the failure path under test
+        // is reached rather than an IP denial.
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            allowedCidrs: [],
+            tailscaleEnabled: false,
+            tailscaleTailnet: null,
+          }),
+        },
       };
       return fn(tx);
     });
@@ -486,6 +513,16 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
           update: vi.fn(),
         },
         mcpAccessToken: { create: vi.fn() },
+        // A real tenant row for the pre-mint enforceAccessRestriction IP gate
+        // (getTenantAccessPolicy); unrestricted so the failure path under test
+        // is reached rather than an IP denial.
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            allowedCidrs: [],
+            tailscaleEnabled: false,
+            tailscaleTailnet: null,
+          }),
+        },
       };
       return fn(tx);
     });
@@ -529,6 +566,16 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
           update: vi.fn(),
         },
         mcpAccessToken: { create: vi.fn() },
+        // A real tenant row for the pre-mint enforceAccessRestriction IP gate
+        // (getTenantAccessPolicy); unrestricted so the failure path under test
+        // is reached rather than an IP denial.
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            allowedCidrs: [],
+            tailscaleEnabled: false,
+            tailscaleTailnet: null,
+          }),
+        },
       };
       return fn(tx);
     });
@@ -576,6 +623,16 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
           update: vi.fn(),
         },
         mcpAccessToken: { create: vi.fn() },
+        // A real tenant row for the pre-mint enforceAccessRestriction IP gate
+        // (getTenantAccessPolicy); unrestricted so the failure path under test
+        // is reached rather than an IP denial.
+        tenant: {
+          findUnique: vi.fn().mockResolvedValue({
+            allowedCidrs: [],
+            tailscaleEnabled: false,
+            tailscaleTailnet: null,
+          }),
+        },
       };
       return fn(tx);
     });

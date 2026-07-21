@@ -332,6 +332,24 @@ describe("POST /api/extension/token/refresh", () => {
     expect(json.scope).toEqual(["passwords:read", "vault:unlock-data"]);
   });
 
+  // Regression (null-tenant fail-open class): activeSession.tenantId is
+  // FK-backed, so a null tenant ROW is data corruption. Defaulting the TTL to
+  // the ceiling could refresh a token to a longer TTL than a tenant that had
+  // tightened it. Must FAIL CLOSED (throw → no rotation).
+  // Mutation check: restore `tenant?.… ?? DEFAULT` (no null-row throw) and this
+  // refresh succeeds instead of throwing — the test fails.
+  it("fails closed (throws) when the tenant row is missing", async () => {
+    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-gone" });
+    mockTenantFindUnique.mockResolvedValueOnce(null);
+
+    const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+    await expect(POST(req)).rejects.toThrow(/tenant-gone not found/);
+    expect(mockExtTokenCreate).not.toHaveBeenCalled();
+  });
+
   it("revokes old token and creates new in transaction", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
     mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });

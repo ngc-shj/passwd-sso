@@ -704,6 +704,25 @@ describe("issueExtensionToken", () => {
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 
+  // Regression (null-tenant fail-open class): tenantId is FK-backed, so a null
+  // tenant ROW (not field) is data corruption. Defaulting the TTL to the ceiling
+  // could mint a longer-lived token than a tenant that had tightened it. Must
+  // FAIL CLOSED (throw → no token issued).
+  // Mutation check: restore `tenant?.… ?? DEFAULT` (no null-row throw) and this
+  // test flips from throw to a successful mint — it fails.
+  it("fails closed (throws) when the tenant row is missing", async () => {
+    mockTenantFindUnique.mockResolvedValueOnce(null);
+    await expect(
+      issueExtensionToken({
+        userId: "u1",
+        tenantId: "tenant-gone",
+        scope: "passwords:read",
+        cnfJkt: VALID_CNF_JKT,
+      }),
+    ).rejects.toThrow(/tenant-gone not found/);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it("falls back to EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT when tenant.extensionTokenIdleTimeoutMinutes is null", async () => {
     mockTenantFindUnique.mockResolvedValueOnce({ extensionTokenIdleTimeoutMinutes: null });
 

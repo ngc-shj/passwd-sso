@@ -91,8 +91,23 @@ async function handlePOST(req: NextRequest) {
       },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
-  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
-  const absoluteMinutes = tenant?.extensionTokenAbsoluteTimeoutMinutes ?? EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT;
+  // FAIL-CLOSED: activeSession.tenantId is FK-backed, so a null tenant row is
+  // data corruption, NOT "no policy". These columns are non-nullable with schema
+  // defaults, so `?? DEFAULT` only fires on a vanished tenant — where defaulting
+  // to the ceiling could refresh a token to a longer TTL than a tenant that had
+  // tightened it. Refuse the refresh instead. (Mirrors issueExtensionToken.)
+  if (!tenant) {
+    throw new Error(
+      `extension token refresh: tenant ${activeSession.tenantId} not found`,
+    );
+  }
+  // Columns are non-nullable with schema defaults; the `?? DEFAULT` is a
+  // defensive floor for a field-null that cannot occur in practice.
+  const idleMinutes =
+    tenant.extensionTokenIdleTimeoutMinutes ?? EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT;
+  const absoluteMinutes =
+    tenant.extensionTokenAbsoluteTimeoutMinutes ??
+    EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT;
 
   const now = new Date();
 

@@ -179,19 +179,30 @@ describe("handleApiAuth — session-required + access restriction", () => {
       new Response(JSON.stringify({ user: { id: "u-1" } }), { status: 200 }),
     );
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
-    mockResolveUserTenantId.mockResolvedValue(null);
+    // Default: a normal user WITH an active tenant membership. A null return
+    // (deactivated member) now fails session validation (see the dedicated
+    // test below), so it is no longer a valid baseline for "session valid".
+    mockResolveUserTenantId.mockResolvedValue("t-1");
   });
   afterEach(() => {
     vi.unstubAllEnvs();
     fetchSpy.mockRestore();
   });
 
-  it("returns 200 when session is valid and no tenant restriction applies", async () => {
+  it("returns 200 when session is valid and access restriction allows", async () => {
     const res = await handleApiAuth(
       makeRequest("/api/passwords", "GET", { Cookie: "authjs.session-token=sess" }),
     );
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it("returns 401 when the user has no active tenant membership (deactivated)", async () => {
+    mockResolveUserTenantId.mockResolvedValueOnce(null);
+    const res = await handleApiAuth(
+      makeRequest("/api/passwords", "GET", { Cookie: "authjs.session-token=sess" }),
+    );
+    expect(res.status).toBe(401);
   });
 
   it("returns 403 when access restriction denies", async () => {

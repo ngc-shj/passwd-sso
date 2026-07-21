@@ -89,11 +89,30 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
 
     let tenantId: string | undefined;
     if (valid && userId) {
+      let resolved: string | null;
       try {
-        tenantId = (await resolveUserTenantId(userId)) ?? undefined;
+        resolved = await resolveUserTenantId(userId);
       } catch {
-        // Non-critical: tenant resolution failure should not block session validation
+        // A THROW (DB/RLS error, MULTI_TENANT anomaly) must not be swallowed:
+        // leaving tenantId undefined would drop the tenant's IP/CIDR gate for a
+        // user who DOES have a restricted tenant. Fail closed (uncached) —
+        // mirrors the !res.ok transient-error handling above.
+        return { valid: false };
       }
+      // A `null` return means NO active TenantMember row (deactivatedAt != null,
+      // i.e. a de-provisioned member). `User.tenantId` is a non-null FK, so this
+      // is NOT a legitimate "no tenant" user — it is a revoked membership whose
+      // session must not survive. Fail closed so a stale cookie (or a session
+      // whose deletion / cache invalidation was missed on deactivation) cannot
+      // pass proxy session validation AND skip the tenant IP restriction
+      // (undefined tenantId → the api-route/page-route gate is bypassed). This
+      // is the session-path analogue of the extension-token C13 deactivated-
+      // member rejection. The result is uncached (fail-closed sessions never
+      // populate the cache).
+      if (resolved === null) {
+        return { valid: false };
+      }
+      tenantId = resolved;
     }
 
     // The `?? false` / `?? null` defaults here are fail-open and are safe ONLY

@@ -287,7 +287,18 @@ export function createCustomAdapter(): Adapter {
           select: { maxConcurrentSessions: true },
         });
 
-        const maxSessions = tenant?.maxConcurrentSessions;
+        // FAIL-CLOSED: tenantId is User.tenantId (non-null FK RESTRICT), so a
+        // null row here is data corruption, NOT "no limit configured" — an
+        // unconfigured limit is a real row with maxConcurrentSessions=null.
+        // Silently skipping the cap would let the corrupt-tenant user open
+        // unbounded concurrent sessions. Throw so session creation refuses.
+        // Matches the null-tenant fail-closed stance across the policy readers
+        // (getTenantAccessPolicy, derivePasskeyState — PR #685 class).
+        if (!tenant) {
+          throw new Error(`createSession: tenant ${tenantId} not found`);
+        }
+
+        const maxSessions = tenant.maxConcurrentSessions;
         if (maxSessions != null && maxSessions > 0) {
           // Count active sessions (ORDER BY id for consistent lock ordering)
           const activeSessions = await tx.session.findMany({
