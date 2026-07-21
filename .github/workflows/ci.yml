@@ -198,7 +198,12 @@ jobs:
     runs-on: ubuntu-latest
     needs: changes
     if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
-    timeout-minutes: 15
+    # test:coverage + build + basePath build already land at ~13–14m on a
+    # healthy runner; slower runners tipped several green dependency PRs over the
+    # old 15m cap mid-`build with basePath` (e.g. #701, #706). 20m keeps the same
+    # ceiling class as the iOS (25m) / refactor-verify (20m) jobs while absorbing
+    # runner variance instead of flaking.
+    timeout-minutes: 20
     services:
       redis:
         image: redis:7-alpine
