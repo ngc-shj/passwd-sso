@@ -16,9 +16,9 @@ import {
   sign as nodeSign,
   verify as nodeVerify,
   createPrivateKey,
-  createPublicKey,
 } from "node:crypto";
 import { getKeyProvider, _resetKeyProvider } from "@/lib/key-provider";
+import { derivePublicKey } from "@/lib/audit/anchor-manifest";
 
 // Stable 64-char hex test keys (32 bytes each)
 const SIGNING_KEY_HEX = randomBytes(32).toString("hex");
@@ -38,7 +38,7 @@ function buildPrivateKeyObject(seedHex: string) {
 
 function buildPublicKeyFromSeed(seedHex: string) {
   // Node crypto has no direct "seed → public key" — derive via private key object.
-  return createPublicKey(buildPrivateKeyObject(seedHex));
+  return derivePublicKey(buildPrivateKeyObject(seedHex));
 }
 
 describe("anchor-publisher KeyProvider — env loading", () => {

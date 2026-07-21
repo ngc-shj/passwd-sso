@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { randomBytes, createPrivateKey, createPublicKey } from "node:crypto";
+import { randomBytes, createPrivateKey } from "node:crypto";
 import os from "node:os";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -31,8 +31,11 @@ import {
 import { AuditAnchorPublisher } from "@/workers/audit-anchor-publisher";
 import type { PublisherConfig } from "@/workers/audit-anchor-publisher";
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
-import { verify as verifyManifest } from "@/lib/audit/anchor-manifest";
-import { computeTenantTag } from "@/lib/audit/anchor-manifest";
+import {
+  verify as verifyManifest,
+  computeTenantTag,
+  derivePublicKey as derivePublicKeyObject,
+} from "@/lib/audit/anchor-manifest";
 
 // Fresh Ed25519 seed (32 bytes) for each test run
 const SIGNING_KEY = randomBytes(32);
@@ -53,7 +56,7 @@ function derivePublicKey(seed: Buffer): Buffer {
     format: "der",
     type: "pkcs8",
   });
-  const pubKey = createPublicKey(privKey);
+  const pubKey = derivePublicKeyObject(privKey);
   const rawDer = pubKey.export({ type: "spki", format: "der" }) as Buffer;
   // Strip the SPKI prefix (12 bytes) to get the raw 32-byte public key
   return rawDer.subarray(ED25519_SPKI_PREFIX.length);

@@ -1,4 +1,11 @@
-import { createHmac, createPrivateKey, createPublicKey, sign as nodeSign, verify as nodeVerify } from "node:crypto";
+import {
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  sign as nodeSign,
+  verify as nodeVerify,
+  type KeyObject,
+} from "node:crypto";
 import { z } from "zod/v4";
 import {
   AUDIT_ANCHOR_TYP,
@@ -136,6 +143,19 @@ const ED25519_PKCS8_PREFIX = Buffer.from("302e020100300506032b657004220420", "he
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
 // --- Public functions ---
+
+/**
+ * Derive the public key of an asymmetric private key.
+ *
+ * `createPublicKey(privateKeyObject)` is a documented Node API, but
+ * @types/node 26 dropped the `KeyObject` overload from `createPublicKey`
+ * (only KeyInput shapes remain in the typings). Re-narrow the runtime-valid
+ * call in one place instead of casting at every call site.
+ */
+export function derivePublicKey(privateKey: KeyObject): KeyObject {
+  const createFromKeyObject = createPublicKey as unknown as (key: KeyObject) => KeyObject;
+  return createFromKeyObject(privateKey);
+}
 
 /**
  * Validates that tenantId is canonical lower-case UUID (RFC 4122 §3).
