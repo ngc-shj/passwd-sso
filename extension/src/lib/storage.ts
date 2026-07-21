@@ -110,8 +110,15 @@ export function validateSettings(raw: StorageSchema): StorageSchema {
 }
 
 export async function getSettings(): Promise<StorageSchema> {
-  const result = await chrome.storage.local.get(DEFAULTS);
-  return result as StorageSchema;
+  // @types/chrome 0.2.x types get() as (keys) => Promise<{ [k: string]: unknown }>,
+  // dropping the generic that used to carry the value shape. Passing DEFAULTS
+  // fills every key, so the resolved object is a full StorageSchema at runtime.
+  // NOTE: do NOT wrap in validateSettings() here — its ensureAutoLockAtLeastMin
+  // clamps autoLockMinutes 0 → 5, but callers treat 0 as "auto-lock disabled",
+  // so self-validating would silently turn the disabled setting into a 5-min
+  // lock. Callers apply validateSettings() at the points that need the clamp.
+  const result = await chrome.storage.local.get(DEFAULTS as unknown as Record<string, unknown>);
+  return result as unknown as StorageSchema;
 }
 
 export async function setSettings(

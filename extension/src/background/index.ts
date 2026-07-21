@@ -853,8 +853,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     if (typeof raw === "number" && raw > 0) cachedClipboardClearSeconds = raw;
   }
   if (changes.vaultTimeoutAction) {
+    // @types/chrome 0.2.x types newValue as unknown; narrow to string before
+    // the membership test validates it against the TimeoutAction values.
     const raw = changes.vaultTimeoutAction.newValue;
-    if (Object.values(TimeoutAction).includes(raw)) cachedVaultTimeoutAction = raw as TimeoutAction;
+    if (typeof raw === "string" && (Object.values(TimeoutAction) as string[]).includes(raw)) {
+      cachedVaultTimeoutAction = raw as TimeoutAction;
+    }
   }
   // Context menu toggle
   if (changes.enableContextMenu) {

@@ -82,7 +82,9 @@ export async function persistSession(state: SessionState): Promise<void> {
 
 export async function loadSession(): Promise<SessionState | null> {
   const result = await chrome.storage.session.get(SESSION_KEY);
-  const raw = result[SESSION_KEY];
+  // @types/chrome 0.2.x types get() values as unknown; the checks below narrow
+  // each field, so read the row as an index map to reach them.
+  const raw = result[SESSION_KEY] as Record<string, unknown> | undefined;
   if (!raw || typeof raw !== "object") return null;
 
   // Backward compat: reject old plaintext format (token as string)
