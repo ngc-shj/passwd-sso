@@ -145,8 +145,10 @@ function bindingVarName(call) {
   const viaPromiseAll = promiseAllDestructuredName(call);
   if (viaPromiseAll !== undefined) return viaPromiseAll;
 
+  // Same climb shape as promiseAllDestructuredName: terminates via an inner
+  // return, `cur` is only reassigned to a non-null parent, so `for (;;)`.
   let cur = call;
-  while (cur) {
+  for (;;) {
     const parent = cur.getParent?.();
     if (!parent) return null;
     const pk = parent.getKind();
@@ -170,7 +172,6 @@ function bindingVarName(call) {
     }
     return null;
   }
-  return null;
 }
 
 // If `call` is the Nth element of an array literal passed to `Promise.all(...)`
@@ -191,9 +192,11 @@ function promiseAllDestructuredName(call) {
   if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return undefined;
   if (callee.getName?.() !== "all") return undefined;
   if (callee.getExpression?.().getText?.() !== "Promise") return undefined;
-  // Walk out to the VariableDeclaration with an array-binding pattern.
+  // Walk out to the VariableDeclaration with an array-binding pattern. The
+  // climb always terminates via an inner return: `cur` is reassigned only to a
+  // non-null parent, so a `while (cur)` guard would never fire — use `for (;;)`.
   let cur = paCall;
-  while (cur) {
+  for (;;) {
     const parent = cur.getParent?.();
     if (!parent) return null;
     const pk = parent.getKind();
@@ -220,7 +223,6 @@ function promiseAllDestructuredName(call) {
     }
     return null;
   }
-  return null;
 }
 
 // Does the enclosing function of `read.node` contain a null guard on the SAME
