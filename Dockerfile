@@ -71,14 +71,18 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # - npm 11.12.1: drops bundled cross-spawn entirely and ships glob 13.x /
 #   minimatch 10.x, closing CVE-2024-21538, CVE-2025-64756,
 #   CVE-2026-26996/27903/27904.
-# - tar >=7.5.11: closes CVE-2026-31802 (npm 11.12.1 already ships this; the
-#   patch block is a guarded no-op but kept as a tripwire if a future bump
-#   downgrades).
+# - tar >=7.5.19: closes CVE-2026-31802 (fixed in 7.5.11) AND the newer
+#   CVE-2026-59873 (gzip-bomb DoS, fixed 7.5.19) / CVE-2026-59874 (malformed
+#   tar-header DoS, fixed 7.5.18). npm 11.12.1 ships tar 6.2.x under its own
+#   node_modules, so the patch block below force-upgrades it.
 # - picomatch >=4.0.4: closes CVE-2026-33671 (still bundled at 4.0.3 nested
 #   under tinyglobby in npm 11.12.1).
 # - sigstore >=4.1.1: closes CVE-2026-48815 (certificateOIDs verification
 #   constraints silently dropped; bundled at 4.1.0 under npm 11.12.1's
 #   provenance/signing path).
+# - brace-expansion >=5.0.7: closes CVE-2026-13149 (exponential-time DoS;
+#   bundled at 5.0.4 under npm 11.12.1). The app's own copy is already pinned
+#   via the package.json overrides block; this patches npm's bundled copy.
 # Patch blocks fail-closed (exit 1) when expected directories disappear, so a
 # silent npm-layout drift cannot reintroduce the CVEs.
 # `--ignore-scripts` on the global npm upgrade limits root-execution blast
@@ -88,9 +92,10 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # `migrate` compose service runs); a floating `latest` here breaks build
 # reproducibility and risks CLI/generated-client skew. Kept in lockstep with the
 # lockfile by scripts/checks/check-dockerfile-prisma-pin.sh.
-RUN TAR_VER=7.5.11 && \
+RUN TAR_VER=7.5.19 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
+    BE_VER=5.0.7 && \
     NPM_VER=11.12.1 && \
     PRISMA_VER=7.8.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
@@ -140,6 +145,21 @@ RUN TAR_VER=7.5.11 && \
     else \
       echo "ERROR: sigstore directory not found at ${SIGSTORE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
     fi && \
+    BE_DIR=/usr/local/lib/node_modules/npm/node_modules/brace-expansion && \
+    if [ -d "$BE_DIR" ]; then \
+      CURRENT=$(node -p "require('${BE_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$BE_VER" "$CURRENT" | sort -V | head -n1)" != "$BE_VER" ]; then \
+        cd "$BE_DIR" && \
+        npm pack "brace-expansion@${BE_VER}" --quiet && \
+        tar xzf "brace-expansion-${BE_VER}.tgz" --strip-components=1 && \
+        rm -f "brace-expansion-${BE_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${BE_VER}'){console.error('brace-expansion patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "brace-expansion ${CURRENT} already >= ${BE_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "ERROR: brace-expansion directory not found at ${BE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
+    fi && \
     cd / && \
     npm cache clean --force >/dev/null 2>&1 && \
     rm -rf /root/.npm /tmp/* && \
@@ -148,6 +168,7 @@ RUN TAR_VER=7.5.11 && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version,c=v.split('.').map(Number),m='${TAR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('tar still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}" && \
     node -e "const v=require('/app/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}"
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
