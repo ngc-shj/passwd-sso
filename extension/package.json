@@ -1,7 +1,7 @@
 {
   "name": "passwd-sso-extension",
   "private": true,
-  "version": "0.4.70",
+  "version": "0.4.71",
   "type": "module",
   "scripts": {
     "dev": "vite",

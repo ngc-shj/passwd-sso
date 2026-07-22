@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.4.71](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.70...passwd-sso-v0.4.71) (2026-07-22)
+
+
+### Features
+
+* **ci:** add TLS-fixture expiry guard and harden iOS pinning guard ([#666](https://github.com/ngc-shj/passwd-sso/issues/666)) ([b232dd0](https://github.com/ngc-shj/passwd-sso/commit/b232dd0562ec3087cb97f05e6bee64653fb15bb0))
+* **security:** burn down Redis fail-closed test debt to zero and pin the class ([#681](https://github.com/ngc-shj/passwd-sso/issues/681)) ([e3498ca](https://github.com/ngc-shj/passwd-sso/commit/e3498ca6ff6a9f86b385b60b2b65c15966bbe0b4))
+* **security:** personal-vault key-version guard, rotation CAS, and anti-evasion CI gates ([#678](https://github.com/ngc-shj/passwd-sso/issues/678)) ([00ed723](https://github.com/ngc-shj/passwd-sso/commit/00ed7236210ec405414eacb77702914d2817f556))
+* **supply-chain:** pin npm provenance, add signature verification + crypto/auth dep governance ([#669](https://github.com/ngc-shj/passwd-sso/issues/669)) ([169c068](https://github.com/ngc-shj/passwd-sso/commit/169c06839e2e65f45d72037b53b1913024490bf9))
+* **worker:** bound audit-outbox destructive sweeps and mechanize sweep parity ([#668](https://github.com/ngc-shj/passwd-sso/issues/668)) ([7e5e4c2](https://github.com/ngc-shj/passwd-sso/commit/7e5e4c2374c74a4361288f97aa3f166dbb199bdd))
+
+
+### Bug Fixes
+
+* **auth:** fail closed when passkey-enforcement fetch fails in session callback ([#685](https://github.com/ngc-shj/passwd-sso/issues/685)) ([4065ccc](https://github.com/ngc-shj/passwd-sso/commit/4065ccc59c7050d714e51fa7a5ea5a2c058a134f))
+* replace dead while(cur) guard with for(;;) in null-tenant climb loops ([#707](https://github.com/ngc-shj/passwd-sso/issues/707)) ([dd3c079](https://github.com/ngc-shj/passwd-sso/commit/dd3c07911dfc32b713235c8224332f05917a07d6))
+* **security:** close SC-T3 fail-closed backlog — SCIM Retry-After, magic-link log split, v1/verify-access test proofs ([#683](https://github.com/ngc-shj/passwd-sso/issues/683)) ([cd0ae29](https://github.com/ngc-shj/passwd-sso/commit/cd0ae29cc102efeba22ca7672f5287b7061bfa15))
+* **security:** fail closed on null tenant across enforcement policy readers ([#693](https://github.com/ngc-shj/passwd-sso/issues/693)) ([d3cb802](https://github.com/ngc-shj/passwd-sso/commit/d3cb8020debb8704d7e80a4886b2559489e9f887))
+* **security:** patch brace-expansion (1.x/2.x) + js-yaml DoS CVEs ([#703](https://github.com/ngc-shj/passwd-sso/issues/703)) ([34aa775](https://github.com/ngc-shj/passwd-sso/commit/34aa7758b283c74cfd39094075803d1a276818ce))
+* **security:** patch brace-expansion + tar CVEs (app dep override + npm-bundled) ([#695](https://github.com/ngc-shj/passwd-sso/issues/695)) ([c6a08f4](https://github.com/ngc-shj/passwd-sso/commit/c6a08f42f36aeb22946cc4ef3b9a740cfa6de631))
+* **security:** patch hono + @hono/node-server DoS CVEs ([#709](https://github.com/ngc-shj/passwd-sso/issues/709)) ([6fdf517](https://github.com/ngc-shj/passwd-sso/commit/6fdf517384d3030151cb3a0b80ded8b13aacb41e))
+* **security:** patch sharp libvips CVEs via 0.35.3 override ([#712](https://github.com/ngc-shj/passwd-sso/issues/712)) ([81031f6](https://github.com/ngc-shj/passwd-sso/commit/81031f6cb4356a748551ecf83a7f04d21b7cce8e))
+* **ui:** close truncate-overflow class + align dashboard banner width ([#687](https://github.com/ngc-shj/passwd-sso/issues/687)) ([3f8040f](https://github.com/ngc-shj/passwd-sso/commit/3f8040fac85ca48bf694c7b12024d6da645cc7c8))
+* **vault:** reject overview-only updates; harden destructive-wrapper re-export gate ([#679](https://github.com/ngc-shj/passwd-sso/issues/679)) ([b8d020e](https://github.com/ngc-shj/passwd-sso/commit/b8d020e029ceb47bd91c0ecc1f64c9a7a8b8140b))
+
+
+### Code Refactoring
+
+* **security:** migrate 13 fail-closed legacy routes to helper mode (SC-T3-1) ([#682](https://github.com/ngc-shj/passwd-sso/issues/682)) ([709b6d9](https://github.com/ngc-shj/passwd-sso/commit/709b6d9a80c7fef1a62e2b8f5685e9e5b016843f))
+* **supply-chain:** isolate npm OIDC publish from untrusted build code ([#677](https://github.com/ngc-shj/passwd-sso/issues/677)) ([a984e38](https://github.com/ngc-shj/passwd-sso/commit/a984e38c75c0caa2baa6c7587818c3e730418fe0))
+
 ## [0.4.70](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.69...passwd-sso-v0.4.70) (2026-07-14)
 
 
