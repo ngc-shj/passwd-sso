@@ -667,6 +667,49 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     invalidateLockoutThresholdCache("tenant-dberr");
   });
 
+  // Regression (external review Low): the strictest fallback must NOT be cached.
+  // If a transient DB failure pinned STRICTEST into the 60s TTL cache, users of
+  // a lenient tenant would keep locking at 1 attempt after the DB recovered.
+  // The next call after recovery must re-query and apply the tenant's real
+  // thresholds. Mutation check: cache the fallback in the catch/null branches of
+  // getLockoutThresholds and the second call here locks at 1, not 5.
+  it("does not cache the strictest fallback — recovers to real thresholds on the next call", async () => {
+    invalidateLockoutThresholdCache("tenant-recover");
+
+    // First call: fetch fails → strictest fallback (locks at 1 attempt)
+    mockPrismaTenant.findUnique.mockRejectedValueOnce(new Error("DB down"));
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    const during = await recordFailure("user-1", undefined, "tenant-recover");
+    expect(during).not.toBeNull();
+    expect(during!.locked).toBe(true); // strictest applied during the outage
+
+    // Second call: DB recovered → tenant's lenient thresholds (lock at 5) apply
+    mockPrismaTenant.findUnique.mockResolvedValue({
+      lockoutThreshold1: 5,
+      lockoutDuration1Minutes: 15,
+      lockoutThreshold2: 10,
+      lockoutDuration2Minutes: 60,
+      lockoutThreshold3: 15,
+      lockoutDuration3Minutes: 1440,
+    });
+    setupTransaction({
+      failed_unlock_attempts: 1, // 1 previous → 2 after increment, below threshold1=5
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+    const after = await recordFailure("user-1", undefined, "tenant-recover");
+
+    expect(after).not.toBeNull();
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledTimes(2); // fallback was not cached
+    expect(after!.attempts).toBe(2);
+    expect(after!.locked).toBe(false); // real (lenient) policy applies again
+    invalidateLockoutThresholdCache("tenant-recover");
+  });
+
   it("re-queries the DB after invalidateLockoutThresholdCache", async () => {
     // First call: return custom thresholds, cache them
     mockPrismaTenant.findUnique.mockResolvedValue({
