@@ -17,11 +17,11 @@ Close the residual actionable items confirmed by the external-review verificatio
 (`external-review-2026-07-verification.md`), except SC-scoped deferrals:
 
 1. 残2 — team history old-key client wiring + old-key fetch audit (the only user-facing data-loss item)
-2. #2 residual — Tailscale UI help text overstates browser-path enforcement
-3. #3 — pin the 4-field session-callback contract (fail-closed drift test)
-4. #6 residual — standalone admin lockout clear + fallback observability
-5. #4 — retention registry vs pg_policies/relrowsecurity DB cross-check
-6. #5 — toolchain pinning (engines/packageManager, CI Node-22 job alignment)
+2. `#2` residual — Tailscale UI help text overstates browser-path enforcement
+3. `#3` — pin the 4-field session-callback contract (fail-closed drift test)
+4. `#6` residual — standalone admin lockout clear + fallback observability
+5. `#4` — retention registry vs pg_policies/relrowsecurity DB cross-check
+6. `#5` — toolchain pinning (engines/packageManager, CI Node-22 job alignment)
 7. 残3 — AccessRequest PENDING→EXPIRED sweep in retention-gc worker
 
 ## Contracts
@@ -142,7 +142,7 @@ Close the residual actionable items confirmed by the external-review verificatio
 ## Scope contract
 
 - SC1 — 残1 (gate self-test debt, 24 entries incl. 6 security gates): owned by the tracked SC7 extraction follow-up already recorded in `gate-selftest-debt.txt`; separate multi-PR effort, not this branch.
-- SC2 — Browser-path Tailscale WhoIs enforcement (real fix beyond wording): owned by the documented intentional boundary (access-restriction.ts:162-175, PR #651) and its future revisit; this branch changes only the UI disclosure (C3).
+- SC2 — Browser-path Tailscale WhoIs enforcement (real fix beyond wording): owned by the documented intentional boundary (access-restriction.ts:162-175, PR `#651`) and its future revisit; this branch changes only the UI disclosure (C3).
 - SC3 — Metrics infrastructure (Prometheus/OTel counters) for lockout fallback: no metrics stack exists in the repo; C5 delivers a stable log key instead. Introducing a metrics stack is out of scope.
 - SC4 — Server-side history re-encryption on team key rotation (the alternative fix for 残2): C1 implements lazy old-key decryption instead; bulk re-encryption is a design alternative deliberately not chosen (client-side E2E crypto makes server re-encryption impossible by design; client-driven bulk re-encrypt is a future UX feature).
 - SC5 — EXPIRED-status UI polish beyond existing status badge rendering.
