@@ -46,6 +46,10 @@ const DISPLAY_PATHS = [
 ];
 
 // A throw-disposition read: enforcement select + null-tenant throw guard.
+// Block body with a statement before the throw — the shape every real manifest
+// throw-file uses — so the baseline pins the descendant-ThrowStatement clause
+// (a bare `if (!t) throw` only exercises the direct-kind clause; see the
+// dedicated bare-throw positive test below).
 const THROW_SRC = `
 import { prisma } from "@/lib/prisma";
 export async function read(id: string) {
@@ -53,7 +57,10 @@ export async function read(id: string) {
     where: { id },
     select: { allowedCidrs: true },
   });
-  if (!tenant) throw new Error("tenant not found");
+  if (!tenant) {
+    console.error("tenant row missing", id);
+    throw new Error("tenant not found");
+  }
   return tenant.allowedCidrs;
 }`;
 
@@ -151,6 +158,51 @@ describe("check-null-tenant-fail-closed (AST)", () => {
     expect(r.stderr).toContain("src/lib/auth/policy/access-restriction.ts");
   });
 
+  // Positive control for the OTHER acceptance clause: the baseline THROW_SRC
+  // uses a block-body guard (descendant-ThrowStatement clause); this pins the
+  // bare unbraced `if (!tenant) throw ...` shape (direct-kind clause). Together
+  // they prove the throw-only tightening did not over-tighten either accepted
+  // guard shape — a rejection-only suite could not tell "correctly rejects
+  // permissive returns" from "rejects everything".
+  it("accepts a bare (unbraced) `if (!tenant) throw` guard", () => {
+    writeFile(
+      "src/lib/auth/policy/access-restriction.ts",
+      `import { prisma } from "@/lib/prisma";
+       export async function read(id: string) {
+         const tenant = await prisma.tenant.findUnique({ where: { id }, select: { allowedCidrs: true } });
+         if (!tenant) throw new Error("tenant not found");
+         return tenant.allowedCidrs;
+       }`,
+    );
+    const r = run();
+    expect(r.code).toBe(0);
+  });
+
+  // External review Medium #2: the earlier check accepted ANY `return` in the
+  // null guard as fail-closed, so `if (!tenant) return []` (permissive empty
+  // allowlist), `return null`, and `return { allowed: true }` all false-greened.
+  // A throw-disposition guard body must THROW — a return, whatever its value,
+  // cannot be proven to be the denial side.
+  it.each([
+    ["return []", "return [];"],
+    ["return null", "return null;"],
+    ["return { allowed: true }", "return { allowed: true };"],
+  ])("fails a throw-disposition guard softened to a permissive `%s`", (_label, guardBody) => {
+    writeFile(
+      "src/lib/auth/policy/access-restriction.ts",
+      `import { prisma } from "@/lib/prisma";
+       export async function read(id: string) {
+         const tenant = await prisma.tenant.findUnique({ where: { id }, select: { allowedCidrs: true } });
+         if (!tenant) ${guardBody}
+         return tenant.allowedCidrs;
+       }`,
+    );
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('disposition "throw"');
+    expect(r.stderr).toContain("src/lib/auth/policy/access-restriction.ts");
+  });
+
   it("fails a failsafe-default file that introduces a permissive enforcement coalesce", () => {
     writeFile(
       "src/lib/auth/policy/account-lockout.ts",
@@ -158,6 +210,23 @@ describe("check-null-tenant-fail-closed (AST)", () => {
        export async function read(id: string) {
          const tenant = await prisma.tenant.findUnique({ where: { id }, select: { lockoutThreshold1: true } });
          return tenant?.lockoutThreshold1 ?? 5;
+       }`,
+    );
+    const r = run();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('disposition "failsafe-default"');
+  });
+
+  // `?? lenient` -> `|| lenient` is a one-character ordinary edit (a plausible
+  // "handle 0/falsy" tweak) with the same fail-open effect; the coalesce check
+  // must catch both operators.
+  it("fails a failsafe-default file whose lenient fallback uses `||` instead of `??`", () => {
+    writeFile(
+      "src/lib/auth/policy/account-lockout.ts",
+      `import { prisma } from "@/lib/prisma";
+       export async function read(id: string) {
+         const tenant = await prisma.tenant.findUnique({ where: { id }, select: { lockoutThreshold1: true } });
+         return tenant?.lockoutThreshold1 || 5;
        }`,
     );
     const r = run();

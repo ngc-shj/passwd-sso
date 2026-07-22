@@ -20,13 +20,20 @@
  * verifies its declared MANIFEST disposition against the implementation:
  *
  *   "throw"            - the read's enclosing function MUST contain a null-tenant
- *                        guard that throws / returns-invalid (`if (!<tenantVar>)
- *                        { throw ... | return ... }`). Reverting the throw to a
- *                        permissive coalesce removes the guard -> FAIL.
+ *                        guard whose body THROWS (`if (!<tenantVar>) { throw ... }`).
+ *                        A bare `return` in the guard body does NOT count: `return
+ *                        []` / `return null` / `return { allowed: true }` are all
+ *                        fail-open shapes that a return-accepting check would
+ *                        false-green (external review Medium #2). All current
+ *                        manifest throw-files throw; if a denial-shaped return
+ *                        (401/403 Response, { valid: false }) ever becomes
+ *                        necessary, add an explicit AST allowlist for it then.
+ *                        Reverting the throw to a permissive coalesce or a
+ *                        permissive return removes the guard -> FAIL.
  *   "failsafe-default" - the file MUST NOT read an enforcement field through a
- *                        permissive null-coalesce (`tenant?.<field> ?? <lenient>`);
- *                        it returns a restrictive default some other way.
- *                        Introducing a permissive coalesce -> FAIL.
+ *                        permissive lenient fallback (`tenant?.<field> ?? <lenient>`
+ *                        or `|| <lenient>`); it returns a restrictive default some
+ *                        other way. Introducing a permissive fallback -> FAIL.
  *   "display-exempt"   - the file must NOT call an access-restriction / deny
  *                        primitive. Turning an echo into an access decision -> FAIL.
  *
@@ -226,9 +233,17 @@ function promiseAllDestructuredName(call) {
 }
 
 // Does the enclosing function of `read.node` contain a null guard on the SAME
-// variable the read is bound to, that throws / returns (fail closed)?
-//   plain read `const t = ...findUnique(...)`  -> guard `if (!t) { throw|return }`
+// variable the read is bound to, whose body THROWS (fail closed)?
+//   plain read `const t = ...findUnique(...)`  -> guard `if (!t) { throw ... }`
 //   relation join bound to `const u = ...`      -> guard `if (!u) | if (!u.tenant)`
+// A `return` in the guard body is NOT accepted: any return value (`[]`, `null`,
+// `{ allowed: true }`) can be the permissive side, and this check cannot tell a
+// denial-shaped return from a fail-open one — a `throw` in the guard body is the
+// accepted signal. Accepted residual (not full control-flow dominance): a throw
+// in a dead branch, swallowed by try/catch, or inside a nested callback still
+// greens; those shapes require deliberate evasion, which is out of this gate's
+// anti-regression threat model — code review + the mutation-verified unit tests
+// over the real files cover them.
 // A read with no bindable variable (guardVar null) is treated as UNGUARDED.
 function hasNullTenantThrowGuard(read) {
   const v = read.guardVar;
@@ -254,18 +269,25 @@ function hasNullTenantThrowGuard(read) {
     const opText = operand.getText().replace(/\s+/g, "");
     if (!wanted.has(opText) && !wanted.has(opText.replace(/\?\./g, "."))) continue;
     const body = ifStmt.getThenStatement();
-    const bk = body.getKind();
-    if (bk === SyntaxKind.ThrowStatement ||
-        bk === SyntaxKind.ReturnStatement ||
-        body.getDescendantsOfKind(SyntaxKind.ThrowStatement).length > 0 ||
-        body.getDescendantsOfKind(SyntaxKind.ReturnStatement).length > 0) return true;
+    if (body.getKind() === SyntaxKind.ThrowStatement ||
+        body.getDescendantsOfKind(SyntaxKind.ThrowStatement).length > 0) return true;
   }
   return false;
 }
 
+// `??` and `||` are both one-edit-apart lenient fallbacks (`?? lenient` ->
+// `|| lenient` is a plausible "handle 0/falsy" tweak); flag either. A ternary
+// (`tenant ? tenant.x : lenient`) remains an accepted residual — it is not
+// reachable by an ordinary one-character edit, and runtime behavior is pinned
+// by the mutation-verified unit tests over the failsafe files.
+const LENIENT_FALLBACK_TOKENS = new Set([
+  SyntaxKind.QuestionQuestionToken,
+  SyntaxKind.BarBarToken,
+]);
+
 function hasPermissiveEnforcementCoalesce(sf) {
   for (const bin of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
-    if (bin.getOperatorToken().getKind() !== SyntaxKind.QuestionQuestionToken) continue;
+    if (!LENIENT_FALLBACK_TOKENS.has(bin.getOperatorToken().getKind())) continue;
     const left = bin.getLeft();
     const paList = left.getKind() === SyntaxKind.PropertyAccessExpression
       ? [left] : left.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression);
@@ -318,11 +340,11 @@ for (const file of targets) {
 
   if (disposition === "throw") {
     if (!reads.every((r) => hasNullTenantThrowGuard(r))) {
-      violations.push(`${rel}: disposition "throw" but an enforcement read has no null-tenant guard (if (!tenant) { throw|return }). A reverted throw is a fail-open regression.`);
+      violations.push(`${rel}: disposition "throw" but an enforcement read has no null-tenant guard whose body throws (if (!tenant) { throw ... }). A reverted or return-softened throw is a fail-open regression.`);
     }
   } else if (disposition === "failsafe-default") {
     if (hasPermissiveEnforcementCoalesce(sf)) {
-      violations.push(`${rel}: disposition "failsafe-default" but an enforcement field is read through a permissive '?? <lenient>' coalesce - the fail-open shape. Return a RESTRICTIVE default instead.`);
+      violations.push(`${rel}: disposition "failsafe-default" but an enforcement field is read through a permissive '?? <lenient>' / '|| <lenient>' fallback - the fail-open shape. Return a RESTRICTIVE default instead.`);
     }
   } else if (disposition === "display-exempt") {
     if (callsAccessDecision(sf)) {
