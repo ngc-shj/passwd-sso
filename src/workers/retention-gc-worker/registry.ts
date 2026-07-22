@@ -536,3 +536,81 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     auditAction: "LOG_RETENTION_PURGED",
   },
 ] as const;
+
+/** Registry entry kinds whose `globalDelete` flag governs RLS-bypass semantics
+ * (the same three kinds validateRegistry enforces globalDelete on). A table in
+ * this family that the worker assumes is RLS-enabled (i.e. NOT listed in
+ * RLS_FREE_EXPIRY_TABLES) but that actually has relrowsecurity = false in the
+ * live catalog would silently mismatch the worker's bypass_rls assumption. */
+const EXPIRY_FAMILY_KINDS: ReadonlySet<RetentionEntryKind> = new Set([
+  "EXPIRY",
+  "EXPIRY_GUARDED",
+  "EXPIRY_AUDIT_PROVENANCE",
+]);
+
+/** Live pg_class catalog row shape (S14 ground truth for RLS enforcement). */
+export interface CatalogTableRow {
+  table: string;
+  relrowsecurity: boolean;
+}
+
+/**
+ * Cross-check the retention registry against live DB catalog rows (S14).
+ *
+ * validateRegistry() only enforces author discipline (did the registry author
+ * remember to set globalDelete). This function closes the gap by comparing
+ * the registry's claims against pg_class.relrowsecurity ground truth. Pure —
+ * no DB access, no side effects — so both the real catalog and injected
+ * negative fixtures can drive it (RT7).
+ *
+ * Throws on:
+ *   - Any registry table absent from catalogRows (renamed/dropped table drift).
+ *   - Any table in rlsFreeTables that the catalog reports as RLS-enabled
+ *     (relrowsecurity === true) — the "RLS-free" claim is stale.
+ *   - Any EXPIRY-family registry table NOT in rlsFreeTables that the catalog
+ *     reports as RLS-disabled (relrowsecurity === false) — the worker would
+ *     wrongly assume bypass_rls semantics apply on a table with no RLS policy.
+ */
+export function assertRegistryRlsParity(
+  registry: readonly RetentionEntry[],
+  rlsFreeTables: ReadonlySet<string>,
+  catalogRows: readonly CatalogTableRow[],
+): void {
+  const catalogByTable = new Map(
+    catalogRows.map((row) => [row.table, row.relrowsecurity]),
+  );
+
+  const registryTables = new Set(registry.map((entry) => entry.table));
+  for (const table of registryTables) {
+    if (!catalogByTable.has(table)) {
+      throw new Error(
+        `retention-gc: registry table "${table}" was not found in the live DB catalog (renamed or dropped table drift).`,
+      );
+    }
+  }
+
+  for (const table of rlsFreeTables) {
+    const relrowsecurity = catalogByTable.get(table);
+    if (relrowsecurity === undefined) {
+      throw new Error(
+        `retention-gc: RLS-free table "${table}" was not found in the live DB catalog.`,
+      );
+    }
+    if (relrowsecurity === true) {
+      throw new Error(
+        `retention-gc: table "${table}" is listed in RLS_FREE_EXPIRY_TABLES but the live catalog reports relrowsecurity = true (RLS is actually enabled).`,
+      );
+    }
+  }
+
+  for (const entry of registry) {
+    if (!EXPIRY_FAMILY_KINDS.has(entry.kind)) continue;
+    if (rlsFreeTables.has(entry.table)) continue;
+    const relrowsecurity = catalogByTable.get(entry.table);
+    if (relrowsecurity === false) {
+      throw new Error(
+        `retention-gc: EXPIRY-family table "${entry.table}" is not in RLS_FREE_EXPIRY_TABLES but the live catalog reports relrowsecurity = false (worker would wrongly assume bypass_rls semantics on a non-RLS table).`,
+      );
+    }
+  }
+}

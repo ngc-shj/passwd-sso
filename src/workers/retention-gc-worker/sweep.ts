@@ -577,6 +577,55 @@ export async function sweepTrashEntry(
 }
 
 /**
+ * Flip PENDING access_requests past their expiry to EXPIRED (external-review
+ * 2026-07 remediation, C7 / 残3). This is a status TRANSITION, not a delete —
+ * the existing EXPIRY_AUDIT_PROVENANCE registry entry for access_requests
+ * (registry.ts, cutoff = expires_at) still hard-deletes the row later,
+ * regardless of its status, so this sweep only makes the interim state
+ * visible to the tenant UI before that eventual purge.
+ *
+ * State-machine cross-reference: PENDING -> EXPIRED by actor SYSTEM is the
+ * MATRIX entry at src/lib/access-request/access-request-state.ts (MATRIX
+ * [PENDING][EXPIRED] = [AR_ACTOR.SYSTEM]); access-request-state.test.ts pins
+ * it green, and the SQL/MATRIX parity test below fails if that entry is ever
+ * removed while this SQL stays.
+ *
+ * Raw SQL instead of bulkTransition(): bulkTransition's bypass-mode guard
+ * (hasScopeUnderBypass) requires a tenantId predicate, which a global,
+ * cross-tenant sweep does not have — widening the guard to carve out a
+ * SYSTEM-sweep exception was rejected (plan C7) as risking route-path callers
+ * inheriting the relaxed guard. The UPDATE is a static template (no
+ * interpolated values — injection-free by construction), CAS by construction
+ * (only rows still PENDING flip), and idempotent (re-running finds fewer or
+ * zero newly-expired rows). Batch-bounded via the same
+ * `(id) IN (SELECT id ... LIMIT $1)` key-set shape used by every other sweep
+ * in this file, so one cycle never flips an unbounded number of rows.
+ *
+ * Runs under the worker's bypass_rls GUC (RLS-enabled table, NOBYPASSRLS
+ * role) — same pattern as sweepExpiryEntry's globalDelete branch. Requires
+ * the migration 20260722000100 GRANT UPDATE (status) ON access_requests.
+ *
+ * @returns Number of rows flipped to EXPIRED this batch.
+ */
+export async function sweepExpiredAccessRequests(
+  tx: Prisma.TransactionClient,
+  batchSize: number,
+): Promise<number> {
+  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+
+  return tx.$executeRawUnsafe<number>(
+    `UPDATE access_requests
+       SET status = 'EXPIRED'
+       WHERE (id) IN (
+         SELECT id FROM access_requests
+         WHERE status = 'PENDING' AND expires_at < now()
+         LIMIT $1
+       )`,
+    batchSize,
+  );
+}
+
+/**
  * Run one full sweep across the RETENTION_REGISTRY.
  *
  * Each EXPIRY entry runs in its own $transaction (INV-C4a). A per-entry error
@@ -598,6 +647,22 @@ export async function sweepOnce(
 ): Promise<Record<string, number>> {
   const log = getLogger();
   const counts: Record<string, number> = {};
+
+  // PENDING -> EXPIRED status sweep runs BEFORE registry processing (C7):
+  // a per-entry registry failure below must not block this cheap, independent
+  // status flip. Isolated in its own try/catch — same per-entry error
+  // isolation contract as the registry loop (INV-C4b).
+  try {
+    const expiredCount = await workerPrisma.$transaction((tx) =>
+      sweepExpiredAccessRequests(tx, batchSize),
+    );
+    if (expiredCount > 0) {
+      log.info({ count: expiredCount }, "retention-gc.access_requests_expired");
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
+    log.error({ table: "access_requests", code }, "retention-gc.entry_failed");
+  }
 
   for (const entry of RETENTION_REGISTRY) {
     const tableName = entry.table;

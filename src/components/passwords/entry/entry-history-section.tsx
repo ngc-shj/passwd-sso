@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
 import { useTeamVault } from "@/lib/team/team-vault-context";
+import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
@@ -187,10 +188,6 @@ export function EntryHistorySection({
     try {
       if (scopedTeamId) {
         // Team entries: fetch encrypted blob, then decrypt client-side.
-        // TODO: If h.teamKeyVersion !== current team version, fetch old key via
-        // GET /member-key?keyVersion=N for correct decryption.
-        // Currently uses latest key only — history from before key rotation
-        // will fail to decrypt until re-encryption is implemented.
         const res = await fetchApi(apiPath.teamPasswordHistoryById(scopedTeamId, entryId, h.id));
         if (!res.ok) {
           return;
@@ -230,8 +227,12 @@ export function EntryHistorySection({
         const plaintext = await decryptData(h.encryptedBlob, encryptionKey, aad);
         setViewData(JSON.parse(plaintext));
       }
-    } catch {
-      toast.error("Failed to decrypt history version");
+    } catch (e) {
+      if (e instanceof TeamKeyVersionUnavailableError) {
+        toast.error(t("historyKeyUnavailable"));
+      } else {
+        toast.error("Failed to decrypt history version");
+      }
     } finally {
       setViewLoading(false);
     }

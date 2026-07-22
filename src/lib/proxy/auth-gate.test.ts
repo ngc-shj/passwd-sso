@@ -164,6 +164,8 @@ describe("getSessionInfo", () => {
             id: "u-2",
             hasPasskey: true,
             requirePasskey: false,
+            requirePasskeyEnabledAt: null,
+            passkeyGracePeriodDays: null,
           },
           expires: new Date(Date.now() + 60_000).toISOString(),
         }),
@@ -182,6 +184,89 @@ describe("getSessionInfo", () => {
     expect(result.hasPasskey).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).toHaveBeenCalledTimes(1);
+  });
+
+  // C4: full-shape response (all four passkey fields present) must pass
+  // through unchanged — regression pin using non-default values so
+  // pass-through is observable (requirePasskey:true + hasPasskey:true would
+  // be silently masked by the fail-closed bundle's own values otherwise).
+  it("full-shape passkey fields pass through unchanged (regression pin)", async () => {
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          user: {
+            id: "u-full",
+            hasPasskey: true,
+            requirePasskey: true,
+            requirePasskeyEnabledAt: "2026-01-01T00:00:00.000Z",
+            passkeyGracePeriodDays: 14,
+          },
+          expires: new Date(Date.now() + 60_000).toISOString(),
+        }),
+        { status: 200 },
+      ),
+    );
+    mockResolveUserTenantId.mockResolvedValueOnce("t-full");
+
+    const result = await getSessionInfo(
+      makeRequest({ cookie: "authjs.session-token=tok-full" }),
+    );
+
+    expect(result.valid).toBe(true);
+    expect(result.hasPasskey).toBe(true);
+    expect(result.requirePasskey).toBe(true);
+    expect(result.requirePasskeyEnabledAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(result.passkeyGracePeriodDays).toBe(14);
+    expect(mockSetCachedSession).toHaveBeenCalledTimes(1);
+  });
+
+  // C4: bundle-level fail-closed substitution — if ANY of the four passkey
+  // fields is absent from a valid session response, the ENTIRE fail-closed
+  // bundle is substituted (not just the missing field), mirroring src/auth.ts's
+  // own catch-path bundle. Mutation check: deleting the substitution branch
+  // makes these four tests fail (hasPasskey/requirePasskeyEnabledAt/
+  // passkeyGracePeriodDays would retain their per-field `?? false`/`?? null`
+  // defaults instead of the full bundle, or requirePasskey would stay false).
+  describe("C4: bundle-level fail-closed substitution on missing passkey field", () => {
+    const fullUser = {
+      id: "u-drift",
+      hasPasskey: true,
+      requirePasskey: true,
+      requirePasskeyEnabledAt: "2026-01-01T00:00:00.000Z",
+      passkeyGracePeriodDays: 14,
+    };
+
+    it.each([
+      "hasPasskey",
+      "requirePasskey",
+      "requirePasskeyEnabledAt",
+      "passkeyGracePeriodDays",
+    ] as const)("substitutes the fail-closed bundle when %s is missing", async (omittedField) => {
+      mockGetCachedSession.mockResolvedValueOnce(null);
+      const user = { ...fullUser };
+      delete (user as Record<string, unknown>)[omittedField];
+      fetchSpy.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            user,
+            expires: new Date(Date.now() + 60_000).toISOString(),
+          }),
+          { status: 200 },
+        ),
+      );
+      mockResolveUserTenantId.mockResolvedValueOnce("t-drift");
+
+      const result = await getSessionInfo(
+        makeRequest({ cookie: "authjs.session-token=tok-drift" }),
+      );
+
+      expect(result.valid).toBe(true);
+      expect(result.requirePasskey).toBe(true);
+      expect(result.hasPasskey).toBe(false);
+      expect(result.requirePasskeyEnabledAt).toBeNull();
+      expect(result.passkeyGracePeriodDays).toBeNull();
+    });
   });
 
   it("fail-closed: fetch throws → { valid: false }, no cache write", async () => {

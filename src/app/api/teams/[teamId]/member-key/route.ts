@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { requireTeamMember } from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, validationError } from "@/lib/http/api-response";
@@ -46,17 +47,42 @@ async function handleGET(req: NextRequest, { params }: Params) {
     if (Number.isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
       return validationError();
     }
-    memberKey = await withTeamTenantRls(teamId, async () =>
-      prisma.teamMemberKey.findUnique({
-        where: {
-          teamId_userId_keyVersion: {
-            teamId: teamId,
-            userId: userId,
-            keyVersion,
+    const [resolvedKey, team] = await withTeamTenantRls(teamId, async () =>
+      Promise.all([
+        prisma.teamMemberKey.findUnique({
+          where: {
+            teamId_userId_keyVersion: {
+              teamId: teamId,
+              userId: userId,
+              keyVersion,
+            },
           },
-        },
-      }),
+        }),
+        prisma.team.findUnique({
+          where: { id: teamId },
+          select: { teamKeyVersion: true },
+        }),
+      ]),
     );
+    memberKey = resolvedKey;
+
+    // Post-authorization forensic signal (C2): a post-rotation member fetching
+    // a non-latest key version is expected (history restore) but worth an
+    // audit trail. Latest-version fetches (the hot no-param path) stay
+    // un-audited to avoid log flood.
+    if (memberKey && team && memberKey.keyVersion < team.teamKeyVersion) {
+      await logAuditAsync({
+        ...teamAuditBase(req, userId, teamId),
+        action: AUDIT_ACTION.TEAM_MEMBER_KEY_OLD_VERSION_READ,
+        targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
+        targetId: userId,
+        metadata: {
+          teamId,
+          keyVersion: memberKey.keyVersion,
+          latestKeyVersion: team.teamKeyVersion,
+        },
+      });
+    }
   } else {
     // Get the latest key version
     memberKey = await withTeamTenantRls(teamId, async () =>

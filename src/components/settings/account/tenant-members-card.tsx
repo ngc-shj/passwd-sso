@@ -21,6 +21,7 @@ import { filterMembers } from "@/lib/filter-members";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { TenantVaultResetButton } from "../security/tenant-vault-reset-button";
+import { TenantClearLockoutButton } from "../security/tenant-clear-lockout-button";
 import { TenantResetHistoryDialog } from "../security/tenant-reset-history-dialog";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -181,6 +182,10 @@ export function TenantMembersCard() {
               const targetLevel = ROLE_LEVEL[m.role] ?? 0;
               const canReset =
                 !isSelf && !isDeactivated && myLevel > targetLevel;
+              // Self-target is allowed for lockout clear (matches the server's
+              // self-bypass of the role-hierarchy check — see clear-lockout route.ts).
+              const canClearLockout =
+                !isDeactivated && (isSelf || myLevel > targetLevel);
               const canChangeRole =
                 isOwner && !isSelf && !isDeactivated && m.role !== "OWNER" && !m.scimManaged;
 
@@ -235,6 +240,12 @@ export function TenantMembersCard() {
                       userId={m.userId}
                       memberName={m.name ?? m.email ?? "—"}
                       disabled={!canReset}
+                      onSuccess={fetchMembers}
+                    />
+                    <TenantClearLockoutButton
+                      userId={m.userId}
+                      memberName={m.name ?? m.email ?? "—"}
+                      disabled={!canClearLockout}
                       onSuccess={fetchMembers}
                     />
                   </div>

@@ -97,6 +97,25 @@ vi.mock("@/components/settings/security/tenant-vault-reset-button", () => ({
   ),
 }));
 
+vi.mock("@/components/settings/security/tenant-clear-lockout-button", () => ({
+  TenantClearLockoutButton: ({
+    userId,
+    disabled,
+  }: {
+    userId: string;
+    disabled?: boolean;
+    memberName?: string;
+    onSuccess?: () => void;
+  }) => (
+    <button
+      data-testid={`clear-lockout-${userId}`}
+      disabled={disabled}
+    >
+      ClearLockout
+    </button>
+  ),
+}));
+
 vi.mock("@/components/settings/security/tenant-reset-history-dialog", () => ({
   TenantResetHistoryDialog: ({
     userId,
@@ -1092,7 +1111,7 @@ describe("TenantMembersCard", () => {
   // -------------------------------------------------------------------------
   // 15. Multiple members
   // -------------------------------------------------------------------------
-  it("renders TenantResetHistoryDialog and TenantVaultResetButton for each member", async () => {
+  it("renders TenantResetHistoryDialog, TenantVaultResetButton and TenantClearLockoutButton for each member", async () => {
     mockUseTenantRole.mockReturnValue({
       role: "ADMIN",
       isAdmin: true,
@@ -1117,5 +1136,89 @@ describe("TenantMembersCard", () => {
     expect(screen.getByTestId("reset-history-u2")).toBeInTheDocument();
     expect(screen.getByTestId("vault-reset-u1")).toBeInTheDocument();
     expect(screen.getByTestId("vault-reset-u2")).toBeInTheDocument();
+    expect(screen.getByTestId("clear-lockout-u1")).toBeInTheDocument();
+    expect(screen.getByTestId("clear-lockout-u2")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // 16. ClearLockoutButton disabled state (canClearLockout logic — self ALLOWED)
+  // -------------------------------------------------------------------------
+  it("enables ClearLockoutButton for self, unlike VaultResetButton (self-target allowed for lockout clear)", async () => {
+    const selfMember = makeMember({
+      id: "mem-self",
+      userId: "owner-id",
+      role: "MEMBER",
+    });
+
+    mockUseTenantRole.mockReturnValue({
+      role: "OWNER",
+      isAdmin: true,
+      loading: false,
+    });
+    setupAsFetchReady({ members: [selfMember], currentUserId: "owner-id" });
+
+    await act(async () => {
+      render(<TenantMembersCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("clear-lockout-owner-id")).toBeInTheDocument();
+    });
+
+    // VaultReset stays disabled for self (unchanged behavior)
+    expect(screen.getByTestId("vault-reset-owner-id")).toBeDisabled();
+    // ClearLockout is NOT disabled for self
+    expect(screen.getByTestId("clear-lockout-owner-id")).not.toBeDisabled();
+  });
+
+  it("disables ClearLockoutButton for deactivated member", async () => {
+    const deactivated = makeMember({
+      id: "mem-deact",
+      userId: "deact-user",
+      role: "MEMBER",
+      deactivatedAt: "2025-01-01T00:00:00Z",
+    });
+
+    mockUseTenantRole.mockReturnValue({
+      role: "OWNER",
+      isAdmin: true,
+      loading: false,
+    });
+    setupAsFetchReady({ members: [deactivated], currentUserId: "owner-id" });
+
+    await act(async () => {
+      render(<TenantMembersCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("clear-lockout-deact-user")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("clear-lockout-deact-user")).toBeDisabled();
+  });
+
+  it("disables ClearLockoutButton for non-self member at or above actor's role level", async () => {
+    const peerOwner = makeMember({
+      id: "mem-peer",
+      userId: "peer-owner",
+      role: "OWNER",
+    });
+
+    mockUseTenantRole.mockReturnValue({
+      role: "OWNER",
+      isAdmin: true,
+      loading: false,
+    });
+    setupAsFetchReady({ members: [peerOwner], currentUserId: "owner-id" });
+
+    await act(async () => {
+      render(<TenantMembersCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("clear-lockout-peer-owner")).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId("clear-lockout-peer-owner")).toBeDisabled();
   });
 });

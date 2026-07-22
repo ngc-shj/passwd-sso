@@ -88,6 +88,7 @@ src/app/api/tenant/access-requests/[id]/approve/route.ts	1
 src/app/api/tenant/access-requests/[id]/deny/route.ts	1
 src/app/api/tenant/access-requests/route.ts	1
 src/app/api/tenant/breakglass/route.ts	1
+src/app/api/tenant/members/[userId]/clear-lockout/route.ts	2
 src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts	2
 src/app/api/tenant/members/[userId]/reset-vault/route.ts	2
 src/app/api/tenant/operator-tokens/route.ts	1

@@ -3,7 +3,8 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
   mockCheckAuth, mockRequireTeamMember, mockPrismaTeamMember,
-  mockPrismaTeamMemberKey, TeamAuthError, mockWithTeamTenantRls,
+  mockPrismaTeamMemberKey, mockPrismaTeam, TeamAuthError, mockWithTeamTenantRls,
+  mockLogAuditAsync,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -18,8 +19,10 @@ const {
     mockRequireTeamMember: vi.fn(),
     mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn() },
     mockPrismaTeamMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
+    mockPrismaTeam: { findUnique: vi.fn() },
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockLogAuditAsync: vi.fn(),
   };
 });
 
@@ -32,10 +35,19 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
     teamMemberKey: mockPrismaTeamMemberKey,
+    team: mockPrismaTeam,
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAuditAsync,
+  teamAuditBase: vi.fn((_req: unknown, userId: string, teamId: string) => ({
+    scope: "TEAM",
+    userId,
+    teamId,
+  })),
 }));
 
 import { GET } from "./route";
@@ -128,6 +140,8 @@ describe("GET /api/teams/[teamId]/member-key", () => {
       keyVersion: 1,
       wrapVersion: 1,
     });
+    // Same version as latest — no audit (only strictly-older reads are audited).
+    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
 
     const res = await GET(
       createRequest("GET", `${URL}?keyVersion=1`),
@@ -137,6 +151,61 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(res.status).toBe(200);
     expect(json.keyVersion).toBe(1);
     expect(json.wrapVersion).toBe(1);
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
+  });
+
+  it("emits TEAM_MEMBER_KEY_OLD_VERSION_READ audit when the fetched version is older than the team's current version (C2)", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMemberKey.findUnique.mockResolvedValue({
+      encryptedTeamKey: "enc-key-v1",
+      teamKeyIv: "iv",
+      teamKeyAuthTag: "tag",
+      ephemeralPublicKey: "eph",
+      hkdfSalt: "salt",
+      keyVersion: 1,
+      wrapVersion: 1,
+    });
+    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 3 });
+
+    const res = await GET(
+      createRequest("GET", `${URL}?keyVersion=1`),
+      { params: Promise.resolve({ teamId: "team-1" }) },
+    );
+    expect(res.status).toBe(200);
+    expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "TEAM_MEMBER_KEY_OLD_VERSION_READ",
+        userId: "user-1",
+        teamId: "team-1",
+        metadata: {
+          teamId: "team-1",
+          keyVersion: 1,
+          latestKeyVersion: 3,
+        },
+      }),
+    );
+  });
+
+  it("does not emit an audit on the latest (no-param) fetch path", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
+    mockPrismaTeamMemberKey.findFirst.mockResolvedValue({
+      encryptedTeamKey: "enc-key",
+      teamKeyIv: "iv-hex",
+      teamKeyAuthTag: "tag-hex",
+      ephemeralPublicKey: "eph-pub",
+      hkdfSalt: "salt-hex",
+      keyVersion: 2,
+      wrapVersion: 1,
+    });
+
+    const res = await GET(
+      createRequest("GET", URL),
+      { params: Promise.resolve({ teamId: "team-1" }) },
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrismaTeam.findUnique).not.toHaveBeenCalled();
+    expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
   it("returns 400 on invalid keyVersion param", async () => {

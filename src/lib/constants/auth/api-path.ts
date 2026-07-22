@@ -133,7 +133,10 @@ export const apiPath = {
     `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments`,
   teamPasswordAttachmentById: (teamId: string, entryId: string, attachmentId: string) =>
     `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/attachments/${attachmentId}`,
-  teamMemberKey: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/member-key`,
+  teamMemberKey: (teamId: string, keyVersion?: number) =>
+    keyVersion !== undefined
+      ? `${API_PATH.TEAMS}/${teamId}/member-key?keyVersion=${keyVersion}`
+      : `${API_PATH.TEAMS}/${teamId}/member-key`,
   teamMemberConfirmKey: (teamId: string, memberId: string) =>
     `${API_PATH.TEAMS}/${teamId}/members/${memberId}/confirm-key`,
   teamTags: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/tags`,
@@ -192,6 +195,8 @@ export const apiPath = {
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
   tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault/${resetId}/revoke`,
+  tenantMemberClearLockout: (userId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}/clear-lockout`,
   teamRotateKey: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rotate-key`,
   teamRotateKeyData: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rotate-key/data`,
   teamWebhooks: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/webhooks`,
