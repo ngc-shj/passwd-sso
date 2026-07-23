@@ -38,3 +38,8 @@ The FIX-M4 mutation proof (loosen schema → confirm test red) was run by sed-ed
 
 ## D13 — F1(perm-residue) root cause: Phase 2 git add -A
 The .claude/settings.json permissions block removed by FIX-F5 was introduced by my own Phase 2 commit's `git add -A` (main has no permissions block). Future: stage explicit paths, not -A, when session tooling may have written machine-specific config.
+
+## D14 — restore snapshot TOCTOU (external supplement round 3) + CI cross-realm fix
+User/IDE review caught the restore route reading the entry OUTSIDE the transaction: a concurrent PUT committing between that read and the tx would be silently lost (restore overwrites it, stale content lands in the snapshot). Fixed with an in-tx SELECT ... FOR UPDATE (mirroring team-password-service's full-update snapshot; the PERSONAL restore route already had this — raw-sql-usage.txt:70 — team side was the gap). Test pins the locked-row values (deliberately different from the outside-tx fixture); concurrent-delete → 404 case added; the parallel test tree src/__tests__/api/teams/team-history-restore.test.ts updated too (R19 — full-suite run caught the sibling).
+Separately, CI-only red on the crypto suite: jsdom's SubtleCrypto wrapper rejects cross-realm ArrayBuffers on newer Node 20.x patches ("2nd argument is not instance of ArrayBuffer"); fixed by replacing globalThis.crypto with node:crypto webcrypto in the test file (still real crypto, zero mocks; per jsdom-web-crypto-probe's documented fallback).
+Simplify: extracted resolveTeamKeyForVersion (single source of the F3 not_available/transient discrimination shared by getEntryDecryptionKey/getItemEncryptionKey; ~45 line reduction; inverted-search confirmed exactly 2 call sites, value-diff audit clean — message string only).

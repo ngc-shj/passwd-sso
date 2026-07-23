@@ -5,6 +5,18 @@
 // crypto-aad module-wide and cannot host real-crypto cases, so version
 // assertion, normalization, and old-key unwrap correctness are exercised
 // here against actual AES-GCM/ECDH primitives. Only `fetch` is stubbed.
+//
+// jsdom's crypto.subtle wrapper enforces same-realm BufferSource checks that
+// reject ArrayBuffers produced in the test (Node) realm — importKey fails
+// with "2nd argument is not instance of ArrayBuffer" on newer Node 20.x
+// patches (CI-only red; see jsdom-web-crypto-probe.test.ts's fallback note).
+// Replace the jsdom wrapper with Node's own webcrypto so fixtures and the
+// production code under test share one realm. Still real crypto, zero mocks.
+import { webcrypto as nodeWebcrypto } from "node:crypto";
+Object.defineProperty(globalThis, "crypto", {
+  value: nodeWebcrypto,
+  configurable: true,
+});
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, it, expect, afterEach } from "vitest";
