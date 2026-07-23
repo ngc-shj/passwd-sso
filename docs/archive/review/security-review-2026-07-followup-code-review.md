@@ -1,7 +1,22 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
-Review round: 4
+Review round: 5
+
+## Round 5 — fourth external re-review (all addressed)
+
+- **High — `.dockerignore` still missed part of the git-ignored secret/data class.** Round 4
+  transcribed the visible `.gitignore` entries but not systematically: `e2e/.auth-state.json`
+  (Playwright session token), `postgres_data/`, `prisma/*.db-journal`, and `saml/` were still
+  absent. Fixed by ENUMERATING every secret/data entry in `.gitignore` and adding the missing
+  patterns (`**/.auth-state.json`, `**/postgres_data`, `**/*.db-journal`, `**/saml`,
+  `**/playwright-report`). Restructured the guard so the static assertion AND the bundle scan
+  derive from ONE shared `MUST_EXCLUDE` representative-path set (no more static/bundle drift —
+  the Round-4 Low). Self-test → 15 cases incl. a drop-each-new-class red loop and new bundle
+  red cases (auth-state, postgres_data/db-journal). None of these files exist locally now, so
+  the static assertion (representative path vs `.dockerignore`) is the mechanical proof.
+- **Doc — fixed a duplicated Round 3 heading and softened the "closes the defect class"
+  wording** (premature while class members kept surfacing).
 
 ## Round 4 — third external re-review (all addressed)
 
@@ -9,18 +24,13 @@ Review round: 4
   only; a real builder still carried `.passwd-sso-env.json`, `certificates/*.pem`, and the
   1.45 GB `infra/terraform/.terraform`. Fixed by mirroring `.gitignore`'s secret/artifact
   entries into `.dockerignore` recursively (keys/certs, CLI vault mapping, Terraform
-  state/tfvars/.terraform, local DBs), keeping `!**/*.tfvars.example`. Guard expanded to the
-  full class incl. ancestor-directory matches; self-test → 12 cases. **Verified against a real
-  `docker build --target builder`: all 4 leaked paths absent, 0 secrets at any depth.** This
-  finally closes the defect CLASS (git-ignored-secret-in-context), not just the `.env` instance.
+  state/tfvars/.terraform, local DBs), keeping `!**/*.tfvars.example`. Guard expanded incl.
+  ancestor-directory matches. **Verified against a real `docker build --target builder`: the
+  4 leaked paths absent.** (Round 5 completed the enumeration — see above.)
 - **Low — Terraform README build context.** `docker build ... .` from `infra/terraform` (no
   Dockerfile there) → `docker build -f ../../Dockerfile ../..` (en + ja).
 - **Low — k8s `envsubst` comment.** Corrected to Kustomize `images:`/`sed` (envsubst can't
   substitute a literal placeholder). Fail-closed placeholder kept.
-
-## Round 3 — second external re-review (all addressed, see below)
-
-Review round: 3
 
 ## Round 3 — second external re-review (all addressed)
 

@@ -33,9 +33,44 @@ echo "check-dockerignore-secrets: FIXTURE_ROOT=$FIXTURE_ROOT"
 DOCKERIGNORE=".dockerignore"
 [ -f "$DOCKERIGNORE" ] || { echo "ERROR: $DOCKERIGNORE not found — a missing dockerignore means COPY . . ships all env files"; exit 1; }
 
-# ── 1. Static assertion: env files are excluded at any depth ─────────────────
+# ── Single source of truth for the git-ignored secret/artifact class ─────────
+# Both the static assertion (path-vs-.dockerignore) and the bundle scan (files
+# in an extracted image tree) derive from THIS list, so they cannot drift.
+# Representative EXCLUDED paths (root + nested), one per .gitignore secret/data
+# class. Keep in sync with .gitignore's secret/data sections and .dockerignore.
+MUST_EXCLUDE=(
+  # env files
+  ".env" ".env.local" ".env.production" ".env.bak"
+  "extension/.env" "a/b/c/.env" "ios/.env.local"
+  # keys / certs / SAML
+  "certificates/localhost-key.pem" "certificates/localhost.pem"
+  "a/b/tls.key" "server.crt" "x.cert" "id.p12" "id.pfx"
+  "master.key" "config/encryption.key" "saml/metadata.xml"
+  # CLI vault mapping + local auth/review artifacts (session tokens)
+  ".passwd-sso-env.json" "sub/dir/.passwd-sso-env.json"
+  "docs/review-credentials.local.md" "load-test/setup/.load-test-auth.json"
+  "e2e/.auth-state.json"
+  # Terraform working dir / state / real tfvars
+  "infra/terraform/.terraform/providers/x" "infra/terraform/terraform.tfstate"
+  "infra/terraform/terraform.tfstate.backup"
+  "infra/terraform/envs/prod/terraform.tfvars" "x/secrets.tfvars.json"
+  # local databases + Postgres data dir
+  "data.db" "sub/cache.sqlite" "prisma/dev.db-journal" "postgres_data/base/1"
+)
+# Committed placeholders that MUST remain included (never excluded).
+MUST_INCLUDE=(
+  ".env.example" "extension/.env.example"
+  "scripts/__tests__/fixtures/env-drift/positive/.env.example"
+  "infra/terraform/terraform.tfvars.example"
+  "infra/terraform/envs/dev/terraform.tfvars.example"
+)
+
+# ── 1. Static assertion: the whole secret class is excluded at any depth ─────
 # Evaluate the effective ignore state with Docker's "last matching pattern wins"
-# semantics for a representative set of secret-bearing env paths (root + nested).
+# semantics for the shared MUST_EXCLUDE / MUST_INCLUDE representative sets.
+MUST_EXCLUDE_JOINED=$(printf '%s\n' "${MUST_EXCLUDE[@]}")
+MUST_INCLUDE_JOINED=$(printf '%s\n' "${MUST_INCLUDE[@]}")
+export MUST_EXCLUDE_JOINED MUST_INCLUDE_JOINED
 node - "$DOCKERIGNORE" <<'NODE'
 const fs = require("fs");
 const patterns = fs.readFileSync(process.argv[2], "utf8")
@@ -82,39 +117,10 @@ function ignored(path) {
   return ig;
 }
 
-// Must be EXCLUDED — root AND nested. Covers the whole git-ignored secret /
-// artifact class that `COPY . .` would otherwise pull into the build context
-// (env files, keys/certs, CLI vault mapping, Terraform state/tfvars/.terraform,
-// local DBs). Nested cases (extension/.env, certificates/*.pem, infra/.terraform)
-// were the successive re-review misses.
-const mustExclude = [
-  // env files
-  ".env", ".env.local", ".env.production", ".env.development",
-  ".env.bak", ".env.local.bak-20260101-000000",
-  "extension/.env", "cli/.env", "extension/.env.production",
-  "a/b/c/.env", "ios/.env.local",
-  // keys / certs
-  "certificates/localhost-key.pem", "certificates/localhost.pem",
-  "a/b/tls.key", "server.crt", "x.cert", "id.p12", "id.pfx",
-  "master.key", "config/encryption.key",
-  // CLI vault mapping + local auth/review artifacts
-  ".passwd-sso-env.json", "sub/dir/.passwd-sso-env.json",
-  "docs/review-credentials.local.md", "load-test/setup/.load-test-auth.json",
-  // Terraform working dir / state / real tfvars
-  "infra/terraform/.terraform/providers/x", "infra/terraform/terraform.tfstate",
-  "infra/terraform/terraform.tfstate.backup",
-  "infra/terraform/envs/prod/terraform.tfvars", "x/secrets.tfvars.json",
-  // local databases
-  "data.db", "sub/cache.sqlite",
-];
-// Must remain INCLUDED (committed, non-secret placeholders) — root and nested.
-const mustInclude = [
-  ".env.example",
-  "extension/.env.example",
-  "scripts/__tests__/fixtures/env-drift/positive/.env.example",
-  "infra/terraform/terraform.tfvars.example",
-  "infra/terraform/envs/dev/terraform.tfvars.example",
-];
+// Shared representative sets (from the bash MUST_EXCLUDE / MUST_INCLUDE arrays —
+// single source of truth; the bundle scan uses the SAME list).
+const mustExclude = process.env.MUST_EXCLUDE_JOINED.split("\n").filter(Boolean);
+const mustInclude = process.env.MUST_INCLUDE_JOINED.split("\n").filter(Boolean);
 
 const leaked = mustExclude.filter((f) => !ignored(f));
 const dropped = mustInclude.filter((f) => ignored(f));
@@ -142,23 +148,26 @@ NODE
 # static gate above is the always-on regression net.
 SCAN_ROOT="${DOCKERIGNORE_SECRETS_IMAGE_ROOT:-.next/standalone}"
 if [ "${DOCKERIGNORE_SECRETS_SCAN_BUNDLE:-0}" = "1" ] && [ -d "$SCAN_ROOT" ]; then
-  # Any git-ignored secret / artifact at ANY depth is a leak: env files, keys/
-  # certs, CLI vault mapping, Terraform state/tfvars/.terraform, local DBs.
-  # Exclude node_modules (third-party packages legitimately ship such fixtures)
-  # and the committed *.example placeholders.
-  # A .terraform dir anywhere in the tree is itself a leak; report it and prune.
-  # node_modules is pruned silently (legit third-party fixtures).
+  # Any git-ignored secret / artifact at ANY depth is a leak. The leaf-name /
+  # dir-name patterns below are the SAME class the static MUST_EXCLUDE list
+  # covers (env files, keys/certs, SAML, CLI vault mapping, session-token
+  # artifacts, Terraform state/tfvars/.terraform, local DBs + Postgres data).
+  # node_modules is pruned silently (legit third-party fixtures); .terraform and
+  # postgres_data dirs are reported as leaks and pruned.
   found=$(find "$SCAN_ROOT" \
     -type d -name node_modules -prune -o \
-    -type d -name .terraform -print -prune -o \
+    -type d \( -name .terraform -o -name postgres_data -o -name saml \) -print -prune -o \
     -type f \( \
         -name ".env" -o -name ".env.*" \
         -o -name "*.pem" -o -name "*.key" -o -name "*.crt" -o -name "*.cert" \
         -o -name "*.p12" -o -name "*.pfx" \
+        -o -name "master.key" -o -name "encryption.key" \
         -o -name ".passwd-sso-env.json" \
+        -o -name "*review-credentials.local.md" \
+        -o -name ".load-test-auth.json" -o -name ".auth-state.json" \
         -o -name "*.tfstate" -o -name "*.tfstate.*" \
         -o -name "*.tfvars" -o -name "*.tfvars.json" \
-        -o -name "*.db" -o -name "*.sqlite" \
+        -o -name "*.db" -o -name "*.sqlite" -o -name "*.db-journal" \
       \) ! -name ".env.example" ! -name "*.tfvars.example" -print \
     2>/dev/null || true)
   if [ -n "$found" ]; then

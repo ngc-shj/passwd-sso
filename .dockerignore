@@ -30,14 +30,19 @@ node_modules
 **/*.pfx
 **/master.key
 **/encryption.key
+# --- SAML certificates (.gitignore: saml/) ---
+**/saml
 # --- CLI vault mapping (user-specific entry IDs) ---
 **/.passwd-sso-env.json
-# --- Local review / auth artifacts ---
+# --- Local review / auth artifacts (session tokens) ---
 **/*review-credentials.local.md
 **/.load-test-auth.json
-# --- Local databases ---
+**/.auth-state.json
+# --- Local databases + Postgres data dir ---
 **/*.db
 **/*.sqlite
+**/*.db-journal
+**/postgres_data
 # --- Terraform working dir / state / real tfvars ---
 **/.terraform
 **/*.tfstate
@@ -49,6 +54,7 @@ node_modules
 **/test-results
 **/coverage
 **/.coverage-snapshots
+**/playwright-report
 
 .claude
 *.md

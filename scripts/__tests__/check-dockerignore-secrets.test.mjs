@@ -51,13 +51,13 @@ const RECURSIVE_IGNORE = [
   "node_modules",
   ".env", ".env.*", "**/.env", "**/.env.*", "!.env.example", "!**/.env.example",
   "**/*.pem", "**/*.key", "**/*.crt", "**/*.cert", "**/*.p12", "**/*.pfx",
-  "**/master.key", "**/encryption.key",
+  "**/master.key", "**/encryption.key", "**/saml",
   "**/.passwd-sso-env.json",
-  "**/*review-credentials.local.md", "**/.load-test-auth.json",
-  "**/*.db", "**/*.sqlite",
+  "**/*review-credentials.local.md", "**/.load-test-auth.json", "**/.auth-state.json",
+  "**/*.db", "**/*.sqlite", "**/*.db-journal", "**/postgres_data",
   "**/.terraform", "**/*.tfstate", "**/*.tfstate.*",
   "**/*.tfvars", "**/*.tfvars.json", "!**/*.tfvars.example",
-  "**/test-results", "**/coverage", "**/.coverage-snapshots",
+  "**/test-results", "**/coverage", "**/.coverage-snapshots", "**/playwright-report",
 ].join("\n") + "\n";
 
 describe("check-dockerignore-secrets", () => {
@@ -89,6 +89,17 @@ describe("check-dockerignore-secrets", () => {
     const r = runGuard();
     expect(r.exitCode).toBe(1);
     expect(r.stdout + r.stderr).toMatch(/\.terraform|tfstate|tfvars/);
+  });
+
+  it("FAILS when .dockerignore misses session-token / DB-data artifacts (.auth-state.json, postgres_data, *.db-journal, saml)", () => {
+    // Everything covered EXCEPT the Round-4-review class — proves each is enforced.
+    const missing = ["**/.auth-state.json", "**/postgres_data", "**/*.db-journal", "**/saml"];
+    for (const drop of missing) {
+      const partial = RECURSIVE_IGNORE.replace(drop + "\n", "");
+      writeDockerignore(partial);
+      const r = runGuard();
+      expect(r.exitCode, `dropping ${drop} should fail the guard`).toBe(1);
+    }
   });
 
   it("FAILS when .dockerignore excludes only root .env but not nested (extension/.env miss)", () => {
@@ -133,6 +144,35 @@ describe("check-dockerignore-secrets", () => {
     });
     expect(r.exitCode).toBe(1);
     expect(r.stdout + r.stderr).toContain("extension/.env");
+  });
+
+  it("FAILS when a built tree contains a session-token artifact (e2e/.auth-state.json bundle scan)", () => {
+    writeDockerignore(RECURSIVE_IGNORE);
+    const e2e = join(root, "image", "app", "e2e");
+    mkdirSync(e2e, { recursive: true });
+    writeFileSync(join(e2e, ".auth-state.json"), '{"token":"secret"}\n', "utf8");
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toContain(".auth-state.json");
+  });
+
+  it("FAILS when a built tree contains a postgres_data dir or *.db-journal (bundle scan)", () => {
+    writeDockerignore(RECURSIVE_IGNORE);
+    const pg = join(root, "image", "app", "postgres_data", "base");
+    const prisma = join(root, "image", "app", "prisma");
+    mkdirSync(pg, { recursive: true });
+    mkdirSync(prisma, { recursive: true });
+    writeFileSync(join(pg, "1"), "PGDATA\n", "utf8");
+    writeFileSync(join(prisma, "dev.db-journal"), "JOURNAL\n", "utf8");
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toMatch(/postgres_data|db-journal/);
   });
 
   it("FAILS when a built tree contains a nested key/cert or Terraform state (bundle scan)", () => {

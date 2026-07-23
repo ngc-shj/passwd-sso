@@ -43,6 +43,22 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Security Minor**: scoped the F7 false-positive regex allowlist to `paths=['''^docs/''']`
   so the 3 example-string regexes cannot suppress matches elsewhere in the tree.
 
+### Round 5 — fourth external re-review additions
+- **High: `.dockerignore` secret class was still incomplete.** Round 4 transcribed visible
+  `.gitignore` entries but not systematically — `e2e/.auth-state.json` (Playwright session
+  token), `postgres_data/`, `prisma/*.db-journal`, `saml/` were missing. Fixed by
+  MACHINE-ENUMERATING every `.gitignore` secret/data entry and adding the gaps. Added a
+  cross-check that every `.gitignore` secret class has a representative path excluded by
+  `.dockerignore` (result: ALL COVERED; both `*.example` placeholders included).
+- **Low: static / bundle drift.** Refactored the guard so both checks derive from ONE shared
+  `MUST_EXCLUDE` representative-path list (bash array → exported to the node static check and
+  used to shape the bundle `find`). No more "static covers X, bundle silently doesn't."
+- **Doc: fixed the duplicated Round 3 heading** and softened the premature "closes the defect
+  class" wording (kept surfacing new members across rounds).
+- **Guard representative-path gotcha**: the saml class's representative path must be a NON-cert
+  file (`saml/metadata.xml`), else `**/*.cert` covers it and the "drop `**/saml`" red test
+  can't go red — a representative path must be uniquely-covered by its own pattern.
+
 ### Round 4 — third external re-review additions
 - **High: `COPY . .` ships the WHOLE git-ignored secret class, not just `.env`.** Rounds 1-3
   closed `.env` (root then nested) but the real class is every secret/artifact `.gitignore`
