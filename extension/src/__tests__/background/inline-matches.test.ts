@@ -460,10 +460,12 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
   });
 
-  it("C8: popup fill (no frameId) stays tab-wide — no frameId option, no executeScript on the happy path", async () => {
+  it("C8: popup CC fill (no frameId) scopes to the TOP FRAME, never tab-wide", async () => {
     await unlock();
 
-    // Sender has a tab but no frameId (top-frame content script).
+    // Sender has a tab but no frameId (popup / context-menu). CC entries are
+    // hostless, so a tab-wide broadcast would leak card data into a cross-origin
+    // iframe. The SW must scope to frame 0 (top frame) only.
     const res = (await sendMessage(
       { type: EXT_MSG.AUTOFILL_FROM_CONTENT, entryId: "cc-1" },
       {
@@ -473,13 +475,18 @@ describe("AUTOFILL_FROM_CONTENT frame targeting + id validation", () => {
     )) as { ok: boolean };
 
     expect(res.ok).toBe(true);
-    // Two-arg form (no options) — must NOT narrow to frame 0.
+    // Must target the top frame explicitly — NOT the two-arg tab-wide form.
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(
       7,
       expect.objectContaining({ type: EXT_MSG.AUTOFILL_CC_FILL }),
+      { frameId: 0 },
     );
     expect(chromeMock?.scripting.executeScript).not.toHaveBeenCalled();
   });
+
+  // Identity uses the identical sendSensitiveFillMessage path as CC (frameId ?? 0),
+  // so the top-frame-scope boundary is covered by the CC test above; a separate
+  // Identity fixture would only re-exercise the same delivery function.
 
   it("C8: fallback injects the bundled content script frame-scoped, never tab-wide", async () => {
     await unlock();

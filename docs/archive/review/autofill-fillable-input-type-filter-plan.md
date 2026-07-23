@@ -163,6 +163,18 @@ All 4 shipped fillable-type regression tests + the fallback test are mutation-pr
 
 Round 1 fixes were test-only additions/refactors (no production-logic change) that strengthen — never weaken — the frame-scope assertions; no Round 2 required.
 
+## Phase 3 Resolution — Round 2 (post-push High finding)
+
+After push, a reviewer surfaced a **High** finding the Round-1 panel (security included) MISSED: making the CC/Identity listeners resident in all frames (all_frames:true) combined with the popup/context-menu path's tab-wide `chrome.tabs.sendMessage(tabId, payload)` (no frameId) delivered card number / CVV / name / address IN PLAINTEXT to every frame — including cross-origin third-party iframes. LOGIN is safe on that same broadcast because its payload carries `allowedHosts` and each frame self-verifies (`isFrameAllowedToFill`), but **CC/Identity entries are hostless by design** so no such per-frame gate exists. The Round-1 security expert wrongly concluded the `sender.id` gate mitigated this — `sender.id` only proves the message came from the extension, it says nothing about WHICH frames receive it.
+
+**Fix (C5, added):** introduced `sendSensitiveFillMessage` = `chrome.tabs.sendMessage(tabId, payload, { frameId: frameId ?? 0 })` — scopes to the originating frame when known, else the TOP FRAME only, never tab-wide. Switched all 4 CC/Identity send sites (primary + fallback, both types) to it. LOGIN keeps `sendFillMessage` (tab-wide, safe via allowedHosts). No content-side over-correction (subframe fills with a known frameId still work). The `executeScript` fallback already scoped to `executeTarget` (top frame when frameId unknown).
+
+**Known limitation (accepted, security-wins tradeoff per R43):** a popup/context-menu fill can no longer auto-fill a CC/Identity form that lives inside a subframe (no frameId → top-frame only). Since CC/Identity entries are hostless there is no way to distinguish a legitimate payment iframe from a hostile one, so delivering to a subframe on an untrusted signal is unacceptable. Content-driven fills (user focuses the subframe field) still work — the frameId is known. Worst case: user must focus the iframe field instead of using the popup for that one case. Likelihood: rare. This is the fail-safe default (security over functionality).
+
+**Verification:** the changed "popup → top frame only" test is mutation-proven RED (reverting `sendSensitiveFillMessage` to tab-wide fails 3 tests — verified in a throwaway worktree, real source untouched). An independent security re-review confirmed the full R42 member-set (popup / context-menu / content-driven × primary-send / fallback-send / fallback-inject) is covered with no residual tab-wide path, LOGIN unaffected, no over-correction. Full suite 917 pass; build green.
+
+**Process lesson recorded:** frame-delivery scope is a distinct security boundary from message-sender authenticity; a `sender.id`/origin-authenticity gate does NOT bound the recipient set. See feedback memory.
+
 **Review disposition (Phase-1 Round 1):**
 - Func F1 / Sec SEC-1,SEC-2 / Test F1 (all Critical/Major, converged): twin drift — resolved by C3's root-cause unification (delete `.js`), stronger than the originally-planned parity guard.
 - Func F2 / Sec confirmations: attack confirmed end-to-end → C4 end-to-end write-path test.
