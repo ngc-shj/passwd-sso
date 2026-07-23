@@ -18,21 +18,32 @@ spec:
         component: audit-outbox-worker
     spec:
       terminationGracePeriodSeconds: 30
+      # Least-privilege: the worker connects via the scoped OUTBOX_WORKER_DATABASE_URL
+      # only — the broad app DATABASE_URL is deliberately NOT injected here.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
+          # Deploy-time: replace :latest with an immutable version tag or digest
+          # (e.g. passwd-sso@sha256:...). The ECR repo is IMMUTABLE.
           image: passwd-sso:latest
           command: ["node", "dist/audit-outbox-worker.js"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: OUTBOX_WORKER_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: passwd-sso-secrets
                   key: outbox-worker-database-url
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: passwd-sso-secrets
-                  key: database-url
           resources:
             requests:
               cpu: 50m
@@ -41,12 +52,16 @@ spec:
               cpu: 200m
               memory: 256Mi
           livenessProbe:
+            # Re-validate env on each liveness check — verifies env still parses
+            # AND the binary still runs. Cheaper than a network probe and avoids
+            # masking DB outages with a tautological process.exit(0).
             exec:
-              command: ["node", "-e", "process.exit(0)"]
+              command: ["node", "dist/audit-outbox-worker.js", "--validate-env-only"]
             initialDelaySeconds: 10
             periodSeconds: 30
+            failureThreshold: 3
           startupProbe:
             exec:
-              command: ["node", "-e", "process.exit(0)"]
+              command: ["node", "dist/audit-outbox-worker.js", "--validate-env-only"]
             failureThreshold: 3
             periodSeconds: 5

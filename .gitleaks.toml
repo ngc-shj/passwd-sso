@@ -10,14 +10,14 @@
 useDefault = true
 
 [[allowlists]]
-description = "Test files, fixtures, sample export data, and docs hold non-secret test vectors / mock tokens (RFC 6238 TOTP vectors, SSH-key fixtures, example API tokens, sample CSV/JSON exports)."
+description = "Test files, fixtures, sample export data, and sample import/export assets hold non-secret test vectors / mock tokens (RFC 6238 TOTP vectors, SSH-key fixtures, example API tokens, sample CSV/JSON exports). Scoped to the specific sample-asset files rather than all of docs/ so a real credential accidentally committed anywhere else under docs/ is still scanned (2026-07 review, F7)."
 paths = [
   '''.*\.test\.(ts|tsx|swift)$''',
   '''.*\.spec\.(ts|tsx)$''',
   '''(^|/)__tests__/''',
   '''(^|/)test/fixtures/''',
   '''^ios/.*Tests/.*''',
-  '''^docs/''',
+  '''^docs/assets/[^/]+\.(csv|json)$''',
 ]
 
 [[allowlists]]
@@ -32,6 +32,16 @@ description = "Crypto KDF constant identifier, not a credential (generic-api-key
 regexTarget = "match"
 regexes = [
   '''VERIFIER_PBKDF2_BITS''',
+]
+
+[[allowlists]]
+description = "Illustrative non-secret example values in design/review docs (2026-07 review, F7 — replaces the former blanket ^docs/ suppression). The base64 string decodes to the literal phrase 'this is a secret password'; PrivateKeyInfo is a PKCS#8 type name; the dcr-cleanup line is a curl example with no credential. Scoped to docs/ so these do not suppress matches elsewhere in the tree."
+paths = ['''^docs/''']
+regexTarget = "match"
+regexes = [
+  '''dGhpcyBpcyBhIHNlY3JldCBwYXNzd29yZA''',
+  '''PrivateKeyInfo, WebCrypto''',
+  '''/api/maintenance/dcr-cleanup''',
 ]
 
 [[allowlists]]

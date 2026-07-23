@@ -18,21 +18,32 @@ spec:
         component: retention-gc-worker
     spec:
       terminationGracePeriodSeconds: 30
+      # Least-privilege: the worker connects via the scoped RETENTION_GC_DATABASE_URL
+      # only — the broad app DATABASE_URL is deliberately NOT injected here.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
+          # Deploy-time: replace :latest with an immutable version tag or digest
+          # (e.g. passwd-sso@sha256:...). The ECR repo is IMMUTABLE.
           image: passwd-sso:latest
           command: ["node", "dist/retention-gc-worker.js"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: RETENTION_GC_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: retention-gc-worker-db
                   key: retention-gc-database-url
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: passwd-sso-secrets
-                  key: database-url
           resources:
             requests:
               cpu: 50m

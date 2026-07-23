@@ -53,6 +53,12 @@ cp envs/dev/terraform.tfvars.example envs/dev/terraform.tfvars
 terraform init
 ```
 
+> **Secrets end up in Terraform state.** Any secret value passed via tfvars is
+> written to `terraform.tfstate` in plaintext (see the SECURITY note in
+> `secrets.tf`). Before applying with real secrets you MUST configure the
+> encrypted S3 remote backend below — do not run a real deployment on local
+> state. `terraform.tfvars` is gitignored; never commit real secret values.
+
 ### 2. Plan & Apply
 
 ```bash
@@ -62,19 +68,30 @@ terraform apply -var-file=envs/dev/terraform.tfvars
 
 ### 3. Push Container Images
 
+> **Immutable tags.** Both ECR repos are `IMMUTABLE` (see `ecr.tf`) — a tag can
+> be pushed once and never overwritten. Do NOT push `:latest`; use an immutable
+> version tag (the repo's `vX.Y.Z` scheme) or a digest. Re-pushing an existing
+> tag fails with `ImageTagAlreadyExistsException`. The ECS task definitions and
+> k8s manifests must reference the exact version tag or `@sha256:` digest at
+> deploy time.
+
 ```bash
 # Login to ECR
 aws ecr get-login-password --region ap-northeast-1 | \
   docker login --username AWS --password-stdin $(terraform output -raw ecr_app_repository_url | cut -d/ -f1)
 
-# Build and push app
-docker build -t $(terraform output -raw ecr_app_repository_url):latest .
-docker push $(terraform output -raw ecr_app_repository_url):latest
+# Build and push app with an immutable version tag (matches package.json version).
+VERSION=$(node -p "require('../../package.json').version")   # e.g. 0.4.71
+docker build -t $(terraform output -raw ecr_app_repository_url):v${VERSION} .
+docker push $(terraform output -raw ecr_app_repository_url):v${VERSION}
 
-# Push jackson (pull from Docker Hub, retag, push)
-docker pull boxyhq/jackson:latest
-docker tag boxyhq/jackson:latest $(terraform output -raw ecr_jackson_repository_url):latest
-docker push $(terraform output -raw ecr_jackson_repository_url):latest
+# Push jackson (pull from Docker Hub, retag, push). jackson has no local version
+# SSOT — pin to a SPECIFIC upstream boxyhq/jackson release tag (not :latest) and
+# retag it under the same immutable version in ECR.
+JACKSON_VERSION=1.42.0   # pick a concrete upstream release; bump deliberately
+docker pull boxyhq/jackson:${JACKSON_VERSION}
+docker tag boxyhq/jackson:${JACKSON_VERSION} $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
+docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
 ```
 
 ### 4. Force New Deployment
@@ -88,9 +105,19 @@ aws ecs update-service \
 
 ## Remote State Backend
 
-State is stored locally by default. For team usage, use S3 + DynamoDB.
+State is stored locally by default. **Any deployment carrying real secrets MUST
+use the encrypted S3 + DynamoDB backend** — Terraform state holds those secret
+values in plaintext, so local state on a laptop or in a CI artifact is a secret
+exposure. The remote backend provides at-rest encryption (`encrypt = true`),
+versioning, and — via bucket policy/IAM — strict access control and access
+logging.
 
-See comments in `backend.tf` for setup steps.
+See comments in `backend.tf` for setup steps (bucket + lock table + versioning).
+Verify the bucket enforces encryption and blocks public access before migrating
+state.
+
+`terraform.tfvars` (which holds the secret values fed into state) is gitignored
+and must never be committed.
 
 ## Secrets Management
 
