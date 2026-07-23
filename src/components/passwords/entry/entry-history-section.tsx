@@ -134,7 +134,7 @@ export function EntryHistorySection({
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
-  const { getEntryDecryptionKey } = useTeamVault();
+  const { getEntryDecryptionKey, invalidateTeamKey } = useTeamVault();
   const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
@@ -173,6 +173,12 @@ export function EntryHistorySection({
         : apiPath.passwordHistoryRestore(entryId, restoreTarget.id);
       const res = await fetchApi(url, { method: "POST" });
       if (res.ok) {
+        // Restore writes back the history row's ItemKey metadata, which may
+        // point at an older TeamKey version. Drop the cached ItemKey so the
+        // next decrypt refetches and unwraps against the restored version.
+        if (scopedTeamId) {
+          invalidateTeamKey(scopedTeamId);
+        }
         toast.success(t("restoreVersion"));
         setRestoreTarget(null);
         fetchHistory();

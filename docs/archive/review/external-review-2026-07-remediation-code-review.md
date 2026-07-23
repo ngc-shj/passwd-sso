@@ -66,3 +66,23 @@ Cross-cutting new-issue hunt clean:
 - M1+M2 same-cycle: flip-before-purge, just-expired row not past grace → survives; flip idempotent (WHERE status='PENDING').
 - R19: no .skip/.todo/.only added.
 Termination: 2 rounds, converged. No expanding R42 class (M4's fail-open was a single structural gap, not an accreting member-set — positive-cache writer set = {auth-gate.ts:185}, code-derived and complete).
+
+## Round 3 (external supplement — history restore ItemKey consistency)
+Date: 2026-07-23
+User/IDE external review caught a Medium data-integrity bug introduced by C1's premise error: the team history restore route wrote back blob + teamKeyVersion but NOT the ItemKey metadata (itemKeyVersion/encryptedItemKey/itemKeyIv/itemKeyAuthTag), so a restored pre-rotation entry had old teamKeyVersion ↔ current-TeamKey-wrapped ItemKey → C1's version-aware client picked the OLD TeamKey → AES-GCM unwrap failure. The route's own comment had described a "client re-encrypt/PUT" workaround that C1 ignored.
+
+Fix (route.ts + entry-history-section.tsx + route.test.ts):
+- restore update now writes back history's 4 ItemKey fields (old teamKeyVersion ↔ old-TeamKey-wrapped ItemKey = internally consistent);
+- pre-restore snapshot now captures the current entry's 4 ItemKey fields (re-restore consistency);
+- client invalidateTeamKey(teamId) on restore success before refetch (drops stale latest pointer + itemKeyCache);
+- stale "client must re-encrypt" comment rewritten.
+
+Verification (independent agent, No findings):
+- AAD consistency: buildItemKeyWrapAAD binds teamKeyVersion; restored entry carries history.teamKeyVersion = the version its ItemKey was wrapped under → AAD byte-identical → unwrap succeeds.
+- snapshot sources entry (current), restore sources history (old) — correct directions.
+- invalidate ordered before refetch; itemKeyCache bypassed on non-latest branch anyway.
+- test double-direction mutation-provable (verifier confirmed red on both write-back removal and mis-sourced snapshot).
+- R42: 2 teamPasswordEntryHistory.create writers — service PUT already complete, restore fixed; personal has no ItemKey concept.
+- v0 restored rows: itemKeyVersion untouched by <1→1 (teamKeyVersion-only); itemKeyVersion<1 → TeamKey-direct branch, correct.
+
+Root cause recorded: C1's plan stated "restore keeps writing back the original blob + original teamKeyVersion (server unchanged)" — this was the premise error; the ItemKey metadata MUST travel with teamKeyVersion for version-aware decryption to be consistent. Testing gap: original C1 tests only fetched old keys cold-cache, never exercised restore→refetch→decrypt.

@@ -37,6 +37,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         blobAuthTag: true,
         aadVersion: true,
         teamKeyVersion: true,
+        itemKeyVersion: true,
+        encryptedItemKey: true,
+        itemKeyIv: true,
+        itemKeyAuthTag: true,
       },
     }),
   );
@@ -55,6 +59,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         blobAuthTag: true,
         aadVersion: true,
         teamKeyVersion: true,
+        itemKeyVersion: true,
+        encryptedItemKey: true,
+        itemKeyIv: true,
+        itemKeyAuthTag: true,
         changedAt: true,
       },
     }),
@@ -76,6 +84,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         blobAuthTag: entry.blobAuthTag,
         aadVersion: entry.aadVersion,
         teamKeyVersion: entry.teamKeyVersion,
+        itemKeyVersion: entry.itemKeyVersion,
+        encryptedItemKey: entry.encryptedItemKey,
+        itemKeyIv: entry.itemKeyIv,
+        itemKeyAuthTag: entry.itemKeyAuthTag,
         changedById: session.user.id,
       },
     });
@@ -92,10 +104,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
     }
 
-    // Restore: writes back history blob with its original teamKeyVersion.
-    // If history.teamKeyVersion !== team.teamKeyVersion (e.g. after key rotation),
-    // the client must detect the mismatch, decrypt with the old key via
-    // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
+    // Restore: writes back the history row's blob together with the
+    // ItemKey metadata (itemKeyVersion/encryptedItemKey/itemKeyIv/
+    // itemKeyAuthTag) it was originally wrapped with, so the restored
+    // entry stays internally consistent (old teamKeyVersion <-> the
+    // old-TeamKey-wrapped ItemKey). The version-aware client
+    // (getEntryDecryptionKey / getItemEncryptionKey) then selects the
+    // matching TeamKey version and decrypts directly — no client-side
+    // re-encrypt/PUT roundtrip needed.
     await tx.teamPasswordEntry.update({
       where: { id, teamId },
       data: {
@@ -104,6 +120,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         blobAuthTag: history.blobAuthTag,
         aadVersion: history.aadVersion,
         teamKeyVersion: history.teamKeyVersion,
+        itemKeyVersion: history.itemKeyVersion,
+        encryptedItemKey: history.encryptedItemKey,
+        itemKeyIv: history.itemKeyIv,
+        itemKeyAuthTag: history.itemKeyAuthTag,
         updatedById: session.user.id,
       },
     });

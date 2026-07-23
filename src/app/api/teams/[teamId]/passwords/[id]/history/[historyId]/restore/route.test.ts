@@ -67,6 +67,10 @@ const baseEntry = {
   blobAuthTag: "curTag",
   aadVersion: 1,
   teamKeyVersion: 3,
+  itemKeyVersion: 2,
+  encryptedItemKey: "curItemKey",
+  itemKeyIv: "curItemKeyIv",
+  itemKeyAuthTag: "curItemKeyTag",
 };
 
 const baseHistory = {
@@ -77,6 +81,10 @@ const baseHistory = {
   blobAuthTag: "oldTag",
   aadVersion: 0,
   teamKeyVersion: 2,
+  itemKeyVersion: 1,
+  encryptedItemKey: "oldItemKey",
+  itemKeyIv: "oldItemKeyIv",
+  itemKeyAuthTag: "oldItemKeyTag",
   changedAt: new Date("2025-01-01"),
 };
 
@@ -167,20 +175,36 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
     expect(status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalled();
+    // Pre-restore snapshot must capture the CURRENT entry's ItemKey metadata
+    // (sourced from `entry`, not `history`) so a later restore of this
+    // snapshot stays internally consistent.
     expect(txHistoryCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           entryId: ENTRY_ID,
           encryptedBlob: baseEntry.encryptedBlob,
+          itemKeyVersion: baseEntry.itemKeyVersion,
+          encryptedItemKey: baseEntry.encryptedItemKey,
+          itemKeyIv: baseEntry.itemKeyIv,
+          itemKeyAuthTag: baseEntry.itemKeyAuthTag,
         }),
       }),
     );
+    // Restore write-back must carry the HISTORY row's ItemKey metadata
+    // (sourced from `history`, not `entry`) alongside its teamKeyVersion —
+    // otherwise the restored entry's teamKeyVersion (old) and its
+    // encryptedItemKey (still current-wrapped) go out of sync and the
+    // version-aware client fails to unwrap (the bug this test guards).
     expect(txEntryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: ENTRY_ID, teamId: TEAM_ID },
         data: expect.objectContaining({
           encryptedBlob: baseHistory.encryptedBlob,
           teamKeyVersion: baseHistory.teamKeyVersion,
+          itemKeyVersion: baseHistory.itemKeyVersion,
+          encryptedItemKey: baseHistory.encryptedItemKey,
+          itemKeyIv: baseHistory.itemKeyIv,
+          itemKeyAuthTag: baseHistory.itemKeyAuthTag,
         }),
       }),
     );
