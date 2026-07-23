@@ -223,6 +223,58 @@ describe("check-dockerignore-secrets", () => {
     expect(r.stdout + r.stderr).toContain("ENV_POLLUTION_GUARD");
   });
 
+  it("FAILS CLOSED when the bundle-scan node derivation crashes (fail-open regression)", () => {
+    // Shim a broken `node` onto PATH so signature derivation exits non-zero.
+    // A security gate must NOT green itself when its own logic fails.
+    writeDockerignore(RECURSIVE_IGNORE);
+    const shimDir = join(root, "shim");
+    mkdirSync(shimDir, { recursive: true });
+    const nodeShim = join(shimDir, "node");
+    writeFileSync(nodeShim, "#!/usr/bin/env bash\nexit 7\n", { mode: 0o755 });
+    const appDir = join(root, "image", "app");
+    mkdirSync(appDir, { recursive: true });
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+      // Static check runs node FIRST; the shim breaks it too, so the static
+      // node (under set -e) aborts. Either way the guard must exit non-zero.
+      PATH: `${shimDir}:${process.env.PATH}`,
+    });
+    expect(r.exitCode).not.toBe(0);
+  });
+
+  it("FAILS CLOSED when the bundle-scan node emits an empty signature set", () => {
+    // Shim `node` to print nothing and exit 0 for the BUNDLE derivation only.
+    // The static node still needs to pass, so the shim echoes the static OK path
+    // by delegating to real node for the first (static) call and returning empty
+    // for the second (bundle) call. Simplest: a shim that exits 3 (the guard's
+    // own "empty set" sentinel) — bundle derivation treats non-zero as fail-closed.
+    writeDockerignore(RECURSIVE_IGNORE);
+    const shimDir = join(root, "shim2");
+    mkdirSync(shimDir, { recursive: true });
+    // Count invocations: 1st (static) → real node; 2nd (bundle) → empty+exit0.
+    const counter = join(shimDir, ".n");
+    const realNode = process.execPath;
+    writeFileSync(
+      join(shimDir, "node"),
+      `#!/usr/bin/env bash\n` +
+        `n=$(( $(cat ${counter} 2>/dev/null || echo 0) + 1 ))\n` +
+        `echo $n > ${counter}\n` +
+        `if [ "$n" -le 1 ]; then exec ${realNode} "$@"; fi\n` +
+        `printf ''\n`, // 2nd call: empty stdout, exit 0
+      { mode: 0o755 },
+    );
+    const appDir = join(root, "image", "app");
+    mkdirSync(appDir, { recursive: true });
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+      PATH: `${shimDir}:${process.env.PATH}`,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toMatch(/failing CLOSED/);
+  });
+
   // ── Contract: bundle scan catches EVERY static MUST_EXCLUDE class ───────────
   // Proves the single-source claim — the bundle scan's derived signatures cover
   // the same set the static assertion enforces. Parse MUST_EXCLUDE straight from

@@ -34,10 +34,21 @@ DOCKERIGNORE=".dockerignore"
 [ -f "$DOCKERIGNORE" ] || { echo "ERROR: $DOCKERIGNORE not found — a missing dockerignore means COPY . . ships all env files"; exit 1; }
 
 # ── Single source of truth for the git-ignored secret/artifact class ─────────
-# Both the static assertion (path-vs-.dockerignore) and the bundle scan (files
-# in an extracted image tree) derive from THIS list, so they cannot drift.
-# Representative EXCLUDED paths (root + nested), one per .gitignore secret/data
-# class. Keep in sync with .gitignore's secret/data sections and .dockerignore.
+# MUST_EXCLUDE is the single list of representative EXCLUDED paths (root +
+# nested), one per .gitignore secret/data class. BOTH downstream checks consume
+# it: the static assertion tests each path against .dockerignore, and the bundle
+# scan derives its find signatures from the SAME list.
+#
+# Coverage guarantee (why extGlobs/dirClasses in the bundle derivation cannot
+# silently under-cover): the bundle derivation classifies each MUST_EXCLUDE path
+# into a dir-class or a filename glob, but ALWAYS falls back to the exact
+# basename when no glob matches — so any new class added to MUST_EXCLUDE is still
+# searched for. The self-test's CONTRACT test
+# (check-dockerignore-secrets.test.mjs) plants EVERY MUST_EXCLUDE path one at a
+# time and requires the bundle scan to flag it, mechanically proving static and
+# bundle cover the same set. Adding a class here therefore needs no edit to the
+# derivation tables; if it ever did, the contract test goes red.
+# Keep in sync with .gitignore's secret/data sections and .dockerignore.
 MUST_EXCLUDE=(
   # env files
   ".env" ".env.local" ".env.production" ".env.bak"
@@ -157,8 +168,11 @@ if [ "${DOCKERIGNORE_SECRETS_SCAN_BUNDLE:-0}" = "1" ] && [ -d "$SCAN_ROOT" ]; th
   # terraform.tfstate.backup → *.tfstate.*). Adding a new class to MUST_EXCLUDE
   # therefore extends the bundle scan automatically — they cannot drift.
   #
-  # Derive the signature set with node (same MUST_EXCLUDE_JOINED already exported).
-  mapfile -t SIGS < <(node -e '
+  # Derive the signature set with node. FAIL CLOSED: capture node's output and
+  # exit status separately (no process substitution, which would hide a node
+  # crash and silently green the gate). A security gate must never fail open.
+  set +e
+  SIGS_RAW=$(node -e '
     const paths = process.env.MUST_EXCLUDE_JOINED.split("\n").filter(Boolean);
     // Extension classes: a trailing ".<ext>" that the static patterns match by glob.
     const extGlobs = [
@@ -194,26 +208,52 @@ if [ "${DOCKERIGNORE_SECRETS_SCAN_BUNDLE:-0}" = "1" ] && [ -d "$SCAN_ROOT" ]; th
       for (const [re, g] of extGlobs) if (re.test(base)) { out.add("G:" + g); matched = true; break; }
       if (!matched) out.add("F:" + base); // fall back to exact basename
     }
+    if (out.size === 0) process.exit(3); // never emit an empty signature set
     process.stdout.write([...out].join("\n"));
   ')
+  node_status=$?
+  set -e
+  if [ "$node_status" -ne 0 ] || [ -z "$SIGS_RAW" ]; then
+    echo "ERROR: bundle-scan signature derivation failed (node exit $node_status) — failing CLOSED."
+    exit 1
+  fi
 
-  # Build find predicates from the derived signatures.
+  # Build find predicates from the derived signatures. Portable (no mapfile —
+  # macOS ships bash 3.2). Read newline-delimited SIGS into arrays.
   dir_names=(); file_preds=()
-  for sig in "${SIGS[@]}"; do
+  while IFS= read -r sig; do
+    [ -n "$sig" ] || continue
     kind="${sig%%:*}"; val="${sig#*:}"
     case "$kind" in
       D) dir_names+=("-o" "-name" "$val") ;;
       F|G) file_preds+=("-o" "-name" "$val") ;;
     esac
-  done
+  done <<EOF
+$SIGS_RAW
+EOF
+
+  # Fail closed if either group came out empty — a scan with no file predicates
+  # would silently find nothing (fail open).
+  if [ "${#file_preds[@]}" -eq 0 ] || [ "${#dir_names[@]}" -eq 0 ]; then
+    echo "ERROR: bundle-scan predicate set empty (files=${#file_preds[@]}, dirs=${#dir_names[@]}) — failing CLOSED."
+    exit 1
+  fi
   # Strip the leading "-o" from each group.
   dir_names=("${dir_names[@]:1}"); file_preds=("${file_preds[@]:1}")
 
+  # Run find. FAIL CLOSED on a find error: capture status; only "0 matches" is a
+  # pass. `2>/dev/null || true` would swallow a real error and green the gate.
+  set +e
   found=$(find "$SCAN_ROOT" \
     -type d -name node_modules -prune -o \
     -type d \( "${dir_names[@]}" \) -print -prune -o \
-    -type f \( "${file_preds[@]}" \) ! -name ".env.example" ! -name "*.tfvars.example" -print \
-    2>/dev/null || true)
+    -type f \( "${file_preds[@]}" \) ! -name ".env.example" ! -name "*.tfvars.example" -print)
+  find_status=$?
+  set -e
+  if [ "$find_status" -ne 0 ]; then
+    echo "ERROR: bundle-scan find failed (exit $find_status) over $SCAN_ROOT — failing CLOSED."
+    exit 1
+  fi
   if [ -n "$found" ]; then
     echo "ERROR: git-ignored secret/artifact(s) present in the built tree $SCAN_ROOT (shipped via build context / image):"
     echo "$found"

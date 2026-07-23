@@ -43,6 +43,17 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Security Minor**: scoped the F7 false-positive regex allowlist to `paths=['''^docs/''']`
   so the 3 example-string regexes cannot suppress matches elsewhere in the tree.
 
+### Round 7 — sixth external re-review additions
+- **Bundle-scan fail-open (Low, but security-critical shape)**: a gate that greens on its own
+  internal error is worse than no gate. Fixed all three fail-open paths — node-derivation crash,
+  empty signature set, find error — to exit 1 with a "failing CLOSED" message. The static node
+  check was already fail-closed (runs under `set -e` as a simple command).
+- **bash 3.2 portability**: `mapfile` → `while IFS= read -r` heredoc loop.
+- **Class-semantics single-sourcing**: chose to KEEP the extGlobs/dirClasses derivation with its
+  exact-basename fallback (which guarantees any new MUST_EXCLUDE class is still searched) and rely
+  on the contract test as the mechanical static/bundle-parity proof, rather than a more complex
+  single declarative table. Documented the guarantee in the guard header.
+
 ### Round 5 — fourth external re-review additions
 - **High: `.dockerignore` secret class was still incomplete.** Round 4 transcribed visible
   `.gitignore` entries but not systematically — `e2e/.auth-state.json` (Playwright session

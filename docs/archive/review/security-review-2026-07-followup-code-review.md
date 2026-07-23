@@ -1,7 +1,24 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
-Review round: 6
+Review round: 7
+
+## Round 7 — sixth external re-review (all addressed)
+
+- **Low — bundle scan could FAIL OPEN.** The signature derivation ran in a
+  `mapfile < <(node …)` process substitution (node crash → empty SIGS, exit code
+  lost) and `find … || true` swallowed find errors → the security gate could
+  green itself on its own internal failure. Fixed to FAIL CLOSED: capture node's
+  exit status + assert non-empty output; assert non-empty predicate arrays; drop
+  the `|| true` and check find's exit status explicitly. Added two red-proven
+  regression tests (node-crash shim; empty-signature shim → "failing CLOSED").
+- **Low — `mapfile` is bash 4+ (absent on macOS's stock bash 3.2).** Replaced with
+  a portable `while IFS= read -r` heredoc loop; verified no other bash-4-isms.
+- **Low — class semantics not fully single-sourced.** MUST_EXCLUDE is the single
+  path list; the bundle derivation's extGlobs/dirClasses are class definitions
+  with an exact-basename FALLBACK, and the contract test mechanically guarantees
+  static+bundle cover the same set. Documented the role split + guarantee in the
+  guard header (per decision: keep the fallback + contract test, document it).
 
 ## Round 6 — fifth external re-review (all addressed)
 
