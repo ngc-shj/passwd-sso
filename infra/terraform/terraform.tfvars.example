@@ -18,8 +18,10 @@ create_acm_certificate = true
 # Container images — after first `terraform apply`, use ECR output URLs:
 #   terraform output -raw ecr_app_repository_url
 #   terraform output -raw ecr_jackson_repository_url
-app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-app:latest"
-jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:latest"
+# ECR is IMMUTABLE: pin an explicit version tag (:vX.Y.Z) or @sha256 digest.
+# :latest is rejected by the app_image / jackson_image variable validation.
+app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-app:v0.4.71"
+jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:v1.42.0"
 
 app_secrets = {
   # Use a non-SUPERUSER app role for DATABASE_URL (RLS enforced)

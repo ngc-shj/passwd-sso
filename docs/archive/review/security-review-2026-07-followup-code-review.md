@@ -1,6 +1,29 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
+Review round: 3
+
+## Round 3 — second external re-review (all addressed)
+
+- **Med — nested `.env` still in build context (`extension/.env`).** Round-2's
+  `.env`/`.env.*` were ROOT-ONLY; Docker does not exclude subdir files with a bare
+  `.env`, and the guard only tested root names + `.next/standalone` → it greened while
+  `extension/.env` shipped to the builder. Fixed: recursive `**/.env` / `**/.env.*`
+  (+ `!**/.env.example`). Guard hardened — static assertion tests nested paths + nested
+  placeholders; bundle scan walks a whole extracted image tree
+  (`DOCKERIGNORE_SECRETS_IMAGE_ROOT`), excluding node_modules. **Verified against a real
+  `docker build --target builder`: 0 secret `.env` at any depth, `extension/.env` absent.**
+  Self-test → 9 cases incl. the nested-miss red case (RT7).
+- **Med — remaining `:latest`.** Root `terraform.tfvars.example` → version tags. k8s
+  worker manifests → `REPLACE_WITH_IMMUTABLE_IMAGE_REF` placeholder (fails fast if not
+  substituted at deploy — no runnable mutable tag).
+- **Med — `.claude/settings.json` broad `rtk read *`.** Confirmed absent from HEAD AND
+  working tree (removed in Round 2's recommit).
+- **Med (F3) / Low (liveness)** — accepted as tracked deferrals with full Anti-Deferral
+  entries (worst case / likelihood / cost / decision) in the deviation log.
+
+## Round 2 — external re-review (all addressed, see below)
+
 Review round: 2
 
 ## Round 2 — external re-review findings (all addressed)

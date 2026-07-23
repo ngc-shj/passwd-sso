@@ -3,12 +3,18 @@ node_modules
 .git
 .gitignore
 # Secrets must never enter the build context / image. Exclude every env file
-# except the committed placeholder. .env holds real dev secrets (DB, migration
+# at ANY depth (root .env and nested ones like extension/.env), keeping only the
+# committed .env.example placeholders. .env holds real dev secrets (DB, migration
 # superuser, auth/OAuth, master key) and Next.js standalone tracing otherwise
-# copies it into .next/standalone → the final image.
+# copies it into .next/standalone → the final image. A secret in the build
+# context also leaks into builder layers and remote build cache, so exclude it
+# recursively — not only at the repo root.
 .env
 .env.*
+**/.env
+**/.env.*
 !.env.example
+!**/.env.example
 .claude
 *.md
 .vscode

@@ -43,6 +43,23 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Security Minor**: scoped the F7 false-positive regex allowlist to `paths=['''^docs/''']`
   so the 3 example-string regexes cannot suppress matches elsewhere in the tree.
 
+### Round 3 — second external re-review additions
+- **Med: nested `.env` in build context** (`extension/.env`). Round-2's `.env`/`.env.*`
+  patterns were ROOT-ONLY; Docker does not exclude subdirectory files with a bare
+  `.env`. Fixed with recursive `**/.env` / `**/.env.*` (+ `!**/.env.example` to keep
+  nested placeholders). Strengthened the guard: static assertion now tests nested paths
+  (`extension/.env`, `a/b/c/.env`) and nested placeholders; bundle scan now walks an
+  ENTIRE extracted image/builder tree (`DOCKERIGNORE_SECRETS_IMAGE_ROOT`), not just
+  `.next/standalone`, excluding `node_modules`. Verified against a real
+  `docker build --target builder`: 0 secret `.env` at any depth, `extension/.env` absent.
+  Self-test grew to 9 cases incl. the nested-miss red case.
+- **Med: remaining `:latest`**. Root `terraform.tfvars.example` → version tags. k8s worker
+  manifests → an unresolved `REPLACE_WITH_IMMUTABLE_IMAGE_REF` placeholder (NOT a runnable
+  `:latest`) so a manifest applied without deploy-time substitution fails fast instead of
+  pulling a mutable image.
+- **`.claude/settings.json`**: the broad `Bash(rtk read *)` permission is absent from both
+  HEAD and the working tree (removed in Round 2's recommit; confirmed clean).
+
 ### Round 2 — external re-review additions
 - **High `.env`-in-image**: not in the original plan scope (the triangulation focused
   on the 9 reported findings; this leak was found by the re-review). Fixed
@@ -75,6 +92,20 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Decision**: ship the documentation control now; file the externalization rework as a
   tracked infra follow-up. The Medium is mitigated (encrypted backend documented as required),
   not fully closed.
+
+### Worker liveness heartbeat deferred to follow-up (Low)
+- **What**: the liveness probe re-parses env + re-execs the binary (`--validate-env-only`).
+  It is strictly better than a tautological `process.exit(0)` (catches a broken image /
+  unparseable env) but does NOT observe the running worker — a hung main loop, stalled queue,
+  or DB outage will not fail it. Comments now state this limitation accurately.
+- **Worst case**: a wedged worker keeps passing liveness; audit_outbox / retention GC stalls
+  go unnoticed until an external signal (queue-age alert) fires.
+- **Likelihood**: Low — restart-on-crash still works; env-parse failures still restart; the
+  gap is only the "process alive but not making progress" mode.
+- **Cost to fix**: Medium — the worker must write a heartbeat/last-success timestamp that the
+  probe reads (worker-code change + a probe script), plus a queue-oldest-PENDING-age alert.
+- **Decision**: ship the corrected probe + accurate comments now; heartbeat liveness is a
+  tracked follow-up. Accepted known operational risk.
 
 ## Verification environment constraints (realized)
 
