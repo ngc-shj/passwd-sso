@@ -19,7 +19,7 @@ Sourced from `src/workers/retention-gc-worker/registry.ts` (`RETENTION_REGISTRY`
 | `service_account_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
 | `operator_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
 | `extension_tokens` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | CREDENTIAL_RETENTION_PURGED |
-| `access_requests` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
+| `access_requests` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | retentionDays: 30 (grace window before purge) | SECURITY_RECORD_RETENTION_PURGED |
 | `admin_vault_resets` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
 | `master_key_rotations` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |
 | `personal_log_access_grants` | EXPIRY_AUDIT_PROVENANCE | `expires_at` | - | - | SECURITY_RECORD_RETENTION_PURGED |

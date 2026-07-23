@@ -125,6 +125,47 @@ describe("TenantClearLockoutButton", () => {
     });
   });
 
+  // F4: the confirm button is a plain Button (not AlertDialogAction), which
+  // does NOT auto-close the dialog on click — the dialog must stay open
+  // through a failure so the loading spinner (and a retry) stays reachable.
+  it("keeps the confirm dialog open after a failure (F4)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({}),
+    });
+    render(<TenantClearLockoutButton userId="user-1" memberName="Alice" />);
+
+    fireEvent.click(screen.getAllByRole("button")[0]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "clearLockoutConfirm" }),
+    );
+
+    await waitFor(() => {
+      expect(mockToast.error).toHaveBeenCalledWith("clearLockoutFailed");
+    });
+    expect(screen.getByText("clearLockoutTitle")).toBeInTheDocument();
+  });
+
+  it("closes the confirm dialog only after a success", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ok: true }),
+    });
+    render(<TenantClearLockoutButton userId="user-1" memberName="Alice" />);
+
+    fireEvent.click(screen.getAllByRole("button")[0]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "clearLockoutConfirm" }),
+    );
+
+    await waitFor(() => {
+      expect(mockToast.success).toHaveBeenCalledWith("clearLockoutSuccess");
+    });
+    expect(screen.queryByText("clearLockoutTitle")).not.toBeInTheDocument();
+  });
+
   // A stale-session clear-lockout POST must surface the reauth recovery path,
   // not the generic clearLockoutFailed toast, and must NOT report success.
   it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED response", async () => {

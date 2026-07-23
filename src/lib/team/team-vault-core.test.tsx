@@ -161,7 +161,11 @@ describe("team-vault-core", () => {
     mockUnwrapTeamKey.mockResolvedValue(new Uint8Array([2, 2, 2, 2]));
     mockDeriveTeamEncryptionKey
       .mockResolvedValueOnce(latestEncKey)
-      .mockResolvedValueOnce(oldEncKey);
+      .mockResolvedValueOnce(oldEncKey)
+      // Default for calls beyond the first two (post-invalidation refetches
+      // at lines 219-228 below) — without this they'd resolve `undefined`
+      // (T5).
+      .mockResolvedValue(latestEncKey);
 
     const fetchMock = vi.fn(async (url: string) => ({
       ok: true,

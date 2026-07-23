@@ -125,6 +125,7 @@ describe("POST /api/tenant/members/[userId]/clear-lockout", () => {
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe("UNAUTHORIZED");
+    expect(mockPrismaUserUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 403 when lacking MEMBER_MANAGE permission", async () => {
@@ -136,6 +137,7 @@ describe("POST /api/tenant/members/[userId]/clear-lockout", () => {
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("FORBIDDEN");
+    expect(mockPrismaUserUpdate).not.toHaveBeenCalled();
   });
 
   it("rethrows non-TenantAuthError errors from permission check", async () => {

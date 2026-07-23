@@ -109,14 +109,29 @@ type TeamMemberKeyResponse = {
   wrapVersion: number;
 };
 
-/** Thrown by getEntryDecryptionKey when a versioned TeamKey fetch fails
- * (member-key 404, or server returned a different keyVersion than requested).
- * Lets callers (e.g. history view) show a distinct "key unavailable" message
- * instead of the generic decrypt-failure toast. */
+/**
+ * Discriminates why a versioned TeamKey fetch failed (F3):
+ * - "not_available": the version genuinely does not exist for this member
+ *   (404 MEMBER_KEY_NOT_FOUND) or the server returned a different version
+ *   than requested. This is not transient — retrying will not help.
+ * - "transient": network/5xx/unwrap failure. May succeed on retry.
+ */
+export type TeamKeyFailureReason = "not_available" | "transient";
+
+/** Thrown by getEntryDecryptionKey / getItemEncryptionKey ONLY when a
+ * versioned TeamKey fetch fails for a non-transient reason (member-key 404,
+ * or server returned a different keyVersion than requested — reason
+ * "not_available"). Lets callers (e.g. history view) show a distinct "key
+ * unavailable" message instead of the generic decrypt-failure toast.
+ * Transient failures (network/5xx/unwrap) throw a plain Error instead (F3) —
+ * they are not evidence the version predates membership. */
 export class TeamKeyVersionUnavailableError extends Error {
-  constructor(teamId: string, keyVersion: number) {
+  readonly reason: TeamKeyFailureReason;
+
+  constructor(teamId: string, keyVersion: number, reason: TeamKeyFailureReason = "not_available") {
     super(`Team key version ${keyVersion} unavailable for team ${teamId}`);
     this.name = "TeamKeyVersionUnavailableError";
+    this.reason = reason;
   }
 }
 
@@ -198,15 +213,26 @@ export function TeamVaultProvider({
   // implementation of the R39 zeroization discipline: every exit path
   // zero-fills ecdhPrivateKeyBytes, and teamKeyBytes is zero-filled right
   // after deriving the encryption key.
+  //
+  // On failure, discriminates WHY (F3): "not_available" (404
+  // MEMBER_KEY_NOT_FOUND, or the server returned a different keyVersion than
+  // requested — genuinely not recoverable by retry) vs "transient" (missing
+  // local vault state, network/5xx/unwrap failure — may succeed on retry).
+  // getTeamEncryptionKeyForVersion propagates this so getEntryDecryptionKey /
+  // getItemEncryptionKey can throw TeamKeyVersionUnavailableError ONLY for
+  // "not_available", never for a transient failure.
   const fetchAndUnwrapTeamKey = useCallback(
     async (
       teamId: string,
       requestedVersion?: number
-    ): Promise<{ key: CryptoKey; keyVersion: number } | null> => {
+    ): Promise<
+      | { key: CryptoKey; keyVersion: number }
+      | { failure: TeamKeyFailureReason }
+    > => {
       const ecdhPrivateKeyBytes = getEcdhPrivateKeyBytes();
       const userId = getUserId();
       if (!ecdhPrivateKeyBytes || !userId) {
-        return null;
+        return { failure: "transient" };
       }
 
       let stage = "fetch_member_key";
@@ -228,7 +254,9 @@ export function TeamVaultProvider({
             error: errorCode,
           });
           ecdhPrivateKeyBytes.fill(0);
-          return null;
+          // 404 MEMBER_KEY_NOT_FOUND is the "genuinely unavailable" signal;
+          // any other status (403/5xx/etc.) is transient (F3).
+          return { failure: res.status === 404 ? "not_available" : "transient" };
         }
 
         stage = "parse_member_key";
@@ -243,7 +271,7 @@ export function TeamVaultProvider({
             responseVersion: memberKeyData.keyVersion,
           });
           ecdhPrivateKeyBytes.fill(0);
-          return null;
+          return { failure: "not_available" };
         }
 
         // Import ECDH private key, then zero-clear the copy
@@ -295,7 +323,9 @@ export function TeamVaultProvider({
           `[getTeamEncryptionKey] failed teamId=${teamId} stage=${stage} error=${errorText}`
         );
         ecdhPrivateKeyBytes.fill(0);
-        return null;
+        // Any exception here (network error, malformed response, unwrap
+        // failure) is transient, not evidence the version is unavailable.
+        return { failure: "transient" };
       }
     },
     [getEcdhPrivateKeyBytes, getUserId]
@@ -315,7 +345,7 @@ export function TeamVaultProvider({
       }
 
       const resolved = await fetchAndUnwrapTeamKey(teamId);
-      if (!resolved) return null;
+      if ("failure" in resolved) return null;
 
       const cachedAt = Date.now();
       // Non-latest fetches never reach here (no requestedVersion passed above),
@@ -335,16 +365,24 @@ export function TeamVaultProvider({
     [fetchAndUnwrapTeamKey]
   );
 
-  const getTeamEncryptionKeyForVersion = useCallback(
-    async (teamId: string, keyVersion: number): Promise<CryptoKey | null> => {
+  // Internal shared body: resolves a versioned TeamKey (cache or network),
+  // returning the failure reason (F3) rather than collapsing to null.
+  // getTeamEncryptionKeyForVersion (public) and getEntryDecryptionKey /
+  // getItemEncryptionKey (need the reason to pick the right error) both
+  // build on this single implementation.
+  const getTeamEncryptionKeyForVersionWithReason = useCallback(
+    async (
+      teamId: string,
+      keyVersion: number
+    ): Promise<{ key: CryptoKey } | { failure: TeamKeyFailureReason }> => {
       const cacheKey = `${teamId}:${keyVersion}`;
       const cached = cacheRef.current.get(cacheKey) as CachedTeamKey | undefined;
       if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-        return cached.key;
+        return { key: cached.key };
       }
 
       const resolved = await fetchAndUnwrapTeamKey(teamId, keyVersion);
-      if (!resolved) return null;
+      if ("failure" in resolved) return resolved;
 
       // Versioned (non-latest) fetches never write the latest pointer slot.
       cacheRef.current.set(cacheKey, {
@@ -353,9 +391,17 @@ export function TeamVaultProvider({
         cachedAt: Date.now(),
       });
 
-      return resolved.key;
+      return { key: resolved.key };
     },
     [fetchAndUnwrapTeamKey]
+  );
+
+  const getTeamEncryptionKeyForVersion = useCallback(
+    async (teamId: string, keyVersion: number): Promise<CryptoKey | null> => {
+      const resolved = await getTeamEncryptionKeyForVersionWithReason(teamId, keyVersion);
+      return "failure" in resolved ? null : resolved.key;
+    },
+    [getTeamEncryptionKeyForVersionWithReason]
   );
 
   const getTeamKeyInfo = useCallback(
@@ -396,13 +442,43 @@ export function TeamVaultProvider({
         throw new Error("Entry does not have ItemKey (itemKeyVersion < 1). Cannot encrypt attachments.");
       }
 
-      // Get TeamKey to unwrap ItemKey
-      const teamKey = await getTeamEncryptionKey(teamId);
-      if (!teamKey) {
+      // Normalize the entry's teamKeyVersion the same way getEntryDecryptionKey
+      // does: legacy schema-default-0 rows were sealed under version 1.
+      const rawTeamKeyVersion = raw.teamKeyVersion as number;
+      const normalizedTeamKeyVersion = rawTeamKeyVersion < 1 ? 1 : rawTeamKeyVersion;
+
+      // Version-aware TeamKey resolution (M3): a restored stale-version entry
+      // (teamKeyVersion < latest) must unwrap its ItemKey with the TeamKey
+      // version it was actually wrapped under, not the latest one, or the
+      // AAD-bound unwrap fails even though the entry is otherwise viewable.
+      const keyInfo = await getTeamKeyInfo(teamId);
+      if (!keyInfo) {
         throw new Error("Failed to obtain team encryption key for ItemKey unwrap");
       }
+      const isLatest = normalizedTeamKeyVersion === keyInfo.keyVersion;
+      let teamKey: CryptoKey;
+      if (isLatest) {
+        teamKey = keyInfo.key;
+      } else {
+        const resolved = await getTeamEncryptionKeyForVersionWithReason(
+          teamId,
+          normalizedTeamKeyVersion,
+        );
+        // F3: only the "not_available" reason (404 / version mismatch)
+        // throws TeamKeyVersionUnavailableError; a transient failure throws
+        // a plain Error so the caller shows a generic toast, not the
+        // "predates your team membership" message.
+        if ("failure" in resolved) {
+          if (resolved.failure === "not_available") {
+            throw new TeamKeyVersionUnavailableError(teamId, normalizedTeamKeyVersion);
+          }
+          throw new Error("Failed to obtain team encryption key for ItemKey unwrap");
+        }
+        teamKey = resolved.key;
+      }
 
-      // Build AAD and unwrap
+      // AAD uses the entry's raw teamKeyVersion as recorded at wrap time —
+      // NOT the normalized value — matching getEntryDecryptionKey.
       const ikAad = buildItemKeyWrapAAD(teamId, entryId, raw.teamKeyVersion);
       const rawItemKey = await unwrapItemKey(
         {
@@ -418,7 +494,13 @@ export function TeamVaultProvider({
       const encryptionKey = await deriveItemEncryptionKey(rawItemKey);
       rawItemKey.fill(0);
 
-      // Cache
+      // Cache only the latest-version ItemKey (same rule as getEntryDecryptionKey
+      // — a non-latest unwrap must never poison the itemKeyCacheRef slot, which
+      // is keyed by entryId only and has no version dimension).
+      if (!isLatest) {
+        return encryptionKey;
+      }
+
       if (!itemKeyCacheRef.current.has(teamId)) {
         itemKeyCacheRef.current.set(teamId, new Map());
       }
@@ -429,7 +511,7 @@ export function TeamVaultProvider({
 
       return encryptionKey;
     },
-    [getTeamEncryptionKey]
+    [getTeamKeyInfo, getTeamEncryptionKeyForVersionWithReason]
   );
 
   const getEntryDecryptionKey = useCallback(
@@ -448,11 +530,25 @@ export function TeamVaultProvider({
       }
 
       const isLatest = normalizedTeamKeyVersion === keyInfo.keyVersion;
-      const teamKey = isLatest
-        ? keyInfo.key
-        : await getTeamEncryptionKeyForVersion(teamId, normalizedTeamKeyVersion);
-      if (!teamKey) {
-        throw new TeamKeyVersionUnavailableError(teamId, normalizedTeamKeyVersion);
+      let teamKey: CryptoKey;
+      if (isLatest) {
+        teamKey = keyInfo.key;
+      } else {
+        const resolved = await getTeamEncryptionKeyForVersionWithReason(
+          teamId,
+          normalizedTeamKeyVersion,
+        );
+        // F3: only "not_available" (404 / version mismatch) throws
+        // TeamKeyVersionUnavailableError; a transient failure throws a plain
+        // Error so entry-history-section shows the generic toast, not the
+        // "predates your team membership" message.
+        if ("failure" in resolved) {
+          if (resolved.failure === "not_available") {
+            throw new TeamKeyVersionUnavailableError(teamId, normalizedTeamKeyVersion);
+          }
+          throw new Error("Failed to obtain team encryption key");
+        }
+        teamKey = resolved.key;
       }
 
       // v0: use the (possibly old) TeamKey directly. Raw-0 rows predate
@@ -517,7 +613,7 @@ export function TeamVaultProvider({
 
       return encryptionKey;
     },
-    [getTeamKeyInfo, getTeamEncryptionKeyForVersion]
+    [getTeamKeyInfo, getTeamEncryptionKeyForVersionWithReason]
   );
 
   const distributePendingKeys = useCallback(async () => {

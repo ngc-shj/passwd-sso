@@ -316,6 +316,26 @@ describe("sweepAuditProvenanceEntry generated SQL (SC4 C2/RT7, A2 delete-first)"
     expect(deleteSql).toMatch(/WHERE expires_at < now\(\)\s+LIMIT \$1/);
   });
 
+  it("entries WITH retentionDays push the cutoff back and bind the days as $2 (M2 grace window)", async () => {
+    const entry: AuditProvenanceEntry = {
+      kind: "EXPIRY_AUDIT_PROVENANCE",
+      table: "access_requests",
+      cutoffColumn: "expires_at",
+      provenanceColumns: ["tenant_id", "status"],
+      auditAction: "SECURITY_RECORD_RETENTION_PURGED",
+      globalDelete: true,
+      retentionDays: 30,
+    };
+    const { tx, queryRawUnsafe } = makeProvenanceTx([]);
+    await sweepAuditProvenanceEntry(tx, entry, 100);
+    const [deleteSql, ...deleteParams] = queryRawUnsafe.mock.calls[0];
+    expect(deleteSql).toMatch(
+      /WHERE expires_at < now\(\) - \(\$2 \|\| ' days'\)::interval\s+LIMIT \$1/,
+    );
+    // retentionDays is bound as $2 (a value), never interpolated into the SQL text.
+    expect(deleteParams).toEqual([100, 30]);
+  });
+
   // T7(b): GUC-guard failure direction. enqueueAuditInWorkerTx's own bypass_rls
   // check must reject when the GUC context is "off" and tenant_id does not
   // match the row's tenant — proving the guard is not a silent no-op.

@@ -432,7 +432,58 @@ describe("EntryHistorySection", () => {
       expect(toast.error).toHaveBeenCalledWith("historyKeyUnavailable");
     });
     // Distinguish from the generic decrypt-failure message.
-    expect(toast.error).not.toHaveBeenCalledWith("Failed to decrypt history version");
+    expect(toast.error).not.toHaveBeenCalledWith("historyDecryptFailed");
+  });
+
+  // F3: a transient failure (network/5xx/unwrap) must NOT be mistaken for
+  // "key predates team membership" — only a plain Error surfaces here
+  // (team-vault-core only throws TeamKeyVersionUnavailableError for the
+  // not_available reason), so the generic toast fires instead.
+  it("shows the generic decrypt-failure toast on a transient (non-version) failure", async () => {
+    mockGetTeamEncryptionKey.mockRejectedValueOnce(
+      new Error("Failed to obtain team encryption key"),
+    );
+
+    const fetchMock = vi.fn((url: string) => {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("/history/h1")
+              ? {
+                  encryptedBlob: "encrypted-ct",
+                  blobIv: "encrypted-iv",
+                  blobAuthTag: "encrypted-tag",
+                  aadVersion: 1,
+                  teamKeyVersion: 2,
+                }
+              : HISTORY_ITEMS,
+          ),
+      });
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+
+    fireEvent.click(screen.getByText(/entryHistory/));
+    const viewButtons = screen.getAllByText(/viewVersion/);
+
+    await act(async () => {
+      fireEvent.click(viewButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("historyDecryptFailed");
+    });
+    // Must NOT show the "predates your team membership" message for a
+    // transient failure.
+    expect(toast.error).not.toHaveBeenCalledWith("historyKeyUnavailable");
   });
 
   it("decrypts client-side for personal entries on View", async () => {

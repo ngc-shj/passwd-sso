@@ -29,3 +29,12 @@ Full `npm run test:integration` shows 1-2 intermittent failures per run in DIFFE
 
 ## D10 — R39 pre-existing residual in fetchAndUnwrapTeamKey (informational)
 Self-R-check noted two byte-identical-to-main residuals carried through the C1 extraction: (i) the `!userId` early return skips ecdhPrivateKeyBytes.fill(0) (the bytes are a fresh copy, GC-freed unfilled); (ii) teamKeyBytes stays unfilled if deriveTeamEncryptionKey throws post-unwrap (try-scoped, unreachable from catch). All paths ADDED by this branch fill correctly. Minor defense-in-depth follow-up candidate; not a branch blocker (pre-existing, transient copies, internal-failure-only window).
+
+## D11 — FIX-M4: auth-gate cache-HIT fail-closed (US2, external supplement)
+User/IDE external review round surfaced a real gap my Phase 3 Round-1 review missed: getSessionInfo (auth-gate.ts:72) returns a cache hit BEFORE the C4 bundle substitution (which runs on the cache-MISS fetch path only), and SessionInfoSchema (session-cache.ts) accepted the 4 passkey fields as optional — so a partial positive-cache entry read back with requirePasskey undefined → falsy → page-route enforcement bypass. Fix: tightened SessionInfoSchema to require the 4 passkey fields (present-but-nullable where the domain allows null); a partial/legacy/type-invalid positive entry now fails safeParse → evict-as-poison → miss → fetch path re-populates a complete substituted entry. Read-side counterpart to C4's write-side substitution; both together close fail-open on cache-hit AND cache-miss. Regression test added (session-cache.test.ts: partial entry missing requirePasskey → null + evicted), mutation-proven red (loosening the field back to optional fails it).
+
+## D12 — Process note: mutation on a real production file (should have used throwaway)
+The FIX-M4 mutation proof (loosen schema → confirm test red) was run by sed-editing the real session-cache.ts and restoring from a scratchpad backup. This violates the "prove-red on throwaway copies only" discipline. Verified byte-identical restore (diff vs backup = IDENTICAL) and R21 residue grep clean, but the correct method was to copy the file to the scratchpad and mutate there. Recorded for the retrospective.
+
+## D13 — F1(perm-residue) root cause: Phase 2 git add -A
+The .claude/settings.json permissions block removed by FIX-F5 was introduced by my own Phase 2 commit's `git add -A` (main has no permissions block). Future: stage explicit paths, not -A, when session tooling may have written machine-specific config.

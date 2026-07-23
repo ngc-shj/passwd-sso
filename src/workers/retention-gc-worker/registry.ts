@@ -122,6 +122,15 @@ export interface AuditProvenanceEntry {
    */
   guard?: GuardName;
   globalDelete?: true;
+  /**
+   * Optional grace window: when set, the delete cutoff becomes
+   * `cutoffColumn < now() - retentionDays days` instead of `< now()`, so a
+   * status-flip interim (e.g. access_requests' PENDING -> EXPIRED sweep,
+   * which uses the SAME cutoff column) stays visible to the tenant for that
+   * window before the row is purged. Omit to keep the current `< now()`
+   * behaviour unchanged.
+   */
+  retentionDays?: number;
 }
 
 /**
@@ -340,7 +349,12 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     // in-flight action.
     //
     // JIT access requests — provenance: requesting actor (user or SA), status,
-    // approval timing.
+    // approval timing. retentionDays: 30 — the sweepExpiredAccessRequests
+    // status-flip (PENDING -> EXPIRED, sweep.ts) shares this table's
+    // expires_at cutoff; without a grace offset the hard-delete below would
+    // purge a row in the SAME sweepOnce cycle it was flipped in, so EXPIRED
+    // would never be user-visible (M2). 30 days matches the other
+    // SECURITY_RECORD_RETENTION_PURGED entries' typical forensic window.
     kind: "EXPIRY_AUDIT_PROVENANCE",
     table: "access_requests",
     cutoffColumn: "expires_at",
@@ -355,6 +369,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     ],
     auditAction: "SECURITY_RECORD_RETENTION_PURGED",
     globalDelete: true,
+    retentionDays: 30,
   },
   {
     // Admin vault resets — provenance: target user + approval/execution/revoke markers.

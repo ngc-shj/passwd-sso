@@ -23,12 +23,25 @@ function makeTx(updatedCount: number) {
 
 describe("sweepExpiredAccessRequests (C7)", () => {
   it("sets bypass_rls before the UPDATE", async () => {
-    const { tx, executeRaw } = makeTx(0);
+    const { tx, executeRaw, executeRawUnsafe } = makeTx(0);
     await sweepExpiredAccessRequests(tx, 100);
     expect(executeRaw).toHaveBeenCalledTimes(1);
+    // Ordering, not just call count (T2): bypass_rls must be set BEFORE the
+    // UPDATE runs, or the RLS policy's uuid cast on app.tenant_id throws.
+    expect(executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      executeRawUnsafe.mock.invocationCallOrder[0],
+    );
+    // The set_config call itself targets app.bypass_rls (not some other GUC).
+    const setConfigCall = executeRaw.mock.calls[0][0] as unknown as {
+      strings?: readonly string[];
+    };
+    const setConfigSql = Array.isArray(setConfigCall)
+      ? (setConfigCall as unknown as readonly string[]).join("")
+      : String(setConfigCall);
+    expect(setConfigSql).toContain("set_config('app.bypass_rls'");
   });
 
-  it("runs a batch-bounded UPDATE with the batchSize as the only bound parameter", async () => {
+  it("runs a batch-bounded UPDATE with the batchSize as the only bound parameter, CAS'd on the outer WHERE (M1)", async () => {
     const { tx, executeRawUnsafe } = makeTx(3);
     const result = await sweepExpiredAccessRequests(tx, 250);
     expect(result).toBe(3);
@@ -36,6 +49,15 @@ describe("sweepExpiredAccessRequests (C7)", () => {
     const [sql, ...params] = executeRawUnsafe.mock.calls[0] as [string, ...unknown[]];
     expect(sql).toContain("UPDATE access_requests");
     expect(sql).toContain("SET status = 'EXPIRED'");
+    // The OUTER WHERE ALSO repeats status = 'PENDING' (M1 fix, AND-appended
+    // after the key-set-IN clause) — this is what makes the UPDATE a real CAS
+    // under READ COMMITTED's EvalPlanQual re-check: a row concurrently
+    // approved between the inner SELECT and the UPDATE re-evaluates the outer
+    // predicate and is skipped, so it cannot flip APPROVED -> EXPIRED. The
+    // key-set-IN clause stays WHERE-leading (worker-policy-manifest's static
+    // sweepBounds check requires `WHERE (id) IN (SELECT id ... LIMIT)` as a
+    // contiguous shape to recognize the batch bound).
+    expect(sql).toMatch(/\(id\)\s+IN\s*\([\s\S]*?\)\s+AND\s+status\s*=\s*'PENDING'/);
     expect(sql).toContain("WHERE status = 'PENDING' AND expires_at < now()");
     expect(sql).toContain("LIMIT $1");
     // Batch-bounded key-set-IN shape (same pattern as every other sweeper in

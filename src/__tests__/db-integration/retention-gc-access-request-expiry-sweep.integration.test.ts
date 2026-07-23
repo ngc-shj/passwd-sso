@@ -21,7 +21,19 @@ import {
 } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { sweepExpiredAccessRequests } from "@/workers/retention-gc-worker/sweep";
+import {
+  sweepExpiredAccessRequests,
+  sweepAuditProvenanceEntry,
+} from "@/workers/retention-gc-worker/sweep";
+import {
+  RETENTION_REGISTRY,
+  type AuditProvenanceEntry,
+} from "@/workers/retention-gc-worker/registry";
+
+const accessRequestProvenanceEntry = RETENTION_REGISTRY.find(
+  (e): e is AuditProvenanceEntry =>
+    e.kind === "EXPIRY_AUDIT_PROVENANCE" && e.table === "access_requests",
+)!;
 
 describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () => {
   let ctx: TestContext;
@@ -139,5 +151,62 @@ describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () 
 
     const secondCount = await runSweep();
     expect(secondCount).toBe(0);
+  });
+
+  // M2: retentionDays: 30 on the access_requests EXPIRY_AUDIT_PROVENANCE
+  // registry entry means the hard-delete cutoff is expires_at < now() - 30
+  // days, NOT expires_at < now() — so an EXPIRED row (past expires_at but
+  // within the 30-day grace window) survives the audit-provenance sweep in
+  // the SAME cycle it was flipped in. Without the grace offset both sweeps
+  // share the same cutoff and the row would be purged before ever being
+  // observed as EXPIRED.
+  it("an EXPIRED row survives the audit-provenance sweep within the retentionDays grace window (M2)", async () => {
+    const id = await insertAccessRequest({
+      status: "PENDING",
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+
+    const flippedCount = await runSweep();
+    expect(flippedCount).toBeGreaterThanOrEqual(1);
+    expect(await statusOf(id)).toBe("EXPIRED");
+
+    // Same cycle: run the audit-provenance sweep that would otherwise
+    // hard-delete this row (cutoff column is the same expires_at).
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await sweepAuditProvenanceEntry(tx, accessRequestProvenanceEntry, 100);
+    });
+
+    // The row still exists, still EXPIRED — visible within the grace window.
+    expect(await statusOf(id)).toBe("EXPIRED");
+  });
+
+  it("the audit-provenance sweep still purges an access_requests row past the retentionDays grace window", async () => {
+    const id = await insertAccessRequest({
+      status: "EXPIRED",
+      // expires_at is far enough in the past that now() - retentionDays(30d)
+      // is still past it, so this row IS eligible for the hard delete.
+      expiresAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+    });
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await sweepAuditProvenanceEntry(tx, accessRequestProvenanceEntry, 100);
+    });
+
+    expect(await statusOf(id)).toBe("MISSING");
+
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ payload: { action: string; metadata: Record<string, unknown> } }[]>(
+        `SELECT payload FROM audit_outbox
+         WHERE tenant_id = $1::uuid AND payload->>'targetId' = $2`,
+        tenantId,
+        id,
+      );
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload.action).toBe("SECURITY_RECORD_RETENTION_PURGED");
+    expect(rows[0].payload.metadata.status).toBe("EXPIRED");
   });
 });

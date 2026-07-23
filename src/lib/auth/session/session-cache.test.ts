@@ -256,6 +256,33 @@ describe("getCachedSession", () => {
     },
   );
 
+  it(
+    "evicts AND returns null on a positive entry missing a required passkey " +
+      "field (fail-closed: a partial entry must NOT survive as a cache hit)",
+    async () => {
+      // A positive-looking entry that omits requirePasskey. getSessionInfo
+      // returns cache hits verbatim BEFORE the fail-closed bundle substitution
+      // (that runs only on the fetch/miss path), so if this parsed successfully
+      // `requirePasskey === undefined` would be falsy and bypass passkey
+      // enforcement at the page-route gate. Requiring the four passkey fields
+      // makes it fail safeParse → evict-as-poison → miss → the fetch path
+      // re-populates a complete, substituted entry.
+      mockGet.mockResolvedValueOnce(
+        JSON.stringify({
+          valid: true,
+          userId: "u1",
+          hasPasskey: true,
+          // requirePasskey OMITTED
+          requirePasskeyEnabledAt: null,
+          passkeyGracePeriodDays: null,
+        }),
+      );
+      mockDel.mockResolvedValueOnce(1);
+      expect(await getCachedSession("tok")).toBeNull();
+      expect(mockDel).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("returns null when Redis is unavailable (getRedis returns null)", async () => {
     mockGetRedis.mockReturnValueOnce(null);
     expect(await getCachedSession("tok")).toBeNull();

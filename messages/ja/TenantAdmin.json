@@ -87,7 +87,7 @@
   "allowedCidrsValidationInvalid": "無効なCIDR: {cidr}",
   "allowedCidrsValidationMax": "CIDRは最大{max}件までです。",
   "tailscaleEnabled": "Tailscaleネットワーク経由のアクセスに制限する",
-  "tailscaleEnabledHelp": "有効にすると、ブラウザーからのアクセスはTailscaleネットワークのアドレス帯に含まれる接続元であれば許可されます。テールネット名が検証されるのはAPIアクセス（トークン利用時）のみです。テナントを厳密に絞り込みたい場合は、許可IP範囲と組み合わせてください。",
+  "tailscaleEnabledHelp": "有効にすると、ブラウザからのアクセスはTailscaleネットワークのアドレス帯に含まれる接続元であれば許可されます。テールネット名が検証されるのはAPIアクセス（トークン利用時）のみです。テナントを厳密に絞り込みたい場合は、許可IP範囲と組み合わせてください。",
   "tailscaleTailnet": "テールネット名",
   "tailscaleTailnetPlaceholder": "example",
   "tailscaleTailnetHelp": "APIアクセス（トークン利用時）の検証に使うテールネット名（例: hostname.example.ts.net の「example」）。",

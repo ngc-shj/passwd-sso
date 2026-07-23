@@ -5,7 +5,6 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -41,7 +40,9 @@ export function TenantClearLockoutButton({
   const [loading, setLoading] = useState(false);
 
   // Inline step-up reauth — on a stale session the confirm dialog stays open
-  // and the hook re-runs handleClear after reauth.
+  // (a plain Button, not AlertDialogAction, keeps it open through failure/
+  // step-up; setOpen(false) fires only on success) and the hook re-runs
+  // handleClear after reauth.
   const inlineReauth = useInlineReauth(() => handleClear());
 
   const handleClear = async () => {
@@ -91,10 +92,10 @@ export function TenantClearLockoutButton({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-          <AlertDialogAction onClick={handleClear} disabled={loading}>
+          <Button onClick={handleClear} disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {t("clearLockoutConfirm")}
-          </AlertDialogAction>
+          </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
 

@@ -250,8 +250,13 @@ function retentionEntryFloor(entry: RetentionEntry): string {
   if (entry.kind === "EXPIRY_GUARDED") {
     return `guard: \`${entry.guard}\` (no live dependents)`;
   }
-  if (entry.kind === "EXPIRY_AUDIT_PROVENANCE" && entry.guard) {
-    return `guard: \`${entry.guard}\` (no live dependents)`;
+  if (entry.kind === "EXPIRY_AUDIT_PROVENANCE") {
+    const parts: string[] = [];
+    if (entry.guard) parts.push(`guard: \`${entry.guard}\` (no live dependents)`);
+    if (entry.retentionDays) {
+      parts.push(`retentionDays: ${entry.retentionDays} (grace window before purge)`);
+    }
+    if (parts.length > 0) return parts.join("; ");
   }
   return "-";
 }

@@ -231,7 +231,7 @@ export function EntryHistorySection({
       if (e instanceof TeamKeyVersionUnavailableError) {
         toast.error(t("historyKeyUnavailable"));
       } else {
-        toast.error("Failed to decrypt history version");
+        toast.error(t("historyDecryptFailed"));
       }
     } finally {
       setViewLoading(false);

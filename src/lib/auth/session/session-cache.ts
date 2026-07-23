@@ -28,14 +28,25 @@ export interface SessionInfo {
 
 // Positive cache shape. Mutually exclusive with NegativeCacheSchema and
 // TombstoneSchema by the presence of `userId` / absence of `tombstone`.
+//
+// The four passkey fields are REQUIRED (present-but-nullable where the domain
+// allows null), NOT optional. getSessionInfo returns a cache hit verbatim
+// before the fail-closed bundle substitution runs (that substitution is on the
+// cache-MISS fetch path only), so a positive entry missing a passkey field
+// would surface as `requirePasskey === undefined` → falsy → enforcement bypass
+// at the page-route gate. Requiring the fields makes any partial/legacy/
+// type-invalid positive entry fail safeParse → evict-as-poison → treated as a
+// miss → the fetch path re-populates a complete, substituted entry. This is the
+// read-side counterpart to the bundle substitution in auth-gate; the two
+// together close the fail-open gap on both cache-miss and cache-hit paths.
 export const SessionInfoSchema = z.object({
   valid: z.literal(true),
   userId: z.string(),
   tenantId: z.string().optional(),
-  hasPasskey: z.boolean().optional(),
-  requirePasskey: z.boolean().optional(),
-  requirePasskeyEnabledAt: z.string().nullable().optional(),
-  passkeyGracePeriodDays: z.number().nullable().optional(),
+  hasPasskey: z.boolean(),
+  requirePasskey: z.boolean(),
+  requirePasskeyEnabledAt: z.string().nullable(),
+  passkeyGracePeriodDays: z.number().nullable(),
 });
 
 // Negative cache: `{ valid: false }` only. Bounded to NEGATIVE_CACHE_TTL_MS
