@@ -598,11 +598,12 @@ export async function sweepTrashEntry(
  * Flip PENDING access_requests past their expiry to EXPIRED (external-review
  * 2026-07 remediation, C7 / 残3). This is a status TRANSITION, not a delete —
  * the existing EXPIRY_AUDIT_PROVENANCE registry entry for access_requests
- * (registry.ts, cutoff = expires_at, retentionDays: 30) still hard-deletes
- * the row later, but with a 30-day grace offset on the SAME cutoff column
- * (M2) — so the EXPIRED state is actually visible to the tenant UI for that
- * window before the eventual purge, instead of being hard-deleted in the
- * same sweepOnce cycle it was flipped in.
+ * (registry.ts, cutoff = expires_at, retentionDays grace) still hard-deletes
+ * the row later, but with a grace offset on the SAME cutoff column (M2) — so
+ * the EXPIRED state is actually visible to the tenant UI for that window
+ * before the eventual purge, instead of being hard-deleted in the same
+ * sweepOnce cycle it was flipped in. The day count lives ONLY on the
+ * registry entry (single source of truth).
  *
  * State-machine cross-reference: PENDING -> EXPIRED by actor SYSTEM is the
  * MATRIX entry at src/lib/access-request/access-request-state.ts (MATRIX

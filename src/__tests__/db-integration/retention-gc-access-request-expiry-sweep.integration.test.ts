@@ -29,11 +29,22 @@ import {
   RETENTION_REGISTRY,
   type AuditProvenanceEntry,
 } from "@/workers/retention-gc-worker/registry";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const accessRequestProvenanceEntry = RETENTION_REGISTRY.find(
   (e): e is AuditProvenanceEntry =>
     e.kind === "EXPIRY_AUDIT_PROVENANCE" && e.table === "access_requests",
 )!;
+
+// Grace window derived from the registry (never hardcode the day count —
+// the tests must track the registry value). Fail loud if the grace offset
+// is ever removed from the entry: these tests exist to pin it.
+if (accessRequestProvenanceEntry.retentionDays === undefined) {
+  throw new Error(
+    "access_requests EXPIRY_AUDIT_PROVENANCE entry lost its retentionDays grace — the EXPIRED-visibility tests below require it",
+  );
+}
+const GRACE_DAYS = accessRequestProvenanceEntry.retentionDays;
 
 describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () => {
   let ctx: TestContext;
@@ -153,13 +164,13 @@ describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () 
     expect(secondCount).toBe(0);
   });
 
-  // M2: retentionDays: 30 on the access_requests EXPIRY_AUDIT_PROVENANCE
-  // registry entry means the hard-delete cutoff is expires_at < now() - 30
-  // days, NOT expires_at < now() — so an EXPIRED row (past expires_at but
-  // within the 30-day grace window) survives the audit-provenance sweep in
-  // the SAME cycle it was flipped in. Without the grace offset both sweeps
-  // share the same cutoff and the row would be purged before ever being
-  // observed as EXPIRED.
+  // M2: the retentionDays grace on the access_requests
+  // EXPIRY_AUDIT_PROVENANCE registry entry means the hard-delete cutoff is
+  // expires_at < now() - retentionDays, NOT expires_at < now() — so an
+  // EXPIRED row (past expires_at but within the grace window) survives the
+  // audit-provenance sweep in the SAME cycle it was flipped in. Without the
+  // grace offset both sweeps share the same cutoff and the row would be
+  // purged before ever being observed as EXPIRED.
   it("an EXPIRED row survives the audit-provenance sweep within the retentionDays grace window (M2)", async () => {
     const id = await insertAccessRequest({
       status: "PENDING",
@@ -184,9 +195,9 @@ describe("retention-gc sweepExpiredAccessRequests: PENDING -> EXPIRED (C7)", () 
   it("the audit-provenance sweep still purges an access_requests row past the retentionDays grace window", async () => {
     const id = await insertAccessRequest({
       status: "EXPIRED",
-      // expires_at is far enough in the past that now() - retentionDays(30d)
-      // is still past it, so this row IS eligible for the hard delete.
-      expiresAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+      // expires_at is one day past the grace window, so now() - retentionDays
+      // is still past it and this row IS eligible for the hard delete.
+      expiresAt: new Date(Date.now() - (GRACE_DAYS + 1) * MS_PER_DAY),
     });
 
     await ctx.su.prisma.$transaction(async (tx) => {

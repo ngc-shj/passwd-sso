@@ -349,12 +349,17 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     // in-flight action.
     //
     // JIT access requests — provenance: requesting actor (user or SA), status,
-    // approval timing. retentionDays: 30 — the sweepExpiredAccessRequests
+    // approval timing. retentionDays: 7 — the sweepExpiredAccessRequests
     // status-flip (PENDING -> EXPIRED, sweep.ts) shares this table's
     // expires_at cutoff; without a grace offset the hard-delete below would
     // purge a row in the SAME sweepOnce cycle it was flipped in, so EXPIRED
-    // would never be user-visible (M2). 30 days matches the other
-    // SECURITY_RECORD_RETENTION_PURGED entries' typical forensic window.
+    // would never be user-visible (M2). The grace is a UI-visibility window
+    // only, NOT forensic retention — the purge's provenance audit records
+    // status=EXPIRED permanently, so investigations never depend on the
+    // grace length. 7 days keeps request metadata (requester, scope,
+    // timing) minimal while comfortably outlasting weekly admin review
+    // cadence; it also mirrors the 7-day emergency-access invitation
+    // window used elsewhere for short-lived security records.
     kind: "EXPIRY_AUDIT_PROVENANCE",
     table: "access_requests",
     cutoffColumn: "expires_at",
@@ -369,7 +374,7 @@ export const RETENTION_REGISTRY: readonly RetentionEntry[] = [
     ],
     auditAction: "SECURITY_RECORD_RETENTION_PURGED",
     globalDelete: true,
-    retentionDays: 30,
+    retentionDays: 7,
   },
   {
     // Admin vault resets — provenance: target user + approval/execution/revoke markers.
