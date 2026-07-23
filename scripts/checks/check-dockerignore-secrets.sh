@@ -59,43 +59,76 @@ function globToRegExp(glob) {
   return new RegExp(out + "$");
 }
 
+// Docker excludes a whole directory subtree when a pattern matches an ancestor
+// dir (e.g. `**/.terraform` excludes infra/terraform/.terraform/providers/x).
+// So a path is matched if the pattern matches the path itself OR any ancestor.
+function matchesPathOrAncestor(re, path) {
+  const parts = path.split("/");
+  for (let i = parts.length; i >= 1; i--) {
+    if (re.test(parts.slice(0, i).join("/"))) return true;
+  }
+  return false;
+}
+
 function ignored(path) {
   let ig = false;
   for (const p of patterns) {
     const neg = p.startsWith("!");
     const pat = neg ? p.slice(1) : p;
-    if (globToRegExp(pat).test(path)) ig = !neg;
+    const re = globToRegExp(pat);
+    // Negations (re-includes) apply to the exact path only, not ancestors.
+    if (neg ? re.test(path) : matchesPathOrAncestor(re, path)) ig = !neg;
   }
   return ig;
 }
 
-// Must be EXCLUDED (carry secrets) — root AND nested (extension/.env was the miss).
+// Must be EXCLUDED — root AND nested. Covers the whole git-ignored secret /
+// artifact class that `COPY . .` would otherwise pull into the build context
+// (env files, keys/certs, CLI vault mapping, Terraform state/tfvars/.terraform,
+// local DBs). Nested cases (extension/.env, certificates/*.pem, infra/.terraform)
+// were the successive re-review misses.
 const mustExclude = [
+  // env files
   ".env", ".env.local", ".env.production", ".env.development",
   ".env.bak", ".env.local.bak-20260101-000000",
   "extension/.env", "cli/.env", "extension/.env.production",
   "a/b/c/.env", "ios/.env.local",
+  // keys / certs
+  "certificates/localhost-key.pem", "certificates/localhost.pem",
+  "a/b/tls.key", "server.crt", "x.cert", "id.p12", "id.pfx",
+  "master.key", "config/encryption.key",
+  // CLI vault mapping + local auth/review artifacts
+  ".passwd-sso-env.json", "sub/dir/.passwd-sso-env.json",
+  "docs/review-credentials.local.md", "load-test/setup/.load-test-auth.json",
+  // Terraform working dir / state / real tfvars
+  "infra/terraform/.terraform/providers/x", "infra/terraform/terraform.tfstate",
+  "infra/terraform/terraform.tfstate.backup",
+  "infra/terraform/envs/prod/terraform.tfvars", "x/secrets.tfvars.json",
+  // local databases
+  "data.db", "sub/cache.sqlite",
 ];
 // Must remain INCLUDED (committed, non-secret placeholders) — root and nested.
 const mustInclude = [
   ".env.example",
   "extension/.env.example",
   "scripts/__tests__/fixtures/env-drift/positive/.env.example",
+  "infra/terraform/terraform.tfvars.example",
+  "infra/terraform/envs/dev/terraform.tfvars.example",
 ];
 
 const leaked = mustExclude.filter((f) => !ignored(f));
 const dropped = mustInclude.filter((f) => ignored(f));
 
 if (leaked.length) {
-  console.error("ERROR: .dockerignore does NOT exclude secret env file(s): " + leaked.join(", "));
-  console.error("Add `.env`, `.env.*`, `**/.env`, `**/.env.*` (with `!.env.example` and `!**/.env.example`).");
+  console.error("ERROR: .dockerignore does NOT exclude git-ignored secret/artifact(s): " + leaked.join(", "));
+  console.error("Mirror .gitignore's secret/artifact entries into .dockerignore recursively (see the file's comments).");
   process.exit(1);
 }
 if (dropped.length) {
   console.error("ERROR: .dockerignore over-excludes committed placeholder(s): " + dropped.join(", "));
   process.exit(1);
 }
-console.log("OK (static: .dockerignore excludes env secrets at any depth, keeps .env.example)");
+console.log("OK (static: .dockerignore excludes git-ignored secrets/artifacts at any depth, keeps *.example placeholders)");
 NODE
 
 # ── 2. Bundle assertion: no env file anywhere in a built tree ─────────────────
@@ -109,17 +142,32 @@ NODE
 # static gate above is the always-on regression net.
 SCAN_ROOT="${DOCKERIGNORE_SECRETS_IMAGE_ROOT:-.next/standalone}"
 if [ "${DOCKERIGNORE_SECRETS_SCAN_BUNDLE:-0}" = "1" ] && [ -d "$SCAN_ROOT" ]; then
-  # Any .env / .env.* other than .env.example, at ANY depth, is a leak.
-  # Exclude node_modules (third-party packages legitimately ship .env fixtures).
-  found=$(find "$SCAN_ROOT" -type d -name node_modules -prune -o \
-    -type f \( -name ".env" -o -name ".env.*" \) ! -name ".env.example" -print 2>/dev/null || true)
+  # Any git-ignored secret / artifact at ANY depth is a leak: env files, keys/
+  # certs, CLI vault mapping, Terraform state/tfvars/.terraform, local DBs.
+  # Exclude node_modules (third-party packages legitimately ship such fixtures)
+  # and the committed *.example placeholders.
+  # A .terraform dir anywhere in the tree is itself a leak; report it and prune.
+  # node_modules is pruned silently (legit third-party fixtures).
+  found=$(find "$SCAN_ROOT" \
+    -type d -name node_modules -prune -o \
+    -type d -name .terraform -print -prune -o \
+    -type f \( \
+        -name ".env" -o -name ".env.*" \
+        -o -name "*.pem" -o -name "*.key" -o -name "*.crt" -o -name "*.cert" \
+        -o -name "*.p12" -o -name "*.pfx" \
+        -o -name ".passwd-sso-env.json" \
+        -o -name "*.tfstate" -o -name "*.tfstate.*" \
+        -o -name "*.tfvars" -o -name "*.tfvars.json" \
+        -o -name "*.db" -o -name "*.sqlite" \
+      \) ! -name ".env.example" ! -name "*.tfvars.example" -print \
+    2>/dev/null || true)
   if [ -n "$found" ]; then
-    echo "ERROR: secret env file(s) present in the built tree $SCAN_ROOT (shipped via build context / image):"
+    echo "ERROR: git-ignored secret/artifact(s) present in the built tree $SCAN_ROOT (shipped via build context / image):"
     echo "$found"
-    echo "Fix .dockerignore (recursive **/.env exclusion) and rebuild."
+    echo "Fix .dockerignore (recursive exclusion of the .gitignore secret class) and rebuild."
     exit 1
   fi
-  echo "OK (bundle: $SCAN_ROOT has no secret env file at any depth)"
+  echo "OK (bundle: $SCAN_ROOT has no git-ignored secret/artifact at any depth)"
 else
   echo "OK (bundle: no built tree at $SCAN_ROOT to scan — static gate applies)"
 fi

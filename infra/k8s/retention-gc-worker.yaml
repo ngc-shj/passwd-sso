@@ -31,7 +31,8 @@ spec:
         - name: worker
           # REQUIRED substitution at deploy time. This is an unresolved
           # placeholder — replace with the full immutable ref (ECR registry +
-          # @sha256 digest or :vX.Y.Z tag) via Kustomize images:/envsubst/sed.
+          # @sha256 digest or :vX.Y.Z tag) via Kustomize images: or sed. (Not
+          # envsubst — it only substitutes $VAR/${VAR}, not literal placeholders.)
           # It is intentionally NOT a runnable :latest so a manifest applied
           # without substitution fails fast instead of pulling a mutable image.
           image: "REPLACE_WITH_IMMUTABLE_IMAGE_REF" # e.g. <ACCOUNT>.dkr.ecr.<region>.amazonaws.com/passwd-sso-app@sha256:...

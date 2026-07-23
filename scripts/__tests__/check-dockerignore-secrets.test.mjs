@@ -45,11 +45,23 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-const RECURSIVE_IGNORE =
-  "node_modules\n.env\n.env.*\n**/.env\n**/.env.*\n!.env.example\n!**/.env.example\n";
+// A FULL, correct ignore covering the whole git-ignored secret/artifact class
+// the guard now enforces (env, keys/certs, CLI vault mapping, Terraform, DBs).
+const RECURSIVE_IGNORE = [
+  "node_modules",
+  ".env", ".env.*", "**/.env", "**/.env.*", "!.env.example", "!**/.env.example",
+  "**/*.pem", "**/*.key", "**/*.crt", "**/*.cert", "**/*.p12", "**/*.pfx",
+  "**/master.key", "**/encryption.key",
+  "**/.passwd-sso-env.json",
+  "**/*review-credentials.local.md", "**/.load-test-auth.json",
+  "**/*.db", "**/*.sqlite",
+  "**/.terraform", "**/*.tfstate", "**/*.tfstate.*",
+  "**/*.tfvars", "**/*.tfvars.json", "!**/*.tfvars.example",
+  "**/test-results", "**/coverage", "**/.coverage-snapshots",
+].join("\n") + "\n";
 
 describe("check-dockerignore-secrets", () => {
-  it("passes when .dockerignore excludes .env at any depth but keeps .env.example", () => {
+  it("passes when .dockerignore excludes the full secret class at any depth, keeps placeholders", () => {
     writeDockerignore(RECURSIVE_IGNORE);
     const r = runGuard();
     expect(r.exitCode).toBe(0);
@@ -60,12 +72,32 @@ describe("check-dockerignore-secrets", () => {
     writeDockerignore("node_modules\n.env.local\n.env*.local\n");
     const r = runGuard();
     expect(r.exitCode).toBe(1);
-    expect(r.stdout + r.stderr).toContain("does NOT exclude secret env file");
+    expect(r.stdout + r.stderr).toContain("does NOT exclude git-ignored secret/artifact");
+  });
+
+  it("FAILS when .dockerignore excludes .env but NOT keys/certs (*.pem leak)", () => {
+    writeDockerignore("node_modules\n.env\n.env.*\n**/.env\n**/.env.*\n!.env.example\n!**/.env.example\n");
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toContain(".pem");
+  });
+
+  it("FAILS when .dockerignore excludes secrets but NOT Terraform state/.terraform", () => {
+    writeDockerignore(
+      "node_modules\n**/.env\n**/.env.*\n!**/.env.example\n**/*.pem\n**/*.key\n**/*.crt\n**/*.cert\n**/*.p12\n**/*.pfx\n**/master.key\n**/encryption.key\n**/.passwd-sso-env.json\n**/*review-credentials.local.md\n**/.load-test-auth.json\n**/*.db\n**/*.sqlite\n",
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toMatch(/\.terraform|tfstate|tfvars/);
   });
 
   it("FAILS when .dockerignore excludes only root .env but not nested (extension/.env miss)", () => {
-    // Root-only patterns — the exact pre-fix gap that let extension/.env ship.
-    writeDockerignore("node_modules\n.env\n.env.*\n!.env.example\n");
+    // Full secret class EXCEPT the recursive **/.env — the exact pre-fix gap
+    // that let extension/.env ship while everything else was covered.
+    const rootOnlyEnv = RECURSIVE_IGNORE
+      .replace("**/.env\n", "")
+      .replace("**/.env.*\n", "");
+    writeDockerignore(rootOnlyEnv);
     const r = runGuard();
     expect(r.exitCode).toBe(1);
     expect(r.stdout + r.stderr).toContain("extension/.env");
@@ -79,8 +111,11 @@ describe("check-dockerignore-secrets", () => {
   });
 
   it("FAILS when .dockerignore over-excludes the committed .env.example", () => {
-    // Recursive exclusion WITHOUT the !.env.example re-includes → placeholder dropped.
-    writeDockerignore("node_modules\n.env\n.env.*\n**/.env\n**/.env.*\n");
+    // Full secret class but WITHOUT the !.env.example re-includes → placeholder dropped.
+    const noReinclude = RECURSIVE_IGNORE
+      .replace("!.env.example\n", "")
+      .replace("!**/.env.example\n", "");
+    writeDockerignore(noReinclude);
     const r = runGuard();
     expect(r.exitCode).toBe(1);
     expect(r.stdout + r.stderr).toContain("over-excludes committed placeholder");
@@ -100,7 +135,23 @@ describe("check-dockerignore-secrets", () => {
     expect(r.stdout + r.stderr).toContain("extension/.env");
   });
 
-  it("passes the bundle scan when the built tree has no secret env file", () => {
+  it("FAILS when a built tree contains a nested key/cert or Terraform state (bundle scan)", () => {
+    writeDockerignore(RECURSIVE_IGNORE);
+    const certs = join(root, "image", "app", "certificates");
+    const tf = join(root, "image", "app", "infra", "terraform");
+    mkdirSync(certs, { recursive: true });
+    mkdirSync(tf, { recursive: true });
+    writeFileSync(join(certs, "localhost-key.pem"), "KEY\n", "utf8");
+    writeFileSync(join(tf, "terraform.tfstate"), "{}\n", "utf8");
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toMatch(/localhost-key\.pem|terraform\.tfstate/);
+  });
+
+  it("passes the bundle scan when the built tree has no secret/artifact", () => {
     writeDockerignore(RECURSIVE_IGNORE);
     const appDir = join(root, "image", "app");
     mkdirSync(appDir, { recursive: true });
@@ -110,7 +161,7 @@ describe("check-dockerignore-secrets", () => {
       DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain("has no secret env file at any depth");
+    expect(r.stdout).toContain("has no git-ignored secret/artifact at any depth");
   });
 
   it("ignores node_modules .env fixtures in the bundle scan", () => {

@@ -81,8 +81,12 @@ aws ecr get-login-password --region ap-northeast-1 | \
   docker login --username AWS --password-stdin $(terraform output -raw ecr_app_repository_url | cut -d/ -f1)
 
 # Build and push app with an immutable version tag (matches package.json version).
+# NOTE: `terraform output` のため infra/terraform で実行するが、Docker build の
+# CONTEXT はリポジトリルート (../..) — Dockerfile はそこにある（ここには無い）。
 VERSION=$(node -p "require('../../package.json').version")   # e.g. 0.4.71
-docker build -t $(terraform output -raw ecr_app_repository_url):v${VERSION} .
+docker build -f ../../Dockerfile \
+  -t $(terraform output -raw ecr_app_repository_url):v${VERSION} \
+  ../..
 docker push $(terraform output -raw ecr_app_repository_url):v${VERSION}
 
 # Push jackson (pull from Docker Hub, retag, push). jackson has no local version

@@ -1,6 +1,25 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
+Review round: 4
+
+## Round 4 — third external re-review (all addressed)
+
+- **High — `COPY . .` ships the whole git-ignored secret class.** Rounds 1-3 closed `.env`
+  only; a real builder still carried `.passwd-sso-env.json`, `certificates/*.pem`, and the
+  1.45 GB `infra/terraform/.terraform`. Fixed by mirroring `.gitignore`'s secret/artifact
+  entries into `.dockerignore` recursively (keys/certs, CLI vault mapping, Terraform
+  state/tfvars/.terraform, local DBs), keeping `!**/*.tfvars.example`. Guard expanded to the
+  full class incl. ancestor-directory matches; self-test → 12 cases. **Verified against a real
+  `docker build --target builder`: all 4 leaked paths absent, 0 secrets at any depth.** This
+  finally closes the defect CLASS (git-ignored-secret-in-context), not just the `.env` instance.
+- **Low — Terraform README build context.** `docker build ... .` from `infra/terraform` (no
+  Dockerfile there) → `docker build -f ../../Dockerfile ../..` (en + ja).
+- **Low — k8s `envsubst` comment.** Corrected to Kustomize `images:`/`sed` (envsubst can't
+  substitute a literal placeholder). Fail-closed placeholder kept.
+
+## Round 3 — second external re-review (all addressed, see below)
+
 Review round: 3
 
 ## Round 3 — second external re-review (all addressed)

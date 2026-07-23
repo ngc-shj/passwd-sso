@@ -15,6 +15,41 @@ node_modules
 **/.env.*
 !.env.example
 !**/.env.example
+
+# Every OTHER git-ignored secret / local artifact would also be pulled in by
+# `COPY . .` and leak into builder layers + remote build cache. Mirror the
+# secret/artifact entries from .gitignore (recursively) so the build context
+# carries none of them. Keep this in sync with .gitignore's "Secrets & Keys",
+# "Terraform", and CLI-config sections; check-dockerignore-secrets.sh guards it.
+# --- Secrets & keys ---
+**/*.pem
+**/*.key
+**/*.crt
+**/*.cert
+**/*.p12
+**/*.pfx
+**/master.key
+**/encryption.key
+# --- CLI vault mapping (user-specific entry IDs) ---
+**/.passwd-sso-env.json
+# --- Local review / auth artifacts ---
+**/*review-credentials.local.md
+**/.load-test-auth.json
+# --- Local databases ---
+**/*.db
+**/*.sqlite
+# --- Terraform working dir / state / real tfvars ---
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+**/*.tfvars.json
+!**/*.tfvars.example
+# --- Test / coverage output (not needed in the image) ---
+**/test-results
+**/coverage
+**/.coverage-snapshots
+
 .claude
 *.md
 .vscode

@@ -43,6 +43,26 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Security Minor**: scoped the F7 false-positive regex allowlist to `paths=['''^docs/''']`
   so the 3 example-string regexes cannot suppress matches elsewhere in the tree.
 
+### Round 4 — third external re-review additions
+- **High: `COPY . .` ships the WHOLE git-ignored secret class, not just `.env`.** Rounds 1-3
+  closed `.env` (root then nested) but the real class is every secret/artifact `.gitignore`
+  excludes. A real builder still carried `/app/.passwd-sso-env.json`, `certificates/*.pem`,
+  and the 1.45 GB `infra/terraform/.terraform`. Fixed by mirroring `.gitignore`'s
+  secret/artifact entries into `.dockerignore` recursively (keys/certs, CLI vault mapping,
+  Terraform state/tfvars/.terraform, local DBs, review/auth artifacts) with `!**/*.tfvars.example`
+  kept. Guard expanded: static `mustExclude` covers all classes incl. ancestor-dir matches
+  (`**/.terraform` excludes its subtree — the guard's glob translator now matches a path when
+  any ancestor matches); bundle scan finds keys/certs/tfstate/.terraform too. Self-test → 12
+  cases. **Verified against a real `docker build --target builder`: all 4 previously-leaked
+  paths absent, 0 git-ignored secrets/artifacts at any depth.**
+- **Low: Terraform README docker build context.** en+ja READMEs ran `docker build ... .` from
+  `infra/terraform`, which has no Dockerfile. Fixed to `docker build -f ../../Dockerfile ../..`
+  (repo-root context). This also makes the .dockerignore hardening the operative control for
+  the now-correct build path.
+- **Low: k8s `envsubst` comment.** `envsubst` only substitutes `$VAR`/`${VAR}`, not the literal
+  `REPLACE_WITH_IMMUTABLE_IMAGE_REF` placeholder. Corrected the comment to Kustomize `images:`
+  or `sed` (kept the fail-closed placeholder).
+
 ### Round 3 — second external re-review additions
 - **Med: nested `.env` in build context** (`extension/.env`). Round-2's `.env`/`.env.*`
   patterns were ROOT-ONLY; Docker does not exclude subdirectory files with a bare
