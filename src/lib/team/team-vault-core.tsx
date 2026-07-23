@@ -274,15 +274,16 @@ export function TeamVaultProvider({
           return { failure: "not_available" };
         }
 
-        // Import ECDH private key, then zero-clear the copy
+        // Import ECDH private key, then zero-clear the copy. Pass the
+        // TypedArray view directly (importKey copies internally): a
+        // `.buffer.slice()` ArrayBuffer both fails SubtleCrypto's realm
+        // check under jsdom/Node-20 test environments AND leaves an
+        // unzeroed intermediate copy on the heap (R39).
         stage = "import_ecdh_private_key";
-        const keyBuf = ecdhPrivateKeyBytes.buffer.slice(
-          ecdhPrivateKeyBytes.byteOffset,
-          ecdhPrivateKeyBytes.byteOffset + ecdhPrivateKeyBytes.byteLength
-        ) as ArrayBuffer;
         const ecdhPrivateKey = await crypto.subtle.importKey(
           "pkcs8",
-          keyBuf,
+          // Uint8Array default type param is ArrayBufferLike; the vault-context copy is always a plain ArrayBuffer view.
+          ecdhPrivateKeyBytes as Uint8Array<ArrayBuffer>,
           { name: "ECDH", namedCurve: "P-256" },
           false,
           ["deriveBits"]
@@ -624,14 +625,12 @@ export function TeamVaultProvider({
       const pendingMembers = await res.json();
       if (!Array.isArray(pendingMembers) || pendingMembers.length === 0) return;
 
-      // Import ECDH private key for unwrapping, then zero-clear the copy
-      const privKeyBuf = ecdhPrivateKeyBytes.buffer.slice(
-        ecdhPrivateKeyBytes.byteOffset,
-        ecdhPrivateKeyBytes.byteOffset + ecdhPrivateKeyBytes.byteLength
-      ) as ArrayBuffer;
+      // Import ECDH private key for unwrapping, then zero-clear the copy.
+      // TypedArray passed directly — see the same note in
+      // fetchAndUnwrapTeamKey (realm check + R39 intermediate copy).
       const ecdhPrivateKey = await crypto.subtle.importKey(
         "pkcs8",
-        privKeyBuf,
+        ecdhPrivateKeyBytes as Uint8Array<ArrayBuffer>,
         { name: "ECDH", namedCurve: "P-256" },
         false,
         ["deriveBits"]

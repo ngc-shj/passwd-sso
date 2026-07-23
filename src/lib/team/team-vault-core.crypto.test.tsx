@@ -8,15 +8,16 @@
 //
 // jsdom's crypto.subtle wrapper enforces same-realm BufferSource checks that
 // reject ArrayBuffers produced in the test (Node) realm — importKey fails
-// with "2nd argument is not instance of ArrayBuffer" on newer Node 20.x
-// patches (CI-only red; see jsdom-web-crypto-probe.test.ts's fallback note).
-// Replace the jsdom wrapper with Node's own webcrypto so fixtures and the
-// production code under test share one realm. Still real crypto, zero mocks.
+// with "2nd argument is not instance of ArrayBuffer" under CI's .nvmrc Node
+// 20.x (locally invisible on a newer Node; see jsdom-web-crypto-probe.test.ts's
+// fallback note). Replace the jsdom wrapper with Node's own webcrypto via
+// vi.stubGlobal — unlike a bare Object.defineProperty, vitest's stub is
+// applied through the same global-population layer the jsdom environment
+// uses, so the production code's bare `crypto` reference resolves to it in
+// every environment. Still real crypto, zero mocks.
 import { webcrypto as nodeWebcrypto } from "node:crypto";
-Object.defineProperty(globalThis, "crypto", {
-  value: nodeWebcrypto,
-  configurable: true,
-});
+import { vi } from "vitest";
+vi.stubGlobal("crypto", nodeWebcrypto);
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, it, expect, afterEach } from "vitest";
@@ -224,14 +225,14 @@ describe("team-vault-core (real WebCrypto)", () => {
     const independentKey = await deriveItemEncryptionKey(itemKeyBytes.slice());
     const plaintext = new TextEncoder().encode("old-version-secret");
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
+    // TypedArray passed directly — an ArrayBuffer from .buffer.slice() fails the realm check under Node 20 jsdom.
     const ciphertext = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: ivBuf },
+      { name: "AES-GCM", iv },
       independentKey,
       plaintext,
     );
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: ivBuf },
+      { name: "AES-GCM", iv },
       key as unknown as CryptoKey,
       ciphertext,
     );
@@ -394,14 +395,14 @@ describe("team-vault-core (real WebCrypto)", () => {
     // not silently the latest (version 3) TeamKey-derived key.
     const plaintext = new TextEncoder().encode("stale-version-attachment-key");
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
+    // TypedArray passed directly — an ArrayBuffer from .buffer.slice() fails the realm check under Node 20 jsdom.
     const ciphertext = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv: ivBuf },
+      { name: "AES-GCM", iv },
       key as unknown as CryptoKey,
       plaintext,
     );
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: ivBuf },
+      { name: "AES-GCM", iv },
       key as unknown as CryptoKey,
       ciphertext,
     );
