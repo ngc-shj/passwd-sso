@@ -99,6 +99,36 @@ describe("detectCreditCardFields", () => {
     expect(fields).toBeNull();
   });
 
+  it("does not claim a radio (id=card_number_pay) as the card-number field on a mixed form", () => {
+    // A payment-method radio whose id matches the card-number regex sits next to
+    // a real card-number text field. Without the fillable-type gate the radio is
+    // claimed as `cardNumber` (first DOM match wins) and the CC dropdown fires on
+    // it. The gate must keep `cardNumber` on the genuine text field.
+    setupForm(`
+      <form>
+        <input type="radio" name="pay_method" id="card_number_pay" value="card" />
+        <input name="cardNumber" type="text" />
+        <input name="cvv" type="text" />
+      </form>
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cardNumber?.getAttribute("name")).toBe("cardNumber"); // not the radio
+    expect((fields!.cardNumber as HTMLInputElement).type).toBe("text");
+  });
+
+  it("still detects a masked (type=password) CVV field", () => {
+    setupForm(`
+      <input autocomplete="cc-number" type="text" />
+      <input autocomplete="cc-csc" type="password" />
+    `);
+
+    const fields = detectCreditCardFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.cvv).toBeTruthy();
+  });
+
   it("detects Japanese label fields", () => {
     setupForm(`
       <label for="num">カード番号</label>

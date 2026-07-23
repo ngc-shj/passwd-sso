@@ -312,4 +312,43 @@ describe("performIdentityAutofill", () => {
 
     expect((document.querySelector('[autocomplete="name"]') as HTMLInputElement).value).toBe("Jane Doe");
   });
+
+  // Regression for the reported bug: a 2FA-method radio whose id="Email" matches
+  // EMAIL_RE sits on a form with real identity fields. The email value must land
+  // in the real text field, and the radio's value must be untouched. Exercises
+  // the real production write path (performIdentityAutofill → detectIdentityFields),
+  // the whole point of routing the fill path through the -lib twin.
+  it("writes email into the real text field, never into the id=Email radio (reported bug)", () => {
+    setupForm(`
+      <form>
+        <input id="Email" name="AuthenicationType" type="radio" value="Email" />
+        <input name="email" type="text" />
+        <input name="fullName" type="text" />
+      </form>
+    `);
+
+    performIdentityAutofill(
+      payload({ email: "jane@example.com", fullName: "Jane Doe" }),
+    );
+
+    // The radio keeps its submit value — no PII written into it.
+    expect((document.getElementById("Email") as HTMLInputElement).value).toBe("Email");
+    // The email lands in the genuine text field.
+    expect((document.querySelector('input[name="email"]') as HTMLInputElement).value).toBe("jane@example.com");
+    expect((document.querySelector('input[name="fullName"]') as HTMLInputElement).value).toBe("Jane Doe");
+  });
+
+  it("fills an attribute-less input (resolved type=text)", () => {
+    // Load-bearing: HTMLInputElement.type resolves to "text" with no type attr,
+    // so the fillable-type allowlist must admit it.
+    setupForm(`
+      <input name="fullName" />
+      <input name="phone" />
+    `);
+
+    performIdentityAutofill(payload({ fullName: "Jane Doe", phone: "555-1234" }));
+
+    expect((document.querySelector('[name="fullName"]') as HTMLInputElement).value).toBe("Jane Doe");
+    expect((document.querySelector('[name="phone"]') as HTMLInputElement).value).toBe("555-1234");
+  });
 });

@@ -71,9 +71,25 @@ function getAutocomplete(el: HTMLElement): string {
   return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
 }
 
+// Only free-text-like input types can receive CC autofill. Radio / checkbox /
+// hidden / submit etc. must never be claimed as card fields — a payment-method
+// radio like `<input type="radio" id="card_number_pay">` would otherwise match
+// by hint and trigger the CC dropdown on focus. `password` is included because
+// CVV fields are commonly masked.
+const FILLABLE_INPUT_TYPES = new Set([
+  "text",
+  "tel",
+  "number",
+  "password",
+]);
+
+function isFillableInput(el: HTMLInputElement): boolean {
+  return FILLABLE_INPUT_TYPES.has(el.type);
+}
+
 function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
   if (el instanceof HTMLInputElement) {
-    return !el.disabled && !el.readOnly;
+    return isFillableInput(el) && !el.disabled && !el.readOnly;
   }
   return !el.disabled;
 }

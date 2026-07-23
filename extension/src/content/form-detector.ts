@@ -10,6 +10,9 @@ import { removeShadowHost } from "./ui/shadow-host";
 // Register AUTOFILL_FILL listener so autofill works without chrome.scripting.executeScript
 // (which requires host permissions or activeTab that may not be available).
 import "./autofill-lib";
+// Register AUTOFILL_CC_FILL / AUTOFILL_IDENTITY_FILL listeners for the same reason.
+import "./autofill-cc-lib";
+import "./autofill-identity-lib";
 // Register WebAuthn bridge for passkey provider (MAIN world ↔ ISOLATED world)
 import "./webauthn-bridge";
 

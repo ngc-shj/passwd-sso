@@ -99,6 +99,59 @@ describe("detectIdentityFields", () => {
     expect(fields).toBeNull();
   });
 
+  it("does not claim a radio (id=Email) as the email field on a mixed form", () => {
+    // Reproduces the reported bug: a 2FA-method radio group whose id="Email"
+    // matches EMAIL_RE sits alongside real identity text fields. Without the
+    // fillable-type gate, the radio is claimed as `email` and the identity
+    // dropdown fires on it. The form has real fields so detection is non-null —
+    // the point is that `email` must be null, not the radio.
+    setupForm(`
+      <form>
+        <input id="Email" name="AuthenicationType" type="radio" value="Email" />
+        <input name="fullName" type="text" />
+        <input name="phone" type="text" />
+      </form>
+    `);
+
+    const fields = detectIdentityFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.email).toBeNull(); // the radio must NOT be claimed
+    expect(fields!.fullName).toBeTruthy();
+    expect(fields!.phone).toBeTruthy();
+  });
+
+  it("does not claim checkbox / submit inputs whose hints match, on a mixed form", () => {
+    // Load-bearing (mixed form so detection stays non-null): a checkbox named
+    // email_optin and a submit named address_submit sit next to real text fields.
+    // Without the fillable-type gate the checkbox is claimed as `email` and the
+    // submit as `address`; the gate must keep those on null.
+    setupForm(`
+      <form>
+        <input type="checkbox" name="email_optin" />
+        <input type="submit" name="address_submit" />
+        <input name="fullName" type="text" />
+        <input name="phone" type="text" />
+      </form>
+    `);
+
+    const fields = detectIdentityFields(document);
+    expect(fields).not.toBeNull();
+    expect(fields!.email).toBeNull();
+    expect(fields!.address).toBeNull();
+    expect(fields!.fullName).toBeTruthy();
+    expect(fields!.phone).toBeTruthy();
+  });
+
+  it("ignores hidden inputs (excluded by visibility) with matching hints", () => {
+    setupForm(`
+      <input type="hidden" name="phone" value="x" />
+      <input type="submit" name="address_submit" />
+    `);
+
+    const fields = detectIdentityFields(document);
+    expect(fields).toBeNull();
+  });
+
   it("skips hidden fields", () => {
     setupForm(`
       <input autocomplete="name" style="display: none" />

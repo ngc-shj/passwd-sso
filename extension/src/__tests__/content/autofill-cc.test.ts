@@ -346,4 +346,31 @@ describe("performCreditCardAutofill", () => {
     const yearSelect = document.querySelector('[name="expyear"]') as HTMLSelectElement;
     expect(yearSelect.value).toBe("opt-b");
   });
+
+  // Regression: a payment-method radio whose id matches the card-number hint sits
+  // next to a real card-number text field. The card number must land in the text
+  // field, never the radio. Exercises the real production write path
+  // (performCreditCardAutofill → detectCreditCardFields).
+  it("writes the card number into the real text field, never the id=card_number_pay radio", () => {
+    setupForm(`
+      <form>
+        <input type="radio" name="pay_method" id="card_number_pay" value="card" />
+        <input name="cardNumber" type="text" />
+        <input name="cvv" type="text" />
+      </form>
+    `);
+
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "12",
+      expiryYear: "2030",
+      cvv: "123",
+    });
+
+    expect((document.getElementById("card_number_pay") as HTMLInputElement).value).toBe("card");
+    expect((document.querySelector('input[name="cardNumber"]') as HTMLInputElement).value).toBe("4111111111111111");
+    expect((document.querySelector('input[name="cvv"]') as HTMLInputElement).value).toBe("123");
+  });
 });

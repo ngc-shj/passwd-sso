@@ -78,9 +78,28 @@ function getAutocomplete(el: HTMLElement): string {
   return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
 }
 
+// Only free-text-like input types can receive identity autofill. Radio /
+// checkbox / hidden / submit etc. must never be claimed: e.g. a 2FA method
+// chooser `<input type="radio" id="Email">` matches EMAIL_RE by hint and
+// would otherwise trigger the identity dropdown on focus.
+const FILLABLE_INPUT_TYPES = new Set([
+  "text",
+  "email",
+  "tel",
+  "number",
+  "search",
+  "url",
+  "date",
+  "month",
+]);
+
+function isFillableInput(el: HTMLInputElement): boolean {
+  return FILLABLE_INPUT_TYPES.has(el.type);
+}
+
 function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
   if (el instanceof HTMLInputElement) {
-    return !el.disabled && !el.readOnly;
+    return isFillableInput(el) && !el.disabled && !el.readOnly;
   }
   return !el.disabled;
 }

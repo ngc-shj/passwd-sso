@@ -1546,61 +1546,77 @@ async function performAutofillForEntry(
   }
 
   // ── Credit Card autofill path ──
+  // autofill-cc-lib.ts is bundled in form-detector.ts (manifest content_scripts),
+  // so the AUTOFILL_CC_FILL listener is already present — no executeScript needed
+  // on the happy path (mirrors the LOGIN path below).
   if (entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
     const cardNumber = blob.cardNumber ?? "";
     if (!cardNumber) {
       return { ok: false, error: "NO_CARD_NUMBER" };
     }
+    const ccPayload = {
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: blob.cardholderName ?? "",
+      cardNumber,
+      expiryMonth: blob.expiryMonth ?? "",
+      expiryYear: blob.expiryYear ?? "",
+      cvv: blob.cvv ?? "",
+    };
     try {
-      await chrome.scripting.executeScript({
-        target: executeTarget,
-        files: ["src/content/autofill-cc.js"],
-      });
-      await sendFillMessage({
-        type: EXT_MSG.AUTOFILL_CC_FILL,
-        cardholderName: blob.cardholderName ?? "",
-        cardNumber,
-        expiryMonth: blob.expiryMonth ?? "",
-        expiryYear: blob.expiryYear ?? "",
-        cvv: blob.cvv ?? "",
-      });
+      await sendFillMessage(ccPayload);
     } catch {
-      // CC/Identity do not support direct fallback injection
-      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      // Fallback: inject the bundled content script (frame-scoped) for pages
+      // where the manifest content script has not attached yet, then retry.
+      try {
+        await chrome.scripting.executeScript({
+          target: executeTarget,
+          files: ["src/content/form-detector.js"],
+        });
+        await sendFillMessage(ccPayload);
+      } catch {
+        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      }
     }
     return { ok: true };
   }
 
   // ── Identity autofill path ──
+  // autofill-identity-lib.ts is bundled in form-detector.ts (manifest
+  // content_scripts), so the AUTOFILL_IDENTITY_FILL listener is already present.
   if (entryType === EXT_ENTRY_TYPE.IDENTITY) {
+    const identityPayload = {
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
+      fullName: blob.fullName ?? "",
+      givenName: blob.givenName ?? "",
+      familyName: blob.familyName ?? "",
+      familyNameKana: blob.familyNameKana ?? "",
+      givenNameKana: blob.givenNameKana ?? "",
+      // Structured addressLine1 is the canonical source; legacy entries store
+      // the monolithic `address` instead.
+      address: blob.addressLine1 ?? blob.address ?? "",
+      addressLine2: blob.addressLine2 ?? "",
+      city: blob.city ?? "",
+      state: blob.state ?? "",
+      postalCode: blob.postalCode ?? "",
+      country: blob.country ?? "",
+      phone: blob.phone ?? "",
+      email: blob.email ?? "",
+      dateOfBirth: blob.dateOfBirth ?? "",
+      nationality: blob.nationality ?? "",
+      idNumber: blob.idNumber ?? "",
+    };
     try {
-      await chrome.scripting.executeScript({
-        target: executeTarget,
-        files: ["src/content/autofill-identity.js"],
-      });
-      await sendFillMessage({
-        type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
-        fullName: blob.fullName ?? "",
-        givenName: blob.givenName ?? "",
-        familyName: blob.familyName ?? "",
-        familyNameKana: blob.familyNameKana ?? "",
-        givenNameKana: blob.givenNameKana ?? "",
-        // Structured addressLine1 is the canonical source; legacy entries store
-        // the monolithic `address` instead.
-        address: blob.addressLine1 ?? blob.address ?? "",
-        addressLine2: blob.addressLine2 ?? "",
-        city: blob.city ?? "",
-        state: blob.state ?? "",
-        postalCode: blob.postalCode ?? "",
-        country: blob.country ?? "",
-        phone: blob.phone ?? "",
-        email: blob.email ?? "",
-        dateOfBirth: blob.dateOfBirth ?? "",
-        nationality: blob.nationality ?? "",
-        idNumber: blob.idNumber ?? "",
-      });
+      await sendFillMessage(identityPayload);
     } catch {
-      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      try {
+        await chrome.scripting.executeScript({
+          target: executeTarget,
+          files: ["src/content/form-detector.js"],
+        });
+        await sendFillMessage(identityPayload);
+      } catch {
+        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      }
     }
     return { ok: true };
   }
