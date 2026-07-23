@@ -56,3 +56,13 @@ US3 [Low] EXPIRED not UI-observable (same as Func F1). → FIX-M2 (grace offset)
 - FIX-F6: ja ブラウザー→ブラウザ.
 - FIX-F7: history generic decrypt toast → historyDecryptFailed i18n key.
 - FIX-T1/T2/T3/T5: decorative-assertion / bypass_rls ordering / RT8 denial-pin / mock-exhaustion all addressed.
+
+## Round 2 (incremental verification)
+Date: 2026-07-23
+No findings — converged. All Round-1 fixes (M1-M4, F3-F7, T1-T3/T5) verified correct and complete.
+Cross-cutting new-issue hunt clean:
+- R43: M4 SessionInfoSchema tightening is a fail-closed narrowing (evict→refetch→ {valid:false}→redirect), NOT a widening; no eviction→fail-open path exists (page-route treats !valid as redirect).
+- M2 30-day grace: EXPIRED is terminal in the MATRIX; approve/deny cannot act on it; no count/quota enumerates access_requests; only conflicting-deleter check clean (sweep is the sole deleter).
+- M1+M2 same-cycle: flip-before-purge, just-expired row not past grace → survives; flip idempotent (WHERE status='PENDING').
+- R19: no .skip/.todo/.only added.
+Termination: 2 rounds, converged. No expanding R42 class (M4's fail-open was a single structural gap, not an accreting member-set — positive-cache writer set = {auth-gate.ts:185}, code-derived and complete).
