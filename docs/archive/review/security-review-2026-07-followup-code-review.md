@@ -1,7 +1,38 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
-Review round: 7
+Review round: 9
+
+## Round 9 — eighth external re-review (all addressed)
+
+- **Low — the STATIC check didn't follow a `DIR_CLASSES`-only addition.** After R8,
+  the bundle scan read `DIR_CLASSES` but the static check still only read
+  `MUST_EXCLUDE`, so a dir-class added to `DIR_CLASSES` alone was NOT verified
+  against `.dockerignore` (it worked only because nested representative paths were
+  hand-added to `MUST_EXCLUDE`). Fixed per the reviewer: the static check now
+  auto-generates `<dir>/__dockerignore_probe__` + `nested/<dir>/__dockerignore_probe__`
+  from `DIR_CLASSES` and asserts each is excluded — so a one-line `DIR_CLASSES`
+  edit genuinely follows BOTH checks. Removed the now-redundant hand-listed nested
+  paths. Added a test that drops each dir pattern from `.dockerignore` and requires
+  the static probe to fail. Red-proven: adding `newsecrets` to `DIR_CLASSES` alone
+  makes the static check fail on `newsecrets/__dockerignore_probe__`.
+
+## Round 8 — seventh external re-review (all addressed)
+
+- **Low — new directory-classes did not auto-follow (bundle side).** The bundle
+  derivation's `dirClasses` was hardcoded, so adding `new-secrets/x` to
+  `MUST_EXCLUDE` only searched the exact basename `x`. Fixed: `DIR_CLASSES` is now
+  a shared bash array READ from the environment by the derivation, and a contract
+  test plants an ARBITRARY-named file deep in each `DIR_CLASSES` subtree. (Round 9
+  completed the static side.)
+- **Low — the node-crash fail-closed test didn't reach the bundle path.** It broke
+  `node` from the first call, so the STATIC node check aborted first and the test
+  only asserted `exitCode !== 0` (which the old fail-open code also satisfied via
+  static abort). Fixed: a shim delegates the static call and crashes only the
+  bundle call; the test now asserts the bundle-specific "signature derivation
+  failed" message. Red-proven against a fail-open mutation. Added a third test
+  shimming `find` to error, covering the find-status fail-closed path
+  independently. Self-test → 20 cases.
 
 ## Round 7 — sixth external re-review (all addressed)
 

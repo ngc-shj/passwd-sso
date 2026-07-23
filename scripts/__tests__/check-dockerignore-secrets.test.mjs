@@ -102,6 +102,23 @@ describe("check-dockerignore-secrets", () => {
     }
   });
 
+  it("static probes follow DIR_CLASSES: dropping a dir-class pattern is caught by the generated probe", () => {
+    // Read DIR_CLASSES from the guard, drop each dir's pattern from an otherwise
+    // complete .dockerignore, and require the static check to fail via the
+    // auto-generated __dockerignore_probe__ path (proving the static side follows
+    // DIR_CLASSES, not just hand-listed MUST_EXCLUDE paths).
+    const guardSrc = readFileSync(GUARD, "utf8");
+    const block = guardSrc.match(/DIR_CLASSES=\(([\s\S]*?)\)/);
+    const dirs = [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    for (const d of dirs) {
+      const partial = RECURSIVE_IGNORE.replace(`**/${d}\n`, "");
+      writeDockerignore(partial);
+      const r = runGuard();
+      expect(r.exitCode, `dropping **/${d} must fail static`).toBe(1);
+      expect(r.stdout + r.stderr).toContain(`${d}/__dockerignore_probe__`);
+    }
+  });
+
   it("FAILS when .dockerignore excludes only root .env but not nested (extension/.env miss)", () => {
     // Full secret class EXCEPT the recursive **/.env — the exact pre-fix gap
     // that let extension/.env ship while everything else was covered.
@@ -223,49 +240,68 @@ describe("check-dockerignore-secrets", () => {
     expect(r.stdout + r.stderr).toContain("ENV_POLLUTION_GUARD");
   });
 
-  it("FAILS CLOSED when the bundle-scan node derivation crashes (fail-open regression)", () => {
-    // Shim a broken `node` onto PATH so signature derivation exits non-zero.
-    // A security gate must NOT green itself when its own logic fails.
-    writeDockerignore(RECURSIVE_IGNORE);
-    const shimDir = join(root, "shim");
+  // Shim helper: delegate the Nth-and-earlier `node` calls to the real node,
+  // and run `failScript` for the (delegateCount+1)-th call onward. Lets a test
+  // pass the STATIC node check (call 1) and only break the BUNDLE derivation
+  // (call 2), so the bundle fail-closed path is genuinely exercised.
+  function makeNodeShim(dirName, delegateCount, failBody) {
+    const shimDir = join(root, dirName);
     mkdirSync(shimDir, { recursive: true });
-    const nodeShim = join(shimDir, "node");
-    writeFileSync(nodeShim, "#!/usr/bin/env bash\nexit 7\n", { mode: 0o755 });
-    const appDir = join(root, "image", "app");
-    mkdirSync(appDir, { recursive: true });
-    const r = runGuard({
-      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
-      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
-      // Static check runs node FIRST; the shim breaks it too, so the static
-      // node (under set -e) aborts. Either way the guard must exit non-zero.
-      PATH: `${shimDir}:${process.env.PATH}`,
-    });
-    expect(r.exitCode).not.toBe(0);
-  });
-
-  it("FAILS CLOSED when the bundle-scan node emits an empty signature set", () => {
-    // Shim `node` to print nothing and exit 0 for the BUNDLE derivation only.
-    // The static node still needs to pass, so the shim echoes the static OK path
-    // by delegating to real node for the first (static) call and returning empty
-    // for the second (bundle) call. Simplest: a shim that exits 3 (the guard's
-    // own "empty set" sentinel) — bundle derivation treats non-zero as fail-closed.
-    writeDockerignore(RECURSIVE_IGNORE);
-    const shimDir = join(root, "shim2");
-    mkdirSync(shimDir, { recursive: true });
-    // Count invocations: 1st (static) → real node; 2nd (bundle) → empty+exit0.
     const counter = join(shimDir, ".n");
-    const realNode = process.execPath;
     writeFileSync(
       join(shimDir, "node"),
       `#!/usr/bin/env bash\n` +
         `n=$(( $(cat ${counter} 2>/dev/null || echo 0) + 1 ))\n` +
         `echo $n > ${counter}\n` +
-        `if [ "$n" -le 1 ]; then exec ${realNode} "$@"; fi\n` +
-        `printf ''\n`, // 2nd call: empty stdout, exit 0
+        `if [ "$n" -le ${delegateCount} ]; then exec ${process.execPath} "$@"; fi\n` +
+        failBody +
+        `\n`,
       { mode: 0o755 },
     );
-    const appDir = join(root, "image", "app");
-    mkdirSync(appDir, { recursive: true });
+    return shimDir;
+  }
+
+  it("FAILS CLOSED at the BUNDLE path when its node derivation crashes (reaches bundle code)", () => {
+    // Delegate the static call (1), crash the bundle call (2) → the guard must
+    // hit the bundle's own fail-closed branch, not abort earlier at static.
+    writeDockerignore(RECURSIVE_IGNORE);
+    const shimDir = makeNodeShim("shim-crash", 1, "exit 7");
+    mkdirSync(join(root, "image", "app"), { recursive: true });
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+      PATH: `${shimDir}:${process.env.PATH}`,
+    });
+    expect(r.exitCode).toBe(1);
+    // This exact message is emitted ONLY by the bundle derivation's fail-closed
+    // branch — proving the bundle code ran (not a static abort).
+    expect(r.stdout + r.stderr).toContain("signature derivation failed");
+  });
+
+  it("FAILS CLOSED when the bundle-scan find errors (3rd fail-open path)", () => {
+    // Delegate both node calls (static + bundle derivation succeed), then shim
+    // `find` to exit non-zero → the guard must fail closed on find's status,
+    // not swallow it. Proves the find-error path independently.
+    writeDockerignore(RECURSIVE_IGNORE);
+    const shimDir = join(root, "shim-find");
+    mkdirSync(shimDir, { recursive: true });
+    writeFileSync(join(shimDir, "find"), "#!/usr/bin/env bash\nexit 4\n", { mode: 0o755 });
+    mkdirSync(join(root, "image", "app"), { recursive: true });
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+      PATH: `${shimDir}:${process.env.PATH}`,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout + r.stderr).toMatch(/find failed|failing CLOSED/);
+  });
+
+  it("FAILS CLOSED when the bundle-scan node emits an empty signature set", () => {
+    // Delegate the static call (1); on the bundle call (2) print nothing + exit 0
+    // → the guard's `-z "$SIGS_RAW"` fail-closed branch must fire.
+    writeDockerignore(RECURSIVE_IGNORE);
+    const shimDir = makeNodeShim("shim-empty", 1, "printf ''");
+    mkdirSync(join(root, "image", "app"), { recursive: true });
     const r = runGuard({
       DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
       DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
@@ -302,6 +338,38 @@ describe("check-dockerignore-secrets", () => {
           DOCKERIGNORE_SECRETS_IMAGE_ROOT: imageRoot,
         });
         expect(r.exitCode, `bundle scan must flag planted secret ${p}`).toBe(1);
+      } finally {
+        rmSync(imageRoot, { recursive: true, force: true });
+      }
+    }
+  });
+
+  // Dir-classes must catch the WHOLE subtree, not just the representative leaf.
+  // Plant an ARBITRARY, non-representative filename deep inside each DIR_CLASSES
+  // dir and require the bundle scan to flag it — proving a new dir-class added to
+  // DIR_CLASSES genuinely covers its subtree (the R7 review gap: the old
+  // hardcoded fallback only caught the representative basename).
+  it("bundle scan flags arbitrary files anywhere under each DIR_CLASSES subtree", () => {
+    const guardSrc = readFileSync(GUARD, "utf8");
+    const block = guardSrc.match(/DIR_CLASSES=\(([\s\S]*?)\)/);
+    expect(block, "DIR_CLASSES array must be parseable from the guard").toBeTruthy();
+    const dirs = [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(dirs.length).toBeGreaterThanOrEqual(3);
+
+    for (const d of dirs) {
+      const imageRoot = mkdtempSync(join(tmpdir(), "di-dirclass-"));
+      try {
+        writeDockerignore(RECURSIVE_IGNORE);
+        // Arbitrary name that matches NO file glob — only the dir-class covers it.
+        const full = join(imageRoot, "app", "some", d, "deep", "arbitrary-blob.xyz");
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, "SECRET\n", "utf8");
+        const r = runGuard({
+          DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+          DOCKERIGNORE_SECRETS_IMAGE_ROOT: imageRoot,
+        });
+        expect(r.exitCode, `bundle scan must flag arbitrary file under ${d}/`).toBe(1);
+        expect(r.stdout + r.stderr).toContain(d);
       } finally {
         rmSync(imageRoot, { recursive: true, force: true });
       }

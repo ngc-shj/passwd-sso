@@ -43,6 +43,27 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Security Minor**: scoped the F7 false-positive regex allowlist to `paths=['''^docs/''']`
   so the 3 example-string regexes cannot suppress matches elsewhere in the tree.
 
+### Round 9 — eighth external re-review additions
+- **Static check now follows DIR_CLASSES**: it auto-generates probe paths
+  (`<dir>/__dockerignore_probe__`, `nested/<dir>/__dockerignore_probe__`) from the shared
+  DIR_CLASSES list and asserts `.dockerignore` excludes them, so adding a dir-class is a genuine
+  one-line edit that BOTH static and bundle follow. Removed the hand-listed nested representative
+  paths from MUST_EXCLUDE (redundant with the probes). This closes the "comment promises more than
+  the code delivers" gap — the R8 comment claimed both checks follow but static didn't. Red-proven
+  and locked with a probe-drop test.
+
+### Round 8 — seventh external re-review additions
+- **DIR_CLASSES single-sourced**: dir-class markers now live in one bash array the node
+  derivation reads from the environment — not a hardcoded copy — so a new dir-class is a
+  one-line edit. The earlier "no derivation-table edit needed" claim was false for dir-classes;
+  corrected in the guard header.
+- **Fail-closed test correctness**: the node-crash test previously aborted at the STATIC node
+  check (never exercising the bundle fail-closed branch) and asserted only a non-zero exit — the
+  old fail-open code passed it too. Rewrote with a call-counting shim (delegate static, crash
+  bundle) asserting the bundle-specific message; red-proven against a fail-open mutation. Added a
+  find-error shim test so all THREE fail-closed paths (node status, empty sigs, find status) are
+  independently covered. Contract test for dir-classes plants an arbitrary-named subtree file.
+
 ### Round 7 — sixth external re-review additions
 - **Bundle-scan fail-open (Low, but security-critical shape)**: a gate that greens on its own
   internal error is worse than no gate. Fixed all three fail-open paths — node-derivation crash,

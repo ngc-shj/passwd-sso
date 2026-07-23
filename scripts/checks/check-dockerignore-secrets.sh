@@ -39,34 +39,52 @@ DOCKERIGNORE=".dockerignore"
 # it: the static assertion tests each path against .dockerignore, and the bundle
 # scan derives its find signatures from the SAME list.
 #
-# Coverage guarantee (why extGlobs/dirClasses in the bundle derivation cannot
-# silently under-cover): the bundle derivation classifies each MUST_EXCLUDE path
-# into a dir-class or a filename glob, but ALWAYS falls back to the exact
-# basename when no glob matches — so any new class added to MUST_EXCLUDE is still
-# searched for. The self-test's CONTRACT test
-# (check-dockerignore-secrets.test.mjs) plants EVERY MUST_EXCLUDE path one at a
-# time and requires the bundle scan to flag it, mechanically proving static and
-# bundle cover the same set. Adding a class here therefore needs no edit to the
-# derivation tables; if it ever did, the contract test goes red.
+# Coverage guarantee:
+#  - FILE classes: the bundle derivation maps each MUST_EXCLUDE basename to an
+#    extension glob, but ALWAYS falls back to the exact basename when no glob
+#    matches — so a new file class is still searched for. The CONTRACT test
+#    (check-dockerignore-secrets.test.mjs) plants EVERY MUST_EXCLUDE path and
+#    requires the bundle scan to flag it → static and bundle cover the same files.
+#  - DIRECTORY classes (whole subtree is a leak): driven by the DIR_CLASSES list
+#    below. BOTH checks read it from the environment (no hardcoded copy): the
+#    STATIC check auto-generates `<dir>/__dockerignore_probe__` and
+#    `nested/<dir>/__dockerignore_probe__` probe paths and asserts .dockerignore
+#    excludes them; the BUNDLE derivation emits a `D:<dir>` find signature.
+#    Adding a dir-class is therefore a genuine ONE-LINE edit to DIR_CLASSES that
+#    both checks follow — no MUST_EXCLUDE / .dockerignore probe list to maintain.
+#    Two tests lock this: one drops each dir pattern from .dockerignore and
+#    requires the static probe to fail; one plants an ARBITRARY-named file deep
+#    in each subtree and requires the bundle scan to flag it.
 # Keep in sync with .gitignore's secret/data sections and .dockerignore.
+#
+# DIR_CLASSES: directory names whose ENTIRE subtree is a secret/artifact. The
+# bundle scan flags the dir itself; the static check verifies .dockerignore
+# excludes a file nested inside it. Adding one here auto-extends both checks.
+DIR_CLASSES=(".terraform" "postgres_data" "saml")
+
 MUST_EXCLUDE=(
   # env files
   ".env" ".env.local" ".env.production" ".env.bak"
   "extension/.env" "a/b/c/.env" "ios/.env.local"
-  # keys / certs / SAML
+  # keys / certs
   "certificates/localhost-key.pem" "certificates/localhost.pem"
   "a/b/tls.key" "server.crt" "x.cert" "id.p12" "id.pfx"
-  "master.key" "config/encryption.key" "saml/metadata.xml"
+  "master.key" "config/encryption.key"
   # CLI vault mapping + local auth/review artifacts (session tokens)
   ".passwd-sso-env.json" "sub/dir/.passwd-sso-env.json"
   "docs/review-credentials.local.md" "load-test/setup/.load-test-auth.json"
   "e2e/.auth-state.json"
-  # Terraform working dir / state / real tfvars
-  "infra/terraform/.terraform/providers/x" "infra/terraform/terraform.tfstate"
-  "infra/terraform/terraform.tfstate.backup"
+  # file classes for Terraform state / real tfvars
+  "infra/terraform/terraform.tfstate" "infra/terraform/terraform.tfstate.backup"
   "infra/terraform/envs/prod/terraform.tfvars" "x/secrets.tfvars.json"
-  # local databases + Postgres data dir
-  "data.db" "sub/cache.sqlite" "prisma/dev.db-journal" "postgres_data/base/1"
+  # local databases
+  "data.db" "sub/cache.sqlite" "prisma/dev.db-journal"
+  # One representative file per DIR_CLASSES entry — feeds the bundle CONTRACT
+  # test (which plants each MUST_EXCLUDE path). Static coverage of these dirs is
+  # generated automatically from DIR_CLASSES (dirProbes), so no OTHER nested
+  # files need listing here — adding a dir-class is a one-line DIR_CLASSES edit.
+  "saml/metadata.xml" "postgres_data/base/1"
+  "infra/terraform/.terraform/providers/x"
 )
 # Committed placeholders that MUST remain included (never excluded).
 MUST_INCLUDE=(
@@ -81,7 +99,8 @@ MUST_INCLUDE=(
 # semantics for the shared MUST_EXCLUDE / MUST_INCLUDE representative sets.
 MUST_EXCLUDE_JOINED=$(printf '%s\n' "${MUST_EXCLUDE[@]}")
 MUST_INCLUDE_JOINED=$(printf '%s\n' "${MUST_INCLUDE[@]}")
-export MUST_EXCLUDE_JOINED MUST_INCLUDE_JOINED
+DIR_CLASSES_JOINED=$(printf '%s\n' "${DIR_CLASSES[@]}")
+export MUST_EXCLUDE_JOINED MUST_INCLUDE_JOINED DIR_CLASSES_JOINED
 node - "$DOCKERIGNORE" <<'NODE'
 const fs = require("fs");
 const patterns = fs.readFileSync(process.argv[2], "utf8")
@@ -133,7 +152,17 @@ function ignored(path) {
 const mustExclude = process.env.MUST_EXCLUDE_JOINED.split("\n").filter(Boolean);
 const mustInclude = process.env.MUST_INCLUDE_JOINED.split("\n").filter(Boolean);
 
-const leaked = mustExclude.filter((f) => !ignored(f));
+// DIR_CLASSES auto-generate static probe paths so adding a dir-class is a ONE-LINE
+// edit to DIR_CLASSES that the static check ALSO follows (not just the bundle
+// scan). Each probe asserts .dockerignore excludes an arbitrary file at the root
+// and nested under the dir — proving the dir's whole subtree is excluded.
+const dirClasses = (process.env.DIR_CLASSES_JOINED || "").split("\n").filter(Boolean);
+const dirProbes = dirClasses.flatMap((dir) => [
+  `${dir}/__dockerignore_probe__`,
+  `nested/${dir}/__dockerignore_probe__`,
+]);
+
+const leaked = [...mustExclude, ...dirProbes].filter((f) => !ignored(f));
 const dropped = mustInclude.filter((f) => ignored(f));
 
 if (leaked.length) {
@@ -188,11 +217,14 @@ if [ "${DOCKERIGNORE_SECRETS_SCAN_BUNDLE:-0}" = "1" ] && [ -d "$SCAN_ROOT" ]; th
       "master.key","encryption.key",".passwd-sso-env.json",
       ".load-test-auth.json",".auth-state.json",
     ]);
-    // The only DIRECTORY classes (whole subtree is a leak). Every other secret
-    // is a file matched by basename/glob — we must NOT treat its parent dir
-    // (certificates/, infra/, docs/, e2e/, …) as a marker, or we would flag
-    // legitimate directories.
-    const dirClasses = new Set([".terraform", "postgres_data", "saml"]);
+    // DIRECTORY classes (whole subtree is a leak) come from the shared
+    // DIR_CLASSES bash array — NOT hardcoded here — so adding a dir-class is a
+    // one-line edit to that single list and both checks follow. Every other
+    // secret is a file matched by basename/glob; we must NOT treat its parent
+    // dir (certificates/, infra/, docs/, e2e/, …) as a marker.
+    const dirClasses = new Set(
+      (process.env.DIR_CLASSES_JOINED || "").split("\n").filter(Boolean),
+    );
     const out = new Set();
     for (const p of paths) {
       const segs = p.split("/");
