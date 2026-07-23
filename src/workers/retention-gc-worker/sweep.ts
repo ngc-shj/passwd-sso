@@ -246,6 +246,13 @@ export async function sweepGuardedExpiryEntry(
  * itself takes the row lock. A FOR UPDATE lock would additionally need
  * UPDATE privilege, which the GC role deliberately lacks.
  *
+ * When entry.retentionDays is set (M2), the cutoff is pushed back by that
+ * many days (`cutoffColumn < now() - retentionDays days`) instead of the
+ * plain `< now()` — giving a status-flip interim on the same table (e.g.
+ * access_requests' PENDING -> EXPIRED sweep) a visibility window before this
+ * delete purges the row. retentionDays is bound as a parameter, not
+ * interpolated — it is a value, not an identifier.
+ *
  * @returns Rows deleted (and audited) this batch.
  */
 export async function sweepAuditProvenanceEntry(
@@ -272,6 +279,17 @@ export async function sweepAuditProvenanceEntry(
   // express GC-eligibility (e.g. emergency_access_grants).
   const guardSql = entry.guard ? ` ${GUARD_SQL[entry.guard](entry.table)}` : "";
   const projection = ["id", ...entry.provenanceColumns].join(", ");
+  // Optional grace window (M2): when retentionDays is set, push the cutoff
+  // back by that many days so a status-flip interim (e.g. access_requests'
+  // PENDING -> EXPIRED sweep, sharing this cutoff column) stays visible before
+  // this hard-delete purges it. The integer is bound as $2 — never
+  // interpolated — so it stays a value, not part of the SQL text.
+  const cutoffSql = entry.retentionDays
+    ? `${entry.cutoffColumn} < now() - ($2 || ' days')::interval`
+    : `${entry.cutoffColumn} < now()`;
+  const params: unknown[] = entry.retentionDays
+    ? [batchSize, entry.retentionDays]
+    : [batchSize];
   // Batch-bounded (id) IN (SELECT id ... LIMIT $1) DELETE, RETURNING the
   // provenance projection so the audit can be emitted from what was actually
   // deleted — mirrors sweepExpiryEntry's shape, extended with RETURNING.
@@ -280,11 +298,11 @@ export async function sweepAuditProvenanceEntry(
     `DELETE FROM ${entry.table}
        WHERE (id) IN (
          SELECT id FROM ${entry.table}
-         WHERE ${entry.cutoffColumn} < now()${guardSql}
+         WHERE ${cutoffSql}${guardSql}
          LIMIT $1
        )
        RETURNING ${projection}`,
-    batchSize,
+    ...params,
   );
 
   if (rows.length === 0) return 0;
@@ -577,6 +595,67 @@ export async function sweepTrashEntry(
 }
 
 /**
+ * Flip PENDING access_requests past their expiry to EXPIRED (external-review
+ * 2026-07 remediation, C7 / 残3). This is a status TRANSITION, not a delete —
+ * the existing EXPIRY_AUDIT_PROVENANCE registry entry for access_requests
+ * (registry.ts, cutoff = expires_at, retentionDays grace) still hard-deletes
+ * the row later, but with a grace offset on the SAME cutoff column (M2) — so
+ * the EXPIRED state is actually visible to the tenant UI for that window
+ * before the eventual purge, instead of being hard-deleted in the same
+ * sweepOnce cycle it was flipped in. The day count lives ONLY on the
+ * registry entry (single source of truth).
+ *
+ * State-machine cross-reference: PENDING -> EXPIRED by actor SYSTEM is the
+ * MATRIX entry at src/lib/access-request/access-request-state.ts (MATRIX
+ * [PENDING][EXPIRED] = [AR_ACTOR.SYSTEM]); access-request-state.test.ts pins
+ * it green, and the SQL/MATRIX parity test below fails if that entry is ever
+ * removed while this SQL stays.
+ *
+ * Raw SQL instead of bulkTransition(): bulkTransition's bypass-mode guard
+ * (hasScopeUnderBypass) requires a tenantId predicate, which a global,
+ * cross-tenant sweep does not have — widening the guard to carve out a
+ * SYSTEM-sweep exception was rejected (plan C7) as risking route-path callers
+ * inheriting the relaxed guard. The UPDATE is a static template (no
+ * interpolated values — injection-free by construction) and idempotent
+ * (re-running finds fewer or zero newly-expired rows). Batch-bounded via the
+ * `(id) IN (SELECT id ... LIMIT $1)` key-set shape used by every other sweep
+ * in this file, so one cycle never flips an unbounded number of rows.
+ * CAS by construction: the outer WHERE ALSO repeats `status = 'PENDING'`
+ * (AND-appended after the key-set-IN clause, not just inside the inner
+ * SELECT), so under READ COMMITTED's EvalPlanQual re-check a row concurrently
+ * approved between the SELECT and the UPDATE is re-evaluated against the
+ * outer predicate and skipped — it cannot flip APPROVED back to EXPIRED. The
+ * key-set-IN clause is kept WHERE-leading (rather than status-leading) so it
+ * stays structurally recognizable to the static sweepBounds check in
+ * worker-policy-manifest.test.ts, which requires the batch-limiting
+ * `WHERE <keys> IN (SELECT <keys> ... LIMIT n)` shape to be contiguous.
+ *
+ * Runs under the worker's bypass_rls GUC (RLS-enabled table, NOBYPASSRLS
+ * role) — same pattern as sweepExpiryEntry's globalDelete branch. Requires
+ * the migration 20260722000100 GRANT UPDATE (status) ON access_requests.
+ *
+ * @returns Number of rows flipped to EXPIRED this batch.
+ */
+export async function sweepExpiredAccessRequests(
+  tx: Prisma.TransactionClient,
+  batchSize: number,
+): Promise<number> {
+  await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+
+  return tx.$executeRawUnsafe<number>(
+    `UPDATE access_requests
+       SET status = 'EXPIRED'
+       WHERE (id) IN (
+         SELECT id FROM access_requests
+         WHERE status = 'PENDING' AND expires_at < now()
+         LIMIT $1
+       )
+       AND status = 'PENDING'`,
+    batchSize,
+  );
+}
+
+/**
  * Run one full sweep across the RETENTION_REGISTRY.
  *
  * Each EXPIRY entry runs in its own $transaction (INV-C4a). A per-entry error
@@ -598,6 +677,22 @@ export async function sweepOnce(
 ): Promise<Record<string, number>> {
   const log = getLogger();
   const counts: Record<string, number> = {};
+
+  // PENDING -> EXPIRED status sweep runs BEFORE registry processing (C7):
+  // a per-entry registry failure below must not block this cheap, independent
+  // status flip. Isolated in its own try/catch — same per-entry error
+  // isolation contract as the registry loop (INV-C4b).
+  try {
+    const expiredCount = await workerPrisma.$transaction((tx) =>
+      sweepExpiredAccessRequests(tx, batchSize),
+    );
+    if (expiredCount > 0) {
+      log.info({ count: expiredCount }, "retention-gc.access_requests_expired");
+    }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
+    log.error({ table: "access_requests", code }, "retention-gc.entry_failed");
+  }
 
   for (const entry of RETENTION_REGISTRY) {
     const tableName = entry.table;

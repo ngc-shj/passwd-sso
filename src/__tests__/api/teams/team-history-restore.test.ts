@@ -140,16 +140,31 @@ describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", 
       teamKeyVersion: 2,
       changedAt: new Date("2025-01-01"),
     });
-    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
-      await fn({
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        // In-tx FOR UPDATE row lock (TOCTOU fix): the snapshot sources from
+        // this locked row, not the outside-tx read.
+        $queryRaw: vi.fn().mockResolvedValue([
+          {
+            encrypted_blob: "cur",
+            blob_iv: "curIv",
+            blob_auth_tag: "curTag",
+            aad_version: 1,
+            team_key_version: 3,
+            item_key_version: 0,
+            encrypted_item_key: null,
+            item_key_iv: null,
+            item_key_auth_tag: null,
+          },
+        ]),
         teamPasswordEntryHistory: {
           create: vi.fn(),
           findMany: vi.fn().mockResolvedValue([]),
           deleteMany: vi.fn(),
         },
         teamPasswordEntry: { update: vi.fn() },
-      });
-    });
+      }),
+    );
 
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: "o1", id: "p1", historyId: "h1" }));

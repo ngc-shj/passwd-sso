@@ -115,20 +115,59 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       tenantId = resolved;
     }
 
-    // The `?? false` / `?? null` defaults here are fail-open and are safe ONLY
-    // because the session callback (src/auth.ts) always emits all four passkey
-    // fields on BOTH its success and its fail-closed catch paths — so these
-    // fallbacks only ever fire when the field is genuinely absent from the JSON
-    // (never for a passkey-required tenant). If that callback contract ever
-    // changes to omit a field, tighten these to a fail-closed default instead.
+    // The session callback (src/auth.ts) always emits all four passkey fields
+    // on BOTH its success and its fail-closed catch paths — under normal
+    // operation these fields are always present when `valid` is true. If the
+    // producer contract ever drifts (a field genuinely absent from the JSON),
+    // per-field `?? false` / `?? null` defaults would be fragile: a partial
+    // fallback set could land in "still in grace" and fail to block (see the
+    // bundle-substitution comment in src/auth.ts's own catch path). Instead,
+    // any missing field substitutes the ENTIRE fail-closed bundle so this
+    // consumer never recombines a partial safe/unsafe mix. This only fires on
+    // producer-contract drift and is positive-cached (valid: true) up to
+    // session TTL by design — a sticky fail-closed block until TTL/invalidation,
+    // mirroring what happens today when auth.ts's own catch bundle flows through.
+    let passkeyFields: Pick<
+      SessionInfo,
+      "hasPasskey" | "requirePasskey" | "requirePasskeyEnabledAt" | "passkeyGracePeriodDays"
+    >;
+    if (valid) {
+      const missing = (
+        ["hasPasskey", "requirePasskey", "requirePasskeyEnabledAt", "passkeyGracePeriodDays"] as const
+      ).filter((field) => data?.user?.[field] === undefined);
+      if (missing.length > 0) {
+        console.warn({
+          msg: "auth-gate: session response missing passkey field(s), substituting fail-closed bundle",
+          missing,
+        });
+        passkeyFields = {
+          requirePasskey: true,
+          hasPasskey: false,
+          requirePasskeyEnabledAt: null,
+          passkeyGracePeriodDays: null,
+        };
+      } else {
+        passkeyFields = {
+          hasPasskey: data.user.hasPasskey,
+          requirePasskey: data.user.requirePasskey,
+          requirePasskeyEnabledAt: data.user.requirePasskeyEnabledAt,
+          passkeyGracePeriodDays: data.user.passkeyGracePeriodDays,
+        };
+      }
+    } else {
+      passkeyFields = {
+        hasPasskey: data?.user?.hasPasskey ?? false,
+        requirePasskey: data?.user?.requirePasskey ?? false,
+        requirePasskeyEnabledAt: data?.user?.requirePasskeyEnabledAt ?? null,
+        passkeyGracePeriodDays: data?.user?.passkeyGracePeriodDays ?? null,
+      };
+    }
+
     const info: SessionInfo = {
       valid,
       userId,
       tenantId,
-      hasPasskey: data?.user?.hasPasskey ?? false,
-      requirePasskey: data?.user?.requirePasskey ?? false,
-      requirePasskeyEnabledAt: data?.user?.requirePasskeyEnabledAt ?? null,
-      passkeyGracePeriodDays: data?.user?.passkeyGracePeriodDays ?? null,
+      ...passkeyFields,
     };
 
     // Derive ttlMs from data.expires (ISO 8601). Clamp downward only;

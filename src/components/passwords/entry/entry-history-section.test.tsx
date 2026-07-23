@@ -48,6 +48,17 @@ vi.mock("@/lib/team/team-vault-context", () => ({
   }),
 }));
 
+// Real class (not mocked): entry-history-section imports it directly to
+// branch on the distinguishable versioned-key-unavailable error. Importing
+// the real module keeps `instanceof` checks in the component working while
+// getEntryDecryptionKey itself is still the mock above.
+vi.mock("@/lib/team/team-vault-core", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/team/team-vault-core")>(
+    "@/lib/team/team-vault-core",
+  );
+  return { TeamKeyVersionUnavailableError: actual.TeamKeyVersionUnavailableError };
+});
+
 vi.mock("@/lib/crypto/crypto-aad", () => ({
   // History uses the entry-blob AAD (PV "blob"); see C1 in
   // personal-history-aad-mismatch-plan.md. NOTE (RT1): decryptData + the AAD
@@ -130,6 +141,8 @@ vi.mock("@/components/ui/alert-dialog", () => ({
 
 import { EntryHistorySection } from "./entry-history-section";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
+import { toast } from "sonner";
+import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
 
 const HISTORY_ITEMS = [
   {
@@ -323,6 +336,154 @@ describe("EntryHistorySection", () => {
       // Verify client-side decryption was called
       expect(mockDecryptData).toHaveBeenCalled();
     });
+  });
+
+  it("passes the history record's own teamKeyVersion to getEntryDecryptionKey (not hardcoded 1)", async () => {
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({ title: "Team PW", password: "secret" }),
+    );
+
+    const OLD_TEAM_KEY_VERSION = 5;
+    const fetchMock = vi.fn((url: string) => {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("/history/h1")
+              ? {
+                  encryptedBlob: "encrypted-ct",
+                  blobIv: "encrypted-iv",
+                  blobAuthTag: "encrypted-tag",
+                  aadVersion: 1,
+                  teamKeyVersion: OLD_TEAM_KEY_VERSION,
+                }
+              : HISTORY_ITEMS,
+          ),
+      });
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+
+    fireEvent.click(screen.getByText(/entryHistory/));
+    const viewButtons = screen.getAllByText(/viewVersion/);
+
+    await act(async () => {
+      fireEvent.click(viewButtons[0]);
+    });
+
+    await waitFor(() => {
+      // Call-arg pin: getEntryDecryptionKey must RECEIVE the history record's
+      // own teamKeyVersion (5), not a hardcoded 1 — hardcoding must go red here.
+      expect(mockGetTeamEncryptionKey).toHaveBeenCalledWith(
+        "team-1",
+        "entry-1",
+        expect.objectContaining({ teamKeyVersion: OLD_TEAM_KEY_VERSION }),
+      );
+    });
+  });
+
+  it("shows a distinct message when the versioned team key is unavailable", async () => {
+    mockGetTeamEncryptionKey.mockRejectedValueOnce(
+      new TeamKeyVersionUnavailableError("team-1", 2),
+    );
+
+    const fetchMock = vi.fn((url: string) => {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("/history/h1")
+              ? {
+                  encryptedBlob: "encrypted-ct",
+                  blobIv: "encrypted-iv",
+                  blobAuthTag: "encrypted-tag",
+                  aadVersion: 1,
+                  teamKeyVersion: 2,
+                }
+              : HISTORY_ITEMS,
+          ),
+      });
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+
+    fireEvent.click(screen.getByText(/entryHistory/));
+    const viewButtons = screen.getAllByText(/viewVersion/);
+
+    await act(async () => {
+      fireEvent.click(viewButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("historyKeyUnavailable");
+    });
+    // Distinguish from the generic decrypt-failure message.
+    expect(toast.error).not.toHaveBeenCalledWith("historyDecryptFailed");
+  });
+
+  // F3: a transient failure (network/5xx/unwrap) must NOT be mistaken for
+  // "key predates team membership" — only a plain Error surfaces here
+  // (team-vault-core only throws TeamKeyVersionUnavailableError for the
+  // not_available reason), so the generic toast fires instead.
+  it("shows the generic decrypt-failure toast on a transient (non-version) failure", async () => {
+    mockGetTeamEncryptionKey.mockRejectedValueOnce(
+      new Error("Failed to obtain team encryption key"),
+    );
+
+    const fetchMock = vi.fn((url: string) => {
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve(
+            url.includes("/history/h1")
+              ? {
+                  encryptedBlob: "encrypted-ct",
+                  blobIv: "encrypted-iv",
+                  blobAuthTag: "encrypted-tag",
+                  aadVersion: 1,
+                  teamKeyVersion: 2,
+                }
+              : HISTORY_ITEMS,
+          ),
+      });
+    }) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" teamId="team-1" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+
+    fireEvent.click(screen.getByText(/entryHistory/));
+    const viewButtons = screen.getAllByText(/viewVersion/);
+
+    await act(async () => {
+      fireEvent.click(viewButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("historyDecryptFailed");
+    });
+    // Must NOT show the "predates your team membership" message for a
+    // transient failure.
+    expect(toast.error).not.toHaveBeenCalledWith("historyKeyUnavailable");
   });
 
   it("decrypts client-side for personal entries on View", async () => {

@@ -87,7 +87,7 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
       // tenant's real policy) and do NOT cache it — caching would pin the
       // aggressive fallback for the TTL even if the row reappears.
       getLogger().warn(
-        { tenantId },
+        { tenantId, metric: "lockout_strictest_fallback", reason: "tenant_row_missing" },
         "vault.lockout.tenantRowMissing.usingStrictest",
       );
       return STRICTEST_LOCKOUT_THRESHOLDS;
@@ -112,7 +112,7 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
     // than the tenant's real policy) and do not cache it. Logged so the
     // degradation is observable.
     getLogger().warn(
-      { err, tenantId },
+      { err, tenantId, metric: "lockout_strictest_fallback", reason: "fetch_failed" },
       "vault.lockout.thresholdsFetchFailed.usingStrictest",
     );
     return STRICTEST_LOCKOUT_THRESHOLDS;

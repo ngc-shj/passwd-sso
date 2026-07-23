@@ -37,7 +37,11 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
     ).map((e) => e.table);
     const entryOrder = RETENTION_REGISTRY.map((e) => e.table);
 
-    let callIndex = 0;
+    // sweepOnce (C7) fires ONE extra $transaction BEFORE the registry loop for
+    // sweepExpiredAccessRequests. Account for it as call 0 (returns 0 — no
+    // access_requests rows expired in this fixture) so the registry-entry
+    // mapping below stays aligned.
+    let callIndex = -1;
     // Each non-trash registry entry triggers one $transaction call, in registry
     // order. sweepOnce ALSO fires one EXTRA $transaction for the heartbeat after
     // the entries (because a sibling deleted >0 → anyDeleted). That extra call
@@ -49,6 +53,10 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
     const mockPrisma = {
       tenant: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async () => {
+        if (callIndex === -1) {
+          callIndex += 1;
+          return 0; // C7 pre-step tx (sweepExpiredAccessRequests) — no rows expired
+        }
         if (callIndex >= txEntryOrder.length) {
           callIndex += 1;
           return 0; // heartbeat tx — result discarded by sweepOnce

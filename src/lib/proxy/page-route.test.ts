@@ -194,7 +194,16 @@ describe("handlePageRoute — protected routes auth check", () => {
   });
 
   it("allows /dashboard with valid session (returns intl response with security headers)", async () => {
-    mockValidSession(fetchSpy);
+    // Full passkey-field shape (all four present, non-enforcing) — C4's
+    // bundle-substitution fires only when a field is genuinely absent from
+    // the session response; this test verifies the ordinary non-enforcing
+    // pass-through, not fail-closed drift handling.
+    mockValidSession(fetchSpy, {
+      hasPasskey: false,
+      requirePasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
     const res = await handlePageRoute(
       makePageRequest("/ja/dashboard/passwords", {
         cookie: "authjs.session-token=sess-1",

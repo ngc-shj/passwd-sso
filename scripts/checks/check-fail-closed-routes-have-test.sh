@@ -759,7 +759,11 @@ fi
 #   audit-outbox-metrics, audit-outbox-purge-failed, dcr-cleanup,
 #   audit-chain-verify) — external-review hygiene: a Redis outage must not
 #   shed the throttle on destructive/privileged maintenance ops.
-EXPECTED_LIMITER_COUNT=69
+# 71 incl. the 2 admin-lockout-clear limiters (adminLockoutClearLimiter +
+#   targetLockoutClearLimiter, tenant/members/[userId]/clear-lockout) —
+#   mirrors the reset-vault dual-limiter shape (external-review-2026-07
+#   remediation plan, C5).
+EXPECTED_LIMITER_COUNT=71
 limiter_count=$(grep -rh 'failClosedOnRedisError: true' "$REPO_ROOT/src/app/api" | wc -l)
 if [ "$limiter_count" -ne "$EXPECTED_LIMITER_COUNT" ]; then
   echo "AC4.4 FAIL: expected $EXPECTED_LIMITER_COUNT 'failClosedOnRedisError: true' instantiations; found $limiter_count"

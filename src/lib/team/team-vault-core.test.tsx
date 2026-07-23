@@ -154,6 +154,139 @@ describe("team-vault-core", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("caches versioned keys independently of latest, and pins fetch count + key identity", async () => {
+    const rawKeyBytes = new Uint8Array([1, 1, 1, 1]);
+    const latestEncKey = { type: "secret", tag: "latest" } as unknown as CryptoKey;
+    const oldEncKey = { type: "secret", tag: "old" } as unknown as CryptoKey;
+    mockUnwrapTeamKey.mockResolvedValue(new Uint8Array([2, 2, 2, 2]));
+    mockDeriveTeamEncryptionKey
+      .mockResolvedValueOnce(latestEncKey)
+      .mockResolvedValueOnce(oldEncKey)
+      // Default for calls beyond the first two (post-invalidation refetches
+      // at lines 219-228 below) — without this they'd resolve `undefined`
+      // (T5).
+      .mockResolvedValue(latestEncKey);
+
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => ({
+        encryptedTeamKey: "cipher",
+        teamKeyIv: "iv",
+        teamKeyAuthTag: "tag",
+        ephemeralPublicKey: "epk",
+        hkdfSalt: "salt",
+        keyVersion: url.includes("keyVersion=2") ? 2 : 3,
+        wrapVersion: 1,
+      }),
+    }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useTeamVault(), {
+      wrapper: makeWrapper({ getBytes: () => rawKeyBytes }),
+    });
+
+    // 1st call: latest (network call #1)
+    let latestKey: CryptoKey | null = null;
+    await act(async () => {
+      latestKey = await result.current.getTeamEncryptionKey("team-1");
+    });
+    expect(latestKey).toBe(latestEncKey);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 2nd call: versioned (network call #2)
+    let versionedKey: CryptoKey | null = null;
+    await act(async () => {
+      versionedKey = await result.current.getTeamEncryptionKeyForVersion("team-1", 2);
+    });
+    expect(versionedKey).toBe(oldEncKey);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // 3rd call: getTeamEncryptionKey again — must NOT trigger a 3rd fetch,
+    // and must return the IDENTICAL CryptoKey object from call 1.
+    let latestAgain: CryptoKey | null = null;
+    await act(async () => {
+      latestAgain = await result.current.getTeamEncryptionKey("team-1");
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(latestAgain).toBe(latestKey);
+
+    // getTeamKeyInfo still resolves { key, keyVersion } under the new scheme
+    let keyInfo: Awaited<ReturnType<typeof result.current.getTeamKeyInfo>> | null = null;
+    await act(async () => {
+      keyInfo = await result.current.getTeamKeyInfo("team-1");
+    });
+    expect(keyInfo).toEqual({ key: latestEncKey, keyVersion: 3 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // invalidateTeamKey clears versioned entries + the latest pointer —
+    // both getTeamEncryptionKey and the versioned fetch must refetch.
+    await act(async () => {
+      result.current.invalidateTeamKey("team-1");
+      await result.current.getTeamEncryptionKey("team-1");
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      await result.current.getTeamEncryptionKeyForVersion("team-1", 2);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("getTeamEncryptionKeyForVersion returns null and caches nothing on response version mismatch", async () => {
+    const rawKeyBytes = new Uint8Array([3, 3, 3, 3]);
+    mockUnwrapTeamKey.mockResolvedValue(new Uint8Array([4, 4, 4, 4]));
+    mockDeriveTeamEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+
+    // Server returns keyVersion 3 (latest) when version 2 was requested —
+    // must not poison the versioned slot or the latest pointer.
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        encryptedTeamKey: "cipher",
+        teamKeyIv: "iv",
+        teamKeyAuthTag: "tag",
+        ephemeralPublicKey: "epk",
+        hkdfSalt: "salt",
+        keyVersion: 3,
+        wrapVersion: 1,
+      }),
+    }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useTeamVault(), {
+      wrapper: makeWrapper({ getBytes: () => rawKeyBytes }),
+    });
+
+    let versionedKey: CryptoKey | null = { type: "sentinel" } as unknown as CryptoKey;
+    await act(async () => {
+      versionedKey = await result.current.getTeamEncryptionKeyForVersion("team-1", 2);
+    });
+    expect(versionedKey).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Nothing cached: a subsequent correctly-versioned fetch still hits the network.
+    const fetchMockCorrect = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        encryptedTeamKey: "cipher",
+        teamKeyIv: "iv",
+        teamKeyAuthTag: "tag",
+        ephemeralPublicKey: "epk",
+        hkdfSalt: "salt",
+        keyVersion: 2,
+        wrapVersion: 1,
+      }),
+    }));
+    globalThis.fetch = fetchMockCorrect as unknown as typeof fetch;
+
+    let retryKey: CryptoKey | null = null;
+    await act(async () => {
+      retryKey = await result.current.getTeamEncryptionKeyForVersion("team-1", 2);
+    });
+    expect(retryKey).not.toBeNull();
+    expect(fetchMockCorrect).toHaveBeenCalledTimes(1);
+  });
+
   it("returns null and logs a warning when member key fetch fails", async () => {
     const rawKeyBytes = new Uint8Array([1, 2, 3, 4]);
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

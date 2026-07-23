@@ -274,6 +274,7 @@ Routes are grouped by their top-level API area for readability (grouping is cosm
 | `src/app/api/tenant/breakglass/route.ts` | api-session-required | GET, POST | session | - | - | - |
 | `src/app/api/tenant/mcp-clients/[id]/route.ts` | api-session-required | GET, PUT, DELETE | session | - | - | - |
 | `src/app/api/tenant/mcp-clients/route.ts` | api-session-required | GET, POST | session | - | - | - |
+| `src/app/api/tenant/members/[userId]/clear-lockout/route.ts` | api-session-required | POST | session | - | - | - |
 | `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts` | api-session-required | POST | session | - | - | - |
 | `src/app/api/tenant/members/[userId]/reset-vault/[resetId]/revoke/route.ts` | api-session-required | POST | session | - | - | - |
 | `src/app/api/tenant/members/[userId]/reset-vault/route.ts` | api-session-required | GET, POST | session | - | - | - |

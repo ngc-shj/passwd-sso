@@ -12,7 +12,14 @@
 
 import { describe, it, expect } from "vitest";
 import { Prisma } from "@prisma/client";
-import { RETENTION_REGISTRY, type ExpiryEntry } from "../registry";
+import {
+  RETENTION_REGISTRY,
+  RLS_FREE_EXPIRY_TABLES,
+  assertRegistryRlsParity,
+  type ExpiryEntry,
+  type CatalogTableRow,
+  type RetentionEntry,
+} from "../registry";
 
 // Build a lookup: physical table name → { model, physicalFields }
 const modelsByPhysicalName = new Map<
@@ -198,5 +205,68 @@ describe("RETENTION_REGISTRY — keyColumns row identity check (INV-C1b)", () =>
     ) as ExpiryEntry | undefined;
     expect(vtEntry).toBeDefined();
     expect(vtEntry!.keyColumns).toEqual(["identifier", "token"]);
+  });
+});
+
+// S14: assertRegistryRlsParity — pure-function unit tests (RT7).
+// A "consistent" fixture catalog: every registry table is RLS-enabled
+// (relrowsecurity = true) except the RLS_FREE_EXPIRY_TABLES set, which is
+// RLS-disabled. This mirrors the real DB ground truth this function guards.
+function buildConsistentCatalogFixture(
+  registry: readonly RetentionEntry[],
+): CatalogTableRow[] {
+  const tables = new Set(registry.map((e) => e.table));
+  return [...tables].map((table) => ({
+    table,
+    relrowsecurity: !RLS_FREE_EXPIRY_TABLES.has(table),
+  }));
+}
+
+describe("assertRegistryRlsParity — pure function (S14/RT7)", () => {
+  it("does not throw for a consistent registry + rls-free-set + catalog fixture", () => {
+    const catalog = buildConsistentCatalogFixture(RETENTION_REGISTRY);
+    expect(() =>
+      assertRegistryRlsParity(RETENTION_REGISTRY, RLS_FREE_EXPIRY_TABLES, catalog),
+    ).not.toThrow();
+  });
+
+  it("throws when a registry table is absent from the catalog (renamed/missing table drift)", () => {
+    const catalog = buildConsistentCatalogFixture(RETENTION_REGISTRY).filter(
+      (row) => row.table !== "sessions",
+    );
+    expect(() =>
+      assertRegistryRlsParity(RETENTION_REGISTRY, RLS_FREE_EXPIRY_TABLES, catalog),
+    ).toThrow(/not found in the live DB catalog/);
+  });
+
+  it("throws when an RLS-enabled table is moved into the rls-free set (stale RLS-free claim)", () => {
+    const catalog = buildConsistentCatalogFixture(RETENTION_REGISTRY);
+    // "sessions" is genuinely RLS-enabled (relrowsecurity: true in the fixture);
+    // injecting it into the rls-free set must be caught.
+    const badRlsFreeTables = new Set([...RLS_FREE_EXPIRY_TABLES, "sessions"]);
+    expect(() =>
+      assertRegistryRlsParity(RETENTION_REGISTRY, badRlsFreeTables, catalog),
+    ).toThrow(/relrowsecurity = true/);
+  });
+
+  it("throws when an EXPIRY-family table not in the rls-free set is reported RLS-disabled", () => {
+    const catalog = buildConsistentCatalogFixture(RETENTION_REGISTRY).map((row) =>
+      row.table === "sessions" ? { ...row, relrowsecurity: false } : row,
+    );
+    expect(() =>
+      assertRegistryRlsParity(RETENTION_REGISTRY, RLS_FREE_EXPIRY_TABLES, catalog),
+    ).toThrow(/relrowsecurity = false/);
+  });
+
+  it("does not throw for tables outside the EXPIRY family reported RLS-disabled (kind not checked)", () => {
+    // PER_TENANT_FN / PER_TENANT_TRASH / PER_TENANT_AGE tables are out of the
+    // EXPIRY-family scope for the third assertion — a false relrowsecurity on
+    // one of them must not trip the check.
+    const catalog = buildConsistentCatalogFixture(RETENTION_REGISTRY).map((row) =>
+      row.table === "audit_logs" ? { ...row, relrowsecurity: false } : row,
+    );
+    expect(() =>
+      assertRegistryRlsParity(RETENTION_REGISTRY, RLS_FREE_EXPIRY_TABLES, catalog),
+    ).not.toThrow();
   });
 });

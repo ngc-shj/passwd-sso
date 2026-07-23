@@ -1553,6 +1553,15 @@
         "session"
       ]
     },
+    "src/app/api/tenant/members/[userId]/clear-lockout/route.ts": {
+      "kind": "api-session-required",
+      "methods": [
+        "POST"
+      ],
+      "auth": [
+        "session"
+      ]
+    },
     "src/app/api/tenant/members/[userId]/reset-vault/[resetId]/approve/route.ts": {
       "kind": "api-session-required",
       "methods": [

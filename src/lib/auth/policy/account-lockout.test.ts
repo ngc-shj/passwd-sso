@@ -634,7 +634,11 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     expect(result!.attempts).toBe(1);
     expect(result!.locked).toBe(true);
     expect(mockLoggerInstance.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: "tenant-missing" }),
+      expect.objectContaining({
+        tenantId: "tenant-missing",
+        metric: "lockout_strictest_fallback",
+        reason: "tenant_row_missing",
+      }),
       "vault.lockout.tenantRowMissing.usingStrictest",
     );
     invalidateLockoutThresholdCache("tenant-missing");
@@ -661,7 +665,11 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     expect(result!.attempts).toBe(1);
     expect(result!.locked).toBe(true);
     expect(mockLoggerInstance.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ tenantId: "tenant-dberr" }),
+      expect.objectContaining({
+        tenantId: "tenant-dberr",
+        metric: "lockout_strictest_fallback",
+        reason: "fetch_failed",
+      }),
       "vault.lockout.thresholdsFetchFailed.usingStrictest",
     );
     invalidateLockoutThresholdCache("tenant-dberr");

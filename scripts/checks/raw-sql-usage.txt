@@ -69,6 +69,7 @@ src/app/api/maintenance/purge-audit-logs/route.ts # operator-gated system-wide a
 src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) for atomic blob snapshot read before history restore
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
+src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) so the pre-restore snapshot sources the committed row, serialising with concurrent PUTs
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/s/[token]/download/route.ts # atomic view_count increment + revocation/expiry recheck on file download (TOCTOU close)
 src/app/s/[token]/page.tsx # atomic view_count increment + revocation/expiry recheck on share view (TOCTOU close)

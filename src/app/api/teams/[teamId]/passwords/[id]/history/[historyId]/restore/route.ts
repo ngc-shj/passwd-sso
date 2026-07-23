@@ -26,17 +26,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return handleAuthError(e);
   }
 
+  // Pre-check only (existence + tenant). The snapshot source is re-read
+  // INSIDE the transaction under FOR UPDATE below — this outside-tx row may
+  // be stale under concurrent PUTs.
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
       select: {
         teamId: true,
         tenantId: true,
-        encryptedBlob: true,
-        blobIv: true,
-        blobAuthTag: true,
-        aadVersion: true,
-        teamKeyVersion: true,
       },
     }),
   );
@@ -55,6 +53,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         blobAuthTag: true,
         aadVersion: true,
         teamKeyVersion: true,
+        itemKeyVersion: true,
+        encryptedItemKey: true,
+        itemKeyIv: true,
+        itemKeyAuthTag: true,
         changedAt: true,
       },
     }),
@@ -64,18 +66,51 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.HISTORY_NOT_FOUND);
   }
 
-  await withTeamTenantRls(teamId, async () =>
+  const restored = await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx) => {
-    // Snapshot current
+    // Row-lock the entry and snapshot from the LOCKED row, not the
+    // outside-tx read above — a concurrent PUT committing between that read
+    // and this transaction would otherwise have its new content overwritten
+    // by the restore while the stale pre-PUT content lands in the snapshot,
+    // losing the concurrent write entirely. FOR UPDATE serialises restores
+    // and PUTs on the same row (same pattern as team-password-service's
+    // full-update snapshot).
+    type LockedRow = {
+      encrypted_blob: string;
+      blob_iv: string;
+      blob_auth_tag: string;
+      aad_version: number;
+      team_key_version: number;
+      item_key_version: number;
+      encrypted_item_key: string | null;
+      item_key_iv: string | null;
+      item_key_auth_tag: string | null;
+    };
+    const [cur] = await tx.$queryRaw<LockedRow[]>`
+      SELECT encrypted_blob, blob_iv, blob_auth_tag,
+             aad_version, team_key_version, item_key_version,
+             encrypted_item_key, item_key_iv, item_key_auth_tag
+      FROM team_password_entries
+      WHERE id = ${id}::uuid AND team_id = ${teamId}::uuid
+      FOR UPDATE
+    `;
+    // Entry may be concurrently deleted between the pre-check and this lock.
+    if (!cur) return false;
+
+    // Snapshot current (from the locked row)
     await tx.teamPasswordEntryHistory.create({
       data: {
         entryId: id,
         tenantId: entry.tenantId,
-        encryptedBlob: entry.encryptedBlob,
-        blobIv: entry.blobIv,
-        blobAuthTag: entry.blobAuthTag,
-        aadVersion: entry.aadVersion,
-        teamKeyVersion: entry.teamKeyVersion,
+        encryptedBlob: cur.encrypted_blob,
+        blobIv: cur.blob_iv,
+        blobAuthTag: cur.blob_auth_tag,
+        aadVersion: cur.aad_version,
+        teamKeyVersion: cur.team_key_version,
+        itemKeyVersion: cur.item_key_version,
+        encryptedItemKey: cur.encrypted_item_key,
+        itemKeyIv: cur.item_key_iv,
+        itemKeyAuthTag: cur.item_key_auth_tag,
         changedById: session.user.id,
       },
     });
@@ -92,10 +127,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
     }
 
-    // Restore: writes back history blob with its original teamKeyVersion.
-    // If history.teamKeyVersion !== team.teamKeyVersion (e.g. after key rotation),
-    // the client must detect the mismatch, decrypt with the old key via
-    // GET /member-key?keyVersion=N, re-encrypt with the current key, and PUT.
+    // Restore: writes back the history row's blob together with the
+    // ItemKey metadata (itemKeyVersion/encryptedItemKey/itemKeyIv/
+    // itemKeyAuthTag) it was originally wrapped with, so the restored
+    // entry stays internally consistent (old teamKeyVersion <-> the
+    // old-TeamKey-wrapped ItemKey). The version-aware client
+    // (getEntryDecryptionKey / getItemEncryptionKey) then selects the
+    // matching TeamKey version and decrypts directly — no client-side
+    // re-encrypt/PUT roundtrip needed.
     await tx.teamPasswordEntry.update({
       where: { id, teamId },
       data: {
@@ -104,11 +143,20 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         blobAuthTag: history.blobAuthTag,
         aadVersion: history.aadVersion,
         teamKeyVersion: history.teamKeyVersion,
+        itemKeyVersion: history.itemKeyVersion,
+        encryptedItemKey: history.encryptedItemKey,
+        itemKeyIv: history.itemKeyIv,
+        itemKeyAuthTag: history.itemKeyAuthTag,
         updatedById: session.user.id,
       },
     });
+    return true;
     }),
   );
+
+  if (!restored) {
+    return notFound();
+  }
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),

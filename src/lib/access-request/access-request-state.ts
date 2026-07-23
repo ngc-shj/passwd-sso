@@ -30,7 +30,8 @@ export const MATRIX: Record<
   [AR_STATUS.PENDING]: {
     [AR_STATUS.APPROVED]: [AR_ACTOR.ADMIN],
     [AR_STATUS.DENIED]: [AR_ACTOR.ADMIN],
-    // TODO(centralize-state-transitions-followup): no caller transitions to EXPIRED yet — implement cron in a follow-up PR
+    // PENDING -> EXPIRED sweep: src/workers/retention-gc-worker/sweep.ts
+    // sweepExpiredAccessRequests (external-review-2026-07 remediation, C7).
     [AR_STATUS.EXPIRED]: [AR_ACTOR.SYSTEM],
     [AR_STATUS.PENDING]: [],
   },
