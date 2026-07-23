@@ -14,9 +14,11 @@ hosted_zone_id = "ZXXXXXXXXXXXXX"
 
 create_acm_certificate = true
 
-# Container images — use ECR repository URLs from terraform output
-app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-app:latest"
-jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:latest"
+# Container images — use ECR repository URLs from terraform output.
+# ECR is IMMUTABLE: pin an explicit version tag (:vX.Y.Z) or @sha256 digest,
+# never :latest (rejected by variable validation).
+app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-app:v0.4.71"
+jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:v1.42.0"
 
 app_secrets = {
   # Use a non-SUPERUSER app role for DATABASE_URL (RLS enforced)

@@ -68,12 +68,25 @@ variable "acm_certificate_arn" {
 
 variable "app_image" {
   type        = string
-  description = "Container image for app service"
+  description = "Container image for app service (immutable version tag or @sha256 digest — not :latest)"
+
+  validation {
+    # ECR repos are IMMUTABLE (see ecr.tf). Reject :latest and untagged refs so a
+    # mutable/ambiguous image can never be deployed (2026-07 review). Accept an
+    # explicit tag (:v1.2.3) or a digest (@sha256:...).
+    condition     = can(regex("(@sha256:[0-9a-f]{64}$)|(:[^:/@]+$)", var.app_image)) && !can(regex(":latest$", var.app_image))
+    error_message = "app_image must be pinned to an immutable version tag (e.g. :v0.4.71) or a @sha256 digest, never :latest."
+  }
 }
 
 variable "jackson_image" {
   type        = string
-  description = "Container image for jackson service"
+  description = "Container image for jackson service (immutable version tag or @sha256 digest — not :latest)"
+
+  validation {
+    condition     = can(regex("(@sha256:[0-9a-f]{64}$)|(:[^:/@]+$)", var.jackson_image)) && !can(regex(":latest$", var.jackson_image))
+    error_message = "jackson_image must be pinned to an immutable version tag or a @sha256 digest, never :latest."
+  }
 }
 
 variable "app_cpu" {

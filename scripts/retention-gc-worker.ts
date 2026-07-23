@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+import { z } from "zod";
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
 
@@ -25,7 +26,42 @@ const workerEnvSchema = envObject.pick({
   LOG_LEVEL: true,
   AUDIT_LOG_FORWARD: true,
   AUDIT_LOG_APP_NAME: true,
-});
+})
+  // Least-privilege (2026-07 security review): the worker connects via the
+  // dedicated RETENTION_GC_DATABASE_URL and only falls back to DATABASE_URL.
+  // DATABASE_URL is therefore optional here so production deployments need not
+  // inject the broad app credential alongside the scoped worker role. It stays
+  // required in the app path (envObject is untouched). Empty/whitespace is
+  // normalized to "unset" so the .refine() below is the single arbiter of the
+  // at-least-one-URL rule (path pinned to DATABASE_URL for stable diagnostics).
+  .extend({
+    DATABASE_URL: z
+      .string()
+      .transform((s) => s.trim())
+      .transform((s) => (s.length === 0 ? undefined : s))
+      .optional(),
+  })
+  // At-least-one-URL (all environments). Path pinned to DATABASE_URL for stable
+  // diagnostics on the common "nothing configured" failure.
+  .refine(
+    (env) => Boolean(env.RETENTION_GC_DATABASE_URL ?? env.DATABASE_URL),
+    {
+      message:
+        "Either RETENTION_GC_DATABASE_URL or DATABASE_URL must be set.",
+      path: ["DATABASE_URL"],
+    },
+  )
+  // In production the dedicated scoped-role URL is REQUIRED — the broad app
+  // DATABASE_URL must NOT be used as a fallback (least-privilege; 2026-07 review).
+  .refine(
+    (env) =>
+      env.NODE_ENV !== "production" || Boolean(env.RETENTION_GC_DATABASE_URL),
+    {
+      message:
+        "RETENTION_GC_DATABASE_URL is required in production (no DATABASE_URL fallback).",
+      path: ["RETENTION_GC_DATABASE_URL"],
+    },
+  );
 
 const parseResult = workerEnvSchema.safeParse(process.env);
 if (!parseResult.success) {
@@ -53,8 +89,22 @@ if (process.argv.includes("--validate-env-only")) {
   process.exit(0);
 }
 
+// The at-least-one-URL .refine() above guarantees this is non-nullish at
+// runtime; narrow the type explicitly and fail closed if that invariant is
+// ever broken (defense-in-depth — never connect with an undefined URL).
 const databaseUrl =
   workerEnv.RETENTION_GC_DATABASE_URL ?? workerEnv.DATABASE_URL;
+if (!databaseUrl) {
+  console.error(
+    JSON.stringify({
+      level: "error",
+      msg: "env validation failed",
+      path: "DATABASE_URL",
+      code: "custom",
+    }),
+  );
+  process.exit(1);
+}
 
 const worker = createWorker({
   databaseUrl,

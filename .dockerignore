@@ -2,8 +2,60 @@ node_modules
 .next
 .git
 .gitignore
-.env.local
-.env*.local
+# Secrets must never enter the build context / image. Exclude every env file
+# at ANY depth (root .env and nested ones like extension/.env), keeping only the
+# committed .env.example placeholders. .env holds real dev secrets (DB, migration
+# superuser, auth/OAuth, master key) and Next.js standalone tracing otherwise
+# copies it into .next/standalone → the final image. A secret in the build
+# context also leaks into builder layers and remote build cache, so exclude it
+# recursively — not only at the repo root.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Every OTHER git-ignored secret / local artifact would also be pulled in by
+# `COPY . .` and leak into builder layers + remote build cache. Mirror the
+# secret/artifact entries from .gitignore (recursively) so the build context
+# carries none of them. Keep this in sync with .gitignore's "Secrets & Keys",
+# "Terraform", and CLI-config sections; check-dockerignore-secrets.sh guards it.
+# --- Secrets & keys ---
+**/*.pem
+**/*.key
+**/*.crt
+**/*.cert
+**/*.p12
+**/*.pfx
+**/master.key
+**/encryption.key
+# --- SAML certificates (.gitignore: saml/) ---
+**/saml
+# --- CLI vault mapping (user-specific entry IDs) ---
+**/.passwd-sso-env.json
+# --- Local review / auth artifacts (session tokens) ---
+**/*review-credentials.local.md
+**/.load-test-auth.json
+**/.auth-state.json
+# --- Local databases + Postgres data dir ---
+**/*.db
+**/*.sqlite
+**/*.db-journal
+**/postgres_data
+# --- Terraform working dir / state / real tfvars ---
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+**/*.tfvars.json
+!**/*.tfvars.example
+# --- Test / coverage output (not needed in the image) ---
+**/test-results
+**/coverage
+**/.coverage-snapshots
+**/playwright-report
+
 .claude
 *.md
 .vscode

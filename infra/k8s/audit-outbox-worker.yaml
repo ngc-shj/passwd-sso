@@ -18,21 +18,36 @@ spec:
         component: audit-outbox-worker
     spec:
       terminationGracePeriodSeconds: 30
+      # Least-privilege: the worker connects via the scoped OUTBOX_WORKER_DATABASE_URL
+      # only — the broad app DATABASE_URL is deliberately NOT injected here.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
-          image: passwd-sso:latest
+          # REQUIRED substitution at deploy time. This is an unresolved
+          # placeholder — replace with the full immutable ref (ECR registry +
+          # @sha256 digest or :vX.Y.Z tag) via Kustomize images: or sed. (Not
+          # envsubst — it only substitutes $VAR/${VAR}, not literal placeholders.)
+          # It is intentionally NOT a runnable :latest so a manifest applied
+          # without substitution fails fast instead of pulling a mutable image.
+          image: "REPLACE_WITH_IMMUTABLE_IMAGE_REF" # e.g. <ACCOUNT>.dkr.ecr.<region>.amazonaws.com/passwd-sso-app@sha256:...
           command: ["node", "dist/audit-outbox-worker.js"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: OUTBOX_WORKER_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: passwd-sso-secrets
                   key: outbox-worker-database-url
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: passwd-sso-secrets
-                  key: database-url
           resources:
             requests:
               cpu: 50m
@@ -41,12 +56,20 @@ spec:
               cpu: 200m
               memory: 256Mi
           livenessProbe:
+            # Re-parse env + re-exec the binary in a SEPARATE process. This is
+            # strictly better than a tautological `process.exit(0)` (it catches
+            # a broken image / unparseable env), but note its LIMITATION: it does
+            # NOT observe the running worker — a hung main loop, a stalled queue,
+            # or a DB outage will NOT fail this probe. A heartbeat/last-success
+            # liveness (worker writes a timestamp the probe reads) is the tracked
+            # follow-up; alert on audit_outbox oldest-PENDING age until then.
             exec:
-              command: ["node", "-e", "process.exit(0)"]
+              command: ["node", "dist/audit-outbox-worker.js", "--validate-env-only"]
             initialDelaySeconds: 10
             periodSeconds: 30
+            failureThreshold: 3
           startupProbe:
             exec:
-              command: ["node", "-e", "process.exit(0)"]
+              command: ["node", "dist/audit-outbox-worker.js", "--validate-env-only"]
             failureThreshold: 3
             periodSeconds: 5

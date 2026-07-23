@@ -4,7 +4,7 @@
 
 resource "aws_ecr_repository" "app" {
   name                 = "${local.name_prefix}-app"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
@@ -15,7 +15,7 @@ resource "aws_ecr_repository" "app" {
 
 resource "aws_ecr_repository" "jackson" {
   name                 = "${local.name_prefix}-jackson"
-  image_tag_mutability = "MUTABLE"
+  image_tag_mutability = "IMMUTABLE"
 
   image_scanning_configuration {
     scan_on_push = true
@@ -47,8 +47,10 @@ resource "aws_ecr_lifecycle_policy" "app" {
         rulePriority = 2
         description  = "Keep last 10 tagged images"
         selection = {
+          # Immutable repo: images are pushed as version tags (vX.Y.Z), never
+          # :latest. Retain the last 10 version-tagged images.
           tagStatus     = "tagged"
-          tagPrefixList = ["latest", "v"]
+          tagPrefixList = ["v"]
           countType     = "imageCountMoreThan"
           countNumber   = 10
         }
@@ -77,8 +79,10 @@ resource "aws_ecr_lifecycle_policy" "jackson" {
         rulePriority = 2
         description  = "Keep last 10 tagged images"
         selection = {
+          # Immutable repo: images are pushed as version tags (vX.Y.Z), never
+          # :latest. Retain the last 10 version-tagged images.
           tagStatus     = "tagged"
-          tagPrefixList = ["latest", "v"]
+          tagPrefixList = ["v"]
           countType     = "imageCountMoreThan"
           countNumber   = 10
         }

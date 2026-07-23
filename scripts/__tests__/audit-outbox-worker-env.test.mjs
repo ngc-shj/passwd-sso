@@ -120,12 +120,25 @@ describe("audit-outbox-worker --validate-env-only", () => {
     expect(payload).toEqual({ level: "info", msg: "env validation passed" });
   });
 
-  it("exits 1 with clear error when DATABASE_URL is missing entirely", () => {
-    // Pass DATABASE_URL as empty string — dotenv won't override an already-set var,
-    // so the Zod nonEmpty check will reject "".
+  it("exits 0 with ONLY OUTBOX_WORKER_DATABASE_URL set and DATABASE_URL unset (least-privilege path)", () => {
+    // Production least-privilege deployment: only the scoped worker URL is
+    // injected; the broad app DATABASE_URL is absent (spawnWorker passes "",
+    // which the worker schema normalizes to unset).
     const result = spawnWorker({
-      DATABASE_URL: "",  // explicitly empty → Zod nonEmpty rejects it
+      OUTBOX_WORKER_DATABASE_URL: VALID_DATABASE_URL,
     });
+
+    expect(result.status).toBe(0);
+
+    const payload = extractJsonLine(result.stdout);
+    expect(payload).toEqual({ level: "info", msg: "env validation passed" });
+  });
+
+  it("exits 1 with DATABASE_URL-pathed error when neither DATABASE_URL nor OUTBOX_WORKER_DATABASE_URL is set", () => {
+    // Both URLs explicitly empty so loadEnv()/dotenv cannot populate them from
+    // .env (dotenv does not override already-set vars). Empty → normalized to
+    // unset → the at-least-one-URL .refine() fails with path pinned to DATABASE_URL.
+    const result = spawnWorker({ OUTBOX_WORKER_DATABASE_URL: "" });
 
     expect(result.status).toBe(1);
 
@@ -140,6 +153,39 @@ describe("audit-outbox-worker --validate-env-only", () => {
       }
     });
     expect(hasDbUrlError).toBe(true);
+  });
+
+  it("exits 1 in production when only DATABASE_URL is set (no OUTBOX_WORKER_DATABASE_URL fallback)", () => {
+    // Production must NOT fall back to the broad app DATABASE_URL — the scoped
+    // worker URL is required. Error path pinned to OUTBOX_WORKER_DATABASE_URL.
+    const result = spawnWorker({
+      NODE_ENV: "production",
+      DATABASE_URL: VALID_DATABASE_URL,
+      OUTBOX_WORKER_DATABASE_URL: "",
+    });
+
+    expect(result.status).toBe(1);
+
+    const stderrLines = result.stderr.trim().split("\n").filter(Boolean);
+    const hasScopedError = stderrLines.some((l) => {
+      try {
+        return JSON.parse(l).path === "OUTBOX_WORKER_DATABASE_URL";
+      } catch {
+        return false;
+      }
+    });
+    expect(hasScopedError).toBe(true);
+  });
+
+  it("exits 0 in production when OUTBOX_WORKER_DATABASE_URL is set", () => {
+    const result = spawnWorker({
+      NODE_ENV: "production",
+      OUTBOX_WORKER_DATABASE_URL: VALID_DATABASE_URL,
+    });
+
+    expect(result.status).toBe(0);
+    const payload = extractJsonLine(result.stdout);
+    expect(payload).toEqual({ level: "info", msg: "env validation passed" });
   });
 
   it("exits 1 with clear error when OUTBOX_BATCH_SIZE is non-numeric", () => {

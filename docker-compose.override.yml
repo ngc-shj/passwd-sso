@@ -27,7 +27,12 @@ services:
       - .env
     environment:
       - OUTBOX_WORKER_DATABASE_URL=postgresql://passwd_outbox_worker:${PASSWD_OUTBOX_WORKER_PASSWORD:?PASSWD_OUTBOX_WORKER_PASSWORD is required}@db:5432/passwd_sso
-      - DATABASE_URL=postgresql://passwd_app:${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}@db:5432/passwd_sso
+      # Least-privilege: connect ONLY via the scoped worker role. Blank out the
+      # broad app DATABASE_URL that env_file: .env would otherwise inject (the
+      # worker schema normalizes empty → unset and uses the dedicated URL). This
+      # mirrors production, so a regression that reintroduces the app credential
+      # is caught in dev.
+      - DATABASE_URL=
     depends_on:
       db:
         condition: service_healthy
@@ -58,7 +63,12 @@ services:
       - .env
     environment:
       - RETENTION_GC_DATABASE_URL=postgresql://passwd_retention_gc_worker:${PASSWD_RETENTION_GC_WORKER_PASSWORD:?PASSWD_RETENTION_GC_WORKER_PASSWORD is required}@db:5432/passwd_sso
-      - DATABASE_URL=postgresql://passwd_app:${PASSWD_APP_PASSWORD:?PASSWD_APP_PASSWORD is required}@db:5432/passwd_sso
+      # Least-privilege: connect ONLY via the scoped worker role. Blank out the
+      # broad app DATABASE_URL that env_file: .env would otherwise inject (the
+      # worker schema normalizes empty → unset and uses the dedicated URL). This
+      # mirrors production, so a regression that reintroduces the app credential
+      # is caught in dev.
+      - DATABASE_URL=
     depends_on:
       db:
         condition: service_healthy
