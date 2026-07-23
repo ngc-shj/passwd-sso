@@ -43,6 +43,21 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **Security Minor**: scoped the F7 false-positive regex allowlist to `paths=['''^docs/''']`
   so the 3 example-string regexes cannot suppress matches elsewhere in the tree.
 
+### Round 2 — external re-review additions
+- **High `.env`-in-image**: not in the original plan scope (the triangulation focused
+  on the 9 reported findings; this leak was found by the re-review). Fixed
+  `.dockerignore` + added a mutation-verified guard with self-test. Verified against
+  a real `docker build`.
+- **NODE_ENV=production dedicated-URL requirement**: added a SECOND refine per worker
+  (the first stays at path `DATABASE_URL` for the "nothing configured" case; the new
+  one pins path to the dedicated URL for the prod-fallback case). Two refines are
+  required because a Zod `.refine()` path is static and the two failure modes need
+  distinct diagnostic paths.
+- **body-parser override**: chose the override path (not shadcn removal) per the
+  established project decision — dev-only Low, shadcn is a CLI devDep. `2.2.2 → 2.3.0`.
+- **liveness probe**: corrected comment + documented limitation rather than
+  implementing heartbeat liveness (needs worker-code change; tracked follow-up).
+
 ## Anti-Deferral entries
 
 ### F3 — Terraform secret-value externalization deferred to follow-up

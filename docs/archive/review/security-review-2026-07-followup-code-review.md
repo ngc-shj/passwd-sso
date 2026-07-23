@@ -1,6 +1,48 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
+Review round: 2
+
+## Round 2 — external re-review findings (all addressed)
+
+A second external review of the committed branch surfaced findings the first
+review round missed — most importantly a High secret-exposure the triangulation
+had not covered. All addressed:
+
+- **High (NEW) — `.env` shipped in the container image.** `.dockerignore` excluded
+  `.env.local` but not `.env`; `COPY . .` + Next.js `output: "standalone"` tracing
+  copied the 12.4 KB `.env` (real dev secrets) into `.next/standalone` → the final
+  image. **Verified end-to-end**: a Docker build with the pre-fix ignore produced
+  `/app/.env`; after adding `.env` + `.env.*` (keep `!.env.example`), a fresh
+  `docker build --target builder` has NO `/app/.env` and no `.env` in standalone.
+  Added `scripts/checks/check-dockerignore-secrets.sh` (static assertion always-on
+  + opt-in bundle scan), wired into `pre-pr.sh` (→ CI static-checks), with a 6-case
+  self-test proving RT7 red-capability. Mutation-verified: pre-fix `.dockerignore`
+  fails the guard.
+- **Medium — image-pin inconsistency.** `:latest` remained in dev+prod tfvars
+  examples, `README.ja.md`, and k8s comments while ECR is IMMUTABLE. Fixed the
+  examples/README to version tags and added `validation` blocks on `app_image`/
+  `jackson_image` that REJECT `:latest` (verified via `terraform console`:
+  `:latest`→false, `:v0.4.71`→true, `@sha256:…`→true, untagged→false).
+- **Low — compose ships broad app creds to workers.** `docker-compose.override.yml`
+  now blanks `DATABASE_URL` for both workers (empty→unset→scoped URL). Added a
+  production hard-requirement to both worker schemas: `NODE_ENV=production` REQUIRES
+  the dedicated URL (no DATABASE_URL fallback), with 4 new tests (red-before proven).
+- **Low — liveness probe overstated.** Corrected both manifest comments: the
+  `--validate-env-only` probe does NOT observe the running worker / DB; heartbeat
+  liveness is the tracked follow-up.
+- **Low — dev CVE.** `body-parser` override → `^2.3.0` (via shadcn→mcp-sdk→express);
+  `npm audit` (dev+prod) now 0 vulnerabilities.
+- **Informational — stale security docs.** Updated `owasp-top10-2026-05.md`: passkey
+  session callback is now fail-closed; webhook SSRF now pins validated IPs (DNS
+  rebinding defeated) — both verified against current code before editing.
+- **Medium (F3) — Terraform state secrets.** Reconfirmed as a tracked deferral:
+  documentation control shipped (encrypted-backend requirement + secret-injection
+  guidance, en+ja); the data-source externalization rework needs a live AWS account
+  and remains an Anti-Deferral follow-up (see deviation log). Not claimed as fixed.
+
+## Round 1 (initial triangulated review — see below)
+
 Review round: 1 (+ inline tightening applied)
 
 ## Changes from Previous Round

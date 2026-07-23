@@ -53,6 +53,12 @@ cp envs/dev/terraform.tfvars.example envs/dev/terraform.tfvars
 terraform init
 ```
 
+> **シークレットは Terraform state に平文で保存されます。** tfvars で渡した
+> シークレット値は `terraform.tfstate` に平文で書き込まれます（`secrets.tf` の
+> SECURITY 注記を参照）。実シークレットで apply する前に、必ず下記の暗号化 S3
+> リモートバックエンドを設定してください。ローカル state のまま本番デプロイし
+> ないこと。`terraform.tfvars` は gitignore 済みで、実値は決してコミットしない。
+
 ### 2. Plan & Apply
 
 ```bash
@@ -62,19 +68,29 @@ terraform apply -var-file=envs/dev/terraform.tfvars
 
 ### 3. Push Container Images
 
+> **イミュータブルタグ。** ECR リポジトリは `IMMUTABLE`（`ecr.tf` 参照）。タグは
+> 一度しか push できず上書き不可のため `:latest` は push せず、イミュータブルな
+> バージョンタグ（リポジトリの `vX.Y.Z` 形式）または digest を使うこと。既存タグ
+> の再 push は `ImageTagAlreadyExistsException` で失敗する。ECS タスク定義・k8s
+> マニフェストはデプロイ時に正確なバージョンタグまたは `@sha256:` digest を参照
+> すること。`app_image` / `jackson_image` 変数は `:latest` を拒否する。
+
 ```bash
 # Login to ECR
 aws ecr get-login-password --region ap-northeast-1 | \
   docker login --username AWS --password-stdin $(terraform output -raw ecr_app_repository_url | cut -d/ -f1)
 
-# Build and push app
-docker build -t $(terraform output -raw ecr_app_repository_url):latest .
-docker push $(terraform output -raw ecr_app_repository_url):latest
+# Build and push app with an immutable version tag (matches package.json version).
+VERSION=$(node -p "require('../../package.json').version")   # e.g. 0.4.71
+docker build -t $(terraform output -raw ecr_app_repository_url):v${VERSION} .
+docker push $(terraform output -raw ecr_app_repository_url):v${VERSION}
 
-# Push jackson (pull from Docker Hub, retag, push)
-docker pull boxyhq/jackson:latest
-docker tag boxyhq/jackson:latest $(terraform output -raw ecr_jackson_repository_url):latest
-docker push $(terraform output -raw ecr_jackson_repository_url):latest
+# Push jackson (pull from Docker Hub, retag, push). jackson has no local version
+# SSOT — pin to a SPECIFIC upstream boxyhq/jackson release tag (not :latest).
+JACKSON_VERSION=1.42.0   # pick a concrete upstream release; bump deliberately
+docker pull boxyhq/jackson:${JACKSON_VERSION}
+docker tag boxyhq/jackson:${JACKSON_VERSION} $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
+docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
 ```
 
 ### 4. Force New Deployment
@@ -88,9 +104,19 @@ aws ecs update-service \
 
 ## Remote State Backend
 
-State はデフォルトでローカルに保存されます。チームで運用する場合は S3 + DynamoDB バックエンドを使用してください。
+State はデフォルトでローカルに保存されます。**実シークレットを含むデプロイでは
+必ず暗号化された S3 + DynamoDB バックエンドを使用してください** — Terraform state
+はシークレット値を平文で保持するため、ローカル state（開発端末や CI アーティファ
+クト上）はシークレット流出です。リモートバックエンドは保存時暗号化
+（`encrypt = true`）・バージョニング・（バケットポリシー/IAM による）厳格なアクセ
+ス制御とアクセスログを提供します。
 
-セットアップ手順は `backend.tf` のコメントを参照。
+セットアップ手順（バケット＋ロックテーブル＋バージョニング）は `backend.tf` の
+コメントを参照。state を移行する前に、バケットが暗号化を強制しパブリックアクセス
+を遮断していることを確認してください。
+
+シークレット値を state に流し込む `terraform.tfvars` は gitignore 済みで、決して
+コミットしないこと。
 
 ## Secrets Management
 

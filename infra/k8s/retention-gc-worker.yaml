@@ -52,9 +52,11 @@ spec:
               cpu: 200m
               memory: 256Mi
           livenessProbe:
-            # Re-validate env on each liveness check — verifies env still parses
-            # AND the binary still runs. Cheaper than a network probe and avoids
-            # masking DB outages with a tautological process.exit(0).
+            # Re-parse env + re-exec the binary in a SEPARATE process. Strictly
+            # better than a tautological `process.exit(0)` (catches a broken image
+            # / unparseable env), but note its LIMITATION: it does NOT observe the
+            # running worker — a hung loop or DB outage will NOT fail this probe.
+            # A heartbeat/last-success liveness is the tracked follow-up.
             exec:
               command: ["node", "dist/retention-gc-worker.js", "--validate-env-only"]
             initialDelaySeconds: 60

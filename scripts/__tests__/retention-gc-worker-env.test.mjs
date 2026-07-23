@@ -153,6 +153,39 @@ describe("retention-gc-worker --validate-env-only", () => {
     expect(hasDbUrlError).toBe(true);
   });
 
+  it("exits 1 in production when only DATABASE_URL is set (no RETENTION_GC_DATABASE_URL fallback)", () => {
+    // Production must NOT fall back to the broad app DATABASE_URL — the scoped
+    // worker URL is required. Error path pinned to RETENTION_GC_DATABASE_URL.
+    const result = spawnWorker({
+      NODE_ENV: "production",
+      DATABASE_URL: VALID_DATABASE_URL,
+      RETENTION_GC_DATABASE_URL: "",
+    });
+
+    expect(result.status).toBe(1);
+
+    const stderrLines = result.stderr.trim().split("\n").filter(Boolean);
+    const hasScopedError = stderrLines.some((l) => {
+      try {
+        return JSON.parse(l).path === "RETENTION_GC_DATABASE_URL";
+      } catch {
+        return false;
+      }
+    });
+    expect(hasScopedError).toBe(true);
+  });
+
+  it("exits 0 in production when RETENTION_GC_DATABASE_URL is set", () => {
+    const result = spawnWorker({
+      NODE_ENV: "production",
+      RETENTION_GC_DATABASE_URL: VALID_DATABASE_URL,
+    });
+
+    expect(result.status).toBe(0);
+    const payload = extractJsonLine(result.stdout);
+    expect(payload).toEqual({ level: "info", msg: "env validation passed" });
+  });
+
   it("exits 1 with clear error when RETENTION_GC_BATCH_SIZE is non-numeric", () => {
     const result = spawnWorker({
       DATABASE_URL: VALID_DATABASE_URL,

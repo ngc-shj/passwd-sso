@@ -48,12 +48,25 @@ const workerEnvSchema = envObject.pick({
       .transform((s) => (s.length === 0 ? undefined : s))
       .optional(),
   })
+  // At-least-one-URL (all environments). Path pinned to DATABASE_URL for stable
+  // diagnostics on the common "nothing configured" failure.
   .refine(
     (env) => Boolean(env.OUTBOX_WORKER_DATABASE_URL ?? env.DATABASE_URL),
     {
       message:
         "Either OUTBOX_WORKER_DATABASE_URL or DATABASE_URL must be set.",
       path: ["DATABASE_URL"],
+    },
+  )
+  // In production the dedicated scoped-role URL is REQUIRED — the broad app
+  // DATABASE_URL must NOT be used as a fallback (least-privilege; 2026-07 review).
+  .refine(
+    (env) =>
+      env.NODE_ENV !== "production" || Boolean(env.OUTBOX_WORKER_DATABASE_URL),
+    {
+      message:
+        "OUTBOX_WORKER_DATABASE_URL is required in production (no DATABASE_URL fallback).",
+      path: ["OUTBOX_WORKER_DATABASE_URL"],
     },
   );
 

@@ -2,8 +2,13 @@ node_modules
 .next
 .git
 .gitignore
-.env.local
-.env*.local
+# Secrets must never enter the build context / image. Exclude every env file
+# except the committed placeholder. .env holds real dev secrets (DB, migration
+# superuser, auth/OAuth, master key) and Next.js standalone tracing otherwise
+# copies it into .next/standalone → the final image.
+.env
+.env.*
+!.env.example
 .claude
 *.md
 .vscode
