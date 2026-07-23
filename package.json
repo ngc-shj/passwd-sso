@@ -134,7 +134,7 @@
     "@babel/core": "^7.29.6",
     "nodemailer": "^9.0.1",
     "effect": ">=3.20.0",
-    "postcss": ">=8.5.10",
+    "postcss": ">=8.5.12",
     "brace-expansion@1": "^1.1.16",
     "brace-expansion@2": "^2.1.2",
     "brace-expansion@>=5.0.0 <5.0.7": "^5.0.7",
