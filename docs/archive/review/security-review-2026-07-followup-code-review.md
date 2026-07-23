@@ -1,7 +1,20 @@
 # Code Review: security-review-2026-07-followup
 
 Date: 2026-07-23
-Review round: 5
+Review round: 6
+
+## Round 6 — fifth external re-review (all addressed)
+
+- **Low — "single source of truth" was inaccurate.** The static assertion used `MUST_EXCLUDE`
+  but the bundle scan used a SEPARATELY hardcoded `find` pattern list — they happened to match
+  but could drift. Fixed for real: the bundle scan now DERIVES its search signatures from the
+  same `MUST_EXCLUDE` array (dir-classes → `-type d -name`, file-classes → basename/extension
+  glob), so adding a class to `MUST_EXCLUDE` extends both checks. Added a CONTRACT test that
+  plants every `MUST_EXCLUDE` representative path one-at-a-time and requires the bundle scan to
+  flag each — red-proven by breaking the bundle's file-predicate construction (planted `.env`
+  then goes undetected → test fails). Self-test → 16 cases.
+- **Doc — softened "MACHINE-ENUMERATING"** to "enumerated from a grep listing, hand-classified"
+  (the classification step is manual).
 
 ## Round 5 — fourth external re-review (all addressed)
 

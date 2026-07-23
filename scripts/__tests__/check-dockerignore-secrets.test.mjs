@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -221,5 +221,38 @@ describe("check-dockerignore-secrets", () => {
     const r = runGuard({ CI: "true", DOCKERIGNORE_SECRETS_FIXTURE_MODE: "" });
     expect(r.exitCode).toBe(1);
     expect(r.stdout + r.stderr).toContain("ENV_POLLUTION_GUARD");
+  });
+
+  // ── Contract: bundle scan catches EVERY static MUST_EXCLUDE class ───────────
+  // Proves the single-source claim — the bundle scan's derived signatures cover
+  // the same set the static assertion enforces. Parse MUST_EXCLUDE straight from
+  // the guard script, plant each representative path in a fake image tree ONE AT
+  // A TIME, and require the bundle scan to flag it. If someone adds a class to
+  // MUST_EXCLUDE but the derivation doesn't produce a matching signature, this
+  // fails — no silent static/bundle drift.
+  it("bundle scan flags every MUST_EXCLUDE representative path (no static/bundle drift)", () => {
+    const guardSrc = readFileSync(GUARD, "utf8");
+    const block = guardSrc.match(/MUST_EXCLUDE=\(([\s\S]*?)\n\)/);
+    expect(block, "MUST_EXCLUDE array must be parseable from the guard").toBeTruthy();
+    const paths = [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    expect(paths.length).toBeGreaterThan(20);
+
+    for (const p of paths) {
+      // Fresh tree per path so one leak can't mask another.
+      const imageRoot = mkdtempSync(join(tmpdir(), "di-contract-"));
+      try {
+        writeDockerignore(RECURSIVE_IGNORE);
+        const full = join(imageRoot, "app", p);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, "SECRET\n", "utf8");
+        const r = runGuard({
+          DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+          DOCKERIGNORE_SECRETS_IMAGE_ROOT: imageRoot,
+        });
+        expect(r.exitCode, `bundle scan must flag planted secret ${p}`).toBe(1);
+      } finally {
+        rmSync(imageRoot, { recursive: true, force: true });
+      }
+    }
   });
 });

@@ -47,7 +47,8 @@ full docs tree is now scanned (real accidental secret under docs/ IS caught) wit
 - **High: `.dockerignore` secret class was still incomplete.** Round 4 transcribed visible
   `.gitignore` entries but not systematically — `e2e/.auth-state.json` (Playwright session
   token), `postgres_data/`, `prisma/*.db-journal`, `saml/` were missing. Fixed by
-  MACHINE-ENUMERATING every `.gitignore` secret/data entry and adding the gaps. Added a
+  enumerating every `.gitignore` entry from a `grep`ed listing (then hand-classifying each as
+  secret/data vs build-noise) and adding the gaps. Added a
   cross-check that every `.gitignore` secret class has a representative path excluded by
   `.dockerignore` (result: ALL COVERED; both `*.example` placeholders included).
 - **Low: static / bundle drift.** Refactored the guard so both checks derive from ONE shared

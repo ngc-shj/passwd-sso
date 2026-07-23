@@ -148,27 +148,71 @@ NODE
 # static gate above is the always-on regression net.
 SCAN_ROOT="${DOCKERIGNORE_SECRETS_IMAGE_ROOT:-.next/standalone}"
 if [ "${DOCKERIGNORE_SECRETS_SCAN_BUNDLE:-0}" = "1" ] && [ -d "$SCAN_ROOT" ]; then
-  # Any git-ignored secret / artifact at ANY depth is a leak. The leaf-name /
-  # dir-name patterns below are the SAME class the static MUST_EXCLUDE list
-  # covers (env files, keys/certs, SAML, CLI vault mapping, session-token
-  # artifacts, Terraform state/tfvars/.terraform, local DBs + Postgres data).
-  # node_modules is pruned silently (legit third-party fixtures); .terraform and
-  # postgres_data dirs are reported as leaks and pruned.
+  # SINGLE SOURCE OF TRUTH: the bundle scan derives its search set from the SAME
+  # MUST_EXCLUDE array the static assertion uses — it does NOT re-list patterns.
+  # For each representative path we take its LEAK SIGNATURE — the marker dir for
+  # a dir-class (a path segment ending in `/`, e.g. `postgres_data/base/1` →
+  # `postgres_data`, `.terraform/…` → `.terraform`), else the file basename
+  # generalized to a glob for the extension classes (localhost-key.pem → *.pem,
+  # terraform.tfstate.backup → *.tfstate.*). Adding a new class to MUST_EXCLUDE
+  # therefore extends the bundle scan automatically — they cannot drift.
+  #
+  # Derive the signature set with node (same MUST_EXCLUDE_JOINED already exported).
+  mapfile -t SIGS < <(node -e '
+    const paths = process.env.MUST_EXCLUDE_JOINED.split("\n").filter(Boolean);
+    // Extension classes: a trailing ".<ext>" that the static patterns match by glob.
+    const extGlobs = [
+      [/\.env$/, ".env"], [/\.env\.[^./]+$/, ".env.*"],
+      [/\.pem$/, "*.pem"], [/\.key$/, "*.key"], [/\.crt$/, "*.crt"], [/\.cert$/, "*.cert"],
+      [/\.p12$/, "*.p12"], [/\.pfx$/, "*.pfx"],
+      [/\.tfstate$/, "*.tfstate"], [/\.tfstate\.[^./]+$/, "*.tfstate.*"],
+      [/\.tfvars$/, "*.tfvars"], [/\.tfvars\.json$/, "*.tfvars.json"],
+      [/\.db$/, "*.db"], [/\.sqlite$/, "*.sqlite"], [/\.db-journal$/, "*.db-journal"],
+    ];
+    // Fixed basenames that are secrets regardless of extension.
+    const fixedNames = new Set([
+      "master.key","encryption.key",".passwd-sso-env.json",
+      ".load-test-auth.json",".auth-state.json",
+    ]);
+    // The only DIRECTORY classes (whole subtree is a leak). Every other secret
+    // is a file matched by basename/glob — we must NOT treat its parent dir
+    // (certificates/, infra/, docs/, e2e/, …) as a marker, or we would flag
+    // legitimate directories.
+    const dirClasses = new Set([".terraform", "postgres_data", "saml"]);
+    const out = new Set();
+    for (const p of paths) {
+      const segs = p.split("/");
+      // If any ancestor is a dir-class, the whole subtree is covered by D: —
+      // do not derive a (possibly too-generic) basename signature for its leaf.
+      const underDirClass = segs.slice(0, -1).some((s) => dirClasses.has(s));
+      for (const s of segs.slice(0, -1)) if (dirClasses.has(s)) out.add("D:" + s);
+      if (underDirClass) continue;
+      const base = segs[segs.length - 1];
+      if (fixedNames.has(base)) { out.add("F:" + base); continue; }
+      if (/review-credentials\.local\.md$/.test(base)) { out.add("G:*review-credentials.local.md"); continue; }
+      let matched = false;
+      for (const [re, g] of extGlobs) if (re.test(base)) { out.add("G:" + g); matched = true; break; }
+      if (!matched) out.add("F:" + base); // fall back to exact basename
+    }
+    process.stdout.write([...out].join("\n"));
+  ')
+
+  # Build find predicates from the derived signatures.
+  dir_names=(); file_preds=()
+  for sig in "${SIGS[@]}"; do
+    kind="${sig%%:*}"; val="${sig#*:}"
+    case "$kind" in
+      D) dir_names+=("-o" "-name" "$val") ;;
+      F|G) file_preds+=("-o" "-name" "$val") ;;
+    esac
+  done
+  # Strip the leading "-o" from each group.
+  dir_names=("${dir_names[@]:1}"); file_preds=("${file_preds[@]:1}")
+
   found=$(find "$SCAN_ROOT" \
     -type d -name node_modules -prune -o \
-    -type d \( -name .terraform -o -name postgres_data -o -name saml \) -print -prune -o \
-    -type f \( \
-        -name ".env" -o -name ".env.*" \
-        -o -name "*.pem" -o -name "*.key" -o -name "*.crt" -o -name "*.cert" \
-        -o -name "*.p12" -o -name "*.pfx" \
-        -o -name "master.key" -o -name "encryption.key" \
-        -o -name ".passwd-sso-env.json" \
-        -o -name "*review-credentials.local.md" \
-        -o -name ".load-test-auth.json" -o -name ".auth-state.json" \
-        -o -name "*.tfstate" -o -name "*.tfstate.*" \
-        -o -name "*.tfvars" -o -name "*.tfvars.json" \
-        -o -name "*.db" -o -name "*.sqlite" -o -name "*.db-journal" \
-      \) ! -name ".env.example" ! -name "*.tfvars.example" -print \
+    -type d \( "${dir_names[@]}" \) -print -prune -o \
+    -type f \( "${file_preds[@]}" \) ! -name ".env.example" ! -name "*.tfvars.example" -print \
     2>/dev/null || true)
   if [ -n "$found" ]; then
     echo "ERROR: git-ignored secret/artifact(s) present in the built tree $SCAN_ROOT (shipped via build context / image):"
