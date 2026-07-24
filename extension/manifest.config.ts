@@ -70,7 +70,7 @@ export default defineManifest({
   ],
   web_accessible_resources: [
     {
-      resources: ["src/content/autofill.js", "src/content/token-bridge.js", "src/content/webauthn-interceptor.js"],
+      resources: ["src/content/token-bridge.js", "src/content/webauthn-interceptor.js"],
       matches: ["https://*/*", "http://localhost/*"],
     },
   ],

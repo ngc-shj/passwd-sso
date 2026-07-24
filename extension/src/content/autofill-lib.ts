@@ -342,7 +342,8 @@ export function performAutofill(payload: AutofillPayload) {
   }
 }
 
-// Guard against double-registration when autofill.js is also injected.
+// Guard against double-registration when this script is injected more than once
+// (manifest content script + programmatic executeScript fallback).
 const AUTOFILL_GUARD = "__pssoAutofillHandler";
 if (
   typeof chrome !== "undefined" &&

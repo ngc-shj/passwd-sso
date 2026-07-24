@@ -141,6 +141,34 @@ export function findFieldByRegex(
 3. **Cross-origin subframe LOGIN fill (C2 behavioral test)**: `window.top !== window.self`, frame host not in `allowedHosts` → `performAutofill` writes nothing. RED-proven.
 4. **Popup LOGIN fill, top frame**: `window.top === window.self` → fills normally (gate returns true). Regression check that the retargeted test does not over-block.
 
+## Implementation Checklist (Step 2-1)
+
+### Files to modify
+- `extension/src/content/form-detector-lib.ts` — ADD exports: `isElementVisible`, `getHintString`, `getAutocomplete`, `findFieldByAutocomplete(fields, acValue, isUsable)`, `findFieldByRegex(fields, regex, regexJa, isUsable)`. Reuse existing private `resolveOpacity` (line 53) — do NOT add a copy (INV-C1-d).
+- `extension/src/content/cc-form-detector-lib.ts` — DELETE local 6 helpers (`resolveOpacity`:38, `isElementVisible`:43, `getHintString`:52, `getAutocomplete`:71, `findFieldByAutocomplete`:130, `findFieldByRegex`:137); import the 5 shared from `./form-detector-lib`; pass `isUsableField` to all 6+6=12 call sites. Keep `findConfNumCvvInForm`, `looksLikeCvvField`, `isCoLocatedWith`, `detectExpiryFormat`, `formatCombinedExpiry` local.
+- `extension/src/content/identity-form-detector-lib.ts` — DELETE local 6 helpers (`resolveOpacity`:46, `isElementVisible`:51, `getHintString`:60, `getAutocomplete`:78, `findFieldByAutocomplete`:161, `findFieldByRegex`:168); import the 5 shared; pass `isUsableField` to all 12+10=22 call sites. Keep `findKanaField`, `findPlainNameField` local (they call `isUsableField` internally).
+- `extension/src/content/autofill.js` — DELETE (dead file).
+- `extension/manifest.config.ts` — remove `"src/content/autofill.js"` from `web_accessible_resources` (line 73), keep the other two.
+- `extension/src/content/autofill-lib.ts:345` — comment-only fix (drop "when autofill.js is also injected"); keep AUTOFILL_GUARD logic.
+- `extension/src/lib/constants.ts:117` — delete the stale "autofill.js keep in sync" note.
+- `extension/src/__tests__/content/autofill-js-sync.test.ts` — DELETE (invariant covered by autofill.test.ts:659-745).
+- `extension/src/__tests__/content/c11-constants-sync.test.ts:54-59` — remove the `autofill.js` `it(...)` case (keep webauthn-interceptor case at :61 and the AUTOFILL_FILL value-pin at :29).
+- `extension/src/__tests__/content/autofill.test.ts` — ADD one behavioral case: unresolvable-origin subframe (null host) → no fill; RED-prove by flipping autofill-lib.ts:17 on a scratchpad copy.
+
+### Member-set (verified by grep)
+- 6-helper duplication set = exactly `{cc-form-detector-lib.ts, identity-form-detector-lib.ts}` (+ form-detector-lib.ts as extraction target). `login-detector-lib.ts` uses `findUsernameInput`, NOT `findFieldBy*` — correctly excluded.
+- `isElementVisible` importers: zero (export exists but unused externally) → near-zero blast radius.
+- `autofill.js` references (non-test src): manifest:73, autofill-lib.ts:345, constants.ts:117 — all enumerated above. Test refs: autofill-js-sync.test.ts, c11:55-57.
+
+### Reusable code (Step 2-1 inventory)
+- `resolveOpacity` — already in form-detector-lib.ts:53. REUSE, do not redefine.
+- `extractHost` / `isHostMatch` — src/lib/url-matching.ts (used by autofill-lib.ts frame gate). Unchanged.
+
+### CI gate parity
+- `ci.yml` extension-ci job (vitest + build) — covered by local `npx vitest run` + `npm run build`.
+- `refactor-phase-verify.yml` fires on `refactor/**` (this branch). `verify-move-only-diff --glob src/**` targets git-detected RENAMES only; this diff is edit+delete (no renames), so it is out of scope — VERIFY post-implementation that `autofill.js` deletion is not mis-detected as a rename (git diff --name-status -M main shows `D`, not `R`). Baseline `.refactor-phase-verify-baseline` auto-records on first CI run.
+- No new CI-only forbidden-pattern gate identified for these files.
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |

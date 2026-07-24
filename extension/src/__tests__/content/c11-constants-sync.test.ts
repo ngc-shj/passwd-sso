@@ -52,12 +52,6 @@ describe("C11 constant value pins", () => {
 // Pattern mirrors token-bridge-js-sync.test.ts (same ?raw import technique).
 
 describe("C11 plain-JS twin sync", () => {
-  it("autofill.js contains the AUTOFILL_FILL literal in sync with the TS constant", async () => {
-    // autofill.js declares a matching local literal — keep both in sync.
-    const { default: file } = await import("../../content/autofill.js?raw");
-    expect(file).toContain(`"${AUTOFILL_FILL}"`);
-  });
-
   it("webauthn-interceptor.js contains the PASSWD_SSO_OWN_APP_BYPASS literal in sync with the TS constant", async () => {
     // webauthn-interceptor.js (MAIN world, plain JS) declares a matching local
     // literal — keep both in sync (mirrors the WebAuthn note in constants.ts).
