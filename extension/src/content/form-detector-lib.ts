@@ -55,6 +55,68 @@ function resolveOpacity(value: string): number {
   return Number.isFinite(parsed) ? parsed : 1;
 }
 
+// ── Shared detector helpers (used by the CC + Identity detectors) ──
+// isElementVisible is the DETECTION-time visibility check — intentionally
+// looser than isElementVisuallySafe (it omits the clipPath/transform anti-
+// spoofing checks the display-safety gate applies). Keep the two distinct.
+
+export function isElementVisible(element: HTMLElement): boolean {
+  const style = getComputedStyle(element);
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  if (resolveOpacity(style.opacity) <= 0.05) return false;
+  return true;
+}
+
+export function getHintString(el: HTMLElement): string {
+  const parts: string[] = [];
+  if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
+    if (el.name) parts.push(el.name);
+    if (el.id) parts.push(el.id);
+    if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
+  }
+  if (el.getAttribute("aria-label")) parts.push(el.getAttribute("aria-label")!);
+  // Walk up to find associated label
+  const id = el.id;
+  if (id && typeof CSS !== "undefined" && CSS.escape) {
+    const label = el.ownerDocument.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
+    if (label?.textContent) parts.push(label.textContent);
+  }
+  const parentLabel = el.closest("label");
+  if (parentLabel?.textContent) parts.push(parentLabel.textContent);
+  return parts.join(" ").toLowerCase();
+}
+
+export function getAutocomplete(el: HTMLElement): string {
+  return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
+}
+
+/** Find the first usable field whose autocomplete attribute equals acValue.
+ * `isUsable` is the caller's per-detector fillable-type predicate (required —
+ * a missing predicate is a compile error, keeping the #717 fail-closed gate). */
+export function findFieldByAutocomplete(
+  fields: (HTMLInputElement | HTMLSelectElement)[],
+  acValue: string,
+  isUsable: (el: HTMLInputElement | HTMLSelectElement) => boolean,
+): HTMLInputElement | HTMLSelectElement | null {
+  return fields.find((f) => getAutocomplete(f) === acValue && isUsable(f)) ?? null;
+}
+
+/** Find the first usable field whose hint matches the latin or JA regex. */
+export function findFieldByRegex(
+  fields: (HTMLInputElement | HTMLSelectElement)[],
+  regex: RegExp,
+  regexJa: RegExp,
+  isUsable: (el: HTMLInputElement | HTMLSelectElement) => boolean,
+): HTMLInputElement | HTMLSelectElement | null {
+  return (
+    fields.find((f) => {
+      if (!isUsable(f)) return false;
+      const hint = getHintString(f);
+      return regex.test(hint) || regexJa.test(hint);
+    }) ?? null
+  );
+}
+
 export function isElementVisuallySafe(element: HTMLElement): boolean {
   const style = getComputedStyle(element);
   if (style.display === "none" || style.visibility === "hidden") return false;
