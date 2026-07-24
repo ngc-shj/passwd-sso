@@ -7,6 +7,7 @@ import { t } from "../lib/i18n";
 import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
   isUsableInput,
+  isUsableFieldOfType,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
@@ -71,12 +72,20 @@ function getAutocomplete(el: HTMLElement): string {
   return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
 }
 
-function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
-  if (el instanceof HTMLInputElement) {
-    return !el.disabled && !el.readOnly;
-  }
-  return !el.disabled;
-}
+// Only free-text-like input types can receive CC autofill. Radio / checkbox /
+// hidden / submit etc. must never be claimed as card fields — a payment-method
+// radio like `<input type="radio" id="card_number_pay">` would otherwise match
+// by hint and trigger the CC dropdown on focus. `password` is included because
+// CVV fields are commonly masked.
+const FILLABLE_INPUT_TYPES = new Set([
+  "text",
+  "tel",
+  "number",
+  "password",
+]);
+
+const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
 
 // ── Regex patterns ──
 

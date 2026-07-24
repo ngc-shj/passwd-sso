@@ -1,6 +1,7 @@
-// Pure logic module for identity/address autofill execution (exported, testable).
-// Side-effect-free — no global event registration here.
+// Identity/address autofill: exported performIdentityAutofill (pure, testable)
+// plus a self-registering AUTOFILL_IDENTITY_FILL listener, mirroring autofill-lib.ts.
 
+import { EXT_MSG } from "../lib/constants";
 import type { IdentityAutofillPayload } from "../types/messages";
 import { detectIdentityFields } from "./identity-form-detector-lib";
 
@@ -113,4 +114,20 @@ export function performIdentityAutofill(payload: IdentityAutofillPayload): void 
   fillField(fields.phone, payload.phone);
   fillField(fields.email, payload.email);
   fillField(fields.dateOfBirth, payload.dateOfBirth);
+}
+
+// Guard against double-registration (manifest content script + programmatic re-injection).
+const IDENTITY_AUTOFILL_GUARD = "__pssoIdentityAutofillHandler";
+if (
+  typeof chrome !== "undefined" &&
+  chrome.runtime?.onMessage &&
+  !(window as unknown as Record<string, boolean>)[IDENTITY_AUTOFILL_GUARD]
+) {
+  (window as unknown as Record<string, boolean>)[IDENTITY_AUTOFILL_GUARD] = true;
+  chrome.runtime.onMessage.addListener((message: IdentityAutofillPayload, sender: chrome.runtime.MessageSender) => {
+    // Only accept messages from our own extension — reject external senders
+    if (message?.type === EXT_MSG.AUTOFILL_IDENTITY_FILL && sender.id === chrome.runtime.id) {
+      performIdentityAutofill(message);
+    }
+  });
 }

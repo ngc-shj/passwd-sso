@@ -1429,14 +1429,26 @@ async function performAutofillForEntry(
     ? { tabId, frameIds: [frameId] }
     : { tabId };
   // AUTOFILL_FILL message target. Frame-scoped when the frame is known; for
-  // popup/context-menu (no frameId) it broadcasts tab-wide — safe because each
-  // frame self-verifies its origin against allowedHosts before filling.
-  // chrome.tabs.sendMessage's options overload rejects `undefined`, so only pass
-  // frame-targeting options when an originating frame is known.
+  // popup/context-menu (no frameId) it broadcasts tab-wide — safe FOR LOGIN
+  // because each frame self-verifies its origin against allowedHosts before
+  // filling (isFrameAllowedToFill). chrome.tabs.sendMessage's options overload
+  // rejects `undefined`, so only pass frame-targeting options when an
+  // originating frame is known.
   const sendFillMessage = (payload: unknown): Promise<unknown> =>
     hasFrameTarget
       ? chrome.tabs.sendMessage(tabId, payload, { frameId })
       : chrome.tabs.sendMessage(tabId, payload);
+
+  // CC/Identity fill target. Unlike LOGIN, CC/Identity entries are hostless by
+  // design (user-picked, usable on any site), so there is no allowedHosts gate a
+  // frame could self-verify against — a tab-wide broadcast would deliver card
+  // number / CVV / name / address in plaintext to EVERY frame, including a
+  // cross-origin third-party iframe (ad/payment widget) whose page JS could then
+  // read the filled value. So when the originating frame is unknown
+  // (popup/context-menu), scope to the TOP FRAME ONLY (`frameId: 0`) rather than
+  // broadcasting. When the frame is known, scope to it.
+  const sendSensitiveFillMessage = (payload: unknown): Promise<unknown> =>
+    chrome.tabs.sendMessage(tabId, payload, { frameId: frameId ?? 0 });
 
   let blobPlain: string;
   let overviewPlain: string;
@@ -1546,61 +1558,77 @@ async function performAutofillForEntry(
   }
 
   // ── Credit Card autofill path ──
+  // autofill-cc-lib.ts is bundled in form-detector.ts (manifest content_scripts),
+  // so the AUTOFILL_CC_FILL listener is already present — no executeScript needed
+  // on the happy path (mirrors the LOGIN path below).
   if (entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
     const cardNumber = blob.cardNumber ?? "";
     if (!cardNumber) {
       return { ok: false, error: "NO_CARD_NUMBER" };
     }
+    const ccPayload = {
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: blob.cardholderName ?? "",
+      cardNumber,
+      expiryMonth: blob.expiryMonth ?? "",
+      expiryYear: blob.expiryYear ?? "",
+      cvv: blob.cvv ?? "",
+    };
     try {
-      await chrome.scripting.executeScript({
-        target: executeTarget,
-        files: ["src/content/autofill-cc.js"],
-      });
-      await sendFillMessage({
-        type: EXT_MSG.AUTOFILL_CC_FILL,
-        cardholderName: blob.cardholderName ?? "",
-        cardNumber,
-        expiryMonth: blob.expiryMonth ?? "",
-        expiryYear: blob.expiryYear ?? "",
-        cvv: blob.cvv ?? "",
-      });
+      await sendSensitiveFillMessage(ccPayload);
     } catch {
-      // CC/Identity do not support direct fallback injection
-      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      // Fallback: inject the bundled content script (frame-scoped) for pages
+      // where the manifest content script has not attached yet, then retry.
+      try {
+        await chrome.scripting.executeScript({
+          target: executeTarget,
+          files: ["src/content/form-detector.js"],
+        });
+        await sendSensitiveFillMessage(ccPayload);
+      } catch {
+        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      }
     }
     return { ok: true };
   }
 
   // ── Identity autofill path ──
+  // autofill-identity-lib.ts is bundled in form-detector.ts (manifest
+  // content_scripts), so the AUTOFILL_IDENTITY_FILL listener is already present.
   if (entryType === EXT_ENTRY_TYPE.IDENTITY) {
+    const identityPayload = {
+      type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
+      fullName: blob.fullName ?? "",
+      givenName: blob.givenName ?? "",
+      familyName: blob.familyName ?? "",
+      familyNameKana: blob.familyNameKana ?? "",
+      givenNameKana: blob.givenNameKana ?? "",
+      // Structured addressLine1 is the canonical source; legacy entries store
+      // the monolithic `address` instead.
+      address: blob.addressLine1 ?? blob.address ?? "",
+      addressLine2: blob.addressLine2 ?? "",
+      city: blob.city ?? "",
+      state: blob.state ?? "",
+      postalCode: blob.postalCode ?? "",
+      country: blob.country ?? "",
+      phone: blob.phone ?? "",
+      email: blob.email ?? "",
+      dateOfBirth: blob.dateOfBirth ?? "",
+      nationality: blob.nationality ?? "",
+      idNumber: blob.idNumber ?? "",
+    };
     try {
-      await chrome.scripting.executeScript({
-        target: executeTarget,
-        files: ["src/content/autofill-identity.js"],
-      });
-      await sendFillMessage({
-        type: EXT_MSG.AUTOFILL_IDENTITY_FILL,
-        fullName: blob.fullName ?? "",
-        givenName: blob.givenName ?? "",
-        familyName: blob.familyName ?? "",
-        familyNameKana: blob.familyNameKana ?? "",
-        givenNameKana: blob.givenNameKana ?? "",
-        // Structured addressLine1 is the canonical source; legacy entries store
-        // the monolithic `address` instead.
-        address: blob.addressLine1 ?? blob.address ?? "",
-        addressLine2: blob.addressLine2 ?? "",
-        city: blob.city ?? "",
-        state: blob.state ?? "",
-        postalCode: blob.postalCode ?? "",
-        country: blob.country ?? "",
-        phone: blob.phone ?? "",
-        email: blob.email ?? "",
-        dateOfBirth: blob.dateOfBirth ?? "",
-        nationality: blob.nationality ?? "",
-        idNumber: blob.idNumber ?? "",
-      });
+      await sendSensitiveFillMessage(identityPayload);
     } catch {
-      return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      try {
+        await chrome.scripting.executeScript({
+          target: executeTarget,
+          files: ["src/content/form-detector.js"],
+        });
+        await sendSensitiveFillMessage(identityPayload);
+      } catch {
+        return { ok: false, error: "AUTOFILL_INJECT_FAILED" };
+      }
     }
     return { ok: true };
   }

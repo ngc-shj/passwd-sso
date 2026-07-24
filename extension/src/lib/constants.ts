@@ -89,9 +89,8 @@ export const EXT_MSG = {
   CHECK_PENDING_SAVE: "CHECK_PENDING_SAVE",
   AUTOFILL_CREDIT_CARD: "AUTOFILL_CREDIT_CARD",
   AUTOFILL_IDENTITY: "AUTOFILL_IDENTITY",
-  // Fill payloads sent SW → injected web-accessible content scripts (autofill-cc.js
-  // / autofill-identity.js). Those plain-JS files cannot import this module, so they
-  // declare matching local literals — keep both in sync (mirrors the WebAuthn note).
+  // Fill payloads sent SW → the bundled autofill-cc-lib.ts / autofill-identity-lib.ts
+  // listeners (registered via form-detector.ts content_scripts import).
   AUTOFILL_CC_FILL: "AUTOFILL_CC_FILL",
   AUTOFILL_IDENTITY_FILL: "AUTOFILL_IDENTITY_FILL",
   KEEPALIVE_PING: "KEEPALIVE_PING",
@@ -116,7 +115,7 @@ export const PSSO_TRIGGER_INLINE_SUGGESTIONS = "PSSO_TRIGGER_INLINE_SUGGESTIONS"
 export const PSSO_VAULT_STATE_CHANGED = "PSSO_VAULT_STATE_CHANGED";
 // SW → autofill content script: perform field fill.
 // Note: autofill.js (plain JS, no import support) declares a matching local literal —
-// keep both in sync (mirrors the AUTOFILL_CC_FILL / autofill-cc.js pattern).
+// keep both in sync.
 export const AUTOFILL_FILL = "AUTOFILL_FILL";
 // ISOLATED world → MAIN world: bypass WebAuthn interception on own app pages.
 // Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.

@@ -53,8 +53,7 @@ describe("C11 constant value pins", () => {
 
 describe("C11 plain-JS twin sync", () => {
   it("autofill.js contains the AUTOFILL_FILL literal in sync with the TS constant", async () => {
-    // autofill.js declares a matching local literal — keep both in sync
-    // (same pattern as autofill-cc.js / AUTOFILL_CC_FILL).
+    // autofill.js declares a matching local literal — keep both in sync.
     const { default: file } = await import("../../content/autofill.js?raw");
     expect(file).toContain(`"${AUTOFILL_FILL}"`);
   });

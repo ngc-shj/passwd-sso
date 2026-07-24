@@ -7,6 +7,7 @@ import { t } from "../lib/i18n";
 import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
   isUsableInput,
+  isUsableFieldOfType,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
@@ -78,12 +79,23 @@ function getAutocomplete(el: HTMLElement): string {
   return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
 }
 
-function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
-  if (el instanceof HTMLInputElement) {
-    return !el.disabled && !el.readOnly;
-  }
-  return !el.disabled;
-}
+// Only free-text-like input types can receive identity autofill. Radio /
+// checkbox / hidden / submit etc. must never be claimed: e.g. a 2FA method
+// chooser `<input type="radio" id="Email">` matches EMAIL_RE by hint and
+// would otherwise trigger the identity dropdown on focus.
+const FILLABLE_INPUT_TYPES = new Set([
+  "text",
+  "email",
+  "tel",
+  "number",
+  "search",
+  "url",
+  "date",
+  "month",
+]);
+
+const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
 
 // ── Regex patterns ──
 

@@ -1,6 +1,7 @@
-// Pure logic module for credit card autofill execution (exported, testable).
-// Side-effect-free — no global event registration here.
+// Credit card autofill: exported performCreditCardAutofill (pure, testable)
+// plus a self-registering AUTOFILL_CC_FILL listener, mirroring autofill-lib.ts.
 
+import { EXT_MSG } from "../lib/constants";
 import type { CreditCardAutofillPayload } from "../types/messages";
 import {
   detectCreditCardFields,
@@ -141,4 +142,20 @@ export function performCreditCardAutofill(payload: CreditCardAutofillPayload): v
     // CVV memory wipe — overwrite payload property immediately after use
     payload.cvv = "";
   }
+}
+
+// Guard against double-registration (manifest content script + programmatic re-injection).
+const CC_AUTOFILL_GUARD = "__pssoCCAutofillHandler";
+if (
+  typeof chrome !== "undefined" &&
+  chrome.runtime?.onMessage &&
+  !(window as unknown as Record<string, boolean>)[CC_AUTOFILL_GUARD]
+) {
+  (window as unknown as Record<string, boolean>)[CC_AUTOFILL_GUARD] = true;
+  chrome.runtime.onMessage.addListener((message: CreditCardAutofillPayload, sender: chrome.runtime.MessageSender) => {
+    // Only accept messages from our own extension — reject external senders
+    if (message?.type === EXT_MSG.AUTOFILL_CC_FILL && sender.id === chrome.runtime.id) {
+      performCreditCardAutofill(message);
+    }
+  });
 }
