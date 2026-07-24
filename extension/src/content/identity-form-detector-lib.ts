@@ -8,6 +8,10 @@ import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } fr
 import {
   isUsableInput,
   isUsableFieldOfType,
+  isElementVisible,
+  getHintString,
+  findFieldByAutocomplete,
+  findFieldByRegex,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
@@ -41,44 +45,7 @@ export interface IdentityFormFields {
   country: HTMLInputElement | HTMLSelectElement | null;
 }
 
-// ── Visibility check ──
-
-function resolveOpacity(value: string): number {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 1;
-}
-
-export function isElementVisible(element: HTMLElement): boolean {
-  const style = getComputedStyle(element);
-  if (style.display === "none" || style.visibility === "hidden") return false;
-  if (resolveOpacity(style.opacity) <= 0.05) return false;
-  return true;
-}
-
-// ── Field detection helpers ──
-
-function getHintString(el: HTMLElement): string {
-  const parts: string[] = [];
-  if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
-    if (el.name) parts.push(el.name);
-    if (el.id) parts.push(el.id);
-    if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
-  }
-  if (el.getAttribute("aria-label")) parts.push(el.getAttribute("aria-label")!);
-  const id = el.id;
-  if (id && typeof CSS !== "undefined" && CSS.escape) {
-    const label = el.ownerDocument.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
-    if (label?.textContent) parts.push(label.textContent);
-  }
-  const parentLabel = el.closest("label");
-  if (parentLabel?.textContent) parts.push(parentLabel.textContent);
-  return parts.join(" ").toLowerCase();
-}
-
-function getAutocomplete(el: HTMLElement): string {
-  return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
-}
-
+// ── Fillable input types ──
 // Only free-text-like input types can receive identity autofill. Radio /
 // checkbox / hidden / submit etc. must never be claimed: e.g. a 2FA method
 // chooser `<input type="radio" id="Email">` matches EMAIL_RE by hint and
@@ -158,27 +125,6 @@ const AC_COUNTRY_NAME = "country-name";
 
 // ── Field finder ──
 
-function findFieldByAutocomplete(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  acValue: string,
-): HTMLInputElement | HTMLSelectElement | null {
-  return fields.find((f) => getAutocomplete(f) === acValue && isUsableField(f)) ?? null;
-}
-
-function findFieldByRegex(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  regex: RegExp,
-  regexJa: RegExp,
-): HTMLInputElement | HTMLSelectElement | null {
-  return (
-    fields.find((f) => {
-      if (!isUsableField(f)) return false;
-      const hint = getHintString(f);
-      return regex.test(hint) || regexJa.test(hint);
-    }) ?? null
-  );
-}
-
 /**
  * Find a kana (フリガナ) field. A kana field's hint MUST contain フリガナ/カナ/かな
  * (guards against matching the plain 姓/名 fields), AND the SEI/MEI selector
@@ -245,18 +191,18 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
   if (visibleFields.length === 0) return null;
 
   // Priority 1: autocomplete attributes
-  let fullName = findFieldByAutocomplete(visibleFields, AC_NAME) as HTMLInputElement | null;
-  let givenName = findFieldByAutocomplete(visibleFields, AC_GIVEN_NAME) as HTMLInputElement | null;
-  let familyName = findFieldByAutocomplete(visibleFields, AC_FAMILY_NAME) as HTMLInputElement | null;
-  let address = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LINE1) as HTMLInputElement | null;
-  let addressLine2 = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LINE2) as HTMLInputElement | null;
-  let city = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LEVEL2);
-  let postalCode = findFieldByAutocomplete(visibleFields, AC_POSTAL_CODE) as HTMLInputElement | null;
-  let phone = findFieldByAutocomplete(visibleFields, AC_TEL) as HTMLInputElement | null;
-  let email = findFieldByAutocomplete(visibleFields, AC_EMAIL) as HTMLInputElement | null;
-  let dateOfBirth = findFieldByAutocomplete(visibleFields, AC_BDAY) as HTMLInputElement | null;
-  let region = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LEVEL1);
-  let country = findFieldByAutocomplete(visibleFields, AC_COUNTRY_NAME);
+  let fullName = findFieldByAutocomplete(visibleFields, AC_NAME, isUsableField) as HTMLInputElement | null;
+  let givenName = findFieldByAutocomplete(visibleFields, AC_GIVEN_NAME, isUsableField) as HTMLInputElement | null;
+  let familyName = findFieldByAutocomplete(visibleFields, AC_FAMILY_NAME, isUsableField) as HTMLInputElement | null;
+  let address = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LINE1, isUsableField) as HTMLInputElement | null;
+  let addressLine2 = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LINE2, isUsableField) as HTMLInputElement | null;
+  let city = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LEVEL2, isUsableField);
+  let postalCode = findFieldByAutocomplete(visibleFields, AC_POSTAL_CODE, isUsableField) as HTMLInputElement | null;
+  let phone = findFieldByAutocomplete(visibleFields, AC_TEL, isUsableField) as HTMLInputElement | null;
+  let email = findFieldByAutocomplete(visibleFields, AC_EMAIL, isUsableField) as HTMLInputElement | null;
+  let dateOfBirth = findFieldByAutocomplete(visibleFields, AC_BDAY, isUsableField) as HTMLInputElement | null;
+  let region = findFieldByAutocomplete(visibleFields, AC_ADDRESS_LEVEL1, isUsableField);
+  let country = findFieldByAutocomplete(visibleFields, AC_COUNTRY_NAME, isUsableField);
 
   // Kana (フリガナ) — regex-only, no autocomplete token. Detect FIRST so a kana
   // field is never mis-claimed by the plain given/family regex (and vice versa:
@@ -268,7 +214,7 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
   // finder so フリガナ fields don't leak in; the JA family/given regex (姓/名) also
   // appears inside 氏名 (fullName) — exclude an already-claimed fullName element.
   if (!fullName) {
-    fullName = findFieldByRegex(visibleFields, NAME_RE, NAME_JA_RE) as HTMLInputElement | null;
+    fullName = findFieldByRegex(visibleFields, NAME_RE, NAME_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!givenName) {
     const candidate = findPlainNameField(visibleFields, GIVEN_NAME_RE, GIVEN_NAME_JA_RE);
@@ -279,31 +225,31 @@ export function detectIdentityFields(root: ParentNode): IdentityFormFields | nul
     familyName = candidate === fullName ? null : candidate;
   }
   if (!address) {
-    address = findFieldByRegex(visibleFields, ADDRESS_RE, ADDRESS_JA_RE) as HTMLInputElement | null;
+    address = findFieldByRegex(visibleFields, ADDRESS_RE, ADDRESS_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!addressLine2) {
-    addressLine2 = findFieldByRegex(visibleFields, ADDRESS_LINE2_RE, ADDRESS_LINE2_JA_RE) as HTMLInputElement | null;
+    addressLine2 = findFieldByRegex(visibleFields, ADDRESS_LINE2_RE, ADDRESS_LINE2_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!city) {
-    city = findFieldByRegex(visibleFields, CITY_RE, CITY_JA_RE);
+    city = findFieldByRegex(visibleFields, CITY_RE, CITY_JA_RE, isUsableField);
   }
   if (!postalCode) {
-    postalCode = findFieldByRegex(visibleFields, POSTAL_RE, POSTAL_JA_RE) as HTMLInputElement | null;
+    postalCode = findFieldByRegex(visibleFields, POSTAL_RE, POSTAL_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!phone) {
-    phone = findFieldByRegex(visibleFields, PHONE_RE, PHONE_JA_RE) as HTMLInputElement | null;
+    phone = findFieldByRegex(visibleFields, PHONE_RE, PHONE_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!email) {
-    email = findFieldByRegex(visibleFields, EMAIL_RE, EMAIL_JA_RE) as HTMLInputElement | null;
+    email = findFieldByRegex(visibleFields, EMAIL_RE, EMAIL_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!dateOfBirth) {
-    dateOfBirth = findFieldByRegex(visibleFields, DOB_RE, DOB_JA_RE) as HTMLInputElement | null;
+    dateOfBirth = findFieldByRegex(visibleFields, DOB_RE, DOB_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!region) {
-    region = findFieldByRegex(visibleFields, REGION_RE, REGION_JA_RE);
+    region = findFieldByRegex(visibleFields, REGION_RE, REGION_JA_RE, isUsableField);
   }
   if (!country) {
-    country = findFieldByRegex(visibleFields, COUNTRY_RE, COUNTRY_JA_RE);
+    country = findFieldByRegex(visibleFields, COUNTRY_RE, COUNTRY_JA_RE, isUsableField);
   }
 
   // Must have at least 2 fields to consider this an identity form

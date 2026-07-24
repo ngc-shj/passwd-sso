@@ -731,6 +731,28 @@ describe("performAutofill — frame-origin gate", () => {
     expect((inputs[1] as HTMLInputElement).value).toBe("");
   });
 
+  it("does NOT fill a subframe whose origin cannot be resolved to a host (fail-closed)", () => {
+    // extractHost returns null for a non-http(s) frame URL. The gate must
+    // fail closed (`if (!frameHost) return false`) even when the entry has
+    // bound hosts — an unresolvable origin can never match an allowed host.
+    setupForm(`
+      <input type="text" autocomplete="username" />
+      <input type="password" autocomplete="current-password" />
+    `);
+
+    inSubframe("about:blank", () => {
+      performAutofill({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        allowedHosts: ["bank.example"],
+      });
+    });
+
+    const inputs = document.querySelectorAll("input");
+    expect((inputs[1] as HTMLInputElement).value).toBe("");
+  });
+
   it("always fills the top frame regardless of allowedHosts", () => {
     // Default jsdom context is the top frame (window.top === window.self).
     setupForm(`

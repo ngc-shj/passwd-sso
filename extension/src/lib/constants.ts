@@ -114,8 +114,6 @@ export const PSSO_TRIGGER_INLINE_SUGGESTIONS = "PSSO_TRIGGER_INLINE_SUGGESTIONS"
 // Popup → content script: vault lock/unlock state changed; re-evaluate suggestions.
 export const PSSO_VAULT_STATE_CHANGED = "PSSO_VAULT_STATE_CHANGED";
 // SW → autofill content script: perform field fill.
-// Note: autofill.js (plain JS, no import support) declares a matching local literal —
-// keep both in sync.
 export const AUTOFILL_FILL = "AUTOFILL_FILL";
 // ISOLATED world → MAIN world: bypass WebAuthn interception on own app pages.
 // Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.

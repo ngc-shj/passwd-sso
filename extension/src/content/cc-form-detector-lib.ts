@@ -8,6 +8,10 @@ import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } fr
 import {
   isUsableInput,
   isUsableFieldOfType,
+  isElementVisible,
+  getHintString,
+  findFieldByAutocomplete,
+  findFieldByRegex,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
@@ -33,45 +37,7 @@ export interface CreditCardFormFields {
   expiryFormat: "split" | "combined";
 }
 
-// ── Visibility check (reuse pattern from form-detector-lib.ts) ──
-
-function resolveOpacity(value: string): number {
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) ? parsed : 1;
-}
-
-export function isElementVisible(element: HTMLElement): boolean {
-  const style = getComputedStyle(element);
-  if (style.display === "none" || style.visibility === "hidden") return false;
-  if (resolveOpacity(style.opacity) <= 0.05) return false;
-  return true;
-}
-
-// ── Field detection helpers ──
-
-function getHintString(el: HTMLElement): string {
-  const parts: string[] = [];
-  if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
-    if (el.name) parts.push(el.name);
-    if (el.id) parts.push(el.id);
-    if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
-  }
-  if (el.getAttribute("aria-label")) parts.push(el.getAttribute("aria-label")!);
-  // Walk up to find associated label
-  const id = el.id;
-  if (id && typeof CSS !== "undefined" && CSS.escape) {
-    const label = el.ownerDocument.querySelector<HTMLLabelElement>(`label[for="${CSS.escape(id)}"]`);
-    if (label?.textContent) parts.push(label.textContent);
-  }
-  const parentLabel = el.closest("label");
-  if (parentLabel?.textContent) parts.push(parentLabel.textContent);
-  return parts.join(" ").toLowerCase();
-}
-
-function getAutocomplete(el: HTMLElement): string {
-  return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
-}
-
+// ── Fillable input types ──
 // Only free-text-like input types can receive CC autofill. Radio / checkbox /
 // hidden / submit etc. must never be claimed as card fields — a payment-method
 // radio like `<input type="radio" id="card_number_pay">` would otherwise match
@@ -126,27 +92,6 @@ const AC_CC_EXP_YEAR = "cc-exp-year";
 const AC_CC_CSC = "cc-csc";
 
 // ── Field finder ──
-
-function findFieldByAutocomplete(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  acValue: string,
-): HTMLInputElement | HTMLSelectElement | null {
-  return fields.find((f) => getAutocomplete(f) === acValue && isUsableField(f)) ?? null;
-}
-
-function findFieldByRegex(
-  fields: (HTMLInputElement | HTMLSelectElement)[],
-  regex: RegExp,
-  regexJa: RegExp,
-): HTMLInputElement | HTMLSelectElement | null {
-  return (
-    fields.find((f) => {
-      if (!isUsableField(f)) return false;
-      const hint = getHintString(f);
-      return regex.test(hint) || regexJa.test(hint);
-    }) ?? null
-  );
-}
 
 /** A `conf_number` field only looks like a CVV if it carries a CVV-specific
  * signal: masked input (type=password) or a 3–4 char length cap. A generic
@@ -251,22 +196,22 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
   if (visibleFields.length === 0) return null;
 
   // Priority 1: autocomplete attributes
-  let cardNumber = findFieldByAutocomplete(visibleFields, AC_CC_NUMBER) as HTMLInputElement | null;
-  let cardholderName = findFieldByAutocomplete(visibleFields, AC_CC_NAME) as HTMLInputElement | null;
-  let expiryCombined = findFieldByAutocomplete(visibleFields, AC_CC_EXP) as HTMLInputElement | null;
-  let expiryMonth = findFieldByAutocomplete(visibleFields, AC_CC_EXP_MONTH);
-  let expiryYear = findFieldByAutocomplete(visibleFields, AC_CC_EXP_YEAR);
-  let cvv = findFieldByAutocomplete(visibleFields, AC_CC_CSC) as HTMLInputElement | null;
+  let cardNumber = findFieldByAutocomplete(visibleFields, AC_CC_NUMBER, isUsableField) as HTMLInputElement | null;
+  let cardholderName = findFieldByAutocomplete(visibleFields, AC_CC_NAME, isUsableField) as HTMLInputElement | null;
+  let expiryCombined = findFieldByAutocomplete(visibleFields, AC_CC_EXP, isUsableField) as HTMLInputElement | null;
+  let expiryMonth = findFieldByAutocomplete(visibleFields, AC_CC_EXP_MONTH, isUsableField);
+  let expiryYear = findFieldByAutocomplete(visibleFields, AC_CC_EXP_YEAR, isUsableField);
+  let cvv = findFieldByAutocomplete(visibleFields, AC_CC_CSC, isUsableField) as HTMLInputElement | null;
 
   // Priority 2: name/id/label regex fallback
   if (!cardNumber) {
-    cardNumber = findFieldByRegex(visibleFields, CC_DETECT_RE.number, CC_NUMBER_JA_RE) as HTMLInputElement | null;
+    cardNumber = findFieldByRegex(visibleFields, CC_DETECT_RE.number, CC_NUMBER_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!cardholderName) {
-    cardholderName = findFieldByRegex(visibleFields, CC_DETECT_RE.name, CC_NAME_JA_RE) as HTMLInputElement | null;
+    cardholderName = findFieldByRegex(visibleFields, CC_DETECT_RE.name, CC_NAME_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   if (!cvv) {
-    cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE) as HTMLInputElement | null;
+    cvv = findFieldByRegex(visibleFields, CC_DETECT_RE.cvv, CC_CVV_JA_RE, isUsableField) as HTMLInputElement | null;
   }
   // Same-form-scoped `conf.?num` fallback. Only after the strong CVV
   // signals miss, and only when the candidate shares the card-number field's
@@ -276,15 +221,15 @@ export function detectCreditCardFields(root: ParentNode): CreditCardFormFields |
   }
   if (!expiryMonth && !expiryCombined) {
     // Check for combined expiry first
-    const combined = findFieldByRegex(visibleFields, CC_EXPIRY_RE, CC_EXPIRY_JA_RE);
+    const combined = findFieldByRegex(visibleFields, CC_EXPIRY_RE, CC_EXPIRY_JA_RE, isUsableField);
     if (combined && combined instanceof HTMLInputElement) {
       expiryCombined = combined;
     } else {
-      expiryMonth = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryMonth, CC_EXPIRY_MONTH_JA_RE);
+      expiryMonth = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryMonth, CC_EXPIRY_MONTH_JA_RE, isUsableField);
     }
   }
   if (!expiryYear && !expiryCombined) {
-    expiryYear = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryYear, CC_EXPIRY_YEAR_JA_RE);
+    expiryYear = findFieldByRegex(visibleFields, CC_DETECT_RE.expiryYear, CC_EXPIRY_YEAR_JA_RE, isUsableField);
   }
 
   // Must have at least card number to consider this a CC form
