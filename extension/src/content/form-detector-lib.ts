@@ -74,7 +74,8 @@ export function getHintString(el: HTMLElement): string {
     if (el.id) parts.push(el.id);
     if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
   }
-  if (el.getAttribute("aria-label")) parts.push(el.getAttribute("aria-label")!);
+  const ariaLabel = el.getAttribute("aria-label");
+  if (ariaLabel) parts.push(ariaLabel);
   // Walk up to find associated label
   const id = el.id;
   if (id && typeof CSS !== "undefined" && CSS.escape) {
