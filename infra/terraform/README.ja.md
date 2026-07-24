@@ -119,13 +119,28 @@ State はデフォルトでローカルに保存されます。**実シークレ
 コメントを参照。state を移行する前に、バケットが暗号化を強制しパブリックアクセス
 を遮断していることを確認してください。
 
-シークレット値を state に流し込む `terraform.tfvars` は gitignore 済みで、決して
-コミットしないこと。
+`terraform.tfvars` は gitignore 済みで、決してコミットしないこと。2026-07 レビュー
+(F3) 以降、シークレット値は tfvars に含めず out-of-band で注入します（下記
+Secrets Management 参照）。
 
 ## Secrets Management
 
-`app_secrets` / `jackson_secrets` は Secrets Manager に JSON として保存されます。
-ECS タスク定義では `{secret_arn}:KEY::` 形式で個別のキーを参照しています。
+シークレット値は Terraform で管理せず、state にも入れません（2026-07 レビュー F3）。
+Terraform は空のコンテナ（`secrets.tf`）のみを作成し、値は `terraform apply` の後・
+ECS サービス起動の前に、コミットしない JSON ファイルから out-of-band で注入します。
+
+```bash
+# app-secrets.json / jackson-secrets.json: 下表のキーを持つ JSON オブジェクト
+# (mode 0600、注入後に削除。コミット禁止)。
+scripts/put-terraform-secrets.sh \
+  --name-prefix passwd-sso-prod \
+  --app-file ./app-secrets.json \
+  --jackson-file ./jackson-secrets.json
+```
+
+空のシークレットは ECS タスク起動を失敗させるため、サービス起動前に実行すること。
+ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、スクリプトが書き込んだ
+値に解決されます。
 
 ### Required Secrets (app)
 

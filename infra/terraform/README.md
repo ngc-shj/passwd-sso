@@ -120,13 +120,29 @@ See comments in `backend.tf` for setup steps (bucket + lock table + versioning).
 Verify the bucket enforces encryption and blocks public access before migrating
 state.
 
-`terraform.tfvars` (which holds the secret values fed into state) is gitignored
-and must never be committed.
+`terraform.tfvars` is gitignored and must never be committed. As of the 2026-07
+review (F3) it no longer carries secret values — those are injected out-of-band
+(see Secrets Management below).
 
 ## Secrets Management
 
-`app_secrets` / `jackson_secrets` are stored as JSON in Secrets Manager.
-ECS task definitions reference secrets in `{secret_arn}:KEY::` format.
+Secret VALUES are **not** managed by Terraform and never enter state (2026-07
+review, F3). Terraform creates only the empty Secrets Manager CONTAINERS
+(`secrets.tf`); the values are injected out-of-band AFTER `terraform apply` and
+BEFORE the ECS services start, using JSON files that are never committed:
+
+```bash
+# app-secrets.json / jackson-secrets.json: JSON objects of the keys below
+# (mode 0600, deleted after injection — never committed).
+scripts/put-terraform-secrets.sh \
+  --name-prefix passwd-sso-prod \
+  --app-file ./app-secrets.json \
+  --jackson-file ./jackson-secrets.json
+```
+
+An empty secret makes the ECS task fail to launch, so run the script before
+bringing services up. ECS task definitions reference secrets in
+`{secret_arn}:KEY::` format, resolving against whatever value the script wrote.
 
 ### Required Secrets (app)
 

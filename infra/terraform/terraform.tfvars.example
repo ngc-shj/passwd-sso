@@ -23,28 +23,30 @@ create_acm_certificate = true
 app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-app:v0.4.71"
 jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:v1.42.0"
 
-app_secrets = {
-  # Use a non-SUPERUSER app role for DATABASE_URL (RLS enforced)
-  DATABASE_URL        = "postgresql://passwd_app:PASSWORD@HOST:5432/passwd_sso"
-  # SUPERUSER role for migrations only (prisma migrate deploy)
-  MIGRATION_DATABASE_URL = "postgresql://passwd_user:PASSWORD@HOST:5432/passwd_sso"
-  AUTH_URL            = "https://app.example.com"
-  AUTH_SECRET         = "<REPLACE>"
-  AUTH_GOOGLE_ID      = "<REPLACE>"
-  AUTH_GOOGLE_SECRET  = "<REPLACE>"
-  AUTH_JACKSON_ID     = "<REPLACE>"
-  AUTH_JACKSON_SECRET = "<REPLACE>"
-  SHARE_MASTER_KEY      = "<REPLACE>"  # Generate with: npm run generate:key
-  REDIS_URL           = "redis://HOST:6379"
-}
-
-jackson_secrets = {
-  JACKSON_API_KEYS = "<REPLACE>"
-  DB_URL           = "postgresql://USER:PASSWORD@HOST:5432/passwd_sso"
-  NEXTAUTH_URL     = "https://sso.example.com"
-  EXTERNAL_URL     = "https://sso.example.com"
-  NEXTAUTH_SECRET  = "<REPLACE>"
-}
+# SECRETS ARE NOT SET HERE (2026-07 review, F3). app_secrets / jackson_secrets
+# variables were removed — passing secret values through Terraform writes them
+# into state as plaintext. Terraform creates only the empty secret CONTAINERS
+# (secrets.tf); inject the VALUES out-of-band AFTER apply, BEFORE ECS starts:
+#
+#   # app-secrets.json (mode 0600, DELETE after injecting; do NOT commit):
+#   # {
+#   #   "DATABASE_URL": "postgresql://passwd_app:PASSWORD@HOST:5432/passwd_sso",
+#   #   "MIGRATION_DATABASE_URL": "postgresql://passwd_user:PASSWORD@HOST:5432/passwd_sso",
+#   #   "AUTH_URL": "https://app.example.com",
+#   #   "AUTH_SECRET": "<REPLACE>",
+#   #   "AUTH_GOOGLE_ID": "<REPLACE>", "AUTH_GOOGLE_SECRET": "<REPLACE>",
+#   #   "AUTH_JACKSON_ID": "<REPLACE>", "AUTH_JACKSON_SECRET": "<REPLACE>",
+#   #   "SHARE_MASTER_KEY": "<REPLACE>",   // npm run generate:key
+#   #   "REDIS_URL": "redis://HOST:6379"
+#   # }
+#   # jackson-secrets.json:
+#   # { "JACKSON_API_KEYS": "<REPLACE>", "DB_URL": "...",
+#   #   "NEXTAUTH_URL": "https://sso.example.com",
+#   #   "EXTERNAL_URL": "https://sso.example.com", "NEXTAUTH_SECRET": "<REPLACE>" }
+#
+#   scripts/put-terraform-secrets.sh \
+#     --name-prefix passwd-sso-dev \
+#     --app-file ./app-secrets.json --jackson-file ./jackson-secrets.json
 
 db_username = "passwd_user"  # SUPERUSER — table owner, used for migrations
 db_password = "<REPLACE>"   # Use a strong, random password

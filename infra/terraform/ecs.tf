@@ -197,3 +197,39 @@ resource "aws_ecs_service" "jackson" {
   depends_on = [aws_lb_listener.https]
   tags       = local.tags
 }
+
+################################################################################
+# Background workers — NOT YET DEFINED as ECS services (operator action required)
+################################################################################
+#
+# This Terraform deploys only the request-serving services (app, jackson) plus
+# the one-shot migrate task. The two long-running background workers are NOT
+# defined here yet — an ECS deployment that applies this module as-is will run
+# WITHOUT them, which silently breaks production guarantees:
+#
+#   audit-outbox-worker  (node dist/audit-outbox-worker.js)
+#     Drains audit_outbox → audit_logs. Missing ⇒ audit events stay PENDING and
+#     never reach audit_logs (compliance / forensics gap).
+#
+#   retention-gc-worker  (node dist/retention-gc-worker.js)
+#     Enforces retention limits and hard-deletes expired records (sessions,
+#     verification/bridge/API/MCP tokens, reset & rotation records, shares,
+#     invitations, emergency access, vault history, audit retention). Missing ⇒
+#     nothing is ever purged; data-minimisation and deletion guarantees fail.
+#
+# Until dedicated aws_ecs_task_definition + aws_ecs_service resources are added
+# here, operators MUST run both workers out-of-band on the SAME image, each with
+# its dedicated least-privilege DB URL:
+#   - OUTBOX_WORKER_DATABASE_URL   → passwd_outbox_worker role
+#   - RETENTION_GC_DATABASE_URL    → passwd_retention_gc_worker role
+# Reference definitions (command, env, least-privilege role wiring):
+#   - docker-compose.workers.yml            (Docker Compose)
+#   - infra/k8s/retention-gc-worker.yaml    (Kubernetes)
+#
+# Each worker must also be monitored (liveness / restart count, heartbeat log
+# lines, audit_outbox PENDING-row age, retention queue age) — a worker that
+# boots but makes no progress fails as silently as one that never starts.
+#
+# TODO: add aws_ecs_task_definition.audit_outbox_worker /
+#       aws_ecs_task_definition.retention_gc_worker and their services
+#       (desired_count = 1, no load_balancer block — these are not request-serving).

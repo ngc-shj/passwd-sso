@@ -154,17 +154,11 @@ variable "redis_node_type" {
   default = "cache.t4g.micro"
 }
 
-variable "app_secrets" {
-  type        = map(string)
-  description = "Secrets for app (JSON stored in Secrets Manager)"
-  sensitive   = true
-}
-
-variable "jackson_secrets" {
-  type        = map(string)
-  description = "Secrets for jackson (JSON stored in Secrets Manager)"
-  sensitive   = true
-}
+# NOTE: app_secrets / jackson_secrets variables were removed intentionally
+# (2026-07 review, F3). Passing secret values through Terraform variables writes
+# them into state as plaintext. Values are now injected out-of-band via
+# scripts/put-terraform-secrets.sh (aws secretsmanager put-secret-value) and
+# never enter Terraform state. See secrets.tf.
 
 variable "db_apply_immediately" {
   type        = bool
