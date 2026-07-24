@@ -87,7 +87,9 @@ export function getHintString(el: HTMLElement): string {
   return parts.join(" ").toLowerCase();
 }
 
-export function getAutocomplete(el: HTMLElement): string {
+// Module-private: only findFieldByAutocomplete consumes it. The detectors
+// resolve autocomplete matches through that helper, never directly.
+function getAutocomplete(el: HTMLElement): string {
   return (el.getAttribute("autocomplete") ?? "").toLowerCase().trim();
 }
 
