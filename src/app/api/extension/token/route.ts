@@ -43,6 +43,10 @@ async function handlePOST(req: NextRequest) {
     pathname: req.nextUrl.pathname,
     scope: "ext_token_legacy_blocked",
     limiter: legacyDeprecatedLimiter,
+    // Bound IP-less traffic too (M2): this endpoint is 410-always so there is no
+    // legitimate traffic to protect, and fail-open would let IP-less requests
+    // amplify dead-letter audit writes + warn logs without limit.
+    boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
     req,

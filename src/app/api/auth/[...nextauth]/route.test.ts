@@ -416,7 +416,10 @@ describe("withMagicLinkIpRateLimit", () => {
   // (envelope + Retry-After + factory attribution) — the former status-only
   // direct case is superseded and removed to avoid duplication.
 
-  it("fail-OPEN: forwards when client IP cannot be determined (no 503)", async () => {
+  it("routes IP-less requests through the shared unknown-ip bucket and warn-logs (M2)", async () => {
+    // Regression for the M2 gap: magic-link signin is high-risk (triggers SMTP
+    // sends) but previously failed OPEN on IP-less requests, bypassing the per-IP
+    // SMTP-DoS cap. It now bounds IP-less traffic via boundUnknownIp.
     mockExtractClientIp.mockReturnValue(null);
     const { _withMagicLinkIpRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
@@ -428,7 +431,29 @@ describe("withMagicLinkIpRateLimit", () => {
 
     expect(res.status).toBe(200);
     expect(inner).toHaveBeenCalledTimes(1);
-    expect(mockRateLimitCheck).not.toHaveBeenCalled();
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:magic_link_signin:unknown-ip");
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pathname: "/api/auth/signin/nodemailer",
+        scope: "magic_link_signin",
+      }),
+      "rate_limit_skipped_unknown_ip",
+    );
+  });
+
+  it("denies an IP-less magic-link request when the shared unknown-ip budget is exhausted (M2)", async () => {
+    mockExtractClientIp.mockReturnValue(null);
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 3000 });
+    const { _withMagicLinkIpRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withMagicLinkIpRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/signin/nodemailer"));
+
+    expect(res.status).toBe(429);
+    expect(inner).not.toHaveBeenCalled();
   });
 });
 

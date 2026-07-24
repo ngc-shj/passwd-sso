@@ -89,6 +89,11 @@ async function handlePOST(request: NextRequest) {
     pathname: "/api/csp-report",
     scope: "csp_report",
     limiter: cspLimiter,
+    // Intentionally NOT boundUnknownIp (M2): this is a write-only telemetry sink
+    // with no security action and no auth/side effect. Collapsing IP-less reports
+    // into one shared bucket would drop legitimate violation reports (browsers do
+    // not always present a usable client IP through every proxy topology). The
+    // per-IP cap plus the 204-on-limit already bound the storage cost.
   });
   if (!rl.allowed) return new NextResponse(null, { status: 204 });
 
