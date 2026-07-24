@@ -1,6 +1,6 @@
 # Stage 1: Install dependencies
-# Pin base image to digest for reproducible builds (update with: docker pull node:20-alpine)
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS deps
+# Pin base image to digest for reproducible builds (update with: docker pull node:24-alpine)
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS deps
 # deps/builder are intermediate — only the runner stage ships. Patching here
 # would be discarded. apk upgrade only happens in the runner stage.
 RUN apk add --no-cache libc6-compat
@@ -23,7 +23,7 @@ COPY prisma.config.ts ./prisma.config.ts
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 
 # Stage 2: Build the application
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS builder
 WORKDIR /app
 # DATABASE_URL is needed only for `prisma generate` to satisfy env("DATABASE_URL")
 # in prisma.config.ts — no actual DB connection is opened at build time. A dummy
@@ -37,20 +37,20 @@ COPY . .
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 RUN npx next build
 RUN npx esbuild scripts/audit-outbox-worker.ts \
-      --bundle --platform=node --target=node20 \
+      --bundle --platform=node --target=node24 \
       --outfile=dist/audit-outbox-worker.js \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
 RUN npx esbuild scripts/retention-gc-worker.ts \
-      --bundle --platform=node --target=node20 \
+      --bundle --platform=node --target=node24 \
       --outfile=dist/retention-gc-worker.js \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
 
 # Stage 3: Production image
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runner
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runner
 WORKDIR /app
 RUN apk upgrade --no-cache zlib libcrypto3 libssl3 musl musl-utils
 
@@ -68,20 +68,25 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 
 # Upgrade npm and patch npm-bundled CVE deps in a single layer.
-# - npm 11.12.1: drops bundled cross-spawn entirely and ships glob 13.x /
+# NPM_VER=11.16.0 matches the npm bundled with node:24-alpine (24.18.0) and the
+# release.yml PUBLISH_NPM_VERSION pin — the `npm install -g` is a no-op version-lock,
+# not a real upgrade, so a future base-image bump that ships a different npm is
+# caught by the post-patch `npm -v` assertion.
+# - npm 11.16.0: drops bundled cross-spawn entirely and ships glob 13.x /
 #   minimatch 10.x, closing CVE-2024-21538, CVE-2025-64756,
 #   CVE-2026-26996/27903/27904.
 # - tar >=7.5.19: closes CVE-2026-31802 (fixed in 7.5.11) AND the newer
 #   CVE-2026-59873 (gzip-bomb DoS, fixed 7.5.19) / CVE-2026-59874 (malformed
-#   tar-header DoS, fixed 7.5.18). npm 11.12.1 ships tar 6.2.x under its own
+#   tar-header DoS, fixed 7.5.18). npm 11.16.0 ships tar 7.5.15 under its own
 #   node_modules, so the patch block below force-upgrades it.
-# - picomatch >=4.0.4: closes CVE-2026-33671 (still bundled at 4.0.3 nested
-#   under tinyglobby in npm 11.12.1).
+# - picomatch >=4.0.4: closes CVE-2026-33671. npm 11.16.0 already bundles 4.0.4
+#   (nested under tinyglobby), so the patch is a no-op skip — kept as a
+#   fail-closed tripwire in case a future npm regresses it.
 # - sigstore >=4.1.1: closes CVE-2026-48815 (certificateOIDs verification
-#   constraints silently dropped; bundled at 4.1.0 under npm 11.12.1's
-#   provenance/signing path).
+#   constraints silently dropped). npm 11.16.0 already bundles 4.1.1, so the
+#   patch is a no-op skip — kept as a fail-closed tripwire.
 # - brace-expansion >=5.0.7: closes CVE-2026-13149 (exponential-time DoS;
-#   bundled at 5.0.4 under npm 11.12.1). The app's own copy is already pinned
+#   bundled at 5.0.6 under npm 11.16.0). The app's own copy is already pinned
 #   via the package.json overrides block; this patches npm's bundled copy.
 # Patch blocks fail-closed (exit 1) when expected directories disappear, so a
 # silent npm-layout drift cannot reintroduce the CVEs.
@@ -96,7 +101,7 @@ RUN TAR_VER=7.5.19 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
     BE_VER=5.0.7 && \
-    NPM_VER=11.12.1 && \
+    NPM_VER=11.16.0 && \
     PRISMA_VER=7.9.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
     npm install "prisma@${PRISMA_VER}" --no-save --ignore-scripts && \

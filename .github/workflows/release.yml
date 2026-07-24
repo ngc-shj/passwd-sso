@@ -141,7 +141,9 @@ jobs:
       # pinned Node patch (env.PUBLISH_NODE_VERSION) bundles an npm that meets
       # Trusted Publishing's floor (npm >= 11.5.1, Node >= 22.14.0); the assert
       # step below fails closed if the toolchain ever drifts.
-      # (.nvmrc pins Node 20 / npm 10 for the app — deliberately NOT inherited.)
+      # (.nvmrc pins Node 24 (major) for the app; publish pins the exact patch
+      # env.PUBLISH_NODE_VERSION — deliberately NOT inherited from .nvmrc, so a
+      # .nvmrc major bump cannot silently move the publish toolchain.)
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.PUBLISH_NODE_VERSION }}

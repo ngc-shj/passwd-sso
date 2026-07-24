@@ -18,7 +18,7 @@
     "ssh-agent"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "bin": {
     "passwd-sso": "./dist/index.js"
