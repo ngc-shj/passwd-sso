@@ -20,9 +20,12 @@ vi.mock("../../lib/i18n", () => ({ t: (key: string) => key }));
 // M6: spy on showInlineNotice; stub the guard helpers with jsdom-safe defaults
 // (no layout in jsdom → hit-test always passes, elements always visible).
 const showInlineNoticeMock = vi.hoisted(() => vi.fn());
-vi.mock("../../content/form-detector-lib", () => ({
+// Keep the real field predicates (isUsableInput / isUsableFieldOfType) so the
+// fillable-type gate is exercised as production does — only the layout-dependent
+// visibility/hit-test helpers are stubbed to pass under jsdom (no layout).
+vi.mock("../../content/form-detector-lib", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../content/form-detector-lib")>()),
   showInlineNotice: showInlineNoticeMock,
-  isUsableInput: (el: HTMLInputElement) => !el.disabled && !el.readOnly,
   isElementVisuallySafe: () => true,
   isPageVisuallySafe: () => true,
   isInputHitTestSafe: () => true,

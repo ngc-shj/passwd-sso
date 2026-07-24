@@ -33,6 +33,23 @@ export function isUsableInput(input: HTMLInputElement): boolean {
   return !input.disabled && !input.readOnly;
 }
 
+/**
+ * Whether a field may receive autofill. An input must resolve to one of the
+ * caller's `allowedTypes` (a fail-closed allowlist that keeps radio/checkbox/
+ * hidden/submit and unknown future types out — see the identity/CC detectors),
+ * and be enabled and writable. Selects have no `type` and are gated on enabled
+ * only. `allowedTypes` differs per detector (identity vs CC), so it is passed in.
+ */
+export function isUsableFieldOfType(
+  el: HTMLInputElement | HTMLSelectElement,
+  allowedTypes: ReadonlySet<string>,
+): boolean {
+  if (el instanceof HTMLInputElement) {
+    return allowedTypes.has(el.type) && !el.disabled && !el.readOnly;
+  }
+  return !el.disabled;
+}
+
 function resolveOpacity(value: string): number {
   const parsed = Number.parseFloat(value);
   return Number.isFinite(parsed) ? parsed : 1;

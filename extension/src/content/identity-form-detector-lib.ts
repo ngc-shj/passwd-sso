@@ -7,6 +7,7 @@ import { t } from "../lib/i18n";
 import { EXT_MSG, PSSO_VAULT_STATE_CHANGED, PSSO_TRIGGER_INLINE_SUGGESTIONS } from "../lib/constants";
 import {
   isUsableInput,
+  isUsableFieldOfType,
   isElementVisuallySafe,
   isPageVisuallySafe,
   isInputHitTestSafe,
@@ -93,16 +94,8 @@ const FILLABLE_INPUT_TYPES = new Set([
   "month",
 ]);
 
-function isFillableInput(el: HTMLInputElement): boolean {
-  return FILLABLE_INPUT_TYPES.has(el.type);
-}
-
-function isUsableField(el: HTMLInputElement | HTMLSelectElement): boolean {
-  if (el instanceof HTMLInputElement) {
-    return isFillableInput(el) && !el.disabled && !el.readOnly;
-  }
-  return !el.disabled;
-}
+const isUsableField = (el: HTMLInputElement | HTMLSelectElement): boolean =>
+  isUsableFieldOfType(el, FILLABLE_INPUT_TYPES);
 
 // ── Regex patterns ──
 
