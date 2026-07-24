@@ -71,6 +71,7 @@ async function handlePOST(req: NextRequest) {
     pathname: req.nextUrl.pathname,
     scope: "webauthn_email_signin_opts",
     limiter: rateLimiter,
+    boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
     req,

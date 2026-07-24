@@ -45,6 +45,7 @@ export async function POST(req: NextRequest) {
     pathname: req.nextUrl.pathname,
     scope: "mcp_revoke",
     limiter: revokeLimiter,
+    boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
     req,

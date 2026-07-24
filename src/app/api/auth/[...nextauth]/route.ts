@@ -94,6 +94,7 @@ function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
       pathname: request.nextUrl.pathname,
       scope: "auth_callback",
       limiter: callbackRateLimiter,
+      boundUnknownIp: true,
     });
     // Pre-auth surface: userId null → checkRateLimitOrFail warn-logs the
     // fail-closed (no audit row). redisErrored → 503; over-limit → 429.

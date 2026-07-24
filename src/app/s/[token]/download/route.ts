@@ -35,6 +35,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     pathname: req.nextUrl.pathname,
     scope: "send_download",
     limiter: downloadLimiter,
+    boundUnknownIp: true,
   });
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);

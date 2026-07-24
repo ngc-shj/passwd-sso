@@ -96,6 +96,7 @@ async function handlePOST(req: NextRequest) {
     pathname: req.nextUrl.pathname,
     scope: "ext_bridge_ip",
     limiter: ipLimiter,
+    boundUnknownIp: true,
   });
   const ipBlocked = await checkRateLimitOrFail({
     req,

@@ -291,7 +291,7 @@ describe("withCallbackRateLimit", () => {
   // (envelope + Retry-After + factory attribution) — the former status-only
   // direct case is superseded and removed to avoid duplication.
 
-  it("skips the limiter and warn-logs when client IP cannot be determined", async () => {
+  it("routes IP-less requests through the shared unknown-ip bucket and warn-logs (M2)", async () => {
     mockExtractClientIp.mockReturnValue(null);
     const { _withCallbackRateLimit } = await import(
       "@/app/api/auth/[...nextauth]/route"
@@ -303,8 +303,10 @@ describe("withCallbackRateLimit", () => {
 
     expect(res.status).toBe(200);
     expect(inner).toHaveBeenCalledTimes(1);
-    expect(mockRateLimitCheck).not.toHaveBeenCalled();
-    // The wrapper delegates to checkIpRateLimit, which logs with the
+    // M2: auth_callback is high-risk (boundUnknownIp), so an IP-less request is
+    // bounded by the shared unknown-ip budget rather than waved through.
+    expect(mockRateLimitCheck).toHaveBeenCalledWith("rl:auth_callback:unknown-ip");
+    // The wrapper delegates to checkIpRateLimit, which still logs with the
     // shared message + { pathname, scope } shape (see ip-rate-limit.ts).
     expect(mockLoggerWarn).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -313,6 +315,21 @@ describe("withCallbackRateLimit", () => {
       }),
       "rate_limit_skipped_unknown_ip",
     );
+  });
+
+  it("denies an IP-less request when the shared unknown-ip budget is exhausted (M2)", async () => {
+    mockExtractClientIp.mockReturnValue(null);
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 3000 });
+    const { _withCallbackRateLimit } = await import(
+      "@/app/api/auth/[...nextauth]/route"
+    );
+    const inner = vi.fn<RouteHandler>(async () => new Response("ok"));
+    const wrapped = _withCallbackRateLimit(inner);
+
+    const res = await wrapped(makeReq("/api/auth/callback/google", "GET"));
+
+    expect(res.status).toBe(429);
+    expect(inner).not.toHaveBeenCalled();
   });
 
   it("partitions limiter buckets by client IP", async () => {

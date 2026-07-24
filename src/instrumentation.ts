@@ -14,6 +14,11 @@ export async function register() {
     const { getKeyProvider } = await import("@/lib/key-provider");
     const provider = await getKeyProvider();
     await provider.validateKeys();
+
+    // Surface a likely reverse-proxy misconfiguration at boot (M2): production
+    // with no trusted-proxy config means forwarded client IPs are dropped.
+    const { warnOnProxyPosture } = await import("@/lib/security/proxy-posture");
+    warnOnProxyPosture();
   }
 
   // Initialize Sentry for server-side error tracking (opt-in via SENTRY_DSN)

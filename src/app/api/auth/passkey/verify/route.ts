@@ -60,6 +60,7 @@ async function handlePOST(req: NextRequest) {
     pathname: req.nextUrl.pathname,
     scope: "webauthn_signin_verify",
     limiter: rateLimiter,
+    boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
     req,
