@@ -20,6 +20,7 @@ function setFullProdEnv() {
   process.env.SHARE_MASTER_KEY = "a".repeat(64);
   (process.env as Record<string, string | undefined>).NODE_ENV = "production";
   process.env.VERIFIER_PEPPER_KEY = "b".repeat(64);
+  process.env.SESSION_TOKEN_HMAC_KEY = "e".repeat(64);
   process.env.REDIS_URL = "redis://redis:6379";
   process.env.AUTH_SECRET = "x".repeat(32);
   process.env.AUTH_URL = "https://app.example.com";
@@ -120,6 +121,12 @@ describe("env validation", () => {
     setFullProdEnv();
     delete process.env.AUTH_URL;
     await expect(import("@/lib/env")).rejects.toThrow("AUTH_URL");
+  });
+
+  it("requires SESSION_TOKEN_HMAC_KEY in production (#3)", async () => {
+    setFullProdEnv();
+    delete process.env.SESSION_TOKEN_HMAC_KEY;
+    await expect(import("@/lib/env")).rejects.toThrow("SESSION_TOKEN_HMAC_KEY");
   });
 
   // ─── Auth provider checks ──────────────────────────────

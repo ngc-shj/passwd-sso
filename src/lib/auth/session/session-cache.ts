@@ -99,8 +99,16 @@ function getSessionCacheHmacKey(): Buffer {
     _sessionCacheHmacKey = Buffer.from(okm);
     return _sessionCacheHmacKey;
   }
-  // Backward-compatible fallback (no dedicated key set): derive from V1, matching
-  // the pre-dedicated-key digests. Rotation-stable: routine
+  // #3: in production the dedicated key is REQUIRED — do NOT silently fall back
+  // to the master key, which would re-couple session auth to master-key
+  // rotation. The V1 fallback exists only for dev/test backward compatibility.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_TOKEN_HMAC_KEY is required in production (decouples session-token HMAC from SHARE_MASTER_KEY rotation)",
+    );
+  }
+  // Backward-compatible fallback (dev/test, no dedicated key): derive from V1,
+  // matching the pre-dedicated-key digests. Rotation-stable: routine
   // SHARE_MASTER_KEY_CURRENT_VERSION bumps (V1→V2) do not change V1 bytes.
   // hkdfSync returns ArrayBuffer; Buffer.from() wraps it zero-copy.
   const ikm = getMasterKeyByVersion(1);

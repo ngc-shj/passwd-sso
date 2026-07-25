@@ -125,12 +125,9 @@ export const envObject = z.object({
 
   // Dedicated key for the session-token HMAC (DB lookup digest + Redis cache
   // key). Decoupled from SHARE_MASTER_KEY so rotating the master key (dropping
-  // V1) does not break session authentication. Optional: falls back to the
-  // V1-derived key when unset (backward compat with pre-dedicated-key digests),
-  // so it is NOT hard-required in prod — that would break existing V1-only
-  // deployments. validateSessionTokenHmacKey() (called at boot) fails fast if
-  // NEITHER this key nor V1 resolves. Production SHOULD set it to decouple from
-  // the master key.
+  // V1) does not break session authentication. REQUIRED in production (see the
+  // superRefine below and getSessionCacheHmacKey); dev/test fall back to the
+  // V1-derived key for backward compat with pre-dedicated-key digests.
   SESSION_TOKEN_HMAC_KEY: hex64.optional(),
 
   // --- Key rotation ---
@@ -474,6 +471,18 @@ export const envSchema = envObject.superRefine((data, ctx) => {
         code: z.ZodIssueCode.custom,
         path: ["VERIFIER_PEPPER_KEY"],
         message: "VERIFIER_PEPPER_KEY is required in production",
+      });
+    }
+
+    if (!data.SESSION_TOKEN_HMAC_KEY) {
+      // #3: required in prod so the session-token HMAC (DB lookup digest) is
+      // decoupled from SHARE_MASTER_KEY rotation. Matches the runtime guard in
+      // getSessionCacheHmacKey.
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["SESSION_TOKEN_HMAC_KEY"],
+        message:
+          "SESSION_TOKEN_HMAC_KEY is required in production (decouples session HMAC from master-key rotation)",
       });
     }
 

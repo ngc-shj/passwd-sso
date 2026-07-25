@@ -98,14 +98,25 @@ docker tag boxyhq/jackson:${JACKSON_VERSION} $(terraform output -raw ecr_jackson
 docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
 ```
 
-### 4. Force New Deployment
+### 4. Deploy a new image version
+
+The ECS services track their task definitions (no `ignore_changes` on
+`task_definition`), so a deploy is just an image-tag bump + apply:
 
 ```bash
-aws ecs update-service \
-  --cluster $(terraform output -raw ecs_cluster_name) \
-  --service $(terraform output -raw ecs_app_service_name) \
-  --force-new-deployment
+# Point app_image at the new immutable tag (e.g. in terraform.tfvars):
+#   app_image = "<ACCOUNT>.dkr.ecr.<region>.amazonaws.com/...-app:v0.4.72"
+terraform apply
 ```
+
+`terraform apply` registers a NEW task-definition revision referencing the new
+tag and updates ALL services that use that image — app, migrate (task def only),
+and BOTH workers (audit-outbox + retention-gc) — to the new revision.
+
+> Do NOT use `aws ecs update-service --force-new-deployment` for a version bump:
+> it only restarts tasks on the SAME task definition (same old image), so it
+> would redeploy the previous version. `--force-new-deployment` is only for
+> same-tag content changes, which this repo's IMMUTABLE tags disallow anyway.
 
 ## Remote State Backend
 
@@ -164,7 +175,7 @@ bringing services up. ECS task definitions reference secrets in
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
 | `SHARE_MASTER_KEY` | Share links/sends encryption master key (256-bit hex) |
-| `SESSION_TOKEN_HMAC_KEY` | Session-token HMAC key (256-bit hex). Decouples session auth from master-key rotation. Recommended. |
+| `SESSION_TOKEN_HMAC_KEY` | Session-token HMAC key (256-bit hex). **Required in production** (env validation + runtime fail closed). Decouples session auth from master-key rotation. Mapped into the app ECS task. Generate with `npm run generate:key`. |
 | `REDIS_URL` | Redis connection string |
 | `OUTBOX_WORKER_DATABASE_URL` | Least-privilege DB URL for the audit-outbox-worker ECS service (`passwd_outbox_worker` role) |
 | `RETENTION_GC_DATABASE_URL` | Least-privilege DB URL for the retention-gc-worker ECS service (`passwd_retention_gc_worker` role) |
@@ -175,6 +186,14 @@ Both background workers run as dedicated ECS services (`*-audit-outbox-worker`,
 Liveness is alarmed via `RunningTaskCount < 1` (Container Insights) — see
 monitoring.tf. Without these workers, audit events stay PENDING and retention is
 never enforced, so the worker DB URLs above MUST be populated before apply.
+
+> **Rotating `SESSION_TOKEN_HMAC_KEY`.** The session-token DB digest and the
+> Redis session-cache key are both derived from this key, so changing it changes
+> every digest. A rotation therefore INVALIDATES ALL SESSIONS (every user must
+> re-authenticate) and leaves stale entries under the OLD cache keys. To rotate:
+> (1) put the new key value, (2) redeploy the app, (3) run `DELETE FROM sessions`
+> (old digests can never match the new key) and flush the Redis session-cache
+> namespace so old-key entries do not linger for the cache TTL.
 
 ### Required Secrets (jackson)
 

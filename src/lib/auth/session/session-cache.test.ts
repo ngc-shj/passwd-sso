@@ -159,6 +159,25 @@ describe("SESSION_TOKEN_HMAC_KEY (dedicated session-token HMAC key)", () => {
     expect(mockGetMasterKeyByVersion).toHaveBeenCalledWith(1);
   });
 
+  describe("production requires the dedicated key (#3)", () => {
+    it("THROWS in production when SESSION_TOKEN_HMAC_KEY is unset (no V1 fallback)", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      _resetSubkeyCacheForTests();
+      // Even if V1 would resolve, production must NOT fall back to it.
+      mockGetMasterKeyByVersion.mockReturnValue(FIXED_IKM);
+      expect(() => hashSessionToken("tok")).toThrow(/required in production/);
+      expect(mockGetMasterKeyByVersion).not.toHaveBeenCalled();
+    });
+
+    it("uses the dedicated key in production when set", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("SESSION_TOKEN_HMAC_KEY", DEDICATED);
+      _resetSubkeyCacheForTests();
+      expect(hashSessionToken("tok")).toMatch(/^[0-9a-f]{64}$/);
+      expect(mockGetMasterKeyByVersion).not.toHaveBeenCalled();
+    });
+  });
+
   describe("validateSessionTokenHmacKey (boot-time #3 gap)", () => {
     it("passes when the dedicated key is set", () => {
       vi.stubEnv("SESSION_TOKEN_HMAC_KEY", DEDICATED);

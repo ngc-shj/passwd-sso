@@ -47,15 +47,21 @@ resource "aws_ecs_task_definition" "app" {
           awslogs-stream-prefix = "ecs"
         }
       }
-      # #5: trust the ALB's X-Forwarded-For so the app derives the real client IP
-      # instead of null (which collapses ALL users into the shared unknown-IP
-      # rate-limit bucket → spurious 429s). TRUSTED_PROXIES = the VPC CIDR so the
-      # ALB ENI's source IP is stripped as a trusted hop (rightmost-untrusted =
-      # the real client). Safe ONLY because the ALB has drop_invalid_header_fields
-      # enabled (alb.tf) — otherwise a client could inject a forged XFF.
+      # #5/#1: trust the ALB's X-Forwarded-For so the app derives the real client
+      # IP instead of null (null collapses ALL users into the shared unknown-IP
+      # rate-limit bucket → spurious 429s).
+      #
+      # Set ONLY TRUST_PROXY_HEADERS=true; do NOT put the VPC CIDR in
+      # TRUSTED_PROXIES. The ALB APPENDS the connection source IP to any
+      # client-supplied XFF (it does not replace it), so with the VPC trusted a
+      # VPC-internal attacker sending `XFF: <spoof>, ` would have the ALB append
+      # its own ENI IP; rightmost-untrusted would strip the trusted ALB IP and
+      # return the SPOOFED value. With TRUSTED_PROXIES unset (loopback only), the
+      # rightmost hop the ALB actually observed (the real client, or an
+      # attacker's own VPC IP — never someone else's) is returned. The ALB is set
+      # to xff_header_processing_mode = "append" in alb.tf to pin this behavior.
       environment = [
         { name = "TRUST_PROXY_HEADERS", value = "true" },
-        { name = "TRUSTED_PROXIES", value = var.vpc_cidr },
       ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
@@ -66,6 +72,9 @@ resource "aws_ecs_task_definition" "app" {
         { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
         { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
         { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
+        # #3: dedicated session-token HMAC key — required in production so the DB
+        # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
+        { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
         { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
       ]
       healthCheck = {
@@ -183,10 +192,6 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
-
   depends_on = [aws_lb_listener.https]
   tags       = local.tags
 }
@@ -207,10 +212,6 @@ resource "aws_ecs_service" "jackson" {
     target_group_arn = aws_lb_target_group.jackson.arn
     container_name   = "jackson"
     container_port   = 5225
-  }
-
-  lifecycle {
-    ignore_changes = [task_definition]
   }
 
   depends_on = [aws_lb_listener.https]
@@ -314,10 +315,6 @@ resource "aws_ecs_service" "audit_outbox_worker" {
     security_groups = [aws_security_group.ecs.id]
   }
 
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
-
   tags = local.tags
 }
 
@@ -331,10 +328,6 @@ resource "aws_ecs_service" "retention_gc_worker" {
   network_configuration {
     subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.ecs.id]
-  }
-
-  lifecycle {
-    ignore_changes = [task_definition]
   }
 
   tags = local.tags

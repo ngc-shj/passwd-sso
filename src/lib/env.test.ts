@@ -60,6 +60,7 @@ describe("env validation", () => {
       NODE_ENV: "production",
       AUTH_URL: "https://app.example.com",
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
       AUTH_GOOGLE_ID: "gid",
       AUTH_GOOGLE_SECRET: "gsecret",
@@ -73,6 +74,7 @@ describe("env validation", () => {
       AUTH_SECRET: "a".repeat(32),
       AUTH_URL: "https://app.example.com",
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
     });
     await expect(import("./env")).rejects.toThrow("auth provider");
@@ -84,6 +86,7 @@ describe("env validation", () => {
       AUTH_SECRET: "a".repeat(32),
       AUTH_URL: "https://app.example.com",
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
       AUTH_GOOGLE_ID: "google-id",
       AUTH_GOOGLE_SECRET: "google-secret",
@@ -144,6 +147,7 @@ describe("env validation", () => {
       AUTH_SECRET: "a".repeat(32),
       AUTH_URL: "https://app.example.com",
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
       EMAIL_PROVIDER: "smtp",
       SMTP_HOST: "smtp.example.com",
@@ -163,6 +167,7 @@ describe("env validation", () => {
       AUTH_SECRET: "a".repeat(32),
       AUTH_URL: "https://app.example.com",
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
       EMAIL_PROVIDER: "smtp",
     });

@@ -252,6 +252,7 @@ describe("envSchema (with superRefine cross-field rules)", () => {
       AUTH_SECRET: "x".repeat(32),
       AUTH_URL: "https://app.example.com",
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
       AUTH_GOOGLE_ID: "id",
       AUTH_GOOGLE_SECRET: "secret",

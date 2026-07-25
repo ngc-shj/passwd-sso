@@ -220,9 +220,8 @@ export const descriptions: Record<
     description:
       "256-bit key (64-char hex) for the session-token HMAC (DB session lookup\n" +
       "digest + Redis cache key). Decoupled from SHARE_MASTER_KEY so rotating the\n" +
-      "master key does not break session auth. Optional: falls back to the\n" +
-      "V1-derived key when unset. Production SHOULD set it. Generate with\n" +
-      "`npm run generate:key`.",
+      "master key does not break session auth. REQUIRED in production; dev/test\n" +
+      "fall back to the V1-derived key. Generate with `npm run generate:key`.",
     secret: true,
   },
   SHARE_MASTER_KEY_V1: {

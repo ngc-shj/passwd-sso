@@ -97,14 +97,25 @@ docker tag boxyhq/jackson:${JACKSON_VERSION} $(terraform output -raw ecr_jackson
 docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
 ```
 
-### 4. Force New Deployment
+### 4. 新しいイメージバージョンをデプロイ
+
+ECS サービスは task definition を追従します（`task_definition` に `ignore_changes`
+なし）。デプロイはイメージタグの更新 + apply だけです:
 
 ```bash
-aws ecs update-service \
-  --cluster $(terraform output -raw ecs_cluster_name) \
-  --service $(terraform output -raw ecs_app_service_name) \
-  --force-new-deployment
+# terraform.tfvars の app_image を新しい immutable タグに向ける:
+#   app_image = "<ACCOUNT>.dkr.ecr.<region>.amazonaws.com/...-app:v0.4.72"
+terraform apply
 ```
+
+`terraform apply` が新タグを参照する新しい task-definition リビジョンを登録し、その
+イメージを使う全サービス（app、migrate はタスク定義のみ、audit-outbox / retention-gc
+の両 worker）を新リビジョンへ更新します。
+
+> バージョン更新に `aws ecs update-service --force-new-deployment` は使わないこと:
+> 同一 task definition（＝同一の旧イメージ）でタスクを再起動するだけで、前バージョン
+> を再デプロイしてしまいます。`--force-new-deployment` は同一タグの内容更新用ですが、
+> 本リポジトリの IMMUTABLE タグではそもそも同一タグ更新は不可です。
 
 ## Remote State Backend
 
@@ -125,9 +136,16 @@ Secrets Management 参照）。
 
 ## Secrets Management
 
-シークレット値は Terraform で管理せず、state にも入れません（2026-07 レビュー F3）。
-Terraform は空のコンテナ（`secrets.tf`）のみを作成し、値は `terraform apply` の後・
-ECS サービス起動の前に、コミットしない JSON ファイルから out-of-band で注入します。
+app/Jackson のシークレット値は Terraform で管理せず、state にも入れません（2026-07
+レビュー F3）。Terraform は空のコンテナ（`secrets.tf`）のみを作成し、値は
+`terraform apply` の後・ECS サービス起動の前に、コミットしない JSON ファイルから
+out-of-band で注入します。RDS マスターパスワードも AWS 管理
+（`manage_master_user_password`）なので state に入りません。
+
+> **例外:** ElastiCache Redis の `auth_token` は設定時に Terraform state へ入ります
+> — ElastiCache に AWS 管理トークン相当がないためです。暗号化リモートバックエンド +
+> 厳格な IAM（backend.tf）が実効的な統制で、トークンは out-of-band でローテーション
+> 可能（`ignore_changes = [auth_token]`）。state を機密として扱ってください。
 
 ```bash
 # app-secrets.json / jackson-secrets.json: 下表のキーを持つ JSON オブジェクト
@@ -154,7 +172,23 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
 | `SHARE_MASTER_KEY` | 組織暗号化マスターキー (256-bit hex) |
+| `SESSION_TOKEN_HMAC_KEY` | セッショントークン HMAC キー (256-bit hex)。**本番必須**（env 検証 + 実行時 fail-closed）。セッション認証をマスターキーローテーションから分離。app ECS タスクにマッピング。`npm run generate:key` で生成。 |
 | `REDIS_URL` | Redis 接続文字列 |
+| `OUTBOX_WORKER_DATABASE_URL` | audit-outbox-worker ECS サービス用の最小権限 DB URL（`passwd_outbox_worker` ロール） |
+| `RETENTION_GC_DATABASE_URL` | retention-gc-worker ECS サービス用の最小権限 DB URL（`passwd_retention_gc_worker` ロール） |
+
+両 worker は app イメージ（`node dist/<worker>.js`）で専用 ECS サービス
+（`*-audit-outbox-worker` / `*-retention-gc-worker`）として起動、`desired_count = 1`、
+LB なし。クラッシュ時は ECS が自動再起動。liveness は `RunningTaskCount < 1`
+（Container Insights）で監視（monitoring.tf）。これらがないと監査は PENDING のまま、
+保持期限も執行されないため、上記 worker DB URL は apply 前に必ず設定すること。
+
+> **`SESSION_TOKEN_HMAC_KEY` のローテーション。** セッションの DB digest と Redis
+> キャッシュキーは両方この鍵から導出されるため、変更すると全 digest が変わります。
+> ローテーションは**全セッションを失効**（全ユーザー再認証）させ、旧キー配下に古い
+> エントリが残ります。手順: (1) 新値を投入、(2) app を再デプロイ、(3) `DELETE FROM
+> sessions`（旧 digest は新鍵に一致しない）を実行し Redis セッションキャッシュの
+> namespace を flush（旧キーのエントリが TTL 分残らないように）。
 
 ### Required Secrets (jackson)
 

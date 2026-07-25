@@ -245,6 +245,36 @@ describe("extractClientIpFromHeaders — TRUST_PROXY_HEADERS toggle (fail-closed
   });
 });
 
+// #1 regression: the production ECS/ALB config is TRUST_PROXY_HEADERS=true with
+// TRUSTED_PROXIES UNSET (loopback only) — the VPC CIDR is deliberately NOT
+// trusted. The ALB APPENDS the connection source IP to any client XFF, so the
+// rightmost hop is always the one the ALB actually observed. A VPC-internal
+// attacker therefore cannot spoof another client's IP. (Trusting the VPC CIDR —
+// the earlier bug — would strip the ALB hop and surface the forged leftmost
+// value.)
+describe("extractClientIpFromHeaders — ALB XFF spoof resistance (#1)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
+    vi.stubEnv("TRUSTED_PROXIES", "127.0.0.1/32,::1/128"); // VPC NOT trusted
+  });
+
+  it("does NOT return an attacker-forged leftmost XFF value (returns the ALB-appended hop)", () => {
+    // Attacker inside the VPC sends `XFF: <spoof>`; the ALB appends its ENI IP.
+    const headers = new Headers({
+      "x-forwarded-for": "198.51.100.77, 10.0.1.25",
+    });
+    const ip = extractClientIpFromHeaders(headers);
+    expect(ip).not.toBe("198.51.100.77"); // spoof rejected
+    expect(ip).toBe("10.0.1.25"); // the hop the ALB actually observed
+  });
+
+  it("returns the real client IP for the standard single-hop ALB XFF", () => {
+    // AWS ALB's normal behavior: XFF = the single real client IP.
+    const headers = new Headers({ "x-forwarded-for": "203.0.113.9" });
+    expect(extractClientIpFromHeaders(headers)).toBe("203.0.113.9");
+  });
+});
+
 describe("extractClientIpFromHeaders — socket-based path", () => {
   it("returns the socket IP and ignores XFF when socket is NOT a trusted proxy", () => {
     vi.stubEnv("TRUSTED_PROXIES", "10.0.0.0/8");
