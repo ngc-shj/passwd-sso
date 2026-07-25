@@ -183,18 +183,20 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 | `RETENTION_GC_DATABASE_URL` | retention-gc-worker ECS サービス用の最小権限 DB URL（`passwd_retention_gc_worker` ロール） |
 
 両 worker は app イメージ（`node dist/<worker>.js`）で専用 ECS サービス
-（`*-audit-outbox-worker` / `*-retention-gc-worker`）として起動、`desired_count = 1`、
-LB なし。クラッシュ時は ECS が自動再起動。liveness は `RunningTaskCount < 1`
-（Container Insights）で監視（monitoring.tf）。これらがないと監査は PENDING のまま、
-保持期限も執行されないため、上記 worker DB URL は apply 前に必ず設定すること。
+（`*-audit-outbox-worker` / `*-retention-gc-worker`）として起動、`desired_count =
+var.worker_desired_count`（初回 bootstrap は 0、定常運用は 1）、LB なし。クラッシュ
+時は ECS が自動再起動。liveness は `RunningTaskCount < 1`（Container Insights）で
+監視（monitoring.tf）。これらがないと監査は PENDING のまま、保持期限も執行されない
+ため、上記 worker DB URL は apply 前に必ず設定すること。
 
 > **`SESSION_TOKEN_HMAC_KEY` のローテーション。** セッションの DB digest と Redis
 > キャッシュキーは両方この鍵から導出されるため、変更すると全 digest が変わり
-> **全セッションが失効**（全ユーザー再認証）します。再デプロイ後ではなく cutover
-> 時点で purge すること: (1) 新値を投入、(2) `DELETE FROM sessions` + Redis
-> セッション keyspace を flush、(3) 再デプロイ。旧 digest は新鍵に一致しないため
-> cutover 前のセッションはいずれにせよ無効で、再デプロイ前に purge することで新
-> （cutover 後）コードが作るセッションを削除せずに済みます。
+> **全セッションが失効**（全ユーザー再認証）します。ハード cutover で行うこと:
+> (1) 旧鍵タスクがローテーション中にセッションを発行しないよう app サービスを
+> `desired_count = 0` にスケールダウン、(2) 新値を投入、(3) `DELETE FROM sessions`
+> + Redis セッション keyspace を flush、(4) 新鍵で app をスケールアップ。手順 (1) を
+> 省くと、purge と再デプロイの間に旧タスクが旧鍵で孤立セッションを作り得ます。
+> docs/operations/key-provider-setup.md を参照。
 
 ### Required Secrets (jackson)
 

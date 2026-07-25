@@ -137,6 +137,12 @@ variable "worker_memory" {
   description = "Fargate memory (MiB) for each background worker"
 }
 
+variable "worker_desired_count" {
+  type        = number
+  default     = 1
+  description = "Desired task count for each background worker. Set to 0 during first-time bootstrap so no worker starts before the migration; restore to 1 for steady state."
+}
+
 variable "db_username" {
   type        = string
   description = "RDS master username"

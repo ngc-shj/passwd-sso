@@ -75,14 +75,22 @@ single `terraform apply` cannot satisfy on its own:
 - The app/worker services start their tasks as soon as they exist, so their
   secrets and roles must be ready first.
 
-Phased bootstrap (services start only in the last phase):
+Phased bootstrap. **Every service is created with `desired_count = 0` first** so
+NO app/jackson/worker task starts against an un-migrated schema; the migration
+runs; only then are the services scaled up. This is required because
+`ignore_changes = [task_definition]` on the services only takes effect on
+UPDATES — on first CREATE the service would otherwise launch tasks on the
+initial task-def immediately, before `deploy.sh` runs the migration.
 
 ```bash
 TFV="-var-file=envs/prod/terraform.tfvars"
 
+# In terraform.tfvars set ALL desired counts to 0 for the bootstrap apply:
+#   app_desired_count     = 0
+#   jackson_desired_count = 0
+#   worker_desired_count  = 0
+
 # Phase A — network + data stores + registries + empty secret containers.
-#   `desired_count = 0` for app/jackson (see terraform.tfvars) so no service task
-#   starts yet; the workers default to 1 but are created in Phase D.
 terraform apply $TFV \
   -target=aws_vpc.main -target=aws_nat_gateway.main \
   -target=aws_db_instance.main -target=aws_elasticache_replication_group.main \
@@ -96,12 +104,6 @@ REDIS_HOST=$(terraform output -raw redis_endpoint)
 MASTER_PW=$(aws secretsmanager get-secret-value --secret-id "$MASTER_ARN" \
   --query SecretString --output text | jq -r .password)
 
-# Phase C — create the DB roles on RDS as the master user (psql), BEFORE migration:
-#   CREATE ROLE passwd_app                 LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
-#   CREATE ROLE passwd_outbox_worker       LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
-#   CREATE ROLE passwd_retention_gc_worker LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
-#   (mirror the GRANTs in infra/postgres/initdb/02-04*.sql for each role.)
-
 # Push the image (step 3), then inject ALL secret values built from the above:
 #   app-secrets.json: DATABASE_URL (passwd_app@$DB_HOST), MIGRATION_DATABASE_URL
 #   (master@$DB_HOST), REDIS_URL ($REDIS_HOST), OUTBOX_WORKER_DATABASE_URL,
@@ -110,14 +112,90 @@ MASTER_PW=$(aws secretsmanager get-secret-value --secret-id "$MASTER_ARN" \
 scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
   --app-file ./app-secrets.json --jackson-file ./jackson-secrets.json
 
-# Phase D — full apply (registers task defs; workers/app start now). Then run the
-# migration + advance services with the SAME script used for steady state:
+# Phase C — full apply. Every service is created at desired_count = 0 (no tasks
+# start yet), and the migrate task def is registered. Then create the DB roles
+# on RDS and run the migration (both need to reach RDS, which only the ECS SG
+# can — see "Creating the DB roles on RDS" below).
+terraform apply $TFV   # creates services at 0, registers migrate task def
+
+# Create the least-privilege DB roles on RDS BEFORE the migration (passwd_app must
+# exist first — some migrations GRANT to it). Use the migrate task via ECS Exec —
+# see "Creating the DB roles on RDS" below for the exact commands.
+
+# Run the migration (migrate task def; still with the services at 0):
+CLUSTER=$(terraform output -raw ecs_cluster_name)
+MIGRATE_TD=$(terraform output -raw migrate_task_definition_arn)
+SUBNETS=$(terraform output -json private_subnet_ids | jq -r 'join(",")')
+SG=$(terraform output -raw ecs_security_group_id)
+aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGRATE_TD" \
+  --launch-type FARGATE --region <region> \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG]}"
+# wait for exit code 0 (aws ecs wait tasks-stopped + describe-tasks).
+
+# Phase D — scale services up to steady state. Set the desired counts in
+# terraform.tfvars to their real values (app_desired_count >= 2 for prod HA,
+# jackson_desired_count, worker_desired_count = 1) and apply. Because the
+# services already exist, ignore_changes = [task_definition] now holds, so this
+# apply changes ONLY desired_count and starts tasks on the already-migrated
+# schema. deploy.sh then advances every service to the current task-def revision.
 terraform apply $TFV
 AWS_REGION=<region> ECR_URL=<app-ecr-url> TF_VAR_FILE=envs/prod/terraform.tfvars \
   ./scripts/deploy.sh
-# (set app_desired_count/jackson_desired_count back to their steady values in
-#  tfvars before this apply if you set them to 0 in Phase A.)
 ```
+
+#### Creating the DB roles on RDS
+
+RDS's security group allows 5432/TCP **only from the ECS security group**
+(`network.tf`), so no operator laptop can reach it — there is no bastion. Create
+the roles from INSIDE the VPC using the migrate task via **ECS Exec**. The task
+role carries the four `ssmmessages:*` actions ECS Exec needs (`iam.tf`); the app
+image ships the `pg` module, so a `node` one-liner is the psql substitute (the
+`node:alpine` base has no `psql` binary).
+
+```bash
+CLUSTER=$(terraform output -raw ecs_cluster_name)
+MIGRATE_TD=$(terraform output -raw migrate_task_definition_arn)
+SUBNETS=$(terraform output -json private_subnet_ids | jq -r 'join(",")')
+SG=$(terraform output -raw ecs_security_group_id)
+
+# Launch the migrate container idle, WITH the exec channel enabled.
+RUN=$(aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGRATE_TD" \
+  --launch-type FARGATE --region <region> --enable-execute-command \
+  --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG]}" \
+  --overrides '{"containerOverrides":[{"name":"migrate","command":["sleep","3600"]}]}' \
+  --output json)
+TASK=$(echo "$RUN" | jq -r '.tasks[0].taskArn')
+aws ecs wait tasks-running --cluster "$CLUSTER" --tasks "$TASK" --region <region>
+
+# Open a shell in the task (MIGRATION_DATABASE_URL = master@RDS is in its env).
+aws ecs execute-command --cluster "$CLUSTER" --task "$TASK" \
+  --container migrate --interactive --command "/bin/sh" --region <region>
+```
+
+Inside the shell, create each role with `pg` (mirror the GRANTs in
+`infra/postgres/initdb/02-04*.sql`). Pass the role passwords as parameters, never
+interpolated into SQL:
+
+```sh
+node -e '
+const { Client } = require("pg");
+const c = new Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
+(async () => {
+  await c.connect();
+  await c.query(
+    "CREATE ROLE passwd_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD $1", [process.env.APP_PW]);
+  await c.query(
+    "CREATE ROLE passwd_outbox_worker LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD $1", [process.env.OUTBOX_PW]);
+  await c.query(
+    "CREATE ROLE passwd_retention_gc_worker LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD $1", [process.env.GC_PW]);
+  // then the GRANT/REVOKE statements from infra/postgres/initdb/02-04*.sql
+  await c.end();
+})().catch(e => { console.error(e); process.exit(1); });
+' # export APP_PW / OUTBOX_PW / GC_PW in the shell first (same values used to
+  # build the DATABASE_URL secrets injected in Phase B).
+```
+
+Exit the shell; the task exits when `sleep` ends (or `aws ecs stop-task` it).
 
 Steady-state deploys (environment already bootstrapped) are a single
 `./scripts/deploy.sh` — see docs/operations/deployment.md.
@@ -156,18 +234,18 @@ docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSI
 
 ### 4. Deploy a new image version
 
-The ECS services track their task definitions (no `ignore_changes` on
-`task_definition`), so a deploy is just an image-tag bump + apply:
+Every ECS service has `ignore_changes = [task_definition]`, so a plain
+`terraform apply` registers a new task-def revision but does NOT move the running
+services — that is deliberate. `scripts/deploy.sh` owns the migration-first
+ordering: it applies (task defs only), runs the DB migration, and only then
+advances each service to the new revision (see
+docs/operations/deployment.md).
 
 ```bash
-# Point app_image at the new immutable tag (e.g. in terraform.tfvars):
-#   app_image = "<ACCOUNT>.dkr.ecr.<region>.amazonaws.com/...-app:v0.4.72"
-terraform apply
+# Steady-state deploy (build → push git-SHA tag → apply → migrate → roll services):
+AWS_REGION=<region> ECR_URL=<app-ecr-url> TF_VAR_FILE=envs/prod/terraform.tfvars \
+  ./scripts/deploy.sh
 ```
-
-`terraform apply` registers a NEW task-definition revision referencing the new
-tag and updates ALL services that use that image — app, migrate (task def only),
-and BOTH workers (audit-outbox + retention-gc) — to the new revision.
 
 > Do NOT use `aws ecs update-service --force-new-deployment` for a version bump:
 > it only restarts tasks on the SAME task definition (same old image), so it
@@ -248,11 +326,12 @@ never enforced, so the worker DB URLs above MUST be populated before apply.
 
 > **Rotating `SESSION_TOKEN_HMAC_KEY`.** The session-token DB digest and the
 > Redis session-cache key are both derived from this key, so changing it changes
-> every digest → INVALIDATES ALL SESSIONS (every user re-authenticates). Purge AT
-> the cutover, not after: (1) put the new value, (2) `DELETE FROM sessions` +
-> flush the Redis session keyspace, (3) redeploy. Old-key digests can never match
-> the new key, so pre-cutover sessions are dead regardless; purging before the
-> redeploy avoids deleting sessions that new (post-cutover) code would create.
+> every digest → INVALIDATES ALL SESSIONS (every user re-authenticates). Use a
+> hard cutover: (1) scale the app service to `desired_count = 0` so no old-key
+> task can mint a session mid-rotation, (2) put the new value, (3) `DELETE FROM
+> sessions` + flush the Redis session keyspace, (4) scale the app back up on the
+> new key. Skipping step 1 lets an old task create an orphaned old-key session
+> between the purge and the redeploy. See docs/operations/key-provider-setup.md.
 
 ### Required Secrets (jackson)
 

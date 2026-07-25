@@ -20,20 +20,24 @@ Configuration precedence: `.env` (canonical base) → `.env.local` (per-develope
 
 - **Immutable tags required**: Use git SHA (`git-abc1234`) or digest (`repo@sha256:...`)
 - **`:latest` is prohibited** — migrate and app task definitions must reference the exact same image
-- `terraform apply` sets `var.app_image` for both `app` and `migrate` task definitions, guaranteeing consistency
+- `terraform apply` sets `var.app_image` for the `app`, `migrate`, and both worker task definitions, guaranteeing they run the same image
 
 ## Deploy Flow (AWS ECS)
 
-**Terraform owns the deploy ordering.** A single `terraform apply` registers the
-new task definitions, runs the DB migration (`null_resource.run_migration` in
-`infra/terraform/migrate-run.tf`), and only THEN updates the app + both worker
-services (they `depends_on` the migration) — so new code never runs against an
-un-migrated schema.
+**`scripts/deploy.sh` owns the deploy ordering — not Terraform.** Every ECS
+service has `ignore_changes = [task_definition]`, so `terraform apply` registers a
+new task-definition revision but does NOT move the running services. The script
+enforces migration-first ordering explicitly: apply (task defs only) → run the DB
+migration as a one-off ECS task → only then advance app + jackson + both workers
+to the new revision. New code never runs against an un-migrated schema.
 
 ```
-1. docker build    →  Build image with immutable tag
-2. docker push     →  Push to ECR
-3. terraform apply →  register task defs → run migration → update app + workers
+1. reject dirty/untracked worktree  →  deployed SHA == committed code
+2. docker build + push              →  immutable git-SHA tag (skip if already in ECR)
+3. terraform apply                  →  register task defs (services unchanged)
+4. ECS run-task (migrate)           →  wait for exit 0
+5. update-service app+jackson+workers →  advance to new revision
+6. wait services-stable + assert rolloutState == COMPLETED
 ```
 
 ### Step-by-step (steady state)
@@ -41,25 +45,27 @@ un-migrated schema.
 ```bash
 export AWS_REGION=<region>
 export ECR_URL=<account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app
-./scripts/deploy.sh   # build → push → terraform apply (migration is inside apply)
+export TF_VAR_FILE=envs/prod/terraform.tfvars   # required — passed as -var-file
+./scripts/deploy.sh
 ```
 
-`scripts/deploy.sh` is a thin wrapper: it builds/pushes an immutable git-SHA tag
-and runs `terraform apply -var app_image=…`. It does NOT run migrations itself —
-Terraform does, gated before the service updates.
+All three variables are required; the script exits immediately if any is unset.
+It builds/pushes an immutable git-SHA tag, runs `terraform apply
+-var-file=$TF_VAR_FILE -var app_image=…`, runs the migration itself (as an ECS
+`run-task`, NOT inside apply), then rolls the services.
 
-> **First-time bootstrap of a NEW environment.** The migration runs inside apply
-> and needs (a) the image pushed to ECR and (b) the app secret VALUES present, but
-> ECR and the empty secret containers are created BY apply. Bootstrap in phases —
-> see `infra/terraform/README.md` "First-time bootstrap": create ECR only
-> (`terraform apply -target=aws_ecr_repository.app`), push the image, inject
-> secrets (`scripts/put-terraform-secrets.sh`), THEN run the full `terraform apply`.
+> **First-time bootstrap of a NEW environment.** Do NOT use `deploy.sh` — the ECR
+> repos and empty secret containers don't exist yet, and the least-privilege DB
+> roles must be created on RDS before the first migration. Follow the phased
+> bootstrap in `infra/terraform/README.md` "First-time bootstrap" (services are
+> created at `desired_count = 0`, roles created via ECS Exec, migration run, then
+> scale up).
 
 ### Code-only release (no schema change)
 
 The migration task is idempotent (`prisma migrate deploy` is a no-op when there
 are no pending migrations), so a code-only release is the same `./scripts/deploy.sh`
-— apply re-runs the (no-op) migration and updates the services.
+— it re-runs the (no-op) migration and advances the services.
 
 ## Deploy Flow (Local / Docker Compose)
 
@@ -92,15 +98,16 @@ Compose they are in `docker-compose.workers.yml` (production) /
 
 ## Migration Failure
 
-The migration runs inside `terraform apply` (`null_resource.run_migration`). If
-it fails, the local-exec returns non-zero, so:
+The migration runs as a one-off ECS `run-task` inside `deploy.sh`, BEFORE any
+service is advanced. If it exits non-zero:
 
-1. **`terraform apply` aborts** — because the app + worker services `depends_on`
-   the migration, they are NOT updated to the new task-def revision when
-   migration fails. Running code keeps the old (schema-compatible) image.
+1. **`deploy.sh` aborts at step 4** — the `update-service` calls (step 5) never
+   run, so the running services stay on their old, schema-compatible revision.
+   New code never touches the failed schema.
 2. Check CloudWatch Logs (`migrate` stream prefix) for error details.
 3. Fix the migration issue (migration SQL, or data conflicts).
-4. Re-run `./scripts/deploy.sh` (or `terraform apply`). Prisma migrations are
+4. Re-run `./scripts/deploy.sh`. The immutable git-SHA tag already exists in ECR,
+   so the build/push is skipped (retry-safe), and Prisma migrations are
    idempotent for already-applied migrations, so the retry resumes from the
    failed point.
 
@@ -108,11 +115,20 @@ it fails, the local-exec returns non-zero, so:
 
 ### Code-only rollback (no schema change)
 
+`deploy.sh --rollback-to <image>` re-points every service at a previous
+known-good image WITHOUT rebuilding from HEAD and WITHOUT running a migration
+(the forward-compatible schema is left in place):
+
 ```bash
-# Point to the previous known-good image
-terraform -chdir=infra/terraform apply -var "app_image=<previous-image>"
-./scripts/deploy.sh --skip-migrate
+export AWS_REGION=<region>
+export ECR_URL=<account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app
+export TF_VAR_FILE=envs/prod/terraform.tfvars
+./scripts/deploy.sh --rollback-to <account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app:git-<previous-sha>
 ```
+
+The target image must already exist in ECR (it is a prior release — `deploy.sh`
+verifies this before touching any service). It then applies with that image,
+skips the migration, advances the services, and waits for them to stabilize.
 
 ### Schema rollback
 
@@ -130,10 +146,9 @@ When deploying at a sub-path (e.g., `https://example.com/passwd-sso`), set `NEXT
 
 - [ ] All tests pass (`npm test`)
 - [ ] Build succeeds (`npm run build`)
-- [ ] Image built with immutable tag (git SHA)
-- [ ] Image pushed to ECR
-- [ ] `terraform apply` completed (updates both app + migrate task definitions)
-- [ ] `deploy.sh` completed successfully
+- [ ] Worktree clean (no uncommitted OR untracked files — `deploy.sh` rejects both)
+- [ ] `AWS_REGION`, `ECR_URL`, `TF_VAR_FILE` exported
+- [ ] `deploy.sh` completed successfully (apply → migrate → roll services → services-stable)
 - [ ] Health check passes after deployment
 - [ ] Verify app functionality in production
 

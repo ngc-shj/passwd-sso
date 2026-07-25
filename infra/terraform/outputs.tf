@@ -100,6 +100,10 @@ output "app_task_definition_arn" {
   value = aws_ecs_task_definition.app.arn
 }
 
+output "jackson_task_definition_arn" {
+  value = aws_ecs_task_definition.jackson.arn
+}
+
 output "migrate_task_definition_arn" {
   value = aws_ecs_task_definition.migrate.arn
 }

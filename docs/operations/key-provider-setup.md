@@ -166,12 +166,20 @@ For non-versioned keys (verifier pepper, directory sync, WebAuthn PRF):
 > dedicated `SESSION_TOKEN_HMAC_KEY` — **required in production**, decoupled from
 > `SHARE_MASTER_KEY` rotation. (Dev/test with no dedicated key fall back to a
 > V1-derived subkey.) Rotating `SESSION_TOKEN_HMAC_KEY` changes every digest, so
-> it INVALIDATES ALL SESSIONS (every user re-authenticates). To rotate cleanly,
-> purge sessions AT the cutover, not after: (1) put the new value, (2) `DELETE
-> FROM sessions` + flush the Redis session keyspace, (3) redeploy with the new
-> key. Old-key digests can never match the new key, so pre-cutover sessions are
-> dead regardless; purging before the redeploy avoids deleting sessions that new
-> (post-cutover) code would otherwise create. TTLs:
+> it INVALIDATES ALL SESSIONS (every user re-authenticates). Rotate with a hard
+> cutover so no old-key task can mint a session that survives:
+>
+> 1. **Stop writes** — scale the app service to `desired_count = 0` (or otherwise
+>    quiesce it) so no running task can create a session with the OLD key.
+> 2. Put the new `SESSION_TOKEN_HMAC_KEY` value.
+> 3. `DELETE FROM sessions` + flush the Redis session keyspace (clears every
+>    old-key digest; they can never match the new key anyway).
+> 4. Redeploy / scale the app back up on the new key.
+>
+> Without the scale-to-zero in step 1, an old task could create a session between
+> the purge (step 3) and the redeploy (step 4); that session's digest is computed
+> with the OLD key, so it would be silently orphaned (never matches on lookup) yet
+> occupy a row — the cutover would not be clean. TTLs:
 > `SESSION_CACHE_TTL_MS`/`TOMBSTONE_TTL_MS` = 30000 ms. Rotating
 > `VERIFIER_PEPPER_KEY` or other non-versioned keys does NOT invalidate the
 > session cache.

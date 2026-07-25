@@ -147,6 +147,11 @@ resource "aws_ecs_task_definition" "migrate" {
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  # task_role carries the ssmmessages:* actions ECS Exec needs (iam.tf). During
+  # bootstrap this task is launched with --enable-execute-command to create the
+  # least-privilege DB roles on RDS (the only host that can reach 5432) — see
+  # infra/terraform/README.md "Creating the DB roles on RDS".
+  task_role_arn = aws_iam_role.ecs_task.arn
 
   container_definitions = jsonencode([
     {
@@ -195,6 +200,16 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 
+  # Circuit breaker: if the new revision fails to reach steady state (crash-loop
+  # or failing health check), ECS aborts and rolls back to the last good revision
+  # instead of hanging. scripts/deploy.sh then reads the PRIMARY deployment's
+  # rolloutState — a FAILED state (post-rollback) fails the deploy loudly rather
+  # than reporting a phantom success.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   # Terraform manages the TASK DEFINITION; the SERVICE's running revision is
   # advanced by scripts/deploy.sh AFTER it runs the migration (migration-first
   # ordering — see docs/operations/deployment.md). ignore_changes keeps a
@@ -224,6 +239,11 @@ resource "aws_ecs_service" "jackson" {
     target_group_arn = aws_lb_target_group.jackson.arn
     container_name   = "jackson"
     container_port   = 5225
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
   }
 
   lifecycle {
@@ -315,20 +335,26 @@ resource "aws_ecs_task_definition" "retention_gc_worker" {
   tags = local.tags
 }
 
-# Worker services: desired_count = 1, NO load_balancer block (not request-serving).
-# ECS restarts a crashed/exited task automatically (the service reconciles to
-# desired_count), giving the "restart: unless-stopped" behavior the compose
-# workers have.
+# Worker services: desired_count = var.worker_desired_count (0 during first-time
+# bootstrap so no worker touches an un-migrated schema; 1 in steady state), NO
+# load_balancer block (not request-serving). ECS restarts a crashed/exited task
+# automatically (the service reconciles to desired_count), giving the
+# "restart: unless-stopped" behavior the compose workers have.
 resource "aws_ecs_service" "audit_outbox_worker" {
   name            = "${local.name_prefix}-audit-outbox-worker"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.audit_outbox_worker.arn
-  desired_count   = 1
+  desired_count   = var.worker_desired_count
   launch_type     = "FARGATE"
 
   network_configuration {
     subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.ecs.id]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
   }
 
   # Task def managed by Terraform; running revision advanced by deploy.sh after
@@ -344,12 +370,17 @@ resource "aws_ecs_service" "retention_gc_worker" {
   name            = "${local.name_prefix}-retention-gc-worker"
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.retention_gc_worker.arn
-  desired_count   = 1
+  desired_count   = var.worker_desired_count
   launch_type     = "FARGATE"
 
   network_configuration {
     subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.ecs.id]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
   }
 
   lifecycle {

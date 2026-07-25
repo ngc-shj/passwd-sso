@@ -22,8 +22,12 @@ create_acm_certificate = true
 app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-prod-app:v0.4.71"
 jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-prod-jackson:v1.42.0"
 
+# Desired task counts. During FIRST-TIME BOOTSTRAP set ALL THREE to 0 so no
+# service starts against an un-migrated schema, run the migration, then scale up
+# (see infra/terraform/README.md "First-time bootstrap"). Steady-state values:
 # app_desired_count    = 2  # Recommended for prod HA
 # jackson_desired_count = 2
+# worker_desired_count  = 1  # audit-outbox + retention-gc each
 
 # SECRETS ARE NOT SET HERE (2026-07 review, F3). Inject secret VALUES out-of-band
 # after apply — they must never enter Terraform state. See the root
