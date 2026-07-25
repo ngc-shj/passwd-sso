@@ -251,6 +251,12 @@ jobs:
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      # Required in production (env-schema.ts). The E2E job boots a real
+      # production server, so without it instrumentation fails env validation and
+      # the web server never starts. Deliberately DIFFERENT from SHARE_MASTER_KEY
+      # — the whole point of this key is that session auth does not ride on
+      # master-key rotation.
+      SESSION_TOKEN_HMAC_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
       AUTH_URL: "http://localhost:3000"
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -479,6 +485,12 @@ jobs:
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      # Required in production (env-schema.ts). The E2E job boots a real
+      # production server, so without it instrumentation fails env validation and
+      # the web server never starts. Deliberately DIFFERENT from SHARE_MASTER_KEY
+      # — the whole point of this key is that session auth does not ride on
+      # master-key rotation.
+      SESSION_TOKEN_HMAC_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
       AUTH_URL: "http://localhost:3000"
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
