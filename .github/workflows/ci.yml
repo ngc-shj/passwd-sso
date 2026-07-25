@@ -217,7 +217,13 @@ jobs:
       # and it passes locally only because a developer's tree already has the
       # client generated.
       - name: Generate Prisma client (needed by the worker-bundle smoke test)
+        # prisma.config.ts resolves the datasource with env("DATABASE_URL"),
+        # which THROWS when unset — and unlike a dev machine this job has no
+        # .env for dotenv to load. `generate` never opens a connection, so a
+        # dummy URL is sufficient (same pattern as the App and integration jobs).
         run: npx prisma generate
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       - name: Run static check guards (PRE_PR_STATIC_ONLY)
         run: PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh
 
