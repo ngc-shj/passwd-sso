@@ -7,7 +7,14 @@ resource "aws_lb" "main" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
-  tags               = local.tags
+
+  # #5 (and M5): drop malformed HTTP headers at the ALB. This is the safety
+  # precondition for the app trusting X-Forwarded-For (ecs.tf TRUST_PROXY_HEADERS)
+  # — the ALB overwrites/sanitises XFF so a client cannot inject a forged proxy
+  # chain that survives to the app's rightmost-untrusted IP extraction.
+  drop_invalid_header_fields = true
+
+  tags = local.tags
 }
 
 ################################################################################

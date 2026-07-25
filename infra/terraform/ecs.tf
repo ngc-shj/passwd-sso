@@ -47,6 +47,16 @@ resource "aws_ecs_task_definition" "app" {
           awslogs-stream-prefix = "ecs"
         }
       }
+      # #5: trust the ALB's X-Forwarded-For so the app derives the real client IP
+      # instead of null (which collapses ALL users into the shared unknown-IP
+      # rate-limit bucket → spurious 429s). TRUSTED_PROXIES = the VPC CIDR so the
+      # ALB ENI's source IP is stripped as a trusted hop (rightmost-untrusted =
+      # the real client). Safe ONLY because the ALB has drop_invalid_header_fields
+      # enabled (alb.tf) — otherwise a client could inject a forged XFF.
+      environment = [
+        { name = "TRUST_PROXY_HEADERS", value = "true" },
+        { name = "TRUSTED_PROXIES", value = var.vpc_cidr },
+      ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
         { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
