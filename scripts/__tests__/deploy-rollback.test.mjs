@@ -421,7 +421,13 @@ describe("deploy.sh --rollback-to validation", () => {
     const result = runDeploy(["--rollback-to", "evil.example/image:git-abc123def456"]);
 
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("must be ${ECR_URL}:<tag> or ${ECR_URL}@sha256:<digest>");
+    // deploy.sh escapes the variable (`\${ECR_URL}`) so the operator is shown the
+    // variable NAME, not its value. Build the expected text from a constant so
+    // the `${` never appears adjacent to a name in a string literal — that shape
+    // reads as a mis-typed template literal to CodeQL, and this assertion is
+    // about data, not interpolation.
+    const varRef = "${" + "ECR_URL}";
+    expect(result.stderr).toContain(`must be ${varRef}:<tag> or ${varRef}@sha256:<digest>`);
     // Nothing may have been deployed or even queried.
     expect(logLines("ecs update-service")).toHaveLength(0);
     expect(logLines("terraform").filter((l) => l.includes("apply"))).toHaveLength(0);

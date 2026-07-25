@@ -42,7 +42,6 @@
  *
  * Env: NTFC_CHECK_ROOT overrides the repo root (used by the guard self-test).
  */
-import { join } from "node:path";
 import { SyntaxKind } from "ts-morph";
 import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
 
