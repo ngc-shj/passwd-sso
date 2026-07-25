@@ -22,6 +22,25 @@ COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 
+# Stage 1b: Dedicated Prisma CLI install (isolated closure).
+# The runner needs the Prisma CLI (the `migrate` compose service runs
+# `npx prisma migrate deploy`), but installing it in the runner re-resolves the
+# WHOLE app dependency tree and fails ERESOLVE on @hookform/resolvers ⇄ valibot
+# — and cherry-picking prisma's deep transitive deps (effect, mysql2, postgres,
+# @prisma/*) out of the app node_modules is fragile. Instead resolve prisma's
+# OWN closure in isolation here (with .npmrc → legacy-peer-deps), pinned to the
+# lockfile version, and COPY the self-contained tree into the runner.
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS prisma-cli
+WORKDIR /prisma-cli
+COPY .npmrc ./
+# PRISMA_VER is kept in lockstep with package-lock.json by
+# scripts/checks/check-dockerfile-prisma-pin.
+RUN PRISMA_VER=7.9.0 && \
+    npm init -y >/dev/null 2>&1 && \
+    npm install "prisma@${PRISMA_VER}" --ignore-scripts --loglevel=error && \
+    node -e "const v=require('/prisma-cli/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}" && \
+    node node_modules/prisma/build/index.js --version >/dev/null
+
 # Stage 2: Build the application
 FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS builder
 WORKDIR /app
@@ -64,7 +83,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# .prisma (generated client) is COPYed AFTER the prisma-cli node_modules below,
+# so the generated client always wins over the CLI stage's tree.
 COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 
 # Upgrade npm and patch npm-bundled CVE deps in a single layer.
@@ -102,9 +122,7 @@ RUN TAR_VER=7.5.19 && \
     SIGSTORE_VER=4.1.1 && \
     BE_VER=5.0.7 && \
     NPM_VER=11.16.0 && \
-    PRISMA_VER=7.9.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
-    npm install "prisma@${PRISMA_VER}" --no-save --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
     if [ -d "$TAR_DIR" ]; then \
       CURRENT=$(node -p "require('${TAR_DIR}/package.json').version") && \
@@ -173,12 +191,23 @@ RUN TAR_VER=7.5.19 && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version,c=v.split('.').map(Number),m='${TAR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('tar still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
-    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}" && \
-    node -e "const v=require('/app/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}"
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}"
 
-# Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
-COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
-COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+# Prisma CLI: COPY the self-contained closure from the dedicated `prisma-cli`
+# stage (isolated npm install with .npmrc), NOT a runner-side `npm install`
+# (which re-resolves the whole app tree → ERESOLVE) and NOT a cherry-pick from
+# the app node_modules (misses deep transitive deps like `effect`). This brings
+# the CLI + its non-@prisma transitive deps (effect, mysql2, postgres, …) into
+# the runner's node_modules.
+COPY --from=prisma-cli /prisma-cli/node_modules ./node_modules
+
+# The CLI-stage COPY above overwrites @prisma/* with the CLI's set, which lacks
+# the app-runtime packages (driver-adapter-utils, generated client). Overlay the
+# builder's COMPLETE @prisma/* — it is a superset (CLI deps: config/engines/dev,
+# AND app runtime: adapter-pg/client/driver-adapter-utils) — plus the generated
+# client, so the worker + app can resolve the adapter at runtime.
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js
