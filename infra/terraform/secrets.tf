@@ -22,6 +22,16 @@
 # Defense-in-depth: still use the ENCRYPTED remote backend (backend.tf) with
 # versioning, strict IAM, and access logging — even without secret values in
 # state, the state carries infra topology worth protecting.
+#
+# RESIDUAL secrets that DO enter state (not all secrets are out-of-band):
+#   - RDS master password: NONE — AWS-managed via manage_master_user_password
+#     (database.tf), stored in RDS's own Secrets Manager secret, not state (#4).
+#   - ElastiCache Redis auth_token: DOES enter state when configured via
+#     var.redis_auth_token — ElastiCache has no AWS-managed-token equivalent.
+#     The encrypted remote backend + strict IAM above are the operative controls;
+#     the token is rotatable out-of-band (database.tf ignore_changes = [auth_token]).
+# So "no secret values in state" holds for the app/jackson/RDS secrets but NOT
+# the Redis auth token — treat state as sensitive accordingly.
 ################################################################################
 
 resource "aws_secretsmanager_secret" "app" {

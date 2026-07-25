@@ -126,10 +126,18 @@ review (F3) it no longer carries secret values — those are injected out-of-ban
 
 ## Secrets Management
 
-Secret VALUES are **not** managed by Terraform and never enter state (2026-07
-review, F3). Terraform creates only the empty Secrets Manager CONTAINERS
+App/Jackson secret VALUES are **not** managed by Terraform and never enter state
+(2026-07 review, F3). Terraform creates only the empty Secrets Manager CONTAINERS
 (`secrets.tf`); the values are injected out-of-band AFTER `terraform apply` and
-BEFORE the ECS services start, using JSON files that are never committed:
+BEFORE the ECS services start, using JSON files that are never committed. The RDS
+master password is AWS-managed (`manage_master_user_password`) so it is not in
+state either.
+
+> **Exception:** the ElastiCache Redis `auth_token`, when configured, DOES enter
+> Terraform state — ElastiCache has no AWS-managed-token equivalent. The
+> encrypted remote backend + strict IAM (backend.tf) are the operative controls;
+> the token is rotatable out-of-band (`ignore_changes = [auth_token]`). Treat
+> state as sensitive accordingly.
 
 ```bash
 # app-secrets.json / jackson-secrets.json: JSON objects of the keys below

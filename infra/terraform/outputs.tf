@@ -22,6 +22,14 @@ output "db_endpoint" {
   value = aws_db_instance.main.address
 }
 
+# ARN of the AWS-managed RDS master-password secret (#4). Operators read the
+# master password from this secret (e.g. `aws secretsmanager get-secret-value`)
+# to build MIGRATION_DATABASE_URL — it is NOT in Terraform state or a tfvar.
+output "db_master_user_secret_arn" {
+  value       = try(aws_db_instance.main.master_user_secret[0].secret_arn, null)
+  description = "AWS-managed RDS master password secret ARN (for MIGRATION_DATABASE_URL)"
+}
+
 output "redis_endpoint" {
   value = local.redis_endpoint
 }

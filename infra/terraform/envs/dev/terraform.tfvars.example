@@ -27,7 +27,6 @@ jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-de
 #     --app-file ./app-secrets.json --jackson-file ./jackson-secrets.json
 
 db_username = "passwd_user"  # SUPERUSER — table owner, used for migrations
-db_password = "<REPLACE>"   # Use a strong, random password
 
 # RDS — dev settings (faster iteration)
 db_apply_immediately    = true

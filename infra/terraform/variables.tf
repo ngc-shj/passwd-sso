@@ -142,11 +142,9 @@ variable "db_username" {
   description = "RDS master username"
 }
 
-variable "db_password" {
-  type        = string
-  description = "RDS master password"
-  sensitive   = true
-}
+# NOTE: db_password removed (#4). The RDS master password is AWS-managed
+# (manage_master_user_password = true in database.tf) so it never enters
+# Terraform state. Do not reintroduce a var-supplied password.
 
 variable "db_name" {
   type    = string
