@@ -66,50 +66,83 @@ done
 REGISTRY="${ECR_URL%%/*}"        # <acct>.dkr.ecr.<region>.amazonaws.com
 REPO_NAME="${ECR_URL#*/}"        # full repository path, namespace included
 
+# Refuse a dirty worktree on EVERY path (forward AND rollback). Both run
+# `terraform apply`, which reads the LOCAL .tf files — an uncommitted/untracked
+# infra change would otherwise be applied silently, and on the forward path the
+# Dockerfile's `COPY . .` would ship untracked source under a clean-HEAD tag.
+# git diff-index only sees TRACKED changes, so use --porcelain --untracked-files.
+if [ -n "$(git status --porcelain --untracked-files=normal 2>/dev/null)" ]; then
+  echo "ERROR: worktree has uncommitted or untracked changes — commit, stash, or" >&2
+  echo "       gitignore them before deploying (apply reads local .tf; the image" >&2
+  echo "       builds from COPY . .)." >&2
+  git status --short --untracked-files=normal >&2
+  exit 1
+fi
+
 if [ -n "$ROLLBACK_IMAGE" ]; then
   # ---- ROLLBACK PATH --------------------------------------------------------
-  # Use the operator-supplied image verbatim. Do NOT rebuild from HEAD (that
-  # would redeploy current code) and do NOT run a migration (a code-only
-  # rollback keeps the existing, forward-compatible schema).
-  IMAGE="$ROLLBACK_IMAGE"
-  echo "==> ROLLBACK to ${IMAGE} (no build, no migration)"
+  # Re-point services at a prior release WITHOUT rebuilding from HEAD (that would
+  # redeploy current code) and WITHOUT a migration (a code-only rollback keeps
+  # the existing, forward-compatible schema).
+  #
+  # The rollback ref MUST live in OUR repo, or the ECR existence check below is
+  # meaningless: describe-images always queries $REPO_NAME, but Terraform would
+  # deploy whatever host/repo the ref names. Without this guard,
+  # `--rollback-to evil.example/img:git-<known-tag>` passes (because git-<tag>
+  # exists in the trusted repo) yet deploys the attacker image. Require the ref
+  # to be exactly ${ECR_URL}:<tag> or ${ECR_URL}@sha256:<digest>.
+  case "$ROLLBACK_IMAGE" in
+    "${ECR_URL}:"*)
+      REF_KIND=tag
+      ROLLBACK_TAG="${ROLLBACK_IMAGE##*:}"
+      ;;
+    "${ECR_URL}@sha256:"*)
+      REF_KIND=digest
+      ROLLBACK_DIGEST="${ROLLBACK_IMAGE##*@}"
+      ;;
+    *)
+      echo "ERROR: --rollback-to must be \${ECR_URL}:<tag> or \${ECR_URL}@sha256:<digest>." >&2
+      echo "       ECR_URL=${ECR_URL}" >&2
+      echo "       got:   ${ROLLBACK_IMAGE}" >&2
+      exit 1
+      ;;
+  esac
 
-  # Confirm the target tag actually exists in ECR before we point services at it.
-  ROLLBACK_TAG="${IMAGE##*:}"
-  if [[ "$IMAGE" == *"@sha256:"* ]]; then
-    ID_ARG="imageDigest=${IMAGE##*@}"
-  else
+  # Resolve the ref to an immutable digest FROM ECR and deploy THAT digest, so
+  # the thing we validated is exactly the thing we deploy (a tag could in theory
+  # be re-pointed between check and use; the repo is IMMUTABLE, but resolving to
+  # a digest removes the tag-indirection entirely).
+  if [ "$REF_KIND" = tag ]; then
     ID_ARG="imageTag=${ROLLBACK_TAG}"
+  else
+    ID_ARG="imageDigest=${ROLLBACK_DIGEST}"
   fi
-  aws ecr describe-images --region "$REGION" --repository-name "$REPO_NAME" \
-    --image-ids "$ID_ARG" >/dev/null 2>&1 \
-    || { echo "ERROR: rollback image not found in ECR: $IMAGE" >&2; exit 1; }
+  DIGEST=$(aws ecr describe-images --region "$REGION" --repository-name "$REPO_NAME" \
+    --image-ids "$ID_ARG" --query 'imageDetails[0].imageDigest' --output text 2>/dev/null || true)
+  if [ -z "$DIGEST" ] || [ "$DIGEST" = "None" ]; then
+    echo "ERROR: rollback image not found in ECR: $ROLLBACK_IMAGE" >&2
+    exit 1
+  fi
+  IMAGE="${ECR_URL}@${DIGEST}"
+  echo "==> ROLLBACK to ${IMAGE} (resolved from ${ROLLBACK_IMAGE}; no build, no migration)"
   RUN_MIGRATION=false
 else
   # ---- FORWARD DEPLOY PATH --------------------------------------------------
-  # 1. Refuse a dirty worktree so the deployed SHA always matches committed code.
-  #    git diff-index only sees TRACKED changes; the Dockerfile does `COPY . .`,
-  #    so an untracked route/config/source would ship under a clean-HEAD tag.
-  #    --porcelain --untracked-files=normal catches tracked AND untracked.
-  if [ -n "$(git status --porcelain --untracked-files=normal 2>/dev/null)" ]; then
-    echo "ERROR: worktree has uncommitted or untracked changes — commit, stash, or" >&2
-    echo "       gitignore them before deploying (the image builds from COPY . .)." >&2
-    git status --short --untracked-files=normal >&2
-    exit 1
-  fi
   GIT_SHA=$(git rev-parse HEAD)          # FULL sha, not --short
   IMAGE="${ECR_URL}:git-${GIT_SHA}"
   RUN_MIGRATION=true
 
-  # 2. Build + push, but skip the push if this immutable tag already exists
-  #    (ECR repos are IMMUTABLE — re-pushing the same tag fails, which would break
-  #    a retry after a mid-deploy failure). The skip TRUSTS an existing
-  #    git-<sha> tag as this commit's build. That trust is anchored by ECR
-  #    immutability (a tag cannot be overwritten once pushed) + the registry's
-  #    IAM push policy; only a principal with ECR push rights could have placed a
-  #    forged tag ahead of us, and such a principal can compromise the deploy
-  #    regardless. If you need cryptographic provenance, sign images (cosign) and
-  #    verify the signature here before the skip.
+  # Build + push, but skip the push if this immutable tag already exists (ECR
+  # repos are IMMUTABLE — re-pushing the same tag fails, which would break a
+  # retry after a mid-deploy failure).
+  #
+  # SECURITY CAVEAT: the skip TRUSTS a pre-existing git-<sha> tag as this commit's
+  # build. ECR immutability stops it being *overwritten*, but a principal with
+  # ECR PUSH but NOT ECS-deploy rights could pre-place a forged git-<sha> ahead
+  # of us; the skip would then deploy their image — a real privilege escalation
+  # where push and deploy roles are separated. This is NOT closed here. To close
+  # it, sign images at build (cosign/ECR image signing) and verify the signature
+  # on this branch BEFORE trusting the existing tag. Tracked as a follow-up.
   if aws ecr describe-images --region "$REGION" --repository-name "$REPO_NAME" \
        --image-ids imageTag="git-${GIT_SHA}" >/dev/null 2>&1; then
     echo "==> Image git-${GIT_SHA} already in ECR — skipping build/push (retry-safe)"
@@ -144,7 +177,11 @@ if [ "$RUN_MIGRATION" = true ]; then
     --output json)
   FAIL=$(echo "$RUN" | jq -r '.failures[0].reason // empty')
   [ -z "$FAIL" ] || { echo "ERROR: run-task failed: $FAIL" >&2; exit 1; }
-  TASK_ARN=$(echo "$RUN" | jq -r '.tasks[0].taskArn')
+  TASK_ARN=$(echo "$RUN" | jq -r '.tasks[0].taskArn // empty')
+  # run-task can return neither a task nor a failure (e.g. an empty tasks array
+  # under some throttle/placement conditions); guard against feeding a null ARN
+  # to the waiter, which would otherwise wait on nothing and pass vacuously.
+  [ -n "$TASK_ARN" ] || { echo "ERROR: run-task returned no task ARN and no failure — aborting." >&2; exit 1; }
   echo "    task: $TASK_ARN — waiting..."
   aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$TASK_ARN" --region "$REGION"
   CODE=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$TASK_ARN" \
@@ -158,44 +195,75 @@ fi
 # 5. Advance every service to its new task-def revision. Jackson is included so
 #    an image/security bump to the SSO container actually reaches the service
 #    (it has ignore_changes = [task_definition] too, so only this loop moves it).
+#    Parallel arrays keep, per service: its name, the revision we WANT it on, and
+#    the revision it was on BEFORE (for the compensating rollback in step 7).
 SERVICES=()
+WANT_TD=()
+PREV_TD=()
 for pair in \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_app_service_name):$(td_arn app_task_definition_arn)" \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_jackson_service_name):$(td_arn jackson_task_definition_arn)" \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_audit_outbox_worker_service_name):$(td_arn audit_outbox_worker_task_definition_arn)" \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_retention_gc_worker_service_name):$(td_arn retention_gc_worker_task_definition_arn)"; do
   SVC="${pair%%:*}"; TD="${pair#*:}"
-  echo "==> Updating service $SVC → $TD"
+  # Record the current running revision BEFORE we change it.
+  BEFORE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region "$REGION" \
+    --query 'services[0].taskDefinition' --output text)
+  echo "==> Updating service $SVC → $TD (was $BEFORE)"
   aws ecs update-service --cluster "$CLUSTER" --service "$SVC" \
     --task-definition "$TD" --region "$REGION" --query 'service.serviceName' --output text
   SERVICES+=("$SVC")
+  WANT_TD+=("$TD")
+  PREV_TD+=("$BEFORE")
 done
 
+# Compensating rollback: put EVERY service back on its pre-deploy revision. ECS
+# only auto-reverts the service(s) that failed, so a partial failure otherwise
+# leaves a version SPLIT (some services new, some reverted). This restores a
+# uniform, known-good state across the whole stack.
+rollback_all() {
+  echo "==> Compensating rollback — restoring all services to their pre-deploy revision" >&2
+  for i in "${!SERVICES[@]}"; do
+    echo "    ${SERVICES[$i]} → ${PREV_TD[$i]}" >&2
+    aws ecs update-service --cluster "$CLUSTER" --service "${SERVICES[$i]}" \
+      --task-definition "${PREV_TD[$i]}" --region "$REGION" \
+      --query 'service.serviceName' --output text >/dev/null 2>&1 || true
+  done
+  echo "    rollback requested; monitor: aws ecs wait services-stable --cluster $CLUSTER --services ${SERVICES[*]}" >&2
+}
+
 # 6. Block until every service reconciles, then assert the rollout SUCCEEDED.
-#    `update-service` only enqueues the change; without this a failed image
-#    (crash-loop / failing health check) would roll back to the prior revision
-#    while the script exits 0 — reporting a "successful" deploy that never
-#    took effect, and potentially leaving app/worker on DIFFERENT revisions.
+#    `update-service` only enqueues the change.
 echo "==> Waiting for services to stabilize: ${SERVICES[*]}"
 if ! aws ecs wait services-stable --cluster "$CLUSTER" --services "${SERVICES[@]}" --region "$REGION"; then
   echo "ERROR: services did not stabilize — see ECS events/CloudWatch" >&2
+  rollback_all
   exit 1
 fi
 
-# services-stable resolves once the running count equals desired and deployments
-# settle — but an ECS deployment circuit-breaker ROLLBACK also "stabilizes" (back
-# on the old task def). Verify each service is actually running the revision we
-# asked for; a mismatch means the new image failed and ECS reverted it.
+# services-stable resolves once running == desired and deployments settle — but a
+# circuit-breaker ROLLBACK ALSO stabilizes: ECS starts a NEW deployment on the
+# previous (good) task def, which reaches rolloutState=COMPLETED. So COMPLETED
+# alone does NOT prove our revision won — the PRIMARY could be COMPLETED on the
+# OLD def. Assert BOTH: rolloutState == COMPLETED AND the PRIMARY deployment's
+# taskDefinition == the exact ARN we requested for THIS service.
 FAILED=()
-for SVC in "${SERVICES[@]}"; do
-  # PRIMARY deployment's rolloutState must be COMPLETED (not FAILED/IN_PROGRESS).
-  STATE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region "$REGION" \
-    --query "services[0].deployments[?status=='PRIMARY']|[0].rolloutState" --output text)
+for i in "${!SERVICES[@]}"; do
+  SVC="${SERVICES[$i]}"
+  read -r STATE ACTIVE_TD < <(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region "$REGION" \
+    --query "services[0].deployments[?status=='PRIMARY']|[0].[rolloutState,taskDefinition]" --output text)
   if [ "$STATE" != "COMPLETED" ]; then
-    echo "ERROR: service $SVC rollout state = $STATE (expected COMPLETED — likely a circuit-breaker rollback)" >&2
+    echo "ERROR: service $SVC rollout state = $STATE (expected COMPLETED)" >&2
+    FAILED+=("$SVC")
+  elif [ "$ACTIVE_TD" != "${WANT_TD[$i]}" ]; then
+    echo "ERROR: service $SVC settled on $ACTIVE_TD, not the requested ${WANT_TD[$i]} — circuit-breaker rolled it back." >&2
     FAILED+=("$SVC")
   fi
 done
-[ ${#FAILED[@]} -eq 0 ] || { echo "ERROR: rollout failed for: ${FAILED[*]}" >&2; exit 1; }
+if [ ${#FAILED[@]} -ne 0 ]; then
+  echo "ERROR: rollout failed for: ${FAILED[*]}" >&2
+  rollback_all
+  exit 1
+fi
 
 echo "==> Done. All services stable on the new revision."

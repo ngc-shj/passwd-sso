@@ -147,11 +147,12 @@ resource "aws_ecs_task_definition" "migrate" {
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
-  # task_role carries the ssmmessages:* actions ECS Exec needs (iam.tf). During
-  # bootstrap this task is launched with --enable-execute-command to create the
-  # least-privilege DB roles on RDS (the only host that can reach 5432) — see
-  # infra/terraform/README.md "Creating the DB roles on RDS".
-  task_role_arn = aws_iam_role.ecs_task.arn
+  # DEDICATED migrate task role carrying the ssmmessages:* actions ECS Exec needs
+  # (iam.tf). Kept SEPARATE from the app/worker task role so long-lived tasks are
+  # not exec-able (least privilege). During bootstrap this task is launched with
+  # --enable-execute-command to create the least-privilege DB roles on RDS (the
+  # only host that can reach 5432) — see README "Creating the DB roles on RDS".
+  task_role_arn = aws_iam_role.ecs_migrate_task.arn
 
   container_definitions = jsonencode([
     {

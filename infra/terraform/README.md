@@ -147,10 +147,16 @@ AWS_REGION=<region> ECR_URL=<app-ecr-url> TF_VAR_FILE=envs/prod/terraform.tfvars
 
 RDS's security group allows 5432/TCP **only from the ECS security group**
 (`network.tf`), so no operator laptop can reach it — there is no bastion. Create
-the roles from INSIDE the VPC using the migrate task via **ECS Exec**. The task
-role carries the four `ssmmessages:*` actions ECS Exec needs (`iam.tf`); the app
-image ships the `pg` module, so a `node` one-liner is the psql substitute (the
-`node:alpine` base has no `psql` binary).
+the roles from INSIDE the VPC using the migrate task via **ECS Exec**. The
+migrate task runs under a DEDICATED task role carrying the four `ssmmessages:*`
+actions ECS Exec needs (`iam.tf`; the app/worker tasks do NOT get this). The
+`node:alpine` base has no `psql` binary, so a version-controlled Node script,
+`scripts/bootstrap-rds-roles.mjs` (baked into the image), does the work via the
+`pg` module. It is idempotent and re-runnable: each role is guarded by a
+`pg_roles` existence check, and it safely quotes the passwords with pg's
+`escapeLiteral` (DDL cannot use bind parameters — `CREATE ROLE x PASSWORD $1` is
+a Postgres syntax error). Table-specific worker grants are issued later by the
+Prisma migrations, exactly as with the Docker initdb path.
 
 ```bash
 CLUSTER=$(terraform output -raw ecs_cluster_name)
@@ -172,27 +178,15 @@ aws ecs execute-command --cluster "$CLUSTER" --task "$TASK" \
   --container migrate --interactive --command "/bin/sh" --region <region>
 ```
 
-Inside the shell, create each role with `pg` (mirror the GRANTs in
-`infra/postgres/initdb/02-04*.sql`). Pass the role passwords as parameters, never
-interpolated into SQL:
+Inside the shell, export the three role passwords (the SAME values used to build
+the `DATABASE_URL` / `*_WORKER_DATABASE_URL` secrets injected in Phase B) and run
+the bootstrap script:
 
 ```sh
-node -e '
-const { Client } = require("pg");
-const c = new Client({ connectionString: process.env.MIGRATION_DATABASE_URL });
-(async () => {
-  await c.connect();
-  await c.query(
-    "CREATE ROLE passwd_app LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD $1", [process.env.APP_PW]);
-  await c.query(
-    "CREATE ROLE passwd_outbox_worker LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD $1", [process.env.OUTBOX_PW]);
-  await c.query(
-    "CREATE ROLE passwd_retention_gc_worker LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD $1", [process.env.GC_PW]);
-  // then the GRANT/REVOKE statements from infra/postgres/initdb/02-04*.sql
-  await c.end();
-})().catch(e => { console.error(e); process.exit(1); });
-' # export APP_PW / OUTBOX_PW / GC_PW in the shell first (same values used to
-  # build the DATABASE_URL secrets injected in Phase B).
+export PASSWD_APP_PASSWORD='…'
+export PASSWD_OUTBOX_WORKER_PASSWORD='…'
+export PASSWD_RETENTION_GC_WORKER_PASSWORD='…'
+node scripts/bootstrap-rds-roles.mjs   # idempotent; MIGRATION_DATABASE_URL is already in env
 ```
 
 Exit the shell; the task exits when `sleep` ends (or `aws ecs stop-task` it).

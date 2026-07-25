@@ -209,6 +209,10 @@ COPY --from=prisma-cli /prisma-cli/node_modules ./node_modules
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
+# One-off RDS role bootstrap (run via ECS Exec on a fresh environment; uses the
+# `pg` module copied below, so no psql binary is needed). Plain .mjs — not bundled.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-rds-roles.mjs ./scripts/bootstrap-rds-roles.mjs
+
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js
 # Retention-GC worker (bundled by esbuild; pg + deps are external)

@@ -52,17 +52,39 @@ resource "aws_iam_role" "ecs_task" {
   tags = local.tags
 }
 
-# ECS Exec (SSM) — lets an operator open an interactive shell INTO a running task
-# (`aws ecs execute-command`). The only sanctioned path to psql the RDS instance:
-# RDS's SG allows 5432 only from the ECS SG (network.tf), so no operator laptop
-# can reach it. During bootstrap the migrate task is launched with
-# --enable-execute-command and used to create the least-privilege DB roles; in
-# steady state it is the break-glass path for DB inspection. These four
-# ssmmessages actions are exactly what the SSM agent needs for the exec channel;
-# CloudWatch/S3 session logging is optional and not required here.
-resource "aws_iam_role_policy" "ecs_exec_ssm" {
-  name = "${local.name_prefix}-ecs-exec-ssm"
-  role = aws_iam_role.ecs_task.id
+################################################################################
+# Migrate Task Role (ECS Exec break-glass — bootstrap DB role creation + DB
+# inspection). SEPARATE from the app/worker task role so the long-lived
+# request-serving + worker tasks do NOT carry ssmmessages:* (least privilege).
+# Only the one-off migrate task uses this role.
+################################################################################
+
+resource "aws_iam_role" "ecs_migrate_task" {
+  name = "${local.name_prefix}-ecs-migrate-task"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+  tags = local.tags
+}
+
+# ECS Exec (SSM) — lets an operator open an interactive shell INTO the running
+# migrate task (`aws ecs execute-command`). The only sanctioned path to reach the
+# RDS instance: its SG admits 5432 only from the ECS SG (network.tf), so no
+# operator laptop can connect. During bootstrap the migrate task is launched with
+# --enable-execute-command to create the least-privilege DB roles (see
+# README "Creating the DB roles on RDS"); in steady state it is the break-glass
+# path for DB inspection. These four ssmmessages actions are exactly what the SSM
+# agent needs for the exec channel; CloudWatch/S3 session logging is optional and
+# not required here. Scoped to the migrate role ONLY — app/jackson/workers cannot
+# be exec'd into.
+resource "aws_iam_role_policy" "ecs_migrate_exec_ssm" {
+  name = "${local.name_prefix}-ecs-migrate-exec-ssm"
+  role = aws_iam_role.ecs_migrate_task.id
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
