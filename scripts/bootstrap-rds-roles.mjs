@@ -10,13 +10,21 @@
 // roles on RDS". The node:alpine app image has no `psql` binary, but it ships
 // the `pg` module, which is all this needs.
 //
-// CONVERGENT, not merely idempotent: re-running does not just skip work, it
-// forces every role back to the intended state. For each role it CREATEs when
-// absent and then ALWAYS applies `ALTER ROLE ... <fixed attrs> PASSWORD <new>`,
-// strips any inherited role membership, and asserts the resulting pg_roles
-// attributes. So a re-run with a rotated password installs it, and a role that
-// was manually escalated to SUPERUSER/BYPASSRLS is demoted back. The
-// schema-level GRANT/REVOKE statements are likewise safe to re-run, so a
+// CONVERGENT for role ATTRIBUTES, passwords and memberships: re-running does
+// not just skip work, it forces every role back to the intended state. For each
+// role it CREATEs when absent and then ALWAYS applies
+// `ALTER ROLE ... <fixed attrs> PASSWORD <new>`, strips any inherited role
+// membership, and asserts the resulting pg_roles attributes. So a re-run with a
+// rotated password installs it, and a role manually escalated to
+// SUPERUSER/BYPASSRLS/REPLICATION is demoted back.
+//
+// NOT convergent for existing-object ACLs on the WORKER roles — those are owned
+// by the Prisma migrations and this script runs before them; see the scope note
+// at the worker loop below, and `scripts/audit-db-grants.mjs` for detecting
+// surplus grants. (passwd_app's schema/table ACLs ARE converged here, because
+// this script is their sole owner.)
+//
+// The schema-level GRANT/REVOKE statements are safe to re-run, so a
 // partially-failed run can simply be re-executed.
 //
 // DDL (CREATE ROLE) cannot use bind parameters — `CREATE ROLE x PASSWORD $1` is
@@ -47,7 +55,23 @@ const ROLES = [
 
 // The attribute set every role above must END UP with, applied on both CREATE
 // and ALTER so a pre-existing (possibly privilege-escalated) role converges.
-const ROLE_ATTRS = "LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE";
+// NOREPLICATION matters as much as NOSUPERUSER: REPLICATION lets a role open a
+// replication connection and stream the entire database (and create/drop
+// replication slots) — a full data-exfiltration path that none of these roles
+// needs. Every attribute listed here is asserted in ROLE_ATTR_EXPECTATIONS
+// below, so the two cannot drift apart silently.
+const ROLE_ATTRS =
+  "LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION";
+
+// pg_roles column -> the value convergence must produce. Asserted after ALTER.
+const ROLE_ATTR_EXPECTATIONS = {
+  rolsuper: false,
+  rolbypassrls: false,
+  rolcreatedb: false,
+  rolcreaterole: false,
+  rolreplication: false,
+  rolcanlogin: true,
+};
 
 // Double-quote a Postgres identifier (doubling embedded quotes). Used for role
 // names read back from pg_roles, which are not part of our hardcoded allowlist.
@@ -101,16 +125,19 @@ export async function convergeRole(client, name, password) {
   }
 
   // Fail loudly if convergence did not actually take (defence against a future
-  // Postgres/RDS quirk silently ignoring one of the attributes).
+  // Postgres/RDS quirk silently ignoring one of the attributes). Driven by
+  // ROLE_ATTR_EXPECTATIONS so every asserted attribute is checked by name and a
+  // newly added one cannot be forgotten here.
+  const columns = Object.keys(ROLE_ATTR_EXPECTATIONS);
   const { rows } = await client.query(
-    `SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolcanlogin
-       FROM pg_roles WHERE rolname = $1`,
+    `SELECT ${columns.join(", ")} FROM pg_roles WHERE rolname = $1`,
     [name],
   );
-  const a = rows[0];
-  if (a.rolsuper || a.rolbypassrls || a.rolcreatedb || a.rolcreaterole || !a.rolcanlogin) {
+  const actual = rows[0];
+  const mismatched = columns.filter((c) => actual[c] !== ROLE_ATTR_EXPECTATIONS[c]);
+  if (mismatched.length > 0) {
     throw new Error(
-      `role ${name} did not converge to the expected attributes: ${JSON.stringify(a)}`,
+      `role ${name} did not converge — ${mismatched.join(", ")} unexpected: ${JSON.stringify(actual)}`,
     );
   }
 }
@@ -168,8 +195,19 @@ async function main() {
       "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app",
     );
 
-    // Worker roles: CONNECT + USAGE only here; deny-by-default on everything
-    // else. Their table-specific grants come from the Prisma migrations.
+    // Worker roles: SCHEMA-level and DEFAULT privileges only.
+    //
+    // Scope note (do not over-read this as convergence): unlike passwd_app
+    // above, existing-object ACLs are deliberately NOT revoked here. The
+    // workers' legitimate table grants are issued by the Prisma migrations that
+    // create those tables (13 migrations at present), and this script runs
+    // BEFORE the first migration — so at this point those grants do not exist
+    // yet, and a blanket `REVOKE ALL ON ALL TABLES` on a re-run would strip the
+    // legitimate ACLs the migrations installed. Consequence: a table privilege
+    // granted to a worker out of band is NOT removed by re-running this script.
+    // Detecting that surplus is the job of `scripts/audit-db-grants.mjs`, which
+    // diffs the live ACLs against the expected set after the migrations have
+    // run.
     for (const worker of ["passwd_outbox_worker", "passwd_retention_gc_worker"]) {
       await client.query(`REVOKE ALL ON SCHEMA public FROM ${worker}`);
       await client.query(

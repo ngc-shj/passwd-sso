@@ -95,12 +95,16 @@ function logLines(filter) {
  *   reported as the PRIMARY deployment's taskDefinition after stabilizing.
  * @param {boolean} [opts.rollbackNeverLands] when true, describe-services keeps
  *   reporting the NEW revision even after a rollback update-service.
+ * @param {number} [opts.signalSelfAtUpdateCall] 1-based forward-update index at
+ *   which the stub sends SIGTERM to the deploy shell instead of succeeding,
+ *   simulating an operator/CI interrupt mid-rollout.
  */
 function installStubs(opts = {}) {
   const {
     failUpdateAtCall = 0,
     primaryTdOverride = null,
     rollbackNeverLands = false,
+    signalSelfAtUpdateCall = 0,
   } = opts;
 
   const tfOutputs = { ...SERVICE_NAMES, ...NEW_TD, ecs_cluster_name: "passwd-sso-prod-cluster" };
@@ -187,6 +191,14 @@ case "$1 $2" in
       N=$(cat "${tmpDir}/fwd_count" 2>/dev/null || echo 0)
       N=$((N + 1))
       echo "$N" > "${tmpDir}/fwd_count"
+      if [ "${signalSelfAtUpdateCall}" -ne 0 ] && [ "$N" -eq "${signalSelfAtUpdateCall}" ]; then
+        # Signal the deploy shell (our parent) to simulate an operator/CI abort
+        # arriving BETWEEN commands, then succeed so \$? is 0 at trap time —
+        # the exact condition under which the old shared handler exited 0.
+        kill -TERM "$PPID" 2>/dev/null || true
+        echo "$SVC"
+        exit 0
+      fi
       if [ "${failUpdateAtCall}" -ne 0 ] && [ "$N" -eq "${failUpdateAtCall}" ]; then
         echo "AccessDeniedException (stubbed failure on forward update #$N)" >&2
         exit 254
@@ -348,6 +360,20 @@ describe("deploy.sh compensating rollback", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("COMPENSATING ROLLBACK INCOMPLETE");
     expect(result.stderr).toContain("MANUAL INTERVENTION REQUIRED");
+  });
+
+  it("exits NON-ZERO and compensates when interrupted by SIGTERM mid-rollout", () => {
+    // Regression: ERR and the signals used to share one handler that did
+    // `exit $?`. On a signal received BETWEEN commands `$?` is the last
+    // completed command's status (0), so an interrupted, half-rolled-out deploy
+    // exited 0 and CI/CD would read it as a success.
+    installStubs({ signalSelfAtUpdateCall: 2 });
+
+    const result = runDeploy();
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("interrupted by signal");
+    expect(result.stderr).toContain("Compensating rollback");
   });
 });
 

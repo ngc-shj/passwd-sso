@@ -201,6 +201,7 @@ run_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 run_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
+run_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
 run_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 run_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
 run_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs

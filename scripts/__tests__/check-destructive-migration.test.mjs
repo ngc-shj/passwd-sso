@@ -85,6 +85,24 @@ describe("check-destructive-migration gate", () => {
     ["RENAME", `ALTER TABLE "users" RENAME COLUMN "name" TO "full_name";`],
     ["SET NOT NULL", `ALTER TABLE "users" ALTER COLUMN "email" SET NOT NULL;`],
     ["ALTER COLUMN TYPE", `ALTER TABLE "users" ALTER COLUMN "age" TYPE BIGINT;`],
+    // Evasion cases reported in review — each slipped past the previous
+    // regex-over-stripped-text implementation.
+    // PostgreSQL makes COLUMN optional in ALTER TABLE ... RENAME.
+    ["RENAME without the optional COLUMN keyword", `ALTER TABLE users RENAME email TO email_address;`],
+    ["ALTER TYPE ... RENAME VALUE", `ALTER TYPE status RENAME VALUE 'OLD' TO 'NEW';`],
+    // The `--` is inside a string literal, so it does NOT start a comment;
+    // stripping comments before parsing strings deletes the DROP and misses it.
+    ["DROP after a string literal containing --", `SELECT '-- harmless'; DROP TABLE users;`],
+    // These migrations wrap their DDL in DO blocks; skipping dollar-quoted
+    // bodies wholesale would miss the majority of real renames.
+    [
+      "RENAME inside a DO $$ block",
+      `DO $$ BEGIN EXECUTE 'ALTER TABLE users RENAME COLUMN a TO b'; END $$;`,
+    ],
+    ["ALTER TABLE DROP without COLUMN", `ALTER TABLE "users" DROP "nickname";`],
+    ["DROP CONSTRAINT", `ALTER TABLE "users" DROP CONSTRAINT "users_email_key";`],
+    ["DROP VIEW", `DROP VIEW "user_summary";`],
+    ["TRUNCATE", `TRUNCATE TABLE "extension_tokens";`],
   ];
 
   for (const [kind, sql] of destructiveCases) {
@@ -132,9 +150,38 @@ describe("check-destructive-migration gate", () => {
       "20260101000004_noise",
       [
         `-- This migration does NOT do: ALTER TABLE "users" DROP COLUMN "x";`,
+        `/* nor does it DROP TABLE legacy_sessions; */`,
         `INSERT INTO "notes" ("body") VALUES ('we used to DROP TABLE legacy here');`,
         `ALTER TABLE "users" ADD COLUMN "y" TEXT;`,
       ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(0);
+  });
+
+  it("T7: does not flag the relaxing DROP forms (DEFAULT / NOT NULL / IDENTITY)", () => {
+    // These remove a CONSTRAINT on writes rather than removing data, so old
+    // code keeps working — flagging them would train reviewers to rubber-stamp
+    // baseline additions.
+    addMigration(
+      "20260101000005_relaxing",
+      [
+        `ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL;`,
+        `ALTER TABLE "users" ALTER COLUMN "created_at" DROP DEFAULT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(0);
+  });
+
+  it("T8: does not flag a quoted identifier that looks like a keyword", () => {
+    addMigration(
+      "20260101000006_quoted",
+      `ALTER TABLE "users" ADD COLUMN "rename" TEXT;`,
     );
 
     const r = runGate();

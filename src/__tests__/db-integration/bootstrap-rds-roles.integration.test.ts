@@ -89,7 +89,7 @@ async function dropProbeRoles(su: Client): Promise<void> {
 
 async function roleAttrs(su: Client, name: string) {
   const { rows } = await su.query(
-    `SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolcanlogin
+    `SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication, rolcanlogin
        FROM pg_roles WHERE rolname = $1`,
     [name],
   );
@@ -122,6 +122,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     expect(a.rolbypassrls).toBe(false);
     expect(a.rolcreatedb).toBe(false);
     expect(a.rolcreaterole).toBe(false);
+    expect(a.rolreplication).toBe(false);
     expect(a.rolcanlogin).toBe(true);
   });
 
@@ -141,11 +142,17 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
 
   it("T3: demotes a role that was escalated out of band", async () => {
     await convergeRole(su, PROBE, "pw");
-    // Simulate an operator (or attacker) escalating the role.
-    await su.query(`ALTER ROLE ${PROBE} WITH SUPERUSER BYPASSRLS CREATEDB CREATEROLE`);
+    // Simulate an operator (or attacker) escalating the role. REPLICATION is
+    // included deliberately: it lets a role stream the whole database, and an
+    // earlier revision of the attribute list omitted NOREPLICATION, so a
+    // re-run demoted SUPERUSER/BYPASSRLS but silently left REPLICATION set.
+    await su.query(
+      `ALTER ROLE ${PROBE} WITH SUPERUSER BYPASSRLS CREATEDB CREATEROLE REPLICATION`,
+    );
     const escalated = await roleAttrs(su, PROBE);
     expect(escalated.rolsuper).toBe(true);
     expect(escalated.rolbypassrls).toBe(true);
+    expect(escalated.rolreplication).toBe(true);
 
     await convergeRole(su, PROBE, "pw");
 
@@ -154,6 +161,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     expect(a.rolbypassrls).toBe(false);
     expect(a.rolcreatedb).toBe(false);
     expect(a.rolcreaterole).toBe(false);
+    expect(a.rolreplication).toBe(false);
   });
 
   it("T4: strips an inherited role membership", async () => {

@@ -275,16 +275,34 @@ rollback_all() {
   return 0
 }
 
-# Arm the trap: any unhandled failure (set -e) or interrupt from here on runs the
-# compensation before exiting, so we never leave a half-updated stack behind.
+# Arm the traps: any unhandled failure (set -e) or interrupt from here on runs
+# the compensation before exiting, so we never leave a half-updated stack behind.
+#
+# ERR and the signals need SEPARATE handlers. On a signal received between
+# commands, `$?` is the exit status of the last COMPLETED command — normally 0 —
+# so a shared handler doing `exit $?` would exit 0 and report a deploy that was
+# interrupted mid-rollout as a SUCCESS to CI/CD. Signals therefore carry their
+# own conventional non-zero status (128 + signal number).
 on_err() {
   local rc=$?
   trap - ERR INT TERM
+  # `set -e` fires ERR with a zero status only in pathological cases; force a
+  # non-zero exit either way so an abort can never look like success.
+  [ "$rc" -ne 0 ] || rc=1
   echo "ERROR: deploy aborted (exit $rc) — compensating." >&2
   rollback_all || true
   exit "$rc"
 }
-trap on_err ERR INT TERM
+on_signal() {
+  local rc="$1"
+  trap - ERR INT TERM
+  echo "ERROR: deploy interrupted by signal (exit $rc) — compensating." >&2
+  rollback_all || true
+  exit "$rc"
+}
+trap on_err ERR
+trap 'on_signal 130' INT   # 128 + SIGINT(2)
+trap 'on_signal 143' TERM  # 128 + SIGTERM(15)
 
 for i in "${!SERVICES[@]}"; do
   echo "==> Updating service ${SERVICES[$i]} → ${WANT_TD[$i]} (was ${PREV_TD[$i]})"

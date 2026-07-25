@@ -302,9 +302,38 @@ The application uses four database roles with separated privileges:
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
 
 On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
-scripts run only on the Docker Postgres image) — create them manually during
-bootstrap, before the first migration. See `infra/terraform/README.md`
-"First-time bootstrap".
+scripts run only on the Docker Postgres image) — create them during bootstrap,
+before the first migration, with `scripts/bootstrap-rds-roles.mjs`. See
+`infra/terraform/README.md` "First-time bootstrap".
+
+### Ownership of role attributes vs table ACLs
+
+These are owned by different things, which matters when auditing:
+
+| Aspect | Owner | Converged by a re-run? |
+|--------|-------|------------------------|
+| Role attributes (`NOSUPERUSER`, `NOBYPASSRLS`, `NOREPLICATION`, …), password, role memberships | `scripts/bootstrap-rds-roles.mjs` | Yes — always re-applied and asserted |
+| `passwd_app` schema + table ACLs | `scripts/bootstrap-rds-roles.mjs` | Yes — revoke-then-grant |
+| Worker table ACLs (`passwd_outbox_worker`, `passwd_retention_gc_worker`) | The Prisma migrations that create each table | **No** |
+
+The worker table ACLs cannot be converged by the bootstrap: it runs *before* the
+first migration, so those grants do not exist yet, and a blanket
+`REVOKE ALL ON ALL TABLES` on a re-run would strip exactly what the migrations
+installed. A privilege granted to a worker out of band is therefore **not**
+removed by re-running the bootstrap.
+
+Detection is a separate step — run it after migrations, against the deployed DB:
+
+```bash
+MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs
+```
+
+It diffs the live table ACLs of all three roles against
+`scripts/checks/db-grants-manifest.json` and exits non-zero on any
+`UNEXPECTED_GRANT` (over-privilege) or `MISSING_GRANT` (migrations not applied).
+When a migration intentionally changes a grant, regenerate the manifest with
+`--write` and review the diff — that diff is the security-relevant part of the
+migration.
 
 ```sql
 -- Production: create a non-superuser application role

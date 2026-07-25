@@ -31,6 +31,9 @@ ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh    
 
 PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
 
+MIGRATION_DATABASE_URL=<superuser-url> node scripts/bootstrap-rds-roles.mjs     # Create/converge least-privilege DB roles (RDS bootstrap; convergent, re-runnable)
+MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs         # Audit live table ACLs vs db-grants-manifest.json (--write to regenerate)
+
 MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens               # Encrypt legacy plaintext OAuth tokens (idempotent; --dry-run available)
 ```
 
