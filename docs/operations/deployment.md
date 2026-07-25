@@ -55,16 +55,16 @@ terraform -chdir=infra/terraform output -raw image_signing_policy_arn
 aws iam attach-role-policy --role-name <deploy-role> --policy-arn <that-arn>
 
 # Verify an image by hand
-cosign verify --key "awskms://$(terraform -chdir=infra/terraform output -raw image_signing_key_arn)" \
+cosign verify --key "awskms:///$(terraform -chdir=infra/terraform output -raw image_signing_key_arn)" \
   <account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app@sha256:<digest>
 ```
 
-`COSIGN_KEY=awskms://<arn>` overrides the key `deploy.sh` reads from the stack
+`COSIGN_KEY=awskms:///<arn>` overrides the key `deploy.sh` reads from the stack
 output — use it when the signing key lives outside this Terraform state.
 
 > **Images pushed before signing was introduced carry no signature** and will be
 > refused. Re-push from a clean checkout (which signs them), or sign the existing
-> digest once with `cosign sign --key awskms://<arn> <repo>@sha256:<digest>`.
+> digest once with `cosign sign --key awskms:///<arn> <repo>@sha256:<digest>`.
 
 > **Do not delete the KMS key.** Losing the private half invalidates every
 > signature already attached to images in ECR; the key is created with a 30-day

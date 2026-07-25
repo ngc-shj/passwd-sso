@@ -276,6 +276,58 @@ describe("check-migration-transaction gate", () => {
     expect(r.stderr).toContain("must stand alone");
   });
 
+  it("T6i: fails when the transaction ends in ROLLBACK", () => {
+    // ROLLBACK discards every schema change while the migration still exits 0,
+    // so Prisma records it as applied against a database that never got it.
+    // Counting ROLLBACK as a COMMIT (they both close a transaction) made this
+    // look like a correctly wrapped migration.
+    addMigration(
+      "20260101000014_rollback",
+      [
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+        `ROLLBACK;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("contains ROLLBACK");
+  });
+
+  it("T6j: accepts END as an alias for COMMIT", () => {
+    addMigration(
+      "20260101000015_end_alias",
+      [
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+        `END;`,
+      ].join("\n"),
+    );
+
+    expect(runGate().status).toBe(0);
+  });
+
+  it("T6k: fails when COMMIT precedes the BEGIN that should wrap the DDL", () => {
+    addMigration(
+      "20260101000016_out_of_order",
+      [
+        `COMMIT;`,
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("never committed");
+  });
+
   it("T7: baseline suppresses the finding, and a stale entry fails", () => {
     addMigration(
       "20260101000006_multi",

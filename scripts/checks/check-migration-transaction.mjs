@@ -97,6 +97,7 @@ export function analyze(sql) {
   let nonTransactionalDdl = 0;
   let beginCount = 0;
   let commitCount = 0;
+  let rollbackCount = 0;
   let inTransaction = false;
   let openAtEnd = false;
   let atBoundary = true;
@@ -116,8 +117,17 @@ export function analyze(sql) {
       } else if (t === "START" && tokens[i + 1] === "TRANSACTION") {
         beginCount += 1;
         inTransaction = true;
-      } else if (t === "COMMIT" || t === "ROLLBACK" || t === "END") {
+      } else if (t === "COMMIT" || t === "END") {
+        // END is an accepted alias for COMMIT at the top level. (Inside a
+        // PL/pgSQL block END closes the block, but dollar-quoted bodies are not
+        // expanded here, so such an END is never seen.)
         commitCount += 1;
+        inTransaction = false;
+      } else if (t === "ROLLBACK") {
+        // NOT a successful close: a migration that rolls back applies nothing
+        // while still "completing". Counted separately so the caller can reject
+        // it rather than mistake it for a committed transaction.
+        rollbackCount += 1;
         inTransaction = false;
       } else if (DDL_KEYWORDS.has(t)) {
         ddlCount += 1;
@@ -142,6 +152,7 @@ export function analyze(sql) {
     nonTransactionalDdl,
     beginCount,
     commitCount,
+    rollbackCount,
     openAtEnd,
   };
 }
@@ -177,8 +188,15 @@ export function findUnwrapped() {
     if (!dir.isDirectory()) continue;
     const sqlPath = join(MIGRATIONS_DIR, dir.name, "migration.sql");
     if (!existsSync(sqlPath)) continue;
-    const { ddlCount, unwrappedDdlCount, nonTransactionalDdl, beginCount, commitCount, openAtEnd } =
-      analyze(readFileSync(sqlPath, "utf8"));
+    const {
+      ddlCount,
+      unwrappedDdlCount,
+      nonTransactionalDdl,
+      beginCount,
+      commitCount,
+      rollbackCount,
+      openAtEnd,
+    } = analyze(readFileSync(sqlPath, "utf8"));
 
     const flag = (reason) => found.push({ name: dir.name, ddlCount, reason });
 
@@ -197,6 +215,13 @@ export function findUnwrapped() {
 
     if (ddlCount <= 1) continue; // single statement is atomic by itself
 
+    // A ROLLBACK discards every schema change while the migration still exits
+    // successfully — Prisma would record it as applied against a database that
+    // never received it. Never legitimate in a committed migration.
+    if (rollbackCount > 0) {
+      flag(`contains ROLLBACK — the schema changes would be discarded, not applied`);
+      continue;
+    }
     // An OPENED but unclosed transaction is not atomic: the implicit end-of-file
     // behaviour is not something to rely on for a schema change. (When no
     // transaction was opened at all, the unwrapped-DDL check below reports it

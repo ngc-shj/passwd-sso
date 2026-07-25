@@ -104,26 +104,23 @@ resource "aws_ecr_lifecycle_policy" "app" {
         }
         action = { type = "expire" }
       },
+      # NOTE: there is deliberately NO rule for cosign signature artifacts
+      # (`sha256-<digest>.sig`).
+      #
+      # An age-based rule on signatures is actively dangerous next to the
+      # count-based rules below: with infrequent deploys an image stays (it is
+      # within "last 20") while its signature ages out, and because verification
+      # fails closed that image becomes UNDEPLOYABLE — precisely when you need it
+      # for a rollback. Any independent retention for signatures risks outliving
+      # or under-living its subject.
+      #
+      # Instead, signature lifetime is tied to the subject's: cosign attaches
+      # signatures as OCI referrers, and ECR garbage-collects reference artifacts
+      # when their subject image is expired. So the `v`/`git-` count rules below
+      # transitively bound the signatures, and a signature can never expire while
+      # the image it attests is still retained.
       {
-        # cosign stores a signature as its own image tagged `sha256-<digest>.sig`.
-        # These are TAGGED, so the untagged rule never reaches them, and they do
-        # not carry the `v`/`git-` prefixes below — without this rule they would
-        # accumulate forever. Kept generously longer than the images they attest
-        # so a signature never expires before its subject (which would make
-        # `cosign verify` fail on an image that is still deployable).
         rulePriority = 2
-        description  = "Expire cosign signature artifacts after 180 days"
-        selection = {
-          tagStatus     = "tagged"
-          tagPrefixList = ["sha256-"]
-          countType     = "sinceImagePushed"
-          countUnit     = "days"
-          countNumber   = 180
-        }
-        action = { type = "expire" }
-      },
-      {
-        rulePriority = 3
         description  = "Keep last 10 release-tagged images"
         selection = {
           # Immutable repo: images are pushed as version tags (vX.Y.Z), never
@@ -136,7 +133,7 @@ resource "aws_ecr_lifecycle_policy" "app" {
         action = { type = "expire" }
       },
       {
-        rulePriority = 4
+        rulePriority = 3
         description  = "Keep last 20 git-SHA images (scripts/deploy.sh)"
         selection = {
           # deploy.sh pushes `git-<full-sha>`; without a rule these were retained

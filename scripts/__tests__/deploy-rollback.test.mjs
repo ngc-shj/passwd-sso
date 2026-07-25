@@ -30,6 +30,8 @@ const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = resolve(REPO_ROOT, "scripts", "deploy.sh");
 
 const ECR_URL = "111122223333.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-prod-app";
+const KMS_KEY_ARN =
+  "arn:aws:kms:ap-northeast-1:111122223333:key/11111111-2222-3333-4444-555555555555";
 const SERVICE_NAMES = {
   ecs_app_service_name: "passwd-sso-prod-app",
   ecs_jackson_service_name: "passwd-sso-prod-jackson",
@@ -118,8 +120,7 @@ function installStubs(opts = {}) {
     ...SERVICE_NAMES,
     ...NEW_TD,
     ecs_cluster_name: "passwd-sso-prod-cluster",
-    image_signing_key_arn:
-      "arn:aws:kms:ap-northeast-1:111122223333:key/11111111-2222-3333-4444-555555555555",
+    image_signing_key_arn: KMS_KEY_ARN,
   };
   const tfOutputCases = Object.entries(tfOutputs)
     .map(([k, v]) => `    ${k}) echo "${v}";;`)
@@ -462,6 +463,27 @@ describe("deploy.sh image signature enforcement", () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("no valid signature");
     expect(logLines("ecs update-service")).toHaveLength(0);
+  });
+
+  it("passes a three-slash awskms:/// URI to cosign", () => {
+    // cosign's AWS KMS URI is awskms://[ENDPOINT]/[ID]. With no custom endpoint
+    // the authority is empty, so an ARN needs THREE slashes. Two makes cosign
+    // read the ARN as the endpoint host; key resolution fails, verification
+    // fails closed, and EVERY deploy aborts. Assert the exact string.
+    installStubs({ imageAbsent: true });
+    const expectedKey = `awskms:///${KMS_KEY_ARN}`;
+
+    const result = runDeploy();
+
+    expect(result.status).toBe(0);
+    const keyed = logLines("cosign").filter((l) => l.includes("--key"));
+    expect(keyed.length).toBeGreaterThan(0);
+    for (const line of keyed) {
+      expect(line).toContain(`--key ${expectedKey} `);
+      // Guard the specific malformed form rather than only the correct one, so a
+      // regression to two slashes cannot pass on a substring match.
+      expect(line).not.toContain(`--key awskms://${KMS_KEY_ARN}`);
+    }
   });
 
   it("signs the pushed digest and deploys that digest, not the tag", () => {

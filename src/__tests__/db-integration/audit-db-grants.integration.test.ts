@@ -173,6 +173,58 @@ describe("audit-db-grants (real DB)", () => {
     }
   });
 
+  it("T7: detects CREATE granted on the schema", async () => {
+    // CREATE on a schema lets the role add its own tables/functions there. No
+    // table-level query surfaces it, so it needs its own audit dimension.
+    try {
+      await su.query("GRANT CREATE ON SCHEMA public TO passwd_outbox_worker");
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: SCHEMA:passwd_outbox_worker public CREATE");
+    } finally {
+      await su.query("REVOKE CREATE ON SCHEMA public FROM passwd_outbox_worker");
+    }
+  });
+
+  it("T8: detects a role attribute re-granted after bootstrap", async () => {
+    // bootstrap-rds-roles converges role attributes, but migrations run as
+    // SUPERUSER and can re-grant them at any time. Asserting on every deploy is
+    // what makes the bootstrap-time convergence durable.
+    try {
+      await su.query("ALTER ROLE passwd_outbox_worker CREATEDB");
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: ROLEATTR:passwd_outbox_worker rolcreatedb true");
+    } finally {
+      await su.query("ALTER ROLE passwd_outbox_worker NOCREATEDB");
+    }
+  });
+
+  it("T9: detects a default privilege pre-authorising future tables", async () => {
+    // Default ACLs apply to objects created LATER, so they grant access to
+    // tables that do not exist yet — invisible to any "what can this role touch
+    // now" query.
+    try {
+      await su.query(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO passwd_outbox_worker",
+      );
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: DEFAULTACL:");
+      expect(r.stderr).toContain("passwd_outbox_worker=r");
+    } finally {
+      await su.query(
+        "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON TABLES FROM passwd_outbox_worker",
+      );
+    }
+  });
+
   it("T6: detects a MISSING grant (manifest entry with no live privilege)", () => {
     // Simulates migrations not having been applied: the manifest expects a
     // privilege the database does not grant.

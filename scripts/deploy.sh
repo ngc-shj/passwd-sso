@@ -24,7 +24,7 @@ set -Eeuo pipefail
 # signature-verified are exactly the bytes that run.
 #
 # Requires `cosign` on PATH and kms:Sign on the signing key (see
-# infra/terraform/ecr.tf). COSIGN_KEY=awskms://<arn> overrides the key that
+# infra/terraform/ecr.tf). COSIGN_KEY=awskms:///<arn> overrides the key that
 # `terraform output image_signing_key_arn` reports.
 #
 # ROLLBACK (no schema change): re-point the services at a previous known-good
@@ -99,11 +99,15 @@ resolve_cosign_key() {
   if [ -z "$arn" ] || [ "$arn" = "None" ]; then
     echo "ERROR: could not resolve the image-signing key." >&2
     echo "       Expected \`terraform output -raw image_signing_key_arn\` (apply the" >&2
-    echo "       stack first) or an explicit COSIGN_KEY=awskms://... override." >&2
+    echo "       stack first) or an explicit COSIGN_KEY=awskms:///... override." >&2
     return 1
   fi
-  # cosign addresses KMS keys as awskms://<key-arn-or-alias>.
-  echo "awskms://${arn}"
+  # cosign's AWS KMS URI is awskms://[ENDPOINT]/[ID]. We do not use a custom
+  # endpoint, so the authority is EMPTY and the ARN goes in the path — that is
+  # THREE slashes: `awskms:///arn:aws:kms:...`. With two, the ARN is parsed as
+  # the endpoint host and key resolution fails, which (because verification
+  # fails closed) would abort every deploy.
+  echo "awskms:///${arn}"
 }
 
 # Verify that $1 (an immutable digest ref) carries a signature from our key.
