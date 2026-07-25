@@ -23,11 +23,10 @@
  *
  * Runs without a Program (in-memory project, per project_ast_guard_tsmorph_no_program).
  */
-import { Project, SyntaxKind, ts } from "ts-morph";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, extname, relative } from "node:path";
+import { SyntaxKind } from "ts-morph";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
+import { createAstProject, sourceFiles } from "./lib/ast-project.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.SESSION_TOKEN_HASHED_ROOT
@@ -49,28 +48,7 @@ const EXCLUDE = new Set([
   "src/app/api/sessions/helpers.ts",
 ]);
 
-const project = new Project({
-  useInMemoryFileSystem: true,
-  skipFileDependencyResolution: true,
-  compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
-});
-
-function walk(dir) {
-  const out = [];
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) { out.push(...walk(full)); continue; }
-    if (!e.isFile()) continue;
-    const ext = extname(e.name);
-    if (ext !== ".ts" && ext !== ".tsx") continue;
-    if (e.name.endsWith(".test.ts") || e.name.endsWith(".test.tsx")) continue;
-    if (full.includes(`${join(dir, "__tests__")}`) || full.split(/[/\\]/).includes("__tests__")) continue;
-    out.push(full);
-  }
-  return out;
-}
+const project = createAstProject();
 
 // True when a `<recv>.session.<op>(...)` call node.
 function isSessionOpCall(call) {
@@ -163,10 +141,8 @@ function resolveGuardedValue(valueNode) {
 
 const violations = [];
 
-for (const file of walk(SRC_DIR)) {
-  const rel = relative(REPO_ROOT, file).split("\\").join("/");
+for (const { rel, sf } of sourceFiles(project, SRC_DIR, REPO_ROOT)) {
   if (EXCLUDE.has(rel)) continue;
-  const sf = project.createSourceFile(rel, readFileSync(file, "utf8"), { overwrite: true });
 
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     if (!isSessionOpCall(call)) continue;

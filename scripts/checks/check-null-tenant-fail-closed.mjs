@@ -42,9 +42,9 @@
  *
  * Env: NTFC_CHECK_ROOT overrides the repo root (used by the guard self-test).
  */
-import { readFileSync, readdirSync } from "node:fs";
-import { join, extname, relative } from "node:path";
-import { Project, SyntaxKind, ts } from "ts-morph";
+import { join } from "node:path";
+import { SyntaxKind } from "ts-morph";
+import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 const ROOT = process.env.NTFC_CHECK_ROOT ?? REPO_ROOT;
@@ -85,23 +85,7 @@ const ACCESS_DECISION_NAMES = new Set([
   "enforceAccessRestriction", "checkTeamAccessRestriction",
 ]);
 
-const project = new Project({
-  useInMemoryFileSystem: true,
-  skipFileDependencyResolution: true,
-  compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
-});
-
-function walk(dir) {
-  const out = [];
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) out.push(...walk(full));
-    else if (e.isFile() && (extname(e.name) === ".ts" || extname(e.name) === ".tsx")) out.push(full);
-  }
-  return out;
-}
+const project = createAstProject();
 
 function selectNamesEnforcementField(objLiteral) {
   if (!objLiteral || objLiteral.getKind() !== SyntaxKind.ObjectLiteralExpression) return false;
@@ -312,22 +296,13 @@ function callsAccessDecision(sf) {
   return false;
 }
 
-const targets = SCAN_DIRS.flatMap((d) => {
-  const full = join(ROOT, d);
-  return d.endsWith(".ts") ? [full] : walk(full);
-});
-
 const liveReads = new Set();
 const violations = [];
 
-for (const file of targets) {
-  if (file.includes(".test.") || file.includes("__tests__")) continue;
-  let text;
-  try { text = readFileSync(file, "utf8"); } catch { continue; }
-  const rel = relative(ROOT, file);
-  const virtualName = `/v/${rel.replaceAll("/", "_")}${extname(file) === ".tsx" ? ".tsx" : ".ts"}`;
-  const sf = project.createSourceFile(virtualName, text, { overwrite: true });
-
+// SCAN_DIRS mixes directories with a single-file target (src/auth.ts);
+// sourceFilesFrom walks dirs, includes single files, and excludes test files —
+// exactly the prior hand-rolled behavior.
+for (const { rel, sf } of sourceFilesFrom(project, SCAN_DIRS, ROOT)) {
   const reads = findEnforcementReads(sf);
   if (reads.length === 0) continue;
   liveReads.add(rel);

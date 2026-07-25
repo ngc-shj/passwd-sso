@@ -26,10 +26,10 @@
  *
  * Runs without a Program (in-memory project).
  */
-import { Project, SyntaxKind, ts } from "ts-morph";
-import { readdirSync, readFileSync } from "node:fs";
-import { join, extname, relative, dirname } from "node:path";
+import { SyntaxKind } from "ts-morph";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createAstProject, sourceFiles } from "./lib/ast-project.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.CRITICAL_AUDIT_ATOMIC_ROOT
@@ -47,28 +47,7 @@ const CRITICAL_ACTIONS = new Set([
   "RECOVERY_PASSPHRASE_RESET",
 ]);
 
-const project = new Project({
-  useInMemoryFileSystem: true,
-  skipFileDependencyResolution: true,
-  compilerOptions: { allowJs: true, jsx: ts.JsxEmit.ReactJSX },
-});
-
-function walk(dir) {
-  const out = [];
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const e of entries) {
-    const full = join(dir, e.name);
-    if (e.isDirectory()) { out.push(...walk(full)); continue; }
-    if (!e.isFile()) continue;
-    const ext = extname(e.name);
-    if (ext !== ".ts" && ext !== ".tsx") continue;
-    if (e.name.endsWith(".test.ts")) continue;
-    if (full.split(/[/\\]/).includes("__tests__")) continue;
-    out.push(full);
-  }
-  return out;
-}
+const project = createAstProject();
 
 // Extract the AUDIT_ACTION.<NAME> referenced by the `action:` property of an
 // object literal, or null. Accepts `AUDIT_ACTION.X` (PropertyAccess) — the sole
@@ -92,10 +71,7 @@ function actionNameFromObject(objLiteral) {
 // action, so reading the direct `action:` property is sufficient.
 const seenInTxActions = new Set();
 
-for (const file of walk(SEARCH_DIR)) {
-  const rel = relative(REPO_ROOT, file).split("\\").join("/");
-  const sf = project.createSourceFile(rel, readFileSync(file, "utf8"), { overwrite: true });
-
+for (const { sf } of sourceFiles(project, SEARCH_DIR, REPO_ROOT)) {
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     const name = callee.getKind() === SyntaxKind.PropertyAccessExpression
