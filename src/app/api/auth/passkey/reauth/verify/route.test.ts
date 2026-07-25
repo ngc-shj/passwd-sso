@@ -73,6 +73,11 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: unknown) => fn,
 }));
+// H4: getSessionTokenDigest hashes the cookie token; deterministic hash so the
+// where-clause assertion is predictable.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
 
 import { POST } from "./route";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
@@ -147,7 +152,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       "webauthn:challenge:reauth:user-1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     );
     expect(mockSessionUpdate).toHaveBeenCalledWith({
-      where: { sessionToken: "sess-1" },
+      where: { sessionToken: "hashed:sess-1" },
       data: { passkeyVerifiedAt: expect.any(Date) },
     });
     expect(mockLogAudit).toHaveBeenCalledWith(

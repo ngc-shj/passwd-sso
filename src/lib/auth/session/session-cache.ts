@@ -107,6 +107,15 @@ function cacheKey(token: string): string {
   return `${SESSION_CACHE_KEY_PREFIX}${hashSessionToken(token)}`;
 }
 
+// H4: the DB now stores the digest (hashSessionToken output), which is exactly
+// the value cacheKey() derives from a raw token — so a caller holding a stored
+// digest must key the cache by PREFIX+digest DIRECTLY, without re-hashing (that
+// would double-hash and silently miss the real cache key). Use this for any
+// invalidation driven by a value read from Session.sessionToken.
+function cacheKeyFromDigest(digest: string): string {
+  return `${SESSION_CACHE_KEY_PREFIX}${digest}`;
+}
+
 async function safeDel(redis: Redis, token: string): Promise<void> {
   try {
     await redis.del(cacheKey(token));
@@ -203,11 +212,27 @@ export async function setCachedSession(
  * logger alone is insufficient for incident reconstruction.
  */
 export async function invalidateCachedSession(token: string): Promise<boolean> {
+  // keyFn deferred so a sync throw from cacheKey()/hashSessionToken()
+  // (KeyProvider cold-start) is contained as a tombstone-write failure.
+  return tombstoneByKey(() => cacheKey(token));
+}
+
+/**
+ * H4 digest-native tombstone. Input is a stored digest (Session.sessionToken),
+ * NOT a raw cookie token — keyed directly via cacheKeyFromDigest (no re-hash).
+ */
+export async function invalidateCachedSessionByDigest(
+  digest: string,
+): Promise<boolean> {
+  return tombstoneByKey(() => cacheKeyFromDigest(digest));
+}
+
+async function tombstoneByKey(keyFn: () => string): Promise<boolean> {
   const redis = getRedis();
   if (!redis) return true;
   try {
     await redis.set(
-      cacheKey(token),
+      keyFn(),
       JSON.stringify({ tombstone: true }),
       "PX",
       TOMBSTONE_TTL_MS,
@@ -236,23 +261,34 @@ export async function invalidateCachedSession(token: string): Promise<boolean> {
 export async function invalidateCachedSessionsBulk(
   tokens: ReadonlyArray<string>,
 ): Promise<{ total: number; failed: number }> {
-  if (tokens.length === 0) return { total: 0, failed: 0 };
+  return tombstoneBulkByKeys(tokens.map(cacheKey));
+}
+
+/**
+ * H4 digest-native bulk tombstone. Inputs are stored digests
+ * (Session.sessionToken), keyed directly (no re-hash).
+ */
+export async function invalidateCachedSessionsBulkByDigest(
+  digests: ReadonlyArray<string>,
+): Promise<{ total: number; failed: number }> {
+  return tombstoneBulkByKeys(digests.map(cacheKeyFromDigest));
+}
+
+async function tombstoneBulkByKeys(
+  keys: ReadonlyArray<string>,
+): Promise<{ total: number; failed: number }> {
+  if (keys.length === 0) return { total: 0, failed: 0 };
   const redis = getRedis();
-  if (!redis) return { total: tokens.length, failed: 0 };
+  if (!redis) return { total: keys.length, failed: 0 };
   const pipeline = redis.pipeline();
-  for (const token of tokens) {
-    pipeline.set(
-      cacheKey(token),
-      JSON.stringify({ tombstone: true }),
-      "PX",
-      TOMBSTONE_TTL_MS,
-    );
+  for (const key of keys) {
+    pipeline.set(key, JSON.stringify({ tombstone: true }), "PX", TOMBSTONE_TTL_MS);
   }
   try {
     await pipeline.exec();
-    return { total: tokens.length, failed: 0 };
+    return { total: keys.length, failed: 0 };
   } catch (err) {
     logRedisError((err as { code?: string } | undefined)?.code);
-    return { total: tokens.length, failed: tokens.length };
+    return { total: keys.length, failed: keys.length };
   }
 }

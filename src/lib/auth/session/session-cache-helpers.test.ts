@@ -5,7 +5,8 @@ const { mockInvalidate } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/auth/session/session-cache", () => ({
-  invalidateCachedSession: mockInvalidate,
+  // H4: the helper now delegates to the digest-native invalidation.
+  invalidateCachedSessionByDigest: mockInvalidate,
 }));
 
 import { invalidateCachedSessions } from "./session-cache-helpers";

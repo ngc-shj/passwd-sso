@@ -1,5 +1,6 @@
 import Bowser from "bowser";
 import { prisma } from "@/lib/prisma";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { sendEmail } from "@/lib/email";
 import { newDeviceLoginEmail } from "@/lib/email/templates/new-device-login";
@@ -46,8 +47,11 @@ export async function checkNewDeviceAndNotify(
           createdAt: { gte: thirtyDaysAgo },
           // Exclude the session that was just created so it doesn't
           // match itself and incorrectly mark the device as "known".
+          // H4: meta.currentSessionToken is the RAW token; the DB column stores
+          // the digest, so exclude by digest (a raw value would never match and
+          // the just-created session would trigger a spurious "new device").
           ...(meta.currentSessionToken
-            ? { sessionToken: { not: meta.currentSessionToken } }
+            ? { sessionToken: { not: hashSessionToken(meta.currentSessionToken) } }
             : {}),
         },
         select: { userAgent: true },

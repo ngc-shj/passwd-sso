@@ -32,6 +32,11 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+// H4: the route compares the digest of the cookie token against the stored
+// (digest) column. Deterministic hash so the mock DB row can supply the digest.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
@@ -81,7 +86,8 @@ describe("DELETE /api/sessions/[id]", () => {
 
   it("returns 400 when trying to revoke current session", async () => {
     mockPrismaSession.findFirst.mockResolvedValue({
-      sessionToken: "current-token",
+      // H4: the DB stores the digest; the route hashes the cookie token to match.
+      sessionToken: "hashed:current-token",
     });
 
     const req = createRequest(

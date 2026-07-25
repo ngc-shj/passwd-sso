@@ -5,7 +5,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { getSessionToken } from "./helpers";
+import { getSessionTokenDigest } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
 import { rateLimited, unauthorized } from "@/lib/http/api-response";
 import { revokeAllExtensionTokensForUser, EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
@@ -20,7 +20,8 @@ async function handleGET(request: NextRequest) {
     return unauthorized();
   }
 
-  const currentToken = getSessionToken(request);
+  // H4: the DB stores the digest; look up the current session by digest.
+  const currentTokenDigest = getSessionTokenDigest(request);
 
   // Parallelize independent queries
   const [sessions, tenant, currentSessionId, extensionTokens] = await withUserTenantRls(
@@ -45,10 +46,10 @@ async function handleGET(request: NextRequest) {
           where: { id: session.user.id },
           select: { tenant: { select: { maxConcurrentSessions: true } } },
         }),
-        currentToken
+        currentTokenDigest
           ? prisma.session
               .findUnique({
-                where: { sessionToken: currentToken },
+                where: { sessionToken: currentTokenDigest },
                 select: { id: true },
               })
               .then((r) => r?.id ?? null)
@@ -116,18 +117,19 @@ async function handleDELETE(request: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const currentToken = getSessionToken(request);
-  if (!currentToken) {
+  const currentTokenDigest = getSessionTokenDigest(request);
+  if (!currentTokenDigest) {
     return unauthorized();
   }
 
   // SELECT tokens before deleteMany so we can invalidate the cache after
-  // the DB delete commits (R3 / S-6 sequencing).
+  // the DB delete commits (R3 / S-6 sequencing). H4: exclude the CURRENT
+  // session by its digest (the DB column stores digests).
   const targets = await withUserTenantRls(session.user.id, async () =>
     prisma.session.findMany({
       where: {
         userId: session.user.id,
-        sessionToken: { not: currentToken },
+        sessionToken: { not: currentTokenDigest },
       },
       select: { sessionToken: true },
     }),
@@ -137,7 +139,7 @@ async function handleDELETE(request: NextRequest) {
     prisma.session.deleteMany({
       where: {
         userId: session.user.id,
-        sessionToken: { not: currentToken },
+        sessionToken: { not: currentTokenDigest },
       },
     }),
   );

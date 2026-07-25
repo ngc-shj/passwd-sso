@@ -1,26 +1,31 @@
-import { invalidateCachedSession } from "@/lib/auth/session/session-cache";
+import { invalidateCachedSessionByDigest } from "@/lib/auth/session/session-cache";
 
 /**
  * Best-effort bulk invalidation. Each call is independently best-effort
- * (errors caught + throttled-logged inside invalidateCachedSession);
+ * (errors caught + throttled-logged inside invalidateCachedSessionByDigest);
  * never throws to the caller.
+ *
+ * H4: inputs are STORED DIGESTS (Session.sessionToken values), not raw cookie
+ * tokens — the DB no longer holds raw tokens. Every caller reads the value from
+ * a `select: { sessionToken: true }`, which is the digest, and the cache is
+ * keyed by that same digest, so no re-hashing happens here (re-hashing would
+ * double-hash and silently miss the real cache key).
  *
  * Returns `{ total, failed }` so security-critical callers (vault reset,
  * member removal) can surface tombstone-write failures into audit metadata.
- * Throttled-logging alone is insufficient for forensic reconstruction —
- * see invalidateCachedSession docstring.
+ * Throttled-logging alone is insufficient for forensic reconstruction.
  *
  * For high-cardinality bulk invalidation (tenant policy change with
- * thousands of sessions), prefer Redis pipelining at the call site —
- * see plan §C3 row #9. This helper is for the common 1–N case.
+ * thousands of sessions), prefer Redis pipelining at the call site
+ * (invalidateCachedSessionsBulkByDigest). This helper is for the common 1–N case.
  */
 export async function invalidateCachedSessions(
-  tokens: ReadonlyArray<string>,
+  digests: ReadonlyArray<string>,
 ): Promise<{ total: number; failed: number }> {
-  if (tokens.length === 0) return { total: 0, failed: 0 };
+  if (digests.length === 0) return { total: 0, failed: 0 };
   const results = await Promise.all(
-    tokens.map((t) => invalidateCachedSession(t)),
+    digests.map((d) => invalidateCachedSessionByDigest(d)),
   );
   const failed = results.reduce((acc, ok) => acc + (ok ? 0 : 1), 0);
-  return { total: tokens.length, failed };
+  return { total: digests.length, failed };
 }

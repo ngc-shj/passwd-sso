@@ -2,7 +2,7 @@ import * as Sentry from "@sentry/nextjs";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
-import { invalidateCachedSessionsBulk } from "@/lib/auth/session/session-cache";
+import { invalidateCachedSessionsBulkByDigest, hashSessionToken } from "@/lib/auth/session/session-cache";
 import { getLogger } from "@/lib/logger";
 
 /**
@@ -107,7 +107,10 @@ export async function invalidateUserSessions(
 
   const allTenants = "allTenants" in options && options.allTenants === true;
   const tenantFilter = allTenants ? {} : { tenantId: options.tenantId };
-  const excludeSessionToken = options.excludeSessionToken ?? null;
+  // H4: callers pass the RAW current cookie token to keep their own session
+  // alive; the DB column stores the digest, so exclude by digest.
+  const rawExclude = options.excludeSessionToken ?? null;
+  const excludeSessionDigest = rawExclude == null ? null : hashSessionToken(rawExclude);
   const now = new Date();
 
   return withBypassRls(prisma, async (tx) => {
@@ -117,7 +120,7 @@ export async function invalidateUserSessions(
       where: {
         userId,
         ...tenantFilter,
-        ...(excludeSessionToken ? { sessionToken: { not: excludeSessionToken } } : {}),
+        ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
       },
       select: { sessionToken: true },
     });
@@ -135,7 +138,7 @@ export async function invalidateUserSessions(
         where: {
           userId,
           ...tenantFilter,
-          ...(excludeSessionToken ? { sessionToken: { not: excludeSessionToken } } : {}),
+          ...(excludeSessionDigest ? { sessionToken: { not: excludeSessionDigest } } : {}),
         },
       }),
       tx.extensionToken.updateMany({
@@ -250,7 +253,7 @@ export async function invalidateTenantSessionsCache(
     return { totalSessions: 0, cacheTombstoneFailures: 0 };
   }
 
-  const result = await invalidateCachedSessionsBulk(
+  const result = await invalidateCachedSessionsBulkByDigest(
     targetSessions.map((s) => s.sessionToken),
   );
   return {

@@ -25,6 +25,18 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   withBypassRls: mockWithBypassRls,
 }));
 
+// H4: deterministic digest so where-clause assertions are predictable.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
+vi.mock("@/app/api/sessions/helpers", () => ({
+  getSessionTokenDigest: (req: NextRequest) => {
+    const raw = req.cookies.get("authjs.session-token")?.value
+      ?? req.cookies.get("__Secure-authjs.session-token")?.value ?? null;
+    return raw == null ? null : `hashed:${raw}`;
+  },
+}));
+
 import {
   markCurrentSessionPasskeyVerified,
   PASSKEY_VERIFICATION_WINDOW_MS,
@@ -103,9 +115,10 @@ describe("markCurrentSessionPasskeyVerified", () => {
     mockSessionUpdate.mockResolvedValue({});
 
     await markCurrentSessionPasskeyVerified("sess-1", verifiedAt);
+    // H4: DB row keyed by the digest of the raw token.
 
     expect(mockSessionUpdate).toHaveBeenCalledWith({
-      where: { sessionToken: "sess-1" },
+      where: { sessionToken: "hashed:sess-1" },
       data: { passkeyVerifiedAt: verifiedAt },
     });
   });

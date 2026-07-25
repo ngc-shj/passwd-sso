@@ -172,7 +172,8 @@ run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
 run_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
-run_step "Static: critical-audit-atomic" bash scripts/checks/check-critical-audit-atomic.sh
+run_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
+run_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
 run_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh

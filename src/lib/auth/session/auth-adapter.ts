@@ -16,6 +16,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import {
   encryptAccountTokenTriple,
   decryptAccountTokenTriple,
@@ -111,9 +112,14 @@ export function createCustomAdapter(): Adapter {
     async getSessionAndUser(
       sessionToken: string,
     ): Promise<{ session: AdapterSession; user: AdapterUser } | null> {
+      // H4: DB stores the digest, not the raw cookie token. Hash the incoming
+      // cookie token to look it up. The returned `sessionToken` below is the
+      // digest — Auth.js only uses it to re-issue the same cookie value on
+      // rolling-session update, so we must return the RAW token the caller
+      // passed in, not the stored digest (see mapping after the query).
       const result = await withBypassRls(prisma, async (tx) =>
         tx.session.findUnique({
-          where: { sessionToken },
+          where: { sessionToken: hashSessionToken(sessionToken) },
           select: {
             sessionToken: true,
             userId: true,
@@ -134,7 +140,12 @@ export function createCustomAdapter(): Adapter {
 
       return {
         session: {
-          sessionToken: result.sessionToken,
+          // Return the RAW token the caller passed in, NOT the stored digest
+          // (result.sessionToken). Auth.js re-issues the session cookie from
+          // this value on rolling-session updates; returning the digest would
+          // overwrite the cookie with the digest, and the next request's
+          // hashSessionToken(digest) would never match the stored row.
+          sessionToken,
           userId: result.userId,
           expires: result.expires,
         },
@@ -336,7 +347,8 @@ export function createCustomAdapter(): Adapter {
 
         return tx.session.create({
           data: {
-            sessionToken: session.sessionToken,
+            // H4: store the digest, never the raw cookie token.
+            sessionToken: hashSessionToken(session.sessionToken),
             userId: session.userId,
             tenantId,
             expires: resolvedExpires,
@@ -345,7 +357,6 @@ export function createCustomAdapter(): Adapter {
             provider: meta?.provider ?? null,
           },
           select: {
-            sessionToken: true,
             userId: true,
             expires: true,
           },
@@ -405,7 +416,10 @@ export function createCustomAdapter(): Adapter {
       }
 
       return {
-        sessionToken: created.sessionToken,
+        // Return the RAW token so Auth.js sets the cookie to the value whose
+        // digest we stored. Returning created.sessionToken (the digest) would
+        // set the cookie to the digest and break the next lookup.
+        sessionToken: session.sessionToken,
         userId: created.userId,
         expires: created.expires,
       };
@@ -457,12 +471,15 @@ export function createCustomAdapter(): Adapter {
     },
 
     async deleteSession(sessionToken: string) {
+      // H4: input is the raw cookie token; the DB row and the cache are both
+      // keyed by its digest.
+      const digest = hashSessionToken(sessionToken);
       await withBypassRls(prisma, async (tx) =>
-        tx.session.delete({ where: { sessionToken } }),
+        tx.session.delete({ where: { sessionToken: digest } }),
       BYPASS_PURPOSE.AUTH_FLOW);
       // R3: invalidation runs only if the delete didn't throw — preserves
       // the "DB write commits before cache evict" invariant.
-      await invalidateCachedSessions([sessionToken]);
+      await invalidateCachedSessions([digest]);
     },
 
     async getAccount(providerAccountId: string, provider: string): Promise<AdapterAccount | null> {
@@ -573,10 +590,13 @@ export function createCustomAdapter(): Adapter {
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
       try {
+        // H4: `session.sessionToken` is the raw cookie token; the DB row and
+        // cache are keyed by its digest. Hash once and use throughout.
+        const digest = hashSessionToken(session.sessionToken);
         // Read current session (provider included for provenance-aware resolution)
         const current = await withBypassRls(prisma, async (tx) =>
           tx.session.findUnique({
-            where: { sessionToken: session.sessionToken },
+            where: { sessionToken: digest },
             select: {
               userId: true,
               createdAt: true,
@@ -602,10 +622,10 @@ export function createCustomAdapter(): Adapter {
         if (now > idleDeadlineMs) {
           await withBypassRls(prisma, async (tx) =>
             tx.session.delete({
-              where: { sessionToken: session.sessionToken },
+              where: { sessionToken: digest },
             }),
           BYPASS_PURPOSE.AUTH_FLOW);
-          await invalidateCachedSessions([session.sessionToken]);
+          await invalidateCachedSessions([digest]);
           return null;
         }
 
@@ -614,10 +634,10 @@ export function createCustomAdapter(): Adapter {
         if (now > absoluteDeadlineMs) {
           await withBypassRls(prisma, async (tx) =>
             tx.session.delete({
-              where: { sessionToken: session.sessionToken },
+              where: { sessionToken: digest },
             }),
           BYPASS_PURPOSE.AUTH_FLOW);
-          await invalidateCachedSessions([session.sessionToken]);
+          await invalidateCachedSessions([digest]);
           await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
             action: AUDIT_ACTION.SESSION_REVOKE,
@@ -638,13 +658,12 @@ export function createCustomAdapter(): Adapter {
 
         const updated = await withBypassRls(prisma, async (tx) =>
           tx.session.update({
-            where: { sessionToken: session.sessionToken },
+            where: { sessionToken: digest },
             data: {
               expires: effectiveExpires,
               lastActiveAt: new Date(),
             },
             select: {
-              sessionToken: true,
               userId: true,
               expires: true,
             },
@@ -652,7 +671,10 @@ export function createCustomAdapter(): Adapter {
         BYPASS_PURPOSE.AUTH_FLOW);
 
         return {
-          sessionToken: updated.sessionToken,
+          // Return the RAW token so Auth.js keeps the cookie value whose digest
+          // is stored (returning the digest would rewrite the cookie and break
+          // the next lookup).
+          sessionToken: session.sessionToken,
           userId: updated.userId,
           expires: updated.expires,
         };

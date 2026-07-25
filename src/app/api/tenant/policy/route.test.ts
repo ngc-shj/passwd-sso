@@ -77,7 +77,8 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 vi.mock("@/lib/auth/session/session-cache", () => ({
-  invalidateCachedSessionsBulk: mockInvalidateCachedSessionsBulk,
+  // H4: tenant-session invalidation now uses the digest-native bulk path.
+  invalidateCachedSessionsBulkByDigest: mockInvalidateCachedSessionsBulk,
 }));
 
 vi.mock("@/lib/auth/session/session-timeout", () => ({

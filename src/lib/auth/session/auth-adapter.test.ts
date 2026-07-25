@@ -89,6 +89,11 @@ vi.mock("@/lib/auth/session/session-timeout", () => ({
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+// H4: deterministic hashSessionToken so assertions can predict the stored/
+// looked-up digest. The adapter stores/queries hashed("x"), returns raw "x".
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
 
 import { createCustomAdapter } from "./auth-adapter";
 import {
@@ -354,7 +359,8 @@ describe("createCustomAdapter", () => {
       // We assert on field presence and resolver-sourced expires, not the caller-passed expires.
       const call = mockTxSession.create.mock.calls[0][0];
       expect(call.data).toMatchObject({
-        sessionToken: "tok-1",
+        // H4: DB stores the digest.
+        sessionToken: "hashed:tok-1",
         userId: "u-1",
         tenantId: "tenant-1",
         ipAddress: "192.168.1.1",
@@ -363,8 +369,9 @@ describe("createCustomAdapter", () => {
       });
       expect(call.data.expires).toBeInstanceOf(Date);
       expect(call.data.expires.getTime()).not.toBe(expires.getTime()); // overridden, not pass-through
-      expect(call.select).toEqual({ sessionToken: true, userId: true, expires: true });
+      expect(call.select).toEqual({ userId: true, expires: true });
       expect(result).toEqual({
+        // H4: the RAW token is returned so Auth.js sets the cookie to it.
         sessionToken: "tok-1",
         userId: "u-1",
         expires,
@@ -448,7 +455,6 @@ describe("createCustomAdapter", () => {
           userAgent: null,
         }),
         select: {
-          sessionToken: true,
           userId: true,
           expires: true,
         },
@@ -480,7 +486,6 @@ describe("createCustomAdapter", () => {
           userAgent: "X".repeat(512),
         }),
         select: {
-          sessionToken: true,
           userId: true,
           expires: true,
         },
@@ -764,7 +769,7 @@ describe("createCustomAdapter", () => {
       const result = await adapter.updateSession!({ sessionToken: "tok-1", expires });
 
       expect(mockPrismaSession.findUnique).toHaveBeenCalledWith({
-        where: { sessionToken: "tok-1" },
+        where: { sessionToken: "hashed:tok-1" },
         select: { userId: true, createdAt: true, lastActiveAt: true, tenantId: true, provider: true },
       });
       expect(mockResolveEffectiveSessionTimeouts).toHaveBeenCalledWith("u-1", "google");
@@ -773,6 +778,7 @@ describe("createCustomAdapter", () => {
       const updateCall = mockPrismaSession.update.mock.calls[0][0];
       expect(updateCall.data.expires.getTime()).toBe(expected.getTime());
       expect(updateCall.data.lastActiveAt.getTime()).toBe(now.getTime());
+      // H4: raw token returned to Auth.js.
       expect(result).toEqual({ sessionToken: "tok-1", userId: "u-1", expires });
     });
 
@@ -824,11 +830,11 @@ describe("createCustomAdapter", () => {
       const result = await adapter.updateSession!({ sessionToken: "tok-idle" });
 
       expect(result).toBeNull();
-      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-idle" } });
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "hashed:tok-idle" } });
       expect(mockPrismaSession.update).not.toHaveBeenCalled();
 
       // R3: cache invalidation after DB delete commits.
-      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["tok-idle"]);
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["hashed:tok-idle"]);
     });
 
     it("deletes session when absolute timeout exceeded and emits SESSION_REVOKE audit", async () => {
@@ -851,7 +857,7 @@ describe("createCustomAdapter", () => {
       const result = await adapter.updateSession!({ sessionToken: "tok-abs-ex" });
 
       expect(result).toBeNull();
-      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-abs-ex" } });
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "hashed:tok-abs-ex" } });
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "SESSION_REVOKE",
@@ -863,7 +869,7 @@ describe("createCustomAdapter", () => {
       );
 
       // R3: cache invalidation after DB delete commits.
-      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["tok-abs-ex"]);
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["hashed:tok-abs-ex"]);
     });
 
     it("survives when createdAt + absolute is 1s in the future (off-by-one)", async () => {
@@ -1174,7 +1180,8 @@ describe("createCustomAdapter", () => {
       const adapter = createCustomAdapter();
       await adapter.deleteSession!("tok-1");
       expect(mockWithBypassRls).toHaveBeenCalled();
-      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-1" } });
+      // H4: DB row keyed by digest.
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "hashed:tok-1" } });
     });
 
     it("invalidates cache for the deleted token after DB commits", async () => {
@@ -1182,7 +1189,8 @@ describe("createCustomAdapter", () => {
       const adapter = createCustomAdapter();
       await adapter.deleteSession!("tok-1");
 
-      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["tok-1"]);
+      // H4: invalidation is by digest.
+      expectInvalidatedAfterCommit(mockInvalidateCachedSessions, ["hashed:tok-1"]);
     });
 
     it("does not invalidate cache when DB delete throws (sequencing invariant)", async () => {

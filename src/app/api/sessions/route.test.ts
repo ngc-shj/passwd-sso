@@ -50,6 +50,10 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+// H4: route looks up / excludes the current session by digest.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
@@ -242,7 +246,7 @@ describe("DELETE /api/sessions", () => {
     expect(mockPrismaSession.deleteMany).toHaveBeenCalledWith({
       where: {
         userId: "user-1",
-        sessionToken: { not: "my-token" },
+        sessionToken: { not: "hashed:my-token" },
       },
     });
 

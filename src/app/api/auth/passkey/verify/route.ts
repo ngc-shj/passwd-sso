@@ -25,6 +25,7 @@ import {
 } from "@/lib/auth/session/cookie-name";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
@@ -143,7 +144,8 @@ async function handlePOST(req: NextRequest) {
     // `src/app/api/auth/passkey/reauth/verify/route.ts`.
     await tx.session.create({
       data: {
-        sessionToken,
+        // H4: store the digest; the raw `sessionToken` is set as the cookie below.
+        sessionToken: hashSessionToken(sessionToken),
         userId: user.id,
         tenantId: existingUser.tenantId,
         expires,
