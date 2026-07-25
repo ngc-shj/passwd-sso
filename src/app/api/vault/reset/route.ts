@@ -13,6 +13,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import { resolveUserTenantId } from "@/lib/tenant-context";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { z } from "zod/v4";
 
@@ -66,9 +67,28 @@ async function handlePOST(request: NextRequest) {
   }
 
   const userId = session.user.id;
+  const tenantId = await resolveUserTenantId(userId);
+  if (!tenantId) {
+    // Non-null FK on User.tenantId → a null here is corruption; fail closed
+    // rather than wipe the vault with no atomic audit trail.
+    return errorResponse(API_ERROR.INTERNAL_ERROR);
+  }
 
-  const { deletedEntries, deletedAttachments } =
-    await executeVaultReset(userId);
+  // #6: the fact-of-reset audit is enqueued ATOMICALLY inside the deletion
+  // transaction (executeVaultReset), so an irreversible wipe can never commit
+  // without a committed audit record. The invalidation counts below are appended
+  // as a best-effort completion event (they are only known post-transaction).
+  const { deletedEntries, deletedAttachments } = await executeVaultReset(
+    userId,
+    {
+      tenantId,
+      params: {
+        ...personalAuditBase(request, userId),
+        action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
+        metadata: { phase: "committed" },
+      },
+    },
+  );
 
   // Mirror admin-reset semantics: a self-reset wipes the vault, but the
   // existing Session / ExtensionToken / ApiKey / McpAccessToken /
@@ -81,10 +101,14 @@ async function handlePOST(request: NextRequest) {
     reason: "self_vault_reset",
   });
 
+  // Completion detail (best-effort): invalidation counts known only after the
+  // transaction. Losing this on a crash loses cleanup metadata, NOT the
+  // fact-of-reset (captured atomically above).
   await logAuditAsync({
     ...personalAuditBase(request, userId),
     action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
     metadata: {
+      phase: "completed",
       deletedEntries,
       deletedAttachments,
       invalidatedSessions: invalidationResult.sessions,

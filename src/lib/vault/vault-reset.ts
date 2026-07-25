@@ -15,10 +15,27 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { bulkTransition } from "@/lib/emergency-access/emergency-access-state";
 import { EA_STATUS, EA_ACTOR } from "@/lib/constants";
+import { logAuditInTx, type AuditLogParams } from "@/lib/audit/audit";
 
 export interface VaultResetResult {
   deletedEntries: number;
   deletedAttachments: number;
+}
+
+/**
+ * Atomic audit event (#6): enqueued via logAuditInTx INSIDE the destructive
+ * transaction, so the irreversible vault wipe can never commit without a
+ * committed audit record of the fact + deletion counts. `deletedEntries` /
+ * `deletedAttachments` are added by executeVaultReset — the caller supplies the
+ * audit base (scope/action/actor/target). Post-reset completion detail
+ * (invalidated-session counts) stays a separate best-effort logAuditAsync event
+ * at the caller, since those happen after this transaction.
+ */
+export interface VaultResetAtomicAudit {
+  tenantId: string;
+  params: Omit<AuditLogParams, "metadata"> & {
+    metadata?: Record<string, unknown>;
+  };
 }
 
 /**
@@ -36,6 +53,7 @@ export interface VaultResetResult {
  */
 export async function executeVaultReset(
   targetUserId: string,
+  atomicAudit?: VaultResetAtomicAudit,
   __testHook?: (tx: Prisma.TransactionClient) => Promise<void>,
 ): Promise<VaultResetResult> {
   // Count data being deleted for audit metadata
@@ -122,6 +140,21 @@ export async function executeVaultReset(
         ecdhPrivateKeyAuthTag: null,
       },
     });
+
+    // #6: atomic audit of the destructive fact, INSIDE this transaction. If the
+    // wipe rolls back, so does the audit row; if it commits, the audit row
+    // commits with it — closing the "vault wiped, no audit trail" window that
+    // a post-commit logAuditAsync leaves open on a crash.
+    if (atomicAudit) {
+      await logAuditInTx(tx, atomicAudit.tenantId, {
+        ...atomicAudit.params,
+        metadata: {
+          ...(atomicAudit.params.metadata ?? {}),
+          deletedEntries,
+          deletedAttachments,
+        },
+      });
+    }
 
     // TEST-ONLY: failure-injection hook (T16 / S4 atomicity). Never runs in production.
     if (process.env.NODE_ENV === "test" && __testHook) {

@@ -15,6 +15,7 @@ const {
   mockCheck,
   mockCreateRateLimiter,
   mockLogAudit,
+  mockLogAuditInTx,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
 } = vi.hoisted(() => {
@@ -29,6 +30,7 @@ const {
     mockCheck,
     mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
     mockGetCurrentMasterKeyVersion: vi.fn(),
     mockGetMasterKeyByVersion: vi.fn(),
   };
@@ -46,6 +48,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT",
     userId,

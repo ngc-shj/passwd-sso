@@ -35,15 +35,22 @@ function writeRoute(rel, contents) {
   writeFileSync(full, contents, "utf8");
 }
 
+// Must match CRITICAL_ACTIONS in the gate.
 const ALL = [
   "MASTER_KEY_ROTATION_INITIATE",
   "MASTER_KEY_ROTATION_APPROVE",
   "MASTER_KEY_ROTATION_REVOKE",
+  "MASTER_KEY_ROTATION_EXECUTE",
   "RECOVERY_PASSPHRASE_RESET",
+  "VAULT_RESET_EXECUTED",
+  "ADMIN_VAULT_RESET_EXECUTE",
 ];
 
 const inTx = (a) =>
   `await logAuditInTx(tx, tenantId, {\n  ...base,\n  action: AUDIT_ACTION.${a},\n});\n`;
+// Atomic-audit descriptor form (delegated to a shared helper).
+const descriptor = (a) =>
+  `await executeVaultReset(userId, {\n  tenantId,\n  params: {\n    action: AUDIT_ACTION.${a},\n    metadata: { phase: "committed" },\n  },\n});\n`;
 const asyncCall = (a) =>
   `await logAuditAsync({\n  action: AUDIT_ACTION.${a},\n});\n`;
 
@@ -59,28 +66,36 @@ describe("check-critical-audit-atomic.mjs", () => {
     ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
-    expect(stdout).toContain("all 4 security-critical actions");
+    expect(stdout).toContain("all 7 security-critical actions");
+  });
+
+  it("recognizes an action written via an atomic-audit descriptor (delegated to a helper)", () => {
+    // All but one via logAuditInTx; the last via the { params: { action } }
+    // descriptor passed to a shared helper (executeVaultReset).
+    ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+    writeRoute("vault/reset/route.ts", descriptor(ALL[ALL.length - 1]));
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
   });
 
   it("FAILS when a critical action is only in logAuditAsync (regression)", () => {
-    ALL.slice(0, 3).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
-    // RECOVERY_PASSPHRASE_RESET reverted to async-only.
-    writeRoute("recover/route.ts", asyncCall("RECOVERY_PASSPHRASE_RESET"));
-    const { exitCode, stdout } = runGuard();
+    // All but the last via logAuditInTx; the last reverted to async-only.
+    ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+    const reverted = ALL[ALL.length - 1];
+    writeRoute("recover/route.ts", asyncCall(reverted));
+    const { exitCode, stdout, stderr } = runGuard();
     expect(exitCode).toBe(1);
-    expect(stdout + " ").toBeTruthy();
-    // Error text names the missing action.
-    const combined = stdout + "";
-    expect(combined.length >= 0).toBe(true);
+    expect(stdout + stderr).toContain(reverted);
   });
 
   it("is action-based, not proximity-based: an action next to (not inside) logAuditInTx does not count", () => {
-    ALL.slice(0, 3).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+    ALL.slice(0, -1).forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
+    const reverted = ALL[ALL.length - 1];
     // logAuditInTx present but with a DIFFERENT action; the critical action sits
     // in a sibling logAuditAsync a few lines away.
     writeRoute(
       "recover/route.ts",
-      inTx("SOME_OTHER_ACTION") + "\n" + asyncCall("RECOVERY_PASSPHRASE_RESET"),
+      inTx("SOME_OTHER_ACTION") + "\n" + asyncCall(reverted),
     );
     const { exitCode } = runGuard();
     expect(exitCode).toBe(1);

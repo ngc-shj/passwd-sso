@@ -63,6 +63,10 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
 }));
+// #6: the route resolves the tenantId for the atomic in-tx audit.
+vi.mock("@/lib/tenant-context", () => ({
+  resolveUserTenantId: vi.fn().mockResolvedValue("tenant-1"),
+}));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
@@ -176,25 +180,31 @@ describe("POST /api/vault/reset", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
 
-    // executeVaultReset was called
-    expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
+    // #6: executeVaultReset receives the atomic-audit descriptor (fact-of-reset
+    // enqueued inside the deletion tx).
+    expect(mockExecuteVaultReset).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        tenantId: "tenant-1",
+        params: expect.objectContaining({
+          action: "VAULT_RESET_EXECUTED",
+          metadata: { phase: "committed" },
+        }),
+      }),
+    );
 
-    // Audit log includes invalidation counts (zero by default in this test)
+    // Async completion event carries invalidation counts (zero by default here).
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VAULT_RESET_EXECUTED",
         userId: "user-1",
-        metadata: {
+        metadata: expect.objectContaining({
+          phase: "completed",
           deletedEntries: 5,
           deletedAttachments: 2,
           invalidatedSessions: 0,
-          invalidatedExtensionTokens: 0,
-          invalidatedApiKeys: 0,
-          invalidatedMcpAccessTokens: 0,
-          invalidatedMcpRefreshTokens: 0,
-          invalidatedDelegationSessions: 0,
           cacheTombstoneFailures: 0,
-        },
+        }),
       }),
     );
   });
@@ -295,6 +305,10 @@ describe("POST /api/vault/reset", () => {
     expect(res.status).toBe(200);
 
     expect(mockExecuteVaultReset).toHaveBeenCalledOnce();
-    expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
+    // #6: called with userId + the atomic-audit descriptor.
+    expect(mockExecuteVaultReset).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({ tenantId: "tenant-1" }),
+    );
   });
 });

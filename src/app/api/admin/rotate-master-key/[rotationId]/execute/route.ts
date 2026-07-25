@@ -18,7 +18,7 @@ import {
 } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
@@ -127,8 +127,14 @@ async function handlePOST(
   // CAS update — load-bearing state-machine + cross-tenant guards. Race
   // losses are silent per AdminVaultReset precedent (race vs terminal vs
   // expired all collapse into a generic 409).
-  const casResult = await withTenantRls(prisma, auth.tenantId, async (tx) =>
-    tx.masterKeyRotation.updateMany({
+  // #6: CAS + an atomic "committed" audit in ONE transaction. The CAS commit of
+  // executedAt is the irreversible point; enqueue the fact-of-execution audit
+  // with it so a crash before the post-CAS share-revocation audit still leaves a
+  // committed record that this rotation was executed. The share-revocation
+  // OUTCOME (revokedShares count, partial-failure) is recorded by the separate
+  // best-effort event after this tx (it must run after the post-CAS steps — M1).
+  const casCount = await withTenantRls(prisma, auth.tenantId, async (tx) => {
+    const casResult = await tx.masterKeyRotation.updateMany({
       where: {
         id: rotationId,
         tenantId: auth.tenantId,
@@ -138,10 +144,23 @@ async function handlePOST(
         expiresAt: { gt: now },
       },
       data: { executedAt: now, executedById: auth.subjectUserId },
-    }),
-  );
+    });
+    if (casResult.count === 0) return 0;
 
-  if (casResult.count === 0) {
+    await logAuditInTx(tx, auth.tenantId, {
+      ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+      actorType: ACTOR_TYPE.HUMAN,
+      action: AUDIT_ACTION.MASTER_KEY_ROTATION_EXECUTE,
+      metadata: {
+        phase: "committed",
+        rotationId,
+        targetVersion: row.targetVersion,
+      },
+    });
+    return casResult.count;
+  });
+
+  if (casCount === 0) {
     getLogger().warn(
       {
         rotationId,
@@ -217,6 +236,7 @@ async function handlePOST(
     actorType: ACTOR_TYPE.HUMAN,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION_EXECUTE,
     metadata: {
+      phase: "completed",
       rotationId,
       targetVersion: row.targetVersion,
       revokedShares,

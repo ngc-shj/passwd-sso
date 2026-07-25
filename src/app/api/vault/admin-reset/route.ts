@@ -125,9 +125,30 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.VAULT_RESET_TOKEN_USED);
   }
 
-  // Token secured — now execute the irreversible vault reset
-  const { deletedEntries, deletedAttachments } =
-    await executeVaultReset(session.user.id);
+  // Token secured — now execute the irreversible vault reset. #6: the
+  // fact-of-reset audit is enqueued ATOMICALLY inside the deletion transaction,
+  // so an admin wipe can never commit without a committed audit record. The
+  // invalidation counts are appended as a best-effort completion event below.
+  const { deletedEntries, deletedAttachments } = await executeVaultReset(
+    session.user.id,
+    {
+      tenantId: resetRecord.tenantId,
+      params: {
+        ...(resetRecord.teamId
+          ? teamAuditBase(req, session.user.id, resetRecord.teamId)
+          : tenantAuditBase(req, session.user.id, resetRecord.tenantId)),
+        tenantId: resetRecord.tenantId,
+        action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
+        targetType: "User",
+        targetId: session.user.id,
+        metadata: {
+          phase: "committed",
+          initiatedById: resetRecord.initiatedById,
+          approvedById: resetRecord.approvedById,
+        },
+      },
+    },
+  );
 
   // Invalidate every authentication artifact for the target across ALL
   // tenants (FR7 + F3+S2). The target may hold Session rows in tenants
@@ -140,9 +161,10 @@ async function handlePOST(req: NextRequest) {
     reason: "admin_vault_reset",
   });
 
-  // Audit log — use TENANT scope for tenant-level resets (teamId is null).
-  // tenantId is preserved on TEAM emit so the JSON log line + downstream
-  // consumers see it (helper does not set it for team scope).
+  // Completion detail (best-effort): invalidation counts known only after the
+  // transaction. Losing this on a crash loses cleanup metadata, NOT the
+  // fact-of-reset (captured atomically above). TENANT scope for tenant-level
+  // resets (teamId null); tenantId preserved on TEAM emit for the JSON log line.
   await logAuditAsync({
     ...(resetRecord.teamId
       ? teamAuditBase(req, session.user.id, resetRecord.teamId)
@@ -152,6 +174,7 @@ async function handlePOST(req: NextRequest) {
     targetType: "User",
     targetId: session.user.id,
     metadata: {
+      phase: "completed",
       deletedEntries,
       deletedAttachments,
       initiatedById: resetRecord.initiatedById,

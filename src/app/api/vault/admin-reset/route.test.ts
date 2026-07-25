@@ -236,8 +236,16 @@ describe("POST /api/vault/admin-reset", () => {
     // Token looked up by SHA-256 hash
     expect(mockAdminVaultResetFindUnique).toHaveBeenCalledWith({ where: { tokenHash: TOKEN_HASH } });
 
-    // Vault reset executed
-    expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
+    // Vault reset executed with the atomic-audit descriptor (#6).
+    expect(mockExecuteVaultReset).toHaveBeenCalledWith(
+      "user-1",
+      expect.objectContaining({
+        params: expect.objectContaining({
+          action: "ADMIN_VAULT_RESET_EXECUTE",
+          metadata: expect.objectContaining({ phase: "committed" }),
+        }),
+      }),
+    );
 
     // Token marked as executed via atomic updateMany (TOCTOU prevention).
     // Defense-in-depth `approvedAt: { not: null }` is on the WHERE clause

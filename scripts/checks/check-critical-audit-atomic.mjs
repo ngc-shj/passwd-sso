@@ -29,22 +29,30 @@
 import { SyntaxKind } from "ts-morph";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAstProject, sourceFiles } from "./lib/ast-project.mjs";
+import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.CRITICAL_AUDIT_ATOMIC_ROOT
   ? process.env.CRITICAL_AUDIT_ATOMIC_ROOT
   : join(__dirname, "..", "..");
-const SEARCH_DIR = join(REPO_ROOT, "src", "app", "api");
+// Scan routes AND shared lib helpers — a destructive op may enqueue its atomic
+// audit inside a shared helper (e.g. executeVaultReset in src/lib/vault), not
+// the route file itself.
+const SEARCH_DIRS = ["src/app/api", "src/lib"];
 
-console.log(`check-critical-audit-atomic: SEARCH_DIR=${SEARCH_DIR}`);
+console.log(`check-critical-audit-atomic: SEARCH_DIRS=${SEARCH_DIRS.join(", ")}`);
 
-// Actions whose success audit MUST be written via logAuditInTx.
+// Actions whose success audit MUST be written via logAuditInTx. A destructive
+// op whose audit records a multi-step OUTCOME (post-CAS counts) keeps a separate
+// best-effort completion event, but the fact-of-commit event must be atomic.
 const CRITICAL_ACTIONS = new Set([
   "MASTER_KEY_ROTATION_INITIATE",
   "MASTER_KEY_ROTATION_APPROVE",
   "MASTER_KEY_ROTATION_REVOKE",
+  "MASTER_KEY_ROTATION_EXECUTE",
   "RECOVERY_PASSPHRASE_RESET",
+  "VAULT_RESET_EXECUTED",
+  "ADMIN_VAULT_RESET_EXECUTE",
 ]);
 
 const project = createAstProject();
@@ -66,24 +74,46 @@ function actionNameFromObject(objLiteral) {
   return null;
 }
 
-// The params object of logAuditInTx(tx, tenantId, params) is the 3rd argument.
-// Support spreads inside it (`...tenantAuditBase(...)`) — those never carry the
-// action, so reading the direct `action:` property is sufficient.
+// An action counts as "written atomically" when it appears as the `action:` of:
+//   (1) a direct logAuditInTx(tx, tenantId, params) call, OR
+//   (2) an ATOMIC-AUDIT DESCRIPTOR — an object literal `{ params: { action: ... } }`
+//       (the VaultResetAtomicAudit shape) passed to a shared helper that enqueues
+//       it via logAuditInTx inside its own transaction (e.g. executeVaultReset).
+// Case (2) is needed because a destructive op may delegate the atomic enqueue to
+// a shared helper, so the `action:` literal lives at the CALLER, not the
+// logAuditInTx call.
 const seenInTxActions = new Set();
 
-for (const { sf } of sourceFiles(project, SEARCH_DIR, REPO_ROOT)) {
+// Extract action from a `params:` property (nested descriptor) of an object literal.
+function actionFromDescriptor(objLiteral) {
+  if (!objLiteral || objLiteral.getKind() !== SyntaxKind.ObjectLiteralExpression) return null;
+  const paramsProp = objLiteral.getProperty?.("params");
+  if (!paramsProp || paramsProp.getKind() !== SyntaxKind.PropertyAssignment) return null;
+  const init = paramsProp.getInitializer();
+  return actionNameFromObject(init);
+}
+
+for (const { sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const callee = call.getExpression();
     const name = callee.getKind() === SyntaxKind.PropertyAccessExpression
       ? callee.getName()
       : callee.getText();
-    if (name !== "logAuditInTx") continue;
 
-    const args = call.getArguments();
-    // params is the last arg; be lenient about arg count.
-    const paramsArg = args[args.length - 1];
-    const action = actionNameFromObject(paramsArg);
-    if (action) seenInTxActions.add(action);
+    if (name === "logAuditInTx") {
+      // (1) direct call — params is the last arg.
+      const args = call.getArguments();
+      const action = actionNameFromObject(args[args.length - 1]);
+      if (action) seenInTxActions.add(action);
+      continue;
+    }
+
+    // (2) atomic-audit descriptor passed to any call: scan its object-literal
+    // args for a `{ params: { action } }` shape.
+    for (const arg of call.getArguments()) {
+      const action = actionFromDescriptor(arg);
+      if (action) seenInTxActions.add(action);
+    }
   }
 }
 
