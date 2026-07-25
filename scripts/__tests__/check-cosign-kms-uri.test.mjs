@@ -2,7 +2,9 @@
  * Self-test for scripts/checks/check-cosign-kms-uri.sh (RT7).
  *
  * The gate exists because a stub-based unit test CANNOT catch a malformed KMS
- * URI (the stub ignores argv), yet the malformed form aborts every real deploy.
+ * URI: the deploy tests assert the exact --key string, but only the real binary
+ * reveals whether cosign RESOLVES it to a key — and the malformed form aborts
+ * every real deploy.
  * So this self-test drives the gate against fixture deploy.sh files and proves
  * both branches against the real cosign binary.
  *

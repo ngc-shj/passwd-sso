@@ -6,7 +6,10 @@
 # authority is EMPTY, so an ARN belongs in the path — THREE slashes. With two,
 # cosign parses the ARN as the endpoint host and never reaches KMS. Because
 # deploy.sh verifies signatures fail-closed, that mistake aborts EVERY deploy,
-# and a stub-based unit test cannot catch it (the stub ignores argv).
+# and a stub-based unit test cannot catch it. The deploy tests DO assert the
+# exact --key string, but only the real binary can tell us whether cosign
+# RESOLVES that string to a key — asserting the literal we chose proves nothing
+# about how cosign interprets it.
 #
 # Detection: run `cosign public-key` against a syntactically valid but
 # non-existent ARN with dummy credentials. The two forms then fail differently:
@@ -17,13 +20,16 @@
 # The dummy credentials are required: with NO credentials at all both forms fail
 # at the same credential-lookup step and the difference is invisible.
 #
-# Skips when cosign is absent (it is a deploy-host tool, not a build dependency).
+# When cosign is absent: skips LOCALLY (it is a deploy-host tool, not a build
+# dependency), but FAILS when CI=true — a skipped gate is indistinguishable from
+# a passing one, and CI installs cosign.
 set -euo pipefail
 
 if ! command -v cosign >/dev/null 2>&1; then
   # In CI the gate must never silently skip: a skipped gate is indistinguishable
   # from a passing one, and this is the ONLY check that can catch a malformed
-  # KMS URI (the deploy unit tests stub cosign and cannot see the --key value).
+  # KMS URI: the deploy tests stub cosign, so they can check the --key value we
+  # pass but not whether cosign resolves it to an actual key.
   # CI installs cosign; a missing binary there is a workflow regression.
   if [ "${CI:-}" = "true" ]; then
     echo "ERROR: cosign is not installed, but CI=true." >&2

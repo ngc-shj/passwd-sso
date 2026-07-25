@@ -397,17 +397,37 @@ It diffs the live ACLs of all three roles against
 `scripts/checks/db-grants-manifest.json` and exits non-zero on any
 `UNEXPECTED_GRANT` (over-privilege) or `MISSING_GRANT` (migrations not applied).
 
-Both granularities are tracked, as separate manifest keys:
+Privileges are **effective**, not direct-ACL: they are computed with
+`has_*_privilege`, so a privilege reached via `PUBLIC` or via role inheritance
+counts. (`information_schema.role_table_grants` omits both, and contains no
+column-scoped grants at all — reading only that view misses all three.) Object
+names are schema-qualified and **every** schema is audited, not just `public`.
 
-- `TABLE:<role> <table> <priv>` — table-level grants
-- `COLUMN:<role> <table>.<column> <priv>` — column-scoped grants that are **not**
-  implied by a table-level grant (13 of these today, e.g. the webhook workers'
-  `UPDATE (fail_count, last_error, …)`)
+Manifest keys:
+
+| Key | Covers |
+|-----|--------|
+| `TABLE:<role> <schema>.<table> <priv>` | table-level privileges |
+| `COLUMN:<role> <schema>.<table>.<col> <priv>` | column-scoped grants not implied by the table-level privilege (13 today, e.g. the webhook workers' `UPDATE (fail_count, last_error, …)`) |
+| `MEMBER:<role> <granted_role>` | role membership — an inheritance path; these roles should have none |
+| `PUBLIC:<schema>.<table> <priv>` | granted to `PUBLIC`, so inherited by every role |
+| `SCHEMA:<grantee> <schema> <priv>` | `USAGE`/`CREATE` (`CREATE` lets the role add its own objects) |
+| `SEQUENCE:<grantee> <schema>.<seq> <priv>` | `USAGE`/`SELECT`/`UPDATE` |
+| `FUNCTION:<grantee> <schema>.<identity> EXECUTE` | routine `EXECUTE`, suffixed `SECURITY_DEFINER` when it runs with its owner's privileges |
+| `DATABASE:<grantee> <db> <priv>` | `CONNECT`/`CREATE`/`TEMP` |
+| `DEFAULTACL:<owner> <schema> <type> <acl>` | pre-authorises objects that do not exist yet |
+| `ROLEATTR:<role> <attr> <value>` | `SUPERUSER`/`BYPASSRLS`/`REPLICATION`/`CREATEDB`/`CREATEROLE`/`LOGIN` |
 
 Columns are keyed individually on purpose: a table that legitimately carries
 `UPDATE (fail_count)` must still fail the audit if `UPDATE (secret_encrypted)` is
-added. Note that `information_schema.role_table_grants` does **not** contain
-column-scoped grants — reading only that view silently misses all of them.
+added.
+
+`FUNCTION` matters because PostgreSQL grants `EXECUTE` on new routines to
+`PUBLIC` by default. A `SECURITY DEFINER` routine is therefore callable by every
+role unless a migration revokes it — and it runs with its **owner's** privileges,
+which no table-level audit would reveal. Role attributes are re-asserted on every
+deploy because migrations run as SUPERUSER and can re-grant them, so the
+bootstrap-time convergence is not durable on its own.
 
 When a migration intentionally changes a grant, regenerate the manifest with
 `--write` and review the diff — that diff is the security-relevant part of the

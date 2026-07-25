@@ -23,12 +23,11 @@
  * Exit codes: 0 = live ACLs match the manifest; 1 = drift (surplus or missing).
  *
  * Findings:
- *   UNEXPECTED_GRANT: <role> <table> <privilege>  — live grant not in manifest
- *                                                   (the security-relevant
- *                                                   direction: over-privilege)
- *   MISSING_GRANT:    <role> <table> <privilege>  — manifest grant not live
- *                                                   (migrations not applied, or
- *                                                   a grant was revoked)
+ *   UNEXPECTED_GRANT: <manifest key>  — live privilege not in the manifest (the
+ *                                       security-relevant direction: over-privilege)
+ *   MISSING_GRANT:    <manifest key>  — manifest entry with no live privilege
+ *                                       (migrations not applied, or a grant was
+ *                                       revoked)
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "pg";

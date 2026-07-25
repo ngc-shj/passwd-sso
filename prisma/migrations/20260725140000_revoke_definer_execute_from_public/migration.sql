@@ -14,9 +14,13 @@
 -- audit_logs beyond their narrow grants — could delete or re-tenant any tenant's
 -- audit log by calling audit_log_purge / audit_log_tenant_migrate.
 --
--- Fix: revoke from PUBLIC, then grant back only to the role that legitimately
--- calls them (passwd_app, from auth.ts and /api/maintenance/purge-audit-logs).
--- Also set a default so FUTURE functions in this schema are not PUBLIC-executable.
+-- Fix: revoke from PUBLIC, then grant back only to the roles that legitimately
+-- call them. This migration re-asserts passwd_app (auth.ts tenant merge,
+-- /api/maintenance/purge-audit-logs); passwd_retention_gc_worker keeps its
+-- separate, explicit grant on audit_log_purge from
+-- 20260618000000_add_retention_gc_worker_role — the retention worker purges
+-- audit logs by design. Net result: app + retention worker on audit_log_purge,
+-- app only on audit_log_tenant_migrate, PUBLIC and the outbox worker on neither.
 
 BEGIN;
 
@@ -35,9 +39,15 @@ BEGIN
 END
 $$;
 
--- 3. Prevent the same trap for functions added later: strip the default PUBLIC
---    EXECUTE grant for objects created by the migration role in this schema.
---    (ALTER DEFAULT PRIVILEGES only affects FUTURE objects, hence steps 1-2.)
+-- 3. Attempt to prevent the same trap for functions added later.
+--
+--    NOTE: this statement is a NO-OP and is superseded by
+--    20260725150000_fix_default_execute_revoke_scope. `ALTER DEFAULT PRIVILEGES
+--    IN SCHEMA <s>` can only undo a matching schema-scoped GRANT; it cannot
+--    cancel PostgreSQL's BUILT-IN global default of granting EXECUTE on new
+--    functions to PUBLIC. It is left here (rather than edited) because this
+--    migration has already been applied — the follow-up issues the correct,
+--    unscoped form.
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 COMMIT;

@@ -21,6 +21,7 @@
     "DATABASE:passwd_retention_gc_worker\tpasswd_sso\tCONNECT",
     "DATABASE:passwd_retention_gc_worker\tpasswd_sso\tTEMP",
     "DATABASE:public\tpasswd_sso\tTEMP",
+    "DEFAULTACL:passwd_user\t-\tf\tpasswd_user=X/passwd_user",
     "DEFAULTACL:passwd_user\tpublic\tS\tpasswd_app=rU/passwd_user",
     "DEFAULTACL:passwd_user\tpublic\tr\tpasswd_app=arwd/passwd_user",
     "FUNCTION:passwd_app\tpublic.audit_log_purge(p_tenant_id uuid, p_cutoff timestamp with time zone)\tEXECUTE\tSECURITY_DEFINER",
