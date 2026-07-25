@@ -187,6 +187,28 @@ jobs:
             git fetch origin main:main
           fi
 
+      # check-cosign-kms-uri.sh needs the real binary: it is the only gate that
+      # can catch a malformed KMS URI (the deploy tests stub cosign and never see
+      # the --key value), and it hard-fails when CI=true without it, so a missing
+      # install here is a loud failure rather than a silent skip.
+      #
+      # Installed from the official release with a pinned version + SHA-256
+      # rather than a third-party action, so nothing new needs SHA-pinning and
+      # the artifact is verified before it runs.
+      - name: Install cosign (pinned)
+        run: |
+          set -euo pipefail
+          # From the release's published cosign_checksums.txt. When bumping the
+          # version, re-read that file — do not hand-edit this value.
+          COSIGN_VERSION=v3.1.2
+          COSIGN_SHA256=f7622ed3cf22e55e1ae6377c080979ff77a22da9981c11df222a2e444991e7cf
+          curl -fsSL -o /tmp/cosign \
+            "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          echo "${COSIGN_SHA256}  /tmp/cosign" | sha256sum -c -
+          chmod +x /tmp/cosign
+          sudo mv /tmp/cosign /usr/local/bin/cosign
+          cosign version
+
       # No `prisma generate` step: every static guard is a pure source/schema
       # grep (none import the generated client), so the client is not needed.
       - name: Run static check guards (PRE_PR_STATIC_ONLY)

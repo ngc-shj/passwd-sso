@@ -14,10 +14,18 @@
  * T4 — a grant to PUBLIC is detected (role_table_grants excludes these)
  * T5 — a privilege reached through role membership is detected, and the
  *      membership itself is reported
- * T6 — a MISSING grant (manifest entry with no live privilege) is detected
+ * T6  — a MISSING grant (manifest entry with no live privilege) is detected
+ * T7  — CREATE on a schema is detected
+ * T8  — a role attribute re-granted after bootstrap is detected
+ * T9  — a default privilege pre-authorising future tables is detected
+ * T10 — EXECUTE on a SECURITY DEFINER routine is detected (PostgreSQL grants it
+ *       to PUBLIC by default; the routine runs with its owner's privileges)
+ * T11 — a grant in a NON-public schema is detected (the audit used to pin every
+ *       query to nspname = 'public')
  *
- * Every mutation runs inside a transaction that is rolled back, so the shared
- * dev database is left untouched.
+ * Each mutation is undone in a `finally`. They must be COMMITTED, not rolled
+ * back: the audit runs in its own process and would not see an open
+ * transaction's changes.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -107,7 +115,7 @@ describe("audit-db-grants (real DB)", () => {
       const r = runAudit(manifestPath);
 
       expect(r.status).toBe(1);
-      expect(r.stderr).toContain("UNEXPECTED_GRANT: TABLE:passwd_outbox_worker users UPDATE");
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: TABLE:passwd_outbox_worker public.users UPDATE");
     } finally {
       await su.query("REVOKE UPDATE ON users FROM passwd_outbox_worker");
     }
@@ -124,7 +132,7 @@ describe("audit-db-grants (real DB)", () => {
 
       expect(r.status).toBe(1);
       expect(r.stderr).toContain(
-        "UNEXPECTED_GRANT: COLUMN:passwd_outbox_worker tenant_webhooks.secret_encrypted UPDATE",
+        "UNEXPECTED_GRANT: COLUMN:passwd_outbox_worker public.tenant_webhooks.secret_encrypted UPDATE",
       );
     } finally {
       await su.query(
@@ -142,9 +150,9 @@ describe("audit-db-grants (real DB)", () => {
       const r = runAudit(manifestPath);
 
       expect(r.status).toBe(1);
-      expect(r.stderr).toContain("UNEXPECTED_GRANT: PUBLIC:accounts SELECT");
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: PUBLIC:public.accounts SELECT");
       // …and the effective privilege it confers on the roles.
-      expect(r.stderr).toContain("TABLE:passwd_outbox_worker accounts SELECT");
+      expect(r.stderr).toContain("TABLE:passwd_outbox_worker public.accounts SELECT");
     } finally {
       await su.query("REVOKE SELECT ON accounts FROM PUBLIC");
     }
@@ -165,7 +173,7 @@ describe("audit-db-grants (real DB)", () => {
         "UNEXPECTED_GRANT: MEMBER:passwd_outbox_worker acl_audit_probe_holder",
       );
       // …as is the privilege it confers.
-      expect(r.stderr).toContain("TABLE:passwd_outbox_worker accounts SELECT");
+      expect(r.stderr).toContain("TABLE:passwd_outbox_worker public.accounts SELECT");
     } finally {
       await su.query("REVOKE acl_audit_probe_holder FROM passwd_outbox_worker").catch(() => {});
       await su.query("DROP OWNED BY acl_audit_probe_holder").catch(() => {});
@@ -225,19 +233,65 @@ describe("audit-db-grants (real DB)", () => {
     }
   });
 
+  it("T10: detects EXECUTE on a SECURITY DEFINER routine", async () => {
+    // PostgreSQL grants EXECUTE to PUBLIC by default, so a definer routine is
+    // callable by every role unless revoked — and it runs with its OWNER's
+    // privileges. audit_log_purge deletes audit records, so the outbox worker
+    // holding EXECUTE would be able to erase any tenant's audit trail.
+    try {
+      await su.query(
+        "GRANT EXECUTE ON FUNCTION audit_log_purge(UUID, TIMESTAMPTZ) TO passwd_outbox_worker",
+      );
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("UNEXPECTED_GRANT: FUNCTION:passwd_outbox_worker");
+      expect(r.stderr).toContain("audit_log_purge");
+      // The key records that the routine is definer-owned, since that is what
+      // makes the grant dangerous.
+      expect(r.stderr).toContain("SECURITY_DEFINER");
+    } finally {
+      await su.query(
+        "REVOKE EXECUTE ON FUNCTION audit_log_purge(UUID, TIMESTAMPTZ) FROM passwd_outbox_worker",
+      );
+    }
+  });
+
+  it("T11: detects a grant in a NON-public schema", async () => {
+    // The audit used to pin every query to `nspname = 'public'`, so a migration
+    // could put a table in another schema, grant the worker SELECT, and the
+    // audit still reported OK.
+    try {
+      await su.query("CREATE SCHEMA IF NOT EXISTS acl_audit_probe_ns");
+      await su.query("CREATE TABLE IF NOT EXISTS acl_audit_probe_ns.secrets(id int)");
+      await su.query("GRANT USAGE ON SCHEMA acl_audit_probe_ns TO passwd_outbox_worker");
+      await su.query("GRANT SELECT ON acl_audit_probe_ns.secrets TO passwd_outbox_worker");
+
+      const r = runAudit(manifestPath);
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain(
+        "UNEXPECTED_GRANT: TABLE:passwd_outbox_worker acl_audit_probe_ns.secrets SELECT",
+      );
+    } finally {
+      await su.query("DROP SCHEMA IF EXISTS acl_audit_probe_ns CASCADE");
+    }
+  });
+
   it("T6: detects a MISSING grant (manifest entry with no live privilege)", () => {
     // Simulates migrations not having been applied: the manifest expects a
     // privilege the database does not grant.
     const doctored = join(tmpDir, "missing.json");
     const base = JSON.parse(readFileSync(manifestPath, "utf8"));
-    base.grants.push("TABLE:passwd_app\ta_table_that_does_not_exist\tSELECT");
+    base.grants.push("TABLE:passwd_app\tpublic.a_table_that_does_not_exist\tSELECT");
     writeFileSync(doctored, JSON.stringify(base, null, 2), "utf8");
 
     const r = runAudit(doctored);
 
     expect(r.status).toBe(1);
     expect(r.stderr).toContain(
-      "MISSING_GRANT: TABLE:passwd_app a_table_that_does_not_exist SELECT",
+      "MISSING_GRANT: TABLE:passwd_app public.a_table_that_does_not_exist SELECT",
     );
   });
 });

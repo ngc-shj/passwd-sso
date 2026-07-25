@@ -65,28 +65,61 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  * `has_column_privilege` answer "can this role actually do this?", collapsing
  * all three paths, so they are what the audit compares against the manifest.
  *
- * Keys, all sorted into one list:
+ * Keys, all sorted into one list. Object names are SCHEMA-QUALIFIED — every
+ * schema is audited, not just `public`, so a migration cannot hide a grant by
+ * putting the table somewhere else:
  *
- *   TABLE:<role>\t<table>\t<priv>          effective table privilege
- *   COLUMN:<role>\t<table>.<col>\t<priv>   effective column privilege NOT implied
- *                                          by the table-level one
- *   MEMBER:<role>\t<granted_role>          role membership (an inheritance path;
- *                                          none of these roles should have any)
- *   PUBLIC:<table>\t<priv>                 privilege granted to PUBLIC, which
- *                                          every role inherits
+ *   TABLE:<role>\t<schema>.<table>\t<priv>        effective table privilege
+ *   COLUMN:<role>\t<schema>.<table>.<col>\t<priv> effective column privilege NOT
+ *                                                 implied by the table-level one
+ *   MEMBER:<role>\t<granted_role>                 role membership (an inheritance
+ *                                                 path; these roles should have none)
+ *   PUBLIC:<schema>.<table>\t<priv>               granted to PUBLIC, so inherited
+ *                                                 by every role
+ *   SCHEMA:<grantee>\t<schema>\t<priv>            USAGE/CREATE (CREATE lets the
+ *                                                 role add its own objects)
+ *   SEQUENCE:<grantee>\t<schema>.<seq>\t<priv>    USAGE/SELECT/UPDATE
+ *   FUNCTION:<grantee>\t<schema>.<ident>\tEXECUTE routine EXECUTE, suffixed
+ *                                                 SECURITY_DEFINER when the routine
+ *                                                 runs with its OWNER's privileges
+ *   DATABASE:<grantee>\t<db>\t<priv>              CONNECT/CREATE/TEMP
+ *   DEFAULTACL:<owner>\t<schema>\t<type>\t<acl>   pre-authorises objects that do
+ *                                                 not exist yet
+ *   ROLEATTR:<role>\t<attr>\t<value>              SUPERUSER/BYPASSRLS/REPLICATION/
+ *                                                 CREATEDB/CREATEROLE/LOGIN
  *
  * Columns are keyed individually on purpose: a table that legitimately carries
  * `UPDATE (fail_count)` must still fail when `UPDATE (secret_encrypted)` appears.
+ *
+ * FUNCTION matters because PostgreSQL grants EXECUTE to PUBLIC by DEFAULT: a
+ * SECURITY DEFINER routine is callable by every role unless a migration revokes
+ * it, and it then runs with its owner's privileges — a direct escalation path no
+ * table-level audit can see.
  */
+/**
+ * SQL predicate selecting every schema whose objects we audit: everything
+ * except PostgreSQL's own catalogs and per-session temp schemas.
+ *
+ * Pinning this to `= 'public'` (as an earlier version did) meant a migration
+ * could create a schema, put a table in it, grant the worker SELECT, and the
+ * audit still reported OK. All object keys below are schema-qualified for the
+ * same reason — `secrets` in two schemas must not collapse to one key.
+ */
+const AUDITABLE_SCHEMAS = `n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND n.nspname NOT LIKE 'pg_toast%'
+        AND n.nspname NOT LIKE 'pg_temp%'
+        AND n.nspname NOT LIKE 'pg_toast_temp%'`;
+
 async function readLiveGrants(client) {
   // 1. Effective TABLE privileges.
   const { rows: tableRows } = await client.query(
-    `SELECT r.rolname AS role, c.relname AS table_name, p.priv AS privilege_type
+    `SELECT r.rolname AS role, n.nspname AS schema_name, c.relname AS table_name,
+            p.priv AS privilege_type
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
        CROSS JOIN unnest($2::text[]) AS p(priv)
        CROSS JOIN unnest($1::text[]) AS r(rolname)
-      WHERE n.nspname = 'public'
+      WHERE ${AUDITABLE_SCHEMAS}
         AND c.relkind IN ('r', 'p', 'v', 'm')
         AND has_table_privilege(r.rolname, c.oid, p.priv)`,
     [AUDITED_ROLES, TABLE_PRIVILEGES],
@@ -94,14 +127,14 @@ async function readLiveGrants(client) {
 
   // 2. Effective COLUMN privileges not already implied by the table-level one.
   const { rows: columnRows } = await client.query(
-    `SELECT r.rolname AS role, c.relname AS table_name, a.attname AS column_name,
-            p.priv AS privilege_type
+    `SELECT r.rolname AS role, n.nspname AS schema_name, c.relname AS table_name,
+            a.attname AS column_name, p.priv AS privilege_type
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
        CROSS JOIN unnest($2::text[]) AS p(priv)
        CROSS JOIN unnest($1::text[]) AS r(rolname)
-      WHERE n.nspname = 'public'
+      WHERE ${AUDITABLE_SCHEMAS}
         AND c.relkind IN ('r', 'p', 'v', 'm')
         AND p.priv IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
         AND has_column_privilege(r.rolname, c.oid, a.attname, p.priv)
@@ -125,11 +158,11 @@ async function readLiveGrants(client) {
   //    quietest way to over-privilege the whole system at once. Audited
   //    independently of the roles.
   const { rows: publicRows } = await client.query(
-    `SELECT c.relname AS table_name, p.priv AS privilege_type
+    `SELECT n.nspname AS schema_name, c.relname AS table_name, p.priv AS privilege_type
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
        CROSS JOIN unnest($1::text[]) AS p(priv)
-      WHERE n.nspname = 'public'
+      WHERE ${AUDITABLE_SCHEMAS}
         AND c.relkind IN ('r', 'p', 'v', 'm')
         AND has_table_privilege('public', c.oid, p.priv)`,
     [TABLE_PRIVILEGES],
@@ -143,7 +176,7 @@ async function readLiveGrants(client) {
        FROM pg_namespace n
        CROSS JOIN unnest(ARRAY['USAGE', 'CREATE']::text[]) AS p(priv)
        CROSS JOIN unnest($1::text[] || ARRAY['public']) AS g(grantee)
-      WHERE n.nspname = 'public'
+      WHERE ${AUDITABLE_SCHEMAS}
         AND has_schema_privilege(g.grantee, n.nspname, p.priv)`,
     [AUDITED_ROLES],
   );
@@ -151,14 +184,33 @@ async function readLiveGrants(client) {
   // 6. SEQUENCE privileges. USAGE/UPDATE on a sequence lets a role advance it;
   //    SELECT reads it. Sequences are separate objects from their tables.
   const { rows: sequenceRows } = await client.query(
-    `SELECT g.grantee, c.relname AS sequence_name, p.priv AS privilege_type
+    `SELECT g.grantee, n.nspname AS schema_name, c.relname AS sequence_name,
+            p.priv AS privilege_type
        FROM pg_class c
        JOIN pg_namespace n ON n.oid = c.relnamespace
        CROSS JOIN unnest(ARRAY['USAGE', 'SELECT', 'UPDATE']::text[]) AS p(priv)
        CROSS JOIN unnest($1::text[] || ARRAY['public']) AS g(grantee)
-      WHERE n.nspname = 'public'
+      WHERE ${AUDITABLE_SCHEMAS}
         AND c.relkind = 'S'
         AND has_sequence_privilege(g.grantee, c.oid, p.priv)`,
+    [AUDITED_ROLES],
+  );
+
+  // 6b. FUNCTION / PROCEDURE EXECUTE. PostgreSQL grants EXECUTE to PUBLIC by
+  //     DEFAULT, so a SECURITY DEFINER routine is callable by every role unless
+  //     the migration explicitly revokes it — the routine then runs with its
+  //     OWNER's privileges, which is a direct privilege-escalation path that no
+  //     table-level audit can see. Keyed by function IDENTITY (name + argument
+  //     types) because overloads are distinct objects with distinct ACLs.
+  const { rows: functionRows } = await client.query(
+    `SELECT g.grantee, n.nspname AS schema_name,
+            p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS func_identity,
+            p.prosecdef AS security_definer
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       CROSS JOIN unnest($1::text[] || ARRAY['public']) AS g(grantee)
+      WHERE ${AUDITABLE_SCHEMAS}
+        AND has_function_privilege(g.grantee, p.oid, 'EXECUTE')`,
     [AUDITED_ROLES],
   );
 
@@ -198,14 +250,27 @@ async function readLiveGrants(client) {
   );
 
   const keys = [
-    ...tableRows.map((r) => `TABLE:${r.role}\t${r.table_name}\t${r.privilege_type}`),
+    ...tableRows.map(
+      (r) => `TABLE:${r.role}\t${r.schema_name}.${r.table_name}\t${r.privilege_type}`,
+    ),
     ...columnRows.map(
-      (r) => `COLUMN:${r.role}\t${r.table_name}.${r.column_name}\t${r.privilege_type}`,
+      (r) =>
+        `COLUMN:${r.role}\t${r.schema_name}.${r.table_name}.${r.column_name}\t${r.privilege_type}`,
     ),
     ...memberRows.map((r) => `MEMBER:${r.role}\t${r.granted_role}`),
-    ...publicRows.map((r) => `PUBLIC:${r.table_name}\t${r.privilege_type}`),
+    ...publicRows.map((r) => `PUBLIC:${r.schema_name}.${r.table_name}\t${r.privilege_type}`),
     ...schemaRows.map((r) => `SCHEMA:${r.grantee}\t${r.schema_name}\t${r.privilege_type}`),
-    ...sequenceRows.map((r) => `SEQUENCE:${r.grantee}\t${r.sequence_name}\t${r.privilege_type}`),
+    ...sequenceRows.map(
+      (r) => `SEQUENCE:${r.grantee}\t${r.schema_name}.${r.sequence_name}\t${r.privilege_type}`,
+    ),
+    ...functionRows.map(
+      (r) =>
+        `FUNCTION:${r.grantee}\t${r.schema_name}.${r.func_identity}\tEXECUTE` +
+        // Flag definer routines in the key itself: converting a routine to
+        // SECURITY DEFINER changes its blast radius, so it must be reviewed even
+        // if the EXECUTE grants are unchanged.
+        (r.security_definer ? "\tSECURITY_DEFINER" : ""),
+    ),
     ...databaseRows.map((r) => `DATABASE:${r.grantee}\t${r.database_name}\t${r.privilege_type}`),
     ...defaultAclRows.map((r) => `DEFAULTACL:${r.owner}\t${r.schema_name}\t${r.obj_type}\t${r.acl}`),
     ...attrRows.flatMap((r) =>
@@ -236,14 +301,20 @@ function readManifest() {
 function writeManifest(grants) {
   const body = {
     _comment:
-      "Expected EFFECTIVE privileges of the least-privilege DB roles. Key forms: " +
-      "'TABLE:<role><TAB><table><TAB><priv>', " +
-      "'COLUMN:<role><TAB><table>.<column><TAB><priv>' (only where not implied by " +
-      "the table-level privilege), 'MEMBER:<role><TAB><granted_role>' (role " +
-      "membership — an inheritance path; these roles should have none), " +
-      "'PUBLIC:<table><TAB><priv>' (granted to PUBLIC, therefore inherited by " +
-      "every role), 'SCHEMA:<grantee><TAB><schema><TAB><priv>' (CREATE lets the " +
-      "role add its own objects), 'SEQUENCE:<grantee><TAB><sequence><TAB><priv>', " +
+      "Expected EFFECTIVE privileges of the least-privilege DB roles. Object " +
+      "names are schema-qualified and EVERY schema is audited, not just public. " +
+      "Key forms: 'TABLE:<role><TAB><schema>.<table><TAB><priv>', " +
+      "'COLUMN:<role><TAB><schema>.<table>.<column><TAB><priv>' (only where not " +
+      "implied by the table-level privilege), 'MEMBER:<role><TAB><granted_role>' " +
+      "(role membership — an inheritance path; these roles should have none), " +
+      "'PUBLIC:<schema>.<table><TAB><priv>' (granted to PUBLIC, therefore " +
+      "inherited by every role), 'SCHEMA:<grantee><TAB><schema><TAB><priv>' " +
+      "(CREATE lets the role add its own objects), " +
+      "'SEQUENCE:<grantee><TAB><schema>.<sequence><TAB><priv>', " +
+      "'FUNCTION:<grantee><TAB><schema>.<identity><TAB>EXECUTE' (suffixed " +
+      "SECURITY_DEFINER when the routine runs with its owner's privileges — " +
+      "PostgreSQL grants EXECUTE to PUBLIC by default, so such a routine is an " +
+      "escalation path unless explicitly revoked), " +
       "'DATABASE:<grantee><TAB><database><TAB><priv>', " +
       "'DEFAULTACL:<owner><TAB><schema><TAB><objtype><TAB><acl>' (pre-authorises " +
       "objects that do not exist yet), and " +
@@ -304,7 +375,7 @@ async function main() {
     console.error("DB grant audit FAILED:\n");
     for (const f of findings) console.error(`  ${f}`);
     console.error(
-      `\nAn UNEXPECTED_GRANT means a role holds a table privilege the manifest` +
+      `\nAn UNEXPECTED_GRANT means a role holds a privilege the manifest` +
         `\ndoes not sanction — revoke it, or if a migration granted it` +
         `\nintentionally, regenerate the manifest with --write and review the diff.` +
         `\nA MISSING_GRANT usually means migrations have not been applied.\n`,
