@@ -123,6 +123,20 @@ variable "jackson_desired_count" {
   default = 1
 }
 
+# Background workers (audit-outbox drain + retention GC). Both run the same app
+# image (node dist/<worker>.js) as long-lived, non-request-serving Fargate tasks.
+variable "worker_cpu" {
+  type        = number
+  default     = 256
+  description = "Fargate CPU for each background worker (audit-outbox / retention-gc)"
+}
+
+variable "worker_memory" {
+  type        = number
+  default     = 512
+  description = "Fargate memory (MiB) for each background worker"
+}
+
 variable "db_username" {
   type        = string
   description = "RDS master username"

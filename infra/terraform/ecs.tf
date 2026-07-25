@@ -4,6 +4,15 @@
 
 resource "aws_ecs_cluster" "main" {
   name = "${local.name_prefix}-cluster"
+
+  # Container Insights publishes per-service RunningTaskCount to CloudWatch,
+  # which the worker-liveness alarms (monitoring.tf) depend on to detect a
+  # crashed/stuck background worker. Also addresses the M5 observability gap.
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
   tags = local.tags
 }
 
@@ -199,37 +208,124 @@ resource "aws_ecs_service" "jackson" {
 }
 
 ################################################################################
-# Background workers — NOT YET DEFINED as ECS services (operator action required)
+# Background workers (audit-outbox drain + retention GC)
 ################################################################################
 #
-# This Terraform deploys only the request-serving services (app, jackson) plus
-# the one-shot migrate task. The two long-running background workers are NOT
-# defined here yet — an ECS deployment that applies this module as-is will run
-# WITHOUT them, which silently breaks production guarantees:
-#
-#   audit-outbox-worker  (node dist/audit-outbox-worker.js)
-#     Drains audit_outbox → audit_logs. Missing ⇒ audit events stay PENDING and
-#     never reach audit_logs (compliance / forensics gap).
-#
-#   retention-gc-worker  (node dist/retention-gc-worker.js)
-#     Enforces retention limits and hard-deletes expired records (sessions,
-#     verification/bridge/API/MCP tokens, reset & rotation records, shares,
-#     invitations, emergency access, vault history, audit retention). Missing ⇒
-#     nothing is ever purged; data-minimisation and deletion guarantees fail.
-#
-# Until dedicated aws_ecs_task_definition + aws_ecs_service resources are added
-# here, operators MUST run both workers out-of-band on the SAME image, each with
-# its dedicated least-privilege DB URL:
+# Both run the SAME app image (node dist/<worker>.js) as long-lived,
+# non-request-serving Fargate services. Each connects via its own least-privilege
+# DB URL (a JSON key in the app Secrets Manager secret, injected out-of-band —
+# see secrets.tf / scripts/put-terraform-secrets.sh):
 #   - OUTBOX_WORKER_DATABASE_URL   → passwd_outbox_worker role
 #   - RETENTION_GC_DATABASE_URL    → passwd_retention_gc_worker role
-# Reference definitions (command, env, least-privilege role wiring):
-#   - docker-compose.workers.yml            (Docker Compose)
-#   - infra/k8s/retention-gc-worker.yaml    (Kubernetes)
 #
-# Each worker must also be monitored (liveness / restart count, heartbeat log
-# lines, audit_outbox PENDING-row age, retention queue age) — a worker that
-# boots but makes no progress fails as silently as one that never starts.
-#
-# TODO: add aws_ecs_task_definition.audit_outbox_worker /
-#       aws_ecs_task_definition.retention_gc_worker and their services
-#       (desired_count = 1, no load_balancer block — these are not request-serving).
+# Without these services: audit events stay PENDING in audit_outbox (never reach
+# audit_logs — compliance gap) and nothing is ever purged (retention / deletion
+# guarantees fail). Monitoring alarms are defined in monitoring.tf.
+
+# audit-outbox-worker task
+resource "aws_ecs_task_definition" "audit_outbox_worker" {
+  family                   = "${local.name_prefix}-audit-outbox-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "audit-outbox-worker"
+      image     = var.app_image
+      essential = true
+      command   = ["node", "dist/audit-outbox-worker.js"]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.audit_outbox_worker.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+      # Least-privilege: connect ONLY via the scoped worker role. No broad
+      # DATABASE_URL is injected (the worker schema uses OUTBOX_WORKER_DATABASE_URL).
+      secrets = [
+        { name = "OUTBOX_WORKER_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:OUTBOX_WORKER_DATABASE_URL::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+# retention-gc-worker task
+resource "aws_ecs_task_definition" "retention_gc_worker" {
+  family                   = "${local.name_prefix}-retention-gc-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "retention-gc-worker"
+      image     = var.app_image
+      essential = true
+      command   = ["node", "dist/retention-gc-worker.js"]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.retention_gc_worker.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+      secrets = [
+        { name = "RETENTION_GC_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:RETENTION_GC_DATABASE_URL::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+# Worker services: desired_count = 1, NO load_balancer block (not request-serving).
+# ECS restarts a crashed/exited task automatically (the service reconciles to
+# desired_count), giving the "restart: unless-stopped" behavior the compose
+# workers have.
+resource "aws_ecs_service" "audit_outbox_worker" {
+  name            = "${local.name_prefix}-audit-outbox-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.audit_outbox_worker.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "retention_gc_worker" {
+  name            = "${local.name_prefix}-retention-gc-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.retention_gc_worker.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = local.tags
+}

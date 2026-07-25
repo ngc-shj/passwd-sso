@@ -37,7 +37,11 @@ jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-de
 #   #   "AUTH_GOOGLE_ID": "<REPLACE>", "AUTH_GOOGLE_SECRET": "<REPLACE>",
 #   #   "AUTH_JACKSON_ID": "<REPLACE>", "AUTH_JACKSON_SECRET": "<REPLACE>",
 #   #   "SHARE_MASTER_KEY": "<REPLACE>",   // npm run generate:key
-#   #   "REDIS_URL": "redis://HOST:6379"
+#   #   "SESSION_TOKEN_HMAC_KEY": "<REPLACE>",  // npm run generate:key (decouples session HMAC from master-key rotation)
+#   #   "REDIS_URL": "redis://HOST:6379",
+#   #   // Least-privilege worker DB URLs (consumed by the ECS worker services):
+#   #   "OUTBOX_WORKER_DATABASE_URL": "postgresql://passwd_outbox_worker:PASSWORD@HOST:5432/passwd_sso",
+#   #   "RETENTION_GC_DATABASE_URL": "postgresql://passwd_retention_gc_worker:PASSWORD@HOST:5432/passwd_sso"
 #   # }
 #   # jackson-secrets.json:
 #   # { "JACKSON_API_KEYS": "<REPLACE>", "DB_URL": "...",

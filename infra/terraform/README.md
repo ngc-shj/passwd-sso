@@ -156,7 +156,17 @@ bringing services up. ECS task definitions reference secrets in
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
 | `SHARE_MASTER_KEY` | Share links/sends encryption master key (256-bit hex) |
+| `SESSION_TOKEN_HMAC_KEY` | Session-token HMAC key (256-bit hex). Decouples session auth from master-key rotation. Recommended. |
 | `REDIS_URL` | Redis connection string |
+| `OUTBOX_WORKER_DATABASE_URL` | Least-privilege DB URL for the audit-outbox-worker ECS service (`passwd_outbox_worker` role) |
+| `RETENTION_GC_DATABASE_URL` | Least-privilege DB URL for the retention-gc-worker ECS service (`passwd_retention_gc_worker` role) |
+
+Both background workers run as dedicated ECS services (`*-audit-outbox-worker`,
+`*-retention-gc-worker`) on the app image (`node dist/<worker>.js`),
+`desired_count = 1`, no load balancer. ECS restarts a crashed task automatically.
+Liveness is alarmed via `RunningTaskCount < 1` (Container Insights) — see
+monitoring.tf. Without these workers, audit events stay PENDING and retention is
+never enforced, so the worker DB URLs above MUST be populated before apply.
 
 ### Required Secrets (jackson)
 

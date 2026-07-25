@@ -122,7 +122,6 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetSubkeyCacheForTests();
-  delete process.env.SESSION_TOKEN_HMAC_KEY;
 });
 
 // ── #3: dedicated SESSION_TOKEN_HMAC_KEY decouples from SHARE_MASTER_KEY ──
@@ -131,7 +130,7 @@ describe("SESSION_TOKEN_HMAC_KEY (dedicated session-token HMAC key)", () => {
   const DEDICATED = "a".repeat(64);
 
   it("uses the dedicated key when set (NOT getMasterKeyByVersion)", () => {
-    process.env.SESSION_TOKEN_HMAC_KEY = DEDICATED;
+    vi.stubEnv("SESSION_TOKEN_HMAC_KEY", DEDICATED);
     _resetSubkeyCacheForTests();
     const digest = hashSessionToken("tok");
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
@@ -142,14 +141,14 @@ describe("SESSION_TOKEN_HMAC_KEY (dedicated session-token HMAC key)", () => {
   it("produces a different digest than the V1-fallback for the same token", () => {
     _resetSubkeyCacheForTests();
     const viaV1 = hashSessionToken("tok"); // fallback (no dedicated key)
-    process.env.SESSION_TOKEN_HMAC_KEY = DEDICATED;
+    vi.stubEnv("SESSION_TOKEN_HMAC_KEY", DEDICATED);
     _resetSubkeyCacheForTests();
     const viaDedicated = hashSessionToken("tok");
     expect(viaDedicated).not.toBe(viaV1);
   });
 
   it("rejects a malformed dedicated key", () => {
-    process.env.SESSION_TOKEN_HMAC_KEY = "not-hex";
+    vi.stubEnv("SESSION_TOKEN_HMAC_KEY", "not-hex");
     _resetSubkeyCacheForTests();
     expect(() => hashSessionToken("tok")).toThrow(/64-char hex/);
   });
@@ -162,7 +161,7 @@ describe("SESSION_TOKEN_HMAC_KEY (dedicated session-token HMAC key)", () => {
 
   describe("validateSessionTokenHmacKey (boot-time #3 gap)", () => {
     it("passes when the dedicated key is set", () => {
-      process.env.SESSION_TOKEN_HMAC_KEY = DEDICATED;
+      vi.stubEnv("SESSION_TOKEN_HMAC_KEY", DEDICATED);
       _resetSubkeyCacheForTests();
       expect(() => validateSessionTokenHmacKey()).not.toThrow();
     });
