@@ -15,12 +15,62 @@ Configuration precedence: `.env` (canonical base) → `.env.local` (per-develope
 - `jq` installed
 - Docker + Docker Compose v2
 - Terraform CLI
+- [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) — `deploy.sh` signs every image it pushes and verifies signatures before deploying
+- `kms:Sign` on the image-signing key (attach the `image_signing_policy_arn` output to the deploy principal)
 
 ## Image Tag Rules
 
 - **Immutable tags required**: Use git SHA (`git-abc1234`) or digest (`repo@sha256:...`)
 - **`:latest` is prohibited** — migrate and app task definitions must reference the exact same image
 - `terraform apply` sets `var.app_image` for the `app`, `migrate`, and both worker task definitions, guaranteeing they run the same image
+- `deploy.sh` resolves the tag to a **digest** and passes that to Terraform, so the bytes it signature-verified are exactly the bytes that run
+
+## Image Signing (cosign + KMS)
+
+Every image `deploy.sh` deploys must carry a valid cosign signature made with the
+KMS key in `infra/terraform/ecr.tf`.
+
+**Why.** ECR immutability stops a tag being *overwritten*, but it does not stop a
+tag being *created first*. A principal holding only ECR push rights could
+pre-place `git-<sha>` for a commit that is about to be deployed; `deploy.sh`'s
+retry-safe "tag already exists → skip build" path would then adopt their image.
+Where push and deploy permissions are separated — as they are here — that is a
+privilege escalation. Signing authority is a distinct IAM permission
+(`kms:Sign`), so a push-only principal cannot produce a signature that verifies.
+
+**What happens on each path:**
+
+| Path | Signing / verification |
+|------|------------------------|
+| Forward deploy, image not yet in ECR | build → push → `cosign sign` the digest → verify |
+| Forward deploy, tag already in ECR (retry) | verify only — an unsigned pre-placed tag is rejected |
+| `--rollback-to` | verify the resolved digest before deploying |
+
+A failed verification aborts the deploy before `terraform apply` and before any
+service is updated.
+
+```bash
+# One-time: grant the deploy principal kms:Sign
+terraform -chdir=infra/terraform output -raw image_signing_policy_arn
+aws iam attach-role-policy --role-name <deploy-role> --policy-arn <that-arn>
+
+# Verify an image by hand
+cosign verify --key "awskms://$(terraform -chdir=infra/terraform output -raw image_signing_key_arn)" \
+  <account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app@sha256:<digest>
+```
+
+`COSIGN_KEY=awskms://<arn>` overrides the key `deploy.sh` reads from the stack
+output — use it when the signing key lives outside this Terraform state.
+
+> **Images pushed before signing was introduced carry no signature** and will be
+> refused. Re-push from a clean checkout (which signs them), or sign the existing
+> digest once with `cosign sign --key awskms://<arn> <repo>@sha256:<digest>`.
+
+> **Do not delete the KMS key.** Losing the private half invalidates every
+> signature already attached to images in ECR; the key is created with a 30-day
+> deletion window for that reason. KMS cannot auto-rotate asymmetric keys — to
+> rotate, create a new key, re-sign the images you still need to deploy, then
+> point `image_signing_key_arn` at it.
 
 ## Deploy Flow (AWS ECS)
 

@@ -130,6 +130,26 @@ steady-state の migration は expand-and-contract（新旧コード双方と互
 必要があります。migration 実行中も旧 app/worker が稼働しているためです。破壊的 DDL は
 `scripts/checks/check-destructive-migration.mjs` が CI で検出します。
 
+### イメージ署名（cosign + KMS）
+
+deploy.sh は push した全イメージを cosign で署名し、デプロイ前に署名を検証します。
+検証に失敗したイメージは apply 前に拒否されます。ECR の immutability はタグの
+「上書き」を防ぎますが「先に作られる」ことは防げないため、ECR push 権限のみを持つ
+主体が `git-<sha>` を先置きすると、deploy.sh の「既存タグならビルドを省略」経路が
+そのイメージを採用してしまいます。署名権限（`kms:Sign`）を分離することでこれを
+遮断しています。
+
+`cosign` を PATH に用意し、環境ごとに一度だけデプロイ用ロールへ権限を付与します。
+
+```bash
+aws iam attach-role-policy --role-name <deploy-role> \
+  --policy-arn "$(terraform output -raw image_signing_policy_arn)"
+```
+
+署名導入前に push されたイメージは署名を持たないため拒否されます。クリーンな
+チェックアウトから push し直すか、既存 digest を一度署名してください。詳細は
+docs/operations/deployment.md "Image Signing" を参照。
+
 ## Remote State Backend
 
 State はデフォルトでローカルに保存されます。**実シークレットを含むデプロイでは

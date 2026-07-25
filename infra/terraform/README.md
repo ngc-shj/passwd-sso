@@ -139,6 +139,13 @@ aws ecs run-task --cluster "$CLUSTER" --task-definition "$MIGRATE_TD" \
 # apply changes ONLY desired_count and starts tasks on the already-migrated
 # schema. deploy.sh then advances every service to the current task-def revision.
 terraform apply $TFV
+
+# deploy.sh signs images and verifies signatures, so the deploy principal needs
+# kms:Sign on the signing key. Attach once per environment (see "Image Signing"
+# in docs/operations/deployment.md).
+aws iam attach-role-policy --role-name <deploy-role> \
+  --policy-arn "$(terraform output -raw image_signing_policy_arn)"
+
 AWS_REGION=<region> ECR_URL=<app-ecr-url> TF_VAR_FILE=envs/prod/terraform.tfvars \
   ./scripts/deploy.sh
 ```
@@ -245,6 +252,19 @@ AWS_REGION=<region> ECR_URL=<app-ecr-url> TF_VAR_FILE=envs/prod/terraform.tfvars
 > it only restarts tasks on the SAME task definition (same old image), so it
 > would redeploy the previous version. `--force-new-deployment` is only for
 > same-tag content changes, which this repo's IMMUTABLE tags disallow anyway.
+
+`deploy.sh` requires `cosign` on PATH and `kms:Sign` on the image-signing key: it
+signs every image it pushes and refuses to deploy one whose signature does not
+verify. Attach the policy once per environment:
+
+```bash
+aws iam attach-role-policy --role-name <deploy-role> \
+  --policy-arn "$(terraform output -raw image_signing_policy_arn)"
+```
+
+Without this, an operator with ECR push rights but no `kms:Sign` can push an
+image but cannot make `deploy.sh` accept it — which is the point of the control.
+See docs/operations/deployment.md "Image Signing".
 
 ## Remote State Backend
 

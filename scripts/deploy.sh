@@ -13,11 +13,19 @@ set -Eeuo pipefail
 # un-migrated schema.
 #
 #   1. reject a dirty worktree (tracked AND untracked); resolve the FULL commit SHA
-#   2. build + push an immutable tag (skip push if the digest already exists)
-#   3. terraform apply -var-file=... -var app_image=...   (task defs only)
+#   2. build + push an immutable tag (skip push if it already exists), cosign-sign
+#      the digest, and VERIFY the signature before trusting the image
+#   3. terraform apply -var-file=... -var app_image=<digest>   (task defs only)
 #   4. run the migrate task, wait for exit 0
 #   5. update-service app + jackson + both workers to the new task-def ARNs
 #   6. wait for every service to stabilize; fail on a rolled-back deployment
+#
+# Images are addressed by DIGEST from step 2 onward, so the bytes that were
+# signature-verified are exactly the bytes that run.
+#
+# Requires `cosign` on PATH and kms:Sign on the signing key (see
+# infra/terraform/ecr.tf). COSIGN_KEY=awskms://<arn> overrides the key that
+# `terraform output image_signing_key_arn` reports.
 #
 # ROLLBACK (no schema change): re-point the services at a previous known-good
 # image WITHOUT rebuilding from HEAD and WITHOUT running a migration:
@@ -58,7 +66,7 @@ ECR_URL="${ECR_URL:?ECR_URL env required (e.g. <acct>.dkr.ecr.<region>.amazonaws
 TF_VAR_FILE="${TF_VAR_FILE:?TF_VAR_FILE env required (e.g. envs/prod/terraform.tfvars)}"
 TF_DIR="${TF_DIR:-infra/terraform}"
 
-for cmd in aws docker terraform git jq; do
+for cmd in aws docker terraform git jq cosign; do
   command -v "$cmd" &>/dev/null || { echo "ERROR: $cmd is required." >&2; exit 1; }
 done
 
@@ -68,6 +76,53 @@ done
 # namespace and query the wrong repo).
 REGISTRY="${ECR_URL%%/*}"        # <acct>.dkr.ecr.<region>.amazonaws.com
 REPO_NAME="${ECR_URL#*/}"        # full repository path, namespace included
+
+# ---- image signing (cosign + KMS) -------------------------------------------
+#
+# Every image this script deploys must carry a valid signature made with the
+# KMS key Terraform provisions (infra/terraform/ecr.tf). This is what closes the
+# "pre-placed tag" escalation: ECR immutability stops a tag being OVERWRITTEN,
+# but a principal holding only ECR PUSH rights could create `git-<sha>` BEFORE
+# us, and the retry-safe "tag already exists → skip build" path would then
+# deploy their image. Signing authority is a separate IAM permission (kms:Sign),
+# so such a principal cannot produce a signature that verifies here.
+#
+# COSIGN_KEY may be supplied to override (e.g. an environment whose key lives
+# outside this Terraform state); otherwise it is read from the stack output.
+resolve_cosign_key() {
+  if [ -n "${COSIGN_KEY:-}" ]; then
+    echo "$COSIGN_KEY"
+    return 0
+  fi
+  local arn
+  arn=$(terraform -chdir="$TF_DIR" output -raw image_signing_key_arn 2>/dev/null || true)
+  if [ -z "$arn" ] || [ "$arn" = "None" ]; then
+    echo "ERROR: could not resolve the image-signing key." >&2
+    echo "       Expected \`terraform output -raw image_signing_key_arn\` (apply the" >&2
+    echo "       stack first) or an explicit COSIGN_KEY=awskms://... override." >&2
+    return 1
+  fi
+  # cosign addresses KMS keys as awskms://<key-arn-or-alias>.
+  echo "awskms://${arn}"
+}
+
+# Verify that $1 (an immutable digest ref) carries a signature from our key.
+# Fails closed: an unsigned image, a signature from another key, or a cosign
+# error all abort the deploy.
+verify_image_signature() {
+  local ref="$1"
+  echo "==> Verifying signature: $ref"
+  if ! cosign verify --key "$COSIGN_KEY_URI" "$ref" >/dev/null 2>&1; then
+    echo "ERROR: no valid signature for $ref" >&2
+    echo "       The image is unsigned, or signed with a key this deploy does not" >&2
+    echo "       trust. Refusing to deploy it. If this is a legitimate image built" >&2
+    echo "       before signing was introduced, re-push it from a clean checkout so" >&2
+    echo "       it gets signed, or sign it explicitly:" >&2
+    echo "         cosign sign --key $COSIGN_KEY_URI $ref" >&2
+    return 1
+  fi
+  echo "    signature OK"
+}
 
 # Refuse a dirty worktree on EVERY path (forward AND rollback). Both run
 # `terraform apply`, which reads the LOCAL .tf files — an uncommitted/untracked
@@ -128,6 +183,10 @@ if [ -n "$ROLLBACK_IMAGE" ]; then
   fi
   IMAGE="${ECR_URL}@${DIGEST}"
   echo "==> ROLLBACK to ${IMAGE} (resolved from ${ROLLBACK_IMAGE}; no build, no migration)"
+  # A rollback target is by definition an image we did not just build, so its
+  # signature is the only evidence it is ours. Verify before deploying it.
+  COSIGN_KEY_URI=$(resolve_cosign_key)
+  verify_image_signature "$IMAGE"
   RUN_MIGRATION=false
 else
   # ---- FORWARD DEPLOY PATH --------------------------------------------------
@@ -135,17 +194,16 @@ else
   IMAGE="${ECR_URL}:git-${GIT_SHA}"
   RUN_MIGRATION=true
 
+  COSIGN_KEY_URI=$(resolve_cosign_key)
+
   # Build + push, but skip the push if this immutable tag already exists (ECR
   # repos are IMMUTABLE — re-pushing the same tag fails, which would break a
   # retry after a mid-deploy failure).
   #
-  # SECURITY CAVEAT: the skip TRUSTS a pre-existing git-<sha> tag as this commit's
-  # build. ECR immutability stops it being *overwritten*, but a principal with
-  # ECR PUSH but NOT ECS-deploy rights could pre-place a forged git-<sha> ahead
-  # of us; the skip would then deploy their image — a real privilege escalation
-  # where push and deploy roles are separated. This is NOT closed here. To close
-  # it, sign images at build (cosign/ECR image signing) and verify the signature
-  # on this branch BEFORE trusting the existing tag. Tracked as a follow-up.
+  # The skip path trusts a tag we did not create in THIS run, so it is gated on
+  # signature verification below: a tag pre-placed by a push-only principal
+  # carries no signature from our KMS key and is rejected. That is what makes
+  # the retry-safe skip safe.
   if aws ecr describe-images --region "$REGION" --repository-name "$REPO_NAME" \
        --image-ids imageTag="git-${GIT_SHA}" >/dev/null 2>&1; then
     echo "==> Image git-${GIT_SHA} already in ECR — skipping build/push (retry-safe)"
@@ -156,7 +214,28 @@ else
     aws ecr get-login-password --region "$REGION" \
       | docker login --username AWS --password-stdin "$REGISTRY"
     docker push "$IMAGE"
+
+    # Sign the DIGEST, never the tag: a signature bound to a mutable name would
+    # not follow the bytes. (This repo's ECR is immutable, but signing the digest
+    # is the correct invariant regardless.)
+    PUSHED_DIGEST=$(aws ecr describe-images --region "$REGION" --repository-name "$REPO_NAME" \
+      --image-ids imageTag="git-${GIT_SHA}" --query 'imageDetails[0].imageDigest' --output text)
+    [ -n "$PUSHED_DIGEST" ] && [ "$PUSHED_DIGEST" != "None" ] \
+      || { echo "ERROR: could not read the pushed image digest — aborting before signing." >&2; exit 1; }
+    echo "==> Signing ${ECR_URL}@${PUSHED_DIGEST}"
+    cosign sign --key "$COSIGN_KEY_URI" --yes "${ECR_URL}@${PUSHED_DIGEST}"
   fi
+
+  # Verify on BOTH branches — the freshly signed image too, so a signing step
+  # that silently no-opped cannot ship an unverifiable image. Resolve the tag to
+  # its digest first so verification and deployment address the same bytes.
+  FWD_DIGEST=$(aws ecr describe-images --region "$REGION" --repository-name "$REPO_NAME" \
+    --image-ids imageTag="git-${GIT_SHA}" --query 'imageDetails[0].imageDigest' --output text)
+  [ -n "$FWD_DIGEST" ] && [ "$FWD_DIGEST" != "None" ] \
+    || { echo "ERROR: could not resolve digest for git-${GIT_SHA}." >&2; exit 1; }
+  verify_image_signature "${ECR_URL}@${FWD_DIGEST}"
+  # Deploy the digest, not the tag: what we verified is exactly what runs.
+  IMAGE="${ECR_URL}@${FWD_DIGEST}"
 fi
 
 # 3. Register the new task definitions (services stay put — ignore_changes).

@@ -98,6 +98,11 @@ function logLines(filter) {
  * @param {number} [opts.signalSelfAtUpdateCall] 1-based forward-update index at
  *   which the stub sends SIGTERM to the deploy shell instead of succeeding,
  *   simulating an operator/CI interrupt mid-rollout.
+ * @param {boolean} [opts.signatureInvalid] when true, `cosign verify` exits
+ *   non-zero — an unsigned image, or one signed with a key we do not trust.
+ * @param {boolean} [opts.imageAbsent] when true, the tag-existence probe fails,
+ *   so deploy.sh takes the build → push → sign branch instead of the
+ *   retry-safe skip.
  */
 function installStubs(opts = {}) {
   const {
@@ -105,9 +110,17 @@ function installStubs(opts = {}) {
     primaryTdOverride = null,
     rollbackNeverLands = false,
     signalSelfAtUpdateCall = 0,
+    signatureInvalid = false,
+    imageAbsent = false,
   } = opts;
 
-  const tfOutputs = { ...SERVICE_NAMES, ...NEW_TD, ecs_cluster_name: "passwd-sso-prod-cluster" };
+  const tfOutputs = {
+    ...SERVICE_NAMES,
+    ...NEW_TD,
+    ecs_cluster_name: "passwd-sso-prod-cluster",
+    image_signing_key_arn:
+      "arn:aws:kms:ap-northeast-1:111122223333:key/11111111-2222-3333-4444-555555555555",
+  };
   const tfOutputCases = Object.entries(tfOutputs)
     .map(([k, v]) => `    ${k}) echo "${v}";;`)
     .join("\n");
@@ -156,13 +169,20 @@ exit 0`,
 SUB="$2"
 case "$1 $2" in
   "ecr describe-images")
-    # The forward path only checks the exit status; the rollback path reads the
-    # resolved digest via --query imageDetails[0].imageDigest.
+    # Existence probes only check the exit status; digest resolution asks for
+    # --query imageDetails[0].imageDigest (both the forward and rollback paths
+    # do this so the deployed ref is a digest).
     for a in "$@"; do
       case "$a" in
-        *imageDigest*) echo "sha256:$(printf '%064d' 1)"; exit 0;;
+        *imageDetails*imageDigest*) echo "sha256:$(printf '%064d' 1)"; exit 0;;
       esac
     done
+    # Bare existence probe. When imageAbsent, report "not found" ONCE so the
+    # build/push/sign branch runs; the post-push probes then succeed.
+    if [ "${imageAbsent ? "true" : "false"}" = "true" ] && [ ! -f "${tmpDir}/pushed" ]; then
+      echo "ImageNotFoundException (stubbed)" >&2
+      exit 254
+    fi
     exit 0;;
   "ecs run-task")
     echo '{"tasks":[{"taskArn":"arn:aws:ecs:task/migrate-1"}],"failures":[]}'
@@ -244,7 +264,23 @@ esac
 exit 0`,
   );
 
-  stub("docker", `echo "docker $*" >> "${logFile}"\nexit 0`);
+  stub(
+    "docker",
+    `echo "docker $*" >> "${logFile}"
+# Mark the image as present once pushed, so the post-push digest probe succeeds
+# even when the pre-push existence probe was stubbed to fail.
+[ "$1" = push ] && touch "${tmpDir}/pushed"
+exit 0`,
+  );
+  stub(
+    "cosign",
+    `echo "cosign $*" >> "${logFile}"
+case "$1" in
+  verify) exit ${signatureInvalid ? 1 : 0};;
+  sign)   exit 0;;
+esac
+exit 0`,
+  );
   stub("jq", `exec ${JSON.stringify(process.execPath)} ${JSON.stringify(resolve(binDir, "jq.mjs"))} "$@"`);
   // Minimal jq: only the two filters deploy.sh uses.
   writeFileSync(
@@ -398,5 +434,55 @@ describe("deploy.sh --rollback-to validation", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("Skipping migration (rollback path)");
     expect(logLines("ecs run-task")).toHaveLength(0);
+  });
+});
+
+describe("deploy.sh image signature enforcement", () => {
+  it("refuses to deploy when the forward image has no valid signature", () => {
+    // The escalation this closes: a principal with ECR PUSH but no ECS-deploy
+    // rights pre-places `git-<sha>`, so deploy.sh's retry-safe skip would adopt
+    // their image. They cannot produce a signature from the KMS key, so
+    // verification must reject it before anything is deployed.
+    installStubs({ signatureInvalid: true });
+
+    const result = runDeploy();
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("no valid signature");
+    // Nothing may have been applied or rolled out.
+    expect(logLines("terraform").filter((l) => l.includes("apply"))).toHaveLength(0);
+    expect(logLines("ecs update-service")).toHaveLength(0);
+  });
+
+  it("refuses to roll back to an image with no valid signature", () => {
+    installStubs({ signatureInvalid: true });
+
+    const result = runDeploy(["--rollback-to", `${ECR_URL}:git-oldsha`]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("no valid signature");
+    expect(logLines("ecs update-service")).toHaveLength(0);
+  });
+
+  it("signs the pushed digest and deploys that digest, not the tag", () => {
+    installStubs({ imageAbsent: true });
+
+    const result = runDeploy();
+
+    expect(result.status).toBe(0);
+    const digest = `sha256:${"0".repeat(63)}1`;
+    // Signing must target the digest — a signature bound to a mutable tag would
+    // not follow the bytes.
+    expect(
+      logLines("cosign sign").some((l) => l.includes(`${ECR_URL}@${digest}`)),
+      "expected `cosign sign` on the digest ref",
+    ).toBe(true);
+    // And the deployed image (passed to terraform) must be that same digest.
+    expect(
+      logLines("terraform").some(
+        (l) => l.includes("apply") && l.includes(`app_image=${ECR_URL}@${digest}`),
+      ),
+      "expected terraform apply to receive the digest ref",
+    ).toBe(true);
   });
 });

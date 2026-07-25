@@ -70,6 +70,18 @@ output "ecr_jackson_repository_url" {
   value = aws_ecr_repository.jackson.repository_url
 }
 
+# cosign signing key. deploy.sh reads this to sign pushed images and to verify a
+# pre-existing tag before trusting it (see ecr.tf for why).
+output "image_signing_key_arn" {
+  value       = aws_kms_key.image_signing.arn
+  description = "KMS asymmetric key used by cosign to sign/verify container images"
+}
+
+output "image_signing_policy_arn" {
+  value       = aws_iam_policy.image_signing.arn
+  description = "Attach to the deploy principal to grant kms:Sign on the image-signing key"
+}
+
 ################################################################################
 # ECS
 ################################################################################
