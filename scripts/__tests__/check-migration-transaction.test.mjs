@@ -132,11 +132,12 @@ describe("check-migration-transaction gate", () => {
 
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("UNWRAPPED_MULTI_DDL: 20260101000004_do_block");
-    // Exactly 2 statements — the DO body's inner DDL must not be counted.
-    expect(r.stderr).toContain("(2 DDL statements");
+    // Exactly 2 statements — the DO body's inner DDL must not be counted, so
+    // both (and only both) are reported as outside the transaction.
+    expect(r.stderr).toContain("2 of 2 DDL statements outside BEGIN/COMMIT");
   });
 
-  it("T6: exempts CREATE INDEX CONCURRENTLY (cannot run in a transaction)", () => {
+  it("T6: exempts a migration of only CREATE INDEX CONCURRENTLY statements", () => {
     addMigration(
       "20260101000005_concurrent",
       [
@@ -146,6 +147,63 @@ describe("check-migration-transaction gate", () => {
     );
 
     expect(runGate().status).toBe(0);
+  });
+
+  it("T6b: fails when CONCURRENTLY is mixed with other DDL", () => {
+    // The non-transactional statement must stand alone; otherwise the other
+    // statements are unprotected anyway. Previously one CONCURRENTLY exempted
+    // the entire file, letting arbitrary unwrapped DDL ride along.
+    addMigration(
+      "20260101000007_mixed_concurrent",
+      [
+        `CREATE INDEX CONCURRENTLY "idx_a" ON "users" ("a");`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("UNWRAPPED_MULTI_DDL: 20260101000007_mixed_concurrent");
+    expect(r.stderr).toContain("non-transactional");
+  });
+
+  it("T6c: fails when a DDL statement precedes BEGIN", () => {
+    // Both BEGIN and COMMIT are present, so a presence-only check passes — but
+    // the first ALTER runs outside the transaction.
+    addMigration(
+      "20260101000008_before_begin",
+      [
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+        `COMMIT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("UNWRAPPED_MULTI_DDL: 20260101000008_before_begin");
+    expect(r.stderr).toContain("outside BEGIN/COMMIT");
+  });
+
+  it("T6d: fails when a DDL statement follows COMMIT", () => {
+    addMigration(
+      "20260101000009_after_commit",
+      [
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `COMMIT;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("UNWRAPPED_MULTI_DDL: 20260101000009_after_commit");
+    expect(r.stderr).toContain("outside BEGIN/COMMIT");
   });
 
   it("T7: baseline suppresses the finding, and a stale entry fails", () => {

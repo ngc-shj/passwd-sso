@@ -322,15 +322,35 @@ first migration, so those grants do not exist yet, and a blanket
 installed. A privilege granted to a worker out of band is therefore **not**
 removed by re-running the bootstrap.
 
-Detection is a separate step — run it after migrations, against the deployed DB:
+Detection runs automatically on **every deploy**: the migrate task's command is
+`prisma migrate deploy && node scripts/audit-db-grants.mjs`
+(`infra/terraform/ecs.tf`), so a migration that grants more than the manifest
+sanctions fails the migrate task — and `deploy.sh` aborts before any service is
+advanced. The audit needs a SUPERUSER connection and RDS admits only the ECS
+security group, so the migrate task is the only place it can run.
+
+To run it manually against a deployed database:
 
 ```bash
 MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs
 ```
 
-It diffs the live table ACLs of all three roles against
+It diffs the live ACLs of all three roles against
 `scripts/checks/db-grants-manifest.json` and exits non-zero on any
 `UNEXPECTED_GRANT` (over-privilege) or `MISSING_GRANT` (migrations not applied).
+
+Both granularities are tracked, as separate manifest keys:
+
+- `TABLE:<role> <table> <priv>` — table-level grants
+- `COLUMN:<role> <table>.<column> <priv>` — column-scoped grants that are **not**
+  implied by a table-level grant (13 of these today, e.g. the webhook workers'
+  `UPDATE (fail_count, last_error, …)`)
+
+Columns are keyed individually on purpose: a table that legitimately carries
+`UPDATE (fail_count)` must still fail the audit if `UPDATE (secret_encrypted)` is
+added. Note that `information_schema.role_table_grants` does **not** contain
+column-scoped grants — reading only that view silently misses all of them.
+
 When a migration intentionally changes a grant, regenerate the manifest with
 `--write` and review the diff — that diff is the security-relevant part of the
 migration.

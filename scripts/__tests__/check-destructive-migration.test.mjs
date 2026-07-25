@@ -103,6 +103,20 @@ describe("check-destructive-migration gate", () => {
     ["DROP CONSTRAINT", `ALTER TABLE "users" DROP CONSTRAINT "users_email_key";`],
     ["DROP VIEW", `DROP VIEW "user_summary";`],
     ["TRUNCATE", `TRUNCATE TABLE "extension_tokens";`],
+    // A dollar-quote tag may contain digits after the first character; an
+    // earlier [A-Za-z_]* pattern rejected $body1$, leaving the body unscanned.
+    [
+      "DROP inside a $body1$-tagged block",
+      `DO $body1$ BEGIN EXECUTE 'DROP TABLE users'; END $body1$;`,
+    ],
+    // Object types that an enumerate-the-destructive-kinds design missed
+    // entirely. These break old code or remove a security boundary.
+    ["DROP FUNCTION", `DROP FUNCTION tenant_guard();`],
+    ["DROP TRIGGER", `DROP TRIGGER audit_guard ON "users";`],
+    ["DROP POLICY", `DROP POLICY tenant_isolation ON "users";`],
+    ["DROP INDEX", `DROP INDEX users_email_key;`],
+    ["DISABLE ROW LEVEL SECURITY", `ALTER TABLE "users" DISABLE ROW LEVEL SECURITY;`],
+    ["NO FORCE ROW LEVEL SECURITY", `ALTER TABLE "users" NO FORCE ROW LEVEL SECURITY;`],
   ];
 
   for (const [kind, sql] of destructiveCases) {

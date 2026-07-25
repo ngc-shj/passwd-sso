@@ -46,24 +46,58 @@ const AUDITED_ROLES = [
 ];
 
 /**
- * Read the live table-level ACLs for the audited roles.
- * Returns a sorted array of "role\ttable\tprivilege" keys.
+ * Read the live ACLs for the audited roles at BOTH granularities.
  *
- * information_schema.role_table_grants expands column-scoped grants to the
- * table level too, so a column-scoped UPDATE shows up as an UPDATE row here.
- * That is the right granularity for detecting over-privilege: we care that the
- * role can UPDATE the table at all.
+ * Two separate catalogs, and both are required:
+ *
+ *   TABLE:<role>\t<table>\t<priv>          from role_table_grants
+ *   COLUMN:<role>\t<table>.<col>\t<priv>   from column_privileges, EXCLUDING
+ *                                          rows implied by a table-level grant
+ *
+ * `role_table_grants` does NOT contain column-scoped grants — that was a wrong
+ * assumption in the first version of this script, and it made the audit blind to
+ * every `GRANT UPDATE (col) ON t` in the migrations (13 of them at the time).
+ * Conversely `column_privileges` lists every column of a table that has a
+ * table-level grant, so taking it wholesale would bury the interesting rows in
+ * thousands of implied ones.
+ *
+ * Keying columns individually matters: a table that legitimately has
+ * `UPDATE (fail_count)` must still fail the audit if `UPDATE (secret_col)` is
+ * added. Collapsing to "can UPDATE this table" would hide exactly that.
  */
 async function readLiveGrants(client) {
-  const { rows } = await client.query(
+  const { rows: tableRows } = await client.query(
     `SELECT grantee, table_name, privilege_type
        FROM information_schema.role_table_grants
       WHERE grantee = ANY($1)
-        AND table_schema = 'public'
-      ORDER BY grantee, table_name, privilege_type`,
+        AND table_schema = 'public'`,
     [AUDITED_ROLES],
   );
-  return [...new Set(rows.map((r) => `${r.grantee}\t${r.table_name}\t${r.privilege_type}`))].sort();
+  const { rows: columnRows } = await client.query(
+    `SELECT cp.grantee, cp.table_name, cp.column_name, cp.privilege_type
+       FROM information_schema.column_privileges cp
+      WHERE cp.grantee = ANY($1)
+        AND cp.table_schema = 'public'
+        -- Keep only column grants NOT already implied by a table-level grant of
+        -- the same privilege; those are the deliberately column-scoped ones.
+        AND NOT EXISTS (
+          SELECT 1
+            FROM information_schema.role_table_grants tg
+           WHERE tg.grantee = cp.grantee
+             AND tg.table_schema = cp.table_schema
+             AND tg.table_name = cp.table_name
+             AND tg.privilege_type = cp.privilege_type
+        )`,
+    [AUDITED_ROLES],
+  );
+
+  const keys = [
+    ...tableRows.map((r) => `TABLE:${r.grantee}\t${r.table_name}\t${r.privilege_type}`),
+    ...columnRows.map(
+      (r) => `COLUMN:${r.grantee}\t${r.table_name}.${r.column_name}\t${r.privilege_type}`,
+    ),
+  ];
+  return [...new Set(keys)].sort();
 }
 
 function readManifest() {

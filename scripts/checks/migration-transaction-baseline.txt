@@ -1,116 +1,115 @@
-# Baseline: migrations with multiple DDL statements that are NOT wrapped in an
-# explicit transaction, and predate the rule (see
-# scripts/checks/check-migration-transaction.mjs and
+# Baseline: migrations whose DDL is not fully inside an explicit transaction, and
+# which predate the rule (see scripts/checks/check-migration-transaction.mjs and
 # docs/operations/deployment.md "Migration Compatibility Rules").
 #
 # These already shipped; the gate binds NEW migrations. Do NOT add a new entry
-# just to silence the gate — wrap the statements in BEGIN; ... COMMIT;, or split
+# just to silence the gate — wrap ALL statements in BEGIN; ... COMMIT;, or split
 # out any statement that cannot run inside a transaction (CREATE INDEX
-# CONCURRENTLY, VACUUM) into its own migration.
+# CONCURRENTLY, VACUUM) into a migration of its own.
 #
 # Format:  <migration_dir_name>  # reason (>= 10 chars)
-20260208091726_init_e2e  # pre-existing baseline (22 DDL statements); predates the explicit-transaction rule
-20260208095145_replace_category_with_tags  # pre-existing baseline (12 DDL statements); predates the explicit-transaction rule
-20260208165650_add_organization_models  # pre-existing baseline (24 DDL statements); predates the explicit-transaction rule
-20260209100000_per_user_org_favorites  # pre-existing baseline (5 DDL statements); predates the explicit-transaction rule
-20260214190000_add_entry_bulk_unarchive  # pre-existing baseline (7 DDL statements); predates the explicit-transaction rule
-20260214195500_add_trash_specific_audit_actions  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260214201000_remove_entry_bulk_delete  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260215132000_backfill_missing_schema_artifacts  # pre-existing baseline (36 DDL statements); predates the explicit-transaction rule
-20260215165129_add_account_lockout_fields  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260215181246_add_recovery_key_fields  # pre-existing baseline (5 DDL statements); predates the explicit-transaction rule
-20260218070334_add_folders_and_entry_history  # pre-existing baseline (28 DDL statements); predates the explicit-transaction rule
-20260219142113_add_send_feature  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260220065159_add_entry_expiration  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260222000000_add_master_key_version  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260223035747_add_session_meta_and_audit_actions  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260223053433_add_org_e2e_ecdh  # pre-existing baseline (13 DDL statements); predates the explicit-transaction rule
-20260223100000_remove_org_server_side_key_columns  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260224213544_add_scim_provisioning  # pre-existing baseline (18 DDL statements); predates the explicit-transaction rule
-20260226173000_add_tenant_team_phase1  # pre-existing baseline (17 DDL statements); predates the explicit-transaction rule
-20260226193000_tenant_team_phase4_tighten  # pre-existing baseline (14 DDL statements); predates the explicit-transaction rule
-20260226224500_rename_organizations_table_to_teams  # pre-existing baseline (5 DDL statements); predates the explicit-transaction rule
-20260226231000_rename_org_id_columns_to_team_id  # pre-existing baseline (9 DDL statements); predates the explicit-transaction rule
-20260226233000_rename_org_tables_to_team_tables  # pre-existing baseline (8 DDL statements); predates the explicit-transaction rule
-20260226234500_rename_org_foreign_key_columns_to_team_names  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260226235500_rename_org_key_columns_to_team_key_columns  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260227003500_fix_team_enum_and_tag_join_table  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260227011000_fix_team_password_entry_fk_rename_leaks  # pre-existing baseline (7 DDL statements); predates the explicit-transaction rule
-20260227013000_rename_audit_enum_values_to_team  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260227020000_enable_tenant_rls_phase5  # pre-existing baseline (12 DDL statements); predates the explicit-transaction rule
-20260227040000_add_tenant_id_columns_phase6  # pre-existing baseline (69 DDL statements); predates the explicit-transaction rule
-20260227043000_tenant_not_null_and_rls_phase7  # pre-existing baseline (139 DDL statements); predates the explicit-transaction rule
-20260227050000_tenant_id_trigger_defaults_phase8  # pre-existing baseline (59 DDL statements); predates the explicit-transaction rule
-20260227113000_add_tenant_scim_membership_and_group_mapping  # pre-existing baseline (12 DDL statements); predates the explicit-transaction rule
-20260228010000_tenant_external_id_and_bootstrap  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260228014150_add_bank_account_software_license  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260228020000_force_rls_and_scim_trigger_phase9  # pre-existing baseline (30 DDL statements); predates the explicit-transaction rule
-20260301143953_rename_org_constraints_to_team  # pre-existing baseline (38 DDL statements); predates the explicit-transaction rule
-20260301200000_add_notification_model  # pre-existing baseline (11 DDL statements); predates the explicit-transaction rule
-20260301210000_add_team_policy  # pre-existing baseline (8 DDL statements); predates the explicit-transaction rule
-20260301220000_add_tag_hierarchy  # pre-existing baseline (12 DDL statements); predates the explicit-transaction rule
-20260302100000_add_team_webhook  # pre-existing baseline (13 DDL statements); predates the explicit-transaction rule
-20260302130000_fix_team_policy_rls  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260304051051_admin_vault_reset  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260304110000_add_admin_vault_reset  # pre-existing baseline (11 DDL statements); predates the explicit-transaction rule
-20260305010000_tenant_vault_reset_revoke  # pre-existing baseline (9 DDL statements); predates the explicit-transaction rule
-20260306000000_batch_f_models  # pre-existing baseline (49 DDL statements); predates the explicit-transaction rule
-20260306020000_fix_rls_webauthn_and_batch_f  # pre-existing baseline (8 DDL statements); predates the explicit-transaction rule
-20260307143637_add_item_key_hierarchy  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260308015713_add_max_concurrent_sessions  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260311050445_add_share_access_verify_audit_actions  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260315010418_add_breakglass_personal_log_access  # pre-existing baseline (17 DDL statements); predates the explicit-transaction rule
-20260316200000_add_webauthn_minpin_largeblob  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260316210000_add_pin_length_check_constraints  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260321090000_change_id_defaults_to_uuid  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260321090001_catchup_db_push_drift  # pre-existing baseline (25 DDL statements); predates the explicit-transaction rule
-20260321110000_convert_id_columns_to_uuid_type  # pre-existing baseline (187 DDL statements); predates the explicit-transaction rule
-20260325000000_scope_team_slug_to_tenant  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260327214409_add_service_account_models  # pre-existing baseline (58 DDL statements); predates the explicit-transaction rule
-20260327221357_add_actor_type_and_access_requests  # pre-existing baseline (16 DDL statements); predates the explicit-transaction rule
-20260327224315_add_mcp_gateway  # pre-existing baseline (20 DDL statements); predates the explicit-transaction rule
-20260328075528_add_rls_machine_identity_tables  # pre-existing baseline (24 DDL statements); predates the explicit-transaction rule
-20260329100000_add_dcr_and_refresh_tokens  # pre-existing baseline (17 DDL statements); predates the explicit-transaction rule
-20260330000000_add_delegation_sessions  # pre-existing baseline (27 DDL statements); predates the explicit-transaction rule
-20260401100000_add_mcp_last_used_and_revoke_all_audit  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260409130000_expand_security_policies  # pre-existing baseline (21 DDL statements); predates the explicit-transaction rule
-20260411123230_add_extension_bridge_codes  # pre-existing baseline (13 DDL statements); predates the explicit-transaction rule
-20260412100000_add_audit_outbox  # pre-existing baseline (15 DDL statements); predates the explicit-transaction rule
-20260412100001_add_audit_outbox_worker_role  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260412110000_add_audit_outbox_phase2_actions  # pre-existing baseline (7 DDL statements); predates the explicit-transaction rule
-20260413100000_add_audit_delivery_targets  # pre-existing baseline (22 DDL statements); predates the explicit-transaction rule
-20260413110000_add_audit_chain  # pre-existing baseline (11 DDL statements); predates the explicit-transaction rule
-20260413120000_convert_timestamp_to_timestamptz  # pre-existing baseline (145 DDL statements); predates the explicit-transaction rule
-20260414120000_add_audit_delivery_target_crud_actions  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260415130000_audit_path_unification  # pre-existing baseline (5 DDL statements); predates the explicit-transaction rule
-20260417081357_drop_redundant_indexes  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260418042050_unify_session_timeout_policy  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260425103520_drop_team_policies_max_session_duration_minutes  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260427105115_add_operator_token  # pre-existing baseline (16 DDL statements); predates the explicit-transaction rule
-20260428170853_add_dcr_cleanup_worker_role_and_system_tenant  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260429000000_verifier_pepper_dual_version  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260430120000_admin_vault_reset_dual_approval  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260501000000_extension_token_client_kind  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260501000002_mobile_token_audit_actions  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260501000003_mobile_bridge_code  # pre-existing baseline (12 DDL statements); predates the explicit-transaction rule
-20260502000000_audit_anchor_publisher_phase2  # pre-existing baseline (16 DDL statements); predates the explicit-transaction rule
-20260503101424_add_recovery_key_invalidated_at_and_prf_rebootstrap_action  # pre-existing baseline (5 DDL statements); predates the explicit-transaction rule
-20260504015602_add_mcp_refresh_token_family_revoked_audit  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260504090109_add_attachment_cek_indirection  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260517042745_add_audit_action_rate_limit_fail_closed  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260519100000_replace_mobile_bridge_code_device_pubkey_with_jkt  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260519100100_add_webhook_secret_aad_version  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260522000000_add_audit_actions_login_failure_counter_reuse  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260522000100_access_request_requester  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260522000200_audit_log_revoke_via_definer  # pre-existing baseline (4 DDL statements); predates the explicit-transaction rule
-20260523023000_a04_4_master_key_rotation_dual_approval  # pre-existing baseline (19 DDL statements); predates the explicit-transaction rule
-20260524060000_extension_dpop_sender_constrained  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260531030918_remove_entry_history_reencrypt_audit_action  # pre-existing baseline (5 DDL statements); predates the explicit-transaction rule
-20260606000100_reconcile_access_request_fk_with_schema  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260607000000_add_ssh_key_sign_audit_actions  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260615000001_sa_token_tenant_composite_fk  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260615000002_access_request_tenant_composite_fk  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
-20260618000000_add_retention_gc_worker_role  # pre-existing baseline (6 DDL statements); predates the explicit-transaction rule
-20260618220000_add_log_retention_days  # pre-existing baseline (3 DDL statements); predates the explicit-transaction rule
-20260715000000_add_webhook_deliveries  # pre-existing baseline (11 DDL statements); predates the explicit-transaction rule
-20260722000000_add_audit_action_team_key_old_version_lockout_clear  # pre-existing baseline (2 DDL statements); predates the explicit-transaction rule
+20260208091726_init_e2e  # pre-existing baseline (22 of 22 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260208095145_replace_category_with_tags  # pre-existing baseline (12 of 12 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260208165650_add_organization_models  # pre-existing baseline (24 of 24 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260209100000_per_user_org_favorites  # pre-existing baseline (5 of 5 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260214190000_add_entry_bulk_unarchive  # pre-existing baseline (7 of 7 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260214195500_add_trash_specific_audit_actions  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260214201000_remove_entry_bulk_delete  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260215132000_backfill_missing_schema_artifacts  # pre-existing baseline (36 of 36 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260215165129_add_account_lockout_fields  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260215181246_add_recovery_key_fields  # pre-existing baseline (5 of 5 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260218070334_add_folders_and_entry_history  # pre-existing baseline (28 of 28 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260219142113_add_send_feature  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260220065159_add_entry_expiration  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260222000000_add_master_key_version  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260223035747_add_session_meta_and_audit_actions  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260223053433_add_org_e2e_ecdh  # pre-existing baseline (13 of 13 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260223100000_remove_org_server_side_key_columns  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260224213544_add_scim_provisioning  # pre-existing baseline (18 of 18 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226173000_add_tenant_team_phase1  # pre-existing baseline (17 of 17 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226193000_tenant_team_phase4_tighten  # pre-existing baseline (14 of 14 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226224500_rename_organizations_table_to_teams  # pre-existing baseline (5 of 5 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226231000_rename_org_id_columns_to_team_id  # pre-existing baseline (9 of 9 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226233000_rename_org_tables_to_team_tables  # pre-existing baseline (8 of 8 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226234500_rename_org_foreign_key_columns_to_team_names  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260226235500_rename_org_key_columns_to_team_key_columns  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227003500_fix_team_enum_and_tag_join_table  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227011000_fix_team_password_entry_fk_rename_leaks  # pre-existing baseline (7 of 7 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227013000_rename_audit_enum_values_to_team  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227020000_enable_tenant_rls_phase5  # pre-existing baseline (12 of 12 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227040000_add_tenant_id_columns_phase6  # pre-existing baseline (69 of 69 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227043000_tenant_not_null_and_rls_phase7  # pre-existing baseline (139 of 139 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227050000_tenant_id_trigger_defaults_phase8  # pre-existing baseline (59 of 59 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260227113000_add_tenant_scim_membership_and_group_mapping  # pre-existing baseline (12 of 12 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260228010000_tenant_external_id_and_bootstrap  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260228014150_add_bank_account_software_license  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260228020000_force_rls_and_scim_trigger_phase9  # pre-existing baseline (30 of 30 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260301143953_rename_org_constraints_to_team  # pre-existing baseline (38 of 38 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260301200000_add_notification_model  # pre-existing baseline (11 of 11 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260301210000_add_team_policy  # pre-existing baseline (8 of 8 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260301220000_add_tag_hierarchy  # pre-existing baseline (12 of 12 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260302100000_add_team_webhook  # pre-existing baseline (13 of 13 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260302130000_fix_team_policy_rls  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260304051051_admin_vault_reset  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260304110000_add_admin_vault_reset  # pre-existing baseline (11 of 11 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260305010000_tenant_vault_reset_revoke  # pre-existing baseline (9 of 9 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260306000000_batch_f_models  # pre-existing baseline (49 of 49 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260306020000_fix_rls_webauthn_and_batch_f  # pre-existing baseline (8 of 8 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260307143637_add_item_key_hierarchy  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260308015713_add_max_concurrent_sessions  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260311050445_add_share_access_verify_audit_actions  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260315010418_add_breakglass_personal_log_access  # pre-existing baseline (17 of 17 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260316200000_add_webauthn_minpin_largeblob  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260316210000_add_pin_length_check_constraints  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260321090000_change_id_defaults_to_uuid  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260321090001_catchup_db_push_drift  # pre-existing baseline (25 of 25 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260321110000_convert_id_columns_to_uuid_type  # pre-existing baseline (187 of 187 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260325000000_scope_team_slug_to_tenant  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260327214409_add_service_account_models  # pre-existing baseline (58 of 58 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260327221357_add_actor_type_and_access_requests  # pre-existing baseline (16 of 16 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260327224315_add_mcp_gateway  # pre-existing baseline (20 of 20 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260328075528_add_rls_machine_identity_tables  # pre-existing baseline (24 of 24 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260329100000_add_dcr_and_refresh_tokens  # pre-existing baseline (17 of 17 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260330000000_add_delegation_sessions  # pre-existing baseline (27 of 27 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260401100000_add_mcp_last_used_and_revoke_all_audit  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260409130000_expand_security_policies  # pre-existing baseline (21 of 21 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260411123230_add_extension_bridge_codes  # pre-existing baseline (13 of 13 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260412100000_add_audit_outbox  # pre-existing baseline (15 of 15 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260412100001_add_audit_outbox_worker_role  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260412110000_add_audit_outbox_phase2_actions  # pre-existing baseline (7 of 7 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260413100000_add_audit_delivery_targets  # pre-existing baseline (22 of 22 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260413110000_add_audit_chain  # pre-existing baseline (11 of 11 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260413120000_convert_timestamp_to_timestamptz  # pre-existing baseline (145 of 145 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260414120000_add_audit_delivery_target_crud_actions  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260415130000_audit_path_unification  # pre-existing baseline (5 of 5 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260417081357_drop_redundant_indexes  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260418042050_unify_session_timeout_policy  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260425103520_drop_team_policies_max_session_duration_minutes  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260427105115_add_operator_token  # pre-existing baseline (16 of 16 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260428170853_add_dcr_cleanup_worker_role_and_system_tenant  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260429000000_verifier_pepper_dual_version  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260430120000_admin_vault_reset_dual_approval  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260501000000_extension_token_client_kind  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260501000002_mobile_token_audit_actions  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260501000003_mobile_bridge_code  # pre-existing baseline (12 of 12 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260502000000_audit_anchor_publisher_phase2  # pre-existing baseline (16 of 16 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260503101424_add_recovery_key_invalidated_at_and_prf_rebootstrap_action  # pre-existing baseline (5 of 5 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260504015602_add_mcp_refresh_token_family_revoked_audit  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260504090109_add_attachment_cek_indirection  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260517042745_add_audit_action_rate_limit_fail_closed  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260519100000_replace_mobile_bridge_code_device_pubkey_with_jkt  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260519100100_add_webhook_secret_aad_version  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260522000000_add_audit_actions_login_failure_counter_reuse  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260522000100_access_request_requester  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260522000200_audit_log_revoke_via_definer  # pre-existing baseline (4 of 4 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260523023000_a04_4_master_key_rotation_dual_approval  # pre-existing baseline (19 of 19 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260524060000_extension_dpop_sender_constrained  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260531030918_remove_entry_history_reencrypt_audit_action  # pre-existing baseline (5 of 5 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260606000100_reconcile_access_request_fk_with_schema  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260607000000_add_ssh_key_sign_audit_actions  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260615000001_sa_token_tenant_composite_fk  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260615000002_access_request_tenant_composite_fk  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260618000000_add_retention_gc_worker_role  # pre-existing baseline (6 of 6 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260618220000_add_log_retention_days  # pre-existing baseline (3 of 3 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260715000000_add_webhook_deliveries  # pre-existing baseline (11 of 11 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule
+20260722000000_add_audit_action_team_key_old_version_lockout_clear  # pre-existing baseline (2 of 2 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule

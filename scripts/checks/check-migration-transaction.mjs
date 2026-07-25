@@ -16,15 +16,22 @@
  * miscounted, and a `DO $$ BEGIN … END $$` block's BEGIN is not mistaken for a
  * transaction BEGIN (that BEGIN is a PL/pgSQL block opener, not `BEGIN;`).
  *
+ * POSITION is checked, not mere presence: `ALTER …; BEGIN; ALTER …; COMMIT;`
+ * contains both keywords yet runs its first statement outside the transaction.
+ * analyze() is a state machine over top-level statements and flags any DDL that
+ * is not between an open BEGIN and its COMMIT.
+ *
  * Statements that CANNOT run inside a transaction (`CREATE INDEX CONCURRENTLY`,
- * `ALTER TYPE … ADD VALUE` on older servers, `VACUUM`) are exempt — such a
- * migration must stand alone, which is the documented guidance.
+ * `VACUUM`) must stand ALONE in their migration — mixing them with other DDL is
+ * flagged, since the others would be unprotected regardless. (The first version
+ * exempted the whole file whenever one such statement appeared, which let
+ * arbitrary unwrapped DDL ride along.)
  *
  * Existing migrations predate the rule and are baselined; the gate binds NEW
  * migrations. An entry needs a reason (>=10 chars).
  *
  * Fail-closed:
- *   UNWRAPPED_MULTI_DDL: <name> (<n> DDL statements, no BEGIN/COMMIT)
+ *   UNWRAPPED_MULTI_DDL: <name> (<what is wrong>)
  *   ALLOWLIST_ENTRY_WITHOUT_REASON: <line>
  *   STALE_ALLOWLIST_ENTRY: <entry>
  */
@@ -52,20 +59,29 @@ const MIN_REASON_LENGTH = 10;
 const DDL_KEYWORDS = new Set(["CREATE", "ALTER", "DROP", "TRUNCATE", "DO"]);
 
 /**
- * Count top-level DDL statements and detect an explicit transaction.
+ * Walk top-level statements, tracking transaction state, and report:
+ *   ddlCount            — total DDL statements
+ *   unwrappedDdlCount   — DDL statements NOT inside an open BEGIN…COMMIT
+ *   nonTransactionalDdl — DDL statements that cannot run inside a transaction
+ *
+ * POSITION matters, which is why this is a state machine and not a "does the
+ * file contain BEGIN and COMMIT" test: `ALTER …; BEGIN; ALTER …; COMMIT;` and
+ * `BEGIN; ALTER …; COMMIT; ALTER …;` both contain both keywords, yet in each
+ * one statement runs outside the transaction and can leave the schema half
+ * applied. Only DDL between an open BEGIN and its COMMIT is actually atomic.
  *
  * A DDL keyword counts only at a statement boundary (start of input or right
- * after `;`), so `ALTER` appearing inside a longer statement is not double
- * counted. Dollar-quoted bodies are already collapsed by tokenize(), so DDL
- * inside a DO block counts as the single statement it is.
+ * after `;`), so `ALTER` inside a longer statement is not double counted.
+ * Dollar-quoted bodies are not expanded, so a DO block is the single statement
+ * it is.
  */
 export function analyze(sql) {
   const tokens = tokenize(sql, { expandDollarQuoted: false });
   let ddlCount = 0;
+  let unwrappedDdlCount = 0;
+  let nonTransactionalDdl = 0;
+  let inTransaction = false;
   let atBoundary = true;
-  let hasBegin = false;
-  let hasCommit = false;
-  let nonTransactional = false;
 
   for (let i = 0; i < tokens.length; i += 1) {
     const t = tokens[i];
@@ -74,20 +90,31 @@ export function analyze(sql) {
       continue;
     }
     if (atBoundary) {
-      if (DDL_KEYWORDS.has(t)) ddlCount += 1;
-      // `BEGIN;` / `START TRANSACTION` only count at a statement boundary, which
-      // is exactly what distinguishes them from a PL/pgSQL `DO $$ BEGIN`.
+      // `BEGIN;` / `START TRANSACTION` only open a transaction at a statement
+      // boundary — that is what distinguishes them from a PL/pgSQL `DO $$ BEGIN`.
       if (t === "BEGIN" && (tokens[i + 1] === ";" || tokens[i + 1] === undefined)) {
-        hasBegin = true;
+        inTransaction = true;
+      } else if (t === "START" && tokens[i + 1] === "TRANSACTION") {
+        inTransaction = true;
+      } else if (t === "COMMIT" || t === "ROLLBACK" || t === "END") {
+        inTransaction = false;
+      } else if (DDL_KEYWORDS.has(t)) {
+        ddlCount += 1;
+        // Scan just this statement for a non-transactional marker, so one
+        // CONCURRENTLY index does not exempt every other statement in the file.
+        let j = i;
+        let nonTx = false;
+        while (j < tokens.length && tokens[j] !== ";") {
+          if (tokens[j] === "CONCURRENTLY" || tokens[j] === "VACUUM") nonTx = true;
+          j += 1;
+        }
+        if (nonTx) nonTransactionalDdl += 1;
+        else if (!inTransaction) unwrappedDdlCount += 1;
       }
-      if (t === "START" && tokens[i + 1] === "TRANSACTION") hasBegin = true;
-      if (t === "COMMIT") hasCommit = true;
     }
-    // Statements that cannot run inside a transaction block.
-    if (t === "CONCURRENTLY" || t === "VACUUM") nonTransactional = true;
     atBoundary = false;
   }
-  return { ddlCount, wrapped: hasBegin && hasCommit, nonTransactional };
+  return { ddlCount, unwrappedDdlCount, nonTransactionalDdl };
 }
 
 function readAllowlist() {
@@ -121,9 +148,30 @@ export function findUnwrapped() {
     if (!dir.isDirectory()) continue;
     const sqlPath = join(MIGRATIONS_DIR, dir.name, "migration.sql");
     if (!existsSync(sqlPath)) continue;
-    const { ddlCount, wrapped, nonTransactional } = analyze(readFileSync(sqlPath, "utf8"));
-    if (ddlCount > 1 && !wrapped && !nonTransactional) {
-      found.push({ name: dir.name, ddlCount });
+    const { ddlCount, unwrappedDdlCount, nonTransactionalDdl } = analyze(
+      readFileSync(sqlPath, "utf8"),
+    );
+
+    // A statement that cannot run inside a transaction must be ALONE in its
+    // migration — otherwise the other statements are unprotected anyway and the
+    // migration is still partially-appliable. This is what the docs say; the
+    // previous implementation exempted the whole file instead.
+    if (nonTransactionalDdl > 0 && ddlCount > nonTransactionalDdl) {
+      found.push({
+        name: dir.name,
+        ddlCount,
+        reason: `${nonTransactionalDdl} non-transactional statement(s) mixed with ${ddlCount - nonTransactionalDdl} other DDL statement(s)`,
+      });
+      continue;
+    }
+    // Multiple DDL statements are fine only if EVERY one of them sits inside an
+    // open transaction.
+    if (ddlCount > 1 && unwrappedDdlCount > 0) {
+      found.push({
+        name: dir.name,
+        ddlCount,
+        reason: `${unwrappedDdlCount} of ${ddlCount} DDL statements outside BEGIN/COMMIT`,
+      });
     }
   }
   return found;
@@ -134,9 +182,9 @@ function main() {
   const unwrapped = findUnwrapped();
   const unwrappedNames = new Set(unwrapped.map((u) => u.name));
 
-  for (const { name, ddlCount } of unwrapped) {
+  for (const { name, reason } of unwrapped) {
     if (!allowlist.has(name)) {
-      errors.push(`UNWRAPPED_MULTI_DDL: ${name} (${ddlCount} DDL statements, no BEGIN/COMMIT)`);
+      errors.push(`UNWRAPPED_MULTI_DDL: ${name} (${reason})`);
     }
   }
   for (const name of allowlist.keys()) {

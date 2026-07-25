@@ -136,7 +136,11 @@ export function tokenize(sql, options = {}) {
       continue;
     }
     if (c === "$") {
-      const tagMatch = /^\$[A-Za-z_]*\$/.exec(sql.slice(i));
+      // A dollar-quote tag follows the unquoted-identifier rule: it may not
+      // START with a digit, but may contain digits after the first character
+      // ($body1$ is valid). An earlier [A-Za-z_]* pattern rejected those, so the
+      // body was never recognised as dollar-quoted and its DDL went unscanned.
+      const tagMatch = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
       if (tagMatch) {
         flush();
         const tag = tagMatch[0];
@@ -174,37 +178,21 @@ export function tokenize(sql, options = {}) {
 const at = (t, i, ...expected) => expected.every((e, n) => t[i + n] === e);
 
 /**
- * Object keywords that can legitimately follow DROP. Anything else after DROP
- * inside an ALTER TABLE is the implicit-column form (`ALTER TABLE t DROP col`),
- * which is destructive.
+ * The ONLY `DROP <x>` forms that are not destructive — they relax a constraint
+ * on future writes rather than removing an object or data, so old code keeps
+ * working. Everything else that follows DROP is treated as destructive.
+ *
+ * This is a DENYLIST-by-default design (fail closed): an earlier version
+ * enumerated the destructive object types instead, so `DROP FUNCTION`,
+ * `DROP TRIGGER`, `DROP POLICY` and `DROP INDEX` — none of which were on the
+ * list — passed silently. Adding a new PostgreSQL object type must not silently
+ * open a hole, so anything unrecognised after DROP now fails.
  */
-const DROP_OBJECT_KEYWORDS = new Set([
-  "TABLE",
-  "COLUMN",
-  "VIEW",
-  "MATERIALIZED",
-  "CONSTRAINT",
-  "TYPE",
-  "SEQUENCE",
-  "INDEX",
-  "SCHEMA",
-  "TRIGGER",
-  "FUNCTION",
-  "PROCEDURE",
-  "POLICY",
-  "EXTENSION",
-  "OWNED",
-  "ROLE",
-  "DATABASE",
-  "PUBLICATION",
-  "SUBSCRIPTION",
-  // Non-destructive column/table clauses: `DROP DEFAULT`, `DROP NOT NULL`,
-  // `DROP IDENTITY`, `DROP EXPRESSION` relax rather than remove data.
-  "DEFAULT",
-  "NOT",
-  "IDENTITY",
-  "EXPRESSION",
-  "IF",
+const NON_DESTRUCTIVE_AFTER_DROP = new Set([
+  "DEFAULT", // ALTER COLUMN … DROP DEFAULT
+  "NOT", // ALTER COLUMN … DROP NOT NULL
+  "IDENTITY", // ALTER COLUMN … DROP IDENTITY
+  "EXPRESSION", // ALTER COLUMN … DROP EXPRESSION
 ]);
 
 /**
@@ -216,20 +204,27 @@ const DESTRUCTIVE_MATCHERS = [
   // RENAME TO t2, RENAME CONSTRAINT c TO c2, ALTER TYPE … RENAME VALUE 'a' TO 'b'.
   ["RENAME", (t, i) => t[i] === "RENAME"],
   ["TRUNCATE", (t, i) => t[i] === "TRUNCATE"],
-  ["DROP TABLE", (t, i) => at(t, i, "DROP", "TABLE")],
-  ["DROP COLUMN", (t, i) => at(t, i, "DROP", "COLUMN")],
+  // Any DROP except the constraint-relaxing forms above. Covers DROP TABLE /
+  // COLUMN / VIEW / CONSTRAINT / TYPE / SEQUENCE / INDEX / FUNCTION / TRIGGER /
+  // POLICY / SCHEMA / EXTENSION, the implicit `ALTER TABLE t DROP col` form, and
+  // any object type added to PostgreSQL later.
   [
-    "DROP VIEW",
-    (t, i) => at(t, i, "DROP", "VIEW") || at(t, i, "DROP", "MATERIALIZED", "VIEW"),
-  ],
-  ["DROP CONSTRAINT", (t, i) => at(t, i, "DROP", "CONSTRAINT")],
-  ["DROP TYPE", (t, i) => at(t, i, "DROP", "TYPE")],
-  ["DROP SEQUENCE", (t, i) => at(t, i, "DROP", "SEQUENCE")],
-  // `ALTER TABLE t DROP col` — the COLUMN keyword omitted.
-  [
-    "DROP COLUMN (implicit)",
+    "DROP",
     (t, i) =>
-      t[i] === "DROP" && t[i + 1] !== undefined && !DROP_OBJECT_KEYWORDS.has(t[i + 1]),
+      t[i] === "DROP" &&
+      t[i + 1] !== undefined &&
+      t[i + 1] !== ";" &&
+      !NON_DESTRUCTIVE_AFTER_DROP.has(t[i + 1]),
+  ],
+  // Turning RLS off removes a tenant-isolation boundary — a security regression
+  // even though no data is deleted. NO FORCE likewise weakens it for the owner.
+  [
+    "DISABLE ROW LEVEL SECURITY",
+    (t, i) => at(t, i, "DISABLE", "ROW", "LEVEL", "SECURITY"),
+  ],
+  [
+    "NO FORCE ROW LEVEL SECURITY",
+    (t, i) => at(t, i, "NO", "FORCE", "ROW", "LEVEL", "SECURITY"),
   ],
   ["SET NOT NULL", (t, i) => at(t, i, "SET", "NOT", "NULL")],
   // ALTER [COLUMN] <name> [SET DATA] TYPE …
@@ -253,11 +248,6 @@ export function findDestructiveKinds(sql) {
     for (const [kind, matches] of DESTRUCTIVE_MATCHERS) {
       if (matches(tokens, i)) kinds.add(kind);
     }
-  }
-  // The implicit form is a catch-all; when an explicit DROP was also matched at
-  // the same site, report only the precise kind.
-  if (kinds.has("DROP COLUMN") || kinds.has("DROP TABLE")) {
-    kinds.delete("DROP COLUMN (implicit)");
   }
   return [...kinds];
 }

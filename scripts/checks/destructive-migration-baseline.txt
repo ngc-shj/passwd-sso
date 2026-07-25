@@ -8,40 +8,61 @@
 # so in the reason.
 #
 # Format:  <migration_dir_name>  # reason (>= 10 chars)
-20260208095145_replace_category_with_tags  # pre-existing baseline (DROP CONSTRAINT, DROP COLUMN, DROP TABLE); predates the expand-and-contract rule
-20260208102854_remove_generator_prefs  # pre-existing baseline (DROP COLUMN); predates the expand-and-contract rule
-20260209100000_per_user_org_favorites  # pre-existing baseline (DROP COLUMN); predates the expand-and-contract rule
-20260214201000_remove_entry_bulk_delete  # pre-existing baseline (RENAME, ALTER COLUMN TYPE, DROP TYPE); predates the expand-and-contract rule
-20260223100000_remove_org_server_side_key_columns  # pre-existing baseline (DROP COLUMN); predates the expand-and-contract rule
-20260226193000_tenant_team_phase4_tighten  # pre-existing baseline (DROP CONSTRAINT, SET NOT NULL); predates the expand-and-contract rule
+20260208095145_replace_category_with_tags  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260208102854_remove_generator_prefs  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260209100000_per_user_org_favorites  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260214201000_remove_entry_bulk_delete  # pre-existing baseline (RENAME, ALTER COLUMN TYPE, DROP); predates the expand-and-contract rule
+20260223100000_remove_org_server_side_key_columns  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260226193000_tenant_team_phase4_tighten  # pre-existing baseline (DROP, SET NOT NULL); predates the expand-and-contract rule
 20260226224500_rename_organizations_table_to_teams  # pre-existing baseline (RENAME); predates the expand-and-contract rule
 20260226231000_rename_org_id_columns_to_team_id  # pre-existing baseline (RENAME); predates the expand-and-contract rule
 20260226233000_rename_org_tables_to_team_tables  # pre-existing baseline (RENAME); predates the expand-and-contract rule
 20260226234500_rename_org_foreign_key_columns_to_team_names  # pre-existing baseline (RENAME); predates the expand-and-contract rule
 20260226235500_rename_org_key_columns_to_team_key_columns  # pre-existing baseline (RENAME); predates the expand-and-contract rule
-20260227003500_fix_team_enum_and_tag_join_table  # pre-existing baseline (RENAME, ALTER COLUMN TYPE, DROP TYPE); predates the expand-and-contract rule
+20260227003500_fix_team_enum_and_tag_join_table  # pre-existing baseline (RENAME, ALTER COLUMN TYPE, DROP); predates the expand-and-contract rule
 20260227011000_fix_team_password_entry_fk_rename_leaks  # pre-existing baseline (RENAME); predates the expand-and-contract rule
 20260227013000_rename_audit_enum_values_to_team  # pre-existing baseline (RENAME); predates the expand-and-contract rule
-20260227043000_tenant_not_null_and_rls_phase7  # pre-existing baseline (SET NOT NULL, DROP CONSTRAINT); predates the expand-and-contract rule
+20260227020000_enable_tenant_rls_phase5  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260227043000_tenant_not_null_and_rls_phase7  # pre-existing baseline (SET NOT NULL, DROP); predates the expand-and-contract rule
+20260227050000_tenant_id_trigger_defaults_phase8  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260227113000_add_tenant_scim_membership_and_group_mapping  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260301143953_rename_org_constraints_to_team  # pre-existing baseline (RENAME); predates the expand-and-contract rule
+20260301200000_add_notification_model  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260301220000_add_tag_hierarchy  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260302100000_add_team_webhook  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260302130000_fix_team_policy_rls  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260304051051_admin_vault_reset  # pre-existing baseline (ALTER COLUMN TYPE); predates the expand-and-contract rule
-20260305010000_tenant_vault_reset_revoke  # pre-existing baseline (DROP CONSTRAINT); predates the expand-and-contract rule
-20260306000000_batch_f_models  # pre-existing baseline (DROP CONSTRAINT, DROP COLUMN); predates the expand-and-contract rule
-20260321100000_unify_all_ids_to_uuid  # pre-existing baseline (DROP TABLE); predates the expand-and-contract rule
-20260321110000_convert_id_columns_to_uuid_type  # pre-existing baseline (DROP CONSTRAINT, ALTER COLUMN TYPE, DROP TABLE); predates the expand-and-contract rule
-20260329100000_add_dcr_and_refresh_tokens  # pre-existing baseline (DROP CONSTRAINT); predates the expand-and-contract rule
+20260305010000_tenant_vault_reset_revoke  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260306000000_batch_f_models  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260306020000_fix_rls_webauthn_and_batch_f  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260321090001_catchup_db_push_drift  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260321100000_unify_all_ids_to_uuid  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260321110000_convert_id_columns_to_uuid_type  # pre-existing baseline (DROP, ALTER COLUMN TYPE); predates the expand-and-contract rule
+20260325000000_scope_team_slug_to_tenant  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260328075528_add_rls_machine_identity_tables  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260329100000_add_dcr_and_refresh_tokens  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260330000000_add_delegation_sessions  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260411123230_add_extension_bridge_codes  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260412100000_add_audit_outbox  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260413100000_add_audit_delivery_targets  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260413110000_add_audit_chain  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260413120000_convert_timestamp_to_timestamptz  # pre-existing baseline (ALTER COLUMN TYPE); predates the expand-and-contract rule
-20260415130000_audit_path_unification  # pre-existing baseline (DROP CONSTRAINT, SET NOT NULL); predates the expand-and-contract rule
-20260415143000_drop_audit_deliveries_outbox_fk  # pre-existing baseline (DROP CONSTRAINT); predates the expand-and-contract rule
+20260415130000_audit_path_unification  # pre-existing baseline (DROP, SET NOT NULL); predates the expand-and-contract rule
+20260415143000_drop_audit_deliveries_outbox_fk  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260417081357_drop_redundant_indexes  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260418042050_unify_session_timeout_policy  # pre-existing baseline (SET NOT NULL); predates the expand-and-contract rule
 20260418144000_flip_extension_token_family_not_null  # pre-existing baseline (SET NOT NULL); predates the expand-and-contract rule
-20260425103520_drop_team_policies_max_session_duration_minutes  # pre-existing baseline (DROP COLUMN); predates the expand-and-contract rule
+20260425103520_drop_team_policies_max_session_duration_minutes  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260427105115_add_operator_token  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260501000003_mobile_bridge_code  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260501000004_rename_client_kind_enum  # pre-existing baseline (RENAME); predates the expand-and-contract rule
 20260503101424_add_recovery_key_invalidated_at_and_prf_rebootstrap_action  # pre-existing baseline (RENAME); predates the expand-and-contract rule
-20260519100000_replace_mobile_bridge_code_device_pubkey_with_jkt  # pre-existing baseline (DROP COLUMN); predates the expand-and-contract rule
+20260519100000_replace_mobile_bridge_code_device_pubkey_with_jkt  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260523023000_a04_4_master_key_rotation_dual_approval  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260524060000_extension_dpop_sender_constrained  # pre-existing baseline (TRUNCATE); predates the expand-and-contract rule
-20260531030918_remove_entry_history_reencrypt_audit_action  # pre-existing baseline (ALTER COLUMN TYPE, RENAME, DROP TYPE); predates the expand-and-contract rule
-20260606000100_reconcile_access_request_fk_with_schema  # pre-existing baseline (DROP CONSTRAINT, RENAME); predates the expand-and-contract rule
-20260615000001_sa_token_tenant_composite_fk  # pre-existing baseline (DROP CONSTRAINT); predates the expand-and-contract rule
-20260615000002_access_request_tenant_composite_fk  # pre-existing baseline (DROP CONSTRAINT); predates the expand-and-contract rule
+20260531030918_remove_entry_history_reencrypt_audit_action  # pre-existing baseline (ALTER COLUMN TYPE, RENAME, DROP); predates the expand-and-contract rule
+20260606000100_reconcile_access_request_fk_with_schema  # pre-existing baseline (DROP, RENAME); predates the expand-and-contract rule
+20260615000001_sa_token_tenant_composite_fk  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260615000002_access_request_tenant_composite_fk  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260629000100_flip_mcp_refresh_token_family_created_at_not_null  # pre-existing baseline (SET NOT NULL); predates the expand-and-contract rule
+20260715000000_add_webhook_deliveries  # pre-existing baseline (DROP); predates the expand-and-contract rule

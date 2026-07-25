@@ -212,6 +212,12 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 # One-off RDS role bootstrap (run via ECS Exec on a fresh environment; uses the
 # `pg` module copied below, so no psql binary is needed). Plain .mjs — not bundled.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-rds-roles.mjs ./scripts/bootstrap-rds-roles.mjs
+# DB grant audit + its expected-ACL manifest. The migrate task runs this right
+# after `prisma migrate deploy` (see infra/terraform/ecs.tf), so a migration that
+# over-grants fails the task before any service is advanced. It needs a SUPERUSER
+# connection, and only tasks in the ECS SG can reach RDS.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/audit-db-grants.mjs ./scripts/audit-db-grants.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/db-grants-manifest.json ./scripts/checks/db-grants-manifest.json
 
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js

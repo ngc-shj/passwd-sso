@@ -159,7 +159,16 @@ resource "aws_ecs_task_definition" "migrate" {
       name      = "migrate"
       image     = var.app_image
       essential = true
-      command   = ["npx", "prisma", "migrate", "deploy"]
+      # Migrate, then AUDIT the resulting DB grants in the same task. The audit
+      # needs a SUPERUSER connection and the RDS SG admits only the ECS SG, so
+      # this task is the sole place it can run — and running it here means a
+      # migration that granted more than db-grants-manifest.json sanctions fails
+      # the task, which aborts deploy.sh BEFORE any service is advanced.
+      # `set -e` via sh -c so a non-zero audit propagates as the task exit code.
+      command = [
+        "sh", "-c",
+        "set -e; npx prisma migrate deploy; node scripts/audit-db-grants.mjs"
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
