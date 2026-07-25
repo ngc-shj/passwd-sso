@@ -35,10 +35,18 @@ WORKDIR /prisma-cli
 COPY .npmrc ./
 # PRISMA_VER is kept in lockstep with package-lock.json by
 # scripts/checks/check-dockerfile-prisma-pin.
+# FMW_VER: prisma pulls find-my-way (via @prisma/dev) and 9.6.0 carries
+# CVE-2026-47219 (HTTP/2 DDoS). This stage is an ISOLATED `npm init` tree, so the
+# repo's package.json `overrides` do NOT apply here — the override has to be
+# written into this stage's own package.json before installing, or the vulnerable
+# copy ships in the runner via the COPY below and Trivy flags it.
 RUN PRISMA_VER=7.9.0 && \
+    FMW_VER=9.7.0 && \
     npm init -y >/dev/null 2>&1 && \
+    node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
     npm install "prisma@${PRISMA_VER}" --ignore-scripts --loglevel=error && \
     node -e "const v=require('/prisma-cli/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}" && \
+    node -e "const v=require('/prisma-cli/node_modules/find-my-way/package.json').version,c=v.split('.').map(Number),m='${FMW_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('find-my-way still '+v);process.exit(1)}}" && \
     node node_modules/prisma/build/index.js --version >/dev/null
 
 # Stage 2: Build the application
@@ -105,6 +113,10 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # - sigstore >=4.1.1: closes CVE-2026-48815 (certificateOIDs verification
 #   constraints silently dropped). npm 11.16.0 already bundles 4.1.1, so the
 #   patch is a no-op skip — kept as a fail-closed tripwire.
+# - undici >=6.28.0: closes CVE-2026-12151 (unbounded memory growth via
+#   WebSocket → DoS). npm 11.16.0 bundles 6.26.0. The app's own top-level undici
+#   is already 7.28.0 (also fixed); this patches npm's bundled copy, which Trivy
+#   reports separately.
 # - brace-expansion >=5.0.8: closes CVE-2026-13149 (exponential-time DoS) AND
 #   GHSA-mh99-v99m-4gvg (unbounded expansion → OOM), whose range is <=5.0.7 —
 #   so the previous 5.0.7 pin was itself affected once that advisory landed.
@@ -124,6 +136,7 @@ RUN TAR_VER=7.5.19 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
     BE_VER=5.0.8 && \
+    UNDICI_VER=6.28.0 && \
     NPM_VER=11.16.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
@@ -186,6 +199,21 @@ RUN TAR_VER=7.5.19 && \
     else \
       echo "ERROR: brace-expansion directory not found at ${BE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
     fi && \
+    UNDICI_DIR=/usr/local/lib/node_modules/npm/node_modules/undici && \
+    if [ -d "$UNDICI_DIR" ]; then \
+      CURRENT=$(node -p "require('${UNDICI_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$UNDICI_VER" "$CURRENT" | sort -V | head -n1)" != "$UNDICI_VER" ]; then \
+        cd "$UNDICI_DIR" && \
+        npm pack "undici@${UNDICI_VER}" --quiet && \
+        tar xzf "undici-${UNDICI_VER}.tgz" --strip-components=1 && \
+        rm -f "undici-${UNDICI_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${UNDICI_VER}'){console.error('undici patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "undici ${CURRENT} already >= ${UNDICI_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "ERROR: undici directory not found at ${UNDICI_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
+    fi && \
     cd / && \
     npm cache clean --force >/dev/null 2>&1 && \
     rm -rf /root/.npm /tmp/* && \
@@ -194,7 +222,8 @@ RUN TAR_VER=7.5.19 && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tar/package.json').version,c=v.split('.').map(Number),m='${TAR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('tar still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
-    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}"
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version,c=v.split('.').map(Number),m='${UNDICI_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('undici still '+v);process.exit(1)}}"
 
 # Prisma CLI: COPY the self-contained closure from the dedicated `prisma-cli`
 # stage (isolated npm install with .npmrc), NOT a runner-side `npm install`
