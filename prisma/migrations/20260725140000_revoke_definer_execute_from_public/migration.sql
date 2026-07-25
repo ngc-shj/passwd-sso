@@ -39,15 +39,17 @@ BEGIN
 END
 $$;
 
--- 3. Attempt to prevent the same trap for functions added later.
+-- 3. Prevent the same trap for functions added later.
 --
---    NOTE: this statement is a NO-OP and is superseded by
---    20260725150000_fix_default_execute_revoke_scope. `ALTER DEFAULT PRIVILEGES
---    IN SCHEMA <s>` can only undo a matching schema-scoped GRANT; it cannot
---    cancel PostgreSQL's BUILT-IN global default of granting EXECUTE on new
---    functions to PUBLIC. It is left here (rather than edited) because this
---    migration has already been applied — the follow-up issues the correct,
---    unscoped form.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+--    NOT `IN SCHEMA public`. The schema-scoped form can only undo a matching
+--    schema-scoped GRANT; it cannot cancel PostgreSQL's BUILT-IN global default
+--    of granting EXECUTE on new functions to PUBLIC, so it is a silent no-op
+--    here (verified: with it, a newly created function was still
+--    PUBLIC-executable, and no pg_default_acl row was created). The unscoped
+--    form targets the default actually in force.
+--
+--    This applies to objects created by THIS role in any schema, and only to
+--    FUTURE objects — hence steps 1-2 for the two that already exist.
+ALTER DEFAULT PRIVILEGES REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 COMMIT;

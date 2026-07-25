@@ -65,8 +65,8 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  * all three paths, so they are what the audit compares against the manifest.
  *
  * Keys, all sorted into one list. Object names are SCHEMA-QUALIFIED — every
- * schema is audited, not just `public`, so a migration cannot hide a grant by
- * putting the table somewhere else:
+ * non-system schema is audited, not just `public`, so a migration cannot hide a
+ * grant by putting the table somewhere else:
  *
  *   TABLE:<role>\t<schema>.<table>\t<priv>        effective table privilege
  *   COLUMN:<role>\t<schema>.<table>.<col>\t<priv> effective column privilege NOT
@@ -96,8 +96,9 @@ const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "R
  * table-level audit can see.
  */
 /**
- * SQL predicate selecting every schema whose objects we audit: everything
- * except PostgreSQL's own catalogs and per-session temp schemas.
+ * SQL predicate selecting the schemas whose objects we audit: every
+ * application schema, i.e. everything except PostgreSQL's own catalogs and the
+ * per-session temp/toast schemas.
  *
  * Pinning this to `= 'public'` (as an earlier version did) meant a migration
  * could create a schema, put a table in it, grant the worker SELECT, and the
@@ -301,7 +302,9 @@ function writeManifest(grants) {
   const body = {
     _comment:
       "Expected EFFECTIVE privileges of the least-privilege DB roles. Object " +
-      "names are schema-qualified and EVERY schema is audited, not just public. " +
+      "names are schema-qualified and every NON-SYSTEM schema is audited, not " +
+      "just public (pg_catalog, information_schema and temp/toast schemas are " +
+      "excluded). " +
       "Key forms: 'TABLE:<role><TAB><schema>.<table><TAB><priv>', " +
       "'COLUMN:<role><TAB><schema>.<table>.<column><TAB><priv>' (only where not " +
       "implied by the table-level privilege), 'MEMBER:<role><TAB><granted_role>' " +

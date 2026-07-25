@@ -401,7 +401,9 @@ Privileges are **effective**, not direct-ACL: they are computed with
 `has_*_privilege`, so a privilege reached via `PUBLIC` or via role inheritance
 counts. (`information_schema.role_table_grants` omits both, and contains no
 column-scoped grants at all — reading only that view misses all three.) Object
-names are schema-qualified and **every** schema is audited, not just `public`.
+names are schema-qualified and **every non-system schema** is audited, not just
+`public` (`pg_catalog`, `information_schema` and the temp/toast schemas are
+excluded).
 
 Manifest keys:
 
