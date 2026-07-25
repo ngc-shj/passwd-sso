@@ -2,18 +2,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions, mockCreateRateLimiter } = vi.hoisted(() => {
+const { mockAuth, mockPrismaUser, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockLogAuditInTx, mockWithUserTenantRls, mockWithTenantRls, mockInvalidateUserSessions, mockCreateRateLimiter } = vi.hoisted(() => {
   const mockVerifyCheck = vi.fn().mockResolvedValue({ allowed: true });
   const mockResetCheck = vi.fn().mockResolvedValue({ allowed: true });
   const mockResetClear = vi.fn();
+  const mockPrismaUser = { findUnique: vi.fn(), update: vi.fn() };
   return {
     mockAuth: vi.fn(),
-    mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+    mockPrismaUser,
     mockVerifyCheck,
     mockResetCheck,
     mockResetClear,
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    // withTenantRls hands the callback a tx whose user.update is the same spy
+    // the ambient path used, so existing update-arg assertions still see it.
+    mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: (tx: unknown) => unknown) =>
+      fn({ user: mockPrismaUser })),
     mockInvalidateUserSessions: vi.fn().mockResolvedValue({
       sessions: 0,
       extensionTokens: 0,
@@ -46,12 +52,16 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -264,7 +274,10 @@ describe("POST /api/vault/recovery-key/recover", () => {
         }),
       );
 
-      expect(mockLogAudit).toHaveBeenCalledWith(
+      // M1: reset audit is now atomic (logAuditInTx(tx, tenantId, params)).
+      expect(mockLogAuditInTx).toHaveBeenCalledWith(
+        expect.anything(),
+        "test-tenant-id",
         expect.objectContaining({
           action: "RECOVERY_PASSPHRASE_RESET",
           userId: "user-1",

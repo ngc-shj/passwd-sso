@@ -16,7 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
@@ -152,8 +152,11 @@ async function handlePOST(
   // `initiatedById: { not: ... }` only fires when the row has a non-null
   // initiator. The app-level eligibility check already handles null initiator
   // case by treating it as not-self.
-  const casResult = await withTenantRls(prisma, auth.tenantId, async (tx) =>
-    tx.masterKeyRotation.updateMany({
+  // M1: CAS + success audit in ONE transaction so an approval cannot commit
+  // without its audit trail. The CAS-lost audit stays best-effort (logAuditAsync,
+  // below) — it records a rejection with no state mutation to be atomic with.
+  const casCount = await withTenantRls(prisma, auth.tenantId, async (tx) => {
+    const casResult = await tx.masterKeyRotation.updateMany({
       where: {
         id: rotationId,
         tenantId: auth.tenantId,
@@ -168,10 +171,25 @@ async function handlePOST(
         approvedById: auth.subjectUserId,
         expiresAt: newExpiresAt,
       },
-    }),
-  );
+    });
+    if (casResult.count === 0) return 0;
 
-  if (casResult.count === 0) {
+    await logAuditInTx(tx, auth.tenantId, {
+      ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+      actorType: ACTOR_TYPE.HUMAN,
+      action: AUDIT_ACTION.MASTER_KEY_ROTATION_APPROVE,
+      metadata: {
+        rotationId,
+        targetVersion: row.targetVersion,
+        initiatedById: row.initiatedById,
+        newExpiresAt: newExpiresAt.toISOString(),
+        reason: reason ?? null,
+      },
+    });
+    return casResult.count;
+  });
+
+  if (casCount === 0) {
     // Operational sub-cause for forensics (NOT in audit metadata — S15).
     getLogger().warn(
       {
@@ -194,19 +212,6 @@ async function handlePOST(
     });
     return errorResponse(API_ERROR.ROTATION_NOT_EXECUTABLE);
   }
-
-  await logAuditAsync({
-    ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
-    actorType: ACTOR_TYPE.HUMAN,
-    action: AUDIT_ACTION.MASTER_KEY_ROTATION_APPROVE,
-    metadata: {
-      rotationId,
-      targetVersion: row.targetVersion,
-      initiatedById: row.initiatedById,
-      newExpiresAt: newExpiresAt.toISOString(),
-      reason: reason ?? null,
-    },
-  });
 
   return NextResponse.json({
     ok: true,

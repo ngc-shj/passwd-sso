@@ -10,7 +10,8 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
-import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
@@ -179,9 +180,13 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 
-  // Update passphrase + recovery key data in a single transaction
-  await withUserTenantRls(userId, async () =>
-    prisma.user.update({
+  // M1: update the passphrase/recovery-key material AND write the audit record
+  // in ONE transaction, so a recovery reset — an account-takeover-recovery event
+  // — can never commit without its audit trail. Uses withTenantRls(tx) (not the
+  // ambient withUserTenantRls, which does not expose a tx client) so logAuditInTx
+  // shares the same transaction as the user.update.
+  await withTenantRls(prisma, user.tenantId, async (tx) => {
+    await tx.user.update({
       where: { id: userId },
       data: {
         // New passphrase-wrapped secret key
@@ -204,17 +209,17 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         lastFailedUnlockAt: null,
         accountLockedUntil: null,
       },
-    }),
-  );
+    });
 
-  await logAuditAsync({
-    ...personalAuditBase(request, userId),
-    action: AUDIT_ACTION.RECOVERY_PASSPHRASE_RESET,
-    metadata: {
-      keyVersion: user.keyVersion,
-      recoveryKeyRegenerated: true,
-      lockoutReset: true,
-    },
+    await logAuditInTx(tx, user.tenantId, {
+      ...personalAuditBase(request, userId),
+      action: AUDIT_ACTION.RECOVERY_PASSPHRASE_RESET,
+      metadata: {
+        keyVersion: user.keyVersion,
+        recoveryKeyRegenerated: true,
+        lockoutReset: true,
+      },
+    });
   });
 
   // C6 (OWASP A07-1): invalidate all sessions and bearer tokens across all

@@ -16,7 +16,7 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
@@ -112,8 +112,16 @@ async function handlePOST(
   }
 
   const now = new Date();
-  const casResult = await withTenantRls(prisma, auth.tenantId, async (tx) =>
-    tx.masterKeyRotation.updateMany({
+  const cause =
+    row.initiatedById !== null && row.initiatedById === auth.subjectUserId
+      ? "INITIATOR_SELF_REVOKE"
+      : "SECOND_ACTOR_REVOKE";
+
+  // M1: CAS + audit in ONE transaction. A revoke that commits without an audit
+  // trail (or an audit row for a CAS that lost the race) is the atomicity gap
+  // this closes. The audit is only enqueued when the CAS actually won.
+  const casCount = await withTenantRls(prisma, auth.tenantId, async (tx) => {
+    const casResult = await tx.masterKeyRotation.updateMany({
       where: {
         id: rotationId,
         tenantId: auth.tenantId,
@@ -121,10 +129,24 @@ async function handlePOST(
         revokedAt: null,
       },
       data: { revokedAt: now, revokedById: auth.subjectUserId },
-    }),
-  );
+    });
+    if (casResult.count === 0) return 0;
 
-  if (casResult.count === 0) {
+    await logAuditInTx(tx, auth.tenantId, {
+      ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+      actorType: ACTOR_TYPE.HUMAN,
+      action: AUDIT_ACTION.MASTER_KEY_ROTATION_REVOKE,
+      metadata: {
+        rotationId,
+        targetVersion: row.targetVersion,
+        cause,
+        reason: reason ?? null,
+      },
+    });
+    return casResult.count;
+  });
+
+  if (casCount === 0) {
     getLogger().warn(
       {
         rotationId,
@@ -136,23 +158,6 @@ async function handlePOST(
     );
     return errorResponse(API_ERROR.ROTATION_NOT_EXECUTABLE);
   }
-
-  const cause =
-    row.initiatedById !== null && row.initiatedById === auth.subjectUserId
-      ? "INITIATOR_SELF_REVOKE"
-      : "SECOND_ACTOR_REVOKE";
-
-  await logAuditAsync({
-    ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
-    actorType: ACTOR_TYPE.HUMAN,
-    action: AUDIT_ACTION.MASTER_KEY_ROTATION_REVOKE,
-    metadata: {
-      rotationId,
-      targetVersion: row.targetVersion,
-      cause,
-      reason: reason ?? null,
-    },
-  });
 
   return NextResponse.json({ ok: true, status: "revoked" as const });
 }

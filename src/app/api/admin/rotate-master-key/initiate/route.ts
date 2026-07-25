@@ -21,7 +21,7 @@ import {
 } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditInTx, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/access/maintenance-auth";
@@ -160,8 +160,12 @@ async function handlePOST(req: NextRequest) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ROTATION_TOTAL_TTL_MS);
 
-  const created = await withTenantRls(prisma, auth.tenantId, async (tx) =>
-    tx.masterKeyRotation.create({
+  // M1: create the rotation row and its audit record in ONE transaction, so a
+  // security-critical key-rotation event can never commit without its audit
+  // trail (nor an audit row survive a rolled-back create). logAuditInTx enqueues
+  // to the outbox within the same tx.
+  const created = await withTenantRls(prisma, auth.tenantId, async (tx) => {
+    const row = await tx.masterKeyRotation.create({
       data: {
         tenantId: auth.tenantId,
         initiatedById: auth.subjectUserId,
@@ -171,26 +175,29 @@ async function handlePOST(req: NextRequest) {
         reason: reason ?? null,
       },
       select: { id: true, expiresAt: true, targetVersion: true },
-    }),
-  );
+    });
 
-  // FR10: notify other OWNER/ADMINs out-of-band; best-effort.
-  await notifyOtherAdmins(auth.tenantId, auth.subjectUserId);
+    await logAuditInTx(tx, auth.tenantId, {
+      ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
+      actorType: ACTOR_TYPE.HUMAN,
+      action: AUDIT_ACTION.MASTER_KEY_ROTATION_INITIATE,
+      metadata: {
+        rotationId: row.id,
+        targetVersion: row.targetVersion,
+        revokeShares,
+        // Flag explicit opt-outs so post-incident review can detect a rotation
+        // that left old-version shares decryptable by the (potentially leaked)
+        // previous key.
+        shareRevocationSkipped: !revokeShares,
+      },
+    });
 
-  await logAuditAsync({
-    ...tenantAuditBase(req, auth.subjectUserId, auth.tenantId),
-    actorType: ACTOR_TYPE.HUMAN,
-    action: AUDIT_ACTION.MASTER_KEY_ROTATION_INITIATE,
-    metadata: {
-      rotationId: created.id,
-      targetVersion: created.targetVersion,
-      revokeShares,
-      // Flag explicit opt-outs so post-incident review can detect a rotation
-      // that left old-version shares decryptable by the (potentially leaked)
-      // previous key.
-      shareRevocationSkipped: !revokeShares,
-    },
+    return row;
   });
+
+  // FR10: notify other OWNER/ADMINs out-of-band; best-effort (intentionally
+  // outside the tx — a notification failure must not roll back the rotation).
+  await notifyOtherAdmins(auth.tenantId, auth.subjectUserId);
 
   return NextResponse.json(
     {
