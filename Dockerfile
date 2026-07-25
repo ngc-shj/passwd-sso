@@ -105,9 +105,12 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # - sigstore >=4.1.1: closes CVE-2026-48815 (certificateOIDs verification
 #   constraints silently dropped). npm 11.16.0 already bundles 4.1.1, so the
 #   patch is a no-op skip — kept as a fail-closed tripwire.
-# - brace-expansion >=5.0.7: closes CVE-2026-13149 (exponential-time DoS;
-#   bundled at 5.0.6 under npm 11.16.0). The app's own copy is already pinned
-#   via the package.json overrides block; this patches npm's bundled copy.
+# - brace-expansion >=5.0.8: closes CVE-2026-13149 (exponential-time DoS) AND
+#   GHSA-mh99-v99m-4gvg (unbounded expansion → OOM), whose range is <=5.0.7 —
+#   so the previous 5.0.7 pin was itself affected once that advisory landed.
+#   npm 11.16.0 bundles 5.0.6, so this patch is doing real work. The app's own
+#   copy is pinned separately via the package.json overrides block; this patches
+#   npm's bundled copy, which Trivy scans as part of the image.
 # Patch blocks fail-closed (exit 1) when expected directories disappear, so a
 # silent npm-layout drift cannot reintroduce the CVEs.
 # `--ignore-scripts` on the global npm upgrade limits root-execution blast
@@ -120,7 +123,7 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 RUN TAR_VER=7.5.19 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
-    BE_VER=5.0.7 && \
+    BE_VER=5.0.8 && \
     NPM_VER=11.16.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \

@@ -209,8 +209,15 @@ jobs:
           sudo mv /tmp/cosign /usr/local/bin/cosign
           cosign version
 
-      # No `prisma generate` step: every static guard is a pure source/schema
-      # grep (none import the generated client), so the client is not needed.
+      # Most static guards are pure source/schema greps, but `Smoke:
+      # worker-bundle-boot` EXECUTES the esbuild worker bundles to prove they
+      # actually boot as shipped (R32). Those bundles require `@prisma/client`,
+      # which resolves `.prisma/client` — a generated artifact. Without this step
+      # the smoke test dies with MODULE_NOT_FOUND on `.prisma/client/default`,
+      # and it passes locally only because a developer's tree already has the
+      # client generated.
+      - name: Generate Prisma client (needed by the worker-bundle smoke test)
+        run: npx prisma generate
       - name: Run static check guards (PRE_PR_STATIC_ONLY)
         run: PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh
 
