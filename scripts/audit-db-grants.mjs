@@ -45,57 +45,103 @@ const AUDITED_ROLES = [
   "passwd_retention_gc_worker",
 ];
 
+/** Table privileges that matter for these roles. */
+const TABLE_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"];
+
 /**
- * Read the live ACLs for the audited roles at BOTH granularities.
+ * Read the live EFFECTIVE privileges of the audited roles.
  *
- * Two separate catalogs, and both are required:
+ * Effective, not direct-ACL. An earlier version selected
+ * `role_table_grants WHERE grantee = <role>`, which only lists privileges
+ * granted DIRECTLY to that role. PostgreSQL reaches a privilege by three paths,
+ * and that query saw one of them:
  *
- *   TABLE:<role>\t<table>\t<priv>          from role_table_grants
- *   COLUMN:<role>\t<table>.<col>\t<priv>   from column_privileges, EXCLUDING
- *                                          rows implied by a table-level grant
+ *   1. direct grant to the role            — visible in role_table_grants
+ *   2. grant to PUBLIC                     — role_table_grants EXCLUDES these
+ *   3. grant to a role the role is a member of (inheritance) — also excluded
  *
- * `role_table_grants` does NOT contain column-scoped grants — that was a wrong
- * assumption in the first version of this script, and it made the audit blind to
- * every `GRANT UPDATE (col) ON t` in the migrations (13 of them at the time).
- * Conversely `column_privileges` lists every column of a table that has a
- * table-level grant, so taking it wholesale would bury the interesting rows in
- * thousands of implied ones.
+ * So `GRANT SELECT ON accounts TO PUBLIC` in a migration left the worker able to
+ * read `accounts` while the audit reported OK. `has_table_privilege` /
+ * `has_column_privilege` answer "can this role actually do this?", collapsing
+ * all three paths, so they are what the audit compares against the manifest.
  *
- * Keying columns individually matters: a table that legitimately has
- * `UPDATE (fail_count)` must still fail the audit if `UPDATE (secret_col)` is
- * added. Collapsing to "can UPDATE this table" would hide exactly that.
+ * Keys, all sorted into one list:
+ *
+ *   TABLE:<role>\t<table>\t<priv>          effective table privilege
+ *   COLUMN:<role>\t<table>.<col>\t<priv>   effective column privilege NOT implied
+ *                                          by the table-level one
+ *   MEMBER:<role>\t<granted_role>          role membership (an inheritance path;
+ *                                          none of these roles should have any)
+ *   PUBLIC:<table>\t<priv>                 privilege granted to PUBLIC, which
+ *                                          every role inherits
+ *
+ * Columns are keyed individually on purpose: a table that legitimately carries
+ * `UPDATE (fail_count)` must still fail when `UPDATE (secret_encrypted)` appears.
  */
 async function readLiveGrants(client) {
+  // 1. Effective TABLE privileges.
   const { rows: tableRows } = await client.query(
-    `SELECT grantee, table_name, privilege_type
-       FROM information_schema.role_table_grants
-      WHERE grantee = ANY($1)
-        AND table_schema = 'public'`,
-    [AUDITED_ROLES],
+    `SELECT r.rolname AS role, c.relname AS table_name, p.priv AS privilege_type
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN unnest($2::text[]) AS p(priv)
+       CROSS JOIN unnest($1::text[]) AS r(rolname)
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p', 'v', 'm')
+        AND has_table_privilege(r.rolname, c.oid, p.priv)`,
+    [AUDITED_ROLES, TABLE_PRIVILEGES],
   );
+
+  // 2. Effective COLUMN privileges not already implied by the table-level one.
   const { rows: columnRows } = await client.query(
-    `SELECT cp.grantee, cp.table_name, cp.column_name, cp.privilege_type
-       FROM information_schema.column_privileges cp
-      WHERE cp.grantee = ANY($1)
-        AND cp.table_schema = 'public'
-        -- Keep only column grants NOT already implied by a table-level grant of
-        -- the same privilege; those are the deliberately column-scoped ones.
-        AND NOT EXISTS (
-          SELECT 1
-            FROM information_schema.role_table_grants tg
-           WHERE tg.grantee = cp.grantee
-             AND tg.table_schema = cp.table_schema
-             AND tg.table_name = cp.table_name
-             AND tg.privilege_type = cp.privilege_type
-        )`,
+    `SELECT r.rolname AS role, c.relname AS table_name, a.attname AS column_name,
+            p.priv AS privilege_type
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+       CROSS JOIN unnest($2::text[]) AS p(priv)
+       CROSS JOIN unnest($1::text[]) AS r(rolname)
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p', 'v', 'm')
+        AND p.priv IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES')
+        AND has_column_privilege(r.rolname, c.oid, a.attname, p.priv)
+        AND NOT has_table_privilege(r.rolname, c.oid, p.priv)`,
+    [AUDITED_ROLES, TABLE_PRIVILEGES],
+  );
+
+  // 3. Role MEMBERSHIPS — an inheritance path into arbitrary privileges. None of
+  //    these roles is supposed to be a member of anything (bootstrap-rds-roles
+  //    strips memberships), so any row here is a finding.
+  const { rows: memberRows } = await client.query(
+    `SELECT r.rolname AS role, g.rolname AS granted_role
+       FROM pg_auth_members m
+       JOIN pg_roles r ON r.oid = m.member
+       JOIN pg_roles g ON g.oid = m.roleid
+      WHERE r.rolname = ANY($1)`,
     [AUDITED_ROLES],
   );
 
+  // 4. Privileges granted to PUBLIC. Every role inherits these, so they are the
+  //    quietest way to over-privilege the whole system at once. Audited
+  //    independently of the roles.
+  const { rows: publicRows } = await client.query(
+    `SELECT c.relname AS table_name, p.priv AS privilege_type
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       CROSS JOIN unnest($1::text[]) AS p(priv)
+      WHERE n.nspname = 'public'
+        AND c.relkind IN ('r', 'p', 'v', 'm')
+        AND has_table_privilege('public', c.oid, p.priv)`,
+    [TABLE_PRIVILEGES],
+  );
+
   const keys = [
-    ...tableRows.map((r) => `TABLE:${r.grantee}\t${r.table_name}\t${r.privilege_type}`),
+    ...tableRows.map((r) => `TABLE:${r.role}\t${r.table_name}\t${r.privilege_type}`),
     ...columnRows.map(
-      (r) => `COLUMN:${r.grantee}\t${r.table_name}.${r.column_name}\t${r.privilege_type}`,
+      (r) => `COLUMN:${r.role}\t${r.table_name}.${r.column_name}\t${r.privilege_type}`,
     ),
+    ...memberRows.map((r) => `MEMBER:${r.role}\t${r.granted_role}`),
+    ...publicRows.map((r) => `PUBLIC:${r.table_name}\t${r.privilege_type}`),
   ];
   return [...new Set(keys)].sort();
 }
@@ -119,11 +165,19 @@ function readManifest() {
 function writeManifest(grants) {
   const body = {
     _comment:
-      "Expected table-level ACLs for the least-privilege DB roles, as " +
-      "role<TAB>table<TAB>privilege. Generated by scripts/audit-db-grants.mjs " +
-      "--write from a known-good database AFTER migrations. Regenerate ONLY " +
-      "when a migration intentionally changes a grant, and review the diff — " +
-      "it is the security-relevant part of that migration.",
+      "Expected EFFECTIVE privileges of the least-privilege DB roles. Key forms: " +
+      "'TABLE:<role><TAB><table><TAB><priv>', " +
+      "'COLUMN:<role><TAB><table>.<column><TAB><priv>' (only where not implied by " +
+      "the table-level privilege), 'MEMBER:<role><TAB><granted_role>' (role " +
+      "membership — an inheritance path; these roles should have none), and " +
+      "'PUBLIC:<table><TAB><priv>' (granted to PUBLIC, therefore inherited by " +
+      "every role). Computed with has_table_privilege/has_column_privilege, so " +
+      "privileges reached via PUBLIC or via inheritance are included — direct-ACL " +
+      "views such as role_table_grants omit both. Generated by " +
+      "scripts/audit-db-grants.mjs --write from a known-good database AFTER " +
+      "migrations. Regenerate ONLY when a migration intentionally changes a " +
+      "grant, and review the diff — it is the security-relevant part of that " +
+      "migration.",
     grants,
   };
   writeFileSync(MANIFEST_FILE, `${JSON.stringify(body, null, 2)}\n`, "utf8");

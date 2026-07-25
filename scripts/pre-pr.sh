@@ -458,7 +458,16 @@ run_step "Static: fetch basePath compliance" bash -c '
 if [ "$STATIC_ONLY" = "1" ]; then
   printf "${BOLD}▸ Secret scan${RESET}\n  (skipped — PRE_PR_STATIC_ONLY: this is the local --staged scan; CI runs a full-tree gitleaks scan in the secret-scan job)\n\n"
 elif command -v gitleaks >/dev/null 2>&1; then
-  run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
+  # gitleaks 8.19+ moved the staged scan from `detect --staged` to
+  # `git --staged`; `detect` now rejects the flag outright ("unknown flag:
+  # --staged"), so the old invocation FAILED the step on every run rather than
+  # scanning anything. Pick the form this binary supports so the scan actually
+  # runs on both generations.
+  if gitleaks git --help >/dev/null 2>&1; then
+    run_step "Secret scan (gitleaks)" gitleaks git --no-banner --redact --staged
+  else
+    run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
+  fi
 else
   # S19/S27 safe fallback: use node (already available — package.json runtime).
   # No shell-regex dialect issues; safe filename handling via -z.

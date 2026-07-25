@@ -137,13 +137,12 @@ describe("check-migration-transaction gate", () => {
     expect(r.stderr).toContain("2 of 2 DDL statements outside BEGIN/COMMIT");
   });
 
-  it("T6: exempts a migration of only CREATE INDEX CONCURRENTLY statements", () => {
+  it("T6: exempts a migration containing exactly one CONCURRENTLY statement", () => {
+    // A lone non-transactional statement is atomic by virtue of being the only
+    // one; two of them are not (see T6h).
     addMigration(
       "20260101000005_concurrent",
-      [
-        `CREATE INDEX CONCURRENTLY "idx_a" ON "users" ("a");`,
-        `CREATE INDEX CONCURRENTLY "idx_b" ON "users" ("b");`,
-      ].join("\n"),
+      `CREATE INDEX CONCURRENTLY "idx_a" ON "users" ("a");`,
     );
 
     expect(runGate().status).toBe(0);
@@ -204,6 +203,77 @@ describe("check-migration-transaction gate", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("UNWRAPPED_MULTI_DDL: 20260101000009_after_commit");
     expect(r.stderr).toContain("outside BEGIN/COMMIT");
+  });
+
+  it("T6e: fails when the transaction is never committed", () => {
+    // Both DDL statements are "inside" a transaction, but it is never closed —
+    // checking only that DDL was in a transaction at the time misses this.
+    addMigration(
+      "20260101000010_no_commit",
+      [
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("never committed");
+  });
+
+  it("T6f: fails when the DDL is split across two transactions", () => {
+    // Each statement is individually wrapped, but if the second fails the first
+    // is already committed — the schema ends up half migrated, which is the
+    // exact outcome the rule exists to prevent.
+    addMigration(
+      "20260101000011_two_txns",
+      [
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "a" TEXT;`,
+        `COMMIT;`,
+        `BEGIN;`,
+        `ALTER TABLE "users" ADD COLUMN "b" TEXT;`,
+        `COMMIT;`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("2 separate transactions");
+  });
+
+  it("T6g: counts VACUUM as a statement and requires it to stand alone", () => {
+    // VACUUM cannot run in a transaction. It was not in the DDL keyword set, so
+    // this looked like a single-statement migration and passed.
+    addMigration(
+      "20260101000012_vacuum",
+      [`VACUUM "users";`, `ALTER TABLE "users" ADD COLUMN "b" TEXT;`].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("must stand alone");
+  });
+
+  it("T6h: fails on two CREATE INDEX CONCURRENTLY in one migration", () => {
+    // Neither can be wrapped, so if the second fails the first survives — the
+    // migration is still partially appliable.
+    addMigration(
+      "20260101000013_two_concurrent",
+      [
+        `CREATE INDEX CONCURRENTLY "idx_a" ON "users" ("a");`,
+        `CREATE INDEX CONCURRENTLY "idx_b" ON "users" ("b");`,
+      ].join("\n"),
+    );
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("must stand alone");
   });
 
   it("T7: baseline suppresses the finding, and a stale entry fails", () => {

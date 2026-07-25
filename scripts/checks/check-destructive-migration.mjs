@@ -136,11 +136,13 @@ export function tokenize(sql, options = {}) {
       continue;
     }
     if (c === "$") {
-      // A dollar-quote tag follows the unquoted-identifier rule: it may not
-      // START with a digit, but may contain digits after the first character
-      // ($body1$ is valid). An earlier [A-Za-z_]* pattern rejected those, so the
+      // A dollar-quote tag follows the UNQUOTED-IDENTIFIER rule, which is NOT
+      // ASCII-only: it may not start with a digit, but after the first character
+      // it may contain digits, and any non-ASCII letter is legal throughout
+      // ($é1$ is a valid tag). Restricting the class to [A-Za-z_] meant such a
       // body was never recognised as dollar-quoted and its DDL went unscanned.
-      const tagMatch = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i));
+      // \p{L} with the u flag covers Unicode letters.
+      const tagMatch = /^\$(?:[\p{L}_][\p{L}\p{N}_$]*)?\$/u.exec(sql.slice(i));
       if (tagMatch) {
         flush();
         const tag = tagMatch[0];
@@ -159,6 +161,14 @@ export function tokenize(sql, options = {}) {
         i = end === -1 ? sql.length : end + tag.length - 1;
         continue;
       }
+      // A `$` that opens something this tokenizer could not resolve as a
+      // dollar-quote. Rather than treat it as ordinary punctuation (which would
+      // let an unrecognised quoting form hide DDL, exactly the class of bug the
+      // ASCII-only tag pattern was), emit a sentinel that findDestructiveKinds
+      // turns into a hard "needs review" finding. Fail closed.
+      tokens.push("<UNPARSED_DOLLAR>");
+      flush();
+      continue;
     }
     if (c === ";") {
       flush();
@@ -226,6 +236,10 @@ const DESTRUCTIVE_MATCHERS = [
     "NO FORCE ROW LEVEL SECURITY",
     (t, i) => at(t, i, "NO", "FORCE", "ROW", "LEVEL", "SECURITY"),
   ],
+  // Fail closed on syntax this tokenizer could not resolve. A `$` that did not
+  // parse as a dollar-quote means some quoting form is going unscanned, and DDL
+  // could be hiding inside it — flag for review rather than silently pass.
+  ["unparsed dollar-quote (needs review)", (t, i) => t[i] === "<UNPARSED_DOLLAR>"],
   ["SET NOT NULL", (t, i) => at(t, i, "SET", "NOT", "NULL")],
   // ALTER [COLUMN] <name> [SET DATA] TYPE …
   [

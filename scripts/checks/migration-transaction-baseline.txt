@@ -1,11 +1,12 @@
-# Baseline: migrations whose DDL is not fully inside an explicit transaction, and
-# which predate the rule (see scripts/checks/check-migration-transaction.mjs and
+# Baseline: migrations whose DDL is not fully inside a single explicit
+# transaction, and which predate the rule (see
+# scripts/checks/check-migration-transaction.mjs and
 # docs/operations/deployment.md "Migration Compatibility Rules").
 #
 # These already shipped; the gate binds NEW migrations. Do NOT add a new entry
-# just to silence the gate — wrap ALL statements in BEGIN; ... COMMIT;, or split
-# out any statement that cannot run inside a transaction (CREATE INDEX
-# CONCURRENTLY, VACUUM) into a migration of its own.
+# just to silence the gate — wrap ALL statements in ONE BEGIN; ... COMMIT;, or
+# put a statement that cannot run inside a transaction (CREATE INDEX
+# CONCURRENTLY, VACUUM, REINDEX) in a migration of its own.
 #
 # Format:  <migration_dir_name>  # reason (>= 10 chars)
 20260208091726_init_e2e  # pre-existing baseline (22 of 22 DDL statements outside BEGIN/COMMIT); predates the explicit-transaction rule

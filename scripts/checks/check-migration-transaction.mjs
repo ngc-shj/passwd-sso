@@ -56,7 +56,22 @@ const MIN_REASON_LENGTH = 10;
  * expandDollarQuoted:false below), but it is still a statement that can fail
  * halfway through the migration.
  */
-const DDL_KEYWORDS = new Set(["CREATE", "ALTER", "DROP", "TRUNCATE", "DO"]);
+const DDL_KEYWORDS = new Set([
+  "CREATE",
+  "ALTER",
+  "DROP",
+  "TRUNCATE",
+  "DO",
+  // VACUUM cannot run inside a transaction block and is a schema-affecting
+  // maintenance statement; it must be COUNTED as a statement (it was not, so
+  // `VACUUM t; ALTER TABLE …;` looked like a single-statement migration) and
+  // classified non-transactional so it has to stand alone.
+  "VACUUM",
+  "REINDEX",
+]);
+
+/** Statements that cannot run inside a transaction block. */
+const NON_TRANSACTIONAL_KEYWORDS = new Set(["VACUUM", "REINDEX"]);
 
 /**
  * Walk top-level statements, tracking transaction state, and report:
@@ -80,7 +95,10 @@ export function analyze(sql) {
   let ddlCount = 0;
   let unwrappedDdlCount = 0;
   let nonTransactionalDdl = 0;
+  let beginCount = 0;
+  let commitCount = 0;
   let inTransaction = false;
+  let openAtEnd = false;
   let atBoundary = true;
 
   for (let i = 0; i < tokens.length; i += 1) {
@@ -93,19 +111,22 @@ export function analyze(sql) {
       // `BEGIN;` / `START TRANSACTION` only open a transaction at a statement
       // boundary — that is what distinguishes them from a PL/pgSQL `DO $$ BEGIN`.
       if (t === "BEGIN" && (tokens[i + 1] === ";" || tokens[i + 1] === undefined)) {
+        beginCount += 1;
         inTransaction = true;
       } else if (t === "START" && tokens[i + 1] === "TRANSACTION") {
+        beginCount += 1;
         inTransaction = true;
       } else if (t === "COMMIT" || t === "ROLLBACK" || t === "END") {
+        commitCount += 1;
         inTransaction = false;
       } else if (DDL_KEYWORDS.has(t)) {
         ddlCount += 1;
         // Scan just this statement for a non-transactional marker, so one
         // CONCURRENTLY index does not exempt every other statement in the file.
         let j = i;
-        let nonTx = false;
+        let nonTx = NON_TRANSACTIONAL_KEYWORDS.has(t);
         while (j < tokens.length && tokens[j] !== ";") {
-          if (tokens[j] === "CONCURRENTLY" || tokens[j] === "VACUUM") nonTx = true;
+          if (tokens[j] === "CONCURRENTLY") nonTx = true;
           j += 1;
         }
         if (nonTx) nonTransactionalDdl += 1;
@@ -114,7 +135,15 @@ export function analyze(sql) {
     }
     atBoundary = false;
   }
-  return { ddlCount, unwrappedDdlCount, nonTransactionalDdl };
+  openAtEnd = inTransaction;
+  return {
+    ddlCount,
+    unwrappedDdlCount,
+    nonTransactionalDdl,
+    beginCount,
+    commitCount,
+    openAtEnd,
+  };
 }
 
 function readAllowlist() {
@@ -148,30 +177,45 @@ export function findUnwrapped() {
     if (!dir.isDirectory()) continue;
     const sqlPath = join(MIGRATIONS_DIR, dir.name, "migration.sql");
     if (!existsSync(sqlPath)) continue;
-    const { ddlCount, unwrappedDdlCount, nonTransactionalDdl } = analyze(
-      readFileSync(sqlPath, "utf8"),
-    );
+    const { ddlCount, unwrappedDdlCount, nonTransactionalDdl, beginCount, commitCount, openAtEnd } =
+      analyze(readFileSync(sqlPath, "utf8"));
+
+    const flag = (reason) => found.push({ name: dir.name, ddlCount, reason });
 
     // A statement that cannot run inside a transaction must be ALONE in its
-    // migration — otherwise the other statements are unprotected anyway and the
-    // migration is still partially-appliable. This is what the docs say; the
-    // previous implementation exempted the whole file instead.
-    if (nonTransactionalDdl > 0 && ddlCount > nonTransactionalDdl) {
-      found.push({
-        name: dir.name,
-        ddlCount,
-        reason: `${nonTransactionalDdl} non-transactional statement(s) mixed with ${ddlCount - nonTransactionalDdl} other DDL statement(s)`,
-      });
+    // migration — otherwise the others are unprotected anyway and the migration
+    // is still partially appliable. That includes two CONCURRENTLY indexes: if
+    // the second fails, the first survives.
+    if (nonTransactionalDdl > 0) {
+      if (ddlCount > 1) {
+        flag(
+          `${nonTransactionalDdl} non-transactional statement(s) must stand alone, but the migration has ${ddlCount} statements`,
+        );
+      }
       continue;
     }
-    // Multiple DDL statements are fine only if EVERY one of them sits inside an
-    // open transaction.
-    if (ddlCount > 1 && unwrappedDdlCount > 0) {
-      found.push({
-        name: dir.name,
-        ddlCount,
-        reason: `${unwrappedDdlCount} of ${ddlCount} DDL statements outside BEGIN/COMMIT`,
-      });
+
+    if (ddlCount <= 1) continue; // single statement is atomic by itself
+
+    // An OPENED but unclosed transaction is not atomic: the implicit end-of-file
+    // behaviour is not something to rely on for a schema change. (When no
+    // transaction was opened at all, the unwrapped-DDL check below reports it
+    // more precisely.)
+    if (beginCount > 0 && (openAtEnd || commitCount === 0)) {
+      flag(`transaction opened but never committed (${beginCount} BEGIN, ${commitCount} COMMIT)`);
+      continue;
+    }
+    // Splitting into several transactions defeats the purpose: if the second
+    // fails, the first is already committed and the schema is half migrated.
+    if (beginCount > 1) {
+      flag(
+        `${beginCount} separate transactions — all DDL must be in ONE BEGIN/COMMIT or a later failure leaves earlier statements applied`,
+      );
+      continue;
+    }
+    // Every DDL statement must sit inside that one transaction.
+    if (unwrappedDdlCount > 0) {
+      flag(`${unwrappedDdlCount} of ${ddlCount} DDL statements outside BEGIN/COMMIT`);
     }
   }
   return found;

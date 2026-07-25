@@ -109,6 +109,12 @@ describe("check-destructive-migration gate", () => {
       "DROP inside a $body1$-tagged block",
       `DO $body1$ BEGIN EXECUTE 'DROP TABLE users'; END $body1$;`,
     ],
+    // Dollar-quote tags follow the unquoted-identifier rule, which is not
+    // ASCII-only — an [A-Za-z_] class left this body unscanned entirely.
+    [
+      "DROP inside a Unicode-tagged block",
+      `DO $é1$ BEGIN EXECUTE 'DROP TABLE users'; END $é1$;`,
+    ],
     // Object types that an enumerate-the-destructive-kinds design missed
     // entirely. These break old code or remove a security boundary.
     ["DROP FUNCTION", `DROP FUNCTION tenant_guard();`],
@@ -190,6 +196,20 @@ describe("check-destructive-migration gate", () => {
     const r = runGate();
 
     expect(r.status).toBe(0);
+  });
+
+  it("T7b: fails closed on a dollar sign it cannot parse as a dollar-quote", () => {
+    // Defence against the NEXT unrecognised quoting form: rather than treating
+    // an unparsed `$` as punctuation (which is how the ASCII-only tag pattern
+    // let a whole body go unscanned), the tokenizer emits a sentinel that
+    // surfaces as a review-required finding.
+    addMigration("20260101000007_odd_dollar", `SELECT $9bad$ DROP TABLE users $9bad$;`);
+
+    const r = runGate();
+
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("20260101000007_odd_dollar");
+    expect(r.stderr).toContain("needs review");
   });
 
   it("T8: does not flag a quoted identifier that looks like a keyword", () => {
