@@ -106,9 +106,9 @@ docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSI
 
 migration-first の順序は Terraform ではなく `scripts/deploy.sh` が所有します。
 Terraform は task **定義**のみ管理し（サービスは `ignore_changes = [task_definition]`）、
-deploy.sh が「apply で新定義を登録 → migration 実行 → 全サービス（app + 両 worker）
-を新 task-def へ update-service」を順に行います。新コードが未 migration スキーマで
-動くことはありません。
+deploy.sh が「apply で新定義を登録 → migration 実行 → 全サービス（app + jackson +
+両 worker の計 4 つ）を新 task-def へ update-service」を順に行います。新コードが未
+migration スキーマで動くことはありません。
 
 ```bash
 export AWS_REGION=<region>
@@ -117,9 +117,18 @@ export TF_VAR_FILE=envs/prod/terraform.tfvars
 ./scripts/deploy.sh   # build → push → apply(定義のみ) → migration → update-service
 ```
 
-deploy.sh は dirty worktree を拒否し full commit SHA を使用、同一タグが ECR に既存
-なら build/push をスキップ（migration 失敗後の再実行が安全）します。詳細は
-docs/operations/deployment.md を参照。新規環境の初回構築は「初回 bootstrap」を参照。
+deploy.sh は dirty/untracked worktree を拒否し full commit SHA を使用、同一タグが
+ECR に既存なら build/push をスキップ（migration 失敗後の再実行が安全）します。
+update-service 後は services-stable を待ち、`rolloutState == COMPLETED` に加えて
+PRIMARY deployment の taskDefinition が要求 ARN と一致することまで検証します
+（circuit-breaker による旧 revision への自動 rollback も COMPLETED になるため）。
+いずれかが失敗した場合は全サービスをデプロイ前 revision へ戻す補償 rollback を
+実行します。詳細は docs/operations/deployment.md を参照。新規環境の初回構築は
+「初回 bootstrap」を参照。
+
+steady-state の migration は expand-and-contract（新旧コード双方と互換）である
+必要があります。migration 実行中も旧 app/worker が稼働しているためです。破壊的 DDL は
+`scripts/checks/check-destructive-migration.mjs` が CI で検出します。
 
 ## Remote State Backend
 

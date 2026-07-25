@@ -37,8 +37,23 @@ to the new revision. New code never runs against an un-migrated schema.
 3. terraform apply                  →  register task defs (services unchanged)
 4. ECS run-task (migrate)           →  wait for exit 0
 5. update-service app+jackson+workers →  advance to new revision
-6. wait services-stable + assert rolloutState == COMPLETED
+6. wait services-stable, then assert BOTH rolloutState == COMPLETED AND the
+   PRIMARY deployment's taskDefinition == the ARN we requested; on any failure,
+   compensating-rollback every service to its pre-deploy revision
 ```
+
+Step 6 checks the task-definition ARN, not just `rolloutState`, because an ECS
+deployment-circuit-breaker rollback ALSO settles at `COMPLETED` — on the OLD task
+definition. `COMPLETED` alone would report a phantom success for a deploy that
+was actually reverted.
+
+The compensating rollback exists because ECS only auto-reverts the service(s)
+that failed: without it, a partial failure leaves a version SPLIT (app on the new
+revision, a worker back on the old). It restores every service to the revision
+captured before the deploy, then waits and verifies; if it cannot, it exits
+non-zero saying manual intervention is required. It is armed by an `ERR/INT/TERM`
+trap before the first `update-service`, so a failure of an `update-service` call
+itself also triggers compensation.
 
 ### Step-by-step (steady state)
 
@@ -96,20 +111,76 @@ Compose they are in `docker-compose.workers.yml` (production) /
 `docker-compose.override.yml` (dev tsx). Without them, audit events accumulate as
 `PENDING` and retention is never enforced.
 
+## Migration Compatibility Rules
+
+Migration-first ordering protects NEW code from an un-migrated schema. It does
+**not** protect OLD code from a new schema: `prisma migrate deploy` runs while the
+previous app + workers are still serving traffic, and they keep running until
+step 5 rolls them. So for the whole migration window — and for the rollback
+window after it — the OLD code is live against the NEW schema.
+
+Therefore every steady-state migration MUST be **expand-and-contract**:
+compatible with both the old and the new code.
+
+| Phase | What ships | Safe with old code running |
+|-------|-----------|----------------------------|
+| Expand | Add the new column/table, nullable and defaulted; dual-write in code | Yes |
+| Migrate data | Backfill in a separate migration | Yes |
+| Contract | Drop/rename/narrow the old column — only AFTER no running code reads it | Only once the old code is fully gone |
+
+Concretely, in a single steady-state deploy do **not**: `DROP COLUMN`,
+`DROP TABLE`, `RENAME`, `SET NOT NULL` on a column old code omits, or
+`ALTER COLUMN ... TYPE` to a representation old code does not write. These are
+enforced by `scripts/checks/check-destructive-migration.mjs`, which fails the
+build for a new migration containing that DDL unless it is listed in
+`scripts/checks/destructive-migration-baseline.txt` with a reason. Pre-existing
+migrations are baselined there; the gate binds new ones.
+
+Two further rules:
+
+- **Wrap multi-statement DDL in an explicit transaction.** Prisma does not wrap
+  PostgreSQL migrations in a transaction automatically, so a migration that fails
+  on its 3rd statement leaves the first two applied — a schema that is neither
+  the old nor the new one. Add explicit `BEGIN;` / `COMMIT;` around multi-step
+  DDL so a failure rolls the whole migration back. (Statements that cannot run
+  inside a transaction, e.g. `CREATE INDEX CONCURRENTLY`, must be their own
+  migration.)
+- **Incompatible migrations use the maintenance path**, not the steady-state
+  deploy: scale the app + workers to `desired_count = 0`, run the migration, then
+  scale back up on the new image. This is a deliberate operator decision with
+  downtime, which is exactly why it is not the default path.
+
 ## Migration Failure
 
 The migration runs as a one-off ECS `run-task` inside `deploy.sh`, BEFORE any
 service is advanced. If it exits non-zero:
 
 1. **`deploy.sh` aborts at step 4** — the `update-service` calls (step 5) never
-   run, so the running services stay on their old, schema-compatible revision.
-   New code never touches the failed schema.
+   run, so the running services stay on their previous revision. New code never
+   touches the failed schema.
 2. Check CloudWatch Logs (`migrate` stream prefix) for error details.
-3. Fix the migration issue (migration SQL, or data conflicts).
-4. Re-run `./scripts/deploy.sh`. The immutable git-SHA tag already exists in ECR,
-   so the build/push is skipped (retry-safe), and Prisma migrations are
-   idempotent for already-applied migrations, so the retry resumes from the
-   failed point.
+3. **Determine what was actually applied.** Prisma marks the failed migration in
+   `_prisma_migrations` and refuses to proceed until it is resolved. Because
+   Prisma does NOT wrap PostgreSQL migrations in a transaction by default, a
+   migration that failed midway may have applied some statements — so the live
+   schema is not necessarily the old one, and the still-running old code may
+   already be interacting with a partially-migrated schema. Inspect the schema
+   before deciding.
+4. Resolve the failed migration, via the migrate task (ECS Exec — see
+   `infra/terraform/README.md`):
+   - Statements were applied and the schema is now correct →
+     `npx prisma migrate resolve --applied <migration_name>`
+   - Nothing was applied, or you manually reverted the partial effects →
+     `npx prisma migrate resolve --rolled-back <migration_name>`, then fix the
+     migration SQL.
+5. Re-run `./scripts/deploy.sh`. The immutable git-SHA tag already exists in ECR,
+   so the build/push is skipped (retry-safe), and already-applied migrations are
+   no-ops, so the retry resumes from the failed point.
+
+> If the partially-applied schema is incompatible with the running old code
+> (see "Migration Compatibility Rules"), treat it as an incident: the fastest
+> safe route is usually to finish the migration forward and roll the services,
+> not to try to reconstruct the old schema under live traffic.
 
 ## Rollback
 

@@ -10,9 +10,14 @@
 // roles on RDS". The node:alpine app image has no `psql` binary, but it ships
 // the `pg` module, which is all this needs.
 //
-// Idempotent: each role is guarded by a pg_roles existence check, and the
-// schema-level GRANT/REVOKE statements are themselves idempotent, so a partial
-// run can be re-executed safely.
+// CONVERGENT, not merely idempotent: re-running does not just skip work, it
+// forces every role back to the intended state. For each role it CREATEs when
+// absent and then ALWAYS applies `ALTER ROLE ... <fixed attrs> PASSWORD <new>`,
+// strips any inherited role membership, and asserts the resulting pg_roles
+// attributes. So a re-run with a rotated password installs it, and a role that
+// was manually escalated to SUPERUSER/BYPASSRLS is demoted back. The
+// schema-level GRANT/REVOKE statements are likewise safe to re-run, so a
+// partially-failed run can simply be re-executed.
 //
 // DDL (CREATE ROLE) cannot use bind parameters — `CREATE ROLE x PASSWORD $1` is
 // a syntax error in Postgres. Passwords are therefore quoted with pg's
@@ -28,6 +33,7 @@
 //   PASSWD_RETENTION_GC_WORKER_PASSWORD — passwd_retention_gc_worker role password
 
 import { Client } from "pg";
+import { pathToFileURL } from "node:url";
 
 // Roles created here. Table-specific GRANTs for the worker roles are issued by
 // the Prisma migrations that create those tables (they carry IF NOT EXISTS role
@@ -38,6 +44,76 @@ const ROLES = [
   { name: "passwd_outbox_worker", pwEnv: "PASSWD_OUTBOX_WORKER_PASSWORD" },
   { name: "passwd_retention_gc_worker", pwEnv: "PASSWD_RETENTION_GC_WORKER_PASSWORD" },
 ];
+
+// The attribute set every role above must END UP with, applied on both CREATE
+// and ALTER so a pre-existing (possibly privilege-escalated) role converges.
+const ROLE_ATTRS = "LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE";
+
+// Double-quote a Postgres identifier (doubling embedded quotes). Used for role
+// names read back from pg_roles, which are not part of our hardcoded allowlist.
+function quoteIdent(name) {
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Converge one role to the intended attributes + password, stripping any
+ * inherited membership. Exported so the integration test can exercise the exact
+ * production convergence logic against throwaway probe roles instead of the
+ * real passwd_* roles.
+ *
+ * @param {import("pg").Client} client SUPERUSER connection
+ * @param {string} name role name (caller-controlled allowlist, not user input)
+ * @param {string} password plaintext password to install
+ */
+export async function convergeRole(client, name, password) {
+  const { rowCount } = await client.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [name]);
+  // escapeLiteral wraps + escapes for the server's string-literal syntax.
+  const pw = client.escapeLiteral(password);
+  if (rowCount === 0) {
+    await client.query(`CREATE ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+    console.log(`created role ${name}`);
+  } else {
+    console.log(`role ${name} exists — converging attributes + password`);
+  }
+  // ALWAYS converge, existing or not. A pre-existing role may carry the WRONG
+  // password (the operator supplied a new one) or have been altered to
+  // SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE out of band — skipping this for
+  // existing roles silently leaves a privilege-escalated role in place and an
+  // unusable password. ALTER ROLE is the convergence point; it is idempotent.
+  await client.query(`ALTER ROLE ${name} WITH ${ROLE_ATTRS} PASSWORD ${pw}`);
+
+  // Role MEMBERSHIP is not covered by ALTER ROLE's attribute list: an inherited
+  // grant (e.g. GRANT rds_superuser TO passwd_app) re-introduces privileges the
+  // attributes above just removed. Strip every membership — none of these roles
+  // is supposed to inherit from anything.
+  const { rows: memberships } = await client.query(
+    `SELECT g.rolname AS grantor
+       FROM pg_auth_members m
+       JOIN pg_roles g ON g.oid = m.roleid
+       JOIN pg_roles r ON r.oid = m.member
+      WHERE r.rolname = $1`,
+    [name],
+  );
+  for (const { grantor } of memberships) {
+    // Role names come from pg_roles (server-side); re-quoted as identifiers.
+    await client.query(`REVOKE ${quoteIdent(grantor)} FROM ${name}`);
+    console.log(`  revoked membership ${grantor} from ${name}`);
+  }
+
+  // Fail loudly if convergence did not actually take (defence against a future
+  // Postgres/RDS quirk silently ignoring one of the attributes).
+  const { rows } = await client.query(
+    `SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolcanlogin
+       FROM pg_roles WHERE rolname = $1`,
+    [name],
+  );
+  const a = rows[0];
+  if (a.rolsuper || a.rolbypassrls || a.rolcreatedb || a.rolcreaterole || !a.rolcanlogin) {
+    throw new Error(
+      `role ${name} did not converge to the expected attributes: ${JSON.stringify(a)}`,
+    );
+  }
+}
 
 async function main() {
   const connectionString = process.env.MIGRATION_DATABASE_URL;
@@ -56,27 +132,25 @@ async function main() {
   await client.connect();
   try {
     for (const r of ROLES) {
-      const { rowCount } = await client.query(
-        "SELECT 1 FROM pg_roles WHERE rolname = $1",
-        [r.name],
-      );
-      if (rowCount > 0) {
-        console.log(`role ${r.name} already exists — skipping CREATE`);
-        continue;
-      }
-      // escapeLiteral wraps + escapes for the server's string-literal syntax.
-      const pw = client.escapeLiteral(process.env[r.pwEnv]);
-      await client.query(
-        `CREATE ROLE ${r.name} WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD ${pw}`,
-      );
-      console.log(`created role ${r.name}`);
+      await convergeRole(client, r.name, process.env[r.pwEnv]);
     }
-
-    // Schema-level privileges — mirror 02-create-app-role.sql. Idempotent:
-    // REVOKE/GRANT/ALTER DEFAULT PRIVILEGES are safe to re-run.
+    // Schema-level privileges — mirror 02-create-app-role.sql. Safe to re-run.
     await client.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
 
     // passwd_app: CONNECT + USAGE + full DML on current + future tables/sequences.
+    // Revoke FIRST so a role that was over-granted out of band (extra table
+    // privileges such as TRUNCATE/REFERENCES, or CREATE on the schema) converges
+    // down to exactly this set rather than keeping the surplus — same
+    // revoke-then-grant shape used for the worker roles below.
+    await client.query("REVOKE ALL ON SCHEMA public FROM passwd_app");
+    await client.query("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM passwd_app");
+    await client.query("REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM passwd_app");
+    await client.query(
+      "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_app",
+    );
+    await client.query(
+      "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_app",
+    );
     await client.query(
       "DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_app', current_database()); END $$",
     );
@@ -121,7 +195,11 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Run only when invoked as a CLI, so the integration test can import
+// convergeRole() without the script connecting to a DB on import.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

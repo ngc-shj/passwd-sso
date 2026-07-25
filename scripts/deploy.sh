@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# -E (errtrace) makes the ERR trap fire for failures inside functions and
+# subshells too, not only at top level — the compensating-rollback trap below
+# depends on it.
+set -Eeuo pipefail
 
 # Steady-state deploy for the AWS ECS stack (environment already bootstrapped).
 #
@@ -195,8 +198,13 @@ fi
 # 5. Advance every service to its new task-def revision. Jackson is included so
 #    an image/security bump to the SSO container actually reaches the service
 #    (it has ignore_changes = [task_definition] too, so only this loop moves it).
-#    Parallel arrays keep, per service: its name, the revision we WANT it on, and
-#    the revision it was on BEFORE (for the compensating rollback in step 7).
+#
+#    Collect EVERYTHING first — service name, the revision we WANT, and the
+#    revision it is on NOW — for ALL services, BEFORE issuing a single
+#    update-service. The compensating rollback needs the complete pre-deploy
+#    picture; building it incrementally inside the update loop would leave the
+#    not-yet-reached services unrecorded exactly when a mid-loop failure makes
+#    the rollback necessary.
 SERVICES=()
 WANT_TD=()
 PREV_TD=()
@@ -206,12 +214,10 @@ for pair in \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_audit_outbox_worker_service_name):$(td_arn audit_outbox_worker_task_definition_arn)" \
   "$(terraform -chdir="$TF_DIR" output -raw ecs_retention_gc_worker_service_name):$(td_arn retention_gc_worker_task_definition_arn)"; do
   SVC="${pair%%:*}"; TD="${pair#*:}"
-  # Record the current running revision BEFORE we change it.
   BEFORE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SVC" --region "$REGION" \
     --query 'services[0].taskDefinition' --output text)
-  echo "==> Updating service $SVC → $TD (was $BEFORE)"
-  aws ecs update-service --cluster "$CLUSTER" --service "$SVC" \
-    --task-definition "$TD" --region "$REGION" --query 'service.serviceName' --output text
+  [ -n "$BEFORE" ] && [ "$BEFORE" != "None" ] \
+    || { echo "ERROR: could not read current task definition for $SVC" >&2; exit 1; }
   SERVICES+=("$SVC")
   WANT_TD+=("$TD")
   PREV_TD+=("$BEFORE")
@@ -220,24 +226,80 @@ done
 # Compensating rollback: put EVERY service back on its pre-deploy revision. ECS
 # only auto-reverts the service(s) that failed, so a partial failure otherwise
 # leaves a version SPLIT (some services new, some reverted). This restores a
-# uniform, known-good state across the whole stack.
+# uniform, known-good state across the whole stack, then WAITS and VERIFIES —
+# a rollback that silently failed is worse than none, because the operator would
+# believe the stack is consistent.
+#
+# Defined BEFORE the update loop and armed via trap so that a failure of the
+# update-service call ITSELF (e.g. the 2nd of 4 throttled/denied) still triggers
+# compensation; under `set -e` the script would otherwise exit at that line and
+# never reach a rollback defined further down.
+ROLLBACK_DONE=false
 rollback_all() {
+  # Guard against re-entry: the trap fires, and the explicit call sites below
+  # would otherwise run it a second time.
+  [ "$ROLLBACK_DONE" = false ] || return 0
+  ROLLBACK_DONE=true
   echo "==> Compensating rollback — restoring all services to their pre-deploy revision" >&2
+  local i failed_rb=()
   for i in "${!SERVICES[@]}"; do
     echo "    ${SERVICES[$i]} → ${PREV_TD[$i]}" >&2
-    aws ecs update-service --cluster "$CLUSTER" --service "${SERVICES[$i]}" \
-      --task-definition "${PREV_TD[$i]}" --region "$REGION" \
-      --query 'service.serviceName' --output text >/dev/null 2>&1 || true
+    if ! aws ecs update-service --cluster "$CLUSTER" --service "${SERVICES[$i]}" \
+        --task-definition "${PREV_TD[$i]}" --region "$REGION" \
+        --query 'service.serviceName' --output text >/dev/null; then
+      echo "    ERROR: rollback update-service FAILED for ${SERVICES[$i]}" >&2
+      failed_rb+=("${SERVICES[$i]}")
+    fi
   done
-  echo "    rollback requested; monitor: aws ecs wait services-stable --cluster $CLUSTER --services ${SERVICES[*]}" >&2
+  echo "    waiting for rolled-back services to stabilize..." >&2
+  if ! aws ecs wait services-stable --cluster "$CLUSTER" --services "${SERVICES[@]}" --region "$REGION"; then
+    echo "    ERROR: rolled-back services did not stabilize" >&2
+    failed_rb+=("<stabilize>")
+  fi
+  # Verify each service actually landed back on its pre-deploy revision.
+  for i in "${!SERVICES[@]}"; do
+    local now
+    now=$(aws ecs describe-services --cluster "$CLUSTER" --services "${SERVICES[$i]}" \
+      --region "$REGION" --query 'services[0].taskDefinition' --output text 2>/dev/null || echo "")
+    if [ "$now" != "${PREV_TD[$i]}" ]; then
+      echo "    ERROR: ${SERVICES[$i]} is on $now, expected ${PREV_TD[$i]}" >&2
+      failed_rb+=("${SERVICES[$i]}")
+    fi
+  done
+  if [ ${#failed_rb[@]} -ne 0 ]; then
+    echo "==> COMPENSATING ROLLBACK INCOMPLETE — MANUAL INTERVENTION REQUIRED." >&2
+    echo "    unresolved: ${failed_rb[*]}" >&2
+    return 1
+  fi
+  echo "    compensating rollback verified: all services back on their pre-deploy revision." >&2
+  return 0
 }
+
+# Arm the trap: any unhandled failure (set -e) or interrupt from here on runs the
+# compensation before exiting, so we never leave a half-updated stack behind.
+on_err() {
+  local rc=$?
+  trap - ERR INT TERM
+  echo "ERROR: deploy aborted (exit $rc) — compensating." >&2
+  rollback_all || true
+  exit "$rc"
+}
+trap on_err ERR INT TERM
+
+for i in "${!SERVICES[@]}"; do
+  echo "==> Updating service ${SERVICES[$i]} → ${WANT_TD[$i]} (was ${PREV_TD[$i]})"
+  aws ecs update-service --cluster "$CLUSTER" --service "${SERVICES[$i]}" \
+    --task-definition "${WANT_TD[$i]}" --region "$REGION" \
+    --query 'service.serviceName' --output text
+done
 
 # 6. Block until every service reconciles, then assert the rollout SUCCEEDED.
 #    `update-service` only enqueues the change.
 echo "==> Waiting for services to stabilize: ${SERVICES[*]}"
 if ! aws ecs wait services-stable --cluster "$CLUSTER" --services "${SERVICES[@]}" --region "$REGION"; then
+  trap - ERR INT TERM
   echo "ERROR: services did not stabilize — see ECS events/CloudWatch" >&2
-  rollback_all
+  rollback_all || true
   exit 1
 fi
 
@@ -261,9 +323,14 @@ for i in "${!SERVICES[@]}"; do
   fi
 done
 if [ ${#FAILED[@]} -ne 0 ]; then
+  trap - ERR INT TERM
   echo "ERROR: rollout failed for: ${FAILED[*]}" >&2
-  rollback_all
+  rollback_all || true
   exit 1
 fi
+
+# Success — disarm the compensation trap so a failure in any later step (there
+# are none today) cannot roll back a deploy that already succeeded.
+trap - ERR INT TERM
 
 echo "==> Done. All services stable on the new revision."
