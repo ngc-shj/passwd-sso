@@ -72,6 +72,7 @@ import {
   TOMBSTONE_TTL_MS,
   SESSION_CACHE_KEY_PREFIX,
   _resetSubkeyCacheForTests,
+  validateSessionTokenHmacKey,
   type SessionInfo,
 } from "./session-cache";
 
@@ -121,6 +122,66 @@ beforeEach(() => {
 
 afterEach(() => {
   _resetSubkeyCacheForTests();
+  delete process.env.SESSION_TOKEN_HMAC_KEY;
+});
+
+// ── #3: dedicated SESSION_TOKEN_HMAC_KEY decouples from SHARE_MASTER_KEY ──
+
+describe("SESSION_TOKEN_HMAC_KEY (dedicated session-token HMAC key)", () => {
+  const DEDICATED = "a".repeat(64);
+
+  it("uses the dedicated key when set (NOT getMasterKeyByVersion)", () => {
+    process.env.SESSION_TOKEN_HMAC_KEY = DEDICATED;
+    _resetSubkeyCacheForTests();
+    const digest = hashSessionToken("tok");
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+    // The dedicated key path must NOT consult the master key at all.
+    expect(mockGetMasterKeyByVersion).not.toHaveBeenCalled();
+  });
+
+  it("produces a different digest than the V1-fallback for the same token", () => {
+    _resetSubkeyCacheForTests();
+    const viaV1 = hashSessionToken("tok"); // fallback (no dedicated key)
+    process.env.SESSION_TOKEN_HMAC_KEY = DEDICATED;
+    _resetSubkeyCacheForTests();
+    const viaDedicated = hashSessionToken("tok");
+    expect(viaDedicated).not.toBe(viaV1);
+  });
+
+  it("rejects a malformed dedicated key", () => {
+    process.env.SESSION_TOKEN_HMAC_KEY = "not-hex";
+    _resetSubkeyCacheForTests();
+    expect(() => hashSessionToken("tok")).toThrow(/64-char hex/);
+  });
+
+  it("falls back to the V1-derived key when unset (backward compat)", () => {
+    _resetSubkeyCacheForTests();
+    hashSessionToken("tok");
+    expect(mockGetMasterKeyByVersion).toHaveBeenCalledWith(1);
+  });
+
+  describe("validateSessionTokenHmacKey (boot-time #3 gap)", () => {
+    it("passes when the dedicated key is set", () => {
+      process.env.SESSION_TOKEN_HMAC_KEY = DEDICATED;
+      _resetSubkeyCacheForTests();
+      expect(() => validateSessionTokenHmacKey()).not.toThrow();
+    });
+
+    it("passes when V1 is available (no dedicated key)", () => {
+      _resetSubkeyCacheForTests();
+      mockGetMasterKeyByVersion.mockReturnValue(FIXED_IKM);
+      expect(() => validateSessionTokenHmacKey()).not.toThrow();
+    });
+
+    it("THROWS when neither the dedicated key nor V1 is available (CURRENT_VERSION=2, only V2)", () => {
+      _resetSubkeyCacheForTests();
+      // Simulate V1 not configured: getMasterKeyByVersion(1) throws.
+      mockGetMasterKeyByVersion.mockImplementation(() => {
+        throw new Error("Master key for version 1 not found");
+      });
+      expect(() => validateSessionTokenHmacKey()).toThrow(/version 1 not found/);
+    });
+  });
 });
 
 // ── Test 1: hashSessionToken determinism + 64-hex output ────

@@ -15,6 +15,15 @@ export async function register() {
     const provider = await getKeyProvider();
     await provider.validateKeys();
 
+    // H4/#3: fail fast at boot if the session-token HMAC key cannot be resolved.
+    // Since H4 the DB session lookup depends on this HMAC; without this check a
+    // deployment with SHARE_MASTER_KEY_CURRENT_VERSION=2 and no V1 (and no
+    // dedicated key) starts cleanly but breaks EVERY session lookup at runtime.
+    const { validateSessionTokenHmacKey } = await import(
+      "@/lib/auth/session/session-cache"
+    );
+    validateSessionTokenHmacKey();
+
     // Surface a likely reverse-proxy misconfiguration at boot (M2): production
     // with no trusted-proxy config means forwarded client IPs are dropped.
     const { warnOnProxyPosture } = await import("@/lib/security/proxy-posture");

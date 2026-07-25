@@ -214,6 +214,17 @@ export const descriptions: Record<
       "Equivalent to SHARE_MASTER_KEY_V1 when SHARE_MASTER_KEY_CURRENT_VERSION=1.",
     secret: true,
   },
+  SESSION_TOKEN_HMAC_KEY: {
+    group: "Vault keys",
+    order: 15,
+    description:
+      "256-bit key (64-char hex) for the session-token HMAC (DB session lookup\n" +
+      "digest + Redis cache key). Decoupled from SHARE_MASTER_KEY so rotating the\n" +
+      "master key does not break session auth. Optional: falls back to the\n" +
+      "V1-derived key when unset. Production SHOULD set it. Generate with\n" +
+      "`npm run generate:key`.",
+    secret: true,
+  },
   SHARE_MASTER_KEY_V1: {
     group: "Vault keys",
     order: 2,

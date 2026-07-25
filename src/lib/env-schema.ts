@@ -123,6 +123,16 @@ export const envObject = z.object({
     .optional(),
   SHARE_MASTER_KEY: hex64.optional(),
 
+  // Dedicated key for the session-token HMAC (DB lookup digest + Redis cache
+  // key). Decoupled from SHARE_MASTER_KEY so rotating the master key (dropping
+  // V1) does not break session authentication. Optional: falls back to the
+  // V1-derived key when unset (backward compat with pre-dedicated-key digests),
+  // so it is NOT hard-required in prod — that would break existing V1-only
+  // deployments. validateSessionTokenHmacKey() (called at boot) fails fast if
+  // NEITHER this key nor V1 resolves. Production SHOULD set it to decouple from
+  // the master key.
+  SESSION_TOKEN_HMAC_KEY: hex64.optional(),
+
   // --- Key rotation ---
   // V1..V10 modeled explicitly (D6-split F16+S4). V11..V100 fall through to
   // process.env[...] in superRefine — the variadic regex-pattern allowlist

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   sanitizeErrorForSentry: vi.fn((err: unknown) => err),
   getKeyProvider: vi.fn(),
   validateKeys: vi.fn(),
+  validateSessionTokenHmacKey: vi.fn(),
 }));
 
 vi.mock("@sentry/nextjs", () => ({
@@ -18,6 +19,12 @@ vi.mock("@/lib/security/sentry-sanitize", () => ({
 
 vi.mock("@/lib/key-provider", () => ({
   getKeyProvider: mocks.getKeyProvider,
+}));
+
+// #3: register() now imports session-cache for the boot-time HMAC-key check.
+// Mock it so the test does not pull in the real key-provider chain.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  validateSessionTokenHmacKey: mocks.validateSessionTokenHmacKey,
 }));
 
 // Dynamic import to avoid module-level side effects
@@ -56,6 +63,8 @@ describe("register", () => {
 
     expect(mocks.getKeyProvider).toHaveBeenCalledTimes(1);
     expect(mocks.validateKeys).toHaveBeenCalledTimes(1);
+    // #3: the session-token HMAC key is validated at boot.
+    expect(mocks.validateSessionTokenHmacKey).toHaveBeenCalledTimes(1);
   });
 
   it("does not call getKeyProvider when NEXT_RUNTIME is not nodejs", async () => {

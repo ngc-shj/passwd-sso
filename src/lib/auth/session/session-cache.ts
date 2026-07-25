@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import type Redis from "ioredis";
 import { z } from "zod";
 import { getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
+import { HEX64_RE } from "@/lib/validations/common";
 import {
   REDIS_FALLBACK_LOG_THROTTLE_MS,
   createThrottledErrorLogger,
@@ -74,14 +75,52 @@ let _sessionCacheHmacKey: Buffer | null = null;
 
 function getSessionCacheHmacKey(): Buffer {
   if (_sessionCacheHmacKey) return _sessionCacheHmacKey;
-  // Pin to V1 forever: rotation of V1 itself is an out-of-band op requiring
-  // a redis FLUSHDB. Routine bumps of SHARE_MASTER_KEY_CURRENT_VERSION
-  // (V1→V2) do not change V1 bytes, so the cache subkey is rotation-stable.
+  // Prefer a DEDICATED SESSION_TOKEN_HMAC_KEY, decoupled from SHARE_MASTER_KEY.
+  // Since H4 the DB session lookup depends on this HMAC (not just the cache), so
+  // a deployment that bumped SHARE_MASTER_KEY_CURRENT_VERSION and dropped V1
+  // would break ALL authentication if this key were pinned to V1 — the dedicated
+  // key removes that coupling. validateSessionTokenHmacKey() enforces at boot
+  // that this resolves, so the runtime path never hits an unconfigured key.
+  const dedicated = process.env.SESSION_TOKEN_HMAC_KEY?.trim();
+  if (dedicated) {
+    if (!HEX64_RE.test(dedicated)) {
+      throw new Error(
+        "SESSION_TOKEN_HMAC_KEY must be a 64-char hex string (256 bits)",
+      );
+    }
+    // HKDF-domain-separate so the stored key is not used verbatim as the HMAC key.
+    const okm = crypto.hkdfSync(
+      "sha256",
+      Buffer.from(dedicated, "hex"),
+      "",
+      "session-token-hmac-v1",
+      32,
+    );
+    _sessionCacheHmacKey = Buffer.from(okm);
+    return _sessionCacheHmacKey;
+  }
+  // Backward-compatible fallback (no dedicated key set): derive from V1, matching
+  // the pre-dedicated-key digests. Rotation-stable: routine
+  // SHARE_MASTER_KEY_CURRENT_VERSION bumps (V1→V2) do not change V1 bytes.
   // hkdfSync returns ArrayBuffer; Buffer.from() wraps it zero-copy.
   const ikm = getMasterKeyByVersion(1);
   const okm = crypto.hkdfSync("sha256", ikm, "", "session-cache-hmac-v1", 32);
   _sessionCacheHmacKey = Buffer.from(okm);
   return _sessionCacheHmacKey;
+}
+
+/**
+ * Boot-time validation (called from instrumentation): confirm the session-token
+ * HMAC key resolves NOW, so the first request's hashSessionToken() cannot fail
+ * with "version 1 not found". Either SESSION_TOKEN_HMAC_KEY is set (preferred),
+ * or the V1 fallback must be present. This closes the gap where
+ * SHARE_MASTER_KEY_CURRENT_VERSION=2 with only V2 configured passes startup but
+ * breaks every session lookup at runtime.
+ */
+export function validateSessionTokenHmacKey(): void {
+  // Force resolution + memoization; throws if neither the dedicated key nor V1
+  // is available/valid.
+  getSessionCacheHmacKey();
 }
 
 // Test-only reset for vi.resetModules-style tests. NEVER export from any
