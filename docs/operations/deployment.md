@@ -62,6 +62,14 @@ cosign verify --key "awskms:///$(terraform -chdir=infra/terraform output -raw im
 `COSIGN_KEY=awskms:///<arn>` overrides the key `deploy.sh` reads from the stack
 output — use it when the signing key lives outside this Terraform state.
 
+> **Three slashes.** cosign's URI is `awskms://[ENDPOINT]/[ID]`. We use no custom
+> endpoint, so the authority is empty and the ARN goes in the path:
+> `awskms:///arn:aws:kms:...`. With two slashes cosign parses the ARN as the
+> endpoint *host* (`Failed to parse uri: https://arn:aws:kms:...`), never reaches
+> KMS, and — since verification fails closed — aborts every deploy.
+> `scripts/checks/check-cosign-kms-uri.sh` runs the real binary against a dummy
+> ARN to keep this from regressing; a stub-based unit test cannot catch it.
+
 > **Images pushed before signing was introduced carry no signature** and will be
 > refused. Re-push from a clean checkout (which signs them), or sign the existing
 > digest once with `cosign sign --key awskms:///<arn> <repo>@sha256:<digest>`.

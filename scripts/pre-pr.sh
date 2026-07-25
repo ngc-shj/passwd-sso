@@ -171,6 +171,7 @@ run_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supp
 run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
+run_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
 run_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
 run_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
 run_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
