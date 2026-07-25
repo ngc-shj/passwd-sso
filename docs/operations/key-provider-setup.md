@@ -161,7 +161,20 @@ For non-versioned keys (verifier pepper, directory sync, WebAuthn PRF):
 
 > **Important:** All providers cache keys in memory. A service restart is required for new values to take effect.
 
-> **Session cache subkey note:** The Redis session cache uses a V1-pinned subkey derived from the application secrets. Rotating the `VERIFIER_PEPPER_KEY` or other non-versioned keys does not automatically invalidate the Redis session cache. If you need to invalidate all cached sessions (e.g. after a key compromise), flush the Redis keyspace (`redis-cli FLUSHDB`) or wait for the cache TTL to expire (`SESSION_CACHE_TTL_MS=30000 ms`, `TOMBSTONE_TTL_MS=30000 ms`).
+> **Session-token HMAC key note:** the session-token HMAC (used for BOTH the DB
+> session-lookup digest and the Redis session-cache key) is derived from the
+> dedicated `SESSION_TOKEN_HMAC_KEY` — **required in production**, decoupled from
+> `SHARE_MASTER_KEY` rotation. (Dev/test with no dedicated key fall back to a
+> V1-derived subkey.) Rotating `SESSION_TOKEN_HMAC_KEY` changes every digest, so
+> it INVALIDATES ALL SESSIONS (every user re-authenticates). To rotate cleanly,
+> purge sessions AT the cutover, not after: (1) put the new value, (2) `DELETE
+> FROM sessions` + flush the Redis session keyspace, (3) redeploy with the new
+> key. Old-key digests can never match the new key, so pre-cutover sessions are
+> dead regardless; purging before the redeploy avoids deleting sessions that new
+> (post-cutover) code would otherwise create. TTLs:
+> `SESSION_CACHE_TTL_MS`/`TOMBSTONE_TTL_MS` = 30000 ms. Rotating
+> `VERIFIER_PEPPER_KEY` or other non-versioned keys does NOT invalidate the
+> session cache.
 
 ---
 

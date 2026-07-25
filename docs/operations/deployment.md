@@ -24,41 +24,42 @@ Configuration precedence: `.env` (canonical base) → `.env.local` (per-develope
 
 ## Deploy Flow (AWS ECS)
 
+**Terraform owns the deploy ordering.** A single `terraform apply` registers the
+new task definitions, runs the DB migration (`null_resource.run_migration` in
+`infra/terraform/migrate-run.tf`), and only THEN updates the app + both worker
+services (they `depends_on` the migration) — so new code never runs against an
+un-migrated schema.
+
 ```
 1. docker build    →  Build image with immutable tag
 2. docker push     →  Push to ECR
-3. terraform apply →  Update app + migrate task definitions (same image)
-4. deploy.sh       →  Run migration → update app service
+3. terraform apply →  register task defs → run migration → update app + workers
 ```
 
-### Step-by-step
+### Step-by-step (steady state)
 
 ```bash
-# 1. Build
-GIT_SHA=$(git rev-parse --short HEAD)
-IMAGE="<account>.dkr.ecr.<region>.amazonaws.com/passwd-sso:git-${GIT_SHA}"
-docker build -t "$IMAGE" .
-
-# 2. Push
-aws ecr get-login-password --region <region> | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
-docker push "$IMAGE"
-
-# 3. Update task definitions via Terraform
-terraform -chdir=infra/terraform apply -var "app_image=$IMAGE"
-
-# 4. Deploy (migrate + app update)
-export SUBNETS="subnet-xxx,subnet-yyy"
-export SECURITY_GROUPS="sg-xxx"
-./scripts/deploy.sh
+export AWS_REGION=<region>
+export ECR_URL=<account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app
+./scripts/deploy.sh   # build → push → terraform apply (migration is inside apply)
 ```
 
-### Skip Migration
+`scripts/deploy.sh` is a thin wrapper: it builds/pushes an immutable git-SHA tag
+and runs `terraform apply -var app_image=…`. It does NOT run migrations itself —
+Terraform does, gated before the service updates.
 
-When a release has no schema changes (code-only deploy):
+> **First-time bootstrap of a NEW environment.** The migration runs inside apply
+> and needs (a) the image pushed to ECR and (b) the app secret VALUES present, but
+> ECR and the empty secret containers are created BY apply. Bootstrap in phases —
+> see `infra/terraform/README.md` "First-time bootstrap": create ECR only
+> (`terraform apply -target=aws_ecr_repository.app`), push the image, inject
+> secrets (`scripts/put-terraform-secrets.sh`), THEN run the full `terraform apply`.
 
-```bash
-./scripts/deploy.sh --skip-migrate
-```
+### Code-only release (no schema change)
+
+The migration task is idempotent (`prisma migrate deploy` is a no-op when there
+are no pending migrations), so a code-only release is the same `./scripts/deploy.sh`
+— apply re-runs the (no-op) migration and updates the services.
 
 ## Deploy Flow (Local / Docker Compose)
 
@@ -82,16 +83,26 @@ docker compose up
 
 This starts `app`, `db`, `jackson`, and `redis` — but **not** the `migrate` service (it uses `profiles: ["migrate"]`).
 
-The full set of six services is: `app`, `db`, `jackson`, `redis`, `migrate`, and `audit-outbox-worker`. The `audit-outbox-worker` service is currently declared only in `docker-compose.override.yml` (the dev override). Production deployments must run the worker separately — either by adding a production-equivalent Compose fragment that references the same image with `npm run worker:audit-outbox` as the command, or by running the worker as a sidecar process on the application host. Without the worker, audit events accumulate in `audit_outbox` with status `PENDING` and are never drained to `audit_logs`.
+Background workers: `audit-outbox-worker` (drains `audit_outbox` → `audit_logs`)
+and `retention-gc-worker` (enforces retention / hard-deletes). On AWS they are
+dedicated Terraform-managed ECS services (`infra/terraform/ecs.tf`); on Docker
+Compose they are in `docker-compose.workers.yml` (production) /
+`docker-compose.override.yml` (dev tsx). Without them, audit events accumulate as
+`PENDING` and retention is never enforced.
 
 ## Migration Failure
 
-If `deploy.sh` reports a migration failure:
+The migration runs inside `terraform apply` (`null_resource.run_migration`). If
+it fails, the local-exec returns non-zero, so:
 
-1. **Do not proceed** — the app service is NOT updated when migration fails
-2. Check CloudWatch Logs (`migrate` stream prefix) for error details
-3. Fix the migration issue (e.g., fix the migration SQL, or address data conflicts)
-4. Re-run `deploy.sh` (migration will retry from the failed point — Prisma migrations are idempotent for already-applied migrations)
+1. **`terraform apply` aborts** — because the app + worker services `depends_on`
+   the migration, they are NOT updated to the new task-def revision when
+   migration fails. Running code keeps the old (schema-compatible) image.
+2. Check CloudWatch Logs (`migrate` stream prefix) for error details.
+3. Fix the migration issue (migration SQL, or data conflicts).
+4. Re-run `./scripts/deploy.sh` (or `terraform apply`). Prisma migrations are
+   idempotent for already-applied migrations, so the retry resumes from the
+   failed point.
 
 ## Rollback
 
@@ -183,25 +194,31 @@ These operations re-encrypt all entries client-side and submit the results atomi
 
 ## Environment Variables
 
-The deploy script uses these environment variables:
+`scripts/deploy.sh` uses these environment variables (cluster / subnets / SG /
+task-def ARNs are read from `terraform output`, not passed in):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ECS_CLUSTER` | `passwd-sso-prod-cluster` | ECS cluster name |
-| `MIGRATE_TASK_DEF` | `passwd-sso-prod-migrate` | Migration task definition family |
-| `APP_SERVICE` | `passwd-sso-prod-app` | ECS app service name |
-| `SUBNETS` | *(required)* | Comma-separated subnet IDs |
-| `SECURITY_GROUPS` | *(required)* | Comma-separated security group IDs |
+| `AWS_REGION` | *(required)* | AWS region |
+| `ECR_URL` | *(required)* | App ECR repo URL (`<acct>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app`) |
+| `TF_VAR_FILE` | *(required)* | tfvars path (e.g. `envs/prod/terraform.tfvars`) — passed as `-var-file` |
+| `TF_DIR` | `infra/terraform` | Terraform working directory |
 
 ## Database User Permissions
 
-The application uses three database roles with separated privileges:
+The application uses four database roles with separated privileges:
 
 | Role | Privileges | Purpose |
 |------|-----------|---------|
 | `passwd_user` (or equivalent) | SUPERUSER or DDL-capable | Table owner, migrations (`prisma migrate deploy`) |
 | `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
+| `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
+
+On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
+scripts run only on the Docker Postgres image) — create them manually during
+bootstrap, before the first migration. See `infra/terraform/README.md`
+"First-time bootstrap".
 
 ```sql
 -- Production: create a non-superuser application role

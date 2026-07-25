@@ -59,12 +59,17 @@ terraform init
 > リモートバックエンドを設定してください。ローカル state のまま本番デプロイし
 > ないこと。`terraform.tfvars` は gitignore 済みで、実値は決してコミットしない。
 
-### 2. Plan & Apply
+### 2. Plan & Apply（既存環境の更新）
 
 ```bash
 terraform plan  -var-file=envs/dev/terraform.tfvars
 terraform apply -var-file=envs/dev/terraform.tfvars
 ```
+
+> **新規環境の初回 bootstrap** には順序制約があります（接続文字列 secret は RDS/Redis
+> 作成後にしか生成できない、RDS は `initdb/*.sql` を実行しないため `passwd_app` /
+> worker ロールを migration 前に手動作成が必要、等）。多段階手順は英語版 README の
+> "First-time bootstrap" を参照してください。
 
 ### 3. Push Container Images
 
@@ -97,25 +102,24 @@ docker tag boxyhq/jackson:${JACKSON_VERSION} $(terraform output -raw ecr_jackson
 docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
 ```
 
-### 4. 新しいイメージバージョンをデプロイ
+### 4. 新しいイメージバージョンをデプロイ（steady state）
 
-ECS サービスは task definition を追従します（`task_definition` に `ignore_changes`
-なし）。デプロイはイメージタグの更新 + apply だけです:
+migration-first の順序は Terraform ではなく `scripts/deploy.sh` が所有します。
+Terraform は task **定義**のみ管理し（サービスは `ignore_changes = [task_definition]`）、
+deploy.sh が「apply で新定義を登録 → migration 実行 → 全サービス（app + 両 worker）
+を新 task-def へ update-service」を順に行います。新コードが未 migration スキーマで
+動くことはありません。
 
 ```bash
-# terraform.tfvars の app_image を新しい immutable タグに向ける:
-#   app_image = "<ACCOUNT>.dkr.ecr.<region>.amazonaws.com/...-app:v0.4.72"
-terraform apply
+export AWS_REGION=<region>
+export ECR_URL=<account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app
+export TF_VAR_FILE=envs/prod/terraform.tfvars
+./scripts/deploy.sh   # build → push → apply(定義のみ) → migration → update-service
 ```
 
-`terraform apply` が新タグを参照する新しい task-definition リビジョンを登録し、その
-イメージを使う全サービス（app、migrate はタスク定義のみ、audit-outbox / retention-gc
-の両 worker）を新リビジョンへ更新します。
-
-> バージョン更新に `aws ecs update-service --force-new-deployment` は使わないこと:
-> 同一 task definition（＝同一の旧イメージ）でタスクを再起動するだけで、前バージョン
-> を再デプロイしてしまいます。`--force-new-deployment` は同一タグの内容更新用ですが、
-> 本リポジトリの IMMUTABLE タグではそもそも同一タグ更新は不可です。
+deploy.sh は dirty worktree を拒否し full commit SHA を使用、同一タグが ECR に既存
+なら build/push をスキップ（migration 失敗後の再実行が安全）します。詳細は
+docs/operations/deployment.md を参照。新規環境の初回構築は「初回 bootstrap」を参照。
 
 ## Remote State Backend
 
@@ -164,7 +168,8 @@ ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、
 
 | Key | Description |
 |-----|-------------|
-| `DATABASE_URL` | PostgreSQL 接続文字列 |
+| `DATABASE_URL` | PostgreSQL 接続文字列（app ロール、NOSUPERUSER） |
+| `MIGRATION_DATABASE_URL` | migrate タスク用の SUPERUSER 接続文字列（`prisma migrate deploy` の DDL）。RDS マスターパスワードは `db_master_user_secret_arn` から取得。 |
 | `AUTH_URL` | アプリの公開URL |
 | `AUTH_SECRET` | Auth.js セッション暗号化キー |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
@@ -184,11 +189,12 @@ LB なし。クラッシュ時は ECS が自動再起動。liveness は `Running
 保持期限も執行されないため、上記 worker DB URL は apply 前に必ず設定すること。
 
 > **`SESSION_TOKEN_HMAC_KEY` のローテーション。** セッションの DB digest と Redis
-> キャッシュキーは両方この鍵から導出されるため、変更すると全 digest が変わります。
-> ローテーションは**全セッションを失効**（全ユーザー再認証）させ、旧キー配下に古い
-> エントリが残ります。手順: (1) 新値を投入、(2) app を再デプロイ、(3) `DELETE FROM
-> sessions`（旧 digest は新鍵に一致しない）を実行し Redis セッションキャッシュの
-> namespace を flush（旧キーのエントリが TTL 分残らないように）。
+> キャッシュキーは両方この鍵から導出されるため、変更すると全 digest が変わり
+> **全セッションが失効**（全ユーザー再認証）します。再デプロイ後ではなく cutover
+> 時点で purge すること: (1) 新値を投入、(2) `DELETE FROM sessions` + Redis
+> セッション keyspace を flush、(3) 再デプロイ。旧 digest は新鍵に一致しないため
+> cutover 前のセッションはいずれにせよ無効で、再デプロイ前に purge することで新
+> （cutover 後）コードが作るセッションを削除せずに済みます。
 
 ### Required Secrets (jackson)
 

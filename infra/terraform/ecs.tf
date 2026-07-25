@@ -52,13 +52,13 @@ resource "aws_ecs_task_definition" "app" {
       # rate-limit bucket → spurious 429s).
       #
       # Set ONLY TRUST_PROXY_HEADERS=true; do NOT put the VPC CIDR in
-      # TRUSTED_PROXIES. The ALB APPENDS the connection source IP to any
-      # client-supplied XFF (it does not replace it), so with the VPC trusted a
-      # VPC-internal attacker sending `XFF: <spoof>, ` would have the ALB append
-      # its own ENI IP; rightmost-untrusted would strip the trusted ALB IP and
-      # return the SPOOFED value. With TRUSTED_PROXIES unset (loopback only), the
-      # rightmost hop the ALB actually observed (the real client, or an
-      # attacker's own VPC IP — never someone else's) is returned. The ALB is set
+      # TRUSTED_PROXIES. The ALB APPENDS the connection source IP it observed to
+      # any client-supplied XFF (it does not replace it). With the VPC trusted, a
+      # VPC-internal attacker sending `XFF: <spoof>` would have the ALB append the
+      # observed source; rightmost-untrusted would then strip that trusted-VPC hop
+      # and return the SPOOFED leftmost value. With TRUSTED_PROXIES unset
+      # (loopback only), the rightmost hop the ALB observed (the real client, or
+      # the attacker's own IP — never someone else's) is returned. The ALB is set
       # to xff_header_processing_mode = "append" in alb.tf to pin this behavior.
       environment = [
         { name = "TRUST_PROXY_HEADERS", value = "true" },
@@ -162,7 +162,10 @@ resource "aws_ecs_task_definition" "migrate" {
           awslogs-stream-prefix = "migrate"
         }
       }
+      # prisma migrate deploy runs DDL → needs the SUPERUSER MIGRATION_DATABASE_URL
+      # (prisma.config.ts prefers it over the NOSUPERUSER app DATABASE_URL).
       secrets = [
+        { name = "MIGRATION_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:MIGRATION_DATABASE_URL::" },
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
       ]
     }
@@ -192,6 +195,15 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 
+  # Terraform manages the TASK DEFINITION; the SERVICE's running revision is
+  # advanced by scripts/deploy.sh AFTER it runs the migration (migration-first
+  # ordering — see docs/operations/deployment.md). ignore_changes keeps a
+  # `terraform apply` from updating the service to a new task-def before the
+  # migration has run.
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
   depends_on = [aws_lb_listener.https]
   tags       = local.tags
 }
@@ -212,6 +224,10 @@ resource "aws_ecs_service" "jackson" {
     target_group_arn = aws_lb_target_group.jackson.arn
     container_name   = "jackson"
     container_port   = 5225
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
   }
 
   depends_on = [aws_lb_listener.https]
@@ -315,6 +331,12 @@ resource "aws_ecs_service" "audit_outbox_worker" {
     security_groups = [aws_security_group.ecs.id]
   }
 
+  # Task def managed by Terraform; running revision advanced by deploy.sh after
+  # migration (workers touch the migrated schema too).
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
   tags = local.tags
 }
 
@@ -328,6 +350,10 @@ resource "aws_ecs_service" "retention_gc_worker" {
   network_configuration {
     subnets         = aws_subnet.private[*].id
     security_groups = [aws_security_group.ecs.id]
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
   }
 
   tags = local.tags

@@ -59,12 +59,68 @@ terraform init
 > encrypted S3 remote backend below — do not run a real deployment on local
 > state. `terraform.tfvars` is gitignored; never commit real secret values.
 
-### 2. Plan & Apply
+### 2. First-time bootstrap (NEW environment)
+
+Bootstrapping a brand-new AWS environment has real ordering constraints that a
+single `terraform apply` cannot satisfy on its own:
+
+- The connection-string secrets (`DATABASE_URL`, `MIGRATION_DATABASE_URL`,
+  `REDIS_URL`, the worker DB URLs) can only be built AFTER RDS/Redis exist and
+  their endpoints + the AWS-managed RDS master password are known.
+- **RDS does NOT run the `infra/postgres/initdb/*.sql` scripts** (those are for
+  the Docker Postgres image only), so the least-privilege roles — `passwd_app`,
+  `passwd_outbox_worker`, `passwd_retention_gc_worker` — must be created manually
+  on RDS. `passwd_app` must exist BEFORE `prisma migrate deploy`, because some
+  migrations conditionally GRANT/REVOKE privileges to it.
+- The app/worker services start their tasks as soon as they exist, so their
+  secrets and roles must be ready first.
+
+Phased bootstrap (services start only in the last phase):
 
 ```bash
-terraform plan  -var-file=envs/dev/terraform.tfvars
-terraform apply -var-file=envs/dev/terraform.tfvars
+TFV="-var-file=envs/prod/terraform.tfvars"
+
+# Phase A — network + data stores + registries + empty secret containers.
+#   `desired_count = 0` for app/jackson (see terraform.tfvars) so no service task
+#   starts yet; the workers default to 1 but are created in Phase D.
+terraform apply $TFV \
+  -target=aws_vpc.main -target=aws_nat_gateway.main \
+  -target=aws_db_instance.main -target=aws_elasticache_replication_group.main \
+  -target=aws_ecr_repository.app -target=aws_ecr_repository.jackson \
+  -target=aws_secretsmanager_secret.app -target=aws_secretsmanager_secret.jackson
+
+# Phase B — read the RDS master password + endpoints.
+MASTER_ARN=$(terraform output -raw db_master_user_secret_arn)
+DB_HOST=$(terraform output -raw db_endpoint)
+REDIS_HOST=$(terraform output -raw redis_endpoint)
+MASTER_PW=$(aws secretsmanager get-secret-value --secret-id "$MASTER_ARN" \
+  --query SecretString --output text | jq -r .password)
+
+# Phase C — create the DB roles on RDS as the master user (psql), BEFORE migration:
+#   CREATE ROLE passwd_app                 LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
+#   CREATE ROLE passwd_outbox_worker       LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
+#   CREATE ROLE passwd_retention_gc_worker LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD '…';
+#   (mirror the GRANTs in infra/postgres/initdb/02-04*.sql for each role.)
+
+# Push the image (step 3), then inject ALL secret values built from the above:
+#   app-secrets.json: DATABASE_URL (passwd_app@$DB_HOST), MIGRATION_DATABASE_URL
+#   (master@$DB_HOST), REDIS_URL ($REDIS_HOST), OUTBOX_WORKER_DATABASE_URL,
+#   RETENTION_GC_DATABASE_URL, plus the app secrets (AUTH_*, SHARE_MASTER_KEY,
+#   SESSION_TOKEN_HMAC_KEY, …).
+scripts/put-terraform-secrets.sh --name-prefix passwd-sso-prod \
+  --app-file ./app-secrets.json --jackson-file ./jackson-secrets.json
+
+# Phase D — full apply (registers task defs; workers/app start now). Then run the
+# migration + advance services with the SAME script used for steady state:
+terraform apply $TFV
+AWS_REGION=<region> ECR_URL=<app-ecr-url> TF_VAR_FILE=envs/prod/terraform.tfvars \
+  ./scripts/deploy.sh
+# (set app_desired_count/jackson_desired_count back to their steady values in
+#  tfvars before this apply if you set them to 0 in Phase A.)
 ```
+
+Steady-state deploys (environment already bootstrapped) are a single
+`./scripts/deploy.sh` — see docs/operations/deployment.md.
 
 ### 3. Push Container Images
 
@@ -139,10 +195,12 @@ review (F3) it no longer carries secret values — those are injected out-of-ban
 
 App/Jackson secret VALUES are **not** managed by Terraform and never enter state
 (2026-07 review, F3). Terraform creates only the empty Secrets Manager CONTAINERS
-(`secrets.tf`); the values are injected out-of-band AFTER `terraform apply` and
-BEFORE the ECS services start, using JSON files that are never committed. The RDS
-master password is AWS-managed (`manage_master_user_password`) so it is not in
-state either.
+(`secrets.tf`); the values are injected out-of-band with `put-terraform-secrets.sh`
+using JSON files that are never committed. On a NEW environment this happens
+during bootstrap Phase C (after RDS/Redis exist and the roles are created, before
+the services start in Phase D) — see "First-time bootstrap" above. The RDS master
+password is AWS-managed (`manage_master_user_password`) so it is not in state
+either.
 
 > **Exception:** the ElastiCache Redis `auth_token`, when configured, DOES enter
 > Terraform state — ElastiCache has no AWS-managed-token equivalent. The
@@ -167,7 +225,8 @@ bringing services up. ECS task definitions reference secrets in
 
 | Key | Description |
 |-----|-------------|
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (app role, NOSUPERUSER) |
+| `MIGRATION_DATABASE_URL` | SUPERUSER connection string used by the migrate task (`prisma migrate deploy` DDL). Read the RDS master password from `db_master_user_secret_arn`. |
 | `AUTH_URL` | Public app URL |
 | `AUTH_SECRET` | Auth.js session encryption key |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
@@ -189,11 +248,11 @@ never enforced, so the worker DB URLs above MUST be populated before apply.
 
 > **Rotating `SESSION_TOKEN_HMAC_KEY`.** The session-token DB digest and the
 > Redis session-cache key are both derived from this key, so changing it changes
-> every digest. A rotation therefore INVALIDATES ALL SESSIONS (every user must
-> re-authenticate) and leaves stale entries under the OLD cache keys. To rotate:
-> (1) put the new key value, (2) redeploy the app, (3) run `DELETE FROM sessions`
-> (old digests can never match the new key) and flush the Redis session-cache
-> namespace so old-key entries do not linger for the cache TTL.
+> every digest → INVALIDATES ALL SESSIONS (every user re-authenticates). Purge AT
+> the cutover, not after: (1) put the new value, (2) `DELETE FROM sessions` +
+> flush the Redis session keyspace, (3) redeploy. Old-key digests can never match
+> the new key, so pre-cutover sessions are dead regardless; purging before the
+> redeploy avoids deleting sessions that new (post-cutover) code would create.
 
 ### Required Secrets (jackson)
 

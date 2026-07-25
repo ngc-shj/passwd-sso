@@ -258,8 +258,11 @@ describe("extractClientIpFromHeaders — ALB XFF spoof resistance (#1)", () => {
     vi.stubEnv("TRUSTED_PROXIES", "127.0.0.1/32,::1/128"); // VPC NOT trusted
   });
 
-  it("does NOT return an attacker-forged leftmost XFF value (returns the ALB-appended hop)", () => {
-    // Attacker inside the VPC sends `XFF: <spoof>`; the ALB appends its ENI IP.
+  it("does NOT return an attacker-forged leftmost XFF value (returns the ALB-observed source)", () => {
+    // Attacker inside the VPC sends `XFF: <spoof>`; the ALB APPENDS the IP it
+    // observed on the connection (here the attacker's own 10.0.1.25 — the ALB
+    // appends the connection source, NOT some fixed ALB IP). So the rightmost
+    // entry is that observed source, never the forged leftmost value.
     const headers = new Headers({
       "x-forwarded-for": "198.51.100.77, 10.0.1.25",
     });

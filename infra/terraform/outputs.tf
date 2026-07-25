@@ -86,6 +86,40 @@ output "ecs_jackson_service_name" {
   value = aws_ecs_service.jackson.name
 }
 
+output "ecs_audit_outbox_worker_service_name" {
+  value = aws_ecs_service.audit_outbox_worker.name
+}
+
+output "ecs_retention_gc_worker_service_name" {
+  value = aws_ecs_service.retention_gc_worker.name
+}
+
+# Task-definition ARNs + network config — consumed by scripts/deploy.sh to run
+# the migration and advance each service to the new revision post-migration.
+output "app_task_definition_arn" {
+  value = aws_ecs_task_definition.app.arn
+}
+
+output "migrate_task_definition_arn" {
+  value = aws_ecs_task_definition.migrate.arn
+}
+
+output "audit_outbox_worker_task_definition_arn" {
+  value = aws_ecs_task_definition.audit_outbox_worker.arn
+}
+
+output "retention_gc_worker_task_definition_arn" {
+  value = aws_ecs_task_definition.retention_gc_worker.arn
+}
+
+output "private_subnet_ids" {
+  value = aws_subnet.private[*].id
+}
+
+output "ecs_security_group_id" {
+  value = aws_security_group.ecs.id
+}
+
 ################################################################################
 # URLs
 ################################################################################
