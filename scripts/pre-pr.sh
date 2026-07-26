@@ -708,27 +708,45 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   queue_step "Test"       npx vitest run
   queue_step "Build"      npx next build
 
+  # CLI is Build→Test and Extension is Test→Build (CI order). Each pair is
+  # SPLIT ACROSS THE TWO BATCHES rather than chained with `&&` in one job:
+  # `&&` would skip the second half whenever the first fails, so a broken CLI
+  # build would leave CLI Test unevaluated — the same "truncated gate run"
+  # the serial script never had, where all four were independent run_steps.
+  # Staging keeps the required order while both halves always run and report.
+  cli_ok=0
   if [ ! -d cli/node_modules ]; then
     printf "${RED}ERROR: cli/node_modules missing — run 'cd cli && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
     failed=$((failed + 1))
     failures+=("CLI: deps missing|")
   else
-    queue_step "CLI: Build → Test" bash -c 'cd cli && npm run build && npm test'
+    cli_ok=1
+    queue_step "CLI: Build"  bash -c 'cd cli && npm run build'
   fi
 
+  ext_ok=0
   if [ ! -d extension/node_modules ]; then
     printf "${RED}ERROR: extension/node_modules missing — run 'cd extension && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
     failed=$((failed + 1))
     failures+=("Extension: deps missing|")
   else
-    queue_step "Extension: Test → Build" bash -c 'cd extension && npm test && npm run build'
+    ext_ok=1
+    queue_step "Extension: Test"  bash -c 'cd extension && npm test'
   fi
 
   run_batch
 
-  # Typecheck reads .next/types/**, which Build generates — so it runs in a
-  # second batch once Build has finished rather than racing it.
+  # Second batch: steps that must observe the first batch's output.
+  #   Typecheck  — reads .next/types/**, which Build generates.
+  #   CLI: Test  — runs against cli/dist from CLI: Build.
+  #   Extension: Build — CI runs it after Extension: Test.
   queue_step "Typecheck"  npx tsc --noEmit
+  if [ "$cli_ok" = "1" ]; then
+    queue_step "CLI: Test"  bash -c 'cd cli && npm test'
+  fi
+  if [ "$ext_ok" = "1" ]; then
+    queue_step "Extension: Build"  bash -c 'cd extension && npm run build'
+  fi
   run_batch
 
 fi
