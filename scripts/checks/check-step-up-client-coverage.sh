@@ -118,6 +118,24 @@ PATHS_FILE="${STEPUP_CLIENT_GUARD_PATHS_FILE:-$REPO_ROOT/scripts/checks/stepup-r
 # `!res.ok` block). 40 is that measured max plus generous margin.
 ADJACENCY_WINDOW="${STEPUP_CLIENT_GUARD_WINDOW:-40}"
 
+# Env-pollution guard (same contract as check-gate-selftest-coverage.sh's
+# sec-F6 guard). Every override above can silently green this gate: pointing
+# CLIENT_DIR at an empty directory leaves nothing to scan, and WINDOW=0
+# disables the adjacency check. Those are legitimate for the self-test, which
+# sets them deliberately — but under CI they can only be accidental or
+# malicious, so require an explicit acknowledgement rather than trusting that
+# "production CI uses the defaults".
+if [ "${CI:-}" = "true" ]; then
+  if [ -n "${STEPUP_CLIENT_GUARD_API_DIR:-}" ] || [ -n "${STEPUP_CLIENT_GUARD_CLIENT_DIR:-}" ] || \
+     [ -n "${STEPUP_CLIENT_GUARD_PATH_ROOT:-}" ] || [ -n "${STEPUP_CLIENT_GUARD_EXEMPT_FILE:-}" ] || \
+     [ -n "${STEPUP_CLIENT_GUARD_PATHS_FILE:-}" ] || [ -n "${STEPUP_CLIENT_GUARD_WINDOW:-}" ]; then
+    if [ "${STEPUP_CLIENT_GUARD_FIXTURE_MODE:-}" != "1" ]; then
+      echo "ENV_POLLUTION_GUARD: STEPUP_CLIENT_GUARD_* override set under CI=true without STEPUP_CLIENT_GUARD_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
+      exit 1
+    fi
+  fi
+fi
+
 # Client "branch present" tokens (extended regex, OR-joined). The paren is a
 # bracket-expression `[(]` not `\(` so it survives awk's -v un-escaping (a `\(`
 # passed via -v becomes a bare `(` = invalid regex group-open in awk).
@@ -477,6 +495,39 @@ done < <(printf '%s' "$MANIFEST_IDS" | sort -u)
 # for that id at that call site.
 MUTATING_METHOD_RE='"(POST|PUT|PATCH|DELETE)"'
 
+# Hoisted per-id manifest data. `method` and `tokens_raw` depend only on the id,
+# but the loop below visits every (call site x id) pair — deriving them inside
+# it re-ran manifest_line_for + 6 grep/sed spawns ~10,000 times (66,176 process
+# spawns, 171s). Derive once here into parallel indexed arrays; the inner loop
+# then only reads memory. bash 3.2 has no associative arrays — keep parallel
+# indexed arrays plus a linear scan, same idiom as EXEMPT_MARKERS.
+#
+# Only mutating-method ids can ever produce a candidate (the loop short-circuits
+# on non-mutating methods), so skip the rest at build time — that keeps the
+# scanned set small without changing which pairs can match.
+CAND_IDS=()
+CAND_METHODS=()
+CAND_TOKENS=()
+while IFS= read -r mid; do
+  [ -z "$mid" ] && continue
+  is_exempt "$mid" && continue
+  mline="$(manifest_line_for "$mid")"
+  m_method="$( { printf '%s' "$mline" | grep -oE '"method":[[:space:]]*"[A-Z]+"' || true; } | sed -E 's/.*"([A-Z]+)"$/\1/')"
+  case "$m_method" in
+    POST|PUT|PATCH|DELETE) ;;
+    *) continue ;;
+  esac
+  m_tokens_raw="$( { printf '%s' "$mline" | grep -oE '"pathTokens":[[:space:]]*\[[^]]*\]' || true; } | sed -E 's/"pathTokens":[[:space:]]*\[(.*)\]/\1/')"
+  # Pre-split and pre-escape the tokens once per id (was: per id PER CALL SITE).
+  # Newline-delimited; each entry is already ERE-escaped for the match below.
+  m_tokens_esc="$( { printf '%s' "$m_tokens_raw" | grep -oE '"[^"]*"' || true; } \
+    | sed -E 's/^"(.*)"$/\1/' | sed -E 's/[][\.^$*+?(){}|/]/\\&/g')"
+  CAND_IDS+=("$mid")
+  CAND_METHODS+=("$m_method")
+  CAND_TOKENS+=("$m_tokens_esc")
+done < <(printf '%s' "$MANIFEST_IDS" | sort -u)
+CAND_N=${#CAND_IDS[@]}
+
 while IFS= read -r hit; do
   [ -z "$hit" ] && continue
   cfile="${hit%%:*}"
@@ -484,65 +535,100 @@ while IFS= read -r hit; do
   fline="${fline%%:*}"
   rel="${cfile#"$PATH_ROOT"/}"
 
+  # Read each client file's lines ONCE and slice every window from memory. The
+  # windows keep their exact original bounds (call line .. +3 / +10, and -3 ..
+  # call line for suppression) — only the repeated awk/grep spawns are removed.
+  # Widening any of these to whole-file scope would change what the gate flags.
+  if [ "$cfile" != "${cur_file:-}" ]; then
+    cur_file="$cfile"
+    CUR_LINES=()
+    while IFS= read -r _l || [ -n "$_l" ]; do CUR_LINES+=("$_l"); done < "$cfile"
+    CUR_NLINES=${#CUR_LINES[@]}
+    # File-scoped (NOT call-site-scoped): this file's own client @stepup ids.
+    cur_marker_ids="$( { grep -oE '@stepup[[:space:]]+id:[A-Za-z0-9_-]+' "$cfile" 2>/dev/null || true; } \
+      | sed -E 's/.*id:([A-Za-z0-9_-]+)/\1/' | sort -u)"
+  fi
+  file_marker_ids="$cur_marker_ids"
+
+  # CUR_LINES is 0-indexed; file line N is CUR_LINES[N-1].
+  slice() { # $1=first line (1-based, clamped), $2=last line
+    local i first="$1" last="$2"
+    [ "$first" -lt 1 ] && first=1
+    [ "$last" -gt "$CUR_NLINES" ] && last=$CUR_NLINES
+    i=$first
+    while [ "$i" -le "$last" ]; do
+      printf '%s\n' "${CUR_LINES[$((i - 1))]}"
+      i=$((i + 1))
+    done
+  }
+
   # Skip fetchApi( occurrences inside a comment (JSDoc `*` continuation or a
   # `//` line comment) — a doc-example call site is not a real call site. This
   # is a line-prefix check only (parser-free, same philosophy as the rest of
   # this guard), not full comment-awareness.
-  call_line_content="$(awk -v l="$fline" 'NR==l' "$cfile")"
+  call_line_content="${CUR_LINES[$((fline - 1))]}"
   case "$(printf '%s' "$call_line_content" | sed -E 's/^[[:space:]]*//')" in
     '*'*|'//'*) continue ;;
   esac
 
-  # This file's own client @stepup ids (cache per file would be an optimization;
-  # correctness first — re-grep is cheap at this file count).
-  file_marker_ids="$( { grep -oE '@stepup[[:space:]]+id:[A-Za-z0-9_-]+' "$cfile" 2>/dev/null || true; } \
-    | sed -E 's/.*id:([A-Za-z0-9_-]+)/\1/' | sort -u)"
+  arg_window="$(slice "$fline" $((fline + 3)))"
+  opt_window="$(slice "$fline" $((fline + 10)))"
 
-  arg_window="$(awk -v l="$fline" 'NR>=l && NR<=l+3' "$cfile")"
-  opt_window="$(awk -v l="$fline" 'NR>=l && NR<=l+10' "$cfile")"
+  # Suppression window is call-site-scoped (-3 .. call line), so it is computed
+  # once per call site rather than once per (call site x id) as before.
+  suppress_window="$(slice $((fline - 3)) "$fline")"
 
-  while IFS= read -r mid; do
-    [ -z "$mid" ] && continue
-    # Exempt ids (check 1's allowlist) never require a standard client
-    # `@stepup id:X` marker at all — their recovery is custom or non-interactive
-    # (see stepup-client-exempt.txt). Without this skip, an exempt id's own
-    # already-known, accepted call site (e.g. team-confirm-key-post's background
-    # poller, operator-tokens-post's bespoke reauth flow) would be flagged as a
-    # "new unmarked call site" even though it never carried a marker by design.
-    is_exempt "$mid" && continue
-    mline="$(manifest_line_for "$mid")"
-    method="$( { printf '%s' "$mline" | grep -oE '"method":[[:space:]]*"[A-Z]+"' || true; } | sed -E 's/.*"([A-Z]+)"$/\1/')"
-    tokens_raw="$( { printf '%s' "$mline" | grep -oE '"pathTokens":[[:space:]]*\[[^]]*\]' || true; } | sed -E 's/"pathTokens":[[:space:]]*\[(.*)\]/\1/')"
+  ci=0
+  while [ "$ci" -lt "$CAND_N" ]; do
+    mid="${CAND_IDS[$ci]}"
+    method="${CAND_METHODS[$ci]}"
+    tokens_esc="${CAND_TOKENS[$ci]}"
+    ci=$((ci + 1))
+
+    # Exempt ids and non-mutating methods were already filtered out when
+    # CAND_* was built (exempt ids never require a standard client marker —
+    # their recovery is custom or non-interactive, see stepup-client-exempt.txt;
+    # GET-only ids can never trip a mutating-call-site candidate).
 
     # Mutating-method literal for THIS id's method must appear in the options
-    # window — GET-only ids never trip a mutating-call-site candidate. Checked
-    # before the token scan below (cheaper short-circuit).
-    case "$method" in
-      POST|PUT|PATCH|DELETE) ;;
+    # window. Checked before the token scan below (cheaper short-circuit).
+    # Bash-native substring test — the pattern is the fixed literal `"METHOD"`,
+    # so no regex engine is needed and no process is spawned per pair.
+    case "$opt_window" in
+      *"\"$method\""*) ;;
       *) continue ;;
     esac
-    printf '%s' "$opt_window" | grep -qE "\"$method\"" || continue
 
     # Word-boundary-aware match: a token must not be immediately followed by an
     # identifier character, so a shorter helper name (e.g. tenantMemberResetVault)
     # does not spuriously match a longer sibling identifier that shares it as a
-    # prefix (tenantMemberResetVaultRevoke). Tokens are escaped for ERE metachars
-    # (path fragments like "/api/tenant/policy" contain none that need escaping
-    # beyond what grep -E treats literally here, but "?"/"."/"$" in a future token
-    # would not be — escape defensively).
+    # prefix (tenantMemberResetVaultRevoke). Tokens were ERE-escaped once when
+    # CAND_TOKENS was built (path fragments like "/api/tenant/policy" contain no
+    # metachars needing it, but a future "?"/"."/"$" token would).
+    # bash's =~ uses the same POSIX ERE engine as `grep -E`, so the escaped
+    # token and the boundary suffix carry over unchanged — but it matches
+    # in-process, removing one spawn per (call site x id) pair. `$` inside the
+    # alternation means end-of-string in =~, whereas grep -E applied it
+    # per-line; arg_window is multi-line, so the line-anchored form is kept by
+    # testing each window line separately (below), preserving the original
+    # per-line semantics exactly.
     token_hit=0
-    while IFS= read -r tok; do
-      [ -z "$tok" ] && continue
-      esc_tok="$(printf '%s' "$tok" | sed -E 's/[][\.^$*+?(){}|/]/\\&/g')"
-      if printf '%s' "$arg_window" | grep -qE "${esc_tok}([^A-Za-z0-9_]|\$)"; then
-        token_hit=1
-        break
-      fi
-    done < <( { printf '%s' "$tokens_raw" | grep -oE '"[^"]*"' || true; } | sed -E 's/^"(.*)"$/\1/')
+    while IFS= read -r esc_tok; do
+      [ -z "$esc_tok" ] && continue
+      while IFS= read -r _wline; do
+        if [[ $_wline =~ ${esc_tok}([^A-Za-z0-9_]|$) ]]; then
+          token_hit=1
+          break 2
+        fi
+      done <<EOF
+$arg_window
+EOF
+    done <<EOF
+$tokens_esc
+EOF
     [ "$token_hit" -eq 1 ] || continue
 
     # Escape hatch: a suppression comment for this exact id near the call line.
-    suppress_window="$(awk -v l="$fline" 'NR>=l-3 && NR<=l' "$cfile")"
     if printf '%s' "$suppress_window" | grep -qE "@stepup-path-ok[[:space:]]+id:${mid}([[:space:]]|$)"; then
       # Reason discipline: require >=10 chars of trailing text on that line.
       suppress_line="$(printf '%s' "$suppress_window" | grep -E "@stepup-path-ok[[:space:]]+id:${mid}" | head -n1)"
@@ -560,7 +646,7 @@ while IFS= read -r hit; do
       echo "UNMARKED_CALLSITE_CANDIDATE: $rel:$fline — fetchApi( call site matches gated id '$mid' ($method) by path token, but this file has no '@stepup id:$mid' marker. Add the marker + step-up handling, or suppress with '// @stepup-path-ok id:$mid <reason>' if this is a confirmed false positive."
       fail=1
     fi
-  done < <(printf '%s' "$MANIFEST_IDS" | sort -u)
+  done
 done < <(
   grep -rnE 'fetchApi\(' "$CLIENT_DIR" \
     --include='*.tsx' --include='*.ts' 2>/dev/null \
