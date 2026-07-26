@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionToken } from "@/app/api/sessions/helpers";
+import { getSessionTokenDigest } from "@/app/api/sessions/helpers";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -25,8 +25,8 @@ export async function requireRecentSession(
     maxAgeMs = STEP_UP_WINDOW_MS,
     errorCode = API_ERROR.SESSION_STEP_UP_REQUIRED,
   } = options;
-  const sessionToken = getSessionToken(req);
-  if (!sessionToken) {
+  const sessionTokenDigest = getSessionTokenDigest(req);
+  if (!sessionTokenDigest) {
     return unauthorized();
   }
 
@@ -34,7 +34,7 @@ export async function requireRecentSession(
     prisma,
     async (tx) =>
       tx.session.findUnique({
-        where: { sessionToken },
+        where: { sessionToken: sessionTokenDigest },
         select: { createdAt: true },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,

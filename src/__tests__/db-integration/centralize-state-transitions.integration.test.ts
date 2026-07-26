@@ -160,6 +160,15 @@ describe("centralize-state-transitions — integration", () => {
     return r.rows[0].status as string;
   }
 
+  async function countVaultResetOutbox(tid: string): Promise<number> {
+    const r = await ctx.su.pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM audit_outbox
+       WHERE tenant_id = $1::uuid AND payload->>'action' = 'VAULT_RESET_EXECUTED'`,
+      [tid],
+    );
+    return r.rows[0].cnt as number;
+  }
+
   async function fetchGrant(id: string): Promise<{
     status: string;
     owner_ephemeral_public_key: string | null;
@@ -334,15 +343,53 @@ describe("centralize-state-transitions — integration", () => {
       );
     });
 
-    // Execute vault reset with a __testHook that throws after bulkTransition
+    // Execute vault reset with a __testHook that throws after bulkTransition.
+    // (atomicAudit is now the 2nd param; the hook is the 3rd.)
     await expect(
-      executeVaultReset(ownerId, async () => {
+      executeVaultReset(ownerId, undefined, async () => {
         throw new Error("T16 test hook: intentional rollback");
       }),
     ).rejects.toThrow("T16 test hook: intentional rollback");
 
     // Assert the grant was NOT marked REVOKED (transaction rolled back)
     expect(await fetchStatus(grantId)).toBe("IDLE");
+  });
+
+  it.skipIf(SKIP)("#6: atomicAudit rolls back WITH a failed vault reset (no audit_outbox row)", async () => {
+    await withBypassRls(
+      ctx.su.prisma,
+      async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `UPDATE users SET vault_setup_at = now(), key_version = 1 WHERE id = $1::uuid`,
+          ownerId,
+        );
+      },
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
+
+    const outboxBefore = await countVaultResetOutbox(tenantId);
+
+    // Pass an atomicAudit descriptor AND a hook that throws inside the tx.
+    await expect(
+      executeVaultReset(
+        ownerId,
+        {
+          tenantId,
+          params: {
+            scope: AUDIT_SCOPE.PERSONAL,
+            userId: ownerId,
+            action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
+          },
+        },
+        async () => {
+          throw new Error("T#6 hook: rollback with atomic audit");
+        },
+      ),
+    ).rejects.toThrow("T#6 hook");
+
+    // The atomic audit must have rolled back with the deletion — NO new row.
+    expect(await countVaultResetOutbox(tenantId)).toBe(outboxBefore);
   });
 
   // ─── T17: Vault auto-promote race (F5/S3) ─────────────────────────────────────

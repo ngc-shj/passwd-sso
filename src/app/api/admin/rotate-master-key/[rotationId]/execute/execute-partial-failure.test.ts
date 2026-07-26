@@ -22,6 +22,7 @@ const {
   mockRequireMaintenanceOperator,
   mockRateLimitCheck,
   mockLogAudit,
+  mockLogAuditInTx,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
 } = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ const {
   mockRequireMaintenanceOperator: vi.fn(),
   mockRateLimitCheck: vi.fn(),
   mockLogAudit: vi.fn(),
+  mockLogAuditInTx: vi.fn(),
   mockGetCurrentMasterKeyVersion: vi.fn(),
   mockGetMasterKeyByVersion: vi.fn(),
 }));
@@ -49,6 +51,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT", userId, tenantId, ip: "10.0.0.1", userAgent: "Test",
   }),

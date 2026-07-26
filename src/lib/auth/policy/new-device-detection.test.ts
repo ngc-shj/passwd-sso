@@ -45,6 +45,10 @@ vi.mock("@/lib/email", () => ({
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
 }));
+// H4: the current session is excluded by the DIGEST of its raw token.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
 vi.mock("@/lib/locale", () => ({
   resolveUserLocale: mockResolveUserLocale,
 }));
@@ -181,7 +185,7 @@ describe("checkNewDeviceAndNotify", () => {
     expect(mockSessionFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          sessionToken: { not: "current-token-abc" },
+          sessionToken: { not: "hashed:current-token-abc" },
         }),
       }),
     );

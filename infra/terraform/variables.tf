@@ -123,16 +123,34 @@ variable "jackson_desired_count" {
   default = 1
 }
 
+# Background workers (audit-outbox drain + retention GC). Both run the same app
+# image (node dist/<worker>.js) as long-lived, non-request-serving Fargate tasks.
+variable "worker_cpu" {
+  type        = number
+  default     = 256
+  description = "Fargate CPU for each background worker (audit-outbox / retention-gc)"
+}
+
+variable "worker_memory" {
+  type        = number
+  default     = 512
+  description = "Fargate memory (MiB) for each background worker"
+}
+
+variable "worker_desired_count" {
+  type        = number
+  default     = 1
+  description = "Desired task count for each background worker. Set to 0 during first-time bootstrap so no worker starts before the migration; restore to 1 for steady state."
+}
+
 variable "db_username" {
   type        = string
   description = "RDS master username"
 }
 
-variable "db_password" {
-  type        = string
-  description = "RDS master password"
-  sensitive   = true
-}
+# NOTE: db_password removed (#4). The RDS master password is AWS-managed
+# (manage_master_user_password = true in database.tf) so it never enters
+# Terraform state. Do not reintroduce a var-supplied password.
 
 variable "db_name" {
   type    = string
@@ -154,17 +172,11 @@ variable "redis_node_type" {
   default = "cache.t4g.micro"
 }
 
-variable "app_secrets" {
-  type        = map(string)
-  description = "Secrets for app (JSON stored in Secrets Manager)"
-  sensitive   = true
-}
-
-variable "jackson_secrets" {
-  type        = map(string)
-  description = "Secrets for jackson (JSON stored in Secrets Manager)"
-  sensitive   = true
-}
+# NOTE: app_secrets / jackson_secrets variables were removed intentionally
+# (2026-07 review, F3). Passing secret values through Terraform variables writes
+# them into state as plaintext. Values are now injected out-of-band via
+# scripts/put-terraform-secrets.sh (aws secretsmanager put-secret-value) and
+# never enter Terraform state. See secrets.tf.
 
 variable "db_apply_immediately" {
   type        = bool

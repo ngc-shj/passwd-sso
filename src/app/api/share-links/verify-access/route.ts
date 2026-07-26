@@ -47,6 +47,7 @@ async function handlePOST(req: NextRequest) {
     scope: "share_verify_ip",
     keySuffix: tokenHash,
     limiter: ipLimiter,
+    boundUnknownIp: true,
   });
   const ipBlocked = await checkRateLimitOrFail({
     req,

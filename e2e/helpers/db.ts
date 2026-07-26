@@ -10,6 +10,12 @@
  * as defined by @@map / @map in prisma/schema.prisma, NOT Prisma model names.
  */
 import pg from "pg";
+// Sessions are stored as an HMAC DIGEST of the token, never the raw value, so a
+// DB read cannot be replayed as a cookie. Seeding must apply the SAME transform
+// the app uses to look rows up — import the production function rather than
+// re-implementing it, or the two drift and every seeded session silently fails
+// to authenticate.
+import { hashSessionToken } from "../../src/lib/auth/session/session-cache";
 
 // ─── Safety Guards ──────────────────────────────────────────────
 
@@ -291,7 +297,7 @@ export async function seedSession(
        expires = EXCLUDED.expires`,
     [
       crypto.randomUUID(),
-      sessionToken,
+      hashSessionToken(sessionToken),
       userId,
       E2E_TENANT.id,
       expires.toISOString(),
@@ -309,7 +315,7 @@ export async function refreshSessionRecency(sessionToken: string): Promise<void>
   const p = getPool();
   await p.query(
     `UPDATE sessions SET created_at = now() WHERE session_token = $1`,
-    [sessionToken]
+    [hashSessionToken(sessionToken)]
   );
 }
 
@@ -322,7 +328,7 @@ export async function makeSessionStale(sessionToken: string): Promise<void> {
   const p = getPool();
   await p.query(
     `UPDATE sessions SET created_at = now() - interval '1 hour' WHERE session_token = $1`,
-    [sessionToken]
+    [hashSessionToken(sessionToken)]
   );
 }
 

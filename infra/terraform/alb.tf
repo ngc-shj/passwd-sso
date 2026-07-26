@@ -7,7 +7,20 @@ resource "aws_lb" "main" {
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
   subnets            = aws_subnet.public[*].id
-  tags               = local.tags
+
+  # M5: drop malformed HTTP header NAMES at the ALB. (Note: this does NOT
+  # sanitise a well-formed X-Forwarded-For VALUE — see xff_header_processing_mode
+  # below and the ecs.tf TRUST_PROXY_HEADERS comment for the real spoof control.)
+  drop_invalid_header_fields = true
+
+  # #1: pin XFF handling to "append" so the ALB always appends the connection
+  # source IP to any client-supplied X-Forwarded-For (rather than "preserve",
+  # which would forward a client-forged XFF unchanged). Combined with the app NOT
+  # trusting the VPC CIDR (ecs.tf), the rightmost hop is always the one the ALB
+  # actually observed, so a VPC-internal client cannot spoof another IP.
+  xff_header_processing_mode = "append"
+
+  tags = local.tags
 }
 
 ################################################################################

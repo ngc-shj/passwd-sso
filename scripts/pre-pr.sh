@@ -171,6 +171,11 @@ run_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supp
 run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
 run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 run_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
+run_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
+run_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
+run_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
+run_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
+run_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
 run_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
 run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
 run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
@@ -196,6 +201,8 @@ run_step "Static: count-then-create-lock" node scripts/checks/check-count-then-c
 run_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
+run_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
+run_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
 run_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 run_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
 run_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
@@ -452,7 +459,16 @@ run_step "Static: fetch basePath compliance" bash -c '
 if [ "$STATIC_ONLY" = "1" ]; then
   printf "${BOLD}▸ Secret scan${RESET}\n  (skipped — PRE_PR_STATIC_ONLY: this is the local --staged scan; CI runs a full-tree gitleaks scan in the secret-scan job)\n\n"
 elif command -v gitleaks >/dev/null 2>&1; then
-  run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
+  # gitleaks 8.19+ moved the staged scan from `detect --staged` to
+  # `git --staged`; `detect` now rejects the flag outright ("unknown flag:
+  # --staged"), so the old invocation FAILED the step on every run rather than
+  # scanning anything. Pick the form this binary supports so the scan actually
+  # runs on both generations.
+  if gitleaks git --help >/dev/null 2>&1; then
+    run_step "Secret scan (gitleaks)" gitleaks git --no-banner --redact --staged
+  else
+    run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
+  fi
 else
   # S19/S27 safe fallback: use node (already available — package.json runtime).
   # No shell-regex dialect issues; safe filename handling via -z.

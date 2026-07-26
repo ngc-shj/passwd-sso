@@ -16,7 +16,7 @@ Any SAML 2.0 compliant IdP can be used via the SAML Jackson bridge.
 | DB | PostgreSQL 16 + Prisma 7 |
 | Encryption | AES-256-GCM (Web Crypto API, client-side) |
 | UI | Tailwind CSS v4 + shadcn/ui + Lucide Icons |
-| Deployment | Docker Compose — 5 base services (`app`, `db`, `jackson`, `redis`, `migrate`) + `audit-outbox-worker` (dev override) |
+| Deployment | Docker Compose — 5 base services (`app`, `db`, `jackson`, `redis`, `migrate`) + `audit-outbox-worker` & `retention-gc-worker` (production: `docker-compose.workers.yml`; dev: override) |
 
 ## Architecture
 
@@ -57,7 +57,8 @@ Services:
 - `jackson` — SAML Jackson bridge (internal network; port 5225 exposed in dev override only)
 - `redis` — Redis 7 (internal network; port 6379 exposed in dev override only)
 - `migrate` — one-shot Prisma migration container (profile-gated: `--profile migrate`); connects as `passwd_user` (SUPERUSER)
-- `audit-outbox-worker` — drains `audit_outbox` rows into `audit_logs`; defined in `docker-compose.override.yml` (dev) — production operators must replicate it (see [Production Deployment](#production-deployment))
+- `audit-outbox-worker` — drains `audit_outbox` rows into `audit_logs`; production definition in `docker-compose.workers.yml` (dev tsx source in `docker-compose.override.yml`) — see [Production Deployment](#production-deployment)
+- `retention-gc-worker` — enforces retention limits and hard-deletes expired records; production definition in `docker-compose.workers.yml` (dev tsx source in `docker-compose.override.yml`) — see [Production Deployment](#production-deployment)
 
 ### About SAML Jackson
 
@@ -281,12 +282,22 @@ Five base services will start:
 - `redis` — Redis 7 (internal network only)
 - `migrate` — Prisma migration runner (profile-gated; run with `--profile migrate`)
 
-> **Important: audit-outbox-worker in production.** The `audit-outbox-worker` service is defined in `docker-compose.override.yml` (development only) — it is NOT included when you run `docker compose up -d` without the override file. Without this worker, audit events accumulate as `PENDING` rows in `audit_outbox` and never reach `audit_logs`. Production operators must run the worker via one of these approaches:
+The base compose does NOT start the background workers. Run them in production with the workers overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
+```
+
+> **Important: background workers are REQUIRED in production.** Both workers are defined for production in `docker-compose.workers.yml` (and, for dev with the tsx source, in `docker-compose.override.yml`). They are NOT started by a bare `docker compose up -d`. Each runs the esbuild-bundled artifact from the same runner image and connects via its own least-privilege DB role.
 >
-> - **Separate compose fragment**: add an `audit-outbox-worker` service to your production compose config with `OUTBOX_WORKER_DATABASE_URL` pointing to the `passwd_outbox_worker` DB role.
-> - **systemd unit or sidecar**: run `npm run worker:audit-outbox` as a separate process or sidecar with the `OUTBOX_WORKER_DATABASE_URL` environment variable set.
+> - **`audit-outbox-worker`** — drains `audit_outbox` → `audit_logs` (`OUTBOX_WORKER_DATABASE_URL` → `passwd_outbox_worker` role). Without it, audit events accumulate as `PENDING` rows and never reach `audit_logs`.
+> - **`retention-gc-worker`** — enforces retention limits and performs hard deletes across sessions, verification/bridge/API/MCP tokens, reset & rotation records, shares, invitations, emergency access, vault history, and audit retention (`RETENTION_GC_DATABASE_URL` → `passwd_retention_gc_worker` role). Without it, **nothing is ever purged** — data-minimisation and deletion guarantees do not hold.
 >
-> In production, do NOT place `docker-compose.override.yml` (that file exposes DB/Jackson/Redis ports to the host and is dev-only).
+> Alternative to the overlay: run either worker as a systemd unit or sidecar via `npm run worker:audit-outbox` / `npm run worker:retention-gc` with the corresponding `*_DATABASE_URL` set.
+>
+> **Monitor both workers.** Because a stalled or crash-looping worker fails silently (the app keeps serving), alert on: process liveness / restart count, worker heartbeat log lines (`retention-gc.loop_start`, outbox drain progress), `audit_outbox` PENDING-row age and depth, and retention queue age. A worker that boots but makes no progress is as harmful as one that never starts.
+>
+> In production, do NOT place `docker-compose.override.yml` (that file exposes DB/Jackson/Redis ports to the host and runs the tsx source — dev-only). Use `docker-compose.workers.yml` instead.
 
 ### Sub-path Deployment (Reverse Proxy)
 

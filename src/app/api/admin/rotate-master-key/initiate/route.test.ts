@@ -13,6 +13,7 @@ const {
   mockCheck,
   mockCreateRateLimiter,
   mockLogAudit,
+  mockLogAuditInTx,
   mockGetCurrentMasterKeyVersion,
   mockGetMasterKeyByVersion,
   mockCreateNotification,
@@ -26,6 +27,7 @@ const {
     mockCheck,
     mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
     mockGetCurrentMasterKeyVersion: vi.fn(),
     mockGetMasterKeyByVersion: vi.fn(),
     mockCreateNotification: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT",
     userId,
@@ -178,7 +181,10 @@ describe("POST /api/admin/rotate-master-key/initiate", () => {
     expect(createArg.data.revokeShares).toBe(true);
     expect(createArg.data.reason).toBe("compromise response");
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    // M1: initiate audit is now atomic (logAuditInTx(tx, tenantId, params)).
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT,
       expect.objectContaining({
         action: "MASTER_KEY_ROTATION_INITIATE",
         metadata: expect.objectContaining({
@@ -193,7 +199,9 @@ describe("POST /api/admin/rotate-master-key/initiate", () => {
 
   it("flags shareRevocationSkipped when revokeShares=false", async () => {
     await POST(makeRequest({ targetVersion: 2, revokeShares: false }));
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT,
       expect.objectContaining({
         metadata: expect.objectContaining({ shareRevocationSkipped: true }),
       }),

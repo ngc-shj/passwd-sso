@@ -2,6 +2,7 @@ import * as crypto from "node:crypto";
 import type Redis from "ioredis";
 import { z } from "zod";
 import { getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
+import { HEX64_RE } from "@/lib/validations/common";
 import {
   REDIS_FALLBACK_LOG_THROTTLE_MS,
   createThrottledErrorLogger,
@@ -74,14 +75,60 @@ let _sessionCacheHmacKey: Buffer | null = null;
 
 function getSessionCacheHmacKey(): Buffer {
   if (_sessionCacheHmacKey) return _sessionCacheHmacKey;
-  // Pin to V1 forever: rotation of V1 itself is an out-of-band op requiring
-  // a redis FLUSHDB. Routine bumps of SHARE_MASTER_KEY_CURRENT_VERSION
-  // (V1→V2) do not change V1 bytes, so the cache subkey is rotation-stable.
+  // Prefer a DEDICATED SESSION_TOKEN_HMAC_KEY, decoupled from SHARE_MASTER_KEY.
+  // Since H4 the DB session lookup depends on this HMAC (not just the cache), so
+  // a deployment that bumped SHARE_MASTER_KEY_CURRENT_VERSION and dropped V1
+  // would break ALL authentication if this key were pinned to V1 — the dedicated
+  // key removes that coupling. validateSessionTokenHmacKey() enforces at boot
+  // that this resolves, so the runtime path never hits an unconfigured key.
+  const dedicated = process.env.SESSION_TOKEN_HMAC_KEY?.trim();
+  if (dedicated) {
+    if (!HEX64_RE.test(dedicated)) {
+      throw new Error(
+        "SESSION_TOKEN_HMAC_KEY must be a 64-char hex string (256 bits)",
+      );
+    }
+    // HKDF-domain-separate so the stored key is not used verbatim as the HMAC key.
+    const okm = crypto.hkdfSync(
+      "sha256",
+      Buffer.from(dedicated, "hex"),
+      "",
+      "session-token-hmac-v1",
+      32,
+    );
+    _sessionCacheHmacKey = Buffer.from(okm);
+    return _sessionCacheHmacKey;
+  }
+  // #3: in production the dedicated key is REQUIRED — do NOT silently fall back
+  // to the master key, which would re-couple session auth to master-key
+  // rotation. The V1 fallback exists only for dev/test backward compatibility.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_TOKEN_HMAC_KEY is required in production (decouples session-token HMAC from SHARE_MASTER_KEY rotation)",
+    );
+  }
+  // Backward-compatible fallback (dev/test, no dedicated key): derive from V1,
+  // matching the pre-dedicated-key digests. Rotation-stable: routine
+  // SHARE_MASTER_KEY_CURRENT_VERSION bumps (V1→V2) do not change V1 bytes.
   // hkdfSync returns ArrayBuffer; Buffer.from() wraps it zero-copy.
   const ikm = getMasterKeyByVersion(1);
   const okm = crypto.hkdfSync("sha256", ikm, "", "session-cache-hmac-v1", 32);
   _sessionCacheHmacKey = Buffer.from(okm);
   return _sessionCacheHmacKey;
+}
+
+/**
+ * Boot-time validation (called from instrumentation): confirm the session-token
+ * HMAC key resolves NOW, so the first request's hashSessionToken() cannot fail
+ * with "version 1 not found". Either SESSION_TOKEN_HMAC_KEY is set (preferred),
+ * or the V1 fallback must be present. This closes the gap where
+ * SHARE_MASTER_KEY_CURRENT_VERSION=2 with only V2 configured passes startup but
+ * breaks every session lookup at runtime.
+ */
+export function validateSessionTokenHmacKey(): void {
+  // Force resolution + memoization; throws if neither the dedicated key nor V1
+  // is available/valid.
+  getSessionCacheHmacKey();
 }
 
 // Test-only reset for vi.resetModules-style tests. NEVER export from any
@@ -105,6 +152,15 @@ const logRedisError = createThrottledErrorLogger(
 
 function cacheKey(token: string): string {
   return `${SESSION_CACHE_KEY_PREFIX}${hashSessionToken(token)}`;
+}
+
+// H4: the DB now stores the digest (hashSessionToken output), which is exactly
+// the value cacheKey() derives from a raw token — so a caller holding a stored
+// digest must key the cache by PREFIX+digest DIRECTLY, without re-hashing (that
+// would double-hash and silently miss the real cache key). Use this for any
+// invalidation driven by a value read from Session.sessionToken.
+function cacheKeyFromDigest(digest: string): string {
+  return `${SESSION_CACHE_KEY_PREFIX}${digest}`;
 }
 
 async function safeDel(redis: Redis, token: string): Promise<void> {
@@ -203,11 +259,27 @@ export async function setCachedSession(
  * logger alone is insufficient for incident reconstruction.
  */
 export async function invalidateCachedSession(token: string): Promise<boolean> {
+  // keyFn deferred so a sync throw from cacheKey()/hashSessionToken()
+  // (KeyProvider cold-start) is contained as a tombstone-write failure.
+  return tombstoneByKey(() => cacheKey(token));
+}
+
+/**
+ * H4 digest-native tombstone. Input is a stored digest (Session.sessionToken),
+ * NOT a raw cookie token — keyed directly via cacheKeyFromDigest (no re-hash).
+ */
+export async function invalidateCachedSessionByDigest(
+  digest: string,
+): Promise<boolean> {
+  return tombstoneByKey(() => cacheKeyFromDigest(digest));
+}
+
+async function tombstoneByKey(keyFn: () => string): Promise<boolean> {
   const redis = getRedis();
   if (!redis) return true;
   try {
     await redis.set(
-      cacheKey(token),
+      keyFn(),
       JSON.stringify({ tombstone: true }),
       "PX",
       TOMBSTONE_TTL_MS,
@@ -236,23 +308,34 @@ export async function invalidateCachedSession(token: string): Promise<boolean> {
 export async function invalidateCachedSessionsBulk(
   tokens: ReadonlyArray<string>,
 ): Promise<{ total: number; failed: number }> {
-  if (tokens.length === 0) return { total: 0, failed: 0 };
+  return tombstoneBulkByKeys(tokens.map(cacheKey));
+}
+
+/**
+ * H4 digest-native bulk tombstone. Inputs are stored digests
+ * (Session.sessionToken), keyed directly (no re-hash).
+ */
+export async function invalidateCachedSessionsBulkByDigest(
+  digests: ReadonlyArray<string>,
+): Promise<{ total: number; failed: number }> {
+  return tombstoneBulkByKeys(digests.map(cacheKeyFromDigest));
+}
+
+async function tombstoneBulkByKeys(
+  keys: ReadonlyArray<string>,
+): Promise<{ total: number; failed: number }> {
+  if (keys.length === 0) return { total: 0, failed: 0 };
   const redis = getRedis();
-  if (!redis) return { total: tokens.length, failed: 0 };
+  if (!redis) return { total: keys.length, failed: 0 };
   const pipeline = redis.pipeline();
-  for (const token of tokens) {
-    pipeline.set(
-      cacheKey(token),
-      JSON.stringify({ tombstone: true }),
-      "PX",
-      TOMBSTONE_TTL_MS,
-    );
+  for (const key of keys) {
+    pipeline.set(key, JSON.stringify({ tombstone: true }), "PX", TOMBSTONE_TTL_MS);
   }
   try {
     await pipeline.exec();
-    return { total: tokens.length, failed: 0 };
+    return { total: keys.length, failed: 0 };
   } catch (err) {
     logRedisError((err as { code?: string } | undefined)?.code);
-    return { total: tokens.length, failed: tokens.length };
+    return { total: keys.length, failed: keys.length };
   }
 }

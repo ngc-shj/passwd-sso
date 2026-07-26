@@ -102,6 +102,12 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/auth/session/session-cache-helpers", () => ({
   invalidateCachedSessions: mockInvalidateCachedSessions,
 }));
+// H4: the route stores the digest but sets the raw token as the cookie and
+// passes the RAW token as excludeSessionToken (user-session-invalidation hashes
+// it internally). Deterministic hash so the test can relate the two.
+vi.mock("@/lib/auth/session/session-cache", () => ({
+  hashSessionToken: (token: string) => `hashed:${token}`,
+}));
 
 vi.mock("@/lib/auth/session/session-timeout", () => ({
   resolveEffectiveSessionTimeouts: mockResolveEffectiveSessionTimeouts,
@@ -266,15 +272,17 @@ describe("POST /api/auth/passkey/verify", () => {
     // freshly-issued session and the client is bounced to sign-in on
     // the next request.
     expect(mockPrismaSessionCreate).toHaveBeenCalledOnce();
-    const createdSessionToken = mockPrismaSessionCreate.mock.calls[0][0].data.sessionToken;
-    expect(createdSessionToken).toEqual(expect.any(String));
+    // H4: the DB stores the DIGEST of the token; excludeSessionToken is the RAW
+    // token (user-session-invalidation hashes it back to the stored digest).
+    const storedDigest = mockPrismaSessionCreate.mock.calls[0][0].data.sessionToken;
+    const excludeArg = mockInvalidateUserSessions.mock.calls[0][1].excludeSessionToken;
     expect(mockInvalidateUserSessions).toHaveBeenCalledWith(
       "user-1",
-      expect.objectContaining({
-        allTenants: true,
-        excludeSessionToken: createdSessionToken,
-      }),
+      expect.objectContaining({ allTenants: true }),
     );
+    // The stored digest must equal hash(excludeSessionToken) — proving the
+    // just-created session (stored by digest) is the one excluded from the wipe.
+    expect(storedDigest).toBe(`hashed:${excludeArg}`);
   });
 
   it("calls deleteMany before create", async () => {

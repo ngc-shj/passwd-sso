@@ -4,6 +4,15 @@
 
 resource "aws_ecs_cluster" "main" {
   name = "${local.name_prefix}-cluster"
+
+  # Container Insights publishes per-service RunningTaskCount to CloudWatch,
+  # which the worker-liveness alarms (monitoring.tf) depend on to detect a
+  # crashed/stuck background worker. Also addresses the M5 observability gap.
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
   tags = local.tags
 }
 
@@ -38,6 +47,22 @@ resource "aws_ecs_task_definition" "app" {
           awslogs-stream-prefix = "ecs"
         }
       }
+      # #5/#1: trust the ALB's X-Forwarded-For so the app derives the real client
+      # IP instead of null (null collapses ALL users into the shared unknown-IP
+      # rate-limit bucket → spurious 429s).
+      #
+      # Set ONLY TRUST_PROXY_HEADERS=true; do NOT put the VPC CIDR in
+      # TRUSTED_PROXIES. The ALB APPENDS the connection source IP it observed to
+      # any client-supplied XFF (it does not replace it). With the VPC trusted, a
+      # VPC-internal attacker sending `XFF: <spoof>` would have the ALB append the
+      # observed source; rightmost-untrusted would then strip that trusted-VPC hop
+      # and return the SPOOFED leftmost value. With TRUSTED_PROXIES unset
+      # (loopback only), the rightmost hop the ALB observed (the real client, or
+      # the attacker's own IP — never someone else's) is returned. The ALB is set
+      # to xff_header_processing_mode = "append" in alb.tf to pin this behavior.
+      environment = [
+        { name = "TRUST_PROXY_HEADERS", value = "true" },
+      ]
       secrets = [
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
         { name = "AUTH_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_URL::" },
@@ -47,6 +72,9 @@ resource "aws_ecs_task_definition" "app" {
         { name = "AUTH_JACKSON_ID", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_ID::" },
         { name = "AUTH_JACKSON_SECRET", valueFrom = "${aws_secretsmanager_secret.app.arn}:AUTH_JACKSON_SECRET::" },
         { name = "SHARE_MASTER_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SHARE_MASTER_KEY::" },
+        # #3: dedicated session-token HMAC key — required in production so the DB
+        # session lookup HMAC is decoupled from SHARE_MASTER_KEY rotation.
+        { name = "SESSION_TOKEN_HMAC_KEY", valueFrom = "${aws_secretsmanager_secret.app.arn}:SESSION_TOKEN_HMAC_KEY::" },
         { name = "REDIS_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:REDIS_URL::" },
       ]
       healthCheck = {
@@ -119,13 +147,28 @@ resource "aws_ecs_task_definition" "migrate" {
   cpu                      = 256
   memory                   = 512
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  # DEDICATED migrate task role carrying the ssmmessages:* actions ECS Exec needs
+  # (iam.tf). Kept SEPARATE from the app/worker task role so long-lived tasks are
+  # not exec-able (least privilege). During bootstrap this task is launched with
+  # --enable-execute-command to create the least-privilege DB roles on RDS (the
+  # only host that can reach 5432) — see README "Creating the DB roles on RDS".
+  task_role_arn = aws_iam_role.ecs_migrate_task.arn
 
   container_definitions = jsonencode([
     {
       name      = "migrate"
       image     = var.app_image
       essential = true
-      command   = ["npx", "prisma", "migrate", "deploy"]
+      # Migrate, then AUDIT the resulting DB grants in the same task. The audit
+      # needs a SUPERUSER connection and the RDS SG admits only the ECS SG, so
+      # this task is the sole place it can run — and running it here means a
+      # migration that granted more than db-grants-manifest.json sanctions fails
+      # the task, which aborts deploy.sh BEFORE any service is advanced.
+      # `set -e` via sh -c so a non-zero audit propagates as the task exit code.
+      command = [
+        "sh", "-c",
+        "set -e; npx prisma migrate deploy; node scripts/audit-db-grants.mjs"
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -134,7 +177,10 @@ resource "aws_ecs_task_definition" "migrate" {
           awslogs-stream-prefix = "migrate"
         }
       }
+      # prisma migrate deploy runs DDL → needs the SUPERUSER MIGRATION_DATABASE_URL
+      # (prisma.config.ts prefers it over the NOSUPERUSER app DATABASE_URL).
       secrets = [
+        { name = "MIGRATION_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:MIGRATION_DATABASE_URL::" },
         { name = "DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:DATABASE_URL::" },
       ]
     }
@@ -164,6 +210,21 @@ resource "aws_ecs_service" "app" {
     container_port   = 3000
   }
 
+  # Circuit breaker: if the new revision fails to reach steady state (crash-loop
+  # or failing health check), ECS aborts and rolls back to the last good revision
+  # instead of hanging. scripts/deploy.sh then reads the PRIMARY deployment's
+  # rolloutState — a FAILED state (post-rollback) fails the deploy loudly rather
+  # than reporting a phantom success.
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  # Terraform manages the TASK DEFINITION; the SERVICE's running revision is
+  # advanced by scripts/deploy.sh AFTER it runs the migration (migration-first
+  # ordering — see docs/operations/deployment.md). ignore_changes keeps a
+  # `terraform apply` from updating the service to a new task-def before the
+  # migration has run.
   lifecycle {
     ignore_changes = [task_definition]
   }
@@ -190,10 +251,151 @@ resource "aws_ecs_service" "jackson" {
     container_port   = 5225
   }
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   lifecycle {
     ignore_changes = [task_definition]
   }
 
   depends_on = [aws_lb_listener.https]
   tags       = local.tags
+}
+
+################################################################################
+# Background workers (audit-outbox drain + retention GC)
+################################################################################
+#
+# Both run the SAME app image (node dist/<worker>.js) as long-lived,
+# non-request-serving Fargate services. Each connects via its own least-privilege
+# DB URL (a JSON key in the app Secrets Manager secret, injected out-of-band —
+# see secrets.tf / scripts/put-terraform-secrets.sh):
+#   - OUTBOX_WORKER_DATABASE_URL   → passwd_outbox_worker role
+#   - RETENTION_GC_DATABASE_URL    → passwd_retention_gc_worker role
+#
+# Without these services: audit events stay PENDING in audit_outbox (never reach
+# audit_logs — compliance gap) and nothing is ever purged (retention / deletion
+# guarantees fail). Monitoring alarms are defined in monitoring.tf.
+
+# audit-outbox-worker task
+resource "aws_ecs_task_definition" "audit_outbox_worker" {
+  family                   = "${local.name_prefix}-audit-outbox-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "audit-outbox-worker"
+      image     = var.app_image
+      essential = true
+      command   = ["node", "dist/audit-outbox-worker.js"]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.audit_outbox_worker.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+      # Least-privilege: connect ONLY via the scoped worker role. No broad
+      # DATABASE_URL is injected (the worker schema uses OUTBOX_WORKER_DATABASE_URL).
+      secrets = [
+        { name = "OUTBOX_WORKER_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:OUTBOX_WORKER_DATABASE_URL::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+# retention-gc-worker task
+resource "aws_ecs_task_definition" "retention_gc_worker" {
+  family                   = "${local.name_prefix}-retention-gc-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "retention-gc-worker"
+      image     = var.app_image
+      essential = true
+      command   = ["node", "dist/retention-gc-worker.js"]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.retention_gc_worker.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+      secrets = [
+        { name = "RETENTION_GC_DATABASE_URL", valueFrom = "${aws_secretsmanager_secret.app.arn}:RETENTION_GC_DATABASE_URL::" },
+      ]
+    }
+  ])
+  tags = local.tags
+}
+
+# Worker services: desired_count = var.worker_desired_count (0 during first-time
+# bootstrap so no worker touches an un-migrated schema; 1 in steady state), NO
+# load_balancer block (not request-serving). ECS restarts a crashed/exited task
+# automatically (the service reconciles to desired_count), giving the
+# "restart: unless-stopped" behavior the compose workers have.
+resource "aws_ecs_service" "audit_outbox_worker" {
+  name            = "${local.name_prefix}-audit-outbox-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.audit_outbox_worker.arn
+  desired_count   = var.worker_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  # Task def managed by Terraform; running revision advanced by deploy.sh after
+  # migration (workers touch the migrated schema too).
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = local.tags
+}
+
+resource "aws_ecs_service" "retention_gc_worker" {
+  name            = "${local.name_prefix}-retention-gc-worker"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.retention_gc_worker.arn
+  desired_count   = var.worker_desired_count
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets         = aws_subnet.private[*].id
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  lifecycle {
+    ignore_changes = [task_definition]
+  }
+
+  tags = local.tags
 }

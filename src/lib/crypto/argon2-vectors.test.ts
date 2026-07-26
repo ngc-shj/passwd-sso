@@ -99,8 +99,15 @@ const toHex = (u: Uint8Array): string =>
     .join("");
 
 describe("Argon2id RFC 9106 conformance (cross-impl oracle)", () => {
-  // Per-test timeout: default-prod-params takes ~150ms; t=2/m=64KB ~80ms.
-  // Plenty under vitest's 10s default.
+  // Each vector runs Argon2id TWICE (hash-wasm + @noble), deliberately at real
+  // KDF cost — that is the point of the oracle. Uninstrumented that is ~100ms a
+  // side, but `npm run test:coverage` instruments @noble's pure-JS
+  // implementation and the same vectors take 4-7s locally; on a slower CI runner
+  // they exceeded vitest's 10s default and failed the App job. Raised to 60s:
+  // these are cost-bound, not hang-prone, so a generous ceiling costs nothing
+  // when they pass and still catches a genuine hang.
+  const KDF_VECTOR_TIMEOUT_MS = 60_000;
+
   it.each(VECTORS)(
     "$name — hash-wasm and @noble/hashes produce the same hash",
     async (v) => {
@@ -135,6 +142,7 @@ describe("Argon2id RFC 9106 conformance (cross-impl oracle)", () => {
       // (or a regression in one that the other happens to mirror) also fails.
       expect(aHex).toBe(v.expectedHex);
     },
+    KDF_VECTOR_TIMEOUT_MS,
   );
 
   // Locks the documented divergence: hash-wasm rejects empty password where

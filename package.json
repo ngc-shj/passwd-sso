@@ -3,7 +3,7 @@
   "version": "0.4.71",
   "private": true,
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "packageManager": "npm@11.17.0",
   "scripts": {
@@ -137,7 +137,8 @@
     "postcss": ">=8.5.12",
     "brace-expansion@1": "^1.1.16",
     "brace-expansion@2": "^2.1.2",
-    "brace-expansion@>=5.0.0 <5.0.7": "^5.0.7",
+    "brace-expansion@>=5.0.0 <5.0.8": "^5.0.8",
+    "find-my-way": "^9.7.0",
     "js-yaml@>=4.0.0 <4.3.0": "^4.3.0",
     "esbuild": ">=0.28.1",
     "sharp": "^0.35.3",

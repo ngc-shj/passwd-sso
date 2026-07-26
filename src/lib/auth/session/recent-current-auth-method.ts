@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionToken } from "@/app/api/sessions/helpers";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -43,11 +44,13 @@ export async function evaluateStepUpFreshness(
   sessionToken: string,
   options: RequireRecentSessionOptions = {},
 ): Promise<StepUpFreshness> {
+  // H4: `sessionToken` is the raw cookie token; the DB row is keyed by its digest.
+  const sessionTokenDigest = hashSessionToken(sessionToken);
   const sessionRow = await withBypassRls(
     prisma,
     async (tx) =>
       tx.session.findUnique({
-        where: { sessionToken },
+        where: { sessionToken: sessionTokenDigest },
         select: { provider: true, createdAt: true, passkeyVerifiedAt: true },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,
@@ -85,7 +88,8 @@ export async function canRecoverSessionWithPasskey(
     prisma,
     async (tx) => {
       const row = await tx.session.findUnique({
-        where: { sessionToken },
+        // H4: raw cookie token → digest keyed row.
+        where: { sessionToken: hashSessionToken(sessionToken) },
         select: { provider: true, userId: true },
       });
       // Bind the two parameters: a caller passing a userId that does not own

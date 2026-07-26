@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionToken } from "@/app/api/sessions/helpers";
+import { getSessionTokenDigest } from "@/app/api/sessions/helpers";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -29,8 +30,8 @@ export async function requireRecentPasskeyVerification(
     maxAgeMs = PASSKEY_VERIFICATION_WINDOW_MS,
     errorCode = API_ERROR.SESSION_STEP_UP_REQUIRED,
   } = options;
-  const sessionToken = getSessionToken(req);
-  if (!sessionToken) {
+  const sessionTokenDigest = getSessionTokenDigest(req);
+  if (!sessionTokenDigest) {
     return unauthorized();
   }
 
@@ -38,7 +39,7 @@ export async function requireRecentPasskeyVerification(
     prisma,
     async (tx) =>
       tx.session.findUnique({
-        where: { sessionToken },
+        where: { sessionToken: sessionTokenDigest },
         select: { passkeyVerifiedAt: true },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,
@@ -63,11 +64,12 @@ export async function markCurrentSessionPasskeyVerified(
   sessionToken: string,
   verifiedAt: Date,
 ): Promise<void> {
+  // H4: `sessionToken` is a raw cookie token; the DB row is keyed by its digest.
   await withBypassRls(
     prisma,
     async (tx) =>
       tx.session.update({
-        where: { sessionToken },
+        where: { sessionToken: hashSessionToken(sessionToken) },
         data: { passkeyVerifiedAt: verifiedAt },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,

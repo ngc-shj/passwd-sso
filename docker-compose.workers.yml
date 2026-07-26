@@ -1,0 +1,78 @@
+# Production worker overlay.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
+#
+# The base docker-compose.yml ships only the five core services (app, db,
+# jackson, redis, migrate). The two background workers are NOT dev-only
+# conveniences — without them, production silently loses guarantees:
+#
+#   audit-outbox-worker  — drains audit_outbox → audit_logs. Without it, audit
+#                          events accumulate as PENDING rows and never land in
+#                          audit_logs (compliance / forensics gap).
+#   retention-gc-worker  — enforces data-retention limits and performs hard
+#                          deletes (sessions, verification/bridge/API/MCP tokens,
+#                          reset & rotation records, shares, invitations,
+#                          emergency access, vault history, audit retention).
+#                          Without it, nothing is ever purged — data-minimisation
+#                          and deletion guarantees do not hold.
+#
+# This overlay is the production home for both. It runs the esbuild-bundled
+# artifacts (`node dist/<worker>.js`) from the same runner image as `app`
+# (NOT the tsx source used by docker-compose.override.yml in dev), and connects
+# each worker via its dedicated least-privilege DB role — the broad app
+# DATABASE_URL is blanked out (empty → normalised to unset) so a regression that
+# reintroduces the app credential is caught.
+#
+# Do NOT combine this with docker-compose.override.yml in production — the dev
+# override exposes DB/Jackson/Redis ports to the host and runs the tsx source.
+
+services:
+  audit-outbox-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
+    env_file:
+      - .env
+    environment:
+      - OUTBOX_WORKER_DATABASE_URL=postgresql://passwd_outbox_worker:${PASSWD_OUTBOX_WORKER_PASSWORD:?PASSWD_OUTBOX_WORKER_PASSWORD is required}@db:5432/passwd_sso
+      # Least-privilege: connect ONLY via the scoped worker role. Blank out the
+      # broad app DATABASE_URL that env_file: .env injects (worker schema
+      # normalises empty → unset and uses the dedicated URL).
+      - DATABASE_URL=
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+        required: false
+    command: ["node", "dist/audit-outbox-worker.js"]
+    restart: unless-stopped
+    networks:
+      - internal
+
+  retention-gc-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
+    env_file:
+      - .env
+    environment:
+      - RETENTION_GC_DATABASE_URL=postgresql://passwd_retention_gc_worker:${PASSWD_RETENTION_GC_WORKER_PASSWORD:?PASSWD_RETENTION_GC_WORKER_PASSWORD is required}@db:5432/passwd_sso
+      # Least-privilege: connect ONLY via the scoped worker role. Blank out the
+      # broad app DATABASE_URL that env_file: .env injects (worker schema
+      # normalises empty → unset and uses the dedicated URL).
+      - DATABASE_URL=
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+        required: false
+    command: ["node", "dist/retention-gc-worker.js"]
+    restart: unless-stopped
+    networks:
+      - internal

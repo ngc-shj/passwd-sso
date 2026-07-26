@@ -175,6 +175,68 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections" {
 }
 
 ################################################################################
+# Background worker liveness alarms
+################################################################################
+#
+# A background worker that crash-loops or exits leaves audit events PENDING or
+# retention un-enforced with NO request-serving symptom — so it must be alarmed
+# independently. RunningTaskCount (Container Insights, enabled on the cluster)
+# drops below 1 when the service has no running task. `treat_missing_data =
+# breaching` so a total metric outage (service never started) also alarms.
+#
+# NOTE: this catches a worker that is DOWN, not one that is UP-but-stuck (booted
+# but making no progress). Detecting the stuck case needs an app-emitted custom
+# metric (audit_outbox PENDING-row age / retention queue age) that the worker
+# does not publish yet — a documented follow-up (M5). The compose/k8s guidance
+# and docs already call out heartbeat-log monitoring as the interim control.
+
+resource "aws_cloudwatch_metric_alarm" "audit_outbox_worker_down" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-audit-outbox-worker-down"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "RunningTaskCount"
+  namespace           = "ECS/ContainerInsights"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  alarm_description   = "audit-outbox-worker has no running task — audit events accumulate as PENDING"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.main.name
+    ServiceName = aws_ecs_service.audit_outbox_worker.name
+  }
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
+resource "aws_cloudwatch_metric_alarm" "retention_gc_worker_down" {
+  count               = var.enable_monitoring ? 1 : 0
+  alarm_name          = "${local.name_prefix}-retention-gc-worker-down"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "RunningTaskCount"
+  namespace           = "ECS/ContainerInsights"
+  period              = 60
+  statistic           = "Minimum"
+  threshold           = 1
+  alarm_description   = "retention-gc-worker has no running task — retention/deletion is not enforced"
+  treat_missing_data  = "breaching"
+
+  dimensions = {
+    ClusterName = aws_ecs_cluster.main.name
+    ServiceName = aws_ecs_service.retention_gc_worker.name
+  }
+
+  alarm_actions = [aws_sns_topic.alarms[0].arn]
+  ok_actions    = [aws_sns_topic.alarms[0].arn]
+  tags          = local.tags
+}
+
+################################################################################
 # EventBridge: ECS Task Stop Detection
 ################################################################################
 

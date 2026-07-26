@@ -59,12 +59,17 @@ terraform init
 > リモートバックエンドを設定してください。ローカル state のまま本番デプロイし
 > ないこと。`terraform.tfvars` は gitignore 済みで、実値は決してコミットしない。
 
-### 2. Plan & Apply
+### 2. Plan & Apply（既存環境の更新）
 
 ```bash
 terraform plan  -var-file=envs/dev/terraform.tfvars
 terraform apply -var-file=envs/dev/terraform.tfvars
 ```
+
+> **新規環境の初回 bootstrap** には順序制約があります（接続文字列 secret は RDS/Redis
+> 作成後にしか生成できない、RDS は `initdb/*.sql` を実行しないため `passwd_app` /
+> worker ロールを migration 前に手動作成が必要、等）。多段階手順は英語版 README の
+> "First-time bootstrap" を参照してください。
 
 ### 3. Push Container Images
 
@@ -97,14 +102,53 @@ docker tag boxyhq/jackson:${JACKSON_VERSION} $(terraform output -raw ecr_jackson
 docker push $(terraform output -raw ecr_jackson_repository_url):v${JACKSON_VERSION}
 ```
 
-### 4. Force New Deployment
+### 4. 新しいイメージバージョンをデプロイ（steady state）
+
+migration-first の順序は Terraform ではなく `scripts/deploy.sh` が所有します。
+Terraform は task **定義**のみ管理し（サービスは `ignore_changes = [task_definition]`）、
+deploy.sh が「apply で新定義を登録 → migration 実行 → 全サービス（app + jackson +
+両 worker の計 4 つ）を新 task-def へ update-service」を順に行います。新コードが未
+migration スキーマで動くことはありません。
 
 ```bash
-aws ecs update-service \
-  --cluster $(terraform output -raw ecs_cluster_name) \
-  --service $(terraform output -raw ecs_app_service_name) \
-  --force-new-deployment
+export AWS_REGION=<region>
+export ECR_URL=<account>.dkr.ecr.<region>.amazonaws.com/passwd-sso-prod-app
+export TF_VAR_FILE=envs/prod/terraform.tfvars
+./scripts/deploy.sh   # build → push → apply(定義のみ) → migration → update-service
 ```
+
+deploy.sh は dirty/untracked worktree を拒否し full commit SHA を使用、同一タグが
+ECR に既存なら build/push をスキップ（migration 失敗後の再実行が安全）します。
+update-service 後は services-stable を待ち、`rolloutState == COMPLETED` に加えて
+PRIMARY deployment の taskDefinition が要求 ARN と一致することまで検証します
+（circuit-breaker による旧 revision への自動 rollback も COMPLETED になるため）。
+いずれかが失敗した場合は全サービスをデプロイ前 revision へ戻す補償 rollback を
+実行します。詳細は docs/operations/deployment.md を参照。新規環境の初回構築は
+「初回 bootstrap」を参照。
+
+steady-state の migration は expand-and-contract（新旧コード双方と互換）である
+必要があります。migration 実行中も旧 app/worker が稼働しているためです。破壊的 DDL は
+`scripts/checks/check-destructive-migration.mjs` が CI で検出します。
+
+### イメージ署名（cosign + KMS）
+
+deploy.sh は push した全イメージを cosign で署名し、デプロイ前に署名を検証します。
+検証に失敗したイメージは apply 前に拒否されます。ECR の immutability はタグの
+「上書き」を防ぎますが「先に作られる」ことは防げないため、ECR push 権限のみを持つ
+主体が `git-<sha>` を先置きすると、deploy.sh の「既存タグならビルドを省略」経路が
+そのイメージを採用してしまいます。署名権限（`kms:Sign`）を分離することでこれを
+遮断しています。
+
+`cosign` を PATH に用意し、環境ごとに一度だけデプロイ用ロールへ権限を付与します。
+
+```bash
+aws iam attach-role-policy --role-name <deploy-role> \
+  --policy-arn "$(terraform output -raw image_signing_policy_arn)"
+```
+
+署名導入前に push されたイメージは署名を持たないため拒否されます。クリーンな
+チェックアウトから push し直すか、既存 digest を一度署名してください。詳細は
+docs/operations/deployment.md "Image Signing" を参照。
 
 ## Remote State Backend
 
@@ -119,19 +163,42 @@ State はデフォルトでローカルに保存されます。**実シークレ
 コメントを参照。state を移行する前に、バケットが暗号化を強制しパブリックアクセス
 を遮断していることを確認してください。
 
-シークレット値を state に流し込む `terraform.tfvars` は gitignore 済みで、決して
-コミットしないこと。
+`terraform.tfvars` は gitignore 済みで、決してコミットしないこと。2026-07 レビュー
+(F3) 以降、シークレット値は tfvars に含めず out-of-band で注入します（下記
+Secrets Management 参照）。
 
 ## Secrets Management
 
-`app_secrets` / `jackson_secrets` は Secrets Manager に JSON として保存されます。
-ECS タスク定義では `{secret_arn}:KEY::` 形式で個別のキーを参照しています。
+app/Jackson のシークレット値は Terraform で管理せず、state にも入れません（2026-07
+レビュー F3）。Terraform は空のコンテナ（`secrets.tf`）のみを作成し、値は
+`terraform apply` の後・ECS サービス起動の前に、コミットしない JSON ファイルから
+out-of-band で注入します。RDS マスターパスワードも AWS 管理
+（`manage_master_user_password`）なので state に入りません。
+
+> **例外:** ElastiCache Redis の `auth_token` は設定時に Terraform state へ入ります
+> — ElastiCache に AWS 管理トークン相当がないためです。暗号化リモートバックエンド +
+> 厳格な IAM（backend.tf）が実効的な統制で、トークンは out-of-band でローテーション
+> 可能（`ignore_changes = [auth_token]`）。state を機密として扱ってください。
+
+```bash
+# app-secrets.json / jackson-secrets.json: 下表のキーを持つ JSON オブジェクト
+# (mode 0600、注入後に削除。コミット禁止)。
+scripts/put-terraform-secrets.sh \
+  --name-prefix passwd-sso-prod \
+  --app-file ./app-secrets.json \
+  --jackson-file ./jackson-secrets.json
+```
+
+空のシークレットは ECS タスク起動を失敗させるため、サービス起動前に実行すること。
+ECS タスク定義は `{secret_arn}:KEY::` 形式で個別キーを参照し、スクリプトが書き込んだ
+値に解決されます。
 
 ### Required Secrets (app)
 
 | Key | Description |
 |-----|-------------|
-| `DATABASE_URL` | PostgreSQL 接続文字列 |
+| `DATABASE_URL` | PostgreSQL 接続文字列（app ロール、NOSUPERUSER） |
+| `MIGRATION_DATABASE_URL` | migrate タスク用の SUPERUSER 接続文字列（`prisma migrate deploy` の DDL）。RDS マスターパスワードは `db_master_user_secret_arn` から取得。 |
 | `AUTH_URL` | アプリの公開URL |
 | `AUTH_SECRET` | Auth.js セッション暗号化キー |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID |
@@ -139,7 +206,26 @@ ECS タスク定義では `{secret_arn}:KEY::` 形式で個別のキーを参照
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret |
 | `SHARE_MASTER_KEY` | 組織暗号化マスターキー (256-bit hex) |
+| `SESSION_TOKEN_HMAC_KEY` | セッショントークン HMAC キー (256-bit hex)。**本番必須**（env 検証 + 実行時 fail-closed）。セッション認証をマスターキーローテーションから分離。app ECS タスクにマッピング。`npm run generate:key` で生成。 |
 | `REDIS_URL` | Redis 接続文字列 |
+| `OUTBOX_WORKER_DATABASE_URL` | audit-outbox-worker ECS サービス用の最小権限 DB URL（`passwd_outbox_worker` ロール） |
+| `RETENTION_GC_DATABASE_URL` | retention-gc-worker ECS サービス用の最小権限 DB URL（`passwd_retention_gc_worker` ロール） |
+
+両 worker は app イメージ（`node dist/<worker>.js`）で専用 ECS サービス
+（`*-audit-outbox-worker` / `*-retention-gc-worker`）として起動、`desired_count =
+var.worker_desired_count`（初回 bootstrap は 0、定常運用は 1）、LB なし。クラッシュ
+時は ECS が自動再起動。liveness は `RunningTaskCount < 1`（Container Insights）で
+監視（monitoring.tf）。これらがないと監査は PENDING のまま、保持期限も執行されない
+ため、上記 worker DB URL は apply 前に必ず設定すること。
+
+> **`SESSION_TOKEN_HMAC_KEY` のローテーション。** セッションの DB digest と Redis
+> キャッシュキーは両方この鍵から導出されるため、変更すると全 digest が変わり
+> **全セッションが失効**（全ユーザー再認証）します。ハード cutover で行うこと:
+> (1) 旧鍵タスクがローテーション中にセッションを発行しないよう app サービスを
+> `desired_count = 0` にスケールダウン、(2) 新値を投入、(3) `DELETE FROM sessions`
+> + Redis セッション keyspace を flush、(4) 新鍵で app をスケールアップ。手順 (1) を
+> 省くと、purge と再デプロイの間に旧タスクが旧鍵で孤立セッションを作り得ます。
+> docs/operations/key-provider-setup.md を参照。
 
 ### Required Secrets (jackson)
 

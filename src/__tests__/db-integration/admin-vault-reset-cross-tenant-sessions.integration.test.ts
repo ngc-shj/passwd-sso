@@ -139,7 +139,8 @@ describe.skipIf(!redisAvailable)(
              now() + interval '1 day', now(), now()
            )`,
           randomUUID(),
-          token,
+          // H4: DB stores the digest; the raw token is what a cookie would carry.
+          hashSessionToken(token),
           userId,
           tenantId,
         );

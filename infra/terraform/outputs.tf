@@ -22,6 +22,14 @@ output "db_endpoint" {
   value = aws_db_instance.main.address
 }
 
+# ARN of the AWS-managed RDS master-password secret (#4). Operators read the
+# master password from this secret (e.g. `aws secretsmanager get-secret-value`)
+# to build MIGRATION_DATABASE_URL — it is NOT in Terraform state or a tfvar.
+output "db_master_user_secret_arn" {
+  value       = try(aws_db_instance.main.master_user_secret[0].secret_arn, null)
+  description = "AWS-managed RDS master password secret ARN (for MIGRATION_DATABASE_URL)"
+}
+
 output "redis_endpoint" {
   value = local.redis_endpoint
 }
@@ -62,6 +70,18 @@ output "ecr_jackson_repository_url" {
   value = aws_ecr_repository.jackson.repository_url
 }
 
+# cosign signing key. deploy.sh reads this to sign pushed images and to verify a
+# pre-existing tag before trusting it (see ecr.tf for why).
+output "image_signing_key_arn" {
+  value       = aws_kms_key.image_signing.arn
+  description = "KMS asymmetric key used by cosign to sign/verify container images"
+}
+
+output "image_signing_policy_arn" {
+  value       = aws_iam_policy.image_signing.arn
+  description = "Attach to the deploy principal to grant kms:Sign on the image-signing key"
+}
+
 ################################################################################
 # ECS
 ################################################################################
@@ -76,6 +96,44 @@ output "ecs_app_service_name" {
 
 output "ecs_jackson_service_name" {
   value = aws_ecs_service.jackson.name
+}
+
+output "ecs_audit_outbox_worker_service_name" {
+  value = aws_ecs_service.audit_outbox_worker.name
+}
+
+output "ecs_retention_gc_worker_service_name" {
+  value = aws_ecs_service.retention_gc_worker.name
+}
+
+# Task-definition ARNs + network config — consumed by scripts/deploy.sh to run
+# the migration and advance each service to the new revision post-migration.
+output "app_task_definition_arn" {
+  value = aws_ecs_task_definition.app.arn
+}
+
+output "jackson_task_definition_arn" {
+  value = aws_ecs_task_definition.jackson.arn
+}
+
+output "migrate_task_definition_arn" {
+  value = aws_ecs_task_definition.migrate.arn
+}
+
+output "audit_outbox_worker_task_definition_arn" {
+  value = aws_ecs_task_definition.audit_outbox_worker.arn
+}
+
+output "retention_gc_worker_task_definition_arn" {
+  value = aws_ecs_task_definition.retention_gc_worker.arn
+}
+
+output "private_subnet_ids" {
+  value = aws_subnet.private[*].id
+}
+
+output "ecs_security_group_id" {
+  value = aws_security_group.ecs.id
 }
 
 ################################################################################

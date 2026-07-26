@@ -94,6 +94,7 @@ function withCallbackRateLimit<H extends RouteHandler>(handler: H): H {
       pathname: request.nextUrl.pathname,
       scope: "auth_callback",
       limiter: callbackRateLimiter,
+      boundUnknownIp: true,
     });
     // Pre-auth surface: userId null → checkRateLimitOrFail warn-logs the
     // fail-closed (no audit row). redisErrored → 503; over-limit → 429.
@@ -150,6 +151,12 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
       pathname: request.nextUrl.pathname,
       scope: "magic_link_signin",
       limiter: magicLinkIpLimiter,
+      // High-risk pre-auth endpoint (M2): triggers SMTP sends. Without this, an
+      // IP-less request (proxy misconfig / spoofed IP source) would fail open and
+      // bypass the per-IP SMTP-DoS cap entirely, leaving only the per-email limit
+      // — which an attacker cycling addresses also evades. Bound IP-less traffic
+      // through the shared unknown-IP budget.
+      boundUnknownIp: true,
     });
     const blocked = await checkRateLimitOrFail({
       req: request,

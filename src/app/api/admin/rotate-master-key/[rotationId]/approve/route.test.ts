@@ -14,6 +14,7 @@ const {
   mockCheck,
   mockCreateRateLimiter,
   mockLogAudit,
+  mockLogAuditInTx,
 } = vi.hoisted(() => {
   const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
@@ -24,6 +25,7 @@ const {
     mockCheck,
     mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
   };
 });
 
@@ -38,6 +40,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT",
     userId,
@@ -221,7 +224,10 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/approve", () => {
     expect(callArg.data.approvedById).toBe(BOB);
     expect(callArg.data.approvedAt).toBeInstanceOf(Date);
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    // M1: happy-path approve audit is now atomic (logAuditInTx(tx, tenantId, params)).
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT,
       expect.objectContaining({
         action: "MASTER_KEY_ROTATION_APPROVE",
         metadata: expect.objectContaining({

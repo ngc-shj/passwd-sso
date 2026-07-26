@@ -13,7 +13,7 @@ This guide describes a production-oriented AWS deployment:
 - `jackson` service (SAML Jackson)
 - `db` as RDS (PostgreSQL)
 - `redis` as ElastiCache (Redis)
-- `audit-outbox-worker` (separate ECS service or sidecar in app task)
+- `audit-outbox-worker` + `retention-gc-worker` (dedicated ECS services, Terraform-managed)
 
 ## System Architecture (ASCII)
 
@@ -35,7 +35,11 @@ flowchart TB
     Secrets -.-> |Task env vars| Worker
 ```
 
-> **Note**: The `audit-outbox-worker` is a long-running process that drains pending rows from `audit_outbox` into `audit_logs`. Without it, audit events silently accumulate as `PENDING` and never reach `audit_logs`. Deploy it as a dedicated ECS/Fargate service (or a sidecar container in the app task) with `OUTBOX_WORKER_DATABASE_URL` pointing to the `passwd_outbox_worker` DB role.
+> **Note**: `audit-outbox-worker` (drains `audit_outbox` → `audit_logs`) and
+> `retention-gc-worker` (enforces retention / hard-deletes) are long-running
+> processes defined as dedicated Terraform-managed ECS services. Without them,
+> audit events accumulate as `PENDING` and retention is never enforced. See
+> [Background worker services](#background-worker-services-terraform-managed).
 
 ## Prerequisites
 
@@ -121,17 +125,24 @@ Env vars (example):
 - `NEXTAUTH_SECRET` (same as AUTH_SECRET)
 - `NEXTAUTH_ACL=*`
 
-### audit-outbox-worker service
+### Background worker services (Terraform-managed)
 
-Run as a dedicated ECS/Fargate service (or sidecar in the app task). Uses the same Docker image as `app`.
+The Terraform (`infra/terraform/ecs.tf`) defines BOTH background workers as
+dedicated ECS/Fargate services on the same image as `app`, `desired_count = 1`,
+no load balancer. ECS restarts a crashed task automatically; liveness is alarmed
+via `RunningTaskCount < 1` (Container Insights). No operator setup is needed
+beyond populating the worker DB URL secret keys before apply.
 
-Command override: `["npx", "tsx", "scripts/audit-outbox-worker.ts"]`
+| Service | Command | DB URL secret (least-privilege role) |
+|---------|---------|--------------------------------------|
+| `*-audit-outbox-worker` | `node dist/audit-outbox-worker.js` | `OUTBOX_WORKER_DATABASE_URL` (`passwd_outbox_worker`) |
+| `*-retention-gc-worker` | `node dist/retention-gc-worker.js` | `RETENTION_GC_DATABASE_URL` (`passwd_retention_gc_worker`) |
 
-Required env vars:
-- `OUTBOX_WORKER_DATABASE_URL` (least-privilege `passwd_outbox_worker` role)
-- `DATABASE_URL` (app role — for any shared config reads)
-
-This service is long-running. Without it, `audit_outbox` rows accumulate as `PENDING` and audit logs are never persisted.
+Without audit-outbox-worker, `audit_outbox` rows accumulate as `PENDING` and
+audit logs are never persisted. Without retention-gc-worker, nothing is ever
+purged and retention/deletion guarantees fail. The `*_DATABASE_URL` keys are
+injected out-of-band into the app Secrets Manager secret (see
+`infra/terraform/README.md` → Secrets Management).
 
 ## Admin / Maintenance Scripts
 

@@ -6,7 +6,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { getSessionToken } from "../helpers";
+import { getSessionTokenDigest } from "../helpers";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
@@ -30,9 +30,12 @@ async function handleDELETE(
 
   const { id } = await params;
 
-  // Check if the target session is the current one
-  const currentToken = getSessionToken(request);
-  if (!currentToken) {
+  // Check if the target session is the current one. H4: the DB column stores
+  // the digest, so compare against the digest of the current cookie token —
+  // comparing against the raw token would never match and let a user revoke
+  // their own current session.
+  const currentTokenDigest = getSessionTokenDigest(request);
+  if (!currentTokenDigest) {
     return unauthorized();
   }
 
@@ -42,7 +45,7 @@ async function handleDELETE(
       select: { sessionToken: true },
     }),
   );
-  if (target?.sessionToken === currentToken) {
+  if (target?.sessionToken === currentTokenDigest) {
     return errorResponse(API_ERROR.CANNOT_REVOKE_CURRENT_SESSION);
   }
 

@@ -45,6 +45,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     pathname: req.nextUrl.pathname,
     scope: "share_content",
     limiter: contentLimiter,
+    boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
     req,

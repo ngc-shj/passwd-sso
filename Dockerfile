@@ -1,6 +1,6 @@
 # Stage 1: Install dependencies
-# Pin base image to digest for reproducible builds (update with: docker pull node:20-alpine)
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS deps
+# Pin base image to digest for reproducible builds (update with: docker pull node:24-alpine)
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS deps
 # deps/builder are intermediate — only the runner stage ships. Patching here
 # would be discarded. apk upgrade only happens in the runner stage.
 RUN apk add --no-cache libc6-compat
@@ -22,8 +22,35 @@ COPY prisma ./prisma
 COPY prisma.config.ts ./prisma.config.ts
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 
+# Stage 1b: Dedicated Prisma CLI install (isolated closure).
+# The runner needs the Prisma CLI (the `migrate` compose service runs
+# `npx prisma migrate deploy`), but installing it in the runner re-resolves the
+# WHOLE app dependency tree and fails ERESOLVE on @hookform/resolvers ⇄ valibot
+# — and cherry-picking prisma's deep transitive deps (effect, mysql2, postgres,
+# @prisma/*) out of the app node_modules is fragile. Instead resolve prisma's
+# OWN closure in isolation here (with .npmrc → legacy-peer-deps), pinned to the
+# lockfile version, and COPY the self-contained tree into the runner.
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS prisma-cli
+WORKDIR /prisma-cli
+COPY .npmrc ./
+# PRISMA_VER is kept in lockstep with package-lock.json by
+# scripts/checks/check-dockerfile-prisma-pin.
+# FMW_VER: prisma pulls find-my-way (via @prisma/dev) and 9.6.0 carries
+# CVE-2026-47219 (HTTP/2 DDoS). This stage is an ISOLATED `npm init` tree, so the
+# repo's package.json `overrides` do NOT apply here — the override has to be
+# written into this stage's own package.json before installing, or the vulnerable
+# copy ships in the runner via the COPY below and Trivy flags it.
+RUN PRISMA_VER=7.9.0 && \
+    FMW_VER=9.7.0 && \
+    npm init -y >/dev/null 2>&1 && \
+    node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
+    npm install "prisma@${PRISMA_VER}" --ignore-scripts --loglevel=error && \
+    node -e "const v=require('/prisma-cli/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}" && \
+    node -e "const v=require('/prisma-cli/node_modules/find-my-way/package.json').version,c=v.split('.').map(Number),m='${FMW_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('find-my-way still '+v);process.exit(1)}}" && \
+    node node_modules/prisma/build/index.js --version >/dev/null
+
 # Stage 2: Build the application
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS builder
 WORKDIR /app
 # DATABASE_URL is needed only for `prisma generate` to satisfy env("DATABASE_URL")
 # in prisma.config.ts — no actual DB connection is opened at build time. A dummy
@@ -37,20 +64,20 @@ COPY . .
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 RUN npx next build
 RUN npx esbuild scripts/audit-outbox-worker.ts \
-      --bundle --platform=node --target=node20 \
+      --bundle --platform=node --target=node24 \
       --outfile=dist/audit-outbox-worker.js \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
 RUN npx esbuild scripts/retention-gc-worker.ts \
-      --bundle --platform=node --target=node20 \
+      --bundle --platform=node --target=node24 \
       --outfile=dist/retention-gc-worker.js \
       --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
       --tsconfig=tsconfig.json \
       --alias:@=./src
 
 # Stage 3: Production image
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS runner
+FROM node:24-alpine@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS runner
 WORKDIR /app
 RUN apk upgrade --no-cache zlib libcrypto3 libssl3 musl musl-utils
 
@@ -64,25 +91,38 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+# .prisma (generated client) is COPYed AFTER the prisma-cli node_modules below,
+# so the generated client always wins over the CLI stage's tree.
 COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 
 # Upgrade npm and patch npm-bundled CVE deps in a single layer.
-# - npm 11.12.1: drops bundled cross-spawn entirely and ships glob 13.x /
+# NPM_VER=11.16.0 matches the npm bundled with node:24-alpine (24.18.0) and the
+# release.yml PUBLISH_NPM_VERSION pin — the `npm install -g` is a no-op version-lock,
+# not a real upgrade, so a future base-image bump that ships a different npm is
+# caught by the post-patch `npm -v` assertion.
+# - npm 11.16.0: drops bundled cross-spawn entirely and ships glob 13.x /
 #   minimatch 10.x, closing CVE-2024-21538, CVE-2025-64756,
 #   CVE-2026-26996/27903/27904.
 # - tar >=7.5.19: closes CVE-2026-31802 (fixed in 7.5.11) AND the newer
 #   CVE-2026-59873 (gzip-bomb DoS, fixed 7.5.19) / CVE-2026-59874 (malformed
-#   tar-header DoS, fixed 7.5.18). npm 11.12.1 ships tar 6.2.x under its own
+#   tar-header DoS, fixed 7.5.18). npm 11.16.0 ships tar 7.5.15 under its own
 #   node_modules, so the patch block below force-upgrades it.
-# - picomatch >=4.0.4: closes CVE-2026-33671 (still bundled at 4.0.3 nested
-#   under tinyglobby in npm 11.12.1).
+# - picomatch >=4.0.4: closes CVE-2026-33671. npm 11.16.0 already bundles 4.0.4
+#   (nested under tinyglobby), so the patch is a no-op skip — kept as a
+#   fail-closed tripwire in case a future npm regresses it.
 # - sigstore >=4.1.1: closes CVE-2026-48815 (certificateOIDs verification
-#   constraints silently dropped; bundled at 4.1.0 under npm 11.12.1's
-#   provenance/signing path).
-# - brace-expansion >=5.0.7: closes CVE-2026-13149 (exponential-time DoS;
-#   bundled at 5.0.4 under npm 11.12.1). The app's own copy is already pinned
-#   via the package.json overrides block; this patches npm's bundled copy.
+#   constraints silently dropped). npm 11.16.0 already bundles 4.1.1, so the
+#   patch is a no-op skip — kept as a fail-closed tripwire.
+# - undici >=6.28.0: closes CVE-2026-12151 (unbounded memory growth via
+#   WebSocket → DoS). npm 11.16.0 bundles 6.26.0. The app's own top-level undici
+#   is already 7.28.0 (also fixed); this patches npm's bundled copy, which Trivy
+#   reports separately.
+# - brace-expansion >=5.0.8: closes CVE-2026-13149 (exponential-time DoS) AND
+#   GHSA-mh99-v99m-4gvg (unbounded expansion → OOM), whose range is <=5.0.7 —
+#   so the previous 5.0.7 pin was itself affected once that advisory landed.
+#   npm 11.16.0 bundles 5.0.6, so this patch is doing real work. The app's own
+#   copy is pinned separately via the package.json overrides block; this patches
+#   npm's bundled copy, which Trivy scans as part of the image.
 # Patch blocks fail-closed (exit 1) when expected directories disappear, so a
 # silent npm-layout drift cannot reintroduce the CVEs.
 # `--ignore-scripts` on the global npm upgrade limits root-execution blast
@@ -95,11 +135,10 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 RUN TAR_VER=7.5.19 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
-    BE_VER=5.0.7 && \
-    NPM_VER=11.12.1 && \
-    PRISMA_VER=7.9.0 && \
+    BE_VER=5.0.8 && \
+    UNDICI_VER=6.28.0 && \
+    NPM_VER=11.16.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
-    npm install "prisma@${PRISMA_VER}" --no-save --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
     if [ -d "$TAR_DIR" ]; then \
       CURRENT=$(node -p "require('${TAR_DIR}/package.json').version") && \
@@ -160,6 +199,21 @@ RUN TAR_VER=7.5.19 && \
     else \
       echo "ERROR: brace-expansion directory not found at ${BE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
     fi && \
+    UNDICI_DIR=/usr/local/lib/node_modules/npm/node_modules/undici && \
+    if [ -d "$UNDICI_DIR" ]; then \
+      CURRENT=$(node -p "require('${UNDICI_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$UNDICI_VER" "$CURRENT" | sort -V | head -n1)" != "$UNDICI_VER" ]; then \
+        cd "$UNDICI_DIR" && \
+        npm pack "undici@${UNDICI_VER}" --quiet && \
+        tar xzf "undici-${UNDICI_VER}.tgz" --strip-components=1 && \
+        rm -f "undici-${UNDICI_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${UNDICI_VER}'){console.error('undici patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "undici ${CURRENT} already >= ${UNDICI_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "ERROR: undici directory not found at ${UNDICI_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
+    fi && \
     cd / && \
     npm cache clean --force >/dev/null 2>&1 && \
     rm -rf /root/.npm /tmp/* && \
@@ -169,11 +223,33 @@ RUN TAR_VER=7.5.19 && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}" && \
-    node -e "const v=require('/app/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}"
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version,c=v.split('.').map(Number),m='${UNDICI_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('undici still '+v);process.exit(1)}}"
 
-# Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
-COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
-COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+# Prisma CLI: COPY the self-contained closure from the dedicated `prisma-cli`
+# stage (isolated npm install with .npmrc), NOT a runner-side `npm install`
+# (which re-resolves the whole app tree → ERESOLVE) and NOT a cherry-pick from
+# the app node_modules (misses deep transitive deps like `effect`). This brings
+# the CLI + its non-@prisma transitive deps (effect, mysql2, postgres, …) into
+# the runner's node_modules.
+COPY --from=prisma-cli /prisma-cli/node_modules ./node_modules
+
+# The CLI-stage COPY above overwrites @prisma/* with the CLI's set, which lacks
+# the app-runtime packages (driver-adapter-utils, generated client). Overlay the
+# builder's COMPLETE @prisma/* — it is a superset (CLI deps: config/engines/dev,
+# AND app runtime: adapter-pg/client/driver-adapter-utils) — plus the generated
+# client, so the worker + app can resolve the adapter at runtime.
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+
+# One-off RDS role bootstrap (run via ECS Exec on a fresh environment; uses the
+# `pg` module copied below, so no psql binary is needed). Plain .mjs — not bundled.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-rds-roles.mjs ./scripts/bootstrap-rds-roles.mjs
+# DB grant audit + its expected-ACL manifest. The migrate task runs this right
+# after `prisma migrate deploy` (see infra/terraform/ecs.tf), so a migration that
+# over-grants fails the task before any service is advanced. It needs a SUPERUSER
+# connection, and only tasks in the ECS SG can reach RDS.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/audit-db-grants.mjs ./scripts/audit-db-grants.mjs
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/db-grants-manifest.json ./scripts/checks/db-grants-manifest.json
 
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js

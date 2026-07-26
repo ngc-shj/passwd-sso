@@ -29,9 +29,15 @@ fi
 
 # Identify added or modified test files since BASE_REF. Status filter:
 # A=added, M=modified, R=renamed (treat as added). Compatible with bash 3.2 (no mapfile).
+# Allowlist (gate c — direct process.env): files that MUST manipulate process.env
+# directly because they test module-load-time env parsing via
+# vi.resetModules() + dynamic import, and own their save/restore (originalEnv /
+# resetEnv) — a model incompatible with vi.stubEnv's afterEach unstub.
+#   - src/__tests__/setup.ts   : global test setup
+#   - src/__tests__/env.test.ts: env.ts parseEnv() validation harness
 CHANGED_LIST=$(git diff --name-only --diff-filter=AMR "$BASE_REF...HEAD" 2>/dev/null \
   | grep -E '\.test\.(ts|tsx)$' \
-  | grep -v -E '^src/__tests__/setup\.ts$' \
+  | grep -v -E '^src/__tests__/(setup\.ts|env\.test\.ts)$' \
   || true)
 
 if [ -z "$CHANGED_LIST" ]; then

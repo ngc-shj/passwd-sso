@@ -18,6 +18,7 @@ import {
   afterEach,
 } from "vitest";
 import { randomUUID } from "node:crypto";
+import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { NextRequest } from "next/server";
 import { requireRecentSession, STEP_UP_WINDOW_MS } from "@/lib/auth/session/step-up";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
@@ -58,6 +59,7 @@ describe.skipIf(!hasDatabase)(
     });
 
     async function insertSession(createdAt: Date): Promise<string> {
+      // H4: the cookie carries the RAW token; the DB column stores its digest.
       const token = `sess-${randomUUID()}`;
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
@@ -69,7 +71,7 @@ describe.skipIf(!hasDatabase)(
              now() + interval '1 day', $5, now()
            )`,
           randomUUID(),
-          token,
+          hashSessionToken(token),
           userId,
           tenantId,
           createdAt,

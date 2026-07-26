@@ -1,0 +1,8 @@
+{
+  "$note": "M2 boundUnknownIp completeness manifest. Enforced by scripts/checks/check-bound-unknown-ip.mjs (ts-morph AST over every checkIpRateLimit call site). A checkIpRateLimit call whose scope is NOT bound (no `boundUnknownIp: true` and no explicit `unknownIpLimiter`) MUST be listed here with a reason, or the gate fails. This closes the R42 class boundary that let the magic-link member slip: the class is derived mechanically from the primitive (all checkIpRateLimit calls), not hand-listed. Entries are completeness-checked both ways — a listed scope that no longer appears (or that is now bound) fails as a stale entry.",
+  "excluded_scopes": {
+    "csp_report": {
+      "reason": "Write-only CSP-violation telemetry sink: no auth, no side effect, no security action. A shared IP-less budget would drop legitimate reports from a busy page (self-DoS on observability); abuse only costs a length-capped log line. Fail-open is the deliberate choice."
+    }
+  }
+}

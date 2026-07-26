@@ -13,6 +13,7 @@ const {
   mockCheck,
   mockCreateRateLimiter,
   mockLogAudit,
+  mockLogAuditInTx,
 } = vi.hoisted(() => {
   const mockCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
@@ -23,6 +24,7 @@ const {
     mockCheck,
     mockCreateRateLimiter: vi.fn((_opts: unknown) => ({ check: mockCheck, clear: vi.fn() })),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
   };
 });
 
@@ -37,6 +39,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT",
     userId,
@@ -152,7 +155,10 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/revoke", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.status).toBe("revoked");
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    // M1: success audit is now atomic (logAuditInTx(tx, tenantId, params)).
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT,
       expect.objectContaining({
         action: "MASTER_KEY_ROTATION_REVOKE",
         metadata: expect.objectContaining({
@@ -169,7 +175,9 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/revoke", () => {
     });
     const res = await callPOST();
     expect(res.status).toBe(200);
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT,
       expect.objectContaining({
         action: "MASTER_KEY_ROTATION_REVOKE",
         metadata: expect.objectContaining({
@@ -236,7 +244,9 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/revoke", () => {
     const res = await callPOST();
     expect(res.status).toBe(200);
     expect(mockUpdateMany).toHaveBeenCalledTimes(1);
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT,
       expect.objectContaining({
         action: "MASTER_KEY_ROTATION_REVOKE",
         metadata: expect.objectContaining({ cause: "SECOND_ACTOR_REVOKE" }),

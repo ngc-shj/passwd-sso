@@ -11,7 +11,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { parseBody } from "@/lib/http/parse-body";
 import { WEBAUTHN_RESPONSE_MAX } from "@/lib/validations/common";
-import { getSessionToken } from "@/app/api/sessions/helpers";
+import { getSessionTokenDigest } from "@/app/api/sessions/helpers";
 import {
   verifyAuthenticationAssertion,
   CHALLENGE_ID_RE,
@@ -42,8 +42,8 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  const sessionToken = getSessionToken(req);
-  if (!sessionToken) {
+  const sessionTokenDigest = getSessionTokenDigest(req);
+  if (!sessionTokenDigest) {
     return unauthorized();
   }
 
@@ -82,7 +82,7 @@ async function handlePOST(req: NextRequest) {
       }
 
       await tx.session.update({
-        where: { sessionToken },
+        where: { sessionToken: sessionTokenDigest },
         data: { passkeyVerifiedAt: verifiedAt },
       });
 

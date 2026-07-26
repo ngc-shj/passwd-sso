@@ -105,6 +105,7 @@ async function handlePOST(req: NextRequest) {
     pathname: req.nextUrl.pathname,
     scope: "ext_exchange",
     limiter: exchangeLimiter,
+    boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
     req,

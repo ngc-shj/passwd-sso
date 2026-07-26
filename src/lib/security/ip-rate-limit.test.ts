@@ -71,4 +71,93 @@ describe("checkIpRateLimit", () => {
     });
     expect(res).toEqual({ allowed: false, redisErrored: true });
   });
+
+  // M2 — high-risk opt-in: unknown IP routes through the shared bounded bucket
+  // instead of failing open.
+  it("routes IP-less requests through unknownIpLimiter with the shared `unknown-ip` key when provided", async () => {
+    const primaryCheck = vi.fn();
+    const unknownCheck = vi.fn().mockResolvedValue({ allowed: true });
+    const res = await checkIpRateLimit({
+      ip: null,
+      pathname: "/api/x",
+      scope: "test_scope",
+      limiter: { check: primaryCheck },
+      unknownIpLimiter: { check: unknownCheck },
+    });
+    // Primary (per-IP) limiter is never touched for an IP-less request.
+    expect(primaryCheck).not.toHaveBeenCalled();
+    expect(unknownCheck).toHaveBeenCalledWith("rl:test_scope:unknown-ip");
+    expect(res).toEqual({ allowed: true });
+    // Still warns so operators see the IP-less traffic.
+    expect(mockWarn).toHaveBeenCalledWith(
+      { pathname: "/api/x", scope: "test_scope" },
+      "rate_limit_skipped_unknown_ip",
+    );
+  });
+
+  it("appends keySuffix to the shared unknown-ip key so resources stay partitioned", async () => {
+    const unknownCheck = vi.fn().mockResolvedValue({ allowed: true });
+    await checkIpRateLimit({
+      ip: null,
+      pathname: "/s/abc",
+      scope: "send_download",
+      keySuffix: "tok123",
+      limiter: { check: vi.fn() },
+      unknownIpLimiter: { check: unknownCheck },
+    });
+    expect(unknownCheck).toHaveBeenCalledWith("rl:send_download:unknown-ip:tok123");
+  });
+
+  it("passes through a deny from the unknownIpLimiter (shared budget exhausted)", async () => {
+    const unknownCheck = vi
+      .fn()
+      .mockResolvedValue({ allowed: false, retryAfterMs: 2000 });
+    const res = await checkIpRateLimit({
+      ip: null,
+      pathname: "/api/x",
+      scope: "test_scope",
+      limiter: { check: vi.fn() },
+      unknownIpLimiter: { check: unknownCheck },
+    });
+    expect(res).toEqual({ allowed: false, retryAfterMs: 2000 });
+  });
+
+  it("still fails open when boundUnknownIp is absent (low-risk default)", async () => {
+    const res = await checkIpRateLimit({
+      ip: null,
+      pathname: "/api/x",
+      scope: "low_risk",
+      limiter: { check: vi.fn() },
+    });
+    expect(res).toEqual({ allowed: true });
+  });
+});
+
+// getUnknownIpLimiter is exercised via boundUnknownIp; mock createRateLimiter so
+// the shared bucket is asserted without touching Redis.
+describe("checkIpRateLimit boundUnknownIp shared bucket", () => {
+  it("uses getUnknownIpLimiter() for the shared bucket when boundUnknownIp is true", async () => {
+    vi.resetModules();
+    const sharedCheck = vi.fn().mockResolvedValue({ allowed: true });
+    vi.doMock("@/lib/logger", () => ({
+      getLogger: () => ({ warn: vi.fn(), error: vi.fn(), info: vi.fn() }),
+    }));
+    vi.doMock("@/lib/auth/policy/ip-access", () => ({
+      rateLimitKeyFromIp: (ip: string) => ip,
+    }));
+    vi.doMock("@/lib/security/rate-limit", () => ({
+      createRateLimiter: vi.fn(() => ({ check: sharedCheck })),
+    }));
+    const mod = await import("./ip-rate-limit");
+    const res = await mod.checkIpRateLimit({
+      ip: null,
+      pathname: "/api/x",
+      scope: "high_risk",
+      limiter: { check: vi.fn() },
+      boundUnknownIp: true,
+    });
+    expect(sharedCheck).toHaveBeenCalledWith("rl:high_risk:unknown-ip");
+    expect(res).toEqual({ allowed: true });
+    vi.doUnmock("@/lib/security/rate-limit");
+  });
 });

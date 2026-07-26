@@ -28,6 +28,9 @@ import {
   cleanup,
   E2E_TENANT,
 } from "./db";
+// Same function the seeder and the app use — asserting against a re-implemented
+// digest here would let the two drift without failing.
+import { hashSessionToken } from "../../src/lib/auth/session/session-cache";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -228,12 +231,18 @@ describe("seedSession", () => {
     expect(params).toContain(E2E_TENANT.id);
   });
 
-  it("passes sessionToken in correct position", async () => {
+  it("stores the session token as an HMAC digest, never the raw value", async () => {
+    // The app looks sessions up by digest, so seeding the RAW token silently
+    // produces a row that can never authenticate — which is exactly what broke
+    // the whole E2E suite once session tokens moved to digests. Assert the
+    // digest goes in AND that the raw token does not, so a regression in either
+    // direction fails here rather than as 80 unexplained E2E failures.
     const token = "my-session-token-xyz";
     await seedSession("user-id-1", token);
     const [, params] = getCall(0);
-    // params: [id, sessionToken, userId, tenantId, expires]
-    expect(params[1]).toBe(token);
+    // params: [id, sessionTokenDigest, userId, tenantId, expires]
+    expect(params[1]).toBe(hashSessionToken(token));
+    expect(params[1]).not.toBe(token);
   });
 
   it("passes userId in correct position", async () => {
