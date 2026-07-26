@@ -678,15 +678,22 @@ fi
 # independent pure readers of the working tree, so they go through the same
 # bounded scheduler.
 #
-# Ordering constraints are preserved by pairing or staging, not by serializing
-# everything:
+# Ordering constraints are honored by STAGING across two batches, never by
+# chaining steps together — a step that must follow another is queued in the
+# later batch, so it still runs and reports even when the earlier one fails:
+#
+#   batch 1: Lint, Test, Build, CLI: Build,  Extension: Test
+#   batch 2:       Typecheck,   CLI: Test,   Extension: Build
+#
 #   * CLI is Build→Test (cli/ is ESM NodeNext, so a missing .js extension is a
-#     tsc error that vitest/esbuild tolerates) and Extension is Test→Build,
-#     matching CI. Each pair is queued as ONE step running both halves in
-#     order, so the pair's internal sequence holds while the pairs run
-#     concurrently with each other.
-#   * Typecheck depends on Build's output, so it runs in a second batch after
-#     the first completes (see below).
+#     tsc TS2835 error that vitest/esbuild tolerate) and Extension is
+#     Test→Build — matching the CI job names.
+#   * Typecheck reads .next/types/**, which Build generates.
+#
+# Do NOT collapse a pair into one `a && b` job to express the order: `&&` skips
+# the second half whenever the first fails, so a broken CLI build would leave
+# CLI Test unevaluated. That is the same truncated-gate-run failure the join
+# phase above is written to avoid, and pre-pr-run-batch.test.mjs pins it.
 #
 # Memory: measured peak RSS is Build ~3.1G, Lint ~1.6G, Typecheck ~1.2G, Test
 # ~0.6G — ~6.5G combined against 47G available here. PRE_PR_JOBS caps the

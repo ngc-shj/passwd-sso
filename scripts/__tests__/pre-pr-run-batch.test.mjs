@@ -40,6 +40,7 @@ const SCHED_START = "batch_labels=()";
 const SCHED_END = '\nprintf "${BOLD}═══ Pre-PR Checks';
 
 let scheduler;
+let prePrSource;
 
 beforeAll(() => {
   const src = readFileSync(PRE_PR, "utf8");
@@ -103,6 +104,67 @@ beforeAll(() => {
   // The join shape is only load-bearing under `set -e`; the harness re-declares
   // it, so pin that pre-pr.sh still sets it rather than letting the two drift.
   expect(src, "pre-pr.sh must keep set -euo pipefail").toMatch(/^set -euo pipefail$/m);
+
+  prePrSource = src;
+});
+
+describe("heavy-step wiring", () => {
+  /** Line index of the first `queue_step "<label>"`, or -1. */
+  const queueLine = (label) =>
+    prePrSource
+      .split("\n")
+      .findIndex((l) => new RegExp(`^\\s*queue_step "${label}"`).test(l));
+
+  /** Line index of the first run_batch strictly after `from`. */
+  const batchAfter = (from) =>
+    prePrSource
+      .split("\n")
+      .findIndex((l, i) => i > from && /^\s*run_batch\s*$/.test(l));
+
+  // Each pair is an ordering constraint: `after` must observe `before`'s output.
+  it.each([
+    ["CLI: Build", "CLI: Test", "cli/dist must exist before its tests run"],
+    ["Extension: Test", "Extension: Build", "CI runs Extension test before build"],
+    ["Build", "Typecheck", "tsc reads .next/types/**, which next build writes"],
+  ])("runs %s in an earlier batch than %s", (before, after, why) => {
+    const beforeLine = queueLine(before);
+    const afterLine = queueLine(after);
+    expect(beforeLine, `queue_step "${before}" not found`).toBeGreaterThan(-1);
+    expect(afterLine, `queue_step "${after}" not found`).toBeGreaterThan(-1);
+
+    // A run_batch must separate them, or they dispatch concurrently and the
+    // ordering constraint is silently lost.
+    const separator = batchAfter(beforeLine);
+    expect(separator, `no run_batch between "${before}" and "${after}" — ${why}`)
+      .toBeGreaterThan(-1);
+    expect(
+      afterLine,
+      `"${after}" must be queued after the run_batch that follows "${before}" — ${why}`,
+    ).toBeGreaterThan(separator);
+  });
+
+  it("does not chain two commands in one step with && (a failing first half would skip the second)", () => {
+    // `queue_step "X" bash -c 'a && b'` expresses ordering by chaining, which
+    // drops b whenever a fails — the truncated-gate-run class. Ordering belongs
+    // in the batch staging above.
+    //
+    // A single leading `cd <dir> && <cmd>` is NOT that: `cd` is directory
+    // setup, not a gate whose failure should still let the next gate report.
+    // So flag a step only when a SECOND `&&` chains two real commands.
+    const chained = prePrSource
+      .split("\n")
+      .filter((line) => {
+        if (!/^\s*queue_step "/.test(line)) return false;
+        const body = line.replace(/^\s*queue_step\s+"[^"]*"\s*/, "");
+        const withoutCd = body.replace(/\bcd\s+[^&]+&&/, "");
+        return withoutCd.includes("&&");
+      })
+      .map((line) => line.trim());
+    expect(
+      chained,
+      "heavy steps must be staged across batches, not chained with &&",
+    ).toEqual([]);
+  });
 });
 
 /** Build a harness around the real scheduler with the given fixture steps. */
