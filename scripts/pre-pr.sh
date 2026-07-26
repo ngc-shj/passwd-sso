@@ -307,12 +307,11 @@ if [ "$RUN_WEB" != "1" ]; then
   printf "${BOLD}▸ Web steps skipped${RESET}  (no app-filter paths changed — iOS-only diff; set PRE_PR_FORCE_FULL=1 to override)\n\n"
 fi
 
-if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  run_step "Lint"                   npx eslint .
-  # tsc --noEmit typechecks test files too (vitest does not; next build excludes
-  # them), catching mock/type drift that would otherwise rot silently.
-  run_step "Typecheck"              npx tsc --noEmit
-fi
+# Lint / Typecheck / Test / Build used to run here and at three later points,
+# serially. They are independent pure readers of the working tree, so they now
+# run together in one batch at the end — see "Heavy web steps" below. Their
+# report order is preserved there (Lint, Typecheck, ... Test, ... Build), so
+# output stays diff-comparable with the serial script.
 queue_step "Static: env drift check"  npm run check:env-docs
 queue_step "Static: security-matrices drift check" npm run check:security-matrices
 queue_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
@@ -638,9 +637,10 @@ if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
   fi
 fi
 if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  # Clear vitest cache to match CI's clean environment
+  # Clear vitest cache to match CI's clean environment. This is a repo-global
+  # mutation, so it must happen BEFORE the heavy batch starts — not inside a
+  # job racing the Extension test that shares extension/node_modules/.vitest.
   rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
-  run_step "Test"                   npx vitest run
 fi
 
 # Integration tests on refactor branches touching auth/DB modules.
@@ -663,9 +663,7 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ] && \
   fi
 fi
 
-if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  run_step "Build"                  npx next build
-fi
+# Build is dispatched in the heavy batch below, not here.
 
 # Multi-package build + test — mirror CI's "CLI: Build → Test" and
 # "Extension: Test → Build" jobs so a package-level break (e.g. an ESM .js
@@ -674,27 +672,52 @@ fi
 # `xcodebuild` on macos-latest and is not reproducible in this local gate.
 # pre-pr does NOT `npm ci` (slow/destructive); it reuses installed deps and
 # fails with an actionable hint if a package's node_modules is absent.
+# ── Heavy web steps ─────────────────────────────────────────────────────────
+# Lint / Typecheck / Test / Build / CLI / Extension are the bulk of a full run
+# (~150s of a ~160s wall clock; the ~40 static gates above are ~11s). They are
+# independent pure readers of the working tree, so they go through the same
+# bounded scheduler.
+#
+# Two ordering constraints are preserved by pairing rather than by serializing
+# everything: CLI is Build→Test (cli/ is ESM NodeNext, so a missing .js
+# extension is a tsc error that vitest/esbuild tolerates) and Extension is
+# Test→Build, matching CI. Each pair is queued as ONE step running both halves
+# in order, so the pair's internal sequence holds while the pairs run
+# concurrently with each other.
+#
+# Memory: measured peak RSS is Build ~3.1G, Lint ~1.6G, Typecheck ~1.2G, Test
+# ~0.6G — ~6.5G combined against 47G available here. PRE_PR_JOBS caps the
+# concurrency, so a smaller machine runs fewer at once rather than thrashing.
 if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  # CLI: Build → Test (CI order — tsc must run first; cli/ is ESM NodeNext, so a
-  # missing .js extension is a tsc TS2835 error that vitest/esbuild tolerates).
+  # `next build` is the one heavy step that WRITES to the working tree (.next/),
+  # and several tests scan that tree — check-dockerignore-secrets and
+  # route-policy-manifest both failed intermittently when Build ran beside Test,
+  # then passed in isolation. So Build runs on its own, after the batch. The
+  # rest are pure readers and are safe to run together.
+  queue_step "Lint"       npx eslint .
+  queue_step "Typecheck"  npx tsc --noEmit
+  queue_step "Test"       npx vitest run
+
   if [ ! -d cli/node_modules ]; then
     printf "${RED}ERROR: cli/node_modules missing — run 'cd cli && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
     failed=$((failed + 1))
     failures+=("CLI: deps missing|")
   else
-    run_step "CLI: Build"  bash -c 'cd cli && npm run build'
-    run_step "CLI: Test"   bash -c 'cd cli && npm test'
+    queue_step "CLI: Build → Test" bash -c 'cd cli && npm run build && npm test'
   fi
 
-  # Extension: Test → Build (CI order).
   if [ ! -d extension/node_modules ]; then
     printf "${RED}ERROR: extension/node_modules missing — run 'cd extension && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
     failed=$((failed + 1))
     failures+=("Extension: deps missing|")
   else
-    run_step "Extension: Test"   bash -c 'cd extension && npm test'
-    run_step "Extension: Build"  bash -c 'cd extension && npm run build'
+    queue_step "Extension: Test → Build" bash -c 'cd extension && npm test && npm run build'
   fi
+
+  run_batch
+
+  # Serial, after the batch: writes .next/ (see note above).
+  run_step "Build" npx next build
 fi
 
 echo ""

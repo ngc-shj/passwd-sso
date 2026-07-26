@@ -58,11 +58,11 @@ beforeAll(() => {
   // the worst regression available here: with both `run_batch` invocations
   // removed, every test below still passes while pre-pr.sh silently drops from
   // 51 executed checks to 13. Assert the wiring against the full source.
-  const runBatchCalls = src.match(/^run_batch$/gm) ?? [];
+  const runBatchCalls = src.match(/^\s*run_batch\s*$/gm) ?? [];
   expect(
     runBatchCalls.length,
     "pre-pr.sh must invoke run_batch once per queued block — queued-but-never-run steps are silently skipped gates",
-  ).toBe(2);
+  ).toBe(3);
   const queueCalls = src.match(/^\s*queue_step "/gm) ?? [];
   expect(
     queueCalls.length,
@@ -75,7 +75,7 @@ beforeAll(() => {
   // later run_batch.
   const lines = src.split("\n");
   const lastRunBatch = lines.reduce(
-    (acc, line, idx) => (/^run_batch$/.test(line) ? idx : acc),
+    (acc, line, idx) => (/^\s*run_batch\s*$/.test(line) ? idx : acc),
     -1,
   );
   const orphans = lines
