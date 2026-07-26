@@ -153,12 +153,34 @@ if [ "${#candidate_tests[@]}" -gt 0 ]; then
 fi
 
 # lookup <abs-path> → record string ("exists=1 import=1 calls=2 mock=0 redis=1")
-lookup() {
-  awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' <<<"$CLASSIFY_OUT"
+# field  <record> <key> → value (empty when record/key absent)
+#
+# Both are called once per (route x key) and were spawning an awk per call —
+# ~500 processes, the bulk of this gate's runtime. They do plain string
+# splitting, so bash does it in-process. Semantics are unchanged: lookup still
+# matches the FIRST record whose tab-delimited field 1 equals the path exactly,
+# and field still returns the first `key=value` whose key matches exactly.
+# tab_lookup <key> <tsv-text> → field 2 of the first line whose field 1 == key.
+# Shared by lookup() and the AST-count lookups below; same semantics as the
+# `awk -F'\t' '$1 == p { print $2; exit }'` it replaces.
+tab_lookup() {
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      "$1"$'\t'*) printf '%s' "${line#*$'\t'}"; return ;;
+    esac
+  done <<<"$2"
 }
-# field <record> <key> → value (empty when record/key absent)
+lookup() {
+  tab_lookup "$1" "$CLASSIFY_OUT"
+}
 field() {
-  awk -v k="$2" '{ for (i = 1; i <= NF; i++) { split($i, a, "="); if (a[1] == k) { print a[2]; exit } } }' <<<"$1"
+  local kv
+  for kv in $1; do
+    case "$kv" in
+      "$2"=*) printf '%s' "${kv#*=}"; return ;;
+    esac
+  done
 }
 
 # manifest_declared_count <repo-rel-path> → the limiter count declared for that
@@ -169,7 +191,12 @@ field() {
 # 2026-07-19, round 2).
 manifest_declared_count() {
   [ -f "$MANIFEST_FILE" ] || return 0
-  awk -F'\t' -v p="$1" '$1 == p { print $2; exit }' "$MANIFEST_FILE"
+  # Read the manifest once, then reuse it in-process (was: an awk spawn per
+  # route). MANIFEST_FILE does not change during a run.
+  if [ -z "${MANIFEST_TEXT+x}" ]; then
+    MANIFEST_TEXT="$(cat "$MANIFEST_FILE")"
+  fi
+  tab_lookup "$1" "$MANIFEST_TEXT"
 }
 
 # assert_covers_all_limiters <route> <test-rel> <distinct> — fail when a
@@ -519,7 +546,7 @@ if [ -f "$MANIFEST_FILE" ]; then
     if [ -f "$abs_path" ]; then
       grep_count="$(grep -c 'failClosedOnRedisError: true' "$abs_path" || true)"
     fi
-    file_ast_count="$(awk -F'\t' -v p="$abs_path" '$1 == p { print $2; exit }' <<<"$MANIFEST_AST_OUT")"
+    file_ast_count="$(tab_lookup "$abs_path" "$MANIFEST_AST_OUT")"
     [ -n "$file_ast_count" ] || file_ast_count=0
     if [ "$grep_count" -gt "$file_ast_count" ]; then
       echo "MANIFEST_COMMENT_LITERAL: $m_path (grep count $grep_count exceeds AST-authoritative count $file_ast_count — the literal appears in a comment/string; reword it, D4 rule)"
