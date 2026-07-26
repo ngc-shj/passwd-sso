@@ -251,12 +251,6 @@ jobs:
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      # Required in production (env-schema.ts). The E2E job boots a real
-      # production server, so without it instrumentation fails env validation and
-      # the web server never starts. Deliberately DIFFERENT from SHARE_MASTER_KEY
-      # — the whole point of this key is that session auth does not ride on
-      # master-key rotation.
-      SESSION_TOKEN_HMAC_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
       AUTH_URL: "http://localhost:3000"
       VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -485,11 +479,15 @@ jobs:
     env:
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci"
       SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      # Required in production (env-schema.ts). The E2E job boots a real
-      # production server, so without it instrumentation fails env validation and
-      # the web server never starts. Deliberately DIFFERENT from SHARE_MASTER_KEY
-      # — the whole point of this key is that session auth does not ride on
-      # master-key rotation.
+      # Required in production (env-schema.ts). This job boots a real production
+      # server, so without it instrumentation fails env validation and the web
+      # server never starts. Deliberately DIFFERENT from SHARE_MASTER_KEY — the
+      # point of this key is that session auth does not ride on master-key
+      # rotation, so reusing that value here would model the coupling away.
+      #
+      # Set ONLY here, NOT in the app-ci job: session-cache.test.ts asserts the
+      # unset/V1-fallback behaviour, so exporting this job-wide there makes those
+      # tests fail. Unit tests set it per-case instead.
       SESSION_TOKEN_HMAC_KEY: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
       AUTH_URL: "http://localhost:3000"
