@@ -308,10 +308,9 @@ if [ "$RUN_WEB" != "1" ]; then
 fi
 
 # Lint / Typecheck / Test / Build used to run here and at three later points,
-# serially. They are independent pure readers of the working tree, so they now
-# run together in one batch at the end — see "Heavy web steps" below. Their
-# report order is preserved there (Lint, Typecheck, ... Test, ... Build), so
-# output stays diff-comparable with the serial script.
+# serially. They now run through the bounded scheduler at the end of the script
+# instead, staged across two batches according to which of them write shared
+# paths — see "Heavy web steps" below.
 queue_step "Static: env drift check"  npm run check:env-docs
 queue_step "Static: security-matrices drift check" npm run check:security-matrices
 queue_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
@@ -674,9 +673,15 @@ fi
 # fails with an actionable hint if a package's node_modules is absent.
 # ── Heavy web steps ─────────────────────────────────────────────────────────
 # Lint / Typecheck / Test / Build / CLI / Extension are the bulk of a full run
-# (~150s of a ~160s wall clock; the ~40 static gates above are ~11s). They are
-# independent pure readers of the working tree, so they go through the same
-# bounded scheduler.
+# (~150s of a ~160s wall clock; the ~40 static gates above are ~11s), so they
+# go through the same bounded scheduler.
+#
+# Most are pure readers of the working tree and can run in any order. The
+# exceptions are the ones that WRITE, and they are what the staging below is
+# for: `next build` writes .next/ (and Typecheck reads it), CLI: Build writes
+# cli/dist (and CLI: Test reads it), Extension: Build writes its own output.
+# Steps are placed in a batch according to those shared write targets, not
+# merely by how long they take.
 #
 # Ordering constraints are honored by STAGING across two batches, never by
 # chaining steps together — a step that must follow another is queued in the
