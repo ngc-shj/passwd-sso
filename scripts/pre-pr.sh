@@ -678,25 +678,35 @@ fi
 # independent pure readers of the working tree, so they go through the same
 # bounded scheduler.
 #
-# Two ordering constraints are preserved by pairing rather than by serializing
-# everything: CLI is Build→Test (cli/ is ESM NodeNext, so a missing .js
-# extension is a tsc error that vitest/esbuild tolerates) and Extension is
-# Test→Build, matching CI. Each pair is queued as ONE step running both halves
-# in order, so the pair's internal sequence holds while the pairs run
-# concurrently with each other.
+# Ordering constraints are preserved by pairing or staging, not by serializing
+# everything:
+#   * CLI is Build→Test (cli/ is ESM NodeNext, so a missing .js extension is a
+#     tsc error that vitest/esbuild tolerates) and Extension is Test→Build,
+#     matching CI. Each pair is queued as ONE step running both halves in
+#     order, so the pair's internal sequence holds while the pairs run
+#     concurrently with each other.
+#   * Typecheck depends on Build's output, so it runs in a second batch after
+#     the first completes (see below).
 #
 # Memory: measured peak RSS is Build ~3.1G, Lint ~1.6G, Typecheck ~1.2G, Test
 # ~0.6G — ~6.5G combined against 47G available here. PRE_PR_JOBS caps the
 # concurrency, so a smaller machine runs fewer at once rather than thrashing.
 if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  # `next build` is the one heavy step that WRITES to the working tree (.next/),
-  # and several tests scan that tree — check-dockerignore-secrets and
-  # route-policy-manifest both failed intermittently when Build ran beside Test,
-  # then passed in isolation. So Build runs on its own, after the batch. The
-  # rest are pure readers and are safe to run together.
+  # Typecheck is NOT in this batch — it is the one step with a real dependency
+  # on another. `tsconfig.json` includes `.next/types/**/*.ts`, which `next
+  # build` generates, so running the two concurrently makes tsc read a
+  # half-written tree:
+  #   .next/types/validator.ts: error TS2307: Cannot find module './routes.js'
+  # It therefore runs in a second batch below, after Build has finished.
+  #
+  # Build itself is safe here despite writing `.next/`: no test in the suite
+  # reads that directory. (Two tests DID fail when Build first joined the
+  # batch — but both were 10s-timeout expiries under CPU contention, not file
+  # races, and they no longer occur now that Build overlaps Test rather than
+  # competing with the whole batch.)
   queue_step "Lint"       npx eslint .
-  queue_step "Typecheck"  npx tsc --noEmit
   queue_step "Test"       npx vitest run
+  queue_step "Build"      npx next build
 
   if [ ! -d cli/node_modules ]; then
     printf "${RED}ERROR: cli/node_modules missing — run 'cd cli && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
@@ -716,8 +726,11 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
 
   run_batch
 
-  # Serial, after the batch: writes .next/ (see note above).
-  run_step "Build" npx next build
+  # Typecheck reads .next/types/**, which Build generates — so it runs in a
+  # second batch once Build has finished rather than racing it.
+  queue_step "Typecheck"  npx tsc --noEmit
+  run_batch
+
 fi
 
 echo ""

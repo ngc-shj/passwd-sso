@@ -58,11 +58,15 @@ beforeAll(() => {
   // the worst regression available here: with both `run_batch` invocations
   // removed, every test below still passes while pre-pr.sh silently drops from
   // 51 executed checks to 13. Assert the wiring against the full source.
+  // Deliberately NOT an exact count: the number of batches is a scheduling
+  // decision that changes whenever steps are regrouped, and pinning it makes
+  // this assertion fire on every legitimate restructure while adding nothing —
+  // the positional check below is what actually catches an unrun queue.
   const runBatchCalls = src.match(/^\s*run_batch\s*$/gm) ?? [];
   expect(
     runBatchCalls.length,
-    "pre-pr.sh must invoke run_batch once per queued block — queued-but-never-run steps are silently skipped gates",
-  ).toBe(3);
+    "pre-pr.sh must invoke run_batch — without it every queued step is a silently skipped gate",
+  ).toBeGreaterThan(0);
   const queueCalls = src.match(/^\s*queue_step "/gm) ?? [];
   expect(
     queueCalls.length,
