@@ -26,7 +26,7 @@
 # comment that discusses the flag (e.g. writing "the fail-closed opt-in
 # flag" instead of the literal) is the required fix, not a manifest change.
 #
-# 65 entries: 62 route files under src/app/api + 3 non-route lib members
+# 66 entries: 63 route files under src/app/api + 3 non-route lib members
 # (src/auth.config.ts, src/lib/scim/rate-limit.ts,
 # src/lib/security/rate-limiters.ts). Each non-route member is covered by a
 # tier-appropriate shared helper — silent-drop (auth.config magic-link),
@@ -40,7 +40,7 @@
 # (MAPPING_MOCKED_CONTRACT_TEST), or leaving a stale legacy entry after
 # migration (STALE_LEGACY_ENTRY) all fail the gate, not just an edit to the
 # manifest count. Sum of all counts here
-# is 72 (69 across the 62 route files, matching AC4.4's
+# is 74 (71 across the 63 route files, matching AC4.4's
 # EXPECTED_LIMITER_COUNT, + 3 for the lib members) — the gate cross-checks
 # the src/app/api subset sum against EXPECTED_LIMITER_COUNT so the two
 # primitives cannot drift apart silently.

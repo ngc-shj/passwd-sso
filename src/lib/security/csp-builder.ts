@@ -13,8 +13,7 @@ const _isProd = process.env.NODE_ENV === "production";
  *   https://<publicKey>@<host>/<projectId>
  * where <host> is org-specific (e.g. `o123456.ingest.us.sentry.io`).
  * Falling back to the broad wildcard is acceptable when the DSN is
- * unparseable — fail-open is safer than CSP-blocking error reports —
- * but we log so misconfig is visible.
+ * unparseable — fail-open is safer than CSP-blocking error reports.
  */
 function sentryConnectSrc(): string {
   const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
