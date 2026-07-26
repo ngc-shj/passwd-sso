@@ -879,4 +879,336 @@ describe("check-step-up-client-coverage.sh", () => {
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
   });
+
+  // ---------------------------------------------------------------------
+  // Check-6 decision-surface fixtures (xix–xxv).
+  //
+  // Check 6 iterates the cross-product `call sites × manifest ids`. Every
+  // fixture above happens to run that loop with exactly ONE candidate id and a
+  // single-line call site, so the loop's per-id and per-window decisions are
+  // never actually discriminated — a cache that leaked id A's method onto id B,
+  // or that widened a call-site window to whole-file scope, would keep the
+  // suite green. These fixtures pin those decisions directly.
+  //
+  // Each was red-proven against a deliberately-broken copy of the guard before
+  // being committed; the mutation that each one catches is named in its title.
+  // ---------------------------------------------------------------------
+
+  it("(xix) discriminates BY METHOD across two ids sharing a path token", () => {
+    // Two ids, same pathTokens, different methods. The call site is a PUT, so
+    // only widget-put may be reported. Red-proves a hoist that pairs one id's
+    // method with another id's tokens.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+      "widget-post": { method: "POST", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeRoute(
+      "widgets",
+      `// @stepup id:widget-post method:POST\n${STEPUP_CALL}\n`,
+    );
+    // Both ids covered by properly-marked call sites.
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const a = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (await handleStepUpError(a, trigger)) return;",
+        "// @stepup id:widget-post",
+        'const b = await fetchApi("/api/widgets", { method: "POST" });',
+        "if (await handleStepUpError(b, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    // Unmarked PUT call site: matches widget-put only.
+    writeClient(
+      "hooks/use-widget-quick-edit.ts",
+      [
+        "async function quickEdit(id) {",
+        '  const res = await fetchApi(`/api/widgets/${id}`, { method: "PUT" });',
+        "  if (!res.ok) throw new Error('failed');",
+        "}",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("UNMARKED_CALLSITE_CANDIDATE");
+    expect(stdout).toContain("widget-put");
+    // The POST id must NOT be attributed to this PUT call site.
+    expect(stdout).not.toContain("widget-post");
+  });
+
+  it("(xx) scopes the client marker per FILE, not globally", () => {
+    // File A carries the marker; file B does not. Both call the same gated
+    // path+method. Red-proves a `file_marker_ids` cache that leaks A's marker
+    // into B's iteration (which would silently clear B).
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (await handleStepUpError(res, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    writeClient(
+      "components/widget-row.tsx",
+      [
+        "async function save(id) {",
+        '  const res = await fetchApi(`/api/widgets/${id}`, { method: "PUT" });',
+        "  if (!res.ok) throw new Error('failed');",
+        "}",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("UNMARKED_CALLSITE_CANDIDATE");
+    expect(stdout).toContain("widget-row.tsx");
+    // The marked file must not be reported.
+    expect(stdout).not.toContain("widget-card.tsx");
+  });
+
+  it("(xxi) token matching respects the word boundary (prefix id must not match its longer sibling)", () => {
+    // Mirrors a real shape in the live manifest, where 12 token prefix-pairs
+    // exist (e.g. apiPath.tenantBreakglass vs apiPath.tenantBreakglassById).
+    // The call site uses ONLY the longer identifier, so the short id must not
+    // match it. Red-proves dropping the `([^A-Za-z0-9_]|$)` suffix at :537.
+    writePathsManifest({
+      "breakglass-list": {
+        method: "POST",
+        pathTokens: ["apiPath.tenantBreakglass"],
+      },
+      "breakglass-by-id": {
+        method: "POST",
+        pathTokens: ["apiPath.tenantBreakglassById"],
+      },
+    });
+    writeRoute(
+      "tenant/breakglass",
+      `// @stepup id:breakglass-list method:POST\n${STEPUP_CALL}\n`,
+    );
+    writeRoute(
+      "tenant/breakglass/[id]",
+      `// @stepup id:breakglass-by-id method:POST\n${STEPUP_CALL}\n`,
+    );
+    // Cover both ids with marked call sites.
+    writeClient(
+      "components/breakglass-panel.tsx",
+      [
+        "// @stepup id:breakglass-list",
+        'const a = await fetchApi(apiPath.tenantBreakglass, { method: "POST" });',
+        "if (await handleStepUpError(a, trigger)) return;",
+        "// @stepup id:breakglass-by-id",
+        'const b = await fetchApi(apiPath.tenantBreakglassById(x), { method: "POST" });',
+        "if (await handleStepUpError(b, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    // Unmarked call site referencing ONLY the longer identifier.
+    writeClient(
+      "hooks/use-breakglass.ts",
+      [
+        "async function revoke(x) {",
+        '  const res = await fetchApi(apiPath.tenantBreakglassById(x), { method: "POST" });',
+        "  if (!res.ok) throw new Error('failed');",
+        "}",
+        "",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("UNMARKED_CALLSITE_CANDIDATE");
+    expect(stdout).toContain("breakglass-by-id");
+    // The shorter id is a strict prefix of the identifier actually used; the
+    // word-boundary rule must keep it out of the report.
+    expect(stdout).not.toContain("id 'breakglass-list'");
+  });
+
+  it("(xxii) escapes ERE metacharacters in tokens (a literal dot must not act as a wildcard)", () => {
+    // Token contains a `.`; the call site contains the same string with the dot
+    // replaced by `x`. Unescaped, `.` matches `x` and the site is flagged.
+    // Red-proves dropping the escaping at :536.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["API_PATH.WIDGETS"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const res = await fetchApi(API_PATH.WIDGETS, { method: "PUT" });',
+        "if (await handleStepUpError(res, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    // `API_PATHxWIDGETS` matches the token only if the dot stays a wildcard.
+    writeClient(
+      "hooks/use-unrelated.ts",
+      [
+        "async function unrelated() {",
+        '  const res = await fetchApi(API_PATHxWIDGETS, { method: "PUT" });',
+        "  if (!res.ok) throw new Error('failed');",
+        "}",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
+  it("(xxiii) skips fetchApi occurrences inside comments", () => {
+    // A commented-out call site (both `//` and JSDoc `*` forms) is not a real
+    // call site. Red-proves dropping the comment-prefix skip at :491-494.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (await handleStepUpError(res, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    writeClient(
+      "hooks/use-widget-docs.ts",
+      [
+        "/**",
+        ' * Example usage — not a real call site:',
+        ' *   const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        " */",
+        '// const legacy = await fetchApi("/api/widgets/y", { method: "PUT" });',
+        "export const NOTE = 1;",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
+  it("(xxiv) honors the options-window upper bound (method literal at +10 is in scope)", () => {
+    // The `method:` literal sits 10 lines below the fetchApi( line — the exact
+    // upper edge of opt_window. Red-proves narrowing that window (e.g. merging
+    // it with arg_window's +3), which would silently stop flagging this site.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (await handleStepUpError(res, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    writeClient(
+      "hooks/use-widget-slow-edit.ts",
+      [
+        "async function slowEdit(id) {", //           F-1
+        "  const res = await fetchApi(", //           F+0  (call site)
+        "    `/api/widgets/${id}`,", //               F+1  (token, within +3)
+        "    {", //                                   F+2
+        "      headers: buildHeaders(),", //          F+3
+        "      credentials: 'include',", //           F+4
+        "      cache: 'no-store',", //                F+5
+        "      redirect: 'follow',", //               F+6
+        "      referrerPolicy: 'no-referrer',", //    F+7
+        "      keepalive: false,", //                 F+8
+        "      mode: 'cors',", //                     F+9
+        '      method: "PUT",', //                    F+10 (upper edge)
+        "    },", //                                  F+11
+        "  );", //
+        "  return res;",
+        "}",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("UNMARKED_CALLSITE_CANDIDATE");
+    expect(stdout).toContain("use-widget-slow-edit.ts");
+  });
+
+  it("(xxvi) exempt ids never raise UNMARKED_CALLSITE_CANDIDATE", () => {
+    // An exempt id's own accepted call site carries no standard `@stepup id:`
+    // marker by design (its recovery is custom or non-interactive). Check 6
+    // must skip exempt ids entirely — otherwise every exempt id's known call
+    // site is reported as a new gap. No prior fixture reaches this branch:
+    // the only exempt fixture writes a client file with no fetchApi( at all.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    // Exempt via a named custom marker, which must appear in client code.
+    writeFileSync(
+      exemptFile,
+      "widget-put   CUSTOM_WIDGET_RECOVERY  # fixture: bespoke recovery flow, no standard marker\n",
+      "utf8",
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// bespoke recovery path, no @stepup marker by design",
+        "const CUSTOM_WIDGET_RECOVERY = true;",
+        'const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (!res.ok) showBespokeReauth();",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+    expect(stdout).not.toContain("UNMARKED_CALLSITE_CANDIDATE");
+  });
+
+  it("(xxv) honors the suppression-window lower bound (@stepup-path-ok at L-3 suppresses)", () => {
+    // suppress_window spans L-3..L. A suppression comment exactly 3 lines above
+    // the call must still apply. Red-proves narrowing that window.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (await handleStepUpError(res, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    writeClient(
+      "hooks/use-widget-quick-edit.ts",
+      [
+        "async function quickEdit(id) {",
+        "  // @stepup-path-ok id:widget-put confirmed false positive: preview-only path, never mutates in prod", // L-3
+        "  const url = buildUrl(id);", //                                                                          L-2
+        "  const headers = buildHeaders();", //                                                                    L-1
+        '  const res = await fetchApi(`/api/widgets/${id}`, {', //                                                  L (call site)
+        '    method: "PUT",', //                                            L+1 — must stay BELOW: opt_window scans L..L+10 only
+        "  });",
+        "  if (!res.ok) throw new Error('failed');",
+        "}",
+      ].join("\n") + "\n",
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
 });
