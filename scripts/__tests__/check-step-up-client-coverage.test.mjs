@@ -1148,6 +1148,35 @@ describe("check-step-up-client-coverage.sh", () => {
     expect(stdout).toContain("use-widget-slow-edit.ts");
   });
 
+  it("(env-guard) refuses STEPUP_CLIENT_GUARD_* overrides under CI without FIXTURE_MODE", () => {
+    // Every path override can silently green this gate — pointing CLIENT_DIR at
+    // an empty tree leaves nothing to scan. Under CI that can only be accidental
+    // or malicious, so it must fail closed rather than report a green gate.
+    // Same contract as check-gate-selftest-coverage.sh's sec-F6 guard.
+    writePathsManifest({
+      "widget-put": { method: "PUT", pathTokens: ["/api/widgets"] },
+    });
+    writeRoute(
+      "widgets/[id]",
+      `// @stepup id:widget-put method:PUT\n${STEPUP_CALL}\n`,
+    );
+    writeClient(
+      "components/widget-card.tsx",
+      [
+        "// @stepup id:widget-put",
+        'const res = await fetchApi("/api/widgets/x", { method: "PUT" });',
+        "if (await handleStepUpError(res, trigger)) return;",
+      ].join("\n") + "\n",
+    );
+    // Sanity: with the acknowledgement, this same fixture set passes.
+    expect(runGuard({ CI: "true" }).exitCode).toBe(0);
+
+    // Without it, the overrides must be refused outright.
+    const denied = runGuard({ CI: "true", STEPUP_CLIENT_GUARD_FIXTURE_MODE: "" });
+    expect(denied.exitCode).toBe(1);
+    expect(denied.stdout).toContain("ENV_POLLUTION_GUARD");
+  });
+
   it("(xxvi) exempt ids never raise UNMARKED_CALLSITE_CANDIDATE", () => {
     // An exempt id's own accepted call site carries no standard `@stepup id:`
     // marker by design (its recovery is custom or non-interactive). Check 6

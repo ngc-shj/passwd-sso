@@ -118,6 +118,24 @@ PATHS_FILE="${STEPUP_CLIENT_GUARD_PATHS_FILE:-$REPO_ROOT/scripts/checks/stepup-r
 # `!res.ok` block). 40 is that measured max plus generous margin.
 ADJACENCY_WINDOW="${STEPUP_CLIENT_GUARD_WINDOW:-40}"
 
+# Env-pollution guard (same contract as check-gate-selftest-coverage.sh's
+# sec-F6 guard). Every override above can silently green this gate: pointing
+# CLIENT_DIR at an empty directory leaves nothing to scan, and WINDOW=0
+# disables the adjacency check. Those are legitimate for the self-test, which
+# sets them deliberately — but under CI they can only be accidental or
+# malicious, so require an explicit acknowledgement rather than trusting that
+# "production CI uses the defaults".
+if [ "${CI:-}" = "true" ]; then
+  if [ -n "${STEPUP_CLIENT_GUARD_API_DIR:-}" ] || [ -n "${STEPUP_CLIENT_GUARD_CLIENT_DIR:-}" ] || \
+     [ -n "${STEPUP_CLIENT_GUARD_PATH_ROOT:-}" ] || [ -n "${STEPUP_CLIENT_GUARD_EXEMPT_FILE:-}" ] || \
+     [ -n "${STEPUP_CLIENT_GUARD_PATHS_FILE:-}" ] || [ -n "${STEPUP_CLIENT_GUARD_WINDOW:-}" ]; then
+    if [ "${STEPUP_CLIENT_GUARD_FIXTURE_MODE:-}" != "1" ]; then
+      echo "ENV_POLLUTION_GUARD: STEPUP_CLIENT_GUARD_* override set under CI=true without STEPUP_CLIENT_GUARD_FIXTURE_MODE=1 — refusing to run against a possibly-unintended path."
+      exit 1
+    fi
+  fi
+fi
+
 # Client "branch present" tokens (extended regex, OR-joined). The paren is a
 # bracket-expression `[(]` not `\(` so it survives awk's -v un-escaping (a `\(`
 # passed via -v becomes a bare `(` = invalid regex group-open in awk).
