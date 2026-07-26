@@ -211,6 +211,24 @@ run_batch() {
   local -a pids logs
   jobs=$(resolve_jobs)
 
+  # `wait -n` (wait for ANY child) needs bash 4.3+. On bash 3.2 — still the
+  # system bash on macOS, and the version the sibling gates deliberately stay
+  # compatible with — it fails immediately, and a `|| true` would swallow that
+  # and mark a slot free without anything having finished. The throttle would
+  # then be a no-op: measured 6 concurrent children against a cap of 2, i.e.
+  # every queued gate launching at once and PRE_PR_JOBS=1 not serializing.
+  # Fall back to waiting on the OLDEST outstanding job, which is bounded and
+  # correct everywhere, just slightly less eager.
+  # `wait -n` landed in bash 4.3, so the test is ">= 4.3", spelled as
+  # "major > 4" OR "major == 4 AND minor >= 3". Note it is `> 4`, not `>= 4`:
+  # with `>=` the 4.0-4.2 range would wrongly take the `wait -n` path and hit
+  # exactly the runaway described above.
+  local wait_any=0
+  if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3))); then
+    wait_any=1
+  fi
+  local oldest=0
+
   for ((i = 0; i < n; i++)); do
     logs[i]=$(mktemp -t "pre-pr.XXXXXX")
     tempfiles+=("${logs[i]}")
@@ -220,7 +238,16 @@ run_batch() {
     pids[i]=$!
     active=$((active + 1))
     if [ "$active" -ge "$jobs" ]; then
-      wait -n 2>/dev/null || true   # throttle only — status deliberately dropped
+      # Throttle only — the status is deliberately dropped in BOTH branches.
+      # `wait -n` cannot say which job it reaped, so using its status here
+      # would attribute a failure to the wrong step; verdicts are read per
+      # index in the join phase below.
+      if [ "$wait_any" -eq 1 ]; then
+        wait -n 2>/dev/null || true
+      else
+        wait "${pids[oldest]}" 2>/dev/null || true
+        oldest=$((oldest + 1))
+      fi
       active=$((active - 1))
     fi
   done

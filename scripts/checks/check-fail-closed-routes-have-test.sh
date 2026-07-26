@@ -182,8 +182,17 @@ lookup() {
   tab_lookup "$1" "$CLASSIFY_OUT"
 }
 field() {
+  # Split $1 on whitespace WITHOUT globbing: a record value containing `*` or
+  # `?` would otherwise expand against the cwd (verified: `field "pat=*" pat`
+  # returns a filename under `set +f`). Values are digits today, so this is a
+  # latent trap rather than a live bug — but the awk this replaced had no such
+  # exposure, so don't introduce it. Using a local array keeps noglob scoped to
+  # the split itself rather than leaking past an early `return`.
   local kv
-  for kv in $1; do
+  local -a kvs
+  read -r -d '' -a kvs <<<"$1" || true
+
+  for kv in "${kvs[@]}"; do
     # `${kv#*=}` keeps everything after the FIRST `=`, so a hypothetical
     # `key=a=b` yields `a=b`. The awk this replaced used split(...,"=") and
     # returned just `a`. All classifier values are numeric today, so the two

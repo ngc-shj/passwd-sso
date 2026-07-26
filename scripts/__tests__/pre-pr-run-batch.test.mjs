@@ -52,6 +52,53 @@ beforeAll(() => {
   scheduler = src.slice(start, end);
   expect(scheduler).toContain("run_batch()");
   expect(scheduler).toContain("queue_step()");
+
+  // The splice covers the scheduler's DEFINITIONS. Its CALL SITES live far
+  // below SCHED_END, so nothing above notices if they disappear — and that is
+  // the worst regression available here: with both `run_batch` invocations
+  // removed, every test below still passes while pre-pr.sh silently drops from
+  // 51 executed checks to 13. Assert the wiring against the full source.
+  const runBatchCalls = src.match(/^run_batch$/gm) ?? [];
+  expect(
+    runBatchCalls.length,
+    "pre-pr.sh must invoke run_batch once per queued block — queued-but-never-run steps are silently skipped gates",
+  ).toBe(2);
+  const queueCalls = src.match(/^\s*queue_step "/gm) ?? [];
+  expect(
+    queueCalls.length,
+    "expected the static-check blocks to still be queued",
+  ).toBeGreaterThan(30);
+
+  // Counting alone is not enough: a queue_step appended AFTER the final
+  // run_batch keeps both counts valid while that gate never executes. Check
+  // position, not just quantity — every queue_step must be followed by some
+  // later run_batch.
+  const lines = src.split("\n");
+  const lastRunBatch = lines.reduce(
+    (acc, line, idx) => (/^run_batch$/.test(line) ? idx : acc),
+    -1,
+  );
+  const orphans = lines
+    .map((line, idx) => ({ line, idx }))
+    .filter(({ line, idx }) => /^\s*queue_step "/.test(line) && idx > lastRunBatch)
+    .map(({ line, idx }) => `${idx + 1}: ${line.trim()}`);
+  expect(
+    orphans,
+    "queue_step after the final run_batch — these gates are queued but never executed",
+  ).toEqual([]);
+
+  // SCHED_START is matched with indexOf, so an earlier occurrence of the same
+  // literal would relocate the region while both toContain checks still pass.
+  // It appears exactly twice: the declaration, and run_batch's reset.
+  const startOccurrences = src.split(SCHED_START).length - 1;
+  expect(
+    startOccurrences,
+    `"${SCHED_START}" must occur exactly twice (declaration + run_batch reset); a third would relocate the splice`,
+  ).toBe(2);
+
+  // The join shape is only load-bearing under `set -e`; the harness re-declares
+  // it, so pin that pre-pr.sh still sets it rather than letting the two drift.
+  expect(src, "pre-pr.sh must keep set -euo pipefail").toMatch(/^set -euo pipefail$/m);
 });
 
 /** Build a harness around the real scheduler with the given fixture steps. */
@@ -214,7 +261,7 @@ describe("pre-pr.sh bounded-parallel scheduler", () => {
     ["-1", "negative"],
     ["abc", "non-numeric"],
     ["99999", "above the cap"],
-  ])("clamps PRE_PR_JOBS=%s (%s) instead of hanging or forking unbounded", (value) => {
+  ])("still produces correct counts with PRE_PR_JOBS=%s (%s)", (value) => {
     const r = run(
       [
         'queue_step "a" bash -c "exit 0"',
@@ -225,6 +272,141 @@ describe("pre-pr.sh bounded-parallel scheduler", () => {
     );
     expect(r.passed).toBe(1);
     expect(r.failed).toBe(1);
+  });
+
+  // The cases above assert only that the run survives; they pass even with
+  // resolve_jobs' clamp deleted outright, because the throttle's
+  // `wait -n || true` absorbs a nonsense job count. Assert the clamp's RETURN
+  // VALUE so the untrusted-input handling is actually pinned.
+  it("clamps PRE_PR_JOBS to [1, min(nproc,8)] rather than trusting it", () => {
+    const cap = Math.min(
+      Number(spawnSync("nproc", { encoding: "utf8" }).stdout?.trim() || 4),
+      8,
+    );
+    const probe = (value) => {
+      const r = run('resolve_jobs; echo ""', { PRE_PR_JOBS: value });
+      return Number(/^(\d+)/m.exec(r.stdout.trim())?.[1] ?? NaN);
+    };
+    // Nonsense values must not reach the dispatch loop: 0 would make the slot
+    // check `active >= 0` block immediately, and a huge value would fork
+    // unbounded. Every result must land inside [1, cap].
+    //
+    // "-1" is deliberately grouped with the malformed inputs rather than
+    // clamped to 1: the `-` makes it non-numeric to the `*[!0-9]*` pattern, so
+    // it takes the fallback branch. Both outcomes are safe; this pins which one
+    // actually happens so the branch cannot change unnoticed.
+    expect(probe("0")).toBe(1);
+    expect(probe("-1")).toBe(cap);
+    expect(probe("abc")).toBe(cap);
+    expect(probe("")).toBe(cap);
+    expect(probe("99999")).toBe(cap);
+    expect(probe("2")).toBe(Math.min(2, cap));
+    for (const v of ["0", "-1", "abc", "", "99999", "2", "1"]) {
+      const got = probe(v);
+      expect(got, `PRE_PR_JOBS=${v} escaped the clamp`).toBeGreaterThanOrEqual(1);
+      expect(got, `PRE_PR_JOBS=${v} escaped the clamp`).toBeLessThanOrEqual(cap);
+    }
+  });
+
+  it("bounds actual concurrency even when PRE_PR_JOBS asks for far more", () => {
+    // The clamp is only meaningful if it reaches the dispatcher: prove a huge
+    // request does not fork one process per step.
+    const dir = mkdtempSync(join(tmpdir(), "pre-pr-cap-"));
+    const events = join(dir, "events.txt");
+    try {
+      run(
+        [
+          `: > ${events}`,
+          "for i in 1 2 3 4 5 6 7 8 9 10 11 12; do",
+          `  queue_step "j$i" bash -c 'echo S >> ${events}; sleep 0.2; echo E >> ${events}'`,
+          "done",
+          "run_batch >/dev/null 2>&1",
+        ].join("\n"),
+        { PRE_PR_JOBS: "99999" },
+      );
+      let cur = 0;
+      let max = 0;
+      for (const line of readFileSync(events, "utf8").trim().split("\n")) {
+        if (line === "S") max = Math.max(max, ++cur);
+        else cur--;
+      }
+      expect(max).toBeLessThanOrEqual(8);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("round-trips argv containing spaces, quotes and shell metacharacters", () => {
+    // queue_step stores argv via printf %q and run_batch replays it through
+    // `bash -c`. Without %q an argument with a space would split into two, and
+    // a `$` or `;` would be interpreted at replay time.
+    const r = run(
+      [
+        `queue_step "spaced" bash -c 'echo "a b  c"; exit 0'`,
+        `queue_step "metachar" bash -c 'echo "lit: \\$HOME ; rm -rf /"; exit 0'`,
+        "run_batch",
+      ].join("\n"),
+    );
+    expect(r.passed).toBe(2);
+    expect(r.failed).toBe(0);
+    expect(r.stdout).toContain("a b  c");
+    // The literal must survive un-expanded and un-executed.
+    expect(r.stdout).toContain("lit: $HOME ; rm -rf /");
+  });
+
+  it("still bounds concurrency on a shell without `wait -n` (bash 3.2)", () => {
+    // `wait -n` is bash 4.3+. On macOS's system bash 3.2 it fails immediately,
+    // and a swallowed error would free a slot with nothing having finished —
+    // turning the throttle into a no-op (measured 6 concurrent against a cap
+    // of 2 before the fallback existed, with PRE_PR_JOBS=1 not serializing).
+    // Force the fallback branch and prove it still bounds.
+    const forced = scheduler.replace(
+      "if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3))); then",
+      "if false; then",
+    );
+    expect(forced, "version-guard anchor missing — fallback no longer reachable").not.toBe(
+      scheduler,
+    );
+
+    const dir = mkdtempSync(join(tmpdir(), "pre-pr-b32-"));
+    const events = join(dir, "events.txt");
+    const script = join(dir, "h.sh");
+    try {
+      writeFileSync(
+        script,
+        [
+          "#!/usr/bin/env bash",
+          "set -euo pipefail",
+          "RED=''; GREEN=''; BOLD=''; RESET=''",
+          "passed=0; failed=0; failures=(); tempfiles=()",
+          forced,
+          `: > ${events}`,
+          "for i in 1 2 3 4 5 6 7 8; do",
+          `  queue_step "j$i" bash -c 'echo S >> ${events}; sleep 0.25; echo E >> ${events}'`,
+          "done",
+          "run_batch >/dev/null 2>&1",
+          'echo "RESULT passed=$passed failed=$failed"',
+        ].join("\n"),
+        "utf8",
+      );
+      const r = spawnSync("bash", [script], {
+        encoding: "utf8",
+        cwd: REPO_ROOT,
+        env: { ...process.env, PRE_PR_JOBS: "2" },
+        timeout: 60_000,
+      });
+      let cur = 0;
+      let max = 0;
+      for (const line of readFileSync(events, "utf8").trim().split("\n")) {
+        if (line === "S") max = Math.max(max, ++cur);
+        else cur--;
+      }
+      expect(max, "fallback throttle did not bound concurrency").toBeLessThanOrEqual(2);
+      // and it must still run every step and report correctly
+      expect(r.stdout).toContain("RESULT passed=8 failed=0");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("actually runs steps concurrently, bounded by PRE_PR_JOBS", () => {
