@@ -152,36 +152,129 @@ run_step() {
   rm -f "$logfile"
 }
 
+# ── Bounded-parallel batch runner ───────────────────────────────────────────
+# Only the contiguous block of independent static checks below goes through
+# this; everything else keeps using run_step directly. Those checks are pure
+# readers of the working tree (the only two that write anything use their own
+# `mktemp -d`), so they can run concurrently — the block was ~90% of the
+# static phase's wall clock and almost all of it was spent waiting.
+#
+# Contract (each clause exists because the naive version of it is a real bug,
+# verified by probe on bash 5.2):
+#   * counters are mutated ONLY here in the parent shell during replay. A
+#     backgrounded job's writes to `passed`/`failed` are discarded on exit, so
+#     incrementing inside the job silently reports "Passed: 0 / Failed: 0".
+#   * `wait -n` is a THROTTLE ONLY and its status is discarded. It does not say
+#     which job it reaped, so assigning its status to the dispatch loop's index
+#     blames the wrong step: measured 7 0 0 against a truth of 0 0 7, i.e. a
+#     failing gate reported as passing.
+#   * the join reads status per index through an `if`, never a bare
+#     `wait "$pid"`. Under this script's `set -e` a non-zero bare wait kills the
+#     run outright: the remaining gates are never joined and the Results block
+#     never prints, so a single failure silently truncates the gate set.
+#   * every `wait` return value IS that step's status. 127 means the step's
+#     command was not found — never "no such job".
+#   * results replay in declaration order regardless of completion order, so
+#     output stays diff-comparable with the serial path, and each step's log is
+#     printed for PASSES too (the serial path's `tee` shows them, and several
+#     gates print CI-auditable config on success).
+batch_labels=()
+batch_cmds=()
+
+queue_step() {
+  local label="$1"
+  shift
+  batch_labels+=("$label")
+  # Store argv safely for later eval-free replay via bash arrays-of-strings.
+  batch_cmds+=("$(printf '%q ' "$@")")
+}
+
+resolve_jobs() {
+  local want="${PRE_PR_JOBS:-}" cores cap
+  cores=$( { command -v nproc >/dev/null 2>&1 && nproc; } || echo 4)
+  cap=$(( cores < 8 ? cores : 8 ))
+  [ "$cap" -lt 1 ] && cap=1
+  # Untrusted input: anything non-numeric or out of range falls back to the
+  # cap rather than to unbounded (PRE_PR_JOBS=0 would otherwise spin forever).
+  case "$want" in
+    ''|*[!0-9]*) printf '%s' "$cap" ;;
+    *) if [ "$want" -lt 1 ]; then printf '%s' 1
+       elif [ "$want" -gt "$cap" ]; then printf '%s' "$cap"
+       else printf '%s' "$want"; fi ;;
+  esac
+}
+
+run_batch() {
+  local n=${#batch_labels[@]}
+  [ "$n" -eq 0 ] && return 0
+  local jobs i ec active=0
+  local -a pids logs
+  jobs=$(resolve_jobs)
+
+  for ((i = 0; i < n; i++)); do
+    logs[i]=$(mktemp -t "pre-pr.XXXXXX")
+    tempfiles+=("${logs[i]}")
+    # No `tee`, no shared pipe: each job owns its logfile, so nothing
+    # interleaves and no pipeline can mask the exit status.
+    bash -c "${batch_cmds[i]}" >"${logs[i]}" 2>&1 &
+    pids[i]=$!
+    active=$((active + 1))
+    if [ "$active" -ge "$jobs" ]; then
+      wait -n 2>/dev/null || true   # throttle only — status deliberately dropped
+      active=$((active - 1))
+    fi
+  done
+
+  for ((i = 0; i < n; i++)); do
+    if wait "${pids[i]}" 2>/dev/null; then ec=0; else ec=$?; fi
+    printf "${BOLD}▸ %s${RESET}\n" "${batch_labels[i]}"
+    [ -s "${logs[i]}" ] && cat "${logs[i]}"
+    if [ "$ec" -eq 0 ]; then
+      printf "${GREEN}  ✓ %s${RESET}\n\n" "${batch_labels[i]}"
+      passed=$((passed + 1))
+      rm -f "${logs[i]}"
+    else
+      printf "${RED}  ✗ %s${RESET}\n\n" "${batch_labels[i]}"
+      failed=$((failed + 1))
+      failures+=("${batch_labels[i]}|${logs[i]}")
+    fi
+  done
+
+  batch_labels=()
+  batch_cmds=()
+}
+
 echo ""
 printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 
-run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
-run_step "Static: security-doc-exists" bash scripts/checks/check-security-doc-exists.sh
-run_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
-run_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
-run_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
-run_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
-run_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
-run_step "Static: permanent-delete-stepup" bash scripts/checks/check-permanent-delete-stepup.sh
-run_step "Static: step-up-client-coverage" bash scripts/checks/check-step-up-client-coverage.sh
-run_step "Static: passkey-mint-gate" bash scripts/checks/check-passkey-mint-gate.sh
-run_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
-run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
-run_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
-run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
-run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
-run_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
-run_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
-run_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
-run_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
-run_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
-run_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
-run_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
-run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
-run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
+queue_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
+queue_step "Static: security-doc-exists" bash scripts/checks/check-security-doc-exists.sh
+queue_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
+queue_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
+queue_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
+queue_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
+queue_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
+queue_step "Static: permanent-delete-stepup" bash scripts/checks/check-permanent-delete-stepup.sh
+queue_step "Static: step-up-client-coverage" bash scripts/checks/check-step-up-client-coverage.sh
+queue_step "Static: passkey-mint-gate" bash scripts/checks/check-passkey-mint-gate.sh
+queue_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
+queue_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
+queue_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
+queue_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
+queue_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
+queue_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
+queue_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
+queue_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
+queue_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
+queue_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
+queue_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
+queue_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
+queue_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
+queue_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
 # Runs here (ubuntu OpenSSL 3.x), never the macOS iOS job — the .p12 fixtures are
 # -legacy-encrypted and macOS LibreSSL rejects `openssl pkcs12 -legacy`.
-run_step "Static: tls-fixture-expiry" bash scripts/checks/check-tls-fixture-expiry.sh
+queue_step "Static: tls-fixture-expiry" bash scripts/checks/check-tls-fixture-expiry.sh
+run_batch
 
 if [ "$RUN_WEB" != "1" ]; then
   printf "${BOLD}▸ Web steps skipped${RESET}  (no app-filter paths changed — iOS-only diff; set PRE_PR_FORCE_FULL=1 to override)\n\n"
@@ -193,19 +286,20 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   # them), catching mock/type drift that would otherwise rot silently.
   run_step "Typecheck"              npx tsc --noEmit
 fi
-run_step "Static: env drift check"  npm run check:env-docs
-run_step "Static: security-matrices drift check" npm run check:security-matrices
-run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
-run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
-run_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
-run_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
-run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
-run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
-run_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
-run_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
-run_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
-run_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
-run_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
+queue_step "Static: env drift check"  npm run check:env-docs
+queue_step "Static: security-matrices drift check" npm run check:security-matrices
+queue_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
+queue_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
+queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
+queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
+queue_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
+queue_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
+queue_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
+queue_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
+queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
+queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
+queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
+run_batch
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
 # if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
 # required" contract for the static checks above).
