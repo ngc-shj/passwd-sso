@@ -164,10 +164,17 @@ fi
 # Shared by lookup() and the AST-count lookups below; same semantics as the
 # `awk -F'\t' '$1 == p { print $2; exit }'` it replaces.
 tab_lookup() {
-  local line
+  local line rest
   while IFS= read -r line; do
     case "$line" in
-      "$1"$'\t'*) printf '%s' "${line#*$'\t'}"; return ;;
+      "$1"$'\t'*)
+        rest="${line#*$'\t'}"
+        # Field 2 only — stop at the next tab, matching awk '{print $2}'. Live
+        # data is 2-column today, but nothing enforces that, and returning
+        # "v1<tab>v2" for a 3-column row would silently corrupt every caller.
+        printf '%s' "${rest%%$'\t'*}"
+        return
+        ;;
     esac
   done <<<"$2"
 }
@@ -177,6 +184,11 @@ lookup() {
 field() {
   local kv
   for kv in $1; do
+    # `${kv#*=}` keeps everything after the FIRST `=`, so a hypothetical
+    # `key=a=b` yields `a=b`. The awk this replaced used split(...,"=") and
+    # returned just `a`. All classifier values are numeric today, so the two
+    # agree; keeping the whole value is the safer of the two if that ever
+    # changes, since silently truncating at a second `=` would be a bug.
     case "$kv" in
       "$2"=*) printf '%s' "${kv#*=}"; return ;;
     esac
