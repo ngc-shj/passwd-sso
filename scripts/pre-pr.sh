@@ -152,60 +152,179 @@ run_step() {
   rm -f "$logfile"
 }
 
+# ── Bounded-parallel batch runner ───────────────────────────────────────────
+# Only the contiguous block of independent static checks below goes through
+# this; everything else keeps using run_step directly. Those checks are pure
+# readers of the working tree (the only two that write anything use their own
+# `mktemp -d`), so they can run concurrently — the block was ~90% of the
+# static phase's wall clock and almost all of it was spent waiting.
+#
+# Contract (each clause exists because the naive version of it is a real bug,
+# verified by probe on bash 5.2):
+#   * counters are mutated ONLY here in the parent shell during replay. A
+#     backgrounded job's writes to `passed`/`failed` are discarded on exit, so
+#     incrementing inside the job silently reports "Passed: 0 / Failed: 0".
+#   * `wait -n` is a THROTTLE ONLY and its status is discarded. It does not say
+#     which job it reaped, so assigning its status to the dispatch loop's index
+#     blames the wrong step: measured 7 0 0 against a truth of 0 0 7, i.e. a
+#     failing gate reported as passing.
+#   * the join reads status per index through an `if`, never a bare
+#     `wait "$pid"`. Under this script's `set -e` a non-zero bare wait kills the
+#     run outright: the remaining gates are never joined and the Results block
+#     never prints, so a single failure silently truncates the gate set.
+#   * every `wait` return value IS that step's status. 127 means the step's
+#     command was not found — never "no such job".
+#   * results replay in declaration order regardless of completion order, so
+#     output stays diff-comparable with the serial path, and each step's log is
+#     printed for PASSES too (the serial path's `tee` shows them, and several
+#     gates print CI-auditable config on success).
+batch_labels=()
+batch_cmds=()
+
+queue_step() {
+  local label="$1"
+  shift
+  batch_labels+=("$label")
+  # Store argv safely for later eval-free replay via bash arrays-of-strings.
+  batch_cmds+=("$(printf '%q ' "$@")")
+}
+
+resolve_jobs() {
+  local want="${PRE_PR_JOBS:-}" cores cap
+  cores=$( { command -v nproc >/dev/null 2>&1 && nproc; } || echo 4)
+  cap=$(( cores < 8 ? cores : 8 ))
+  [ "$cap" -lt 1 ] && cap=1
+  # Untrusted input: anything non-numeric or out of range falls back to the
+  # cap rather than to unbounded (PRE_PR_JOBS=0 would otherwise spin forever).
+  case "$want" in
+    ''|*[!0-9]*) printf '%s' "$cap" ;;
+    *) if [ "$want" -lt 1 ]; then printf '%s' 1
+       elif [ "$want" -gt "$cap" ]; then printf '%s' "$cap"
+       else printf '%s' "$want"; fi ;;
+  esac
+}
+
+run_batch() {
+  local n=${#batch_labels[@]}
+  [ "$n" -eq 0 ] && return 0
+  local jobs i ec active=0
+  local -a pids logs
+  jobs=$(resolve_jobs)
+
+  # `wait -n` (wait for ANY child) needs bash 4.3+. On bash 3.2 — still the
+  # system bash on macOS, and the version the sibling gates deliberately stay
+  # compatible with — it fails immediately, and a `|| true` would swallow that
+  # and mark a slot free without anything having finished. The throttle would
+  # then be a no-op: measured 6 concurrent children against a cap of 2, i.e.
+  # every queued gate launching at once and PRE_PR_JOBS=1 not serializing.
+  # Fall back to waiting on the OLDEST outstanding job, which is bounded and
+  # correct everywhere, just slightly less eager.
+  # `wait -n` landed in bash 4.3, so the test is ">= 4.3", spelled as
+  # "major > 4" OR "major == 4 AND minor >= 3". Note it is `> 4`, not `>= 4`:
+  # with `>=` the 4.0-4.2 range would wrongly take the `wait -n` path and hit
+  # exactly the runaway described above.
+  local wait_any=0
+  if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 3))); then
+    wait_any=1
+  fi
+  local oldest=0
+
+  for ((i = 0; i < n; i++)); do
+    logs[i]=$(mktemp -t "pre-pr.XXXXXX")
+    tempfiles+=("${logs[i]}")
+    # No `tee`, no shared pipe: each job owns its logfile, so nothing
+    # interleaves and no pipeline can mask the exit status.
+    bash -c "${batch_cmds[i]}" >"${logs[i]}" 2>&1 &
+    pids[i]=$!
+    active=$((active + 1))
+    if [ "$active" -ge "$jobs" ]; then
+      # Throttle only — the status is deliberately dropped in BOTH branches.
+      # `wait -n` cannot say which job it reaped, so using its status here
+      # would attribute a failure to the wrong step; verdicts are read per
+      # index in the join phase below.
+      if [ "$wait_any" -eq 1 ]; then
+        wait -n 2>/dev/null || true
+      else
+        wait "${pids[oldest]}" 2>/dev/null || true
+        oldest=$((oldest + 1))
+      fi
+      active=$((active - 1))
+    fi
+  done
+
+  for ((i = 0; i < n; i++)); do
+    if wait "${pids[i]}" 2>/dev/null; then ec=0; else ec=$?; fi
+    printf "${BOLD}▸ %s${RESET}\n" "${batch_labels[i]}"
+    [ -s "${logs[i]}" ] && cat "${logs[i]}"
+    if [ "$ec" -eq 0 ]; then
+      printf "${GREEN}  ✓ %s${RESET}\n\n" "${batch_labels[i]}"
+      passed=$((passed + 1))
+      rm -f "${logs[i]}"
+    else
+      printf "${RED}  ✗ %s${RESET}\n\n" "${batch_labels[i]}"
+      failed=$((failed + 1))
+      failures+=("${batch_labels[i]}|${logs[i]}")
+    fi
+  done
+
+  batch_labels=()
+  batch_cmds=()
+}
+
 echo ""
 printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 
-run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
-run_step "Static: security-doc-exists" bash scripts/checks/check-security-doc-exists.sh
-run_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
-run_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
-run_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
-run_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
-run_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
-run_step "Static: permanent-delete-stepup" bash scripts/checks/check-permanent-delete-stepup.sh
-run_step "Static: step-up-client-coverage" bash scripts/checks/check-step-up-client-coverage.sh
-run_step "Static: passkey-mint-gate" bash scripts/checks/check-passkey-mint-gate.sh
-run_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
-run_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
-run_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
-run_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
-run_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
-run_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
-run_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
-run_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
-run_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
-run_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
-run_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
-run_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
-run_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
-run_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
+queue_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
+queue_step "Static: security-doc-exists" bash scripts/checks/check-security-doc-exists.sh
+queue_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
+queue_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
+queue_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
+queue_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
+queue_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
+queue_step "Static: permanent-delete-stepup" bash scripts/checks/check-permanent-delete-stepup.sh
+queue_step "Static: step-up-client-coverage" bash scripts/checks/check-step-up-client-coverage.sh
+queue_step "Static: passkey-mint-gate" bash scripts/checks/check-passkey-mint-gate.sh
+queue_step "Static: raw-body-read" bash scripts/checks/check-raw-body-read.sh
+queue_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pinned.sh
+queue_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
+queue_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
+queue_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
+queue_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
+queue_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
+queue_step "Smoke: worker-bundle-boot" bash scripts/checks/check-worker-bundle-smoke.sh
+queue_step "Static: critical-audit-atomic" node scripts/checks/check-critical-audit-atomic.mjs
+queue_step "Static: session-token-hashed" node scripts/checks/check-session-token-hashed.mjs
+queue_step "Static: bound-unknown-ip" node scripts/checks/check-bound-unknown-ip.mjs
+queue_step "Static: publish-toolchain" bash scripts/checks/check-publish-toolchain.sh
+queue_step "Static: ios-no-diagnostic-logging" bash scripts/checks/check-ios-no-diagnostic-logging.sh
+queue_step "Static: ios-authenticated-session-pinning" bash scripts/checks/check-ios-authenticated-session-pinning.sh
 # Runs here (ubuntu OpenSSL 3.x), never the macOS iOS job — the .p12 fixtures are
 # -legacy-encrypted and macOS LibreSSL rejects `openssl pkcs12 -legacy`.
-run_step "Static: tls-fixture-expiry" bash scripts/checks/check-tls-fixture-expiry.sh
+queue_step "Static: tls-fixture-expiry" bash scripts/checks/check-tls-fixture-expiry.sh
+run_batch
 
 if [ "$RUN_WEB" != "1" ]; then
   printf "${BOLD}▸ Web steps skipped${RESET}  (no app-filter paths changed — iOS-only diff; set PRE_PR_FORCE_FULL=1 to override)\n\n"
 fi
 
-if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  run_step "Lint"                   npx eslint .
-  # tsc --noEmit typechecks test files too (vitest does not; next build excludes
-  # them), catching mock/type drift that would otherwise rot silently.
-  run_step "Typecheck"              npx tsc --noEmit
-fi
-run_step "Static: env drift check"  npm run check:env-docs
-run_step "Static: security-matrices drift check" npm run check:security-matrices
-run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
-run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
-run_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
-run_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
-run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
-run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
-run_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
-run_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
-run_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
-run_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
-run_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
+# Lint / Typecheck / Test / Build used to run here and at three later points,
+# serially. They now run through the bounded scheduler at the end of the script
+# instead, staged across two batches according to which of them write shared
+# paths — see "Heavy web steps" below.
+queue_step "Static: env drift check"  npm run check:env-docs
+queue_step "Static: security-matrices drift check" npm run check:security-matrices
+queue_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
+queue_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
+queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
+queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
+queue_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
+queue_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
+queue_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
+queue_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
+queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
+queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
+queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
+run_batch
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
 # if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
 # required" contract for the static checks above).
@@ -517,9 +636,10 @@ if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
   fi
 fi
 if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  # Clear vitest cache to match CI's clean environment
+  # Clear vitest cache to match CI's clean environment. This is a repo-global
+  # mutation, so it must happen BEFORE the heavy batch starts — not inside a
+  # job racing the Extension test that shares extension/node_modules/.vitest.
   rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
-  run_step "Test"                   npx vitest run
 fi
 
 # Integration tests on refactor branches touching auth/DB modules.
@@ -542,9 +662,7 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ] && \
   fi
 fi
 
-if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  run_step "Build"                  npx next build
-fi
+# Build is dispatched in the heavy batch below, not here.
 
 # Multi-package build + test — mirror CI's "CLI: Build → Test" and
 # "Extension: Test → Build" jobs so a package-level break (e.g. an ESM .js
@@ -553,27 +671,96 @@ fi
 # `xcodebuild` on macos-latest and is not reproducible in this local gate.
 # pre-pr does NOT `npm ci` (slow/destructive); it reuses installed deps and
 # fails with an actionable hint if a package's node_modules is absent.
+# ── Heavy web steps ─────────────────────────────────────────────────────────
+# Lint / Typecheck / Test / Build / CLI / Extension are the bulk of a full run
+# (~150s of a ~160s wall clock; the ~40 static gates above are ~11s), so they
+# go through the same bounded scheduler.
+#
+# Most are pure readers of the working tree and can run in any order. The
+# exceptions are the ones that WRITE, and they are what the staging below is
+# for: `next build` writes .next/ (and Typecheck reads it), CLI: Build writes
+# cli/dist (and CLI: Test reads it), Extension: Build writes its own output.
+# Steps are placed in a batch according to those shared write targets, not
+# merely by how long they take.
+#
+# Ordering constraints are honored by STAGING across two batches, never by
+# chaining steps together — a step that must follow another is queued in the
+# later batch, so it still runs and reports even when the earlier one fails:
+#
+#   batch 1: Lint, Test, Build, CLI: Build,  Extension: Test
+#   batch 2:       Typecheck,   CLI: Test,   Extension: Build
+#
+#   * CLI is Build→Test (cli/ is ESM NodeNext, so a missing .js extension is a
+#     tsc TS2835 error that vitest/esbuild tolerate) and Extension is
+#     Test→Build — matching the CI job names.
+#   * Typecheck reads .next/types/**, which Build generates.
+#
+# Do NOT collapse a pair into one `a && b` job to express the order: `&&` skips
+# the second half whenever the first fails, so a broken CLI build would leave
+# CLI Test unevaluated. That is the same truncated-gate-run failure the join
+# phase above is written to avoid, and pre-pr-run-batch.test.mjs pins it.
+#
+# Memory: measured peak RSS is Build ~3.1G, Lint ~1.6G, Typecheck ~1.2G, Test
+# ~0.6G — ~6.5G combined against 47G available here. PRE_PR_JOBS caps the
+# concurrency, so a smaller machine runs fewer at once rather than thrashing.
 if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
-  # CLI: Build → Test (CI order — tsc must run first; cli/ is ESM NodeNext, so a
-  # missing .js extension is a tsc TS2835 error that vitest/esbuild tolerates).
+  # Typecheck is NOT in this batch — it is the one step with a real dependency
+  # on another. `tsconfig.json` includes `.next/types/**/*.ts`, which `next
+  # build` generates, so running the two concurrently makes tsc read a
+  # half-written tree:
+  #   .next/types/validator.ts: error TS2307: Cannot find module './routes.js'
+  # It therefore runs in a second batch below, after Build has finished.
+  #
+  # Build itself is safe here despite writing `.next/`: no test in the suite
+  # reads that directory. (Two tests DID fail when Build first joined the
+  # batch — but both were 10s-timeout expiries under CPU contention, not file
+  # races, and they no longer occur now that Build overlaps Test rather than
+  # competing with the whole batch.)
+  queue_step "Lint"       npx eslint .
+  queue_step "Test"       npx vitest run
+  queue_step "Build"      npx next build
+
+  # CLI is Build→Test and Extension is Test→Build (CI order). Each pair is
+  # SPLIT ACROSS THE TWO BATCHES rather than chained with `&&` in one job:
+  # `&&` would skip the second half whenever the first fails, so a broken CLI
+  # build would leave CLI Test unevaluated — the same "truncated gate run"
+  # the serial script never had, where all four were independent run_steps.
+  # Staging keeps the required order while both halves always run and report.
+  cli_ok=0
   if [ ! -d cli/node_modules ]; then
     printf "${RED}ERROR: cli/node_modules missing — run 'cd cli && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
     failed=$((failed + 1))
     failures+=("CLI: deps missing|")
   else
-    run_step "CLI: Build"  bash -c 'cd cli && npm run build'
-    run_step "CLI: Test"   bash -c 'cd cli && npm test'
+    cli_ok=1
+    queue_step "CLI: Build"  bash -c 'cd cli && npm run build'
   fi
 
-  # Extension: Test → Build (CI order).
+  ext_ok=0
   if [ ! -d extension/node_modules ]; then
     printf "${RED}ERROR: extension/node_modules missing — run 'cd extension && npm ci' (pre-pr does not auto-install)${RESET}\n\n" >&2
     failed=$((failed + 1))
     failures+=("Extension: deps missing|")
   else
-    run_step "Extension: Test"   bash -c 'cd extension && npm test'
-    run_step "Extension: Build"  bash -c 'cd extension && npm run build'
+    ext_ok=1
+    queue_step "Extension: Test"  bash -c 'cd extension && npm test'
   fi
+
+  run_batch
+
+  # Second batch: steps that must observe the first batch's output.
+  #   Typecheck  — reads .next/types/**, which Build generates.
+  #   CLI: Test  — runs against cli/dist from CLI: Build.
+  #   Extension: Build — CI runs it after Extension: Test.
+  queue_step "Typecheck"  npx tsc --noEmit
+  if [ "$cli_ok" = "1" ]; then
+    queue_step "CLI: Test"  bash -c 'cd cli && npm test'
+  fi
+  if [ "$ext_ok" = "1" ]; then
+    queue_step "Extension: Build"  bash -c 'cd extension && npm run build'
+  fi
+  run_batch
+
 fi
 
 echo ""

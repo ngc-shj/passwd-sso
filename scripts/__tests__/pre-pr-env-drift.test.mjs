@@ -52,9 +52,16 @@ describe("pre-pr.sh env drift wiring (T18)", () => {
       "utf8",
     );
 
-    // CT9: soft pattern — asserts the drift-check step is wired via run_step
-    // with `npm run check:env-docs` but tolerates small label text changes,
-    // so a cosmetic rename does not silently regress the wiring check.
-    expect(prePrContent).toMatch(/run_step[\s\S]{0,120}check:env-docs/);
+    // CT9: soft pattern — asserts the drift-check step is wired as a step with
+    // `npm run check:env-docs` but tolerates small label text changes, so a
+    // cosmetic rename does not silently regress the wiring check.
+    //
+    // Matches either dispatcher: steps run serially via `run_step` or are
+    // queued via `queue_step` for the bounded-parallel batch. Anchoring on
+    // `run_step` alone silently passed after this step moved to `queue_step`,
+    // because an unrelated later `run_step` fell inside the 120-char window.
+    expect(prePrContent).toMatch(
+      /(?:run_step|queue_step)[\s\S]{0,120}check:env-docs/,
+    );
   });
 });
