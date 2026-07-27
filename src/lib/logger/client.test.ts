@@ -14,9 +14,9 @@ describe("clientLogWarn / clientLogError", () => {
 
   it("writes the event to console.warn exactly once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV);
+    clientLogWarn(EV, { namespace: opaque("Settings") });
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith(EV);
+    expect(warn).toHaveBeenCalledWith(EV, { namespace: "Settings" });
   });
 
   it("writes the event to console.error exactly once", () => {
@@ -103,26 +103,43 @@ describe("client logger value-safety", () => {
     vi.restoreAllMocks();
   });
 
-  it("rejects a free-form string as the event — enforced by the compiler", () => {
-    // The load-bearing assertion for the whole design: `@ts-expect-error` fails
-    // the BUILD when the line stops erroring, so widening the parameter back to
-    // `string` breaks typecheck rather than passing silently.
+  it("rejects free-form events, unlisted keys, and cross-event payloads", () => {
+    // These are COMPILE-time assertions. `@ts-expect-error` fails the build when
+    // a line stops erroring, so a regression breaks typecheck instead of passing
+    // silently — a runtime assertion structurally cannot observe a parameter
+    // type. Both prior versions of this test were proven inadequate by mutation:
+    // one checked only the shape of the enum VALUES, the next constrained only
+    // the FIRST parameter and stayed green when the payload type was reverted.
     //
-    // An earlier version of this test only checked the SHAPE of the enum values
-    // and stayed green through exactly that regression — verified by mutation.
-    // A runtime assertion structurally cannot observe a parameter type.
+    // The calls live in a never-invoked function so the directives are checked
+    // by tsc while nothing runs — the arguments are deliberately invalid, and
+    // executing them would throw for reasons unrelated to what is being pinned.
+    const typeOnly = () => {
+      // @ts-expect-error arbitrary strings must not be accepted as an event id
+      clientLogWarn("arbitrary.event", {});
+      // @ts-expect-error the same holds for the error level
+      clientLogError("arbitrary.event", {});
 
-    // @ts-expect-error arbitrary strings must not be accepted as an event id
-    clientLogWarn("arbitrary.event");
-    // @ts-expect-error the same holds for the error level
-    clientLogError("arbitrary.event", {});
+      const interpolated = `injected ${"secret"}`;
+      // @ts-expect-error a template literal is the exact bypass this type closes
+      clientLogWarn(interpolated, {});
 
-    const interpolated = `injected ${"secret"}`;
-    // @ts-expect-error a template literal is the exact bypass this type closes
-    clientLogWarn(interpolated);
+      clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED, {
+        code: CLIENT_ERROR_CODE.UNKNOWN,
+        // @ts-expect-error `otp` is not in this event's payload
+        otp: 123456,
+      });
 
-    // Reached only if the three lines above compiled as errors.
-    expect(true).toBe(true);
+      clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED, {
+        // @ts-expect-error this payload belongs to a different event
+        namespace: opaque("Settings"),
+      });
+
+      // @ts-expect-error every payload has a required key, so it cannot be omitted
+      clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED);
+    };
+
+    expect(typeOnly).toBeTypeOf("function");
   });
 
   it("emits opaque values as plain strings, not wrapper objects", () => {

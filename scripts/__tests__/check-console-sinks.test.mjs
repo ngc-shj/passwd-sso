@@ -93,18 +93,17 @@ describe("check-console-sinks", () => {
 
   it("rejects the sink disappearing from client.ts entirely", () => {
     // Guards the inverse failure: a gate that finds nothing must not read as OK.
+    // `fields` is required, so each sink has exactly one console call.
     patch(
       "src/lib/logger/client.ts",
       "console.warn(event, redact(fields));",
       "void redact(fields);",
     );
-    patch("src/lib/logger/client.ts", "console.warn(event);", ";");
     patch(
       "src/lib/logger/client.ts",
       "console.error(event, redact(fields));",
       "void redact(fields);",
     );
-    patch("src/lib/logger/client.ts", "console.error(event);", ";");
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/expected at least one console call/);

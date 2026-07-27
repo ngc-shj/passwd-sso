@@ -96,22 +96,26 @@ export function redact(fields: Record<string, ClientLogValue>): EmittedFields {
  * which fields exist, so `{ otp: 123456 }` and `{ detail: opaque(secret) }`
  * both typechecked. An unlisted key is now an error.
  *
+ * `fields` is required, not optional. Every declared payload has at least one
+ * required key, so an optional parameter let `clientLogError(EVENT)` compile
+ * with the payload simply absent. If an event ever legitimately carries no
+ * fields, widen this to a conditional rest tuple rather than making the
+ * parameter optional for all of them.
+ *
  * `CLIENT_REDACT_KEYS` still runs beneath this as the sink-side layer, for the
  * cases the types cannot see (a cast, a call from untyped JS, a future widening).
  */
 export function clientLogWarn<E extends ClientLogEvent>(
   event: E,
-  fields?: ClientLogPayloads[E],
+  fields: ClientLogPayloads[E],
 ): void {
-  if (fields) console.warn(event, redact(fields));
-  else console.warn(event);
+  console.warn(event, redact(fields));
 }
 
 /** See {@link clientLogWarn} on why both parameters are constrained. */
 export function clientLogError<E extends ClientLogEvent>(
   event: E,
-  fields?: ClientLogPayloads[E],
+  fields: ClientLogPayloads[E],
 ): void {
-  if (fields) console.error(event, redact(fields));
-  else console.error(event);
+  console.error(event, redact(fields));
 }
