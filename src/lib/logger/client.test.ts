@@ -83,6 +83,12 @@ describe("clientLogWarn / clientLogError", () => {
  *    spellings left over.
  */
 describe("client logger value-safety", () => {
+  const EV = CLIENT_LOG_EVENT.I18N_NAMESPACE_MISSING;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("rejects a free-form string as the event — enforced by the compiler", () => {
     // The load-bearing assertion for the whole design: `@ts-expect-error` fails
     // the BUILD when the line stops erroring, so widening the parameter back to
@@ -103,6 +109,26 @@ describe("client logger value-safety", () => {
 
     // Reached only if the three lines above compiled as errors.
     expect(true).toBe(true);
+  });
+
+  it("emits opaque values as plain strings, not wrapper objects", () => {
+    // The brand is a type-level marker only. An earlier version wrapped the
+    // value in `{ __opaque }`, which contradicted "flat values only" and
+    // changed the field shape every downstream log consumer sees.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    clientLogWarn(EV, { teamId: opaque("team-1") });
+
+    const fields = warn.mock.calls[0][1] as Record<string, unknown>;
+    expect(fields.teamId).toBe("team-1");
+    expect(typeof fields.teamId).toBe("string");
+  });
+
+  it("truncates an opaque value that outgrew its bound", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    clientLogWarn(EV, { teamId: opaque("x".repeat(200)) });
+
+    const fields = warn.mock.calls[0][1] as Record<string, unknown>;
+    expect(String(fields.teamId)).toHaveLength(64);
   });
 
   it("keeps event ids free of anywhere an interpolated value could hide", () => {

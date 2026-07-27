@@ -49,15 +49,26 @@ export type ClientLogEnum = ClientErrorCode | ClientLogStage;
 /**
  * An explicitly bounded string. Construct with {@link opaque}, whose contract
  * is: the value contains no user input, no server text, and no URL query.
+ *
+ * Branded with a module-private symbol rather than a visible property. An
+ * earlier version used `{ readonly __opaque: string }`, which had three
+ * problems: the emitted log value became an object (contradicting "flat values
+ * only" and changing the field shape downstream consumers see), and the shape
+ * was public, so `{ __opaque: `token=${secret}` }` assigned cleanly and skipped
+ * the truncation entirely. The symbol is not exported, so the brand cannot be
+ * produced structurally — `opaque()` is the only way in — and at runtime the
+ * value stays an ordinary string.
  */
-export type Opaque = { readonly __opaque: string };
+declare const opaqueBrand: unique symbol;
+
+export type Opaque = string & { readonly [opaqueBrand]: true };
 
 /**
  * Mark a string as safe to log. Truncates as a backstop — an id that grew into
  * a serialized blob still cannot flood the console.
  */
 export function opaque(value: string, maxLength = 64): Opaque {
-  return { __opaque: value.slice(0, maxLength) };
+  return value.slice(0, maxLength) as Opaque;
 }
 
 /**
