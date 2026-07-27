@@ -10,16 +10,25 @@
  *   - `@/lib/security/csp-builder` warns at module scope when a production
  *     build ignores `CSP_MODE`.
  *
- * This module exists so the `no-console` override lands on a file that cannot
- * see a secret, rather than on `env.ts`, which holds every secret in the
- * process.
+ * This module exists so the `no-console` override lands on a file that holds no
+ * secret itself, rather than on `env.ts`, which holds every secret in the
+ * process. Note what that does and does not buy: THIS FILE cannot see a secret,
+ * but the callers assemble `message`, and `env.ts` assembles it with all of
+ * `process.env` in scope. Moving the override moved the lint exemption, not the
+ * risk.
  *
- * Caller contract: a message may name a variable and may echo a *non-secret*
- * value back to the operator (`CSP_MODE="dev"` is the operator's own setting,
- * drawn from a two-value enum). It must never carry a credential, key, token,
- * connection string, or `result.data` from env parsing. The env banner honors
- * this by building only from Zod issue paths and messages — variable names,
- * not values.
+ * Caller contract: a message must be built from string literals, closed-union
+ * values, and numbers. It must never carry a credential, key, token, connection
+ * string, an arbitrary env value, or `result.data` from env parsing — including
+ * a value being reported as *rejected*, which is arbitrary operator input
+ * precisely because it failed validation.
+ *
+ * The contract is enforced, not merely documented:
+ * `scripts/checks/check-boot-stderr-callers.mjs` walks every call site and
+ * fails the build on an interpolation it cannot prove bounded. That gate exists
+ * because `check-console-sinks` guards only the shape of the `console.error`
+ * call below — a caller passing `bootStderr(`token=${t}`)` was verified to pass
+ * both that gate and `eslint` with exit 0.
  */
 
 export function bootStderr(message: string): void {

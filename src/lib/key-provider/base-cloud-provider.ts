@@ -151,7 +151,11 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
     return Buffer.from(hex, "hex");
   }
 
-  private logStaleWarning(name: string, elapsedSec: number, err: unknown): void {
+  // `name` is KeyName, not string: it is the only caller-varying value
+  // interpolated into the bootStderr message below, and bootStderr writes to a
+  // raw console with no redaction. A closed union keeps that interpolation
+  // provably free of secrets; `string` left it to the caller to get right.
+  private logStaleWarning(name: KeyName, elapsedSec: number, err: unknown): void {
     // Dynamic import to avoid bundling pino/node:async_hooks into SSR bundles
     void import("@/lib/logger").then(({ default: log }) => {
       log.warn(

@@ -99,8 +99,24 @@ describe("csp-builder", () => {
       expect(header).not.toContain("'unsafe-inline'");
       expect(header).toContain("nonce-p-nonce");
       expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('CSP_MODE="dev" is ignored in production builds'),
+        expect.stringContaining("CSP_MODE is set to an unsupported value"),
       );
+    });
+
+    it("does not echo the rejected CSP_MODE value to stderr", async () => {
+      // The rejected value is arbitrary operator input — it reaches the warning
+      // precisely BECAUSE it is not one of the two accepted modes — and
+      // bootStderr writes to a raw console with no redaction.
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CSP_MODE", "s3cr3t-looking-value");
+      const { bootStderr } = await import("@/lib/boot-stderr");
+      const warn = vi.mocked(bootStderr);
+      warn.mockClear();
+      const { buildCspHeader } = await import("./csp-builder");
+      buildCspHeader("p-nonce");
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).not.toContain("s3cr3t-looking-value");
     });
   });
 

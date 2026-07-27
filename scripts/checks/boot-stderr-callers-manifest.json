@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "Files allowed to call bootStderr with a message the AST gate cannot prove",
+    "secret-free. Empty by design: all three current call sites build their",
+    "message from string literals, a closed union (KeyName), and numbers.",
+    "",
+    "Adding an entry means accepting a raw, unredacted console write whose",
+    "content is only guaranteed by review. Prefer restructuring the call to use",
+    "a closed type over adding an exemption here.",
+    "",
+    "Stale entries fail the gate: an exemption for a file that no longer calls",
+    "bootStderr hides the next real one."
+  ],
+  "exempt_files": {}
+}
