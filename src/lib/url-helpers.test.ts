@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { CLIENT_LOG_EVENT } from "@/lib/logger/client";
 
 /**
  * BASE_PATH is evaluated at module load time from process.env.NEXT_PUBLIC_BASE_PATH.
@@ -62,17 +63,16 @@ describe("url-helpers (no basePath)", () => {
   });
 
   it("withBasePath warns when path does not start with /", async () => {
-    // The offending path travels in `fields`, not interpolated into the
-    // message: only `fields` passes through the redaction denylist, and a path
-    // can carry a token in its query string.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { withBasePath } = await import("@/lib/url-helpers");
 
     withBasePath("api/test");
 
+    // The path itself is deliberately NOT logged — it is caller-supplied and a
+    // query string can carry a token. Only the leading segment is emitted.
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('path should start with "/"'),
-      { path: "api/test" },
+      CLIENT_LOG_EVENT.BASE_PATH_MALFORMED,
+      { firstSegment: "api" },
     );
   });
 

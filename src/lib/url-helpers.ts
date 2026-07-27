@@ -1,4 +1,4 @@
-import { clientLogWarn } from "@/lib/logger/client";
+import { clientLogWarn, CLIENT_LOG_EVENT } from "@/lib/logger/client";
 
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -51,7 +51,12 @@ export const isHttps = (process.env.AUTH_URL ?? "http://localhost:3000").startsW
  */
 export function withBasePath(path: string): string {
   if (process.env.NODE_ENV !== "production" && path && !path.startsWith("/")) {
-    clientLogWarn("withBasePath: path should start with \"/\"", { path });
+    // The path itself is never logged: it is caller-supplied and can carry a
+    // token in its query string. The first segment is enough to locate the
+    // offending call, and it is taken before any "?" so no query survives.
+    clientLogWarn(CLIENT_LOG_EVENT.BASE_PATH_MALFORMED, {
+      firstSegment: path.split(/[?#/]/)[0].slice(0, 32),
+    });
   }
   return `${BASE_PATH}${path}`;
 }

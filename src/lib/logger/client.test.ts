@@ -1,32 +1,35 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
+import { readFileSync, existsSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { clientLogWarn, clientLogError } from "./client";
 import { CLIENT_REDACT_KEYS, REDACTED } from "./redact-keys";
+import { CLIENT_LOG_EVENT } from "./client-events";
 
 describe("clientLogWarn / clientLogError", () => {
+  // Any member works; the point is the API takes an enumerated id, not a string.
+  const EV = CLIENT_LOG_EVENT.I18N_NAMESPACE_MISSING;
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("writes the message to console.warn exactly once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn("boom");
+    clientLogWarn(EV);
     expect(warn).toHaveBeenCalledOnce();
-    expect(warn).toHaveBeenCalledWith("boom");
+    expect(warn).toHaveBeenCalledWith(EV);
   });
 
   it("writes the message to console.error exactly once", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    clientLogError("boom");
+    clientLogError(EV);
     expect(error).toHaveBeenCalledOnce();
-    expect(error).toHaveBeenCalledWith("boom");
+    expect(error).toHaveBeenCalledWith(EV);
   });
 
   it("passes non-sensitive fields through untouched", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn("m", { teamId: "team-1", status: 403, ok: false, extra: null });
-    expect(warn).toHaveBeenCalledWith("m", {
+    clientLogWarn(EV, { teamId: "team-1", status: 403, ok: false, extra: null });
+    expect(warn).toHaveBeenCalledWith(EV, {
       teamId: "team-1",
       status: 403,
       ok: false,
@@ -36,8 +39,8 @@ describe("clientLogWarn / clientLogError", () => {
 
   it("redacts a secret passed as a bare string — the flat-scalar type alone does not stop this", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn("m", { token: "super-secret-value" });
-    expect(warn).toHaveBeenCalledWith("m", { token: REDACTED });
+    clientLogWarn(EV, { token: "super-secret-value" });
+    expect(warn).toHaveBeenCalledWith(EV, { token: REDACTED });
     // The point of the assertion: the value must not survive anywhere in the call.
     expect(JSON.stringify(warn.mock.calls)).not.toContain("super-secret-value");
   });
@@ -49,8 +52,8 @@ describe("clientLogWarn / clientLogError", () => {
       CLIENT_REDACT_KEYS.map((k) => [k, `leaked-${k}`]),
     );
 
-    clientLogWarn("m", fields);
-    clientLogError("m", fields);
+    clientLogWarn(EV, fields);
+    clientLogError(EV, fields);
 
     for (const key of CLIENT_REDACT_KEYS) {
       expect(warn.mock.calls[0][1]).toMatchObject({ [key]: REDACTED });
@@ -61,8 +64,88 @@ describe("clientLogWarn / clientLogError", () => {
 
   it("redacts client-only identity keys the server logger does not cover", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn("m", { email: "a@example.test", userId: "u-1" });
-    expect(warn).toHaveBeenCalledWith("m", { email: REDACTED, userId: REDACTED });
+    clientLogWarn(EV, { email: "a@example.test", userId: "u-1" });
+    expect(warn).toHaveBeenCalledWith(EV, { email: REDACTED, userId: REDACTED });
+  });
+});
+
+/**
+ * Guards the two Medium findings from the pre-merge security review.
+ *
+ * 1. A key-name denylist inspects KEYS, so a secret embedded in a VALUE
+ *    ("authentication failed: password=hunter2", "/api?token=…") passes
+ *    straight through. The fix is upstream: no caller may put free-form text
+ *    into a field, so the tests below pin that every production call site emits
+ *    bounded values only.
+ * 2. The message channel is closed by the type system rather than by a lint
+ *    rule — an ESLint selector on the callee name was bypassable by an aliased
+ *    import, a variable, a concatenation, or a wrapper. A type has no such
+ *    spellings left over.
+ */
+describe("client logger value-safety", () => {
+  it("only accepts enumerated event ids, never a free-form string", () => {
+    // A compile-time property, asserted here so the intent survives a refactor
+    // that might otherwise widen the parameter back to `string`.
+    const events: string[] = Object.values(CLIENT_LOG_EVENT);
+    expect(events.length).toBeGreaterThan(0);
+    for (const id of events) {
+      // Every id is a dotted, lowercase, punctuation-free token — no room for
+      // an interpolated value to hide in one.
+      expect(id).toMatch(/^[a-z0-9_]+(\.[a-z0-9_]+)+$/);
+    }
+  });
+
+  it("classifies errors by shape, never by message or cause", async () => {
+    const { toClientErrorCode, CLIENT_ERROR_CODE } = await import("./client-events");
+    const secret = "password=hunter2";
+
+    const err = new Error(`authentication failed: ${secret}`);
+    err.cause = new Error(`inner ${secret}`);
+
+    const code = toClientErrorCode(err);
+    expect(code).toBe(CLIENT_ERROR_CODE.UNKNOWN);
+    // The whole point: no part of the message or cause survives into the code.
+    expect(code).not.toContain("hunter2");
+    expect(Object.values(CLIENT_ERROR_CODE)).toContain(code);
+  });
+
+  it("maps recognized DOMException names without reading their messages", async () => {
+    const { toClientErrorCode, CLIENT_ERROR_CODE } = await import("./client-events");
+    const cases: [string, string][] = [
+      ["AbortError", CLIENT_ERROR_CODE.ABORTED],
+      ["NotAllowedError", CLIENT_ERROR_CODE.NOT_ALLOWED],
+      ["InvalidStateError", CLIENT_ERROR_CODE.INVALID_STATE],
+      ["OperationError", CLIENT_ERROR_CODE.DECRYPT],
+    ];
+    for (const [name, expected] of cases) {
+      expect(toClientErrorCode(new DOMException("leaked-secret", name))).toBe(expected);
+    }
+  });
+
+  it("no production call site passes free-form error text into a field", () => {
+    // The defect class, pinned at its source rather than per-call-site: a
+    // reviewer adding `error: e.message` to any clientLog* call reds this.
+    const SRC = resolve(__dirname, "../..");
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === "__tests__" || entry.name === "node_modules") continue;
+          walk(full);
+          continue;
+        }
+        if (!/\.tsx?$/.test(entry.name) || /\.test\./.test(entry.name)) continue;
+        const src = readFileSync(full, "utf8");
+        for (const call of src.matchAll(/clientLog(?:Warn|Error)\(([\s\S]{0,400}?)\n\s*\}\);/g)) {
+          if (/\.message\b|String\(\s*e|describeUnknownError/.test(call[1])) {
+            offenders.push(full.replace(`${SRC}/`, ""));
+          }
+        }
+      }
+    };
+    walk(SRC);
+    expect(offenders).toEqual([]);
   });
 });
 

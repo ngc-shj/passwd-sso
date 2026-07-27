@@ -13,6 +13,10 @@
  */
 
 import { CLIENT_REDACT_KEYS, REDACTED } from "./redact-keys";
+import type { ClientLogEvent } from "./client-events";
+
+export { CLIENT_LOG_EVENT, CLIENT_ERROR_CODE, toClientErrorCode } from "./client-events";
+export type { ClientLogEvent, ClientErrorCode } from "./client-events";
 
 /**
  * Flat scalars only. A nested object cannot be redacted without traversing it,
@@ -32,18 +36,19 @@ function redact(fields: ClientLogFields): ClientLogFields {
 }
 
 /**
- * `message` MUST be a constant string — it is emitted verbatim and is the one
- * channel redaction cannot cover. Every variable value belongs in `fields`,
- * which is redacted by key name. Interpolating a caller-supplied value into the
- * message (a path, a URL, an error string) routes it around the denylist.
+ * `event` is a `ClientLogEvent`, not a `string`. The message channel is emitted
+ * verbatim and is the one thing redaction cannot cover, so it is closed by the
+ * type system rather than by a lint rule: a template literal, a variable, or a
+ * concatenation simply does not assign. Variable data goes in `fields`, which is
+ * redacted by key name.
  */
-export function clientLogWarn(message: string, fields?: ClientLogFields): void {
-  if (fields) console.warn(message, redact(fields));
-  else console.warn(message);
+export function clientLogWarn(event: ClientLogEvent, fields?: ClientLogFields): void {
+  if (fields) console.warn(event, redact(fields));
+  else console.warn(event);
 }
 
-/** See {@link clientLogWarn} on the constant-message requirement. */
-export function clientLogError(message: string, fields?: ClientLogFields): void {
-  if (fields) console.error(message, redact(fields));
-  else console.error(message);
+/** See {@link clientLogWarn} on why `event` is not a string. */
+export function clientLogError(event: ClientLogEvent, fields?: ClientLogFields): void {
+  if (fields) console.error(event, redact(fields));
+  else console.error(event);
 }

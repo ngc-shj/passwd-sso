@@ -1,5 +1,5 @@
 import type { AbstractIntlMessages } from "next-intl";
-import { clientLogWarn } from "@/lib/logger/client";
+import { clientLogWarn, CLIENT_LOG_EVENT } from "@/lib/logger/client";
 
 /**
  * Pick a subset of top-level namespaces from the full messages object.
@@ -14,7 +14,7 @@ export function pickMessages(
     if (ns in messages) {
       picked[ns] = messages[ns];
     } else if (process.env.NODE_ENV === "development") {
-      clientLogWarn("[pickMessages] namespace not found in messages", { namespace: ns });
+      clientLogWarn(CLIENT_LOG_EVENT.I18N_NAMESPACE_MISSING, { namespace: ns });
     }
   }
   return picked;

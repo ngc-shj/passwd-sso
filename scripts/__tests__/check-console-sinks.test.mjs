@@ -61,8 +61,8 @@ describe("check-console-sinks", () => {
   it("rejects fields reaching console without redact()", () => {
     patch(
       "src/lib/logger/client.ts",
-      "console.warn(message, redact(fields))",
-      "console.warn(message, fields)",
+      "console.warn(event, redact(fields))",
+      "console.warn(event, fields)",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
@@ -95,16 +95,16 @@ describe("check-console-sinks", () => {
     // Guards the inverse failure: a gate that finds nothing must not read as OK.
     patch(
       "src/lib/logger/client.ts",
-      "console.warn(message, redact(fields));",
+      "console.warn(event, redact(fields));",
       "void redact(fields);",
     );
-    patch("src/lib/logger/client.ts", "console.warn(message);", ";");
+    patch("src/lib/logger/client.ts", "console.warn(event);", ";");
     patch(
       "src/lib/logger/client.ts",
-      "console.error(message, redact(fields));",
+      "console.error(event, redact(fields));",
       "void redact(fields);",
     );
-    patch("src/lib/logger/client.ts", "console.error(message);", ";");
+    patch("src/lib/logger/client.ts", "console.error(event);", ";");
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/expected at least one console call/);

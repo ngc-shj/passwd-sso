@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { InlineDetailData } from "@/types/entry";
 import { VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
-import { clientLogError } from "@/lib/logger/client";
+import { clientLogError, CLIENT_LOG_EVENT, toClientErrorCode } from "@/lib/logger/client";
 
 interface UsePasswordEntryDetailOpts {
   getDetail: (id: string) => Promise<InlineDetailData>;
@@ -76,8 +76,8 @@ export function usePasswordEntryDetail(
         // Dev-only: this is the vault decrypt path, so the error text must not
         // reach a production browser console. Keep this gate.
         if (process.env.NODE_ENV === "development") {
-          clientLogError("[usePasswordEntryDetail] getDetail error", {
-            error: wrapped.message,
+          clientLogError(CLIENT_LOG_EVENT.VAULT_ENTRY_DETAIL_FAILED, {
+            code: toClientErrorCode(wrapped),
           });
         }
         setErrorState({ id: entryId, err: wrapped });

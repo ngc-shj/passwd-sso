@@ -106,25 +106,6 @@ const eslintConfig = defineConfig([
     },
   },
   {
-    // The client logger redacts `fields` by key name but emits `message`
-    // verbatim, so an interpolated message routes a value around the denylist.
-    // Keep variable data in `fields` — enforced, not just documented.
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
-    rules: {
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector:
-            "CallExpression[callee.name=/^clientLog(Warn|Error)$/] > TemplateLiteral:first-child[expressions.length>0]",
-          message:
-            "clientLogWarn/clientLogError take a CONSTANT message; only `fields` is redacted. " +
-            "Move interpolated values into the second argument.",
-        },
-      ],
-    },
-  },
-  {
     // The two sanctioned console sinks. Neither can see a secret: client.ts
     // redacts by denylist before writing; boot-stderr.ts takes a plain string
     // and exists so this exemption does NOT land on src/lib/env.ts, which holds

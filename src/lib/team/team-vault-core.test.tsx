@@ -2,9 +2,13 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clientLogWarn, clientLogError } from "@/lib/logger/client";
+import { clientLogWarn, clientLogError, CLIENT_LOG_EVENT } from "@/lib/logger/client";
 
-vi.mock("@/lib/logger/client", () => ({
+// Partial mock: the two sink functions are stubbed so calls can be asserted,
+// but CLIENT_LOG_EVENT and toClientErrorCode keep their real values — asserting
+// against a stubbed event id would prove nothing about what production emits.
+vi.mock("@/lib/logger/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/logger/client")>()),
   clientLogWarn: vi.fn(),
   clientLogError: vi.fn(),
 }));
@@ -313,9 +317,11 @@ describe("team-vault-core", () => {
     });
 
     expect(key).toBeNull();
+    // "forbidden" is not in the API_ERROR vocabulary, so it logs as "other"
+    // rather than echoing a server-supplied string into a browser console.
     expect(warnSpy).toHaveBeenCalledWith(
-      "[getTeamEncryptionKey] member-key request failed",
-      expect.objectContaining({ teamId: "team-1", status: 403, error: "forbidden" }),
+      CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_REQUEST_FAILED,
+      expect.objectContaining({ teamId: "team-1", status: 403, error: "other" }),
     );
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
   });
@@ -337,12 +343,15 @@ describe("team-vault-core", () => {
       await result.current.getTeamEncryptionKey("team-1");
     });
 
-    // Asserts the FIELD, not a substring of an interpolated string — a
-    // strictly stronger check than the pre-logger form it replaces.
+    // Asserts fields, not a substring of an interpolated string. `code` is a
+    // closed vocabulary — the exception's message and cause never appear.
     expect(errorSpy).toHaveBeenCalledWith(
-      "[getTeamEncryptionKey] failed",
+      CLIENT_LOG_EVENT.TEAM_ENCRYPTION_KEY_FAILED,
       expect.objectContaining({ teamId: "team-1", stage: "parse_member_key" }),
     );
+    const loggedFields = errorSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect(Object.keys(loggedFields)).not.toContain("error");
+    expect(loggedFields.code).toBeTypeOf("string");
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
   });
 

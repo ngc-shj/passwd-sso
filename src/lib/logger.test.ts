@@ -34,20 +34,18 @@ describe("logger module", () => {
   });
 
   it("uses AUDIT_LOG_APP_NAME env var as app name when set", async () => {
-    process.env.AUDIT_LOG_APP_NAME = "custom-app";
+    vi.stubEnv("AUDIT_LOG_APP_NAME", "custom-app");
     const mod = await import("@/lib/logger");
     // Logger is already created with the env var at module load time.
     // The module exports are not recreated; just assert the module loads cleanly.
     expect(mod.default).toBeDefined();
-    delete process.env.AUDIT_LOG_APP_NAME;
   });
 
   it("uses LOG_LEVEL env var to control minimum log level", async () => {
-    process.env.LOG_LEVEL = "warn";
+    vi.stubEnv("LOG_LEVEL", "warn");
     const mod = await import("@/lib/logger");
     // The level is applied at instantiation; module should load without error.
     expect(mod.default.level).toBe("warn");
-    delete process.env.LOG_LEVEL;
   });
 
   it("requestContext.getStore() returns undefined outside of run()", async () => {

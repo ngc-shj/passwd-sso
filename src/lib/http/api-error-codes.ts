@@ -243,6 +243,21 @@ export const API_ERROR = {
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
 
+const API_ERROR_VALUES: ReadonlySet<string> = new Set(Object.values(API_ERROR));
+
+/**
+ * Narrow a value read off a response body to a known error code.
+ *
+ * A `typeof x === "string"` check alone leaves free text, which matters when the
+ * value is about to be logged client-side: a browser console is readable by
+ * page scripts and extensions, so an echoed server string is an uncontrolled
+ * sink. Callers that log should fall back to a fixed placeholder rather than
+ * emitting an unrecognized value.
+ */
+export function isKnownApiError(value: unknown): value is ApiErrorCode {
+  return typeof value === "string" && API_ERROR_VALUES.has(value);
+}
+
 /**
  * Default HTTP status for each error code.
  *

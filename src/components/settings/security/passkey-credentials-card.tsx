@@ -35,7 +35,7 @@ import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
-import { clientLogError } from "@/lib/logger/client";
+import { clientLogError, CLIENT_LOG_EVENT, toClientErrorCode } from "@/lib/logger/client";
 import {
   isWebAuthnSupported,
   startPasskeyRegistration,
@@ -256,10 +256,10 @@ export function PasskeyCredentialsCard() {
             return;
         }
       }
-      // Narrowed to the message: a WebAuthn DOMException carries UA-specific
-      // fields, and the whole object cannot be redacted key-by-key.
-      clientLogError("[WebAuthn] Registration failed", {
-        error: err instanceof Error ? err.message : "unknown error",
+      // Normalized to a code: a WebAuthn DOMException's message is UA-specific
+      // free text, and a key-name denylist cannot inspect what is inside a value.
+      clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED, {
+        code: toClientErrorCode(err),
       });
       toast.error(t("registerError"));
     } finally {
