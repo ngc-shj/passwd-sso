@@ -137,7 +137,7 @@ describe("check-boot-diagnostic-shape", () => {
     // applied without a check means envVarName(secret) compiles and passes.
     patch(
       "src/lib/boot-events.ts",
-      "  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
       "  return raw as EnvVarName;",
     );
     const { code, output } = runGate();
@@ -233,18 +233,95 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/may import only/);
   });
 
+  it("rejects `typeof process.env.X` smuggled in as a property type", () => {
+    // The TypeQuery branch exists for `typeof BOOT_EVENT.X`. It used to return
+    // true for ANY `typeof <expr>`, so `detail: typeof process.env.AUTH_SECRET`
+    // — which resolves to `string | undefined` — passed the gate, the compiler,
+    // render's process check and the console sink gate.
+    patch(
+      "src/lib/boot-events.ts",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED }",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED; detail: typeof process.env.AUTH_SECRET }",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/property `detail`/);
+  });
+
+  it("rejects a discriminant naming a BOOT_EVENT member that does not exist", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED }",
+      "  | { event: typeof BOOT_EVENT.NOT_A_REAL_MEMBER }",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/property `event`/);
+  });
+
+  it("rejects envVarName taking the allowlist as a parameter", () => {
+    // The fail-open that replaced the shape predicate: a membership test is
+    // only as trustworthy as the set it tests against, so a caller-supplied set
+    // means `envVarName(secret, new Set([secret]))` prints the secret.
+    patch(
+      "src/lib/boot-events.ts",
+      "export function envVarName(raw: string): EnvVarName {\n  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "export function envVarName(raw: string, declared: ReadonlySet<string>): EnvVarName {\n  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/caller-supplied allowlist/);
+  });
+
+  it("rejects the declared-name set no longer coming from the env schema", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      'import { getSchemaShape } from "@/lib/env-schema";',
+      "const getSchemaShapeStub = () => ({});",
+    );
+    patch("src/lib/boot-events.ts", "Object.keys(getSchemaShape())", "Object.keys(getSchemaShapeStub())");
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/not derived from `@\/lib\/env-schema`/);
+  });
+
+  it("rejects a set built elsewhere while the schema import is left in place", () => {
+    // The residual an import-existence check cannot see: keep the import, build
+    // the set from something else. Substring and import-presence checks both
+    // pass; only tying `Object.keys(...)` to the imported binding catches it.
+    patch(
+      "src/lib/boot-events.ts",
+      "Object.keys(getSchemaShape())",
+      'Object.keys({ ANYTHING: 1, [process.env.AUTH_SECRET ?? ""]: 1 })',
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/does not build its set from/);
+  });
+
+  it("accepts the schema accessor imported under an alias", () => {
+    // Resolution is on the binding, not the spelling, so a rename stays green.
+    patch(
+      "src/lib/boot-events.ts",
+      'import { getSchemaShape } from "@/lib/env-schema";',
+      'import { getSchemaShape as schemaShape } from "@/lib/env-schema";',
+    );
+    patch("src/lib/boot-events.ts", "Object.keys(getSchemaShape())", "Object.keys(schemaShape())");
+    expect(runGate().code).toBe(0);
+  });
+
   it("rejects envVarName validating shape instead of membership", () => {
     // The defect round 2 caught: /^[A-Za-z_][A-Za-z0-9_]{0,63}$/ matches a
     // 64-char hex master key, an AKIA… id, and an api_… token. A predicate over
     // a value's form cannot answer a question about its origin.
     patch(
       "src/lib/boot-events.ts",
-      "export function envVarName(raw: string, declared: ReadonlySet<string>): EnvVarName {\n  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
-      "export function envVarName(raw: string): EnvVarName {\n  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/takes no allowlist parameter|does not test membership/);
+    expect(output).toMatch(/does not test membership/);
   });
 
   it("fails when BootDiagnostic is deleted entirely", () => {

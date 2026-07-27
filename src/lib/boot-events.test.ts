@@ -2,17 +2,16 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { BOOT_EVENT, envVarName, type BootDiagnostic } from "./boot-events";
 import { bootStderr } from "./boot-stderr";
 
-const DECLARED = new Set(["DATABASE_URL", "SHARE_MASTER_KEY", "NODE_ENV"]);
-
 describe("envVarName", () => {
   it("admits a name the schema declares", () => {
-    expect(envVarName("SHARE_MASTER_KEY", DECLARED)).toBe("SHARE_MASTER_KEY");
+    expect(envVarName("SHARE_MASTER_KEY")).toBe("SHARE_MASTER_KEY");
+    expect(envVarName("DATABASE_URL")).toBe("DATABASE_URL");
   });
 
   it("rejects a name the schema does not declare", () => {
-    expect(envVarName("NOT_A_REAL_VAR", DECLARED)).toBe("<unnamed>");
-    expect(envVarName("", DECLARED)).toBe("<unnamed>");
-    expect(envVarName("0", DECLARED)).toBe("<unnamed>");
+    expect(envVarName("NOT_A_REAL_VAR")).toBe("<unnamed>");
+    expect(envVarName("")).toBe("<unnamed>");
+    expect(envVarName("0")).toBe("<unnamed>");
   });
 
   it("rejects identifier-shaped secret VALUES", () => {
@@ -20,15 +19,17 @@ describe("envVarName", () => {
     // these satisfies /^[A-Za-z_][A-Za-z0-9_]{0,63}$/ — the check an earlier
     // version used and called "validated" — so shape alone would have printed
     // a master key to unredacted stderr.
-    expect(envVarName("a".repeat(64), DECLARED)).toBe("<unnamed>");
-    expect(envVarName("AKIAIOSFODNN7EXAMPLE", DECLARED)).toBe("<unnamed>");
-    expect(envVarName("api_9f2c7ba4e1d84c0f", DECLARED)).toBe("<unnamed>");
+    expect(envVarName("a".repeat(64))).toBe("<unnamed>");
+    expect(envVarName("AKIAIOSFODNN7EXAMPLE")).toBe("<unnamed>");
+    expect(envVarName("api_9f2c7ba4e1d84c0f")).toBe("<unnamed>");
   });
 
-  it("rejects a value even when it happens to look like a declared name", () => {
-    // Membership is decided against the caller's set, so an empty set admits
-    // nothing at all — the failure direction is closed.
-    expect(envVarName("SHARE_MASTER_KEY", new Set())).toBe("<unnamed>");
+  it("takes no allowlist argument, so a caller cannot choose the trust anchor", () => {
+    // The fail-open this replaced: with `envVarName(raw, declared)` the caller
+    // supplied the set, so `envVarName(secret, new Set([secret]))` type-checked
+    // and printed the secret. A membership test is only as trustworthy as the
+    // set it tests against.
+    expect(envVarName).toHaveLength(1);
   });
 });
 
@@ -47,7 +48,7 @@ describe("bootStderr rendering", () => {
   it("renders the env banner from declared variable names", () => {
     const out = capture({
       event: BOOT_EVENT.ENV_VALIDATION_FAILED,
-      variables: [envVarName("DATABASE_URL", DECLARED), envVarName("SHARE_MASTER_KEY", DECLARED)],
+      variables: [envVarName("DATABASE_URL"), envVarName("SHARE_MASTER_KEY")],
     });
     expect(out).toContain("ENVIRONMENT VARIABLE VALIDATION FAILED");
     expect(out).toContain("DATABASE_URL");
@@ -103,8 +104,9 @@ describe("bootStderr rendering", () => {
         elapsedSec: 1,
       });
 
-      // @ts-expect-error the allowlist argument is required, so a bare string cannot be branded
-      envVarName(process.env.AUTH_SECRET ?? "");
+      // Note: `secret as EnvVarName` DOES compile — a brand is nominal against
+      // structural forging, not against a deliberate assertion. That residual is
+      // review-visible by design and is not something a directive can pin here.
     };
     expect(typeOnly).toBeTypeOf("function");
   });

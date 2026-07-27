@@ -324,3 +324,65 @@ payload type and the sink's own render body.
 
 Round 3 not warranted: no finding remains open, and the remaining risk surface
 is now enforced by the type system rather than by detection.
+
+---
+
+# Round 3
+
+External re-review of the Round 2 fixes found two High fail-opens on the NEW
+boundary. Both were real and are closed.
+
+## R3-1 [High] The caller supplied `envVarName`'s trust anchor
+
+Round 2 replaced shape validation with membership — but took the allowlist as a
+PARAMETER, which moved the fail-open rather than closing it:
+
+```ts
+envVarName(secret, new Set([secret]))   // type-checks, prints the secret
+```
+
+A membership test is only as trustworthy as the set it tests against, so the set
+cannot be an input. `envVarName(raw)` now derives it internally from
+`getSchemaShape()` (memoized). `@/lib/env-schema` is the side-effect-free half of
+env handling and imports only zod + constants, so there is no cycle and no boot
+cost. The gate now requires exactly one parameter and rejects a caller-supplied
+allowlist explicitly.
+
+- Modified: `src/lib/boot-events.ts:70`, `src/lib/env.ts:47`
+
+## R3-2 [High] `TypeQuery` accepted unconditionally
+
+The branch existed for the `typeof BOOT_EVENT.X` discriminant but returned true
+for every `typeof <expr>`. `detail: typeof process.env.AUTH_SECRET` resolves to
+`string | undefined` and passed the shape gate, the compiler, render's `process`
+check, and the console-sink gate — a complete path from caller to raw stderr.
+
+Now restricted to `/^typeof BOOT_EVENT\.([A-Za-z0-9_]+)$/` where the member must
+exist on the `BOOT_EVENT` object, and only on the `event` property.
+
+- Modified: `scripts/checks/check-boot-diagnostic-shape.mjs:212`
+
+## R3-3 [Non-blocking, adopted] Schema derivation pinned structurally
+
+The reviewer noted the schema-origin check rested on import presence plus a
+`.has(` substring, so leaving a near-unused import in place while building the
+set elsewhere would pass. This is the same weakness that a `getSchemaShapeStub`
+had already defeated once during Round 2 implementation. Closed with AST: the
+imported binding is resolved (alias included) and must be the callee inside
+`Object.keys(...)` within `declared()`.
+
+- Modified: `scripts/checks/check-boot-diagnostic-shape.mjs:149`
+
+## Round 3 verification
+
+`npx vitest run` 987 files / 13108 tests, exit 0. `npx next build` exit 0.
+`npx tsc --noEmit` exit 0. `bash scripts/pre-pr.sh` 62/62, exit 0. Shape-gate
+self-test 23 cases, including one asserting an ALIASED schema import still
+passes (proving resolution is binding-based, not spelling-based).
+
+## Known residual (accepted, review-visible)
+
+`secret as EnvVarName` compiles. A brand is nominal against structural forging,
+not against a deliberate assertion. Closing it would need a cast scan over three
+type names — a closed enumeration, so it would not reintroduce the taint-analysis
+class — but it is not done here. Recorded rather than silently carried.

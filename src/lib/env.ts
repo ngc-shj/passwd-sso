@@ -42,12 +42,11 @@ function parseEnv(): Env {
     // Deduplicated on the full path, not on the resolved name: two distinct
     // paths that both fail the allowlist stay two entries, so several problems
     // cannot collapse into a single `<unnamed>` line.
-    const declared = new Set(Object.keys(getSchemaShape()));
     const paths = [...new Set(result.error.issues.map((issue) => issue.path.join(".")))];
 
     bootStderr({
       event: BOOT_EVENT.ENV_VALIDATION_FAILED,
-      variables: paths.map((path) => envVarName(path, declared)),
+      variables: paths.map(envVarName),
     });
 
     // The thrown Error keeps the full per-issue detail. It travels the normal

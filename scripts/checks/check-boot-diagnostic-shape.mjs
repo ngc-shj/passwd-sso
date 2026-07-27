@@ -116,30 +116,78 @@ if (events) {
   if (!ctor) {
     failures.push(`${EVENTS_FILE}: constructor \`envVarName\` is gone`);
   } else {
-    // Membership, not shape.
+    // Membership against a set the CALLER CANNOT CHOOSE.
     //
-    // A brand that asserts without checking is the `opaque()` failure mode
-    // recorded elsewhere in this repo. But a SHAPE check is not enough either,
-    // and this gate previously accepted one: the constructor tested
-    // `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/`, which every identifier-shaped secret
-    // this repo handles satisfies — a 64-char hex master key, an `AKIA…` id, an
-    // `api_…` token. A predicate over a value's FORM cannot answer a question
-    // about its ORIGIN. So require an allowlist parameter and a membership test.
-    const takesAllowlist = ctor
-      .getParameters()
-      .some((p) => /ReadonlySet|Set<|readonly string\[\]/.test(p.getTypeNode()?.getText() ?? ""));
-    const body = ctor.getBody()?.getText() ?? "";
-    if (!takesAllowlist) {
+    // Two lessons, both learned the hard way. A brand that asserts without
+    // checking is the `opaque()` failure mode. A SHAPE check is no better: the
+    // constructor once tested `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/`, which every
+    // identifier-shaped secret this repo handles satisfies — a 64-char hex
+    // master key, an `AKIA…` id, an `api_…` token. A predicate over a value's
+    // FORM cannot answer a question about its ORIGIN.
+    //
+    // The fix for that took the allowlist as a PARAMETER, which merely moved the
+    // fail-open: `envVarName(secret, new Set([secret]))` type-checks and prints
+    // the secret. A membership test is only as trustworthy as the set it tests
+    // against, so the set must come from the schema, not from an argument.
+    const params = ctor.getParameters();
+    if (params.length !== 1) {
       failures.push(
-        `${EVENTS_FILE}: envVarName takes no allowlist parameter — a shape predicate cannot ` +
-          `distinguish a variable NAME from an identifier-shaped secret VALUE`,
+        `${EVENTS_FILE}: envVarName takes ${params.length} parameters; expected exactly 1 — ` +
+          `a caller-supplied allowlist lets the constrained code choose its own trust anchor`,
       );
     }
+    const body = ctor.getBody()?.getText() ?? "";
     if (!body.includes(".has(")) {
       failures.push(
-        `${EVENTS_FILE}: envVarName does not test membership of the declared set — a brand ` +
-          `applied without that check means \`envVarName(secret, …)\` passes through`,
+        `${EVENTS_FILE}: envVarName does not test membership — a brand applied without that ` +
+          `check means \`envVarName(secret)\` passes through`,
       );
+    }
+    // The set must be BUILT FROM the schema accessor, verified structurally.
+    //
+    // Two weaker versions of this check were tried and both were defeated. A
+    // substring search for `getSchemaShape` matched a local
+    // `getSchemaShapeStub`. Checking only that the import EXISTS is defeated by
+    // leaving the import in place while `declared()` builds a different set —
+    // the import goes unused-ish and nothing notices. So resolve the imported
+    // binding (alias included) and require it to be the thing `Object.keys` is
+    // called on inside `declared()`.
+    const schemaAccessors = new Set();
+    for (const d of events.getImportDeclarations()) {
+      if (d.getModuleSpecifierValue() !== "@/lib/env-schema") continue;
+      for (const n of d.getNamedImports()) {
+        if (["getSchemaShape", "envObject"].includes(n.getName())) {
+          schemaAccessors.add((n.getAliasNode() ?? n.getNameNode()).getText());
+        }
+      }
+    }
+
+    if (schemaAccessors.size === 0) {
+      failures.push(
+        `${EVENTS_FILE}: the declared-name set is not derived from \`@/lib/env-schema\` — ` +
+          `membership must be checked against names the schema itself declares`,
+      );
+    } else {
+      const declaredFn = events.getFunction("declared");
+      if (!declaredFn) {
+        failures.push(`${EVENTS_FILE}: no \`declared()\` builder for the allowed-name set`);
+      } else {
+        const buildsFromSchema = declaredFn
+          .getDescendantsOfKind(SyntaxKind.CallExpression)
+          .some((call) => {
+            if (call.getExpression().getText() !== "Object.keys") return false;
+            const arg = call.getArguments()[0];
+            if (!arg || arg.getKind() !== SyntaxKind.CallExpression) return false;
+            return schemaAccessors.has(arg.getExpression().getText());
+          });
+        if (!buildsFromSchema) {
+          failures.push(
+            `${EVENTS_FILE}: declared() does not build its set from ` +
+              `\`Object.keys(<schema accessor>())\` — an import left in place while the set ` +
+              `comes from somewhere else would otherwise pass`,
+          );
+        }
+      }
     }
   }
 }
@@ -198,29 +246,65 @@ function importedClosedNames(sf) {
   return closed;
 }
 
-function isAllowedPropertyType(sf, node, closedNames) {
+/** The member names actually declared on the BOOT_EVENT const object. */
+function bootEventMembers(sf) {
+  const names = new Set();
+  const decl = sf.getVariableDeclaration("BOOT_EVENT");
+  const init = decl?.getInitializer();
+  const obj =
+    init?.getKind() === SyntaxKind.AsExpression ? init.getExpression() : init;
+  for (const prop of obj?.getDescendantsOfKind(SyntaxKind.PropertyAssignment) ?? []) {
+    names.add(prop.getName());
+  }
+  return names;
+}
+
+function isAllowedPropertyType(sf, node, closedNames, propName, eventMembers) {
   if (!node) return false;
   const kind = node.getKind();
   const text = node.getText();
 
   if (ALLOWED_PRIMITIVES.has(text)) return true;
-  // `typeof BOOT_EVENT.ENV_VALIDATION_FAILED` — the discriminant.
-  if (kind === SyntaxKind.TypeQuery) return true;
+
+  // `typeof BOOT_EVENT.ENV_VALIDATION_FAILED` — the discriminant, and ONLY that.
+  //
+  // This branch previously returned true for every TypeQuery, which is any
+  // `typeof <expr>` at all. `detail: typeof process.env.AUTH_SECRET` is a
+  // TypeQuery, resolves to `string | undefined`, and passed — so a caller could
+  // hand the sink a secret and render would print it, through every gate. The
+  // branch exists for one shape; it now admits only that shape, and only on the
+  // property it exists for.
+  if (kind === SyntaxKind.TypeQuery) {
+    if (propName !== "event") return false;
+    const m = /^typeof\s+BOOT_EVENT\.([A-Za-z0-9_]+)$/.exec(text);
+    return m !== null && eventMembers.has(m[1]);
+  }
+
   // A literal union written inline.
   if (kind === SyntaxKind.LiteralType) return true;
   if (
     kind === SyntaxKind.UnionType &&
-    node.getTypeNodes().every((n) => isAllowedPropertyType(sf, n, closedNames))
+    node
+      .getTypeNodes()
+      .every((n) => isAllowedPropertyType(sf, n, closedNames, propName, eventMembers))
   ) {
     return true;
   }
   // `readonly X[]` / `X[]`.
   if (kind === SyntaxKind.ArrayType) {
-    return isAllowedPropertyType(sf, node.getElementTypeNode(), closedNames);
+    return isAllowedPropertyType(
+      sf,
+      node.getElementTypeNode(),
+      closedNames,
+      propName,
+      eventMembers,
+    );
   }
   if (node.getKind() === SyntaxKind.TypeOperator) {
     const inner = node.getTypeNode?.();
-    return inner ? isAllowedPropertyType(sf, inner, closedNames) : false;
+    return inner
+      ? isAllowedPropertyType(sf, inner, closedNames, propName, eventMembers)
+      : false;
   }
   // A named alias, either declared here or resolved one hop through an import.
   if (kind === SyntaxKind.TypeReference) {
@@ -235,6 +319,10 @@ if (events) {
     failures.push(`${EVENTS_FILE}: type \`BootDiagnostic\` is gone`);
   } else {
     const closedNames = importedClosedNames(events);
+    const eventMembers = bootEventMembers(events);
+    if (eventMembers.size === 0) {
+      failures.push(`${EVENTS_FILE}: BOOT_EVENT declares no members — cannot verify discriminants`);
+    }
     const node = diagnostic.getTypeNode();
     const members =
       node?.getKind() === SyntaxKind.UnionType ? node.getTypeNodes() : node ? [node] : [];
@@ -314,7 +402,9 @@ if (events) {
       }
       for (const prop of props) {
         const propType = prop.getTypeNode();
-        if (!isAllowedPropertyType(events, propType, closedNames)) {
+        if (
+          !isAllowedPropertyType(events, propType, closedNames, prop.getName(), eventMembers)
+        ) {
           failures.push(
             `${EVENTS_FILE}:${prop.getStartLineNumber()}: property \`${prop.getName()}\` is typed ` +
               `\`${propType?.getText() ?? "<inferred>"}\`, which is not a closed shape — ` +

@@ -31,6 +31,7 @@
  */
 
 import type { KeyName, ProviderName } from "@/lib/key-provider/types";
+import { getSchemaShape } from "@/lib/env-schema";
 
 export const BOOT_EVENT = {
   ENV_VALIDATION_FAILED: "boot.env_validation_failed",
@@ -57,6 +58,9 @@ declare const envVarNameBrand: unique symbol;
  * type-checked and printed the key verbatim. A predicate over the value's FORM
  * cannot decide a question about its ORIGIN; an allowlist of names the schema
  * declares can, because no secret is ever a schema key.
+ *
+ * And the allowlist is built here, not passed in — see {@link declared}. Taking
+ * it as a parameter moved the fail-open rather than closing it.
  */
 export type EnvVarName = string & { readonly [envVarNameBrand]: true };
 
@@ -64,11 +68,28 @@ export type EnvVarName = string & { readonly [envVarNameBrand]: true };
 const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;
 
 /**
- * @param raw      candidate name, typically a Zod issue path
- * @param declared every variable name the env schema declares
+ * The declared variable names, read from the schema itself.
+ *
+ * Derived HERE rather than accepted as a parameter. An earlier version took
+ * `declared: ReadonlySet<string>` from the caller, which handed the trust anchor
+ * to the code being constrained: `envVarName(secret, new Set([secret]))` type-checks
+ * and prints the secret. A membership test is only as trustworthy as the set it
+ * tests against, so the set cannot be an input.
+ *
+ * `@/lib/env-schema` is the side-effect-free half of env handling — it holds no
+ * `parseEnv()` call — so importing it here costs nothing at boot and introduces
+ * no cycle (it imports only zod and constants).
  */
-export function envVarName(raw: string, declared: ReadonlySet<string>): EnvVarName {
-  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;
+let declaredNames: ReadonlySet<string> | null = null;
+
+function declared(): ReadonlySet<string> {
+  declaredNames ??= new Set(Object.keys(getSchemaShape()));
+  return declaredNames;
+}
+
+/** @param raw candidate name, typically a Zod issue path */
+export function envVarName(raw: string): EnvVarName {
+  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;
 }
 
 /**
