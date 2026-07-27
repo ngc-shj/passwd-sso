@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "bcrypt-pbkdf": "^1.0.2",
-    "chalk": "^5.4.1",
+    "chalk": "^6.0.0",
     "cli-table3": "^0.6.5",
     "clipboardy": "^5.3.1",
     "commander": "^15.0.0",
