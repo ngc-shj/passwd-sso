@@ -34,6 +34,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
+import { clientLogError } from "@/lib/logger/client";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -279,7 +280,9 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
       setConfirmInput("");
       onSuccess?.();
     } catch (e) {
-      console.error("[TeamRotateKeyButton] rotation failed:", e instanceof Error ? e.message : "unknown error");
+      clientLogError("[TeamRotateKeyButton] rotation failed", {
+        error: e instanceof Error ? e.message : "unknown error",
+      });
       toast.error(t("rotateKeyFailed"));
     } finally {
       setLoading(false);

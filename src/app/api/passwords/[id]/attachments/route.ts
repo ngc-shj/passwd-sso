@@ -17,6 +17,7 @@ import { rejectOversizedMultipart } from "@/lib/http/parse-body";
 import { assertQuotaAvailable, QuotaExceededError } from "@/lib/quota/resource-quotas";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/http/with-request-log";
+import { getLogger } from "@/lib/logger";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { AAD_VERSION, CURRENT_CEK_WRAP_AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -215,7 +216,7 @@ async function handlePOST(
 
   // I3.3: keyVersion from request is ignored in mode-2 uploads
   if (keyVersion !== null) {
-    console.warn("[attachment upload] keyVersion field received but ignored — server always sets encryptionMode: 2");
+    getLogger().warn("[attachment upload] keyVersion field received but ignored — server always sets encryptionMode: 2");
   }
 
   // Validate iv/authTag format (hex strings)

@@ -10,6 +10,7 @@ import type { KeyName, KeyProvider } from "./types";
 import { HEX64_RE } from "@/lib/validations/common";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
+import { bootStderr } from "@/lib/boot-stderr";
 
 export { HEX64_RE };
 
@@ -158,8 +159,11 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
         `[key-provider] fetch failed, using stale cached key: ${err instanceof Error ? err.message : err}`
       );
     }).catch(() => {
-      // Fallback if logger unavailable
-      console.warn(`[key-provider] ${this.name} stale key used for "${name}" (${elapsedSec}s old)`);
+      // Fallback when the logger import itself fails — by definition the logger
+      // is unavailable here, so this is the one remaining case for the raw
+      // stderr sink. Key material never appears: only the provider name, the
+      // key's NAME (not its value), and an age in seconds.
+      bootStderr(`[key-provider] ${this.name} stale key used for "${name}" (${elapsedSec}s old)`);
     });
   }
 

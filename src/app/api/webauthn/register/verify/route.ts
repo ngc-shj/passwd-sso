@@ -27,6 +27,7 @@ import {
   PER_CRED_SALT_HEX_RE,
   CHALLENGE_ID_RE,
 } from "@/lib/auth/webauthn/webauthn-server";
+import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 import { sendEmail } from "@/lib/email";
 import { passkeyRegisteredEmail } from "@/lib/email/templates/passkey-registered";
@@ -131,10 +132,30 @@ async function handlePOST(req: NextRequest) {
 
   const origin = getRpOrigin(rpId);
 
+  // `response` arrives as z.record(z.string(), z.unknown()) — the schema does NOT
+  // validate its fields, so every `typeof` narrowing below IS the validation.
+  // Two distinct shapes are read off it and they must not be conflated:
+  //   - as a verifyRegistration() argument -> the library's RegistrationResponseJSON
+  //   - as a source of extension outputs   -> a local wire type with `unknown`
+  //     fields, because minPinLength/largeBlob exist on NEITHER lib.dom's
+  //     AuthenticationExtensionsClientOutputs NOR @simplewebauthn's narrower copy.
+  const responseWire = response as {
+    response?: { transports?: unknown };
+    clientExtensionResults?: {
+      credProps?: { rk?: unknown };
+      minPinLength?: unknown;
+      largeBlob?: { supported?: unknown };
+    };
+  };
+
   let verification;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    verification = await verifyRegistration(response as any, challenge, rpId, origin);
+    verification = await verifyRegistration(
+      response as unknown as RegistrationResponseJSON,
+      challenge,
+      rpId,
+      origin,
+    );
   } catch {
     return errorResponseWithMessage(API_ERROR.VALIDATION_ERROR, "Registration verification failed");
   }
@@ -158,28 +179,26 @@ async function handlePOST(req: NextRequest) {
 
   // Extract transports from the response if available (allowlisted per WebAuthn spec)
   const VALID_TRANSPORTS = new Set(["usb", "nfc", "ble", "internal", "hybrid", "smart-card"]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rawTransports: unknown[] = (response as any).response?.transports ?? [];
+  const rawTransportsRaw = responseWire.response?.transports;
+  // G3: a hostile client can send a non-array here; `.filter` on a string throws.
+  const rawTransports: unknown[] = Array.isArray(rawTransportsRaw) ? rawTransportsRaw : [];
   const transports: string[] = rawTransports.filter(
     (t): t is string => typeof t === "string" && VALID_TRANSPORTS.has(t),
   );
 
   // credProps.rk is a client-supplied value (not authenticator-signed).
   // It is used ONLY for UI display. Never use it for auth/authz decisions.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rawRk = (response as any).clientExtensionResults?.credProps?.rk;
+  const rawRk = responseWire.clientExtensionResults?.credProps?.rk;
   const discoverable: boolean | null = typeof rawRk === "boolean" ? rawRk : null;
 
   // minPinLength is a client-supplied value (not authenticator-signed).
   // Policy enforcement is best-effort; compromised browsers can spoof this value.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rawMinPin = (response as any).clientExtensionResults?.minPinLength;
+  const rawMinPin = responseWire.clientExtensionResults?.minPinLength;
   const minPinLength: number | null =
     typeof rawMinPin === "number" && Number.isInteger(rawMinPin) && rawMinPin >= PIN_LENGTH_MIN && rawMinPin <= PIN_LENGTH_MAX
       ? rawMinPin : null;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rawLargeBlob = (response as any).clientExtensionResults?.largeBlob?.supported;
+  const rawLargeBlob = responseWire.clientExtensionResults?.largeBlob?.supported;
   const largeBlobSupported: boolean | null =
     typeof rawLargeBlob === "boolean" ? rawLargeBlob : null;
 

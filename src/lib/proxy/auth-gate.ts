@@ -18,6 +18,7 @@ import {
 } from "@/lib/auth/session/session-cache";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { ALL_KNOWN_SESSION_COOKIE_NAMES } from "@/lib/auth/session/cookie-name";
+import { getLogger } from "@/lib/logger";
 
 export type { SessionInfo } from "@/lib/auth/session/session-cache";
 export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
@@ -136,7 +137,11 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
         ["hasPasskey", "requirePasskey", "requirePasskeyEnabledAt", "passkeyGracePeriodDays"] as const
       ).filter((field) => data?.user?.[field] === undefined);
       if (missing.length > 0) {
-        console.warn({
+        // .error() not .warn(): this fires only when a fail-closed substitution
+        // has already happened, and it is the sole signal that it did. An
+        // operator setting LOG_LEVEL=error to cut noise would silence a warn
+        // here and make a security-relevant degradation invisible.
+        getLogger().error({
           msg: "auth-gate: session response missing passkey field(s), substituting fail-closed bundle",
           missing,
         });

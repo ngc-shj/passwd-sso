@@ -10,6 +10,7 @@
 
 import pino from "pino";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { SECRET_REDACT_KEYS, REDACTED } from "@/lib/logger/redact-keys";
 
 const appName = process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso";
 
@@ -19,26 +20,10 @@ const logger = pino({
   timestamp: pino.stdTimeFunctions.isoTime,
   base: { _logType: "app", _app: appName },
   redact: {
-    paths: [
-      "password",
-      "passphrase",
-      "secret",
-      "secretKey",
-      "authHash",
-      "encryptedBlob",
-      "encryptedOverview",
-      "encryptedData",
-      "encryptedSecretKey",
-      "token",
-      "tokenHash",
-      "codeHash",
-      "accessToken",
-      "refreshToken",
-      "idToken",
-      "authorization",
-      "cookie",
-    ],
-    censor: "[REDACTED]",
+    // Shared with the client logger (@/lib/logger/client) so one redaction
+    // policy cannot exist as two hand-maintained copies that drift apart.
+    paths: [...SECRET_REDACT_KEYS],
+    censor: REDACTED,
   },
   formatters: {
     level(label: string) {

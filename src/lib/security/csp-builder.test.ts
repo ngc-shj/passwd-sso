@@ -9,6 +9,10 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
+// csp-builder warns at MODULE INIT via bootStderr (it runs before any logger
+// exists), so the sink is mocked rather than spied on console.
+vi.mock("@/lib/boot-stderr", () => ({ bootStderr: vi.fn() }));
+
 describe("csp-builder", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -84,7 +88,9 @@ describe("csp-builder", () => {
     it("ignores CSP_MODE=dev in production (forces strict)", async () => {
       vi.stubEnv("NODE_ENV", "production");
       vi.stubEnv("CSP_MODE", "dev");
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { bootStderr } = await import("@/lib/boot-stderr");
+      const warn = vi.mocked(bootStderr);
+      warn.mockClear();
       const { buildCspHeader } = await import("./csp-builder");
       const header = buildCspHeader("p-nonce");
 
@@ -95,7 +101,6 @@ describe("csp-builder", () => {
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('CSP_MODE="dev" is ignored in production builds'),
       );
-      warn.mockRestore();
     });
   });
 

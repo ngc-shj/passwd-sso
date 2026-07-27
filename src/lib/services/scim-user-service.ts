@@ -250,8 +250,7 @@ export async function patchScimUser(
 
   if (member.role === TENANT_ROLE.OWNER && operations.active === false) throw new ScimOwnerProtectedError();
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const updateData: Record<string, any> = {
+  const updateData: Prisma.TenantMemberUpdateInput = {
     scimManaged: true,
     provisioningSource: "SCIM",
     lastScimSyncedAt: new Date(),

@@ -20,6 +20,7 @@ import { buildItemKeyWrapAAD } from "../crypto/crypto-aad";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { fetchApi } from "@/lib/url-helpers";
+import { clientLogWarn, clientLogError } from "@/lib/logger/client";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -248,7 +249,7 @@ export function TeamVaultProvider({
           } catch {
             // no-op: keep status-based logging
           }
-          console.warn("[getTeamEncryptionKey] member-key request failed", {
+          clientLogWarn("[getTeamEncryptionKey] member-key request failed", {
             teamId,
             status: res.status,
             error: errorCode,
@@ -265,7 +266,7 @@ export function TeamVaultProvider({
         // Version assertion: a server-side version swap must not poison the
         // versioned slot or the latest pointer.
         if (requestedVersion !== undefined && memberKeyData.keyVersion !== requestedVersion) {
-          console.warn("[getTeamEncryptionKey] member-key response version mismatch", {
+          clientLogWarn("[getTeamEncryptionKey] member-key response version mismatch", {
             teamId,
             requestedVersion,
             responseVersion: memberKeyData.keyVersion,
@@ -320,9 +321,13 @@ export function TeamVaultProvider({
         return { key: encryptionKey, keyVersion: memberKeyData.keyVersion };
       } catch (e) {
         const errorText = describeUnknownError(e);
-        console.error(
-          `[getTeamEncryptionKey] failed teamId=${teamId} stage=${stage} error=${errorText}`
-        );
+        // Decomposed from an interpolated string into fields so the values are
+        // redactable and assertable individually.
+        clientLogError("[getTeamEncryptionKey] failed", {
+          teamId,
+          stage,
+          error: errorText,
+        });
         ecdhPrivateKeyBytes.fill(0);
         // Any exception here (network error, malformed response, unwrap
         // failure) is transient, not evidence the version is unavailable.

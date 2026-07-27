@@ -1,3 +1,5 @@
+import { clientLogWarn } from "@/lib/logger/client";
+
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 /**
@@ -49,7 +51,7 @@ export const isHttps = (process.env.AUTH_URL ?? "http://localhost:3000").startsW
  */
 export function withBasePath(path: string): string {
   if (process.env.NODE_ENV !== "production" && path && !path.startsWith("/")) {
-    console.warn(`withBasePath: path should start with "/", got "${path}"`);
+    clientLogWarn("withBasePath: path should start with \"/\"", { path });
   }
   return `${BASE_PATH}${path}`;
 }

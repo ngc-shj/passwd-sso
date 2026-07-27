@@ -2,6 +2,8 @@
 // (root) so it can be unit-tested without pulling in the full Next.js
 // middleware import chain (next-intl, etc.).
 
+import { bootStderr } from "@/lib/boot-stderr";
+
 // Pre-compute static CSP parts at module init time to avoid per-request work.
 // Only the nonce value is injected per-request.
 const _isProd = process.env.NODE_ENV === "production";
@@ -34,7 +36,11 @@ function sentryConnectSrc(): string {
 const _rawCspMode = process.env.CSP_MODE ?? (_isProd ? "strict" : "dev");
 const _cspMode = _isProd && _rawCspMode !== "strict" ? "strict" : _rawCspMode;
 if (_isProd && _rawCspMode !== _cspMode) {
-  console.warn(
+  // Module-scope, so this fires during initialization before any logger is
+  // guaranteed to exist — same constraint as the env banner. It is also an
+  // operator signal about a server env var, not a browser-user signal, so the
+  // client logger would be the wrong sink even setting init order aside.
+  bootStderr(
     `[CSP] CSP_MODE="${_rawCspMode}" is ignored in production builds; using "strict"`,
   );
 }

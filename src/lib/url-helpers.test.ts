@@ -62,6 +62,9 @@ describe("url-helpers (no basePath)", () => {
   });
 
   it("withBasePath warns when path does not start with /", async () => {
+    // The offending path travels in `fields`, not interpolated into the
+    // message: only `fields` passes through the redaction denylist, and a path
+    // can carry a token in its query string.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { withBasePath } = await import("@/lib/url-helpers");
 
@@ -69,6 +72,7 @@ describe("url-helpers (no basePath)", () => {
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('path should start with "/"'),
+      { path: "api/test" },
     );
   });
 
