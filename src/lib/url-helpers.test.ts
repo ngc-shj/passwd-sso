@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { CLIENT_LOG_EVENT } from "@/lib/logger/client";
+import { CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
 
 /**
  * BASE_PATH is evaluated at module load time from process.env.NEXT_PUBLIC_BASE_PATH.
@@ -72,7 +72,7 @@ describe("url-helpers (no basePath)", () => {
     // query string can carry a token. Only the leading segment is emitted.
     expect(warnSpy).toHaveBeenCalledWith(
       CLIENT_LOG_EVENT.BASE_PATH_MALFORMED,
-      { firstSegment: "api" },
+      { firstSegment: opaque("api") },
     );
   });
 

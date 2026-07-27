@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync, existsSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { clientLogWarn, clientLogError } from "./client";
+import { clientLogWarn, clientLogError, opaque } from "./client";
 import { CLIENT_REDACT_KEYS, REDACTED } from "./redact-keys";
 import { CLIENT_LOG_EVENT } from "./client-events";
 
@@ -28,9 +28,9 @@ describe("clientLogWarn / clientLogError", () => {
 
   it("passes non-sensitive fields through untouched", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { teamId: "team-1", status: 403, ok: false, extra: null });
+    clientLogWarn(EV, { teamId: opaque("team-1"), status: 403, ok: false, extra: null });
     expect(warn).toHaveBeenCalledWith(EV, {
-      teamId: "team-1",
+      teamId: opaque("team-1"),
       status: 403,
       ok: false,
       extra: null,
@@ -39,7 +39,7 @@ describe("clientLogWarn / clientLogError", () => {
 
   it("redacts a secret passed as a bare string — the flat-scalar type alone does not stop this", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { token: "super-secret-value" });
+    clientLogWarn(EV, { token: opaque("super-secret-value") });
     expect(warn).toHaveBeenCalledWith(EV, { token: REDACTED });
     // The point of the assertion: the value must not survive anywhere in the call.
     expect(JSON.stringify(warn.mock.calls)).not.toContain("super-secret-value");
@@ -49,7 +49,7 @@ describe("clientLogWarn / clientLogError", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const fields = Object.fromEntries(
-      CLIENT_REDACT_KEYS.map((k) => [k, `leaked-${k}`]),
+      CLIENT_REDACT_KEYS.map((k) => [k, opaque(`leaked-${k}`)]),
     );
 
     clientLogWarn(EV, fields);
@@ -64,7 +64,7 @@ describe("clientLogWarn / clientLogError", () => {
 
   it("redacts client-only identity keys the server logger does not cover", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { email: "a@example.test", userId: "u-1" });
+    clientLogWarn(EV, { email: opaque("a@example.test"), userId: opaque("u-1") });
     expect(warn).toHaveBeenCalledWith(EV, { email: REDACTED, userId: REDACTED });
   });
 });
@@ -83,14 +83,32 @@ describe("clientLogWarn / clientLogError", () => {
  *    spellings left over.
  */
 describe("client logger value-safety", () => {
-  it("only accepts enumerated event ids, never a free-form string", () => {
-    // A compile-time property, asserted here so the intent survives a refactor
-    // that might otherwise widen the parameter back to `string`.
+  it("rejects a free-form string as the event — enforced by the compiler", () => {
+    // The load-bearing assertion for the whole design: `@ts-expect-error` fails
+    // the BUILD when the line stops erroring, so widening the parameter back to
+    // `string` breaks typecheck rather than passing silently.
+    //
+    // An earlier version of this test only checked the SHAPE of the enum values
+    // and stayed green through exactly that regression — verified by mutation.
+    // A runtime assertion structurally cannot observe a parameter type.
+
+    // @ts-expect-error arbitrary strings must not be accepted as an event id
+    clientLogWarn("arbitrary.event");
+    // @ts-expect-error the same holds for the error level
+    clientLogError("arbitrary.event", {});
+
+    const interpolated = `injected ${"secret"}`;
+    // @ts-expect-error a template literal is the exact bypass this type closes
+    clientLogWarn(interpolated);
+
+    // Reached only if the three lines above compiled as errors.
+    expect(true).toBe(true);
+  });
+
+  it("keeps event ids free of anywhere an interpolated value could hide", () => {
     const events: string[] = Object.values(CLIENT_LOG_EVENT);
     expect(events.length).toBeGreaterThan(0);
     for (const id of events) {
-      // Every id is a dotted, lowercase, punctuation-free token — no room for
-      // an interpolated value to hide in one.
       expect(id).toMatch(/^[a-z0-9_]+(\.[a-z0-9_]+)+$/);
     }
   });

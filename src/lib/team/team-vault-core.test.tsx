@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clientLogWarn, clientLogError, CLIENT_LOG_EVENT } from "@/lib/logger/client";
+import { clientLogWarn, clientLogError, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
 
 // Partial mock: the two sink functions are stubbed so calls can be asserted,
 // but CLIENT_LOG_EVENT and toClientErrorCode keep their real values — asserting
@@ -321,7 +321,7 @@ describe("team-vault-core", () => {
     // rather than echoing a server-supplied string into a browser console.
     expect(warnSpy).toHaveBeenCalledWith(
       CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_REQUEST_FAILED,
-      expect.objectContaining({ teamId: "team-1", status: 403, error: "other" }),
+      expect.objectContaining({ teamId: opaque("team-1"), status: 403, error: opaque("other") }),
     );
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
   });
@@ -347,7 +347,7 @@ describe("team-vault-core", () => {
     // closed vocabulary — the exception's message and cause never appear.
     expect(errorSpy).toHaveBeenCalledWith(
       CLIENT_LOG_EVENT.TEAM_ENCRYPTION_KEY_FAILED,
-      expect.objectContaining({ teamId: "team-1", stage: "parse_member_key" }),
+      expect.objectContaining({ teamId: opaque("team-1"), stage: "parse_member_key" }),
     );
     const loggedFields = errorSpy.mock.calls[0][1] as Record<string, unknown>;
     expect(Object.keys(loggedFields)).not.toContain("error");

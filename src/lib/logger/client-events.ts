@@ -54,6 +54,24 @@ export type ClientErrorCode =
   (typeof CLIENT_ERROR_CODE)[keyof typeof CLIENT_ERROR_CODE];
 
 /**
+ * Named steps of the team-key derivation chain.
+ *
+ * Logged so a failure can be located without shipping the exception text. A
+ * closed set rather than a free string, for the same reason as the codes above:
+ * anything assignable from `string` is a channel for an interpolated secret.
+ */
+export const CLIENT_LOG_STAGE = {
+  FETCH_MEMBER_KEY: "fetch_member_key",
+  PARSE_MEMBER_KEY: "parse_member_key",
+  IMPORT_ECDH_PRIVATE_KEY: "import_ecdh_private_key",
+  UNWRAP_TEAM_KEY: "unwrap_team_key",
+  DERIVE_TEAM_ENCRYPTION_KEY: "derive_team_encryption_key",
+} as const;
+
+export type ClientLogStage =
+  (typeof CLIENT_LOG_STAGE)[keyof typeof CLIENT_LOG_STAGE];
+
+/**
  * Classify an unknown throwable into a loggable code.
  *
  * Reads only the error's *shape* (constructor, DOMException name) — never its

@@ -13,22 +13,66 @@
  */
 
 import { CLIENT_REDACT_KEYS, REDACTED } from "./redact-keys";
-import type { ClientLogEvent } from "./client-events";
+import type { ClientLogEvent, ClientErrorCode, ClientLogStage } from "./client-events";
 
-export { CLIENT_LOG_EVENT, CLIENT_ERROR_CODE, toClientErrorCode } from "./client-events";
-export type { ClientLogEvent, ClientErrorCode } from "./client-events";
+export {
+  CLIENT_LOG_EVENT,
+  CLIENT_ERROR_CODE,
+  CLIENT_LOG_STAGE,
+  toClientErrorCode,
+} from "./client-events";
+export type { ClientLogEvent, ClientErrorCode, ClientLogStage } from "./client-events";
 
 /**
- * Flat scalars only. A nested object cannot be redacted without traversing it,
+ * A value that cannot smuggle free text into a browser console.
+ *
+ * `string` is deliberately absent. It was the last hole in this design: field
+ * NAMES are redacted, so `{ detail: `token=${secret}` }` typechecked and was
+ * emitted verbatim. What the call sites actually need is narrower than `string`
+ * anyway — an opaque id, a status code, a closed vocabulary, a boolean.
+ *
+ * `Opaque` is the escape hatch for the one legitimate string-ish case: a value
+ * the caller has already bounded (an id, a truncated path segment). Wrapping is
+ * explicit, so a reviewer sees the claim being made and can check it, rather
+ * than a bare template literal sliding through.
+ */
+export type ClientLogValue =
+  | ClientLogEnum
+  | number
+  | boolean
+  | null
+  | Opaque;
+
+/** A member of a closed vocabulary declared in client-events.ts. */
+export type ClientLogEnum = ClientErrorCode | ClientLogStage;
+
+/**
+ * An explicitly bounded string. Construct with {@link opaque}, whose contract
+ * is: the value contains no user input, no server text, and no URL query.
+ */
+export type Opaque = { readonly __opaque: string };
+
+/**
+ * Mark a string as safe to log. Truncates as a backstop — an id that grew into
+ * a serialized blob still cannot flood the console.
+ */
+export function opaque(value: string, maxLength = 64): Opaque {
+  return { __opaque: value.slice(0, maxLength) };
+}
+
+/**
+ * Flat values only. A nested object cannot be redacted without traversing it,
  * and traversal is how a whole credential object ends up in a log line — so the
  * type makes "log the entire response" a compile error rather than a runtime
- * leak. Key-name redaction below covers the other half: a secret passed as a
- * bare string.
+ * leak. Key-name redaction below covers a secret stored under a known key.
  */
-export type ClientLogFields = Record<string, string | number | boolean | null>;
+export type ClientLogFields = Record<string, ClientLogValue>;
 
-function redact(fields: ClientLogFields): ClientLogFields {
-  const out: ClientLogFields = {};
+/** Emitted shape: like ClientLogFields, but a censored slot holds REDACTED. */
+type EmittedFields = Record<string, ClientLogValue | typeof REDACTED>;
+
+function redact(fields: ClientLogFields): EmittedFields {
+  const out: EmittedFields = {};
   for (const [key, value] of Object.entries(fields)) {
     out[key] = CLIENT_REDACT_KEYS.includes(key) ? REDACTED : value;
   }

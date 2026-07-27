@@ -1,4 +1,4 @@
-import { clientLogWarn, CLIENT_LOG_EVENT } from "@/lib/logger/client";
+import { clientLogWarn, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
 
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -55,7 +55,7 @@ export function withBasePath(path: string): string {
     // token in its query string. The first segment is enough to locate the
     // offending call, and it is taken before any "?" so no query survives.
     clientLogWarn(CLIENT_LOG_EVENT.BASE_PATH_MALFORMED, {
-      firstSegment: path.split(/[?#/]/)[0].slice(0, 32),
+      firstSegment: opaque(path.split(/[?#/]/)[0], 32),
     });
   }
   return `${BASE_PATH}${path}`;
