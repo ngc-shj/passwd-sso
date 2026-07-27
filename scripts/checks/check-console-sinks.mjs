@@ -17,19 +17,36 @@
  *   boot-stderr.ts — exactly one console call, taking the bare `message` param
  *
  * Run: node scripts/checks/check-console-sinks.mjs
+ *
+ * CONSOLE_SINKS_ROOT overrides the scan root (self-test fixtures only).
  */
 
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import { Project, SyntaxKind } from "ts-morph";
+
+const REPO_ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+  encoding: "utf8",
+}).trim();
+
+// Scan root is overridable so the self-test
+// (scripts/__tests__/check-console-sinks.test.mjs) can point the guard at
+// fixtures instead of mutating the real tree — mutating it in place raced with
+// the other gates `pre-pr.sh` runs concurrently. Production CI uses the default.
+const SCAN_ROOT = process.env.CONSOLE_SINKS_ROOT || REPO_ROOT;
 
 const CLIENT = "src/lib/logger/client.ts";
 const BOOT = "src/lib/boot-stderr.ts";
+const ESLINT_CONFIG = "eslint.config.mjs";
+
+const at = (rel) => resolve(SCAN_ROOT, rel);
 
 const project = new Project({ useInMemoryFileSystem: false, skipAddingFilesFromTsConfig: true });
 const failures = [];
 
 function consoleCalls(filePath) {
-  const sf = project.addSourceFileAtPath(filePath);
+  const sf = project.addSourceFileAtPath(at(filePath));
   return sf
     .getDescendantsOfKind(SyntaxKind.CallExpression)
     .filter((call) => {
@@ -88,18 +105,18 @@ for (const call of bootCalls) {
 // ── the override list itself must not grow silently ──────────────────
 // A third exempted file would be a new unguarded sink; this pins the list to
 // the two this script actually checks.
-const eslintConfig = readFileSync("eslint.config.mjs", "utf8");
+const eslintConfig = readFileSync(at(ESLINT_CONFIG), "utf8");
 const overrideBlock = eslintConfig.match(
   /files:\s*\[([^\]]*)\][^}]*?"no-console":\s*"off"/s,
 );
 if (!overrideBlock) {
-  failures.push("eslint.config.mjs: could not locate the no-console override block");
+  failures.push(`${ESLINT_CONFIG}: could not locate the no-console override block`);
 } else {
   const exempted = [...overrideBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort();
   const expected = [BOOT, CLIENT].sort();
   if (JSON.stringify(exempted) !== JSON.stringify(expected)) {
     failures.push(
-      `eslint.config.mjs: no-console override list is [${exempted.join(", ")}], expected [${expected.join(", ")}] — ` +
+      `${ESLINT_CONFIG}: no-console override list is [${exempted.join(", ")}], expected [${expected.join(", ")}] — ` +
         `a new exempt file needs a matching check here`,
     );
   }

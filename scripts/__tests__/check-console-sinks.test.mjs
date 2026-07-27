@@ -1,16 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import {
-  readFileSync,
-  writeFileSync,
-  mkdtempSync,
-  mkdirSync,
-  cpSync,
-  rmSync,
-  symlinkSync,
-} from "node:fs";
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, cpSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /**
  * Self-test for scripts/checks/check-console-sinks.mjs.
@@ -20,49 +12,49 @@ import { dirname, resolve } from "node:path";
  * runs green proves nothing, so each case mutates the shape the gate exists to
  * reject and asserts red.
  *
- * The mutations happen in a COPY of the tree under $TMPDIR, never in the repo.
- * An earlier version patched the real files and restored them in afterEach,
- * which is safe in isolation and wrong under `pre-pr.sh`: that runner executes
- * steps concurrently, so another gate reading `src/` during the mutation window
- * observed a half-broken tree and failed. The failure was real but pointed at
- * an unrelated check, and it did not reproduce on a solo `vitest run` — the
- * worst shape a flake can take. Copying removes the shared mutable state
- * instead of narrowing the window.
+ * The guard is driven against fixtures via CONSOLE_SINKS_ROOT, matching the
+ * MINT_GATE_* / other *_ROOT conventions in this directory. An earlier version
+ * patched the real files and restored them in afterEach, which is safe in
+ * isolation and wrong under `pre-pr.sh`: that runner executes steps
+ * concurrently, so another gate reading `src/` during the mutation window
+ * observed a half-broken tree and failed as an unrelated check. Pointing the
+ * guard at a fixture root removes the shared mutable state instead of narrowing
+ * the window.
  */
 
 const REPO = resolve(import.meta.dirname, "../..");
-const GATE = "scripts/checks/check-console-sinks.mjs";
+const GATE = resolve(REPO, "scripts/checks/check-console-sinks.mjs");
 
-// Only what the gate reads: the two sink modules, the ESLint config, and the
-// gate itself. Copying node_modules would make each case take seconds.
+// Only what the gate reads.
 const TREE_FILES = [
   "src/lib/logger/client.ts",
   "src/lib/boot-stderr.ts",
   "eslint.config.mjs",
-  GATE,
 ];
 
-let sandbox;
+let root;
 
 beforeEach(() => {
-  sandbox = mkdtempSync(resolve(tmpdir(), "console-sinks-"));
+  root = mkdtempSync(join(tmpdir(), "console-sinks-"));
   for (const rel of TREE_FILES) {
-    const dst = resolve(sandbox, rel);
+    const dst = join(root, rel);
     mkdirSync(dirname(dst), { recursive: true });
-    cpSync(resolve(REPO, rel), dst);
+    cpSync(join(REPO, rel), dst);
   }
-  // The gate imports ts-morph, which resolves from its own location; a symlink
-  // costs nothing and avoids copying the dependency tree per test case.
-  symlinkSync(resolve(REPO, "node_modules"), resolve(sandbox, "node_modules"), "dir");
 });
 
 afterEach(() => {
-  rmSync(sandbox, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
 });
 
 function runGate() {
   try {
-    execFileSync("node", [GATE], { cwd: sandbox, stdio: "pipe" });
+    execFileSync("node", [GATE], {
+      cwd: REPO,
+      env: { ...process.env, CONSOLE_SINKS_ROOT: root },
+      encoding: "utf8",
+      stdio: "pipe",
+    });
     return { code: 0, output: "" };
   } catch (err) {
     return { code: err.status ?? 1, output: `${err.stdout}${err.stderr}` };
@@ -70,7 +62,7 @@ function runGate() {
 }
 
 function patch(file, from, to) {
-  const path = resolve(sandbox, file);
+  const path = join(root, file);
   const src = readFileSync(path, "utf8");
   expect(src).toContain(from);
   writeFileSync(path, src.replace(from, to), "utf8");
