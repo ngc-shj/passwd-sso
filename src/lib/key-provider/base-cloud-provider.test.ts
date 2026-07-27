@@ -19,7 +19,10 @@ const HEX_B = "b".repeat(64);
 const HEX_A_BUF = Buffer.from(HEX_A, "hex");
 
 class TestProvider extends BaseCloudKeyProvider {
-  readonly name = "test";
+  // One of the real ProviderName members: the union is production surface and
+  // should not carry a fixture identity (it would appear at every exhaustiveness
+  // site). Matches how index.test.ts names its fakes.
+  readonly name = "aws-sm";
   fetchCalls: Array<{ name: KeyName; version?: number; resolvedSecretName: string }> = [];
   fetchHandler: (name: KeyName, version?: number) => Promise<string | Buffer> = async () => HEX_A;
   validateConfigError: Error | null = null;

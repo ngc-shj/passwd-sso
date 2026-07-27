@@ -3,6 +3,7 @@
 // middleware import chain (next-intl, etc.).
 
 import { bootStderr } from "@/lib/boot-stderr";
+import { BOOT_EVENT } from "@/lib/boot-events";
 
 // Pre-compute static CSP parts at module init time to avoid per-request work.
 // Only the nonce value is injected per-request.
@@ -40,14 +41,7 @@ if (_isProd && _rawCspMode !== _cspMode) {
   // guaranteed to exist — same constraint as the env banner. It is also an
   // operator signal about a server env var, not a browser-user signal, so the
   // client logger would be the wrong sink even setting init order aside.
-  // The rejected value is operator-supplied and arbitrary — it reaches here
-  // precisely BECAUSE it is not one of the two accepted modes, so it cannot be
-  // described as coming from a closed enum. Echoing it verbatim would put an
-  // unbounded env value into a raw, unredacted stderr write. The operator
-  // already knows what they set; naming the variable is enough to act on.
-  bootStderr(
-    `[CSP] CSP_MODE is set to an unsupported value and is ignored in production builds; using "strict"`,
-  );
+  bootStderr({ event: BOOT_EVENT.CSP_MODE_IGNORED });
 }
 const _reportUri = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/csp-report`;
 // In dev mode style-src and script-src use 'unsafe-inline'; in strict mode

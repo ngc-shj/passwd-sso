@@ -137,6 +137,12 @@ describe("client logger value-safety", () => {
 
       // @ts-expect-error every payload has a required key, so it cannot be omitted
       clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED);
+
+      clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED, {
+        // @ts-expect-error nesting is what the payload type prevents — redact()
+        // only inspects top-level keys, so a nested secret would pass it
+        code: { token: "secret" },
+      });
     };
 
     expect(typeOnly).toBeTypeOf("function");

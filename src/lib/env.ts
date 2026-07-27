@@ -15,6 +15,7 @@
 
 import { envObject, envSchema, type Env, getSchemaShape } from "@/lib/env-schema";
 import { bootStderr } from "@/lib/boot-stderr";
+import { BOOT_EVENT, envVarName } from "@/lib/boot-events";
 
 // Re-export schema surface so existing imports (`from "@/lib/env"`) keep working.
 export { envObject, envSchema, getSchemaShape };
@@ -22,40 +23,34 @@ export type { Env };
 
 // ─── Parse and validate ─────────────────────────────────────
 
-/**
- * Variable NAMES that failed validation — never their values.
- *
- * Split out from the banner so the "no value ever reaches stderr" claim is a
- * property of a small function with a `string[]` return, rather than a promise
- * made in a comment above a 20-line string concatenation. `issue.path` is the
- * schema key; `issue.message` is Zod's own text ("Required", "Invalid url").
- * Neither is derived from the parsed value, so neither can carry a secret.
- */
-function failedVariableNames(issues: readonly StandardIssue[]): string[] {
-  return issues.map((issue) => `  ${issue.path.join(".")}: ${issue.message}`);
-}
-
-type StandardIssue = { path: PropertyKey[]; message: string };
-
 function parseEnv(): Env {
   const result = envSchema.safeParse(process.env);
 
   if (!result.success) {
-    const formatted = failedVariableNames(result.error.issues).join("\n");
+    const formatted = result.error.issues
+      .map((issue) => `  ${issue.path.join(".")}: ${issue.message}`)
+      .join("\n");
 
-    // Log to stderr for visibility in container logs. Routed through
-    // boot-stderr because this runs before the logger exists; keeping the raw
-    // console call out of this module means `no-console` stays enforced here,
-    // where every secret in process.env is in scope.
+    // Two channels, deliberately asymmetric.
     //
-    // Built inline from string literals and `formatted` (variable names only)
-    // so `check-boot-stderr-callers` can verify the shape at the call site. A
-    // precomputed `banner` local was equally safe but opaque to the gate, and
-    // this is the one caller where an unnoticed change could echo a secret.
-    bootStderr(
-      `\n${"=".repeat(60)}\n ENVIRONMENT VARIABLE VALIDATION FAILED\n${"=".repeat(60)}\n${formatted}\n${"=".repeat(60)}`,
-    );
+    // The raw stderr sink gets variable NAMES only. It runs before the logger
+    // exists and has no redaction beneath it, and Zod messages are not a bounded
+    // channel — `env-schema.ts` already builds one by interpolation, so a future
+    // `.refine(…, { message: `bad: ${v}` })` would put a value there with
+    // nothing to stop it. `envVarName` validates the shape rather than asserting
+    // it, so a nested or synthetic issue path cannot smuggle text through.
+    // Deduplicated: one variable can raise several issues (a format refine plus
+    // a superRefine, say). With the messages dropped, repeating the name carries
+    // nothing but noise.
+    bootStderr({
+      event: BOOT_EVENT.ENV_VALIDATION_FAILED,
+      variables: [
+        ...new Set(result.error.issues.map((issue) => envVarName(String(issue.path[0] ?? "")))),
+      ],
+    });
 
+    // The thrown Error keeps the full per-issue detail. It travels the normal
+    // exception path, not the raw console, so the operator loses nothing.
     throw new Error(`Invalid environment variables:\n${formatted}`);
   }
 

@@ -1,7 +1,7 @@
 /**
  * Raw stderr writer for boot-time diagnostics that run before any logger exists.
  *
- * Two callers, both structurally unable to use pino:
+ * Callers, all structurally unable to use pino:
  *   - `@/lib/env` validates `process.env` during module initialization; the
  *     logger is constructed after env, so routing this through pino would
  *     invert a deliberate dependency order — and the failure being reported is
@@ -9,28 +9,51 @@
  *     logging itself is misconfigured.
  *   - `@/lib/security/csp-builder` warns at module scope when a production
  *     build ignores `CSP_MODE`.
+ *   - `@/lib/key-provider/base-cloud-provider` reports a stale cached key when
+ *     the logger import itself failed.
  *
- * This module exists so the `no-console` override lands on a file that holds no
- * secret itself, rather than on `env.ts`, which holds every secret in the
- * process. Note what that does and does not buy: THIS FILE cannot see a secret,
- * but the callers assemble `message`, and `env.ts` assembles it with all of
- * `process.env` in scope. Moving the override moved the lint exemption, not the
- * risk.
+ * The guarantee is in the TYPE, not in a caller contract or a lint rule.
+ * `bootStderr` takes a {@link BootDiagnostic} — a closed union whose every field
+ * is a brand, a closed union, or a number — so a secret has no parameter it fits
+ * into, under any import form and from any call position. The prose text is
+ * rendered HERE, from data the caller could not have forged, rather than
+ * assembled by the caller and inspected afterwards. See `@/lib/boot-events` for
+ * why the previous `(message: string)` signature was abandoned.
  *
- * Caller contract: a message must be built from string literals, closed-union
- * values, and numbers. It must never carry a credential, key, token, connection
- * string, an arbitrary env value, or `result.data` from env parsing — including
- * a value being reported as *rejected*, which is arbitrary operator input
- * precisely because it failed validation.
- *
- * The contract is enforced, not merely documented:
- * `scripts/checks/check-boot-stderr-callers.mjs` walks every call site and
- * fails the build on an interpolation it cannot prove bounded. That gate exists
- * because `check-console-sinks` guards only the shape of the `console.error`
- * call below — a caller passing `bootStderr(`token=${t}`)` was verified to pass
- * both that gate and `eslint` with exit 0.
+ * This file and `@/lib/logger/client` are the only modules under `src/`
+ * permitted a raw `console` call; `scripts/checks/check-console-sinks.mjs`
+ * guards the shape of the call below, and
+ * `scripts/checks/check-boot-diagnostic-shape.mjs` guards that the payload types
+ * never widen back toward `string`.
  */
 
-export function bootStderr(message: string): void {
+import { BOOT_EVENT, type BootDiagnostic } from "@/lib/boot-events";
+
+const RULE = "=".repeat(60);
+
+/**
+ * Render a diagnostic to its operator-facing text.
+ *
+ * Exhaustive over the union: a new `BootDiagnostic` member with no case here is
+ * a compile error, so a diagnostic cannot ship with no rendering.
+ */
+function render(diagnostic: BootDiagnostic): string {
+  switch (diagnostic.event) {
+    case BOOT_EVENT.ENV_VALIDATION_FAILED: {
+      const names = diagnostic.variables.map((name) => `  ${name}`).join("\n");
+      return `\n${RULE}\n ENVIRONMENT VARIABLE VALIDATION FAILED\n${RULE}\n${names}\n${RULE}`;
+    }
+    case BOOT_EVENT.CSP_MODE_IGNORED:
+      // The rejected value is NOT echoed: it reaches this branch precisely
+      // because it is not one of the two accepted modes, so it is arbitrary
+      // operator input. The operator set it and can read it back themselves.
+      return '[CSP] CSP_MODE is set to an unsupported value and is ignored in production builds; using "strict"';
+    case BOOT_EVENT.KEY_PROVIDER_STALE_KEY:
+      return `[key-provider] ${diagnostic.provider} stale key used for "${diagnostic.keyName}" (${diagnostic.elapsedSec}s old)`;
+  }
+}
+
+export function bootStderr(diagnostic: BootDiagnostic): void {
+  const message = render(diagnostic);
   console.error(message);
 }

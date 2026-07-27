@@ -11,6 +11,7 @@ import { HEX64_RE } from "@/lib/validations/common";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 import { bootStderr } from "@/lib/boot-stderr";
+import { BOOT_EVENT } from "@/lib/boot-events";
 
 export { HEX64_RE };
 
@@ -153,10 +154,6 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
     return Buffer.from(hex, "hex");
   }
 
-  // `name` is KeyName, not string: it is the only caller-varying value
-  // interpolated into the bootStderr message below, and bootStderr writes to a
-  // raw console with no redaction. A closed union keeps that interpolation
-  // provably free of secrets; `string` left it to the caller to get right.
   private logStaleWarning(name: KeyName, elapsedSec: number, err: unknown): void {
     // Dynamic import to avoid bundling pino/node:async_hooks into SSR bundles
     void import("@/lib/logger").then(({ default: log }) => {
@@ -169,7 +166,12 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
       // is unavailable here, so this is the one remaining case for the raw
       // stderr sink. Key material never appears: only the provider name, the
       // key's NAME (not its value), and an age in seconds.
-      bootStderr(`[key-provider] ${this.name} stale key used for "${name}" (${elapsedSec}s old)`);
+      bootStderr({
+        event: BOOT_EVENT.KEY_PROVIDER_STALE_KEY,
+        provider: this.name,
+        keyName: name,
+        elapsedSec,
+      });
     });
   }
 

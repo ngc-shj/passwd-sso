@@ -41,4 +41,4 @@ export interface KeyProvider {
  * provider to derive its name from configuration and put that value on stderr
  * with nothing to stop it. Enforced by `scripts/checks/check-boot-stderr-callers.mjs`.
  */
-export type ProviderName = "env" | "aws-sm" | "gcp-sm" | "azure-kv" | "test";
+export type ProviderName = "env" | "aws-sm" | "gcp-sm" | "azure-kv";
