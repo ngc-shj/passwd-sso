@@ -66,7 +66,43 @@ describe("check-console-sinks", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/not a redact\(\.\.\.\) call/);
+    expect(output).toMatch(/the only permitted form is/);
+  });
+
+  it("rejects an unredacted single-argument console call", () => {
+    // The regression this gate missed: `console.warn(fields)` is a one-argument
+    // call, and the check used to wave those through as "nothing to redact".
+    // Now only the exact `(event, redact(fields))` form is accepted.
+    patch(
+      "src/lib/logger/client.ts",
+      "console.warn(event, redact(fields));",
+      "console.warn(fields);",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/the only permitted form is/);
+  });
+
+  it("rejects an extra argument appended to a sink call", () => {
+    patch(
+      "src/lib/logger/client.ts",
+      "console.error(event, redact(fields));",
+      "console.error(event, redact(fields), fields);",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/the only permitted form is/);
+  });
+
+  it("rejects the arguments being reordered", () => {
+    patch(
+      "src/lib/logger/client.ts",
+      "console.warn(event, redact(fields));",
+      "console.warn(redact(fields), event);",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/the only permitted form is/);
   });
 
   it("rejects a serialized argument in the boot sink", () => {

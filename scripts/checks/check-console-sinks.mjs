@@ -13,7 +13,7 @@
  * A plain call count was the first idea and is not enough — it would pass an
  * unredacted fourth call. So the check is on argument SHAPE:
  *
- *   client.ts     — every console call is `(message)` or `(message, redact(fields))`
+ *   client.ts     — every console call is exactly `(event, redact(fields))`
  *   boot-stderr.ts — exactly one console call, taking the bare `message` param
  *
  * Run: node scripts/checks/check-console-sinks.mjs
@@ -46,19 +46,24 @@ const clientCalls = consoleCalls(CLIENT);
 if (clientCalls.length === 0) {
   failures.push(`${CLIENT}: expected at least one console call; found none (did the sink move?)`);
 }
+// Exactly `(event, redact(fields))` — nothing else.
+//
+// An earlier version waved through any single-argument call as "(message) —
+// nothing to redact". That was true when the payload was optional; once it
+// became required it turned into a hole, because `console.warn(fields)` is also
+// a single-argument call and emits the payload unredacted. The gate reported OK
+// on exactly the shape it exists to prevent. Enumerating the one legal form
+// removes the class rather than the instance.
+const EXPECTED_ARGS = ["event", "redact(fields)"];
+
 for (const call of clientCalls) {
-  const args = call.getArguments();
+  const args = call.getArguments().map((a) => a.getText());
   const line = call.getStartLineNumber();
-  if (args.length === 1) continue; // (message) — nothing to redact
-  if (args.length !== 2) {
-    failures.push(`${CLIENT}:${line}: console call takes ${args.length} args; expected (message) or (message, redact(fields))`);
-    continue;
-  }
-  const second = args[1].getText();
-  if (!/^redact\(/.test(second)) {
+  if (args.length !== EXPECTED_ARGS.length || args.some((a, i) => a !== EXPECTED_ARGS[i])) {
     failures.push(
-      `${CLIENT}:${line}: second argument is \`${second}\`, not a redact(...) call — ` +
-        `fields would reach the console unredacted`,
+      `${CLIENT}:${line}: console call is \`(${args.join(", ")})\`; ` +
+        `the only permitted form is \`(${EXPECTED_ARGS.join(", ")})\` — ` +
+        `anything else can reach the console unredacted`,
     );
   }
 }
