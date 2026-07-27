@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { getLogger } from "@/lib/logger";
+
+vi.mock("@/lib/logger", () => {
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  return { getLogger: () => logger, default: logger };
+});
 import { NextRequest } from "next/server";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
@@ -447,7 +453,8 @@ describe("POST /api/passwords/[id]/attachments", () => {
       createdAt: now,
     });
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.mocked(getLogger().warn);
+    warnSpy.mockClear();
 
     const res = await POST(
       await createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
@@ -474,8 +481,10 @@ describe("POST /api/passwords/[id]/attachments", () => {
     const createCall = mockPrismaAttachment.create.mock.calls[0][0];
     expect(createCall.data).not.toHaveProperty("keyVersion");
     // Warning log should fire when keyVersion is submitted
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
+    // Tightened from a bare toHaveBeenCalled() while migrating the sink.
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("keyVersion field received but ignored"),
+    );
   });
 
   it("stores client-generated id and aadVersion from FormData", async () => {

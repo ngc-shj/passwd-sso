@@ -14,6 +14,7 @@
  */
 
 import { envObject, envSchema, type Env, getSchemaShape } from "@/lib/env-schema";
+import { bootStderr } from "@/lib/boot-stderr";
 
 // Re-export schema surface so existing imports (`from "@/lib/env"`) keep working.
 export { envObject, envSchema, getSchemaShape };
@@ -40,8 +41,13 @@ function parseEnv(): Env {
       "\n" +
       "=".repeat(60);
 
-    // Log to stderr for visibility in container logs
-    console.error(banner);
+    // Log to stderr for visibility in container logs. Routed through
+    // boot-stderr because this runs before the logger exists; keeping the raw
+    // console call out of this module means `no-console` stays enforced here,
+    // where every secret in process.env is in scope.
+    // The banner is built from issue paths (variable NAMES) and Zod messages
+    // only — it must never interpolate a value from process.env or result.data.
+    bootStderr(banner);
 
     throw new Error(`Invalid environment variables:\n${formatted}`);
   }

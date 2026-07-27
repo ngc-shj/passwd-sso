@@ -109,8 +109,19 @@ export function QRCaptureDialog({
       });
 
       const track = stream.getVideoTracks()[0];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const imageCapture = new (window as any).ImageCapture(track);
+      // Firefox has no ImageCapture. Throwing here lands in the existing catch
+      // below, which already surfaces the localized qrCaptureFailed message —
+      // same user-visible outcome as today's TypeError, no new i18n key.
+      if (!("ImageCapture" in window)) {
+        throw new Error("IMAGE_CAPTURE_UNSUPPORTED");
+      }
+      // lib.dom's ImageCapture declares takePhoto/getPhotoCapabilities but not
+      // grabFrame, which the spec does define and browsers do implement. Widen
+      // locally rather than with a global augmentation, so the gap stays
+      // visible here and disappears when lib.dom catches up.
+      const imageCapture = new ImageCapture(track) as ImageCapture & {
+        grabFrame(): Promise<ImageBitmap>;
+      };
       const bitmap: ImageBitmap = await imageCapture.grabFrame();
 
       const canvas = canvasRef.current;

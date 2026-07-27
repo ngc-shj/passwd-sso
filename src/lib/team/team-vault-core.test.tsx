@@ -2,6 +2,16 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clientLogWarn, clientLogError, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
+
+// Partial mock: the two sink functions are stubbed so calls can be asserted,
+// but CLIENT_LOG_EVENT and toClientErrorCode keep their real values — asserting
+// against a stubbed event id would prove nothing about what production emits.
+vi.mock("@/lib/logger/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/logger/client")>()),
+  clientLogWarn: vi.fn(),
+  clientLogError: vi.fn(),
+}));
 import type { ReactNode } from "react";
 
 const {
@@ -289,7 +299,8 @@ describe("team-vault-core", () => {
 
   it("returns null and logs a warning when member key fetch fails", async () => {
     const rawKeyBytes = new Uint8Array([1, 2, 3, 4]);
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.mocked(clientLogWarn);
+    warnSpy.mockClear();
     globalThis.fetch = vi.fn(async () => ({
       ok: false,
       status: 403,
@@ -306,17 +317,19 @@ describe("team-vault-core", () => {
     });
 
     expect(key).toBeNull();
+    // "forbidden" is not in the API_ERROR vocabulary, so it logs as "other"
+    // rather than echoing a server-supplied string into a browser console.
     expect(warnSpy).toHaveBeenCalledWith(
-      "[getTeamEncryptionKey] member-key request failed",
-      expect.objectContaining({ teamId: "team-1", status: 403, error: "forbidden" }),
+      CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_REQUEST_FAILED,
+      expect.objectContaining({ teamId: opaque("team-1"), status: 403, error: opaque("other") }),
     );
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
-    warnSpy.mockRestore();
   });
 
   it("returns null and logs detailed errors for malformed responses", async () => {
     const rawKeyBytes = new Uint8Array([1, 2, 3, 4]);
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const errorSpy = vi.mocked(clientLogError);
+    errorSpy.mockClear();
     globalThis.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({ encryptedTeamKey: "cipher" }),
@@ -330,11 +343,16 @@ describe("team-vault-core", () => {
       await result.current.getTeamEncryptionKey("team-1");
     });
 
+    // Asserts fields, not a substring of an interpolated string. `code` is a
+    // closed vocabulary — the exception's message and cause never appear.
     expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining("stage=parse_member_key"),
+      CLIENT_LOG_EVENT.TEAM_ENCRYPTION_KEY_FAILED,
+      expect.objectContaining({ teamId: opaque("team-1"), stage: "parse_member_key" }),
     );
+    const loggedFields = errorSpy.mock.calls[0][1] as Record<string, unknown>;
+    expect(Object.keys(loggedFields)).not.toContain("error");
+    expect(loggedFields.code).toBeTypeOf("string");
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
-    errorSpy.mockRestore();
   });
 
   describe("getItemEncryptionKey", () => {

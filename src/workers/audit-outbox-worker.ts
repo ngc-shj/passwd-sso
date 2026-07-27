@@ -69,8 +69,10 @@ interface WorkerConfig {
   pollIntervalMs?: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- accepts PrismaClient or TransactionClient
-async function setBypassRlsGucs(client: any): Promise<void> {
+/** Structural minimum shared by PrismaClient and TransactionClient. */
+type RawExecutor = { $executeRaw: PrismaClient["$executeRaw"] };
+
+async function setBypassRlsGucs(client: RawExecutor): Promise<void> {
   await client.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
   await client.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
   await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;

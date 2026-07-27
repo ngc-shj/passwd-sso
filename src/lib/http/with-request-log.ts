@@ -21,7 +21,10 @@ import { sanitizeErrorForSentry } from "@/lib/security/sentry-sanitize";
 // TypeScript's contravariant function params prevent a single non-any
 // constraint from accepting both shapes while preserving H's concrete type.
 // The `as unknown as H` cast (L53) is the actual type boundary.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// `no-explicit-any` is disabled for this file in eslint.config.mjs rather than
+// inline, so the exception stays on the reviewable audit surface. Verified:
+// `readonly unknown[]` yields TS2345 — under strictFunctionTypes, parameter
+// positions are contravariant, so widening to unknown is exactly backwards.
 type RouteHandler = (...args: any[]) => Promise<Response>;
 
 export function withRequestLog<H extends RouteHandler>(handler: H): H {

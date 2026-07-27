@@ -20,6 +20,16 @@ import { buildItemKeyWrapAAD } from "../crypto/crypto-aad";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  clientLogWarn,
+  clientLogError,
+  CLIENT_LOG_EVENT,
+  CLIENT_LOG_STAGE,
+  toClientErrorCode,
+  opaque,
+  type ClientLogStage,
+} from "@/lib/logger/client";
+import { isKnownApiError } from "@/lib/http/api-error-codes";
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -135,14 +145,6 @@ export class TeamKeyVersionUnavailableError extends Error {
   }
 }
 
-function describeUnknownError(e: unknown): string {
-  if (e instanceof Error) {
-    const base = e.message ? `${e.name}: ${e.message}` : `${e.name}: <empty message>`;
-    return e.cause ? `${base} cause=${String(e.cause)}` : base;
-  }
-  return String(e);
-}
-
 function parseTeamMemberKeyResponse(data: unknown): TeamMemberKeyResponse {
   if (!data || typeof data !== "object") {
     throw new Error("invalid member-key response: not an object");
@@ -235,7 +237,7 @@ export function TeamVaultProvider({
         return { failure: "transient" };
       }
 
-      let stage = "fetch_member_key";
+      let stage: ClientLogStage = CLIENT_LOG_STAGE.FETCH_MEMBER_KEY;
       try {
         const res = await fetchApi(apiPath.teamMemberKey(teamId, requestedVersion));
         if (!res.ok) {
@@ -248,10 +250,15 @@ export function TeamVaultProvider({
           } catch {
             // no-op: keep status-based logging
           }
-          console.warn("[getTeamEncryptionKey] member-key request failed", {
-            teamId,
+          clientLogWarn(CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_REQUEST_FAILED, {
+            teamId: opaque(teamId),
             status: res.status,
-            error: errorCode,
+            // errorCode comes from the response body and is only checked for
+            // being a string, so it is free text as far as this sink is
+            // concerned. Bound it to the API_ERROR vocabulary; anything else
+            // logs as "other" rather than echoing a server-supplied value into
+            // a browser console.
+            error: opaque(isKnownApiError(errorCode) ? errorCode : "other"),
           });
           ecdhPrivateKeyBytes.fill(0);
           // 404 MEMBER_KEY_NOT_FOUND is the "genuinely unavailable" signal;
@@ -259,14 +266,14 @@ export function TeamVaultProvider({
           return { failure: res.status === 404 ? "not_available" : "transient" };
         }
 
-        stage = "parse_member_key";
+        stage = CLIENT_LOG_STAGE.PARSE_MEMBER_KEY;
         const memberKeyData = parseTeamMemberKeyResponse(await res.json());
 
         // Version assertion: a server-side version swap must not poison the
         // versioned slot or the latest pointer.
         if (requestedVersion !== undefined && memberKeyData.keyVersion !== requestedVersion) {
-          console.warn("[getTeamEncryptionKey] member-key response version mismatch", {
-            teamId,
+          clientLogWarn(CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_VERSION_MISMATCH, {
+            teamId: opaque(teamId),
             requestedVersion,
             responseVersion: memberKeyData.keyVersion,
           });
@@ -279,7 +286,7 @@ export function TeamVaultProvider({
         // `.buffer.slice()` ArrayBuffer both fails SubtleCrypto's realm
         // check under jsdom/Node-20 test environments AND leaves an
         // unzeroed intermediate copy on the heap (R39).
-        stage = "import_ecdh_private_key";
+        stage = CLIENT_LOG_STAGE.IMPORT_ECDH_PRIVATE_KEY;
         const ecdhPrivateKey = await crypto.subtle.importKey(
           "pkcs8",
           // Uint8Array default type param is ArrayBufferLike; the vault-context copy is always a plain ArrayBuffer view.
@@ -299,7 +306,7 @@ export function TeamVaultProvider({
         };
 
         // Unwrap team key
-        stage = "unwrap_team_key";
+        stage = CLIENT_LOG_STAGE.UNWRAP_TEAM_KEY;
         const teamKeyBytes = await unwrapTeamKey(
           {
             ciphertext: memberKeyData.encryptedTeamKey,
@@ -313,16 +320,21 @@ export function TeamVaultProvider({
         );
 
         // Derive encryption key from team key, then zero-clear raw bytes
-        stage = "derive_team_encryption_key";
+        stage = CLIENT_LOG_STAGE.DERIVE_TEAM_ENCRYPTION_KEY;
         const encryptionKey = await deriveTeamEncryptionKey(teamKeyBytes);
         teamKeyBytes.fill(0);
 
         return { key: encryptionKey, keyVersion: memberKeyData.keyVersion };
       } catch (e) {
-        const errorText = describeUnknownError(e);
-        console.error(
-          `[getTeamEncryptionKey] failed teamId=${teamId} stage=${stage} error=${errorText}`
-        );
+        // A code, not the message. The removed describeUnknownError() helper
+        // concatenated `String(e.cause)` into free text that landed in a
+        // production browser console; a key-name denylist cannot inspect what
+        // is inside a value, so the value itself must not be free-form.
+        clientLogError(CLIENT_LOG_EVENT.TEAM_ENCRYPTION_KEY_FAILED, {
+          teamId: opaque(teamId),
+          stage,
+          code: toClientErrorCode(e),
+        });
         ecdhPrivateKeyBytes.fill(0);
         // Any exception here (network error, malformed response, unwrap
         // failure) is transient, not evidence the version is unavailable.

@@ -41,8 +41,7 @@ async function handleGET(req: NextRequest) {
     const count = Math.min(SCIM_PAGE_COUNT_MAX, Math.max(SCIM_PAGE_COUNT_MIN, parseInt(url.searchParams.get("count") ?? String(SCIM_PAGE_COUNT_DEFAULT), 10) || SCIM_PAGE_COUNT_DEFAULT));
     const filterParam = url.searchParams.get("filter");
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let prismaWhere: Record<string, any> = { tenantId, user: { is: { email: { not: null } } } };
+    let prismaWhere: Prisma.TenantMemberWhereInput = { tenantId, user: { is: { email: { not: null } } } };
 
     if (filterParam) {
       try {

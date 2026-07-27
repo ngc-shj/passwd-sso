@@ -1,4 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { getLogger } from "@/lib/logger";
+
+// The fail-closed substitution below emits the ONLY signal that it happened.
+// Mocked so the assertion can pin both the message and the `missing` list.
+vi.mock("@/lib/logger", () => {
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+  return { getLogger: () => logger, default: logger };
+});
 import { NextRequest } from "next/server";
 
 const { mockGetCachedSession, mockSetCachedSession, mockResolveUserTenantId } =
@@ -266,6 +274,16 @@ describe("getSessionInfo", () => {
       expect(result.hasPasskey).toBe(false);
       expect(result.requirePasskeyEnabledAt).toBeNull();
       expect(result.passkeyGracePeriodDays).toBeNull();
+
+      // The substitution must stay observable. Without this the bundle could be
+      // swapped in silently and the whole suite would still pass — a
+      // security-relevant degradation with no signal.
+      expect(getLogger().error).toHaveBeenCalledWith(
+        expect.objectContaining({
+          msg: expect.stringContaining("substituting fail-closed bundle"),
+          missing: expect.arrayContaining([omittedField]),
+        }),
+      );
     });
   });
 

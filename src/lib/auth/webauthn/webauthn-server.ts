@@ -133,12 +133,18 @@ export async function generateRegistrationOpts(
       // late-reject. "required" surfaces the requirement before the ceremony.
       userVerification: "required",
     },
+    // @simplewebauthn/server ships its OWN AuthenticationExtensionsClientInputs
+    // (types/dom.d.ts), narrower than lib.dom's: it has credProps and
+    // minPinLength but NOT largeBlob. The extension is valid per the WebAuthn
+    // spec and the browser honors it, so widen with a named intersection
+    // rather than erasing the whole object's type with `any`.
     extensions: {
       credProps: true,
       minPinLength: true,
       largeBlob: { support: "preferred" },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any,
+    } as GenerateRegistrationOptionsOpts["extensions"] & {
+      largeBlob?: { support: string };
+    },
   };
 
   return generateRegistrationOptions(opts);

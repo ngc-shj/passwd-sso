@@ -38,12 +38,86 @@ import { hexDecode, hexEncode, toArrayBuffer } from "../../crypto/crypto-utils";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 export { hexEncode };
 
+// ─── Wire types ────────────────────────────────────────────
+//
+// These describe JSON that arrived from the server, NOT values the browser
+// produced — so they are deliberately not the lib.dom types. The critical
+// difference: PRF salts cross this wire as HEX STRINGS, whereas
+// `AuthenticationExtensionsPRFValues.first` is a `BufferSource`. The hex →
+// ArrayBuffer conversion happens at exactly one place (buildPrfExtension
+// below); nothing may straddle both sides.
+
+type PrfValuesWire = { first: string; second?: string };
+
+type PrfInputsWire = {
+  eval?: PrfValuesWire;
+  evalByCredential?: Record<string, PrfValuesWire>;
+};
+
+type ExtensionsWire = { prf?: PrfInputsWire } & Record<string, unknown>;
+
+type CredentialDescriptorWire = {
+  id: string;
+  type: PublicKeyCredentialType;
+  transports?: AuthenticatorTransport[];
+};
+
+type CreationOptionsWire = {
+  rp: PublicKeyCredentialRpEntity;
+  user: { id: string; name: string; displayName: string };
+  challenge: string;
+  pubKeyCredParams: PublicKeyCredentialParameters[];
+  timeout?: number;
+  excludeCredentials?: CredentialDescriptorWire[];
+  authenticatorSelection?: AuthenticatorSelectionCriteria;
+  attestation?: AttestationConveyancePreference;
+  extensions?: ExtensionsWire;
+};
+
+type RequestOptionsWire = {
+  challenge: string;
+  timeout?: number;
+  rpId?: string;
+  allowCredentials?: CredentialDescriptorWire[];
+  userVerification?: UserVerificationRequirement;
+  extensions?: ExtensionsWire;
+};
+
+// Narrowing readers. `challenge` is the only field required on both paths —
+// everything else is optional, matching what callers actually send. A missing
+// challenge previously produced `undefined.replace` deep inside
+// base64urlDecode; failing here names the problem instead.
+function asCreationOptionsWire(json: Record<string, unknown>): CreationOptionsWire {
+  if (typeof json.challenge !== "string") {
+    throw new Error("WEBAUTHN_OPTIONS_MALFORMED: challenge must be a string");
+  }
+  if (typeof json.user !== "object" || json.user === null) {
+    throw new Error("WEBAUTHN_OPTIONS_MALFORMED: user must be an object");
+  }
+  return json as CreationOptionsWire;
+}
+
+function asRequestOptionsWire(json: Record<string, unknown>): RequestOptionsWire {
+  if (typeof json.challenge !== "string") {
+    throw new Error("WEBAUTHN_OPTIONS_MALFORMED: challenge must be a string");
+  }
+  return json as RequestOptionsWire;
+}
+
 // ─── Option conversion ─────────────────────────────────────
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+function toCredentialDescriptors(
+  list: CredentialDescriptorWire[] | undefined,
+): PublicKeyCredentialDescriptor[] | undefined {
+  return list?.map((c) => ({
+    id: toArrayBuffer(base64urlDecode(c.id)),
+    type: c.type,
+    transports: c.transports,
+  }));
+}
 
 function toCreationOptions(
-  json: any,
+  json: CreationOptionsWire,
 ): PublicKeyCredentialCreationOptions {
   return {
     rp: json.rp,
@@ -55,31 +129,67 @@ function toCreationOptions(
     challenge: toArrayBuffer(base64urlDecode(json.challenge)),
     pubKeyCredParams: json.pubKeyCredParams,
     timeout: json.timeout,
-    excludeCredentials: json.excludeCredentials?.map((c: any) => ({
-      id: toArrayBuffer(base64urlDecode(c.id)),
-      type: c.type,
-      transports: c.transports,
-    })),
+    excludeCredentials: toCredentialDescriptors(json.excludeCredentials),
     authenticatorSelection: json.authenticatorSelection,
     attestation: json.attestation,
-    extensions: json.extensions,
+    // Forward every extension EXCEPT prf. Only prf carries hex strings that the
+    // DOM type would mis-describe; the rest (credProps, minPinLength,
+    // largeBlob) are plain booleans/enums that the server sends on registration
+    // and the browser must actually receive. Dropping them compiles and keeps
+    // every server-side guard intact, yet silently nulls three columns and
+    // starves the tenant requireMinPinLength policy of its input.
+    extensions: toDomExtensions(json.extensions),
   };
 }
 
+/**
+ * Strip `prf` (hex-string wire form) and pass the remaining extensions through
+ * as DOM types. Returns undefined when nothing is left, so the property is
+ * omitted rather than set to an empty object.
+ */
+function toDomExtensions(
+  wire: ExtensionsWire | undefined,
+): AuthenticationExtensionsClientInputs | undefined {
+  if (!wire) return undefined;
+  const { prf: _prf, ...rest } = wire;
+  return Object.keys(rest).length > 0
+    ? (rest as AuthenticationExtensionsClientInputs)
+    : undefined;
+}
+
 function toRequestOptions(
-  json: any,
+  json: RequestOptionsWire,
 ): PublicKeyCredentialRequestOptions {
   return {
     challenge: toArrayBuffer(base64urlDecode(json.challenge)),
     timeout: json.timeout,
     rpId: json.rpId,
-    allowCredentials: json.allowCredentials?.map((c: any) => ({
-      id: toArrayBuffer(base64urlDecode(c.id)),
-      type: c.type,
-      transports: c.transports,
-    })),
+    allowCredentials: toCredentialDescriptors(json.allowCredentials),
     userVerification: json.userVerification,
-    extensions: json.extensions,
+    // Same rule as the creation path: forward all non-prf extensions. Today the
+    // auth routes only ever send prf, so this keeps the converter structurally
+    // safe rather than incidentally safe — a future auth-side extension will
+    // not be silently dropped.
+    extensions: toDomExtensions(json.extensions),
+  };
+}
+
+/** Convert a wire PRF input (hex strings) into the browser's BufferSource form. */
+function toPrfExtension(wire: PrfInputsWire): AuthenticationExtensionsPRFInputs {
+  return {
+    ...(wire.eval
+      ? { eval: { first: toArrayBuffer(hexDecode(wire.eval.first)) } }
+      : {}),
+    ...(wire.evalByCredential
+      ? {
+          evalByCredential: Object.fromEntries(
+            Object.entries(wire.evalByCredential).map(([credId, value]) => [
+              credId,
+              { first: toArrayBuffer(hexDecode(value.first)) },
+            ]),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -129,8 +239,6 @@ function credentialToAuthenticationJSON(
     clientExtensionResults: credential.getClientExtensionResults(),
   };
 }
-
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ─── PRF Key Wrapping ──────────────────────────────────────
 
@@ -274,11 +382,11 @@ export async function startPasskeyRegistration(
   optionsJSON: Record<string, unknown>,
   prfSalt?: string, // hex
 ): Promise<PasskeyRegistrationResult> {
-  const publicKeyOptions = toCreationOptions(optionsJSON);
+  const wire = asCreationOptionsWire(optionsJSON);
+  const publicKeyOptions = toCreationOptions(wire);
 
   if (prfSalt) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (publicKeyOptions as any).extensions = {
+    publicKeyOptions.extensions = {
       ...publicKeyOptions.extensions,
       prf: { eval: { first: toArrayBuffer(hexDecode(prfSalt)) } },
     };
@@ -313,9 +421,12 @@ export async function startPasskeyRegistration(
   if (!credential) throw new Error("REGISTRATION_CANCELLED");
 
   // Extract PRF output from extension results
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const extResults = credential.getClientExtensionResults() as any;
-  const prfResults = extResults?.prf?.results;
+  const extResults = credential.getClientExtensionResults();
+  const prfResults = extResults.prf?.results;
+  // Cast retained deliberately: `first` is typed BufferSource, and the uncast
+  // form does not compile (TS2769). Keeping it emits byte-identical JS and
+  // avoids introducing an ArrayBuffer/ArrayBufferView branch that no test —
+  // and per VC1 no CI test ever could — would exercise.
   const prfOutput = prfResults?.first
     ? new Uint8Array(prfResults.first as ArrayBuffer)
     : null;
@@ -337,7 +448,8 @@ export async function startPasskeyAuthentication(
   prfSalt?: string, // hex — top-level eval (legacy or mixed v1 fallback)
   evalByCredential?: Record<string, string>, // credId base64url → salt hex (A02-8)
 ): Promise<PasskeyAuthenticationResult> {
-  const publicKeyOptions = toRequestOptions(optionsJSON);
+  const wire = asRequestOptionsWire(optionsJSON);
+  const publicKeyOptions = toRequestOptions(wire);
 
   // A02-8: PRF extension input may arrive via three channels (in priority order):
   //   1. Server-built `optionsJSON.extensions.prf` — pass through verbatim
@@ -348,50 +460,36 @@ export async function startPasskeyAuthentication(
   //      or v1 RP-global fallback).
   // Channel (1) is mutually exclusive with (2)/(3). Channels (2) and (3) can
   // coexist and produce { eval, evalByCredential } simultaneously.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const serverPrfExt = (optionsJSON as any).extensions?.prf as
-    | { eval?: { first: string }; evalByCredential?: Record<string, { first: string }> }
-    | undefined;
+  // Read off the WIRE type (hex strings), not the DOM type. Mis-typing this as
+  // AuthenticationExtensionsClientInputs makes the read resolve to undefined,
+  // which silently drops control into the client-salt branch below — a
+  // downgrade of the server-bound salt that governs the vault wrapping key.
+  const serverPrfExt = wire.extensions?.prf;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const extensions: any = { ...publicKeyOptions.extensions };
+  const extensions: AuthenticationExtensionsClientInputs = {
+    ...publicKeyOptions.extensions,
+  };
 
   if (serverPrfExt) {
-    // Convert hex strings back into ArrayBuffers for the browser-side WebAuthn API.
-    extensions.prf = {
-      ...(serverPrfExt.eval
-        ? { eval: { first: toArrayBuffer(hexDecode(serverPrfExt.eval.first)) } }
-        : {}),
-      ...(serverPrfExt.evalByCredential
-        ? {
-            evalByCredential: Object.fromEntries(
-              Object.entries(serverPrfExt.evalByCredential).map(([credId, value]) => [
-                credId,
-                { first: toArrayBuffer(hexDecode(value.first)) },
-              ]),
-            ),
-          }
-        : {}),
-    };
+    extensions.prf = toPrfExtension(serverPrfExt);
   } else if (prfSalt || evalByCredential) {
-    extensions.prf = {
-      ...(prfSalt ? { eval: { first: toArrayBuffer(hexDecode(prfSalt)) } } : {}),
+    extensions.prf = toPrfExtension({
+      ...(prfSalt ? { eval: { first: prfSalt } } : {}),
       ...(evalByCredential
         ? {
             evalByCredential: Object.fromEntries(
               Object.entries(evalByCredential).map(([credId, salt]) => [
                 credId,
-                { first: toArrayBuffer(hexDecode(salt)) },
+                { first: salt },
               ]),
             ),
           }
         : {}),
-    };
+    });
   }
 
   if (extensions.prf || Object.keys(extensions).length > 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (publicKeyOptions as any).extensions = extensions;
+    publicKeyOptions.extensions = extensions;
   }
 
   const { abort, timer } = beginCeremony();
@@ -419,9 +517,12 @@ export async function startPasskeyAuthentication(
 
   if (!credential) throw new Error("AUTHENTICATION_CANCELLED");
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const extResults = credential.getClientExtensionResults() as any;
-  const prfResults = extResults?.prf?.results;
+  const extResults = credential.getClientExtensionResults();
+  const prfResults = extResults.prf?.results;
+  // Cast retained deliberately: `first` is typed BufferSource, and the uncast
+  // form does not compile (TS2769). Keeping it emits byte-identical JS and
+  // avoids introducing an ArrayBuffer/ArrayBufferView branch that no test —
+  // and per VC1 no CI test ever could — would exercise.
   const prfOutput = prfResults?.first
     ? new Uint8Array(prfResults.first as ArrayBuffer)
     : null;

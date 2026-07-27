@@ -372,6 +372,127 @@ describe("startPasskeyAuthentication in-flight ceremony guard", () => {
   });
 });
 
+describe("malformed server options are rejected by name", () => {
+  // RT8: these paths previously died as `undefined.replace` deep inside
+  // base64urlDecode — an anonymous TypeError far from its cause. The named
+  // error is the behavior change, so the assertions pin the NAME; a bare
+  // .toThrow() would pass against the pre-change code too and prove nothing.
+  beforeEach(() => {
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      credentials: { create: vi.fn(), get: vi.fn() },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("registration rejects options with no challenge", async () => {
+    const { startPasskeyRegistration } = await import("./webauthn-client");
+    await expect(
+      startPasskeyRegistration({ rp: {}, user: { id: "x", name: "u", displayName: "U" } }),
+    ).rejects.toThrow(/WEBAUTHN_OPTIONS_MALFORMED: challenge/);
+  });
+
+  it("registration rejects options whose user is not an object", async () => {
+    const { startPasskeyRegistration } = await import("./webauthn-client");
+    await expect(
+      startPasskeyRegistration({ challenge: "Y2hhbGxlbmdl", user: "nope" }),
+    ).rejects.toThrow(/WEBAUTHN_OPTIONS_MALFORMED: user/);
+  });
+
+  it("authentication rejects options with no challenge", async () => {
+    const { startPasskeyAuthentication } = await import("./webauthn-client");
+    await expect(
+      startPasskeyAuthentication({ rpId: "localhost", allowCredentials: [] }),
+    ).rejects.toThrow(/WEBAUTHN_OPTIONS_MALFORMED: challenge/);
+  });
+});
+
+describe("startPasskeyRegistration forwards server extensions to the browser", () => {
+  // Regression guard. The server sends credProps / minPinLength / largeBlob on
+  // registration (webauthn-server.ts) and the verify route reads all three back
+  // out of clientExtensionResults. A converter that drops them compiles, keeps
+  // every server-side guard intact, and still breaks the contract end-to-end:
+  // the three columns null out and the tenant requireMinPinLength policy stops
+  // rejecting, because its input is starved rather than its check removed.
+  type CapturedCreate = { extensions?: Record<string, unknown> };
+  let captured: CapturedCreate | null = null;
+
+  beforeEach(() => {
+    captured = null;
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      credentials: {
+        create: vi.fn(async ({ publicKey }: { publicKey: CapturedCreate }) => {
+          captured = publicKey;
+          return {
+            id: "cred-id",
+            rawId: new Uint8Array(8).buffer,
+            type: "public-key",
+            response: {
+              clientDataJSON: new Uint8Array(8).buffer,
+              attestationObject: new Uint8Array(8).buffer,
+              getTransports: () => ["internal"],
+            },
+            getClientExtensionResults: () => ({}),
+          };
+        }),
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const REG_OPTIONS = {
+    rp: { id: "localhost", name: "x" },
+    user: { id: "dXNlcg", name: "u", displayName: "U" },
+    challenge: "Y2hhbGxlbmdl",
+    pubKeyCredParams: [],
+    extensions: {
+      credProps: true,
+      minPinLength: true,
+      largeBlob: { support: "preferred" },
+    },
+  };
+
+  it("passes credProps, minPinLength and largeBlob through to credentials.create", async () => {
+    const { startPasskeyRegistration } = await import("./webauthn-client");
+    await startPasskeyRegistration(REG_OPTIONS);
+
+    expect(captured!.extensions).toMatchObject({
+      credProps: true,
+      minPinLength: true,
+      largeBlob: { support: "preferred" },
+    });
+  });
+
+  it("keeps forwarding them when a prf salt is also supplied", async () => {
+    const { startPasskeyRegistration } = await import("./webauthn-client");
+    await startPasskeyRegistration(REG_OPTIONS, "a".repeat(64));
+
+    const ext = captured!.extensions as Record<string, unknown>;
+    expect(ext).toMatchObject({ credProps: true, minPinLength: true });
+    // prf is rebuilt from the hex wire form: a BufferSource here, never the hex
+    // string that crossed the wire. (Matches the existing PRF assertions above,
+    // which observe a Uint8Array view under jsdom.)
+    const first = (ext.prf as { eval: { first: ArrayBufferLike } }).eval.first;
+    expect(typeof first).not.toBe("string");
+    expect(hexEncode(new Uint8Array(first))).toBe("a".repeat(64));
+  });
+
+  it("omits extensions entirely when the server sends none", async () => {
+    const { startPasskeyRegistration } = await import("./webauthn-client");
+    const { extensions: _drop, ...noExt } = REG_OPTIONS;
+    await startPasskeyRegistration(noExt);
+
+    expect(captured!.extensions).toBeUndefined();
+  });
+});
+
 describe("isWebAuthnSupported", () => {
   it("returns true when window.PublicKeyCredential is defined", () => {
     // jsdom does not ship PublicKeyCredential; stub it for this test.

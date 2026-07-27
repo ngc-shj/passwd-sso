@@ -35,6 +35,7 @@ import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
+import { clientLogError, CLIENT_LOG_EVENT, toClientErrorCode } from "@/lib/logger/client";
 import {
   isWebAuthnSupported,
   startPasskeyRegistration,
@@ -202,8 +203,10 @@ export function PasskeyCredentialsCard() {
       }
 
       // 4. Auto-generate nickname from transports; user can rename after registration.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const transports: string[] = (responseJSON as any).response?.transports ?? [];
+      const regResponse = (responseJSON as { response?: { transports?: unknown } }).response;
+      const transports: string[] = Array.isArray(regResponse?.transports)
+        ? regResponse.transports.filter((t): t is string => typeof t === "string")
+        : [];
       const resolvedNickname = generateDefaultNickname(transports);
 
       // 5. Send to server
@@ -253,7 +256,11 @@ export function PasskeyCredentialsCard() {
             return;
         }
       }
-      console.error("[WebAuthn] Registration failed:", err);
+      // Normalized to a code: a WebAuthn DOMException's message is UA-specific
+      // free text, and a key-name denylist cannot inspect what is inside a value.
+      clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED, {
+        code: toClientErrorCode(err),
+      });
       toast.error(t("registerError"));
     } finally {
       // Defense-in-depth zeroize — covers (a) wrapSecretKeyWithPrf throws,

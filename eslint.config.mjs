@@ -82,6 +82,50 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // Keep diagnostics out of raw console calls in production source.
+    //
+    // Only `no-console` is added here — `@typescript-eslint/no-explicit-any` is
+    // ALREADY error repo-wide via eslint-config-next/typescript, and
+    // re-declaring it under a test-excluding block would invite a future
+    // "simplification" that quietly drops enforcement for test code.
+    //
+    // Client code routes through `@/lib/logger/client` (which redacts by key
+    // name); server code through `@/lib/logger` (pino). The two overrides below
+    // are the only sanctioned raw sinks, and that list IS the audit surface —
+    // adding a third requires editing this file, which is visible in review.
+    // Note the ignore list deliberately does NOT contain `src/**/e2e/**`: in
+    // this repo "E2E" also means end-to-end *encryption* (see
+    // components/share/share-e2e-entry-view.tsx), so a future `src/lib/e2e/`
+    // would be production crypto code silently exempted. Playwright specs live
+    // in the repo-root `e2e/` directory, outside this glob entirely.
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
+    rules: {
+      "no-console": "error",
+    },
+  },
+  {
+    // The two sanctioned console sinks. Neither can see a secret: client.ts
+    // redacts by denylist before writing; boot-stderr.ts takes a plain string
+    // and exists so this exemption does NOT land on src/lib/env.ts, which holds
+    // every secret in process.env.
+    files: ["src/lib/logger/client.ts", "src/lib/boot-stderr.ts"],
+    rules: {
+      "no-console": "off",
+    },
+  },
+  {
+    // Route handlers have varying signatures; TypeScript's contravariant
+    // parameter positions make a non-any constraint impossible here (verified:
+    // `readonly unknown[]` yields TS2345). See the explanatory comment in the
+    // file. A file-scoped override rather than an inline disable, so the
+    // exception stays on the reviewable audit surface.
+    files: ["src/lib/http/with-request-log.ts"],
+    rules: {
+      "@typescript-eslint/no-explicit-any": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;
