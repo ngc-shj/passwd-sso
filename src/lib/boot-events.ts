@@ -46,23 +46,29 @@ declare const envVarNameBrand: unique symbol;
  * The NAME of an environment variable — never its value.
  *
  * Branded with a module-private symbol so it cannot be produced structurally,
- * and validated on construction rather than merely asserted. The distinction
- * matters: an earlier `opaque()` helper elsewhere in this repo brands without
- * checking, so `opaque(secret)` type-checks. Here a value that is not shaped
- * like an env var name is replaced, so the brand means what it says.
+ * and admitted only by membership in the caller-supplied set of DECLARED
+ * variable names.
+ *
+ * Membership, not shape. An earlier version of this function tested
+ * `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/` and called itself validated. It was not:
+ * that pattern matches a 64-char hex master key, an `AKIA…` access key id, and
+ * an `api_…` token — every secret encoding this repo actually handles is
+ * identifier-shaped. `envVarName(process.env.SHARE_MASTER_KEY)` would have
+ * type-checked and printed the key verbatim. A predicate over the value's FORM
+ * cannot decide a question about its ORIGIN; an allowlist of names the schema
+ * declares can, because no secret is ever a schema key.
  */
 export type EnvVarName = string & { readonly [envVarNameBrand]: true };
 
-// Length-bounded as well as shape-bounded. Real env var names sit well under
-// this; the cap is what stops an identifier-shaped blob from flooding the boot
-// console, since this sink has no downstream that could trim it.
-const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
-
-/** Placeholder for a path that is not an env var name (e.g. a nested Zod path). */
+/** Placeholder for a path that names no declared variable. */
 const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;
 
-export function envVarName(raw: string): EnvVarName {
-  return ENV_VAR_NAME_RE.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;
+/**
+ * @param raw      candidate name, typically a Zod issue path
+ * @param declared every variable name the env schema declares
+ */
+export function envVarName(raw: string, declared: ReadonlySet<string>): EnvVarName {
+  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;
 }
 
 /**

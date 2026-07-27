@@ -39,14 +39,15 @@ function parseEnv(): Env {
     // `.refine(…, { message: `bad: ${v}` })` would put a value there with
     // nothing to stop it. `envVarName` validates the shape rather than asserting
     // it, so a nested or synthetic issue path cannot smuggle text through.
-    // Deduplicated: one variable can raise several issues (a format refine plus
-    // a superRefine, say). With the messages dropped, repeating the name carries
-    // nothing but noise.
+    // Deduplicated on the full path, not on the resolved name: two distinct
+    // paths that both fail the allowlist stay two entries, so several problems
+    // cannot collapse into a single `<unnamed>` line.
+    const declared = new Set(Object.keys(getSchemaShape()));
+    const paths = [...new Set(result.error.issues.map((issue) => issue.path.join(".")))];
+
     bootStderr({
       event: BOOT_EVENT.ENV_VALIDATION_FAILED,
-      variables: [
-        ...new Set(result.error.issues.map((issue) => envVarName(String(issue.path[0] ?? "")))),
-      ],
+      variables: paths.map((path) => envVarName(path, declared)),
     });
 
     // The thrown Error keeps the full per-issue detail. It travels the normal

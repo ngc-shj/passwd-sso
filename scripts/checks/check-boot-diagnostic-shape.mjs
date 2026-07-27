@@ -116,16 +116,29 @@ if (events) {
   if (!ctor) {
     failures.push(`${EVENTS_FILE}: constructor \`envVarName\` is gone`);
   } else {
+    // Membership, not shape.
+    //
     // A brand that asserts without checking is the `opaque()` failure mode
-    // recorded elsewhere in this repo: opaque(secret) type-checks. Require a
-    // real test in the body.
+    // recorded elsewhere in this repo. But a SHAPE check is not enough either,
+    // and this gate previously accepted one: the constructor tested
+    // `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/`, which every identifier-shaped secret
+    // this repo handles satisfies — a 64-char hex master key, an `AKIA…` id, an
+    // `api_…` token. A predicate over a value's FORM cannot answer a question
+    // about its ORIGIN. So require an allowlist parameter and a membership test.
+    const takesAllowlist = ctor
+      .getParameters()
+      .some((p) => /ReadonlySet|Set<|readonly string\[\]/.test(p.getTypeNode()?.getText() ?? ""));
     const body = ctor.getBody()?.getText() ?? "";
-    const validates =
-      body.includes(".test(") || body.includes(".match(") || body.includes("includes(");
-    if (!validates) {
+    if (!takesAllowlist) {
       failures.push(
-        `${EVENTS_FILE}: envVarName does not validate its input — a brand applied without ` +
-          `a check means \`envVarName(secret)\` compiles and passes through`,
+        `${EVENTS_FILE}: envVarName takes no allowlist parameter — a shape predicate cannot ` +
+          `distinguish a variable NAME from an identifier-shaped secret VALUE`,
+      );
+    }
+    if (!body.includes(".has(")) {
+      failures.push(
+        `${EVENTS_FILE}: envVarName does not test membership of the declared set — a brand ` +
+          `applied without that check means \`envVarName(secret, …)\` passes through`,
       );
     }
   }
@@ -228,8 +241,78 @@ if (events) {
     if (members.length === 0) {
       failures.push(`${EVENTS_FILE}: BootDiagnostic has no members`);
     }
-    for (const member of members) {
-      for (const prop of member.getDescendantsOfKind(SyntaxKind.PropertySignature)) {
+
+    // Resolve a member to the node whose properties should be checked.
+    //
+    // Walking `getDescendantsOfKind(PropertySignature)` on the written node was
+    // vacuous for every member that is not an inline type literal: extracting a
+    // member to `type StaleKey = { …; detail: string }` yields zero descendants,
+    // so the loop ran zero times and the gate printed OK. That is the most
+    // likely future edit here (someone tidies a growing union), and it disabled
+    // the check wholesale. Anything not reducible to a checkable literal is now
+    // a failure rather than an empty iteration.
+    function checkMember(member, depth = 0) {
+      const kind = member.getKind();
+      if (depth > 4) {
+        failures.push(`${EVENTS_FILE}: BootDiagnostic member nests too deeply to verify`);
+        return;
+      }
+      if (kind === SyntaxKind.IntersectionType || kind === SyntaxKind.UnionType) {
+        for (const part of member.getTypeNodes()) checkMember(part, depth + 1);
+        return;
+      }
+      if (kind === SyntaxKind.ParenthesizedType) {
+        const inner = member.getTypeNode?.();
+        if (inner) checkMember(inner, depth + 1);
+        return;
+      }
+      if (kind === SyntaxKind.TypeReference) {
+        const name = member.getText();
+        const alias = events.getTypeAlias(name);
+        const iface = events.getInterface?.(name);
+        const target = alias?.getTypeNode() ?? iface;
+        if (!target) {
+          failures.push(
+            `${EVENTS_FILE}: BootDiagnostic member \`${name}\` cannot be resolved in this file — ` +
+              `a member the gate cannot read is a member it cannot check`,
+          );
+          return;
+        }
+        checkMember(target, depth + 1);
+        return;
+      }
+      if (kind !== SyntaxKind.TypeLiteral && kind !== SyntaxKind.InterfaceDeclaration) {
+        failures.push(
+          `${EVENTS_FILE}: BootDiagnostic member is a ${member.getKindName()}, which the gate ` +
+            `cannot reduce to a property list`,
+        );
+        return;
+      }
+
+      // An index signature, a method, or a call signature can each carry a
+      // free-form value without ever appearing as a PropertySignature.
+      for (const bad of [
+        SyntaxKind.IndexSignature,
+        SyntaxKind.MethodSignature,
+        SyntaxKind.CallSignature,
+        SyntaxKind.MappedType,
+      ]) {
+        for (const node of member.getDescendantsOfKind(bad)) {
+          failures.push(
+            `${EVENTS_FILE}:${node.getStartLineNumber()}: BootDiagnostic member contains a ` +
+              `${node.getKindName()} — only explicit properties with closed types are allowed`,
+          );
+        }
+      }
+
+      const props = member.getDescendantsOfKind(SyntaxKind.PropertySignature);
+      if (props.length === 0) {
+        failures.push(
+          `${EVENTS_FILE}:${member.getStartLineNumber()}: BootDiagnostic member declares no ` +
+            `properties — every member must at least carry its \`event\` discriminant`,
+        );
+      }
+      for (const prop of props) {
         const propType = prop.getTypeNode();
         if (!isAllowedPropertyType(events, propType, closedNames)) {
           failures.push(
@@ -239,6 +322,40 @@ if (events) {
           );
         }
       }
+    }
+
+    for (const member of members) checkMember(member);
+  }
+}
+
+// ── the sink renders from the diagnostic and nothing else ────────────
+//
+// Rendering moved into the sink, which created a prose-assembly site that no
+// gate read. `check-console-sinks` pins the console ARGUMENT; this pins what
+// render may reach for. Proven necessary: a render body returning
+// `${process.env.AUTH_SECRET}` passed every gate, in the one file where
+// `no-console` is off.
+if (sink) {
+  const render = sink.getFunction("render");
+  if (!render) {
+    failures.push(`${SINK_FILE}: no \`render\` function — did the sink's rendering move?`);
+  } else {
+    const body = render.getBody();
+    if (body && /\bprocess\b/.test(body.getText())) {
+      failures.push(
+        `${SINK_FILE}:${render.getStartLineNumber()}: render() reads \`process\` — the sink must ` +
+          `build its text only from the diagnostic it was handed`,
+      );
+    }
+  }
+  // The sink's imports bound what it can reach at all.
+  for (const decl of sink.getImportDeclarations()) {
+    const spec = decl.getModuleSpecifierValue();
+    if (spec !== "@/lib/boot-events") {
+      failures.push(
+        `${SINK_FILE}: imports \`${spec}\`; the sink may import only \`@/lib/boot-events\` — ` +
+          `every additional import is a value it could interpolate`,
+      );
     }
   }
 }

@@ -227,3 +227,100 @@ mutations in its self-test, wired into `pre-pr.sh` and thereby CI
 
 Round 2 is warranted: the redesign is new code touching a security boundary, so
 the tightening-only skip does not apply.
+
+---
+
+# Round 2
+
+Reviewed `git diff HEAD~1 HEAD` (b1bc8fe9e). Security expert plus a combined
+Functionality/Testing expert. Both converged on the same three Major items.
+
+## Verified resolved from Round 1
+
+The nine call-shape escapes are genuinely closed — by the compiler, not a
+detector. Confirmed by both experts: `tsc --noEmit` clean with five live
+`@ts-expect-error` directives pinning the signature; `render()` exhaustiveness
+is a real `TS2366` when a member is added without a case; `tsconfig` includes
+`scripts/**`, so the production workers the old gate never scanned are now
+covered by the same parameter type. C10, C11, C13, C14, C15 all confirmed
+resolved, C13 red-proved against three independent mutants.
+
+Operability is **not** regressed: `next` rethrows a failing `register()` with the
+message preserved (`instrumentation-globals.external.js:64-68`), and `env.ts`
+still throws the full per-issue text, so the operator gets names in the banner
+and names+reasons in the error.
+
+## R2-1 [Major, converged] `envVarName` validated shape, not origin
+
+`src/lib/boot-events.ts`. The regex `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/` matches a
+64-char hex master key, `AKIAIOSFODNN7EXAMPLE`, and `api_9f2c7ba4e1d84c0f` —
+every identifier-shaped secret this repo handles. `envVarName(process.env
+.SHARE_MASTER_KEY)` type-checked and would have printed the key verbatim. The
+Round-1 claim that the brand "means what it says" was wrong: a predicate over a
+value's FORM cannot answer a question about its ORIGIN.
+
+- Action: replaced with an allowlist — `envVarName(raw, declared: ReadonlySet<string>)`,
+  admitting only names the schema declares. No secret is ever a schema key.
+  The gate's `validates` heuristic now requires the allowlist parameter and a
+  membership test, so a reversion to a shape predicate fails.
+- Modified: `src/lib/boot-events.ts:47`, `src/lib/env.ts:47`
+
+## R2-2 [Major, converged] `check-console-sinks`' assertion became vacuous
+
+Moving rendering into the sink turned `message` from the typed PARAMETER into an
+ordinary local. The gate asserts the argument text is `message`, which had
+carried the whole caller→console chain; it then constrained nothing. Proven: a
+sink body of `const message = \`${process.env.AUTH_SECRET}\`` passed both gates,
+in the one file where `no-console` is off.
+
+- Action: the call is now inline `console.error(render(diagnostic))` and the gate
+  pins that exact text. `check-boot-diagnostic-shape` additionally rejects
+  `render()` reading `process` and rejects any sink import beyond `@/lib/boot-events`.
+- Modified: `src/lib/boot-stderr.ts:57`, `scripts/checks/check-console-sinks.mjs:96`
+
+## R2-3 [Major, converged] Shape gate passed vacuously on non-inline members
+
+Walking `getDescendantsOfKind(PropertySignature)` on the written node meant any
+member that is not an inline type literal yielded zero properties and the gate
+printed OK. Five widenings passed: named alias, index signature, method
+signature, `& Record<string,string>`, `& Extra`. Extracting a growing union
+member to its own alias is the most likely edit here, and it disabled the check
+wholesale.
+
+- Action: members are resolved (alias/interface/intersection/parenthesized,
+  recursively) before property checking; `IndexSignature`, `MethodSignature`,
+  `CallSignature`, `MappedType`, an unresolvable member, and a member with zero
+  properties are each an explicit failure.
+- Modified: `scripts/checks/check-boot-diagnostic-shape.mjs:231`
+
+## R2-4 [Minor] Stale references / dedup / dead import
+
+- `types.ts:42` cited the deleted gate; repointed. `eslint.config.mjs:110`
+  described the old string signature; corrected.
+- `env.ts` deduped on the resolved name, so several pathless issues could
+  collapse into one `<unnamed>` line; now dedupes on the full path.
+- `boot-events.test.ts` mixed a dynamic import with a static one, implying an
+  isolation it did not provide (proved same instance); now a single static import.
+
+## Round 2 verification
+
+`npx vitest run` 987 files / 13102 tests, exit 0. `npx next build` exit 0.
+`npx tsc --noEmit` exit 0. `bash scripts/pre-pr.sh` 62/62, exit 0. Gate
+self-tests 26 cases across the two sinks, each red-proved. All statuses read
+unpiped (R44).
+
+## Termination
+
+Round 2's findings are resolved. Every Round-2 item is a guard-layer defect
+(false assurance) rather than a live leak, with one exception — R2-1, which was
+a real egress path and is now closed by an allowlist plus a gate that rejects
+the weaker predicate.
+
+The C1 class is closed by construction: the guarantee is the parameter type,
+checked by the compiler at every call site in every import form, with a
+mutation-verified gate (`check-boot-diagnostic-shape`, red-proven by 17
+mutations) covering the two things the compiler cannot see — widening the
+payload type and the sink's own render body.
+
+Round 3 not warranted: no finding remains open, and the remaining risk surface
+is now enforced by the type system rather than by detection.

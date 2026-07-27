@@ -54,6 +54,9 @@ function render(diagnostic: BootDiagnostic): string {
 }
 
 export function bootStderr(diagnostic: BootDiagnostic): void {
-  const message = render(diagnostic);
-  console.error(message);
+  // Inline, not via a local: `check-console-sinks` asserts the argument text,
+  // and while `message` was the typed PARAMETER that assertion carried the whole
+  // caller→console chain. Once rendering moved in here, a local named `message`
+  // satisfied the same string while proving nothing about its provenance.
+  console.error(render(diagnostic));
 }

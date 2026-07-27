@@ -132,17 +132,17 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/takes 2 parameters/);
   });
 
-  it("rejects envVarName asserting the brand without validating", () => {
+  it("rejects envVarName asserting the brand without checking anything", () => {
     // The `opaque()` failure mode recorded elsewhere in this repo: a brand
     // applied without a check means envVarName(secret) compiles and passes.
     patch(
       "src/lib/boot-events.ts",
-      "return ENV_VAR_NAME_RE.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
-      "return raw as EnvVarName;",
+      "  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return raw as EnvVarName;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not validate its input/);
+    expect(output).toMatch(/does not test membership/);
   });
 
   it("rejects EnvVarName losing its brand", () => {
@@ -162,6 +162,89 @@ describe("check-boot-diagnostic-shape", () => {
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/did the boot sink move/);
+  });
+
+  it("rejects a member extracted to a named alias carrying a string field", () => {
+    // Round 2 found this: walking descendants of the WRITTEN node meant a
+    // member that is not an inline literal yielded zero properties and the
+    // gate printed OK. Extracting a growing union member to its own alias is
+    // the most likely edit here, and it disabled the check wholesale.
+    patch(
+      "src/lib/boot-events.ts",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED }",
+      "  | CspModeIgnored",
+    );
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\ntype CspModeIgnored = { event: typeof BOOT_EVENT.CSP_MODE_IGNORED; detail: string };\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/property `detail` is typed `string`/);
+  });
+
+  it("rejects a member carrying an index signature", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED }",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED; [k: string]: string }",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/IndexSignature/);
+  });
+
+  it("rejects a member carrying a method signature", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED }",
+      "  | { event: typeof BOOT_EVENT.CSP_MODE_IGNORED; detail(): string }",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/MethodSignature/);
+  });
+
+  it("rejects render() reaching for process state", () => {
+    // Rendering moved into the sink, creating a prose-assembly site no gate
+    // read. Proven necessary in round 2: a render body interpolating
+    // process.env.AUTH_SECRET passed every gate, in the one file where
+    // no-console is off.
+    patch(
+      "src/lib/boot-stderr.ts",
+      "    case BOOT_EVENT.CSP_MODE_IGNORED:",
+      "    case BOOT_EVENT.CSP_MODE_IGNORED:\n      return `${process.env.AUTH_SECRET}`;",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/render\(\) reads `process`/);
+  });
+
+  it("rejects the sink importing anything beyond boot-events", () => {
+    patch(
+      "src/lib/boot-stderr.ts",
+      'import { BOOT_EVENT, type BootDiagnostic } from "@/lib/boot-events";',
+      'import { BOOT_EVENT, type BootDiagnostic } from "@/lib/boot-events";\nimport { env } from "@/lib/env";',
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/may import only/);
+  });
+
+  it("rejects envVarName validating shape instead of membership", () => {
+    // The defect round 2 caught: /^[A-Za-z_][A-Za-z0-9_]{0,63}$/ matches a
+    // 64-char hex master key, an AKIA… id, and an api_… token. A predicate over
+    // a value's form cannot answer a question about its origin.
+    patch(
+      "src/lib/boot-events.ts",
+      "export function envVarName(raw: string, declared: ReadonlySet<string>): EnvVarName {\n  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "export function envVarName(raw: string): EnvVarName {\n  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/takes no allowlist parameter|does not test membership/);
   });
 
   it("fails when BootDiagnostic is deleted entirely", () => {

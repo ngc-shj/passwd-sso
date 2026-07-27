@@ -39,6 +39,7 @@ export interface KeyProvider {
  * implementation today assigns a fixed literal, so this only writes down what
  * was already true — but as `string` it left the door open for a future
  * provider to derive its name from configuration and put that value on stderr
- * with nothing to stop it. Enforced by `scripts/checks/check-boot-stderr-callers.mjs`.
+ * with nothing to stop it. Enforced by `scripts/checks/check-boot-diagnostic-shape.mjs`,
+ * which resolves this import one hop and re-checks that the union is still closed.
  */
 export type ProviderName = "env" | "aws-sm" | "gcp-sm" | "azure-kv";
