@@ -13,15 +13,28 @@
  */
 
 import { CLIENT_REDACT_KEYS, REDACTED } from "./redact-keys";
-import type { ClientLogEvent, ClientErrorCode, ClientLogStage } from "./client-events";
+import type {
+  ClientLogEvent,
+  ClientLogPayloads,
+  ClientErrorCode,
+  ClientLogStage,
+  Opaque,
+} from "./client-events";
 
 export {
   CLIENT_LOG_EVENT,
   CLIENT_ERROR_CODE,
   CLIENT_LOG_STAGE,
   toClientErrorCode,
+  opaque,
 } from "./client-events";
-export type { ClientLogEvent, ClientErrorCode, ClientLogStage } from "./client-events";
+export type {
+  ClientLogEvent,
+  ClientLogPayloads,
+  ClientErrorCode,
+  ClientLogStage,
+  Opaque,
+} from "./client-events";
 
 /**
  * A value that cannot smuggle free text into a browser console.
@@ -47,31 +60,6 @@ export type ClientLogValue =
 export type ClientLogEnum = ClientErrorCode | ClientLogStage;
 
 /**
- * An explicitly bounded string. Construct with {@link opaque}, whose contract
- * is: the value contains no user input, no server text, and no URL query.
- *
- * Branded with a module-private symbol rather than a visible property. An
- * earlier version used `{ readonly __opaque: string }`, which had three
- * problems: the emitted log value became an object (contradicting "flat values
- * only" and changing the field shape downstream consumers see), and the shape
- * was public, so `{ __opaque: `token=${secret}` }` assigned cleanly and skipped
- * the truncation entirely. The symbol is not exported, so the brand cannot be
- * produced structurally — `opaque()` is the only way in — and at runtime the
- * value stays an ordinary string.
- */
-declare const opaqueBrand: unique symbol;
-
-export type Opaque = string & { readonly [opaqueBrand]: true };
-
-/**
- * Mark a string as safe to log. Truncates as a backstop — an id that grew into
- * a serialized blob still cannot flood the console.
- */
-export function opaque(value: string, maxLength = 64): Opaque {
-  return value.slice(0, maxLength) as Opaque;
-}
-
-/**
  * Flat values only. A nested object cannot be redacted without traversing it,
  * and traversal is how a whole credential object ends up in a log line — so the
  * type makes "log the entire response" a compile error rather than a runtime
@@ -82,7 +70,12 @@ export type ClientLogFields = Record<string, ClientLogValue>;
 /** Emitted shape: like ClientLogFields, but a censored slot holds REDACTED. */
 type EmittedFields = Record<string, ClientLogValue | typeof REDACTED>;
 
-function redact(fields: ClientLogFields): EmittedFields {
+/**
+ * Exported for tests: the public API now constrains keys per event, so the
+ * sink-side layer can only be exercised directly. That is the point of keeping
+ * it — it defends the paths the types do not reach.
+ */
+export function redact(fields: Record<string, ClientLogValue>): EmittedFields {
   const out: EmittedFields = {};
   for (const [key, value] of Object.entries(fields)) {
     out[key] = CLIENT_REDACT_KEYS.includes(key) ? REDACTED : value;
@@ -91,19 +84,34 @@ function redact(fields: ClientLogFields): EmittedFields {
 }
 
 /**
- * `event` is a `ClientLogEvent`, not a `string`. The message channel is emitted
- * verbatim and is the one thing redaction cannot cover, so it is closed by the
- * type system rather than by a lint rule: a template literal, a variable, or a
- * concatenation simply does not assign. Variable data goes in `fields`, which is
- * redacted by key name.
+ * Two independent restrictions, both at compile time.
+ *
+ * `event` is a `ClientLogEvent`, not a `string`: the id is emitted verbatim and
+ * is the one channel redaction cannot cover, so a template literal, a variable,
+ * or a concatenation simply does not assign. (A lint rule tried this first and
+ * was bypassable by an aliased import.)
+ *
+ * `fields` is `ClientLogPayloads[E]` — the exact key set declared for THAT
+ * event. Restricting the value type alone was not enough: it says nothing about
+ * which fields exist, so `{ otp: 123456 }` and `{ detail: opaque(secret) }`
+ * both typechecked. An unlisted key is now an error.
+ *
+ * `CLIENT_REDACT_KEYS` still runs beneath this as the sink-side layer, for the
+ * cases the types cannot see (a cast, a call from untyped JS, a future widening).
  */
-export function clientLogWarn(event: ClientLogEvent, fields?: ClientLogFields): void {
+export function clientLogWarn<E extends ClientLogEvent>(
+  event: E,
+  fields?: ClientLogPayloads[E],
+): void {
   if (fields) console.warn(event, redact(fields));
   else console.warn(event);
 }
 
-/** See {@link clientLogWarn} on why `event` is not a string. */
-export function clientLogError(event: ClientLogEvent, fields?: ClientLogFields): void {
+/** See {@link clientLogWarn} on why both parameters are constrained. */
+export function clientLogError<E extends ClientLogEvent>(
+  event: E,
+  fields?: ClientLogPayloads[E],
+): void {
   if (fields) console.error(event, redact(fields));
   else console.error(event);
 }

@@ -1,71 +1,85 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { readFileSync, existsSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { clientLogWarn, clientLogError, opaque } from "./client";
+import { clientLogWarn, clientLogError, opaque, redact } from "./client";
 import { CLIENT_REDACT_KEYS, REDACTED } from "./redact-keys";
-import { CLIENT_LOG_EVENT } from "./client-events";
+import { CLIENT_LOG_EVENT, CLIENT_ERROR_CODE } from "./client-events";
 
 describe("clientLogWarn / clientLogError", () => {
-  // Any member works; the point is the API takes an enumerated id, not a string.
   const EV = CLIENT_LOG_EVENT.I18N_NAMESPACE_MISSING;
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("writes the message to console.warn exactly once", () => {
+  it("writes the event to console.warn exactly once", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     clientLogWarn(EV);
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(EV);
   });
 
-  it("writes the message to console.error exactly once", () => {
+  it("writes the event to console.error exactly once", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    clientLogError(EV);
+    clientLogError(CLIENT_LOG_EVENT.WEBAUTHN_REGISTRATION_FAILED, {
+      code: CLIENT_ERROR_CODE.ABORTED,
+    });
     expect(error).toHaveBeenCalledOnce();
-    expect(error).toHaveBeenCalledWith(EV);
   });
 
-  it("passes non-sensitive fields through untouched", () => {
+  it("passes an event's declared fields through untouched", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { teamId: opaque("team-1"), status: 403, ok: false, extra: null });
-    expect(warn).toHaveBeenCalledWith(EV, {
+    clientLogWarn(CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_VERSION_MISMATCH, {
       teamId: opaque("team-1"),
+      requestedVersion: 2,
+      responseVersion: 3,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      CLIENT_LOG_EVENT.TEAM_MEMBER_KEY_VERSION_MISMATCH,
+      { teamId: "team-1", requestedVersion: 2, responseVersion: 3 },
+    );
+  });
+});
+
+/**
+ * The sink-side redaction layer, tested directly.
+ *
+ * It is no longer reachable through the public API with an arbitrary key —
+ * per-event payload types see to that — which is exactly why it still earns its
+ * place: it covers what the types cannot, such as a cast or a call from untyped
+ * JavaScript. Testing it here keeps that layer honest rather than assumed.
+ */
+describe("redact (defence in depth beneath the payload types)", () => {
+  it("censors a secret held under a denylisted key", () => {
+    expect(redact({ token: opaque("super-secret-value") })).toEqual({
+      token: REDACTED,
+    });
+  });
+
+  it("censors every key in the shared denylist", () => {
+    const fields = Object.fromEntries(
+      CLIENT_REDACT_KEYS.map((k) => [k, opaque(`leaked-${k}`)]),
+    );
+    const out = redact(fields);
+    for (const key of CLIENT_REDACT_KEYS) {
+      expect(out[key]).toBe(REDACTED);
+    }
+    expect(JSON.stringify(out)).not.toContain("leaked-");
+  });
+
+  it("censors client-only identity keys the server logger does not cover", () => {
+    expect(redact({ email: opaque("a@example.test"), userId: opaque("u-1") })).toEqual({
+      email: REDACTED,
+      userId: REDACTED,
+    });
+  });
+
+  it("leaves non-sensitive keys alone", () => {
+    expect(redact({ status: 403, ok: false, extra: null })).toEqual({
       status: 403,
       ok: false,
       extra: null,
     });
-  });
-
-  it("redacts a secret passed as a bare string — the flat-scalar type alone does not stop this", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { token: opaque("super-secret-value") });
-    expect(warn).toHaveBeenCalledWith(EV, { token: REDACTED });
-    // The point of the assertion: the value must not survive anywhere in the call.
-    expect(JSON.stringify(warn.mock.calls)).not.toContain("super-secret-value");
-  });
-
-  it("redacts every key in the shared denylist, on both levels", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    const fields = Object.fromEntries(
-      CLIENT_REDACT_KEYS.map((k) => [k, opaque(`leaked-${k}`)]),
-    );
-
-    clientLogWarn(EV, fields);
-    clientLogError(EV, fields);
-
-    for (const key of CLIENT_REDACT_KEYS) {
-      expect(warn.mock.calls[0][1]).toMatchObject({ [key]: REDACTED });
-      expect(error.mock.calls[0][1]).toMatchObject({ [key]: REDACTED });
-    }
-    expect(JSON.stringify([...warn.mock.calls, ...error.mock.calls])).not.toContain("leaked-");
-  });
-
-  it("redacts client-only identity keys the server logger does not cover", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { email: opaque("a@example.test"), userId: opaque("u-1") });
-    expect(warn).toHaveBeenCalledWith(EV, { email: REDACTED, userId: REDACTED });
   });
 });
 
@@ -116,19 +130,19 @@ describe("client logger value-safety", () => {
     // value in `{ __opaque }`, which contradicted "flat values only" and
     // changed the field shape every downstream log consumer sees.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { teamId: opaque("team-1") });
+    clientLogWarn(EV, { namespace: opaque("Settings") });
 
     const fields = warn.mock.calls[0][1] as Record<string, unknown>;
-    expect(fields.teamId).toBe("team-1");
-    expect(typeof fields.teamId).toBe("string");
+    expect(fields.namespace).toBe("Settings");
+    expect(typeof fields.namespace).toBe("string");
   });
 
   it("truncates an opaque value that outgrew its bound", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    clientLogWarn(EV, { teamId: opaque("x".repeat(200)) });
+    clientLogWarn(EV, { namespace: opaque("x".repeat(200)) });
 
     const fields = warn.mock.calls[0][1] as Record<string, unknown>;
-    expect(String(fields.teamId)).toHaveLength(64);
+    expect(String(fields.namespace)).toHaveLength(64);
   });
 
   it("keeps event ids free of anywhere an interpolated value could hide", () => {
