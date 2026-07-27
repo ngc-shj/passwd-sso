@@ -65,22 +65,103 @@ const SINK_FILE = "src/lib/boot-stderr.ts";
 const project = createAstProject();
 
 /**
- * Local names that `bootStderr` is reachable under in this file.
+ * Modules that re-export `bootStderr`, so an import of a barrel is recognized
+ * as an import of the sink. Repo-relative POSIX paths WITHOUT extension, which
+ * is the form a module specifier resolves to below.
  *
- * Following the aliased-import lesson recorded in client-events.ts: a gate that
- * matches only the literal callee name `bootStderr` is bypassed by
- * `import { bootStderr as warn }`. Resolve the import binding instead.
+ * Seeded with the sink itself and grown by `indexReExports`. Without this a
+ * `export { bootStderr } from "./boot-stderr"` barrel would make every caller
+ * that imports through it invisible to the gate.
  */
-function bootStderrAliases(sf) {
-  const names = new Set();
-  for (const decl of sf.getImportDeclarations()) {
-    if (!decl.getModuleSpecifierValue().endsWith("/boot-stderr")) continue;
-    for (const named of decl.getNamedImports()) {
-      if (named.getName() !== "bootStderr") continue;
-      names.add((named.getAliasNode() ?? named.getNameNode()).getText());
+const sinkModules = new Set(["src/lib/boot-stderr"]);
+
+/** Resolve a relative/aliased specifier to a repo-relative path without extension. */
+function resolveSpecifier(spec, fromRel) {
+  if (spec.startsWith("@/")) return `src/${spec.slice(2)}`.replace(/\.tsx?$/, "");
+  if (!spec.startsWith(".")) return null;
+  const joined = join(dirname(fromRel), spec).split("\\").join("/");
+  return joined.replace(/\.tsx?$/, "");
+}
+
+/**
+ * Grow `sinkModules` transitively over re-export chains.
+ *
+ * Run to a fixed point before the main pass: a barrel that re-exports another
+ * barrel must also count, and the file order of the walk is arbitrary.
+ */
+function indexReExports(files) {
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const { rel, sf } of files) {
+      const self = rel.replace(/\.tsx?$/, "");
+      if (sinkModules.has(self)) continue;
+      for (const decl of sf.getExportDeclarations()) {
+        const spec = decl.getModuleSpecifierValue?.();
+        if (!spec) continue;
+        const target = resolveSpecifier(spec, rel);
+        if (!target || !sinkModules.has(target)) continue;
+        // `export * from` re-exports everything; a named clause must name it.
+        const named = decl.getNamedExports?.() ?? [];
+        const reexportsSink =
+          named.length === 0 || named.some((n) => n.getName() === "bootStderr");
+        if (!reexportsSink) continue;
+        sinkModules.add(self);
+        grew = true;
+      }
     }
   }
-  return names;
+}
+
+/**
+ * How `bootStderr` is reachable in this file: bare local names, plus namespace
+ * objects it must be called as a property of.
+ *
+ * Every import FORM has to be covered, not just the aliased-named one. Verified
+ * as a real bypass, not a hypothetical: with named-import matching only,
+ *
+ *     import * as stderr from "@/lib/boot-stderr";
+ *     stderr.bootStderr(process.env.AUTH_SECRET!);
+ *
+ * did not merely pass — the file was never even counted as a caller, so no
+ * manifest entry could have caught it either. A detection gap is strictly worse
+ * than a classification gap, because the exemption list cannot see it.
+ */
+function bootStderrBindings(sf, rel) {
+  const direct = new Set();
+  const namespaces = new Set();
+
+  for (const decl of sf.getImportDeclarations()) {
+    const target = resolveSpecifier(decl.getModuleSpecifierValue(), rel);
+    if (!target || !sinkModules.has(target)) continue;
+
+    for (const named of decl.getNamedImports()) {
+      if (named.getName() !== "bootStderr") continue;
+      direct.add((named.getAliasNode() ?? named.getNameNode()).getText());
+    }
+    const ns = decl.getNamespaceImport?.();
+    if (ns) namespaces.add(ns.getText());
+    // A default import of a module that has no default export cannot call the
+    // sink, but `import boot from "..."` on a barrel with `export default` can.
+    const def = decl.getDefaultImport?.();
+    if (def) namespaces.add(def.getText());
+  }
+
+  return { direct, namespaces };
+}
+
+/** True when this call expression targets bootStderr under any import form. */
+function isBootStderrCall(call, { direct, namespaces }) {
+  const callee = call.getExpression();
+  if (callee.getKind() === SyntaxKind.Identifier) {
+    return direct.has(callee.getText());
+  }
+  if (callee.getKind() === SyntaxKind.PropertyAccessExpression) {
+    if (callee.getName() !== "bootStderr") return false;
+    const obj = callee.getExpression();
+    return obj.getKind() === SyntaxKind.Identifier && namespaces.has(obj.getText());
+  }
+  return false;
 }
 
 /**
@@ -147,21 +228,72 @@ function closedTypeNames(sf, rel) {
 }
 
 /**
- * Functions in this file whose declared return type is a closed, value-free
- * shape (`string[]` / `readonly string[]` built from schema keys, `number`).
+ * Expressions that read ambient process state — the origin of every secret this
+ * gate cares about. `process.env.X`, `process.env["X"]`, and any member access
+ * beneath them.
+ */
+function readsProcessState(node) {
+  for (const access of node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+    if (access.getExpression().getText().startsWith("process.env")) return true;
+    if (access.getText().startsWith("process.env")) return true;
+  }
+  for (const el of node.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+    if (el.getExpression().getText().startsWith("process.env")) return true;
+  }
+  return false;
+}
+
+/**
+ * Functions whose BODY is inspected and found free of ambient secret sources.
  *
- * This is what lets `env.ts` pass: `formatted` is `failedVariableNames(...)
- * .join("\n")`, and the helper's signature is the reviewable claim. The gate
- * trusts the annotation, so the claim lives in the type rather than a comment.
+ * A return-type annotation is not evidence of data origin: `function values():
+ * string[] { return [process.env.AUTH_SECRET!] }` satisfies `string[]` while
+ * returning a credential, and that exact shape was verified to pass an earlier
+ * version of this gate. The annotation says what SHAPE comes out, never where
+ * it came from — so the body is what gets checked, and the annotation is only
+ * used to reject non-string-ish returns early.
+ *
+ * A function that touches `process.env`, or calls something this pass has not
+ * cleared, is not safe. Unresolvable → unsafe, so the default stays fail-closed.
  */
 function safeReturningFunctions(sf) {
-  const safe = new Set();
+  const candidates = new Map();
   for (const fn of sf.getFunctions()) {
     const rt = fn.getReturnTypeNode?.();
     if (!rt) continue;
     const text = rt.getText().replace(/\s+/g, "");
-    if (text === "string[]" || text === "readonlystring[]" || text === "number") {
-      safe.add(fn.getName());
+    if (text !== "string[]" && text !== "readonlystring[]" && text !== "number") continue;
+    const name = fn.getName();
+    if (name) candidates.set(name, fn);
+  }
+
+  const safe = new Set();
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [name, fn] of candidates) {
+      if (safe.has(name)) continue;
+      const body = fn.getBody?.();
+      if (!body) continue;
+      if (readsProcessState(body)) continue;
+
+      // Every call the body makes must itself be cleared, or be a bounded
+      // string/array builder. An unknown callee could reach anywhere.
+      const callsOk = body.getDescendantsOfKind(SyntaxKind.CallExpression).every((c) => {
+        const callee = c.getExpression();
+        if (callee.getKind() === SyntaxKind.Identifier) {
+          return safe.has(callee.getText());
+        }
+        if (callee.getKind() === SyntaxKind.PropertyAccessExpression) {
+          const m = callee.getName();
+          return ["map", "join", "filter", "slice", "repeat", "toString", "flatMap"].includes(m);
+        }
+        return false;
+      });
+      if (!callsOk) continue;
+
+      safe.add(name);
+      grew = true;
     }
   }
   return safe;
@@ -195,6 +327,37 @@ function isSafeStringBuilder(sf, expr, closed, safeFns) {
   // `names.join("\n")` where `names` is a proven binding.
   if (rk === SyntaxKind.Identifier) {
     return isProvablyClosedBinding(sf, receiver.getText(), closed, safeFns, receiver);
+  }
+  return false;
+}
+
+/**
+ * Whether a class property `this.<prop>` is pinned to a closed set.
+ *
+ * Resolves the member declaration on the enclosing class: a closed-union
+ * annotation, a numeric type, or a string-literal initializer all qualify. An
+ * unannotated or `string`-typed member does NOT.
+ */
+function isProvablyClosedMember(sf, prop, closed, fromNode) {
+  for (let scope = fromNode.getParent(); scope; scope = scope.getParent()) {
+    const members = scope.getMembers?.();
+    if (!members) continue;
+    for (const m of members) {
+      if (m.getName?.() !== prop) continue;
+      const t = m.getTypeNode?.();
+      if (t) {
+        const text = t.getText();
+        return closed.has(text) || text === "number";
+      }
+      const init = m.getInitializer?.();
+      if (!init) return false;
+      const ik = init.getKind();
+      return (
+        ik === SyntaxKind.StringLiteral ||
+        ik === SyntaxKind.NoSubstitutionTemplateLiteral ||
+        ik === SyntaxKind.NumericLiteral
+      );
+    }
   }
   return false;
 }
@@ -272,10 +435,16 @@ function isSafeInterpolation(sf, expr, closed, safeFns) {
     return true;
   }
 
-  // `this.name` on a provider — the class's own identity, not runtime data.
+  // `this.<prop>` — accepted only when the property's DECLARED type is a closed
+  // union or a literal initializer. Matching the text `this.name` alone was a
+  // real hole: the declaration was `abstract readonly name: string`, so a future
+  // provider deriving its name from config could put that value on stderr with
+  // the gate none the wiser. The class member is what gets checked, not the
+  // spelling of the access.
   if (kind === SyntaxKind.PropertyAccessExpression) {
-    const text = expr.getText();
-    return text === "this.name";
+    const obj = expr.getExpression();
+    if (obj.getKind() !== SyntaxKind.ThisKeyword) return false;
+    return isProvablyClosedMember(sf, expr.getName(), closed, expr);
   }
 
   // `"=".repeat(60)`, `names.join("\n")`.
@@ -340,19 +509,23 @@ function classifyArgument(sf, arg, closed, safeFns) {
 const violations = [];
 const callingFiles = new Set();
 
-for (const { rel, sf } of sourceFiles(project, SRC_DIR, REPO_ROOT)) {
+// Materialize the walk once: the re-export index needs a full pass over the
+// tree before any caller can be classified, since a barrel may be visited after
+// the file importing through it.
+const allFiles = [...sourceFiles(project, SRC_DIR, REPO_ROOT)];
+indexReExports(allFiles);
+
+for (const { rel, sf } of allFiles) {
   if (rel === SINK_FILE) continue;
 
-  const aliases = bootStderrAliases(sf);
-  if (aliases.size === 0) continue;
+  const bindings = bootStderrBindings(sf, rel);
+  if (bindings.direct.size === 0 && bindings.namespaces.size === 0) continue;
 
   const closed = closedTypeNames(sf, rel);
   const safeFns = safeReturningFunctions(sf);
 
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const callee = call.getExpression();
-    if (callee.getKind() !== SyntaxKind.Identifier) continue;
-    if (!aliases.has(callee.getText())) continue;
+    if (!isBootStderrCall(call, bindings)) continue;
 
     callingFiles.add(rel);
     if (exemptFiles.has(rel)) continue;

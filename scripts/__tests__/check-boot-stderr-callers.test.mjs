@@ -175,6 +175,82 @@ describe("check-boot-stderr-callers", () => {
     expect(runGate().code).toBe(0);
   });
 
+  it("detects a call made through a namespace import", () => {
+    // Reported bypass, reproduced before fixing: with named-import matching
+    // only, this file was not even COUNTED as a caller — so no manifest entry
+    // could have caught it either. A detection gap beats a classification gap.
+    writeFileSync(
+      join(root, "src/lib/ns-caller.ts"),
+      [
+        'import * as stderr from "@/lib/boot-stderr";',
+        "export function leak() {",
+        "  stderr.bootStderr(`v=${process.env.AUTH_SECRET}`);",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/ns-caller\.ts/);
+  });
+
+  it("detects a call made through a re-exporting barrel", () => {
+    writeFileSync(
+      join(root, "src/lib/barrel.ts"),
+      'export { bootStderr } from "@/lib/boot-stderr";\n',
+      "utf8",
+    );
+    writeFileSync(
+      join(root, "src/lib/barrel-caller.ts"),
+      [
+        'import { bootStderr } from "@/lib/barrel";',
+        "export function leak() {",
+        "  bootStderr(`v=${process.env.AUTH_SECRET}`);",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/barrel-caller\.ts/);
+  });
+
+  it("rejects a string[]-returning helper that reads process.env", () => {
+    // A return-type annotation says what SHAPE comes out, never where it came
+    // from. `function values(): string[] { return [process.env.SECRET!] }`
+    // satisfies the annotation while returning a credential.
+    writeFileSync(
+      join(root, "src/lib/leaky-helper.ts"),
+      [
+        'import { bootStderr } from "@/lib/boot-stderr";',
+        "function values(): string[] {",
+        "  return [process.env.AUTH_SECRET!];",
+        "}",
+        "export function leak() {",
+        '  bootStderr(`value=${values().join(",")}`);',
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/leaky-helper\.ts/);
+  });
+
+  it("rejects a this.<prop> whose declared type is a bare string", () => {
+    // `this.name` was accepted by text match while the declaration was
+    // `abstract readonly name: string` — a provider deriving its name from
+    // config could have put that value on stderr unchecked.
+    patch(
+      "src/lib/key-provider/base-cloud-provider.ts",
+      "abstract readonly name: ProviderName;",
+      "abstract readonly name: string;",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/this\.name/);
+  });
+
   it("does not treat an imported type as closed without resolving it", () => {
     // Fail-open guard: if the gate assumed any imported annotation were a
     // closed union, `name: SomethingUnresolvable` would satisfy it.

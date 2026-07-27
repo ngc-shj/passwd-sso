@@ -6,7 +6,7 @@
  * implement fetchSecret() and validateConfig().
  */
 
-import type { KeyName, KeyProvider } from "./types";
+import type { KeyName, KeyProvider, ProviderName } from "./types";
 import { HEX64_RE } from "@/lib/validations/common";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
@@ -25,7 +25,9 @@ export interface CloudProviderConfig {
 }
 
 export abstract class BaseCloudKeyProvider implements KeyProvider {
-  abstract readonly name: string;
+  // ProviderName, not string: this value is interpolated into the raw stderr
+  // write in logStaleWarning below.
+  abstract readonly name: ProviderName;
 
   /** Map KeyName to env var name for custom secret name override */
   protected abstract readonly secretNameEnvMap: Record<KeyName, string>;
