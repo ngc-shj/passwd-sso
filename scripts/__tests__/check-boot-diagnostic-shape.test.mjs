@@ -305,6 +305,58 @@ describe("check-boot-diagnostic-shape", () => {
     expect(runGate().code).toBe(0);
   });
 
+  it("rejects a sentinel computed from anything but a string literal", () => {
+    // A live leak, not doc drift: NOT_A_VAR_NAME is what envVarName returns on
+    // every unmatched lookup, so a computed value here reaches raw stderr.
+    // Pinning only the declaration NAME let this through.
+    patch(
+      "src/lib/boot-events.ts",
+      'const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;',
+      "const NOT_A_VAR_NAME = process.env.AUTH_SECRET as EnvVarName;",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/NOT_A_VAR_NAME is .*not a string literal/);
+  });
+
+  it("rejects a type predicate that mints the brand without any assertion", () => {
+    // No AsExpression, no TypeAssertionExpression — the assertion rule cannot
+    // see this, which is why mentions are allowlisted as well.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function unsafeName(s: string): s is EnvVarName {\n  return true;\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/referenced by unexpected declaration\(s\): unsafeName/);
+  });
+
+  it("rejects an `asserts` signature mentioning EnvVarName", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function assertName(s: string): asserts s is EnvVarName {}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/referenced by unexpected declaration\(s\): assertName/);
+  });
+
+  it("rejects an ambient declaration that returns EnvVarName", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport declare function mintName(s: string): EnvVarName;\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/referenced by unexpected declaration\(s\): mintName/);
+  });
+
   it("rejects an old-style <EnvVarName> assertion", () => {
     // Legal in a .ts file, and a different SyntaxKind from `as`. The first
     // version of this check matched only AsExpression and counted two sites

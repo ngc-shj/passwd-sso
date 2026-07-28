@@ -160,6 +160,80 @@ if (events) {
         `<line ${a.getStartLineNumber()}>`,
     );
     const expectedBrandSites = ["NOT_A_VAR_NAME", "DECLARED"];
+
+    // The sentinel must be a fixed STRING, not merely a declaration with the
+    // right name.
+    //
+    // Pinning the name and not the value was a live leak, not a doc problem:
+    // `const NOT_A_VAR_NAME = process.env.AUTH_SECRET as EnvVarName` passed, and
+    // that value is what `envVarName` returns on no match — so every unmatched
+    // lookup would have put a secret on raw stderr.
+    const sentinel = events.getVariableDeclaration("NOT_A_VAR_NAME");
+    if (sentinel) {
+      let expr = sentinel.getInitializer();
+      while (
+        expr &&
+        (expr.getKind() === SyntaxKind.AsExpression ||
+          expr.getKind() === SyntaxKind.TypeAssertionExpression)
+      ) {
+        expr = expr.getExpression();
+      }
+      const kind = expr?.getKind();
+      if (kind !== SyntaxKind.StringLiteral && kind !== SyntaxKind.NoSubstitutionTemplateLiteral) {
+        failures.push(
+          `${EVENTS_FILE}:${sentinel.getStartLineNumber()}: NOT_A_VAR_NAME is ` +
+            `\`${expr?.getText().slice(0, 50) ?? "<none>"}\`, not a string literal — it is ` +
+            `returned on every unmatched lookup, so anything computed here reaches stderr`,
+        );
+      }
+    }
+
+    // Every mention of EnvVarName must belong to one of the five known owners.
+    //
+    // The previous rule forbade type ASSERTIONS, which was the wrong class: a
+    // brand can also be minted with no assertion syntax at all, by a type
+    // predicate or an `asserts` signature —
+    //
+    //     export function unsafeName(s: string): s is EnvVarName { return true; }
+    //
+    // — after which any caller narrows anything. Enumerating construct kinds
+    // would just add predicates and assertion signatures and wait for the next
+    // one (ambient declarations, overloads, …). So this allowlists the MENTIONS
+    // instead: wherever the name appears, the declaration it belongs to must be
+    // one this design knows about. A new way to spell brand-minting still has to
+    // live in some declaration, and that declaration will not be on the list.
+    const ENV_VAR_NAME_OWNERS = [
+      "EnvVarName", // the type's own declaration
+      "NOT_A_VAR_NAME", // the sentinel
+      "DECLARED", // the schema-derived list
+      "envVarName", // the sole accessor
+      "variables", // the BootDiagnostic field that carries them
+    ];
+    const OWNER_KINDS = [
+      SyntaxKind.VariableDeclaration,
+      SyntaxKind.FunctionDeclaration,
+      SyntaxKind.TypeAliasDeclaration,
+      SyntaxKind.PropertySignature,
+      SyntaxKind.MethodSignature,
+      SyntaxKind.InterfaceDeclaration,
+    ];
+    const strayMentions = new Set();
+    for (const id of events.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      if (id.getText() !== "EnvVarName") continue;
+      let owner = null;
+      for (let n = id.getParent(); n && !owner; n = n.getParent()) {
+        if (OWNER_KINDS.includes(n.getKind())) owner = n;
+      }
+      const name = owner?.getName?.() ?? `<line ${id.getStartLineNumber()}>`;
+      if (!ENV_VAR_NAME_OWNERS.includes(name)) strayMentions.add(name);
+    }
+    if (strayMentions.size > 0) {
+      failures.push(
+        `${EVENTS_FILE}: EnvVarName is referenced by unexpected declaration(s): ` +
+          `${[...strayMentions].join(", ")} — only ${ENV_VAR_NAME_OWNERS.join(", ")} may ` +
+          `mention it, or a predicate/assertion signature can mint the brand with no cast`,
+      );
+    }
     const unexpected = [...new Set(brandSites.filter((n) => !expectedBrandSites.includes(n)))];
     if (unexpected.length > 0) {
       failures.push(
