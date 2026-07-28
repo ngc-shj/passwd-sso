@@ -498,6 +498,73 @@ it, both at Round 1 (delete the `string` parameter) and Round 5 (delete the
 boolean), was removing the thing that needed verifying rather than verifying it
 harder. Worth remembering the next time a gate needs its fourth special case.
 
+---
+
+# Rounds 6–11 and the replacement
+
+Six consecutive rounds found the shape gate escapable, each by a spelling it had
+not been taught:
+
+| Round | The gate checked | The escape |
+|---|---|---|
+| 6 | `as EnvVarName` | `<EnvVarName>x` |
+| 7 | both assertion syntaxes | a type predicate — no assertion at all |
+| 8 | owner NAMES | a function named `variables` |
+| 9 | unnamed exports | a same-name re-export swapping the implementation |
+| 10 | export NAMES | a value/type namespace collision |
+| 11 | — | (the fix below) |
+
+Every round closed an instance and left the class open. The cause was structural:
+ts-morph without a Program has no type resolution, so the gate could compare
+spellings only, and a language has unbounded ways to spell one thing. Six times
+the conclusion "the enumeration is now closed" was written and was wrong.
+
+## The replacement
+
+**Public contract → compiler.** `check-public-contract.mjs` compiles
+`boot-events.ts`, `boot-stderr.ts` and `key-provider/types.ts` to declaration
+files and diffs them against a tracked baseline
+(`boot-public-contract.d.txt`, 28 lines). Everything a caller can import appears
+there by construction, so there is nothing to enumerate. `key-provider/types` is
+included because `BootDiagnostic` carries `ProviderName`/`KeyName` and widening
+those would not alter boot-events' own declaration.
+
+Determinism: a standalone tsconfig (not extending the root, so a later edit
+there cannot move the baseline), `removeComments` on so docstring edits do not
+churn it, `declarationMap`/`incremental`/`composite` off, `rootDir` pinned to the
+repo root so an import from outside `src/lib` cannot relocate the output. Emit
+goes to a temp dir; the tracked baseline is written only by an explicit
+`--update`, which CI never passes.
+
+**Internal invariants → a small AST gate.** `check-boot-diagnostic-shape.mjs`
+drops from 816 lines to 243 and keeps only what no `.d.ts` expresses: DECLARED is
+the schema's key list, envVarName selects from it rather than re-branding its
+input, the sentinel is a fixed non-colliding literal, render reads no `process`,
+and the sink imports only boot-events.
+
+**Rounds 6–10 as mechanism tests.** The five escapes are kept in
+`check-public-contract.test.mjs`, but they assert *"the contract changed"* plus
+the diff line — not that a particular construct was detected, since the mechanism
+has no notion of constructs. A sixth spelling is covered by the same assertion.
+
+## Scope, stated rather than implied
+
+This does not resist someone editing these sources with intent — they can edit
+the gate, the baseline, or the CI config too. That is not a property a CI check
+can hold alone; it belongs to code review, protected branches, and protected CI
+settings. Note also that rounds 7–10 are not purely hostile scenarios: a
+convenience helper or a refactor could introduce any of them accidentally, which
+is exactly the case the baseline catches.
+
+## Verification
+
+`npx vitest run` 988 files / 13112 tests, exit 0. `npx tsc --noEmit` exit 0.
+`bash scripts/pre-pr.sh` **63/63**, exit 0 (the new gate is wired in).
+`check-gate-selftest-coverage.sh` exit 0. Self-tests: 15 internal-invariant
+cases + 12 contract-mechanism cases. The contract self-test mutates the real
+source (a fixture copy cannot resolve `@/lib/env-schema`) and restores it; the
+working tree was verified clean afterwards.
+
 ## Known residual (accepted, review-visible)
 
 `secret as EnvVarName` compiles. A brand is nominal against structural forging,

@@ -1,0 +1,39 @@
+// ── src/lib/boot-events.d.ts ──
+import type { KeyName, ProviderName } from "@/lib/key-provider/types";
+export declare const BOOT_EVENT: {
+    readonly ENV_VALIDATION_FAILED: "boot.env_validation_failed";
+    readonly CSP_MODE_IGNORED: "boot.csp_mode_ignored";
+    readonly KEY_PROVIDER_STALE_KEY: "boot.key_provider_stale_key";
+};
+export type BootEvent = (typeof BOOT_EVENT)[keyof typeof BOOT_EVENT];
+declare const envVarNameBrand: unique symbol;
+export type EnvVarName = string & {
+    readonly [envVarNameBrand]: true;
+};
+export declare function envVarName(raw: string): EnvVarName;
+export type BootDiagnostic = {
+    event: typeof BOOT_EVENT.ENV_VALIDATION_FAILED;
+    variables: readonly EnvVarName[];
+} | {
+    event: typeof BOOT_EVENT.CSP_MODE_IGNORED;
+} | {
+    event: typeof BOOT_EVENT.KEY_PROVIDER_STALE_KEY;
+    provider: ProviderName;
+    keyName: KeyName;
+    elapsedSec: number;
+};
+export {};
+
+// ── src/lib/boot-stderr.d.ts ──
+import { type BootDiagnostic } from "@/lib/boot-events";
+export declare function bootStderr(diagnostic: BootDiagnostic): void;
+
+// ── src/lib/key-provider/types.d.ts ──
+export type KeyName = "share-master" | "verifier-pepper" | "directory-sync" | "webauthn-prf" | "audit-anchor-signing" | "audit-anchor-tag-secret";
+export interface KeyProvider {
+    getKey(name: KeyName, version?: number): Promise<Buffer>;
+    getKeySync(name: KeyName, version?: number): Buffer;
+    validateKeys(): Promise<void>;
+    readonly name: ProviderName;
+}
+export type ProviderName = "env" | "aws-sm" | "gcp-sm" | "azure-kv";
