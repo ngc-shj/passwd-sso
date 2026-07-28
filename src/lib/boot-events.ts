@@ -47,17 +47,25 @@ declare const envVarNameBrand: unique symbol;
  * The NAME of an environment variable — never its value.
  *
  * Branded with a module-private symbol, so it cannot be produced structurally.
- * The only values that ever carry the brand are the schema's own keys, and
- * {@link envVarName} is the only way to obtain one — see there for why the
- * function looks values up rather than checking them.
+ * Exactly two things carry the brand: the schema's own keys ({@link DECLARED})
+ * and the fixed {@link NOT_A_VAR_NAME} sentinel. {@link envVarName} returns one
+ * or the other and nothing else — see there for why it looks values up rather
+ * than checking them.
  */
 export type EnvVarName = string & { readonly [envVarNameBrand]: true };
 
-/** Placeholder for a path that names no declared variable. */
+/**
+ * Placeholder for a path that names no declared variable.
+ *
+ * A constant, so it carries no caller data. Shaped so it cannot collide with a
+ * real name: `<` is not legal in an environment variable identifier.
+ */
 const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;
 
 /**
- * The declared names, branded once, at the only place the brand is applied.
+ * The declared names — the only branding site that carries data.
+ *
+ * (The other is {@link NOT_A_VAR_NAME}, a constant.)
  *
  * Read from the schema here rather than accepted from a caller. An earlier
  * version took the allowed set as a PARAMETER, which handed the trust anchor to
@@ -78,10 +86,11 @@ const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName
 /**
  * Look the name up; never re-brand the input.
  *
- * `find` returns an ELEMENT OF `DECLARED`, so whatever comes back is a schema
- * key by construction. `raw` is only ever compared, never returned. That is the
- * whole guarantee, and it does not depend on the comparison being right: a
- * broken comparison here returns the WRONG VARIABLE NAME, never a secret.
+ * `find` returns an ELEMENT OF `DECLARED`, so what comes back is a schema key —
+ * or, on no match, the fixed {@link NOT_A_VAR_NAME} sentinel. `raw` is only ever
+ * compared, never returned. That is the whole guarantee, and it does not depend
+ * on the comparison being right: a broken comparison here returns the WRONG
+ * VARIABLE NAME, never a secret.
  *
  * Three earlier shapes all failed because each left something to be trusted:
  *

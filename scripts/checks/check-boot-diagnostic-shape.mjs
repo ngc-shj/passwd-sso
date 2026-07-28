@@ -137,6 +137,40 @@ if (events) {
       );
     }
 
+    // Exactly two things may carry the brand, and both are named.
+    //
+    // `EnvVarName`'s docstring says so, which under this repo's own rule means
+    // it has to be enforced rather than asserted. It is also a real fail-open:
+    // a third branding site — `export const unsafeName = (s: string) => s as
+    // EnvVarName` — hands every caller the ability to brand a secret, and no
+    // other check here would see it. The set is closed and tiny, so pinning it
+    // is a count, not an analysis.
+    const brandSites = events
+      .getDescendantsOfKind(SyntaxKind.AsExpression)
+      .filter((a) => /^(unknown as )?readonly EnvVarName\[\]$|^EnvVarName$/.test(a.getTypeNode()?.getText() ?? ""))
+      .map((a) => {
+        // Attribute each cast to the declaration it initializes.
+        const decl = a.getFirstAncestorByKind(SyntaxKind.VariableDeclaration);
+        return decl?.getName() ?? `<line ${a.getStartLineNumber()}>`;
+      });
+    const expectedBrandSites = ["NOT_A_VAR_NAME", "DECLARED"];
+    const unexpected = brandSites.filter((n) => !expectedBrandSites.includes(n));
+    if (unexpected.length > 0) {
+      failures.push(
+        `${EVENTS_FILE}: unexpected EnvVarName branding site(s): ${unexpected.join(", ")} — ` +
+          `only ${expectedBrandSites.join(" and ")} may apply the brand, or any code can ` +
+          `mint a name from an arbitrary string`,
+      );
+    }
+    for (const expected of expectedBrandSites) {
+      if (!brandSites.includes(expected)) {
+        failures.push(
+          `${EVENTS_FILE}: expected branding site \`${expected}\` is gone — ` +
+            `the brand's provenance is no longer what the docs claim`,
+        );
+      }
+    }
+
     // The happy path must carry no cast.
     //
     // Presence checks kept missing dataflow: a `.has(` anywhere plus a manual

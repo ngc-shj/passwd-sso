@@ -305,6 +305,35 @@ describe("check-boot-diagnostic-shape", () => {
     expect(runGate().code).toBe(0);
   });
 
+  it("rejects a third place that applies the EnvVarName brand", () => {
+    // The docstring says exactly two things carry the brand, so that has to be
+    // enforced rather than asserted. It is also a real fail-open: an exported
+    // minting helper hands every caller the ability to brand a secret, and no
+    // other check in this gate would see it.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport const unsafeName = (s: string) => s as EnvVarName;\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/unexpected EnvVarName branding site\(s\): unsafeName/);
+  });
+
+  it("rejects a branding site disappearing", () => {
+    // The inverse: if DECLARED stops being the branded list, the provenance
+    // story in the docs is no longer what the code does.
+    patch(
+      "src/lib/boot-events.ts",
+      "const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName[];",
+      "const DECLARED: readonly EnvVarName[] = [];",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/expected branding site `DECLARED` is gone|DECLARED is not/);
+  });
+
   it("rejects a hand-written DECLARED list", () => {
     patch(
       "src/lib/boot-events.ts",
