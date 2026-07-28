@@ -137,12 +137,12 @@ describe("check-boot-diagnostic-shape", () => {
     // applied without a check means envVarName(secret) compiles and passes.
     patch(
       "src/lib/boot-events.ts",
-      "  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;",
       "  return raw as EnvVarName;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not test membership/);
+    expect(output).toMatch(/casts to EnvVarName/);
   });
 
   it("rejects EnvVarName losing its brand", () => {
@@ -265,8 +265,8 @@ describe("check-boot-diagnostic-shape", () => {
     // means `envVarName(secret, new Set([secret]))` prints the secret.
     patch(
       "src/lib/boot-events.ts",
-      "export function envVarName(raw: string): EnvVarName {\n  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
-      "export function envVarName(raw: string, declared: ReadonlySet<string>): EnvVarName {\n  return declared.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "export function envVarName(raw: string): EnvVarName {\n  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;",
+      "export function envVarName(raw: string, allowed: ReadonlySet<string>): EnvVarName {\n  return allowed.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
@@ -296,7 +296,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not build its set from/);
+    expect(output).toMatch(/does not RETURN/);
   });
 
   it("accepts the schema accessor imported under an alias", () => {
@@ -310,18 +310,78 @@ describe("check-boot-diagnostic-shape", () => {
     expect(runGate().code).toBe(0);
   });
 
+  it("rejects a gate-pleasing expression that feeds nothing", () => {
+    // The reviewer's counter-example: the schema call is present but discarded,
+    // and the returned set is written by hand. An existence check passed it.
+    patch(
+      "src/lib/boot-events.ts",
+      "  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));",
+      '  Object.keys(getSchemaShape());\n  return new Set(["DATABASE_URL"]);',
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/array literal|does not RETURN/);
+  });
+
+  it("rejects a predicate that tests a literal instead of its own parameter", () => {
+    // The other half of the same counter-example. The compiler stops the caller
+    // from returning an unchecked value, but nothing stops the PREDICATE from
+    // checking the wrong thing.
+    patch(
+      "src/lib/boot-events.ts",
+      "  return declared().has(raw);",
+      '  return declared().has("DATABASE_URL");',
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/does not call `\.has\(raw\)`/);
+  });
+
+  it("rejects envVarName re-branding by cast instead of narrowing", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;",
+      "  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/casts to EnvVarName/);
+  });
+
+  it("rejects isDeclared losing its type-predicate return", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "function isDeclared(raw: string): raw is EnvVarName {",
+      "function isDeclared(raw: string): boolean {",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/not a\s+`raw is EnvVarName` predicate/);
+  });
+
+  it("rejects a second return in declared()", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));",
+      "  if (declaredNames) return declaredNames;\n  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/return statements; expected 1/);
+  });
+
   it("rejects envVarName validating shape instead of membership", () => {
     // The defect round 2 caught: /^[A-Za-z_][A-Za-z0-9_]{0,63}$/ matches a
     // 64-char hex master key, an AKIA… id, and an api_… token. A predicate over
     // a value's form cannot answer a question about its origin.
     patch(
       "src/lib/boot-events.ts",
-      "  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
-      "  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return declared().has(raw);",
+      "  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw);",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not test membership/);
+    expect(output).toMatch(/does not call `\.has\(raw\)`/);
   });
 
   it("fails when BootDiagnostic is deleted entirely", () => {

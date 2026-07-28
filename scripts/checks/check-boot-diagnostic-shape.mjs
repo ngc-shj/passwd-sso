@@ -136,12 +136,55 @@ if (events) {
           `a caller-supplied allowlist lets the constrained code choose its own trust anchor`,
       );
     }
-    const body = ctor.getBody()?.getText() ?? "";
-    if (!body.includes(".has(")) {
+
+    // The happy path must carry no cast.
+    //
+    // Presence checks kept missing dataflow: a `.has(` anywhere plus a manual
+    // `raw as EnvVarName` satisfied every earlier version of this gate while
+    // `declared().has("DATABASE_URL") ? (raw as EnvVarName) : …` branded any
+    // input. The fix is not a smarter search — it is `isDeclared(raw): raw is
+    // EnvVarName`, which makes the compiler narrow the ARGUMENT so `return raw`
+    // needs no cast. All this gate has to do now is forbid the cast coming back.
+    const rebrands = ctor
+      .getDescendantsOfKind(SyntaxKind.AsExpression)
+      .filter((a) => a.getTypeNode()?.getText() === "EnvVarName");
+    if (rebrands.length > 0) {
       failures.push(
-        `${EVENTS_FILE}: envVarName does not test membership — a brand applied without that ` +
-          `check means \`envVarName(secret)\` passes through`,
+        `${EVENTS_FILE}:${rebrands[0].getStartLineNumber()}: envVarName casts to EnvVarName — ` +
+          `the brand must come from narrowing via the \`raw is EnvVarName\` predicate, since a ` +
+          `cast does not care which value was checked`,
       );
+    }
+
+    // …and the predicate itself must test its OWN parameter.
+    const pred = events.getFunction("isDeclared");
+    if (!pred) {
+      failures.push(`${EVENTS_FILE}: no \`isDeclared\` type predicate`);
+    } else {
+      const ret = pred.getReturnTypeNode()?.getText() ?? "";
+      if (!/\bis\s+EnvVarName\b/.test(ret)) {
+        failures.push(
+          `${EVENTS_FILE}: isDeclared returns \`${ret || "<inferred>"}\`, not a ` +
+            `\`raw is EnvVarName\` predicate — without the predicate the caller must cast, ` +
+            `and a cast is what decoupled the check from the value`,
+        );
+      }
+      const paramName = pred.getParameters()[0]?.getName();
+      const testsOwnParam = pred
+        .getDescendantsOfKind(SyntaxKind.CallExpression)
+        .some((c) => {
+          const callee = c.getExpression();
+          if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return false;
+          if (callee.getName() !== "has") return false;
+          const arg = c.getArguments()[0];
+          return arg?.getKind() === SyntaxKind.Identifier && arg.getText() === paramName;
+        });
+      if (!testsOwnParam) {
+        failures.push(
+          `${EVENTS_FILE}: isDeclared does not call \`.has(${paramName})\` — testing a literal ` +
+            `or another binding makes the predicate lie about the value it narrows`,
+        );
+      }
     }
     // The set must be BUILT FROM the schema accessor, verified structurally.
     //
@@ -172,19 +215,42 @@ if (events) {
       if (!declaredFn) {
         failures.push(`${EVENTS_FILE}: no \`declared()\` builder for the allowed-name set`);
       } else {
-        const buildsFromSchema = declaredFn
-          .getDescendantsOfKind(SyntaxKind.CallExpression)
-          .some((call) => {
-            if (call.getExpression().getText() !== "Object.keys") return false;
-            const arg = call.getArguments()[0];
-            if (!arg || arg.getKind() !== SyntaxKind.CallExpression) return false;
-            return schemaAccessors.has(arg.getExpression().getText());
+        // The RETURNED set, not merely a matching expression somewhere in the
+        // body. `Object.keys(getSchemaShape()); return new Set(["DATABASE_URL"])`
+        // satisfied an existence check while returning a hand-written set — the
+        // expression was there to please the gate and fed nothing.
+        const returns = declaredFn.getDescendantsOfKind(SyntaxKind.ReturnStatement);
+        if (returns.length !== 1) {
+          failures.push(
+            `${EVENTS_FILE}: declared() has ${returns.length} return statements; expected 1 — ` +
+              `a second return can bypass the schema-derived one`,
+          );
+        }
+        // A hand-written set needs an array literal; the schema-derived one does not.
+        const literals = declaredFn.getDescendantsOfKind(SyntaxKind.ArrayLiteralExpression);
+        if (literals.length > 0) {
+          failures.push(
+            `${EVENTS_FILE}:${literals[0].getStartLineNumber()}: declared() contains an array ` +
+              `literal — the allowed names must come from the schema, not be written by hand`,
+          );
+        }
+        const buildsFromSchema = (returns[0]?.getDescendantsOfKind(SyntaxKind.NewExpression) ?? [])
+          .filter((n) => n.getExpression().getText() === "Set")
+          .some((n) => {
+            const keys = n.getArguments()[0];
+            if (!keys || keys.getKind() !== SyntaxKind.CallExpression) return false;
+            if (keys.getExpression().getText() !== "Object.keys") return false;
+            const shape = keys.getArguments()[0];
+            return (
+              shape?.getKind() === SyntaxKind.CallExpression &&
+              schemaAccessors.has(shape.getExpression().getText())
+            );
           });
         if (!buildsFromSchema) {
           failures.push(
-            `${EVENTS_FILE}: declared() does not build its set from ` +
-              `\`Object.keys(<schema accessor>())\` — an import left in place while the set ` +
-              `comes from somewhere else would otherwise pass`,
+            `${EVENTS_FILE}: declared() does not RETURN ` +
+              `\`new Set(Object.keys(<schema accessor>()))\` — the schema call must feed the ` +
+              `returned set, not merely appear in the body`,
           );
         }
       }

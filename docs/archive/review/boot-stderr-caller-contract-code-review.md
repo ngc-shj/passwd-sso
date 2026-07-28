@@ -380,6 +380,65 @@ imported binding is resolved (alias included) and must be the callee inside
 self-test 23 cases, including one asserting an ALIASED schema import still
 passes (proving resolution is binding-based, not spelling-based).
 
+---
+
+# Round 4
+
+External re-review found the shape gate checked for the PRESENCE of safe
+expressions without tying them to the dataflow. Counter-example, which passed:
+
+```ts
+function declared() {
+  Object.keys(getSchemaShape());        // satisfies the gate, feeds nothing
+  return new Set(["DATABASE_URL"]);
+}
+export function envVarName(raw: string): EnvVarName {
+  return declared().has("DATABASE_URL") ? (raw as EnvVarName) : NOT_A_VAR_NAME;
+}
+```
+
+Any `raw` gets branded. Real, and the fourth instance of one pattern: substring
+match → import presence → expression presence. Each round the instance was
+closed and the class was not. Writing progressively cleverer searches inside the
+gate is the same taint-analysis mistake that Round 1 retired, at smaller scope.
+
+## R4-1 The check is now tied to the value by the compiler
+
+`isDeclared(raw): raw is EnvVarName` — a type predicate, not a boolean. The
+compiler narrows the ARGUMENT, so `return raw` needs no cast, and the
+substitution above becomes **TS2322** (verified in isolation before adopting):
+
+```
+isDeclared("DATABASE_URL") ? raw : NOT_A_VAR_NAME
+  → Type 'string' is not assignable to type 'EnvVarName'
+```
+
+"The value tested is the value returned" moved out of the gate and into the type
+system. The gate's remaining job on this path is one total property: **no cast to
+`EnvVarName` inside `envVarName`**.
+
+- Modified: `src/lib/boot-events.ts:84`
+
+## R4-2 What the compiler still cannot see, pinned structurally
+
+Two residues the predicate does not cover, both now AST-checked:
+
+- The predicate could test the wrong thing (`declared().has("DATABASE_URL")`).
+  Gate requires `.has(<its own parameter identifier>)`.
+- `declared()` could return a hand-written set. Gate requires exactly one
+  `return`, forbids any array literal in the function, and requires the RETURNED
+  expression to be `new Set(Object.keys(<resolved schema accessor>()))` — not
+  merely to contain it somewhere.
+
+- Modified: `scripts/checks/check-boot-diagnostic-shape.mjs:139,166`
+
+## Round 4 verification
+
+`npx vitest run` 987 files / 13113 tests, exit 0. `npx next build` exit 0.
+`npx tsc --noEmit` exit 0. `bash scripts/pre-pr.sh` 62/62, exit 0. Shape-gate
+self-test 28 cases; the reviewer's counter-example is reproduced by two of them
+(the discarded expression and the literal-testing predicate).
+
 ## Known residual (accepted, review-visible)
 
 `secret as EnvVarName` compiles. A brand is nominal against structural forging,

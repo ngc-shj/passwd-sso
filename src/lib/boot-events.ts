@@ -83,13 +83,31 @@ const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;
 let declaredNames: ReadonlySet<string> | null = null;
 
 function declared(): ReadonlySet<string> {
-  declaredNames ??= new Set(Object.keys(getSchemaShape()));
-  return declaredNames;
+  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));
+}
+
+/**
+ * A type PREDICATE, not a boolean helper.
+ *
+ * `raw is EnvVarName` is what ties the check to the value. With a plain
+ * `boolean`, the brand had to be reapplied by hand — `check ? (raw as EnvVarName)
+ * : …` — and a cast does not care what was checked, so
+ *
+ *     declared().has("DATABASE_URL") ? (raw as EnvVarName) : NOT_A_VAR_NAME
+ *
+ * compiled and branded any input. As a predicate, the compiler narrows the
+ * ARGUMENT, so returning `raw` needs no cast and the same substitution is a
+ * TS2322. The property "the value tested is the value returned" moved from
+ * something a gate had to look for into something the compiler will not let you
+ * write.
+ */
+function isDeclared(raw: string): raw is EnvVarName {
+  return declared().has(raw);
 }
 
 /** @param raw candidate name, typically a Zod issue path */
 export function envVarName(raw: string): EnvVarName {
-  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;
+  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;
 }
 
 /**
