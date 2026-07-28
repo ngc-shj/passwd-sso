@@ -230,5 +230,4 @@ export interface IdentityAutofillPayload {
   email: string;
   dateOfBirth: string;
   nationality: string;
-  idNumber: string;
 }

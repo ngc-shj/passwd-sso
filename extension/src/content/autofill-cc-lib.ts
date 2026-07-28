@@ -8,6 +8,7 @@ import {
   detectExpiryFormat,
   formatCombinedExpiry,
 } from "./cc-form-detector-lib";
+import { logNoSelectMatch } from "./select-diag-lib";
 
 // ── Visibility check ──
 
@@ -81,10 +82,10 @@ function setSelectValue(select: HTMLSelectElement, targetValue: string, normaliz
   });
 
   if (!match) {
-    // Silent failure — no fuzzy/nearest match per security review
-    if (typeof console !== "undefined" && console.debug) {
-      console.debug(`[passwd-sso] No exact match for select value: ${targetValue}`);
-    }
+    // Silent failure — no fuzzy/nearest match per security review.
+    // The label is the element's own name/id; the target VALUE never reaches a
+    // console — it is the user's card expiry.
+    logNoSelectMatch(select);
     return;
   }
 
@@ -116,7 +117,16 @@ export function performCreditCardAutofill(payload: CreditCardAutofillPayload): v
   }
 
   // Expiry
-  if (fields.expiryFormat === "combined" && fields.expiryCombined) {
+  // The payload guarantees only the card number; expiryMonth/Year may be "".
+  // Without the payload guard, formatCombinedExpiry("", "", "MM/YY") yields "00/00"
+  // and setInputValue writes it over whatever the user typed. The split branch below
+  // has always guarded; the combined branch had not.
+  if (
+    fields.expiryFormat === "combined" &&
+    fields.expiryCombined &&
+    payload.expiryMonth &&
+    payload.expiryYear
+  ) {
     const format = detectExpiryFormat(fields.expiryCombined);
     const combined = formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format);
     setInputValue(fields.expiryCombined, combined);

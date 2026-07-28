@@ -265,6 +265,43 @@ describe("X-4 keyboard shortcut commands", () => {
     });
   });
 
+  // V8 embeds a window of the INPUT in a JSON.parse SyntaxError, and the input on
+  // this path is decrypted vault plaintext. Before the parse was narrowed, the error
+  // fell through to `console.warn("[psso] copy command failed:", err)` and printed a
+  // prefix of the password into the service-worker console.
+  it("does not print decrypted plaintext when the blob is not valid JSON", async () => {
+    await unlockVault(chromeMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The first decryptData call is the list overview (see the default mock); the
+    // individual blob is decrypted afterwards, and that is the one to corrupt.
+    let call = 0;
+    cryptoMocks.decryptData.mockImplementation(async () => {
+      call++;
+      if (call <= 1) {
+        return JSON.stringify({
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+        });
+      }
+      return '{"username":"bob","password":S3cr3t-Passw0rd-VeryLong}';
+    });
+
+    const handler = commandHandlers[0];
+    await handler(CMD_COPY_PASSWORD);
+
+    expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ target: "offscreen", type: "clipboard-write" }),
+    );
+    // The command still reports why it failed — warnBackground takes two closed
+    // unions, so it has no slot the plaintext could occupy.
+    expect(warn).toHaveBeenCalledTimes(1);
+    const logged = warn.mock.calls.flat().join(" ");
+    expect(logged).toBe("[passwd-sso] copy-command-failed: syntax-error");
+    expect(logged).not.toContain("S3cr3t");
+    expect(logged).not.toContain("password");
+  });
+
   it("copy-username copies username to clipboard via offscreen document", async () => {
     await unlockVault(chromeMock);
 

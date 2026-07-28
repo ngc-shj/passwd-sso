@@ -4,6 +4,7 @@
 import { EXT_MSG } from "../lib/constants";
 import type { IdentityAutofillPayload } from "../types/messages";
 import { detectIdentityFields } from "./identity-form-detector-lib";
+import { logNoSelectMatch } from "./select-diag-lib";
 
 // ── Visibility check ──
 
@@ -46,9 +47,11 @@ function setSelectValue(select: HTMLSelectElement, targetValue: string): void {
   });
 
   if (!match) {
-    if (typeof console !== "undefined" && console.debug) {
-      console.debug(`[passwd-sso] No exact match for select value: ${targetValue}`);
-    }
+    // The label is the element's own name/id. fillField routes every identity
+    // field here when the element is a <select>, so the target VALUE can be the
+    // user's name, address, phone, email or date of birth — it never reaches a
+    // console.
+    logNoSelectMatch(select);
     return;
   }
 

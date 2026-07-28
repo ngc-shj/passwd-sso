@@ -29,7 +29,11 @@ detect_web_changes() {
   [ "${PRE_PR_FORCE_FULL:-0}" = "1" ] && return 0
   # Keep this list in lockstep with the `app:` filter in
   # .github/workflows/ci.yml (R33 — single source of truth for what gates Web).
-  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|next\.config\.|scripts/)'
+  # `eslint\.extension\.config\.` is listed separately: `eslint\.config\.` does NOT
+  # match `eslint.extension.config.mjs`, so without it a PR editing only that file
+  # (which is what adding an entry to its two-file override audit surface looks
+  # like) would skip the self-test that proves the gate can still fail.
+  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/)'
   local base diff ref
   # Prefer origin/main (CI's base; survives a stale local main) and fall back to
   # local main only if the remote ref is absent.
@@ -280,6 +284,7 @@ queue_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
 queue_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
 queue_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
 queue_step "Static: console-sinks"  node scripts/checks/check-console-sinks.mjs
+queue_step "Static: extension no-console" node scripts/checks/lint-extension.mjs
 queue_step "Static: boot-diagnostic-shape" node scripts/checks/check-boot-diagnostic-shape.mjs
 queue_step "Static: public-contract" node scripts/checks/check-public-contract.mjs
 queue_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
