@@ -380,7 +380,7 @@ describe("check-boot-diagnostic-shape", () => {
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/no export statement is permitted/);
-    expect(output).toMatch(/expected export `envVarName` is missing/);
+    expect(output).toMatch(/expected exported function `envVarName` is missing/);
   });
 
   it("rejects a plain local re-export statement", () => {
@@ -435,7 +435,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/unexpected export\(s\): Unsafe/);
+    expect(output).toMatch(/6 exported declarations/);
   });
 
   it("rejects `export { x as default }`", () => {
@@ -450,6 +450,32 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/no export statement is permitted/);
   });
 
+  it("rejects a value-namespace collision with a permitted type name", () => {
+    // TypeScript keeps types and values apart, so `function BootDiagnostic`
+    // coexists with `type BootDiagnostic`. Both read as the permitted name while
+    // callers import the function — a name list cannot see it, a node count can.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function BootDiagnostic(s: string): ReturnType<typeof envVarName> {\n  return JSON.parse(JSON.stringify(s));\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/exported 2 times|6 exported declarations/);
+  });
+
+  it("rejects an exported declaration of the wrong kind", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "export function envVarName(raw: string): EnvVarName {",
+      "export const envVarNameMoved = 1;\nfunction envVarName(raw: string): EnvVarName {",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/expected exported function `envVarName` is missing/);
+  });
+
   it("rejects an extra export even when it names no branded type", () => {
     // The type-blind axis: a caller can only reach a helper that is exported.
     const path = join(root, "src/lib/boot-events.ts");
@@ -460,7 +486,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/unexpected export\(s\): somethingElse/);
+    expect(output).toMatch(/6 exported declarations/);
   });
 
   it("rejects one of the five expected exports disappearing", () => {
@@ -471,7 +497,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/expected export `envVarName` is missing/);
+    expect(output).toMatch(/expected exported function `envVarName` is missing/);
   });
 
   it("rejects a predicate whose name collides with a permitted owner", () => {

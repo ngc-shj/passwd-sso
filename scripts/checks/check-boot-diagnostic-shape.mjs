@@ -320,37 +320,81 @@ if (events) {
       );
     }
 
-    const actualExports = [
-      ...events.getFunctions(),
-      ...events.getTypeAliases(),
-      ...events.getInterfaces(),
-      ...events.getClasses(),
-      ...events.getEnums(),
-      ...events.getModules(),
-    ]
-      .filter((d) => d.isExported?.())
-      .map((d) => d.getName())
-      .concat(
-        events
-          .getVariableStatements()
-          .filter((s) => s.isExported())
-          .flatMap((s) => s.getDeclarations().map((d) => d.getName())),
-      );
-    // Deliberately NOT including names from export statements: those are banned
-    // above, and counting them here would let a re-export satisfy the
-    // "expected export present" check below while the local declaration it
-    // shadows goes unexported — which is exactly the swap being closed.
-    const unexpectedExports = actualExports.filter((n) => !EXPECTED_EXPORTS.includes(n));
-    if (unexpectedExports.length > 0) {
+    // The export surface is five specific DECLARATIONS — name AND kind.
+    //
+    // A name list could not see a namespace collision: TypeScript keeps types
+    // and values apart, so
+    //
+    //     export function BootDiagnostic(s: string): ReturnType<typeof envVarName>
+    //
+    // coexists with `type BootDiagnostic`, and both read as the permitted name
+    // `BootDiagnostic` while callers import the function and mint brands with
+    // it. Counting NODES rather than names closes that: a sixth exported
+    // declaration is a failure whatever it is called.
+    //
+    // Deliberately NOT counting names from export statements — those are banned
+    // above, and counting them would let a re-export satisfy "expected export
+    // present" while the local declaration it shadows goes unexported.
+    const EXPORT_SPEC = [
+      { name: "BOOT_EVENT", kind: "variable" },
+      { name: "BootEvent", kind: "type alias" },
+      { name: "EnvVarName", kind: "type alias" },
+      { name: "envVarName", kind: "function" },
+      { name: "BootDiagnostic", kind: "type alias" },
+    ];
+
+    const exportedDecls = [];
+    const collect = (decls, kind) => {
+      for (const d of decls) {
+        if (!d.isExported?.()) continue;
+        exportedDecls.push({ name: d.getName(), kind, node: d });
+        if (d.isDefaultExport?.()) {
+          failures.push(
+            `${EVENTS_FILE}:${d.getStartLineNumber()}: \`${d.getName()}\` is a default export — ` +
+              `a default-imported symbol is renameable at the import site, so it cannot be ` +
+              `held to this allowlist`,
+          );
+        }
+      }
+    };
+    collect(events.getFunctions(), "function");
+    collect(events.getTypeAliases(), "type alias");
+    collect(events.getInterfaces(), "interface");
+    collect(events.getClasses(), "class");
+    collect(events.getEnums(), "enum");
+    collect(events.getModules(), "namespace");
+    for (const stmt of events.getVariableStatements()) {
+      if (!stmt.isExported()) continue;
+      for (const d of stmt.getDeclarations()) {
+        exportedDecls.push({ name: d.getName(), kind: "variable", node: d });
+      }
+    }
+
+    if (exportedDecls.length !== EXPORT_SPEC.length) {
       failures.push(
-        `${EVENTS_FILE}: unexpected export(s): ${unexpectedExports.join(", ")} — only ` +
-          `${EXPECTED_EXPORTS.join(", ")} may leave this module, or a caller can be handed a ` +
-          `second way to obtain an EnvVarName`,
+        `${EVENTS_FILE}: ${exportedDecls.length} exported declarations, expected ` +
+          `${EXPORT_SPEC.length} — found ${exportedDecls
+            .map((d) => `${d.kind} ${d.name}`)
+            .join(", ")}`,
       );
     }
-    for (const expected of EXPECTED_EXPORTS) {
-      if (!actualExports.includes(expected)) {
-        failures.push(`${EVENTS_FILE}: expected export \`${expected}\` is missing`);
+    for (const spec of EXPORT_SPEC) {
+      const matches = exportedDecls.filter((d) => d.name === spec.name);
+      if (matches.length === 0) {
+        failures.push(
+          `${EVENTS_FILE}: expected exported ${spec.kind} \`${spec.name}\` is missing`,
+        );
+      } else if (matches.length > 1) {
+        failures.push(
+          `${EVENTS_FILE}: \`${spec.name}\` is exported ${matches.length} times ` +
+            `(${matches.map((m) => m.kind).join(", ")}) — a value and a type of the same name ` +
+            `both satisfy a name check while only one of them was inspected`,
+        );
+      } else if (matches[0].kind !== spec.kind) {
+        failures.push(
+          `${EVENTS_FILE}: \`${spec.name}\` is exported as a ${matches[0].kind}, ` +
+            `expected a ${spec.kind}`,
+        );
       }
     }
 
