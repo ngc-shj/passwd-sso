@@ -152,9 +152,11 @@ describe("eslint.extension.config.mjs", () => {
   it("reports clean source with no findings at all", () => {
     const { exitCode, rules } = lintAs(
       CONTENT,
-      'import { logNoSelectMatch } from "./select-diag-lib";\n' +
-        "declare const s: { name: string; id: string };\n" +
-        "logNoSelectMatch(s);\n",
+      'import {\n' +
+        "  logNoSelectMatch,\n" +
+        "  SELECT_DIAG_FIELD,\n" +
+        '} from "./select-diag-lib";\n' +
+        "logNoSelectMatch(SELECT_DIAG_FIELD.IDENTITY_COUNTRY);\n",
     );
     expect(exitCode).toBe(0);
     expect(rules).toEqual([]);

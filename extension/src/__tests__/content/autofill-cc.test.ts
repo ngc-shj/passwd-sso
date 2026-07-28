@@ -411,7 +411,7 @@ describe("performCreditCardAutofill — select mismatch diagnostics", () => {
     };
   }
 
-  it("logs the select's name, never the expiry value, when no option matches", () => {
+  it("logs the extension's own field identifier, never the expiry value, when no option matches", () => {
     const select = setupYearSelectForm();
     const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
 

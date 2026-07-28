@@ -79,9 +79,9 @@ export default [
     // The two sanctioned sinks — this list IS the audit surface. Adding a third
     // entry is a review event by construction.
     //
-    // Neither can leak: select-diag-lib.ts takes `SelectIdentity` ({ name, id }),
-    // not HTMLSelectElement, so `select.value` / `select.form` do not compile;
-    // log.ts takes two closed string unions, so there is no free-form slot.
+    // Neither can leak: both take closed string unions and nothing else, so
+    // there is no free-form slot for a caller — or a page — to widen. Passing a
+    // DOM node or any page-derived string does not compile.
     //
     // BOTH rules must be off. Disabling only `no-console` leaves the
     // Identifier[name='console'] selector firing on the sinks' own reference, which

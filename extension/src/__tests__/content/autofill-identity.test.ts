@@ -379,7 +379,7 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     ) as HTMLSelectElement;
   }
 
-  it("logs the select's name, never the identity value, when no option matches", () => {
+  it("logs the extension's own field identifier, never the identity value, when no option matches", () => {
     const select = setupCountrySelectForm();
     const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
 
@@ -396,8 +396,9 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     expect(debug.mock.calls.length).toBeGreaterThan(0);
     for (const args of debug.mock.calls) {
       expect(args).toHaveLength(1);
-      // Passing the live element instead of a string would serialise in DevTools
-      // with its selected value while a join() renders it "[object …]".
+      // A non-string argument would serialise in DevTools with its own contents
+      // while the join() below renders it "[object …]" — so the denials that
+      // follow would pass while the console still showed the value.
       expect(args.every((a) => typeof a === "string")).toBe(true);
     }
 
