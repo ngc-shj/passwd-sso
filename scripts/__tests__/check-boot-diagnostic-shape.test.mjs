@@ -361,6 +361,47 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/`export default` is not permitted/);
   });
 
+  it("rejects swapping the implementation via a same-name re-export", () => {
+    // The gate resolved `envVarName` to the local declaration and checked THAT,
+    // while callers imported the re-exported one. Both halves must be caught:
+    // the export statement itself, and envVarName no longer being exported
+    // locally.
+    patch(
+      "src/lib/boot-events.ts",
+      "export function envVarName(raw: string): EnvVarName {",
+      "function envVarName(raw: string): EnvVarName {",
+    );
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport { envVarName } from "./unsafe-env-name";\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/no export statement is permitted/);
+    expect(output).toMatch(/expected export `envVarName` is missing/);
+  });
+
+  it("rejects a plain local re-export statement", () => {
+    // Even without a module specifier, `export { x }` decouples the name from
+    // the declaration the gate inspected.
+    patch(
+      "src/lib/boot-events.ts",
+      "export function envVarName(raw: string): EnvVarName {",
+      "function envVarName(raw: string): EnvVarName {",
+    );
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport { envVarName };\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/no export statement is permitted/);
+  });
+
   it("rejects a star re-export", () => {
     const path = join(root, "src/lib/boot-events.ts");
     writeFileSync(
@@ -370,7 +411,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/`export \*` re-exports/);
+    expect(output).toMatch(/no export statement is permitted/);
   });
 
   it("rejects a namespace re-export", () => {
@@ -382,7 +423,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/`export \* as schema` re-exports/);
+    expect(output).toMatch(/no export statement is permitted/);
   });
 
   it("rejects an exported namespace", () => {
@@ -406,7 +447,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/unexpected export\(s\): default/);
+    expect(output).toMatch(/no export statement is permitted/);
   });
 
   it("rejects an extra export even when it names no branded type", () => {

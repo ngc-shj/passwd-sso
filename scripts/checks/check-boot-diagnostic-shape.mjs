@@ -298,19 +298,26 @@ if (events) {
           `default-imported helper is as reachable as a named one`,
       );
     }
+    // No `export { … }` statement of any form.
+    //
+    // Refusing only the unnamed ones was not enough. A NAMED re-export compares
+    // equal to the allowlist while swapping the implementation underneath:
+    //
+    //     function envVarName(raw: string): EnvVarName { …the safe body… }
+    //     export { envVarName } from "./unsafe-env-name";
+    //
+    // The gate resolved `envVarName` to the local declaration and checked THAT,
+    // while callers imported the other one. Matching on the exported NAME is the
+    // same defect as the owner allowlist that a function called `variables`
+    // walked through. Every export here is an inline `export const/type/function`
+    // today, so requiring that costs nothing and makes name and implementation
+    // the same thing again.
     for (const ed of events.getExportDeclarations()) {
-      const ns = ed.getNamespaceExport();
-      if (ns) {
-        failures.push(
-          `${EVENTS_FILE}:${ed.getStartLineNumber()}: \`export * as ${ns.getName()}\` re-exports ` +
-            `a whole module — the surface must stay enumerable`,
-        );
-      } else if (ed.getModuleSpecifier() && ed.getNamedExports().length === 0) {
-        failures.push(
-          `${EVENTS_FILE}:${ed.getStartLineNumber()}: \`export *\` re-exports whatever the ` +
-            `target holds, now and in future — the surface must stay enumerable`,
-        );
-      }
+      failures.push(
+        `${EVENTS_FILE}:${ed.getStartLineNumber()}: \`${ed.getText().slice(0, 60)}\` — no export ` +
+          `statement is permitted; export inline at the declaration, so the name the gate ` +
+          `checks and the implementation callers get cannot drift apart`,
+      );
     }
 
     const actualExports = [
@@ -328,12 +335,11 @@ if (events) {
           .getVariableStatements()
           .filter((s) => s.isExported())
           .flatMap((s) => s.getDeclarations().map((d) => d.getName())),
-      )
-      .concat(
-        events
-          .getExportDeclarations()
-          .flatMap((d) => d.getNamedExports().map((n) => (n.getAliasNode() ?? n.getNameNode()).getText())),
       );
+    // Deliberately NOT including names from export statements: those are banned
+    // above, and counting them here would let a re-export satisfy the
+    // "expected export present" check below while the local declaration it
+    // shadows goes unexported — which is exactly the swap being closed.
     const unexpectedExports = actualExports.filter((n) => !EXPECTED_EXPORTS.includes(n));
     if (unexpectedExports.length > 0) {
       failures.push(
