@@ -14,7 +14,14 @@
  * unredacted fourth call. So the check is on argument SHAPE:
  *
  *   client.ts     — every console call is exactly `(event, redact(fields))`
- *   boot-stderr.ts — exactly one console call, taking the bare `message` param
+ *   boot-stderr.ts — exactly one console call, exactly `render(diagnostic)`
+ *
+ * The boot form used to be the bare `message` PARAMETER, which was meaningful
+ * while a companion gate proved every caller's argument secret-free. Rendering
+ * now happens inside the sink, so `message` became an ordinary local and the
+ * same assertion stopped constraining anything — a `const message =
+ * \`${process.env.AUTH_SECRET}\`` passed. Pinning the call to `render(diagnostic)`
+ * restores the binding; `check-boot-diagnostic-shape` covers render's body.
  *
  * Run: node scripts/checks/check-console-sinks.mjs
  *
@@ -93,11 +100,11 @@ if (bootCalls.length !== 1) {
 for (const call of bootCalls) {
   const args = call.getArguments();
   const line = call.getStartLineNumber();
-  if (args.length !== 1 || args[0].getText() !== "message") {
+  if (args.length !== 1 || args[0].getText() !== "render(diagnostic)") {
     failures.push(
-      `${BOOT}:${line}: console call must take the bare \`message\` parameter, got \`${args
+      `${BOOT}:${line}: console call must be exactly \`render(diagnostic)\`, got \`${args
         .map((a) => a.getText())
-        .join(", ")}\` — an interpolated or serialized argument can carry a secret`,
+        .join(", ")}\` — a local binding proves nothing about where the string came from`,
     );
   }
 }

@@ -107,9 +107,10 @@ const eslintConfig = defineConfig([
   },
   {
     // The two sanctioned console sinks. Neither can see a secret: client.ts
-    // redacts by denylist before writing; boot-stderr.ts takes a plain string
-    // and exists so this exemption does NOT land on src/lib/env.ts, which holds
-    // every secret in process.env.
+    // redacts by denylist before writing; boot-stderr.ts takes a closed
+    // BootDiagnostic union and renders the text itself, so a caller has no
+    // free-form slot. Both exist so this exemption does NOT land on
+    // src/lib/env.ts, which holds every secret in process.env.
     files: ["src/lib/logger/client.ts", "src/lib/boot-stderr.ts"],
     rules: {
       "no-console": "off",

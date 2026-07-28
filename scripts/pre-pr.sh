@@ -280,6 +280,8 @@ queue_step "Static: test-hygiene"   bash scripts/checks/check-test-hygiene.sh
 queue_step "Static: settings-card-layout"  bash scripts/checks/check-settings-card-layout.sh
 queue_step "Static: api-error-codes" bash scripts/checks/check-api-error-codes.sh
 queue_step "Static: console-sinks"  node scripts/checks/check-console-sinks.mjs
+queue_step "Static: boot-diagnostic-shape" node scripts/checks/check-boot-diagnostic-shape.mjs
+queue_step "Static: public-contract" node scripts/checks/check-public-contract.mjs
 queue_step "Static: api-error-body-drift" bash scripts/checks/check-api-error-body-drift.sh
 queue_step "Static: fail-closed-routes-have-test" bash scripts/checks/check-fail-closed-routes-have-test.sh
 queue_step "Static: permanent-delete-stepup" bash scripts/checks/check-permanent-delete-stepup.sh

@@ -28,5 +28,18 @@ export interface KeyProvider {
   validateKeys(): Promise<void>;
 
   /** Provider name for logging. */
-  readonly name: string;
+  readonly name: ProviderName;
 }
+
+/**
+ * The closed set of provider identities.
+ *
+ * A union rather than `string` because this value is interpolated into a raw,
+ * unredacted stderr write in `BaseCloudKeyProvider.logStaleWarning`. Every
+ * implementation today assigns a fixed literal, so this only writes down what
+ * was already true — but as `string` it left the door open for a future
+ * provider to derive its name from configuration and put that value on stderr
+ * with nothing to stop it. Enforced by `scripts/checks/check-boot-diagnostic-shape.mjs`,
+ * which resolves this import one hop and re-checks that the union is still closed.
+ */
+export type ProviderName = "env" | "aws-sm" | "gcp-sm" | "azure-kv";

@@ -3,6 +3,7 @@
 // middleware import chain (next-intl, etc.).
 
 import { bootStderr } from "@/lib/boot-stderr";
+import { BOOT_EVENT } from "@/lib/boot-events";
 
 // Pre-compute static CSP parts at module init time to avoid per-request work.
 // Only the nonce value is injected per-request.
@@ -40,9 +41,7 @@ if (_isProd && _rawCspMode !== _cspMode) {
   // guaranteed to exist — same constraint as the env banner. It is also an
   // operator signal about a server env var, not a browser-user signal, so the
   // client logger would be the wrong sink even setting init order aside.
-  bootStderr(
-    `[CSP] CSP_MODE="${_rawCspMode}" is ignored in production builds; using "strict"`,
-  );
+  bootStderr({ event: BOOT_EVENT.CSP_MODE_IGNORED });
 }
 const _reportUri = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/csp-report`;
 // In dev mode style-src and script-src use 'unsafe-inline'; in strict mode

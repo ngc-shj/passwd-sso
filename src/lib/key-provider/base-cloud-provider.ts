@@ -6,11 +6,12 @@
  * implement fetchSecret() and validateConfig().
  */
 
-import type { KeyName, KeyProvider } from "./types";
+import type { KeyName, KeyProvider, ProviderName } from "./types";
 import { HEX64_RE } from "@/lib/validations/common";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 import { bootStderr } from "@/lib/boot-stderr";
+import { BOOT_EVENT } from "@/lib/boot-events";
 
 export { HEX64_RE };
 
@@ -25,7 +26,9 @@ export interface CloudProviderConfig {
 }
 
 export abstract class BaseCloudKeyProvider implements KeyProvider {
-  abstract readonly name: string;
+  // ProviderName, not string: this value is interpolated into the raw stderr
+  // write in logStaleWarning below.
+  abstract readonly name: ProviderName;
 
   /** Map KeyName to env var name for custom secret name override */
   protected abstract readonly secretNameEnvMap: Record<KeyName, string>;
@@ -151,7 +154,7 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
     return Buffer.from(hex, "hex");
   }
 
-  private logStaleWarning(name: string, elapsedSec: number, err: unknown): void {
+  private logStaleWarning(name: KeyName, elapsedSec: number, err: unknown): void {
     // Dynamic import to avoid bundling pino/node:async_hooks into SSR bundles
     void import("@/lib/logger").then(({ default: log }) => {
       log.warn(
@@ -163,7 +166,12 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
       // is unavailable here, so this is the one remaining case for the raw
       // stderr sink. Key material never appears: only the provider name, the
       // key's NAME (not its value), and an age in seconds.
-      bootStderr(`[key-provider] ${this.name} stale key used for "${name}" (${elapsedSec}s old)`);
+      bootStderr({
+        event: BOOT_EVENT.KEY_PROVIDER_STALE_KEY,
+        provider: this.name,
+        keyName: name,
+        elapsedSec,
+      });
     });
   }
 

@@ -15,6 +15,7 @@
 
 import { envObject, envSchema, type Env, getSchemaShape } from "@/lib/env-schema";
 import { bootStderr } from "@/lib/boot-stderr";
+import { BOOT_EVENT, envVarName } from "@/lib/boot-events";
 
 // Re-export schema surface so existing imports (`from "@/lib/env"`) keep working.
 export { envObject, envSchema, getSchemaShape };
@@ -30,25 +31,26 @@ function parseEnv(): Env {
       .map((issue) => `  ${issue.path.join(".")}: ${issue.message}`)
       .join("\n");
 
-    const banner =
-      "\n" +
-      "=".repeat(60) +
-      "\n" +
-      " ENVIRONMENT VARIABLE VALIDATION FAILED\n" +
-      "=".repeat(60) +
-      "\n" +
-      formatted +
-      "\n" +
-      "=".repeat(60);
+    // Two channels, deliberately asymmetric.
+    //
+    // The raw stderr sink gets variable NAMES only. It runs before the logger
+    // exists and has no redaction beneath it, and Zod messages are not a bounded
+    // channel — `env-schema.ts` already builds one by interpolation, so a future
+    // `.refine(…, { message: `bad: ${v}` })` would put a value there with
+    // nothing to stop it. `envVarName` validates the shape rather than asserting
+    // it, so a nested or synthetic issue path cannot smuggle text through.
+    // Deduplicated on the full path, not on the resolved name: two distinct
+    // paths that both fail the allowlist stay two entries, so several problems
+    // cannot collapse into a single `<unnamed>` line.
+    const paths = [...new Set(result.error.issues.map((issue) => issue.path.join(".")))];
 
-    // Log to stderr for visibility in container logs. Routed through
-    // boot-stderr because this runs before the logger exists; keeping the raw
-    // console call out of this module means `no-console` stays enforced here,
-    // where every secret in process.env is in scope.
-    // The banner is built from issue paths (variable NAMES) and Zod messages
-    // only — it must never interpolate a value from process.env or result.data.
-    bootStderr(banner);
+    bootStderr({
+      event: BOOT_EVENT.ENV_VALIDATION_FAILED,
+      variables: paths.map(envVarName),
+    });
 
+    // The thrown Error keeps the full per-issue detail. It travels the normal
+    // exception path, not the raw console, so the operator loses nothing.
     throw new Error(`Invalid environment variables:\n${formatted}`);
   }
 

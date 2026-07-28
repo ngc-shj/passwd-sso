@@ -74,6 +74,14 @@ type EmittedFields = Record<string, ClientLogValue | typeof REDACTED>;
  * Exported for tests: the public API now constrains keys per event, so the
  * sink-side layer can only be exercised directly. That is the point of keeping
  * it — it defends the paths the types do not reach.
+ *
+ * Scope, precisely: this inspects TOP-LEVEL KEY NAMES only. It catches a secret
+ * stored under a known key on a payload that reached here via a cast or untyped
+ * JS. It does NOT traverse, so a cast-in nested object (`{ context: { token } }`)
+ * is emitted with `context` intact — the top-level key is `context`, which is
+ * not on the list. Nesting is a compile error through the typed API, which is
+ * where that case is actually prevented; this is the backstop for known keys,
+ * not a general-purpose sanitizer.
  */
 export function redact(fields: Record<string, ClientLogValue>): EmittedFields {
   const out: EmittedFields = {};

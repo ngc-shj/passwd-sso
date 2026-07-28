@@ -47,6 +47,29 @@ describe("env validation", () => {
     await expect(import("./env")).rejects.toThrow("Invalid environment variables");
   });
 
+  it("reports only variable names to stderr, never the rejected value", async () => {
+    // env.ts is the caller with all of process.env in scope, and bootStderr
+    // writes to a raw console with no redaction beneath it. Zod messages are not
+    // a bounded channel — env-schema.ts already builds one by interpolation — so
+    // the boot payload carries names only. Nothing else pins that.
+    vi.doMock("@/lib/boot-stderr", () => ({ bootStderr: vi.fn() }));
+    const { bootStderr } = await import("@/lib/boot-stderr");
+    const boot = vi.mocked(bootStderr);
+    boot.mockClear();
+
+    const secretish = "deadbeef-not-a-valid-key-value";
+    process.env = buildMinimalEnv({ SHARE_MASTER_KEY: secretish });
+    await expect(import("./env")).rejects.toThrow("Invalid environment variables");
+
+    expect(boot).toHaveBeenCalledTimes(1);
+    const payload = boot.mock.calls[0][0];
+    expect(JSON.stringify(payload)).not.toContain(secretish);
+    expect(payload).toEqual({
+      event: "boot.env_validation_failed",
+      variables: ["SHARE_MASTER_KEY"],
+    });
+  });
+
   it("defaults NODE_ENV to development when unset", async () => {
     // Vitest sets NODE_ENV=test, so we can't truly unset it.
     // Instead verify that the "test" value is accepted as valid.

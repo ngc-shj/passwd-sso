@@ -123,12 +123,27 @@ describe("check-console-sinks", () => {
   it("rejects a serialized argument in the boot sink", () => {
     patch(
       "src/lib/boot-stderr.ts",
-      "console.error(message)",
+      "console.error(render(diagnostic))",
       "console.error(JSON.stringify(process.env))",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/must take the bare `message` parameter/);
+    expect(output).toMatch(/must be exactly `render\(diagnostic\)`/);
+  });
+
+  it("rejects the boot sink writing a local instead of render(diagnostic)", () => {
+    // The regression this assertion exists for. While `message` was the typed
+    // PARAMETER, pinning the argument text carried the whole caller→console
+    // chain. Once rendering moved into the sink, a local of the same name
+    // satisfied the string while proving nothing about the value's origin.
+    patch(
+      "src/lib/boot-stderr.ts",
+      "  console.error(render(diagnostic));",
+      "  const message = `${process.env.AUTH_SECRET}`;\n  console.error(message);",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/a local binding proves nothing/);
   });
 
   it("rejects a third file joining the no-console override list", () => {
