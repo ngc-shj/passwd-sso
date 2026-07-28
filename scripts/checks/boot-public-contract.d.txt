@@ -1,4 +1,4 @@
-// ── src/lib/boot-events.d.ts ──
+// -- src/lib/boot-events.d.ts --
 import type { KeyName, ProviderName } from "@/lib/key-provider/types";
 export declare const BOOT_EVENT: {
     readonly ENV_VALIDATION_FAILED: "boot.env_validation_failed";
@@ -24,11 +24,11 @@ export type BootDiagnostic = {
 };
 export {};
 
-// ── src/lib/boot-stderr.d.ts ──
+// -- src/lib/boot-stderr.d.ts --
 import { type BootDiagnostic } from "@/lib/boot-events";
 export declare function bootStderr(diagnostic: BootDiagnostic): void;
 
-// ── src/lib/key-provider/types.d.ts ──
+// -- src/lib/key-provider/types.d.ts --
 export type KeyName = "share-master" | "verifier-pepper" | "directory-sync" | "webauthn-prf" | "audit-anchor-signing" | "audit-anchor-tag-secret";
 export interface KeyProvider {
     getKey(name: KeyName, version?: number): Promise<Buffer>;

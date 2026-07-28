@@ -1,58 +1,120 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdtempSync,
+  mkdirSync,
+  cpSync,
+  rmSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 /**
  * Self-test for scripts/checks/check-public-contract.mjs.
  *
- * The cases below are the five escapes that defeated the previous
- * syntax-scanning gate, one review round each:
+ * Runs entirely inside a temp fixture: the sources are COPIED there, a tsconfig
+ * is generated pointing at the copies, and the checker is aimed at both via
+ * PUBLIC_CONTRACT_TSCONFIG / PUBLIC_CONTRACT_BASELINE. The tracked tree is never
+ * written to.
  *
- *   `<EnvVarName>x` instead of `as EnvVarName`
- *   a type predicate, which needs no assertion syntax at all
- *   a helper named after a permitted owner
- *   a same-name re-export swapping the implementation
- *   a value/type namespace collision
+ * An earlier version mutated `src/lib/boot-events.ts` in place and restored it
+ * in afterEach. That is unsafe here for three separate reasons: `pre-pr.sh` runs
+ * Test, Lint and the Next build concurrently, so another step can read a
+ * half-mutated source; an interrupted run leaves the file broken; and the
+ * restore writes back a `pristine` snapshot that would clobber anything the
+ * developer edited meanwhile.
  *
- * They are kept NOT as per-syntax detectors — the mechanism has no notion of
- * syntax — but as evidence that the baseline rejects each of them for the one
- * reason it knows: the emitted declarations no longer match. The assertions
- * therefore check the diff, not a construct name. A sixth spelling nobody has
- * thought of is covered by the same line.
- *
- * The real source tree is mutated here rather than a fixture copy, because the
- * gate compiles through the project's module graph and a partial copy would not
- * resolve `@/lib/env-schema`. Every case restores the file in `afterEach`, and
- * the baseline is redirected to a temp path so the tracked one is never touched.
+ * The fixture copies the module's full import closure, so the compile resolves
+ * without reaching outside the temp dir. If boot-events gains an import beyond
+ * this list, the first case goes red rather than silently falling back to the
+ * real tree.
  */
 
 const REPO = resolve(import.meta.dirname, "../..");
 const GATE = resolve(REPO, "scripts/checks/check-public-contract.mjs");
-const TRACKED_BASELINE = resolve(REPO, "scripts/checks/boot-public-contract.d.txt");
-const EVENTS = resolve(REPO, "src/lib/boot-events.ts");
 
-let tmpBaseline;
-let pristine;
+/** The import closure of the three contract files, verified by case 1. */
+const FIXTURE_SOURCES = [
+  "src/lib/boot-events.ts",
+  "src/lib/boot-stderr.ts",
+  "src/lib/key-provider/types.ts",
+  "src/lib/env-schema.ts",
+  "src/lib/validations/common.ts",
+  "src/lib/constants/time.ts",
+];
+
+const CONTRACT_ENTRIES = [
+  "./src/lib/boot-events.ts",
+  "./src/lib/boot-stderr.ts",
+  "./src/lib/key-provider/types.ts",
+];
+
+let fixture;
+let tsconfigPath;
+let baselinePath;
 
 beforeEach(() => {
-  pristine = readFileSync(EVENTS, "utf8");
-  const dir = mkdtempSync(join(tmpdir(), "public-contract-test-"));
-  tmpBaseline = join(dir, "baseline.d.txt");
-  writeFileSync(tmpBaseline, readFileSync(TRACKED_BASELINE, "utf8"), "utf8");
+  fixture = mkdtempSync(join(tmpdir(), "public-contract-test-"));
+  for (const rel of FIXTURE_SOURCES) {
+    const dst = join(fixture, rel);
+    mkdirSync(dirname(dst), { recursive: true });
+    cpSync(join(REPO, rel), dst);
+  }
+
+  // Mirrors scripts/checks/tsconfig.public-contract.json, rooted at the fixture.
+  tsconfigPath = join(fixture, "tsconfig.json");
+  writeFileSync(
+    tsconfigPath,
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2020",
+          lib: ["dom", "dom.iterable", "esnext"],
+          module: "esnext",
+          moduleResolution: "bundler",
+          strict: true,
+          skipLibCheck: true,
+          esModuleInterop: true,
+          resolveJsonModule: true,
+          declaration: true,
+          emitDeclarationOnly: true,
+          declarationMap: false,
+          removeComments: true,
+          incremental: false,
+          composite: false,
+          noEmitOnError: false,
+          rootDir: ".",
+          baseUrl: ".",
+          paths: { "@/*": ["./src/*"] },
+        },
+        files: CONTRACT_ENTRIES,
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+
+  baselinePath = join(fixture, "baseline.d.txt");
+  runGate(["--update"]);
 });
 
 afterEach(() => {
-  writeFileSync(EVENTS, pristine, "utf8");
-  rmSync(tmpBaseline, { force: true });
+  rmSync(fixture, { recursive: true, force: true });
 });
 
 function runGate(args = []) {
   try {
     execFileSync("node", [GATE, ...args], {
       cwd: REPO,
-      env: { ...process.env, PUBLIC_CONTRACT_BASELINE: tmpBaseline },
+      env: {
+        ...process.env,
+        PUBLIC_CONTRACT_TSCONFIG: tsconfigPath,
+        PUBLIC_CONTRACT_BASELINE: baselinePath,
+      },
       encoding: "utf8",
       stdio: "pipe",
     });
@@ -63,27 +125,51 @@ function runGate(args = []) {
 }
 
 function append(source) {
-  writeFileSync(EVENTS, `${readFileSync(EVENTS, "utf8")}\n${source}\n`, "utf8");
+  const path = join(fixture, "src/lib/boot-events.ts");
+  writeFileSync(path, `${readFileSync(path, "utf8")}\n${source}\n`, "utf8");
+}
+
+function patchEvents(from, to) {
+  const path = join(fixture, "src/lib/boot-events.ts");
+  const src = readFileSync(path, "utf8");
+  expect(src).toContain(from);
+  writeFileSync(path, src.replace(from, to), "utf8");
 }
 
 describe("check-public-contract", () => {
-  it("passes on the current tree", () => {
+  it("passes on an unmodified copy of the sources", () => {
+    // Also proves the fixture's import closure is complete: an unresolved import
+    // would leave the declarations unemitted and fail here.
     expect(runGate().code).toBe(0);
   });
 
-  it("leaves the tracked baseline alone when verifying", () => {
-    const before = readFileSync(TRACKED_BASELINE, "utf8");
+  it("matches the tracked baseline, so the fixture is faithful", () => {
+    const tracked = readFileSync(
+      resolve(REPO, "scripts/checks/boot-public-contract.d.txt"),
+      "utf8",
+    );
+    expect(readFileSync(baselinePath, "utf8")).toBe(tracked);
+  });
+
+  it("never writes the tracked baseline while verifying", () => {
+    const trackedPath = resolve(REPO, "scripts/checks/boot-public-contract.d.txt");
+    const before = readFileSync(trackedPath, "utf8");
     append("export const somethingElse = 1;");
     expect(runGate().code).toBe(1);
-    expect(readFileSync(TRACKED_BASELINE, "utf8")).toBe(before);
+    expect(readFileSync(trackedPath, "utf8")).toBe(before);
+  });
+
+  it("is itself plain text, so a contract diff stays reviewable", () => {
+    // A stray NUL in this gate once made git treat it as binary, which defeats
+    // the whole point of a reviewable baseline.
+    expect(readFileSync(GATE).includes(0)).toBe(false);
   });
 
   describe("rejects a widened surface, whatever syntax produced it", () => {
     const escapes = [
       {
         name: "old-style assertion helper",
-        source:
-          "export function unsafeName(s: string): EnvVarName {\n  return <EnvVarName>s;\n}",
+        source: "export function unsafeName(s: string): EnvVarName {\n  return <EnvVarName>s;\n}",
         surfaces: "export declare function unsafeName(s: string): EnvVarName;",
       },
       {
@@ -94,8 +180,7 @@ describe("check-public-contract", () => {
       },
       {
         name: "helper named after a permitted owner",
-        source:
-          "export function variables(s: string): s is EnvVarName {\n  return true;\n}",
+        source: "export function variables(s: string): s is EnvVarName {\n  return true;\n}",
         surfaces: "export declare function variables(s: string): s is EnvVarName;",
       },
       {
@@ -126,17 +211,11 @@ describe("check-public-contract", () => {
   });
 
   it("rejects a same-name re-export that swaps the implementation", () => {
-    // The declaration output records where the symbol comes from, so a re-export
-    // is visible even though the name is unchanged.
-    writeFileSync(
-      EVENTS,
-      pristine.replace(
-        "export function envVarName(raw: string): EnvVarName {",
-        "function envVarName(raw: string): EnvVarName {",
-      ),
-      "utf8",
+    patchEvents(
+      "export function envVarName(raw: string): EnvVarName {",
+      "function envVarName(raw: string): EnvVarName {",
     );
-    append('export { envVarName } from "@/lib/env-schema";');
+    append('export { getSchemaShape as envVarName } from "@/lib/env-schema";');
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/the public contract changed/);
@@ -145,18 +224,30 @@ describe("check-public-contract", () => {
   it("rejects narrowing the surface too, not only widening", () => {
     // A removed export breaks callers as surely as an added one loosens the
     // contract; the baseline is an equality check, not a subset check.
+    patchEvents(
+      "export function envVarName(raw: string): EnvVarName {",
+      "function envVarName(raw: string): EnvVarName {",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toContain("- export declare function envVarName");
+  });
+
+  it("rejects widening a closed union in the depended-on types file", () => {
+    // BootDiagnostic's own declaration would not change, which is why that file
+    // is part of the contract.
+    const path = join(fixture, "src/lib/key-provider/types.ts");
     writeFileSync(
-      EVENTS,
-      pristine.replace(
-        "export function envVarName(raw: string): EnvVarName {",
-        "function envVarName(raw: string): EnvVarName {",
+      path,
+      readFileSync(path, "utf8").replace(
+        'export type ProviderName = "env" | "aws-sm" | "gcp-sm" | "azure-kv";',
+        "export type ProviderName = string;",
       ),
       "utf8",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/the public contract changed/);
-    expect(output).toContain("- export declare function envVarName");
+    expect(output).toContain("+ export type ProviderName = string;");
   });
 
   it("shows a unified diff naming what moved", () => {
@@ -171,15 +262,15 @@ describe("check-public-contract", () => {
     expect(runGate().code).toBe(1);
     expect(runGate(["--update"]).code).toBe(0);
     expect(runGate().code).toBe(0);
-    expect(readFileSync(tmpBaseline, "utf8")).toContain("extraThing");
+    expect(readFileSync(baselinePath, "utf8")).toContain("extraThing");
   });
 
   it("fails rather than self-approving when the baseline is absent", () => {
     // The failure mode that would make the whole mechanism decorative.
-    rmSync(tmpBaseline, { force: true });
+    rmSync(baselinePath, { force: true });
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/no baseline at/);
-    expect(existsSync(tmpBaseline)).toBe(false);
+    expect(existsSync(baselinePath)).toBe(false);
   });
 });
