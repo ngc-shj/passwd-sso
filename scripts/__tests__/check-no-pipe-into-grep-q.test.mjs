@@ -63,23 +63,33 @@ describe("the defect this guard exists for", () => {
   const NEEDLE = "needle";
   const BUILD = `block=$'filler-line\\n'; for _ in $(seq 1 18); do block="$block$block"; done; big=$'${NEEDLE}\\n'"$block";`;
 
+  // grep's own stdout is discarded: -m1 and -l print their match, which would
+  // otherwise land in the FOUND/MISSED capture.
   function runShape(condition) {
     return spawnSync(
       "bash",
       [
         "-c",
-        `set -euo pipefail; ${BUILD} if ${condition}; then echo FOUND; else echo "MISSED(rc=$?)"; fi`,
+        `set -euo pipefail; ${BUILD} if ${condition} >/dev/null 2>&1; then echo FOUND; else echo "MISSED(rc=$?)"; fi`,
       ],
       { encoding: "utf8", maxBuffer: 1 << 20 },
     );
   }
 
-  it("reports a SUCCESSFUL match as failure when piped into grep -q", () => {
-    const r = runShape(`printf '%s' "$big" | grep -qxF '${NEEDLE}'`);
-    // The needle IS on the first line — "MISSED" here is the inversion itself,
-    // not a matching failure. If a future bash/coreutils stops reporting it,
-    // this assertion is the tripwire that says so.
-    expect(r.stdout.trim()).toMatch(/^MISSED\(rc=\d+\)$/);
+  // The needle IS on the first line — "MISSED" here is the inversion itself,
+  // not a matching failure. These four flags are the gate's member set, and
+  // this is the measurement it was derived from; `-l` is excluded below.
+  it.each([["-q"], ["--quiet"], ["--silent"], ["-m1"]])(
+    "reports a SUCCESSFUL match as failure when piped into grep %s",
+    (flag) => {
+      const r = runShape(`printf '%s' "$big" | grep ${flag} '${NEEDLE}'`);
+      expect(r.stdout.trim()).toMatch(/^MISSED\(rc=\d+\)$/);
+    },
+  );
+
+  it("does NOT invert for grep -l, which is why the gate leaves it alone", () => {
+    const r = runShape(`printf '%s' "$big" | grep -l '${NEEDLE}'`);
+    expect(r.stdout.trim()).toBe("FOUND");
   });
 
   it("reports the same match correctly through a herestring", () => {
@@ -123,6 +133,10 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     ["-iqE (q in the middle)", 'cat f | grep -iqE "^x"'],
     ["-Eq (q last)", 'cat f | grep -Eq "^x"'],
     ["--quiet", 'cat f | grep --quiet "^x"'],
+    ["--silent", 'cat f | grep --silent "^x"'],
+    ["-m1", 'cat f | grep -m1 "^x"'],
+    ["-m 1 (separated)", 'cat f | grep -m 1 "^x"'],
+    ["--max-count=1", 'cat f | grep --max-count=1 "^x"'],
   ])("FAILS on the %s spelling", (_name, body) => {
     writeScript(
       "offender",
@@ -131,7 +145,7 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(runGuard().exitCode).toBe(1);
   });
 
-  it("FAILS when the pipe and the grep are split by a line continuation", () => {
+  it("FAILS when the pipe and the grep are split by a `\\` continuation", () => {
     writeScript(
       "offender",
       '#!/usr/bin/env bash\nset -euo pipefail\nif cat f | \\\n  grep -qxF "$1"; then true; fi\n',
@@ -140,6 +154,30 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(exitCode).toBe(1);
     // Reported against the line the pipeline starts on, not the continuation.
     expect(stdout).toMatch(/offender\.sh:3:/);
+  });
+
+  it.each([["|"], ["|&"]])(
+    "FAILS when the line simply ends in `%s` — bash needs no backslash there",
+    (op) => {
+      writeScript(
+        "offender",
+        `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s' "$value" ${op}\n  grep -q needle\n`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stdout).toMatch(/offender\.sh:3:/);
+    },
+  );
+
+  it("PASSES `grep -l`, which measurement shows does not invert", () => {
+    // Pinning the derivation: the member set is "flags that make grep exit
+    // before draining stdin", and -l is not one of them. If that ever changes,
+    // this test is where the claim gets revisited.
+    writeScript(
+      "clean",
+      '#!/usr/bin/env bash\nset -euo pipefail\ncat f | grep -l needle\n',
+    );
+    expect(runGuard().exitCode).toBe(0);
   });
 
   it("FAILS on a three-stage pipeline whose last reader is quiet", () => {

@@ -386,7 +386,7 @@ while IFS= read -r line; do
   #     as the route file) must exist and contain the literal
   #     `@browser-redirect-recovery-test` marker, pinning a regression test.
   if [ "$emarker" = "@browser-redirect" ]; then
-    route_rel="$(printf '%s' "$SERVER_ID_FILES" | grep -m1 "^${eid} " | cut -d' ' -f2-)"
+    route_rel="$(grep -m1 "^${eid} " <<<"$SERVER_ID_FILES" | cut -d' ' -f2-)"
     if [ -z "$route_rel" ]; then
       echo "STALE_EXEMPT: exempt id '$eid' has no matching server route file on record — remove it from stepup-client-exempt.txt."
       fail=1

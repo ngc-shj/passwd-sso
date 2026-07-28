@@ -42,24 +42,30 @@ if [ ! -d "$SCAN_DIR" ]; then
   exit 1
 fi
 
-# Matching is done in awk, not by a line regex, because the shape has three
+# Matching is done in awk, not by a line regex, because the shape has several
 # spellings a regex over raw lines gets wrong:
-#   * the quiet flag can sit anywhere in a short cluster (-q, -qxF, -iqE, -Eq)
-#     or appear as --quiet;
-#   * the pipe and the grep can be split across a `\` continuation;
+#   * the early-exit flag can sit anywhere in a short cluster (-q, -qxF, -iqE,
+#     -Eq) or appear long (--quiet, --silent, --max-count);
+#   * the pipe and the grep can be split across a `\` continuation OR across a
+#     bare trailing `|` / `|&`, which bash continues without a backslash;
 #   * `||` is not a pipe and must not match.
-# So: join continuations into logical lines, mask `||`, then for each piped
-# `grep` test its own argument segment for a quiet flag.
+#
+# The flag set was derived by measurement, not from the man page: with the
+# needle on line 1 and a body past the pipe buffer, `-q`, `--quiet`, `--silent`
+# and `-m1` all report the match as rc=141, while `-l` does not — so `-l` is
+# not a member and is deliberately absent.
 detect_awk='
 function has_quiet(seg) {
-  sub(/[;&].*$/, "", seg)
-  return (seg ~ /(^|[ \t])-[A-Za-z]*q[A-Za-z]*([ \t]|$)/ ||
-          seg ~ /(^|[ \t])--quiet([ \t]|$)/)
+  sub(/;.*$/, "", seg)
+  sub(/&&.*$/, "", seg)
+  # Trailing digits so `-m1` (and `-im1`) match as well as `-m 1`.
+  return (seg ~ /(^|[ \t])-[A-Za-z]*[qm][A-Za-z]*[0-9]*([ \t]|=|$)/ ||
+          seg ~ /(^|[ \t])--(quiet|silent|max-count)([ \t]|=|$)/)
 }
 function offends(s,   t, seg) {
   t = s
   gsub(/\|\|/, "@@OR@@", t)
-  while (match(t, /\|[ \t]*grep([ \t]|$)/)) {
+  while (match(t, /\|&?[ \t]*grep([ \t]|$)/)) {
     seg = substr(t, RSTART + RLENGTH - 1)
     if (has_quiet(seg)) return 1
     t = substr(t, RSTART + RLENGTH)
@@ -69,7 +75,9 @@ function offends(s,   t, seg) {
 {
   if (buf == "") { start = FNR; disp = $0 }
   raw = $0
-  cont = (raw ~ /\\[ \t]*$/)
+  # bash continues a line ending in `\`, and also one ending in a pipe
+  # operator (`|` or `|&`) with no backslash at all.
+  cont = (raw ~ /\\[ \t]*$/ || raw ~ /\|&?[ \t]*$/)
   sub(/\\[ \t]*$/, " ", raw)
   buf = buf raw
   if (cont) next
