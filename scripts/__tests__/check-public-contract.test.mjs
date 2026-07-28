@@ -8,6 +8,7 @@ import {
   cpSync,
   rmSync,
   existsSync,
+  symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -64,6 +65,11 @@ beforeEach(() => {
     cpSync(join(REPO, rel), dst);
   }
 
+  // Without this the fixture compiles with `zod`, `process` and `Buffer` all
+  // unresolved. Those errors used to be swallowed, which made every case below
+  // pass against declarations emitted from a broken program.
+  symlinkSync(join(REPO, "node_modules"), join(fixture, "node_modules"), "dir");
+
   // Mirrors scripts/checks/tsconfig.public-contract.json, rooted at the fixture.
   tsconfigPath = join(fixture, "tsconfig.json");
   writeFileSync(
@@ -99,7 +105,11 @@ beforeEach(() => {
   );
 
   baselinePath = join(fixture, "baseline.d.txt");
-  runGate(["--update"]);
+  // Asserted, not assumed: a fixture that cannot compile would otherwise leave
+  // every case below comparing against a baseline that was never written.
+  const seeded = runGate(["--update"]);
+  expect(seeded.output).toBe("");
+  expect(seeded.code).toBe(0);
 });
 
 afterEach(() => {
@@ -138,9 +148,28 @@ function patchEvents(from, to) {
 
 describe("check-public-contract", () => {
   it("passes on an unmodified copy of the sources", () => {
-    // Also proves the fixture's import closure is complete: an unresolved import
-    // would leave the declarations unemitted and fail here.
     expect(runGate().code).toBe(0);
+  });
+
+  it("fails when a file in the import closure is missing", () => {
+    // The case that exposes a swallowed compile. Previously the checker
+    // tolerated a non-zero tsc exit whenever the three .d.ts existed, and
+    // `noEmitOnError` is off — so deleting this file still reported OK, and the
+    // "closure is complete" claim on the case above was a false positive.
+    rmSync(join(fixture, "src/lib/env-schema.ts"), { force: true });
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/tsc reported errors/);
+    expect(output).toMatch(/env-schema/);
+  });
+
+  it("fails when an external dependency cannot be resolved", () => {
+    // Same fail-open from the other direction: no node_modules meant `zod`,
+    // `process` and `Buffer` were all unresolved and the gate passed anyway.
+    rmSync(join(fixture, "node_modules"), { force: true });
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/tsc reported errors/);
   });
 
   it("matches the tracked baseline, so the fixture is faithful", () => {

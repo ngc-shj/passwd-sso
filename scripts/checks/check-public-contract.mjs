@@ -107,6 +107,17 @@ function emitDeclarations() {
   }
 
   const outDir = mkdtempSync(join(tmpdir(), "public-contract-"));
+
+  // A failed compile invalidates the baseline, even when files were emitted.
+  //
+  // An earlier version tolerated a non-zero exit as long as the three .d.ts
+  // existed. That is fail-open: `noEmitOnError` is off, so tsc writes
+  // declarations anyway, and a module it could not resolve degrades to `any` in
+  // the output. Measured, this was not hypothetical — the self-test fixture had
+  // no `node_modules`, so 31 errors (`Cannot find module 'zod'`, `Cannot find
+  // name 'process'`) were being swallowed, and deleting a file from the fixture's
+  // import closure still reported OK. Declarations produced from a broken
+  // program describe nothing.
   try {
     execFileSync("node", [TSC, "-p", TSCONFIG, "--outDir", outDir], {
       cwd: REPO_ROOT,
@@ -114,16 +125,20 @@ function emitDeclarations() {
       stdio: "pipe",
     });
   } catch (err) {
-    // `noEmitOnError: false` means declarations are still written when the
-    // sources have unrelated type errors; only report if the files are absent.
-    const missing = CONTRACT_FILES.filter((f) => !existsSync(join(outDir, f)));
-    if (missing.length > 0) {
-      rmSync(outDir, { recursive: true, force: true });
-      console.error("check-public-contract: FAIL — tsc did not emit declarations");
-      console.error(`missing: ${missing.join(", ")}`);
-      console.error(`${err.stdout ?? ""}${err.stderr ?? ""}`.trim());
-      process.exit(1);
-    }
+    rmSync(outDir, { recursive: true, force: true });
+    console.error("check-public-contract: FAIL — tsc reported errors, so the emitted");
+    console.error("declarations cannot be trusted as the contract.");
+    console.error("");
+    console.error(`${err.stdout ?? ""}${err.stderr ?? ""}`.trim());
+    process.exit(1);
+  }
+
+  const missing = CONTRACT_FILES.filter((f) => !existsSync(join(outDir, f)));
+  if (missing.length > 0) {
+    rmSync(outDir, { recursive: true, force: true });
+    console.error("check-public-contract: FAIL — tsc exited clean but emitted nothing for:");
+    for (const f of missing) console.error(`  ${f}`);
+    process.exit(1);
   }
 
   const sections = CONTRACT_FILES.map((rel) => {
