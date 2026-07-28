@@ -386,7 +386,7 @@ run_step "Static: prf-salt-migration-script-readonly" bash -c '
   # Extract just the SQL block(s) between `<<EOF` markers and the closing tag.
   # Any of UPDATE/INSERT/DELETE/TRUNCATE inside that block fails the check.
   SQL_BODY=$(awk "/^psql /,/^SQL\$/" "$SCRIPT")
-  if echo "$SQL_BODY" | grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b"; then
+  if grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b" <<<"$SQL_BODY"; then
     echo "ERROR: forbidden write verb inside SQL body of $SCRIPT (A02-8 C9 immutable)"
     exit 1
   fi

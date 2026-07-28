@@ -115,10 +115,37 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(runGuard().exitCode).toBe(1);
   });
 
-  it("FAILS on combined short flags (-qxF, -qiE)", () => {
+  // The quiet flag is what makes the reader exit early, so every spelling of it
+  // has to match. Matching `grep -q…` by prefix missed four of these five.
+  it.each([
+    ["-q", 'cat f | grep -q "^x"'],
+    ["-qiE (q first)", 'cat f | grep -qiE "^x"'],
+    ["-iqE (q in the middle)", 'cat f | grep -iqE "^x"'],
+    ["-Eq (q last)", 'cat f | grep -Eq "^x"'],
+    ["--quiet", 'cat f | grep --quiet "^x"'],
+  ])("FAILS on the %s spelling", (_name, body) => {
     writeScript(
       "offender",
-      '#!/usr/bin/env bash\nset -euo pipefail\ncat f | grep -qiE "^x"\n',
+      `#!/usr/bin/env bash\nset -euo pipefail\nif ${body}; then true; fi\n`,
+    );
+    expect(runGuard().exitCode).toBe(1);
+  });
+
+  it("FAILS when the pipe and the grep are split by a line continuation", () => {
+    writeScript(
+      "offender",
+      '#!/usr/bin/env bash\nset -euo pipefail\nif cat f | \\\n  grep -qxF "$1"; then true; fi\n',
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    // Reported against the line the pipeline starts on, not the continuation.
+    expect(stdout).toMatch(/offender\.sh:3:/);
+  });
+
+  it("FAILS on a three-stage pipeline whose last reader is quiet", () => {
+    writeScript(
+      "offender",
+      '#!/usr/bin/env bash\nset -euo pipefail\nif cat f | grep -v skip | grep -q .; then true; fi\n',
     );
     expect(runGuard().exitCode).toBe(1);
   });

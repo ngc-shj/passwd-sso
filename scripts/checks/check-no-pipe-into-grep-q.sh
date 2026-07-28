@@ -42,9 +42,42 @@ if [ ! -d "$SCAN_DIR" ]; then
   exit 1
 fi
 
-# `[^|]` before the pipe keeps `||  grep -q` (logical OR — no pipe, no race)
-# out of the match. `-q` may carry other short flags (`-qxF`, `-qiE`).
-PATTERN='[^|]\|[[:space:]]*grep[[:space:]]+-q'
+# Matching is done in awk, not by a line regex, because the shape has three
+# spellings a regex over raw lines gets wrong:
+#   * the quiet flag can sit anywhere in a short cluster (-q, -qxF, -iqE, -Eq)
+#     or appear as --quiet;
+#   * the pipe and the grep can be split across a `\` continuation;
+#   * `||` is not a pipe and must not match.
+# So: join continuations into logical lines, mask `||`, then for each piped
+# `grep` test its own argument segment for a quiet flag.
+detect_awk='
+function has_quiet(seg) {
+  sub(/[;&].*$/, "", seg)
+  return (seg ~ /(^|[ \t])-[A-Za-z]*q[A-Za-z]*([ \t]|$)/ ||
+          seg ~ /(^|[ \t])--quiet([ \t]|$)/)
+}
+function offends(s,   t, seg) {
+  t = s
+  gsub(/\|\|/, "@@OR@@", t)
+  while (match(t, /\|[ \t]*grep([ \t]|$)/)) {
+    seg = substr(t, RSTART + RLENGTH - 1)
+    if (has_quiet(seg)) return 1
+    t = substr(t, RSTART + RLENGTH)
+  }
+  return 0
+}
+{
+  if (buf == "") { start = FNR; disp = $0 }
+  raw = $0
+  cont = (raw ~ /\\[ \t]*$/)
+  sub(/\\[ \t]*$/, " ", raw)
+  buf = buf raw
+  if (cont) next
+  if (buf !~ /^[ \t]*#/ && offends(buf)) printf "%d:%s\n", start, disp
+  buf = ""
+}
+END { if (buf != "" && buf !~ /^[ \t]*#/ && offends(buf)) printf "%d:%s\n", start, disp }
+'
 
 files=$(find "$SCAN_DIR" -name '*.sh' -type f -not -path '*/__tests__/fixtures/*' | sort)
 file_count=$(grep -c . <<<"$files" || true)
@@ -61,9 +94,7 @@ fi
 violations=""
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  # Strip comment-only lines so the prose that documents this rule does not
-  # trip it.
-  hits=$(grep -nE "$PATTERN" "$f" | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+  hits=$(awk "$detect_awk" "$f" || true)
   if [ -n "$hits" ]; then
     while IFS= read -r h; do
       [ -z "$h" ] && continue
