@@ -64,14 +64,20 @@ updates:
     # ("reading 'Cjs'"); TypeScript majors churn the lib.dom typings the app
     # depends on. undici 8 requires Node >=22.19, but the production image and
     # .nvmrc are on Node 20, so it fails at runtime in the SSRF-guarded HTTP
-    # path (webhook / audit delivery). Ignore these major lines; drop the
-    # entry once the peer deps (or the Node baseline) catch up.
+    # path (webhook / audit delivery). jsdom 30 rewrote the CSS engine and its
+    # getComputedStyle throws "object null is not iterable" out of
+    # living/css/helpers/font-sizes.js, which every @testing-library getByRole
+    # query hits via isSubtreeInaccessible — reproduced on this tree with jsdom
+    # 30.0.0 as the only change. Ignore these major lines; drop the entry once
+    # the peer deps (or the Node baseline) catch up.
     ignore:
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
       - dependency-name: "undici"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
 
@@ -113,8 +119,11 @@ updates:
           - "*"
         exclude-patterns:
           - "otpauth"
-    # Keep TypeScript on the 5.x line here too (see /cli note).
+    # Keep TypeScript on the 5.x line here too (see /cli note), and jsdom on
+    # 29.x for the same getComputedStyle regression as the root ecosystem.
     ignore:
       - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "jsdom"
         update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
