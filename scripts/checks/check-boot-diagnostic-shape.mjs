@@ -156,35 +156,38 @@ if (events) {
       );
     }
 
-    // …and the predicate itself must test its OWN parameter.
-    const pred = events.getFunction("isDeclared");
-    if (!pred) {
-      failures.push(`${EVENTS_FILE}: no \`isDeclared\` type predicate`);
-    } else {
-      const ret = pred.getReturnTypeNode()?.getText() ?? "";
-      if (!/\bis\s+EnvVarName\b/.test(ret)) {
-        failures.push(
-          `${EVENTS_FILE}: isDeclared returns \`${ret || "<inferred>"}\`, not a ` +
-            `\`raw is EnvVarName\` predicate — without the predicate the caller must cast, ` +
-            `and a cast is what decoupled the check from the value`,
-        );
-      }
-      const paramName = pred.getParameters()[0]?.getName();
-      const testsOwnParam = pred
-        .getDescendantsOfKind(SyntaxKind.CallExpression)
-        .some((c) => {
-          const callee = c.getExpression();
-          if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return false;
-          if (callee.getName() !== "has") return false;
-          const arg = c.getArguments()[0];
-          return arg?.getKind() === SyntaxKind.Identifier && arg.getText() === paramName;
-        });
-      if (!testsOwnParam) {
-        failures.push(
-          `${EVENTS_FILE}: isDeclared does not call \`.has(${paramName})\` — testing a literal ` +
-            `or another binding makes the predicate lie about the value it narrows`,
-        );
-      }
+    // …and the returned value must be SELECTED FROM the declared list.
+    //
+    // This replaced a type predicate. The predicate made the CALL SITE
+    // compiler-checked, but `raw is EnvVarName` is an assertion TypeScript
+    // trusts rather than verifies, so the predicate body was still an
+    // unverified claim: `{ declared().has(raw); return true; }` type-checked and
+    // branded everything. Pinning the predicate's body would have been the fifth
+    // round of teaching this gate to recognize one more way of writing a check.
+    //
+    // Selecting from a list has no check to fake: `find`/`get` return an element
+    // of the collection, so the result is a schema key by construction and the
+    // input is only ever compared. A wrong comparison yields the wrong NAME, not
+    // a secret.
+    const returns = ctor.getDescendantsOfKind(SyntaxKind.ReturnStatement);
+    if (returns.length !== 1) {
+      failures.push(
+        `${EVENTS_FILE}: envVarName has ${returns.length} return statements; expected 1`,
+      );
+    }
+    const selectsFromList = (returns[0]?.getDescendantsOfKind(SyntaxKind.CallExpression) ?? [])
+      .some((c) => {
+        const callee = c.getExpression();
+        if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return false;
+        if (!["find", "get"].includes(callee.getName())) return false;
+        return callee.getExpression().getText() === "DECLARED";
+      });
+    if (!selectsFromList) {
+      failures.push(
+        `${EVENTS_FILE}: envVarName does not return a value selected from \`DECLARED\` ` +
+          `(via .find/.get) — returning anything derived from the input puts the guarantee ` +
+          `back on a check being correct`,
+      );
     }
     // The set must be BUILT FROM the schema accessor, verified structurally.
     //
@@ -211,46 +214,37 @@ if (events) {
           `membership must be checked against names the schema itself declares`,
       );
     } else {
-      const declaredFn = events.getFunction("declared");
-      if (!declaredFn) {
-        failures.push(`${EVENTS_FILE}: no \`declared()\` builder for the allowed-name set`);
+      // The list itself must BE the schema's key list.
+      //
+      // Everything above rests on `DECLARED` holding schema keys and nothing
+      // else, so this is the one initializer that matters. Checked as a whole
+      // expression: an earlier version accepted `Object.keys(getSchemaShape())`
+      // appearing anywhere in a function, which let the call be evaluated and
+      // discarded while a hand-written list was returned.
+      const listDecl = events.getVariableDeclaration("DECLARED");
+      if (!listDecl) {
+        failures.push(`${EVENTS_FILE}: no \`DECLARED\` list of schema-derived names`);
       } else {
-        // The RETURNED set, not merely a matching expression somewhere in the
-        // body. `Object.keys(getSchemaShape()); return new Set(["DATABASE_URL"])`
-        // satisfied an existence check while returning a hand-written set — the
-        // expression was there to please the gate and fed nothing.
-        const returns = declaredFn.getDescendantsOfKind(SyntaxKind.ReturnStatement);
-        if (returns.length !== 1) {
-          failures.push(
-            `${EVENTS_FILE}: declared() has ${returns.length} return statements; expected 1 — ` +
-              `a second return can bypass the schema-derived one`,
-          );
+        let init = listDecl.getInitializer();
+        // Unwrap `… as readonly EnvVarName[]`.
+        while (init && init.getKind() === SyntaxKind.AsExpression) {
+          init = init.getExpression();
         }
-        // A hand-written set needs an array literal; the schema-derived one does not.
-        const literals = declaredFn.getDescendantsOfKind(SyntaxKind.ArrayLiteralExpression);
-        if (literals.length > 0) {
-          failures.push(
-            `${EVENTS_FILE}:${literals[0].getStartLineNumber()}: declared() contains an array ` +
-              `literal — the allowed names must come from the schema, not be written by hand`,
-          );
-        }
-        const buildsFromSchema = (returns[0]?.getDescendantsOfKind(SyntaxKind.NewExpression) ?? [])
-          .filter((n) => n.getExpression().getText() === "Set")
-          .some((n) => {
-            const keys = n.getArguments()[0];
-            if (!keys || keys.getKind() !== SyntaxKind.CallExpression) return false;
-            if (keys.getExpression().getText() !== "Object.keys") return false;
-            const shape = keys.getArguments()[0];
+        const isSchemaKeys =
+          init?.getKind() === SyntaxKind.CallExpression &&
+          init.getExpression().getText() === "Object.keys" &&
+          (() => {
+            const shape = init.getArguments()[0];
             return (
               shape?.getKind() === SyntaxKind.CallExpression &&
               schemaAccessors.has(shape.getExpression().getText())
             );
-          });
-        if (!buildsFromSchema) {
+          })();
+        if (!isSchemaKeys) {
           failures.push(
-            `${EVENTS_FILE}: declared() does not RETURN ` +
-              `\`new Set(Object.keys(<schema accessor>()))\` — the schema call must feed the ` +
-              `returned set, not merely appear in the body`,
+            `${EVENTS_FILE}:${listDecl.getStartLineNumber()}: DECLARED is not ` +
+              `\`Object.keys(<schema accessor>())\` — it is \`${listDecl.getInitializer()?.getText().slice(0, 60) ?? "<none>"}\`. ` +
+              `Every name this module can emit comes from here, so it must come from the schema.`,
           );
         }
       }

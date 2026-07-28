@@ -132,19 +132,6 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/takes 2 parameters/);
   });
 
-  it("rejects envVarName asserting the brand without checking anything", () => {
-    // The `opaque()` failure mode recorded elsewhere in this repo: a brand
-    // applied without a check means envVarName(secret) compiles and passes.
-    patch(
-      "src/lib/boot-events.ts",
-      "  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;",
-      "  return raw as EnvVarName;",
-    );
-    const { code, output } = runGate();
-    expect(code).toBe(1);
-    expect(output).toMatch(/casts to EnvVarName/);
-  });
-
   it("rejects EnvVarName losing its brand", () => {
     patch(
       "src/lib/boot-events.ts",
@@ -265,7 +252,7 @@ describe("check-boot-diagnostic-shape", () => {
     // means `envVarName(secret, new Set([secret]))` prints the secret.
     patch(
       "src/lib/boot-events.ts",
-      "export function envVarName(raw: string): EnvVarName {\n  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;",
+      "export function envVarName(raw: string): EnvVarName {\n  return DECLARED.find((declared) => declared === raw) ?? NOT_A_VAR_NAME;",
       "export function envVarName(raw: string, allowed: ReadonlySet<string>): EnvVarName {\n  return allowed.has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
     );
     const { code, output } = runGate();
@@ -273,30 +260,34 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/caller-supplied allowlist/);
   });
 
-  it("rejects the declared-name set no longer coming from the env schema", () => {
+  it("rejects the declared list no longer coming from the env schema", () => {
     patch(
       "src/lib/boot-events.ts",
       'import { getSchemaShape } from "@/lib/env-schema";',
       "const getSchemaShapeStub = () => ({});",
     );
-    patch("src/lib/boot-events.ts", "Object.keys(getSchemaShape())", "Object.keys(getSchemaShapeStub())");
+    patch(
+      "src/lib/boot-events.ts",
+      "const DECLARED = Object.keys(getSchemaShape())",
+      "const DECLARED = Object.keys(getSchemaShapeStub())",
+    );
     const { code, output } = runGate();
     expect(code).toBe(1);
     expect(output).toMatch(/not derived from `@\/lib\/env-schema`/);
   });
 
-  it("rejects a set built elsewhere while the schema import is left in place", () => {
+  it("rejects a list built elsewhere while the schema import is left in place", () => {
     // The residual an import-existence check cannot see: keep the import, build
-    // the set from something else. Substring and import-presence checks both
+    // the list from something else. Substring and import-presence checks both
     // pass; only tying `Object.keys(...)` to the imported binding catches it.
     patch(
       "src/lib/boot-events.ts",
-      "Object.keys(getSchemaShape())",
-      'Object.keys({ ANYTHING: 1, [process.env.AUTH_SECRET ?? ""]: 1 })',
+      "const DECLARED = Object.keys(getSchemaShape())",
+      'const DECLARED = Object.keys({ ANYTHING: 1, [process.env.AUTH_SECRET ?? ""]: 1 })',
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not RETURN/);
+    expect(output).toMatch(/DECLARED is not/);
   });
 
   it("accepts the schema accessor imported under an alias", () => {
@@ -306,82 +297,77 @@ describe("check-boot-diagnostic-shape", () => {
       'import { getSchemaShape } from "@/lib/env-schema";',
       'import { getSchemaShape as schemaShape } from "@/lib/env-schema";',
     );
-    patch("src/lib/boot-events.ts", "Object.keys(getSchemaShape())", "Object.keys(schemaShape())");
+    patch(
+      "src/lib/boot-events.ts",
+      "const DECLARED = Object.keys(getSchemaShape())",
+      "const DECLARED = Object.keys(schemaShape())",
+    );
     expect(runGate().code).toBe(0);
   });
 
-  it("rejects a gate-pleasing expression that feeds nothing", () => {
-    // The reviewer's counter-example: the schema call is present but discarded,
-    // and the returned set is written by hand. An existence check passed it.
+  it("rejects a hand-written DECLARED list", () => {
     patch(
       "src/lib/boot-events.ts",
-      "  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));",
-      '  Object.keys(getSchemaShape());\n  return new Set(["DATABASE_URL"]);',
+      "const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName[];",
+      'const DECLARED = ["DATABASE_URL"] as unknown as readonly EnvVarName[];',
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/array literal|does not RETURN/);
+    expect(output).toMatch(/DECLARED is not/);
   });
 
-  it("rejects a predicate that tests a literal instead of its own parameter", () => {
-    // The other half of the same counter-example. The compiler stops the caller
-    // from returning an unchecked value, but nothing stops the PREDICATE from
-    // checking the wrong thing.
+  it("rejects the schema call being evaluated and discarded", () => {
+    // The counter-example that defeated the presence check: the safe expression
+    // is there, satisfies a search, and feeds nothing.
     patch(
       "src/lib/boot-events.ts",
-      "  return declared().has(raw);",
-      '  return declared().has("DATABASE_URL");',
+      "const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName[];",
+      "const _unused = Object.keys(getSchemaShape());\n" +
+        'const DECLARED = ["DATABASE_URL"] as unknown as readonly EnvVarName[];',
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not call `\.has\(raw\)`/);
+    expect(output).toMatch(/DECLARED is not/);
   });
 
-  it("rejects envVarName re-branding by cast instead of narrowing", () => {
+  it("rejects envVarName returning something derived from its input", () => {
+    // A type predicate is an assertion TypeScript TRUSTS, not one it verifies,
+    // so `{ declared().has(raw); return true; }` type-checked and branded
+    // everything. Selecting from DECLARED removes the check from the trusted
+    // path: whatever comes back is an element of the list.
     patch(
       "src/lib/boot-events.ts",
-      "  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;",
-      "  return declared().has(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
+      "  return DECLARED.find((declared) => declared === raw) ?? NOT_A_VAR_NAME;",
+      "  return raw as EnvVarName;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/casts to EnvVarName/);
+    expect(output).toMatch(/casts to EnvVarName|not return a value selected from/);
   });
 
-  it("rejects isDeclared losing its type-predicate return", () => {
+  it("rejects selecting from a list other than DECLARED", () => {
     patch(
       "src/lib/boot-events.ts",
-      "function isDeclared(raw: string): raw is EnvVarName {",
-      "function isDeclared(raw: string): boolean {",
+      "  return DECLARED.find((declared) => declared === raw) ?? NOT_A_VAR_NAME;",
+      "  return [raw].find((declared) => declared === raw) as EnvVarName ?? NOT_A_VAR_NAME;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/not a\s+`raw is EnvVarName` predicate/);
+    expect(output).toMatch(/casts to EnvVarName|not return a value selected from/);
   });
 
-  it("rejects a second return in declared()", () => {
-    patch(
-      "src/lib/boot-events.ts",
-      "  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));",
-      "  if (declaredNames) return declaredNames;\n  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));",
-    );
-    const { code, output } = runGate();
-    expect(code).toBe(1);
-    expect(output).toMatch(/return statements; expected 1/);
-  });
-
-  it("rejects envVarName validating shape instead of membership", () => {
+  it("rejects envVarName validating shape instead of selecting from the list", () => {
     // The defect round 2 caught: /^[A-Za-z_][A-Za-z0-9_]{0,63}$/ matches a
     // 64-char hex master key, an AKIA… id, and an api_… token. A predicate over
     // a value's form cannot answer a question about its origin.
     patch(
       "src/lib/boot-events.ts",
-      "  return declared().has(raw);",
-      "  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw);",
+      "  return DECLARED.find((declared) => declared === raw) ?? NOT_A_VAR_NAME;",
+      "  return /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(raw) ? (raw as EnvVarName) : NOT_A_VAR_NAME;",
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/does not call `\.has\(raw\)`/);
+    expect(output).toMatch(/casts to EnvVarName|not return a value selected from/);
   });
 
   it("fails when BootDiagnostic is deleted entirely", () => {

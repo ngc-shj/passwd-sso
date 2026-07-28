@@ -80,34 +80,45 @@ const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;
  * `parseEnv()` call — so importing it here costs nothing at boot and introduces
  * no cycle (it imports only zod and constants).
  */
-let declaredNames: ReadonlySet<string> | null = null;
-
-function declared(): ReadonlySet<string> {
-  return (declaredNames ??= new Set(Object.keys(getSchemaShape())));
-}
+/**
+ * The declared names, branded once, at the only place the brand is applied.
+ *
+ * The cast lands on `Object.keys(getSchemaShape())` — the schema's own key list
+ * — and nowhere else. That single fact is what the function below rests on.
+ */
+// `as unknown as` because a branded element type is not directly assignable
+// from `string[]`. Deliberately NOT `.map(k => k as EnvVarName)`: a callback
+// would be one more body to trust, and this array is then literally the schema's
+// key list rather than something computed from it.
+const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName[];
 
 /**
- * A type PREDICATE, not a boolean helper.
+ * Look the name up; never re-brand the input.
  *
- * `raw is EnvVarName` is what ties the check to the value. With a plain
- * `boolean`, the brand had to be reapplied by hand — `check ? (raw as EnvVarName)
- * : …` — and a cast does not care what was checked, so
+ * `find` returns an ELEMENT OF `DECLARED`, so whatever comes back is a schema
+ * key by construction. `raw` is only ever compared, never returned. That is the
+ * whole guarantee, and it does not depend on the comparison being right: a
+ * broken predicate here returns the WRONG VARIABLE NAME, never a secret.
  *
- *     declared().has("DATABASE_URL") ? (raw as EnvVarName) : NOT_A_VAR_NAME
+ * Three earlier shapes all failed because each left something to be trusted:
  *
- * compiled and branded any input. As a predicate, the compiler narrows the
- * ARGUMENT, so returning `raw` needs no cast and the same substitution is a
- * TS2322. The property "the value tested is the value returned" moved from
- * something a gate had to look for into something the compiler will not let you
- * write.
+ *   1. `regex.test(raw) ? (raw as EnvVarName) : …` — shape says nothing about
+ *      origin; a 64-char hex master key matched.
+ *   2. `declared.has(raw) ? (raw as EnvVarName) : …` with `declared` a
+ *      PARAMETER — the caller chose the trust anchor.
+ *   3. `isDeclared(raw) ? raw : …` with a `raw is EnvVarName` predicate — the
+ *      call site became compiler-checked, but a type predicate is an assertion
+ *      the compiler TRUSTS, not one it verifies, so
+ *      `{ declared().has(raw); return true; }` branded everything.
+ *
+ * Each fix made the check harder to fake and left a check to fake. Returning a
+ * stored value removes the check from the trusted path entirely: there is no
+ * boolean to get wrong and no predicate to lie about.
+ *
+ * @param raw candidate name, typically a Zod issue path
  */
-function isDeclared(raw: string): raw is EnvVarName {
-  return declared().has(raw);
-}
-
-/** @param raw candidate name, typically a Zod issue path */
 export function envVarName(raw: string): EnvVarName {
-  return isDeclared(raw) ? raw : NOT_A_VAR_NAME;
+  return DECLARED.find((declared) => declared === raw) ?? NOT_A_VAR_NAME;
 }
 
 /**

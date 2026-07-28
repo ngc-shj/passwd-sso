@@ -439,6 +439,65 @@ Two residues the predicate does not cover, both now AST-checked:
 self-test 28 cases; the reviewer's counter-example is reproduced by two of them
 (the discarded expression and the literal-testing predicate).
 
+---
+
+# Round 5
+
+External re-review: **a type predicate is an assertion TypeScript trusts, not one
+it verifies.** Round 4's claim that the property "moved into the type system" was
+half true — the CALL SITE became compiler-checked, the predicate body did not.
+
+```ts
+function isDeclared(raw: string): raw is EnvVarName {
+  declared().has(raw);   // satisfies the gate
+  return true;
+}
+```
+
+Type-checks, passes the gate, brands every string. Correct, and the fifth
+instance of one pattern: substring → import presence → expression presence →
+predicate body. Each round the gate learned to recognize one more way of writing
+a check, and each round there was another.
+
+## R5-1 Return a stored value; delete the check from the trusted path
+
+```ts
+const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName[];
+
+export function envVarName(raw: string): EnvVarName {
+  return DECLARED.find((declared) => declared === raw) ?? NOT_A_VAR_NAME;
+}
+```
+
+`find` returns an ELEMENT OF `DECLARED`, so the result is a schema key by
+construction; `raw` is only ever compared, never returned. The guarantee no
+longer depends on the comparison being right — **a broken comparison here yields
+the wrong variable NAME, never a secret.** There is no boolean to fake and no
+predicate to lie about, so there is nothing left for a gate to verify about the
+check, because there is no check on the trusted path.
+
+The one remaining trusted fact is that `DECLARED` holds schema keys. That is a
+single initializer, and the gate pins it as a whole expression (`as` chains
+unwrapped) rather than by looking for a matching call somewhere in a body.
+
+- Modified: `src/lib/boot-events.ts:93`, `scripts/checks/check-boot-diagnostic-shape.mjs:139,166`
+
+## Round 5 verification
+
+`npx vitest run` 987 files / 13111 tests, exit 0. `npx next build` exit 0.
+`npx tsc --noEmit` exit 0. `bash scripts/pre-pr.sh` 62/62, exit 0. Shape-gate
+self-test 26 cases. The self-test's anchor-uniqueness assertion
+(`split(from).length === 2`) caught two cases whose anchor had become ambiguous
+against a doc comment — the guard added in Round 2 doing its job.
+
+## Note on the shape of these five rounds
+
+Rounds 2–5 were the same mistake at descending scope: each fix removed one way to
+fool a checker and left a smaller checker to fool. The move that actually ended
+it, both at Round 1 (delete the `string` parameter) and Round 5 (delete the
+boolean), was removing the thing that needed verifying rather than verifying it
+harder. Worth remembering the next time a gate needs its fourth special case.
+
 ## Known residual (accepted, review-visible)
 
 `secret as EnvVarName` compiles. A brand is nominal against structural forging,
