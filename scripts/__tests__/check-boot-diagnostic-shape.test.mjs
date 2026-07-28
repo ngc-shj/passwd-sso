@@ -305,6 +305,42 @@ describe("check-boot-diagnostic-shape", () => {
     expect(runGate().code).toBe(0);
   });
 
+  it("rejects an old-style <EnvVarName> assertion", () => {
+    // Legal in a .ts file, and a different SyntaxKind from `as`. The first
+    // version of this check matched only AsExpression and counted two sites
+    // while this minted brands freely.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function unsafeName(s: string): EnvVarName {\n  return <EnvVarName>s;\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/type assertion\(s\) outside the two branding sites/);
+  });
+
+  it("rejects branding through a type alias", () => {
+    // `as Alias` defeats any comparison against the literal text `EnvVarName`,
+    // which is why the rule is about assertions rather than about target types.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\ntype Alias = EnvVarName;\nexport const unsafeName = (s: string) => s as Alias;\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/unsafeName/);
+  });
+
+  it("still accepts `as const` on the event table", () => {
+    // The exclusion must not be so broad that it re-opens the hole, nor so
+    // narrow that ordinary literal narrowing trips it.
+    expect(runGate().code).toBe(0);
+    expect(readFileSync(join(root, "src/lib/boot-events.ts"), "utf8")).toContain("} as const;");
+  });
+
   it("rejects a third place that applies the EnvVarName brand", () => {
     // The docstring says exactly two things carry the brand, so that has to be
     // enforced rather than asserted. It is also a real fail-open: an exported
@@ -318,7 +354,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/unexpected EnvVarName branding site\(s\): unsafeName/);
+    expect(output).toMatch(/type assertion\(s\) outside the two branding sites: unsafeName/);
   });
 
   it("rejects a branding site disappearing", () => {

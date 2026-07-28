@@ -137,29 +137,35 @@ if (events) {
       );
     }
 
-    // Exactly two things may carry the brand, and both are named.
+    // NO type assertion in this file except the two named branding sites.
     //
-    // `EnvVarName`'s docstring says so, which under this repo's own rule means
-    // it has to be enforced rather than asserted. It is also a real fail-open:
-    // a third branding site — `export const unsafeName = (s: string) => s as
-    // EnvVarName` — hands every caller the ability to brand a secret, and no
-    // other check here would see it. The set is closed and tiny, so pinning it
-    // is a count, not an analysis.
-    const brandSites = events
-      .getDescendantsOfKind(SyntaxKind.AsExpression)
-      .filter((a) => /^(unknown as )?readonly EnvVarName\[\]$|^EnvVarName$/.test(a.getTypeNode()?.getText() ?? ""))
-      .map((a) => {
-        // Attribute each cast to the declaration it initializes.
-        const decl = a.getFirstAncestorByKind(SyntaxKind.VariableDeclaration);
-        return decl?.getName() ?? `<line ${a.getStartLineNumber()}>`;
-      });
+    // Not "no `as EnvVarName`" — that was the first version, and it was the same
+    // mistake this gate has now made six times: enumerate one spelling and miss
+    // the others. `<EnvVarName>secret` is a TypeAssertionExpression (legal in a
+    // .ts file, not a .tsx one) and slipped straight past, as would
+    // `as SomeAliasOfEnvVarName` past a text comparison.
+    //
+    // So the rule is not about the target type at all. Any assertion here can
+    // mint a brand, so assertions are forbidden and the two that must exist are
+    // named. `as const` is excluded — it narrows a literal, it cannot widen
+    // anything into a brand.
+    const assertions = [
+      ...events.getDescendantsOfKind(SyntaxKind.AsExpression),
+      ...events.getDescendantsOfKind(SyntaxKind.TypeAssertionExpression),
+    ].filter((a) => (a.getTypeNode()?.getText() ?? "") !== "const");
+
+    const brandSites = assertions.map(
+      (a) =>
+        a.getFirstAncestorByKind(SyntaxKind.VariableDeclaration)?.getName() ??
+        `<line ${a.getStartLineNumber()}>`,
+    );
     const expectedBrandSites = ["NOT_A_VAR_NAME", "DECLARED"];
-    const unexpected = brandSites.filter((n) => !expectedBrandSites.includes(n));
+    const unexpected = [...new Set(brandSites.filter((n) => !expectedBrandSites.includes(n)))];
     if (unexpected.length > 0) {
       failures.push(
-        `${EVENTS_FILE}: unexpected EnvVarName branding site(s): ${unexpected.join(", ")} — ` +
-          `only ${expectedBrandSites.join(" and ")} may apply the brand, or any code can ` +
-          `mint a name from an arbitrary string`,
+        `${EVENTS_FILE}: type assertion(s) outside the two branding sites: ${unexpected.join(", ")} — ` +
+          `only ${expectedBrandSites.join(" and ")} may assert, or any code here can mint an ` +
+          `EnvVarName from an arbitrary string`,
       );
     }
     for (const expected of expectedBrandSites) {
@@ -173,12 +179,14 @@ if (events) {
 
     // The happy path must carry no cast.
     //
-    // Presence checks kept missing dataflow: a `.has(` anywhere plus a manual
-    // `raw as EnvVarName` satisfied every earlier version of this gate while
-    // `declared().has("DATABASE_URL") ? (raw as EnvVarName) : …` branded any
-    // input. The fix is not a smarter search — it is `isDeclared(raw): raw is
-    // EnvVarName`, which makes the compiler narrow the ARGUMENT so `return raw`
-    // needs no cast. All this gate has to do now is forbid the cast coming back.
+    // Presence checks kept missing dataflow: a membership call anywhere plus a
+    // manual `raw as EnvVarName` satisfied every earlier version of this gate,
+    // while `<check> ? (raw as EnvVarName) : …` branded any input regardless of
+    // what was checked. Successive fixes tried a caller-supplied allowlist, then
+    // a `raw is EnvVarName` type predicate — but a predicate is an assertion the
+    // compiler TRUSTS, so its body was still an unverified claim. `envVarName`
+    // now RETURNS AN ELEMENT of DECLARED (see below), which leaves no check on
+    // the trusted path; all that remains here is to forbid a cast coming back.
     const rebrands = ctor
       .getDescendantsOfKind(SyntaxKind.AsExpression)
       .filter((a) => a.getTypeNode()?.getText() === "EnvVarName");
