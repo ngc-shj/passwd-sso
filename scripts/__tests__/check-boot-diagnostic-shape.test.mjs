@@ -319,6 +319,45 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/NOT_A_VAR_NAME is .*not a string literal/);
   });
 
+  it("rejects a predicate whose name collides with a permitted owner", () => {
+    // `variables` is permitted because the BootDiagnostic FIELD is called that.
+    // A name-based allowlist classified this function as that field and let it
+    // mint brands — resolving by spelling instead of by declaration.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function variables(s: string): s is EnvVarName {\n  return true;\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/referenced outside the five permitted declarations/);
+  });
+
+  it("rejects a sentinel that looks like a real variable name", () => {
+    // "some string literal" was not enough: this reports a genuine-looking
+    // variable for every unmatched path.
+    patch(
+      "src/lib/boot-events.ts",
+      'const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;',
+      'const NOT_A_VAR_NAME = "DATABASE_URL" as EnvVarName;',
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/shaped like a real environment variable name/);
+  });
+
+  it("accepts renaming the sentinel to another non-colliding form", () => {
+    // The rule is the property (cannot be mistaken for a variable name), not the
+    // exact spelling, so an equivalent sentinel stays legal.
+    patch(
+      "src/lib/boot-events.ts",
+      'const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;',
+      'const NOT_A_VAR_NAME = "<none>" as EnvVarName;',
+    );
+    expect(runGate().code).toBe(0);
+  });
+
   it("rejects a type predicate that mints the brand without any assertion", () => {
     // No AsExpression, no TypeAssertionExpression — the assertion rule cannot
     // see this, which is why mentions are allowlisted as well.
@@ -330,7 +369,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/referenced by unexpected declaration\(s\): unsafeName/);
+    expect(output).toMatch(/referenced outside the five permitted declarations, by: unsafeName/);
   });
 
   it("rejects an `asserts` signature mentioning EnvVarName", () => {
@@ -342,7 +381,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/referenced by unexpected declaration\(s\): assertName/);
+    expect(output).toMatch(/referenced outside the five permitted declarations, by: assertName/);
   });
 
   it("rejects an ambient declaration that returns EnvVarName", () => {
@@ -354,7 +393,7 @@ describe("check-boot-diagnostic-shape", () => {
     );
     const { code, output } = runGate();
     expect(code).toBe(1);
-    expect(output).toMatch(/referenced by unexpected declaration\(s\): mintName/);
+    expect(output).toMatch(/referenced outside the five permitted declarations, by: mintName/);
   });
 
   it("rejects an old-style <EnvVarName> assertion", () => {

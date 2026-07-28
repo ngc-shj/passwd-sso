@@ -185,6 +185,23 @@ if (events) {
             `\`${expr?.getText().slice(0, 50) ?? "<none>"}\`, not a string literal — it is ` +
             `returned on every unmatched lookup, so anything computed here reaches stderr`,
         );
+      } else {
+        // …and the literal must be unable to collide with a real variable name.
+        //
+        // "some string literal" was not enough: `"DATABASE_URL" as EnvVarName`
+        // passed and would report a genuine-looking variable for every path that
+        // matched nothing — a misleading diagnostic rather than a leak, but it
+        // breaks the contract the sentinel exists for. Checked as the PROPERTY
+        // (not identifier-shaped) rather than as the exact spelling, so renaming
+        // it to `<none>` stays legal while `DATABASE_URL` cannot.
+        const value = expr.getLiteralText();
+        if (value.length === 0 || /^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+          failures.push(
+            `${EVENTS_FILE}:${sentinel.getStartLineNumber()}: NOT_A_VAR_NAME is ` +
+              `"${value}", which is shaped like a real environment variable name — the ` +
+              `sentinel must be impossible to mistake for one`,
+          );
+        }
       }
     }
 
@@ -202,36 +219,53 @@ if (events) {
     // instead: wherever the name appears, the declaration it belongs to must be
     // one this design knows about. A new way to spell brand-minting still has to
     // live in some declaration, and that declaration will not be on the list.
-    const ENV_VAR_NAME_OWNERS = [
-      "EnvVarName", // the type's own declaration
-      "NOT_A_VAR_NAME", // the sentinel
-      "DECLARED", // the schema-derived list
-      "envVarName", // the sole accessor
-      "variables", // the BootDiagnostic field that carries them
-    ];
-    const OWNER_KINDS = [
-      SyntaxKind.VariableDeclaration,
-      SyntaxKind.FunctionDeclaration,
-      SyntaxKind.TypeAliasDeclaration,
-      SyntaxKind.PropertySignature,
-      SyntaxKind.MethodSignature,
-      SyntaxKind.InterfaceDeclaration,
-    ];
+    // Owners are compared by NODE IDENTITY, not by name.
+    //
+    // A name list is defeated by collision: `variables` is on it because the
+    // BootDiagnostic field is called that, so
+    //
+    //     export function variables(s: string): s is EnvVarName { return true; }
+    //
+    // was classified as the allowed owner and minted brands freely. Resolving by
+    // spelling instead of by the actual declaration is the same defect as the
+    // scope-blind lookup this gate hit earlier; here the fix is to hold the five
+    // permitted nodes and test ancestry against those.
+    const allowedOwners = new Set();
+    const allowOwner = (node) => {
+      if (node) allowedOwners.add(`${node.getStart()}:${node.getEnd()}`);
+    };
+    allowOwner(events.getTypeAlias("EnvVarName"));
+    allowOwner(sentinel);
+    allowOwner(events.getVariableDeclaration("DECLARED"));
+    allowOwner(ctor);
+    const diagnosticAlias = events.getTypeAlias("BootDiagnostic");
+    for (const p of diagnosticAlias?.getDescendantsOfKind(SyntaxKind.PropertySignature) ?? []) {
+      if (p.getName() === "variables") allowOwner(p);
+    }
+    if (allowedOwners.size !== 5) {
+      failures.push(
+        `${EVENTS_FILE}: expected 5 declarations permitted to mention EnvVarName, resolved ` +
+          `${allowedOwners.size} — one of them was renamed or removed, so the allowlist no ` +
+          `longer describes this file`,
+      );
+    }
+
     const strayMentions = new Set();
     for (const id of events.getDescendantsOfKind(SyntaxKind.Identifier)) {
       if (id.getText() !== "EnvVarName") continue;
-      let owner = null;
-      for (let n = id.getParent(); n && !owner; n = n.getParent()) {
-        if (OWNER_KINDS.includes(n.getKind())) owner = n;
+      let permitted = false;
+      let label = null;
+      for (let n = id.getParent(); n && !permitted; n = n.getParent()) {
+        if (allowedOwners.has(`${n.getStart()}:${n.getEnd()}`)) permitted = true;
+        else if (!label && typeof n.getName === "function") label = n.getName();
       }
-      const name = owner?.getName?.() ?? `<line ${id.getStartLineNumber()}>`;
-      if (!ENV_VAR_NAME_OWNERS.includes(name)) strayMentions.add(name);
+      if (!permitted) strayMentions.add(label ?? `<line ${id.getStartLineNumber()}>`);
     }
     if (strayMentions.size > 0) {
       failures.push(
-        `${EVENTS_FILE}: EnvVarName is referenced by unexpected declaration(s): ` +
-          `${[...strayMentions].join(", ")} — only ${ENV_VAR_NAME_OWNERS.join(", ")} may ` +
-          `mention it, or a predicate/assertion signature can mint the brand with no cast`,
+        `${EVENTS_FILE}: EnvVarName is referenced outside the five permitted declarations, by: ` +
+          `${[...strayMentions].join(", ")} — a predicate or assertion signature there can mint ` +
+          `the brand with no cast at all`,
       );
     }
     const unexpected = [...new Set(brandSites.filter((n) => !expectedBrandSites.includes(n)))];
