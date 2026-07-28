@@ -250,6 +250,66 @@ if (events) {
       );
     }
 
+    // No type predicate here, whatever it narrows to.
+    //
+    // The mention allowlist below reads IDENTIFIERS, so it cannot see a type
+    // reached indirectly: `s is ReturnType<typeof envVarName>` is exactly
+    // EnvVarName, adds no `EnvVarName` token and no assertion, and passed.
+    // Chasing that is unbounded — `ReturnType`, `typeof NOT_A_VAR_NAME`,
+    // `Parameters`, conditional types, `infer` — so this bans the CONSTRUCT that
+    // does the narrowing rather than the spellings of its target. `asserts x is
+    // T` is the same node kind, so both forms go at once. This file has no
+    // legitimate predicate, so the rule costs nothing.
+    for (const pred of events.getDescendantsOfKind(SyntaxKind.TypePredicate)) {
+      const owner = pred.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration);
+      failures.push(
+        `${EVENTS_FILE}:${pred.getStartLineNumber()}: type predicate \`${pred.getText()}\`` +
+          `${owner ? ` on \`${owner.getName()}\`` : ""} — a predicate narrows without any cast, ` +
+          `so no predicate is permitted in this module regardless of what it names`,
+      );
+    }
+
+    // Only the five known symbols may leave this module.
+    //
+    // A second, type-blind axis: a caller can only reach a brand-minting helper
+    // if it is exported. This closes the same class from the other side, so a
+    // future construct that neither the assertion rule nor the mention rule
+    // recognizes still cannot be handed to anyone.
+    const EXPECTED_EXPORTS = ["BOOT_EVENT", "BootEvent", "EnvVarName", "envVarName", "BootDiagnostic"];
+    const actualExports = [
+      ...events.getFunctions(),
+      ...events.getTypeAliases(),
+      ...events.getInterfaces(),
+      ...events.getClasses(),
+      ...events.getEnums(),
+    ]
+      .filter((d) => d.isExported?.())
+      .map((d) => d.getName())
+      .concat(
+        events
+          .getVariableStatements()
+          .filter((s) => s.isExported())
+          .flatMap((s) => s.getDeclarations().map((d) => d.getName())),
+      )
+      .concat(
+        events
+          .getExportDeclarations()
+          .flatMap((d) => d.getNamedExports().map((n) => (n.getAliasNode() ?? n.getNameNode()).getText())),
+      );
+    const unexpectedExports = actualExports.filter((n) => !EXPECTED_EXPORTS.includes(n));
+    if (unexpectedExports.length > 0) {
+      failures.push(
+        `${EVENTS_FILE}: unexpected export(s): ${unexpectedExports.join(", ")} — only ` +
+          `${EXPECTED_EXPORTS.join(", ")} may leave this module, or a caller can be handed a ` +
+          `second way to obtain an EnvVarName`,
+      );
+    }
+    for (const expected of EXPECTED_EXPORTS) {
+      if (!actualExports.includes(expected)) {
+        failures.push(`${EVENTS_FILE}: expected export \`${expected}\` is missing`);
+      }
+    }
+
     const strayMentions = new Set();
     for (const id of events.getDescendantsOfKind(SyntaxKind.Identifier)) {
       if (id.getText() !== "EnvVarName") continue;

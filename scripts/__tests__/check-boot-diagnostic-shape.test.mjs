@@ -319,6 +319,57 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/NOT_A_VAR_NAME is .*not a string literal/);
   });
 
+  it("rejects a predicate naming the type indirectly via ReturnType", () => {
+    // `ReturnType<typeof envVarName>` IS EnvVarName, but adds no EnvVarName
+    // token and no assertion, so the mention allowlist could not see it.
+    // Chasing type derivation is unbounded; banning the construct is not.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function unsafeName(s: string): s is ReturnType<typeof envVarName> {\n  return true;\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/type predicate/);
+  });
+
+  it("rejects a predicate naming the type via typeof the sentinel", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport function unsafeName(s: string): s is typeof NOT_A_VAR_NAME {\n  return true;\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/type predicate/);
+  });
+
+  it("rejects an extra export even when it names no branded type", () => {
+    // The type-blind axis: a caller can only reach a helper that is exported.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport const somethingElse = 1;\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/unexpected export\(s\): somethingElse/);
+  });
+
+  it("rejects one of the five expected exports disappearing", () => {
+    patch(
+      "src/lib/boot-events.ts",
+      "export function envVarName(raw: string): EnvVarName {",
+      "function envVarName(raw: string): EnvVarName {",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/expected export `envVarName` is missing/);
+  });
+
   it("rejects a predicate whose name collides with a permitted owner", () => {
     // `variables` is permitted because the BootDiagnostic FIELD is called that.
     // A name-based allowlist classified this function as that field and let it
