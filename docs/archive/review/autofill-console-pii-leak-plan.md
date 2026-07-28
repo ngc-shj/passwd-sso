@@ -991,6 +991,53 @@ One round-3 claim was refuted and is recorded rather than acted on: F20 also rep
 an unhandled rejection on the context-menu autofill path, but
 `context-menu.ts:247` already terminates it with `.catch(() => {})`.
 
+## Round 4 outcome (post-push review) — C1 redesigned
+
+One High finding, and it invalidated C1's central design decision.
+
+**The label must not come from the DOM at all.** C1 read `select.name` / `select.id`
+on the reasoning that page-authored attributes reveal nothing the page does not
+already hold. True as far as it goes — and irrelevant, because `setInputValue`
+dispatches `input` **synchronously**, so a page listener runs *before* the next field
+is filled and can move a value the extension has already written:
+
+```js
+cardNumber.addEventListener("input", () => { expiryMonth.name = cardNumber.value; });
+```
+
+Red-proved end-to-end. Pre-fix output:
+
+```
+[passwd-sso] No exact match for select: 4111111111111111      // the PAN
+[passwd-sso] No exact match for select: 12?Rue?Secrete        // the address
+```
+
+Sanitising did not help and could not: digits and letters are exactly what a PAN or
+an address is made of — the `?` in the second line is only the spaces.
+
+The page learns nothing (it already holds what it moved). What it gains is the
+ability to push the user's secrets into a log surface **only the extension can write
+to** — DevTools/CDP capture, automation harnesses, telemetry agents, support bundles.
+That is precisely the leak this plan exists to close, re-opened under attacker
+control, which makes the original R43 assessment ("`name`/`id` are page-authored;
+echoing them reveals nothing new") wrong in the one direction that mattered.
+
+**Fix:** `logNoSelectMatch` now takes a `SelectDiagField` — a closed union this
+module owns (`cc-expiry-month`, `identity-country`, … 16 members) — and reads
+nothing from the DOM. Callers pass the identifier for the field they are filling.
+This is the same discipline C3 already had, applied where it was missing.
+
+Deleted as a consequence, all of it existing only to make a page-controlled string
+safe: `describeSelect`, `SelectIdentity`, `SELECT_DIAG_LABEL_MAX`, the character-class
+sanitiser, the code-point truncation, and their tests — including the truncation test
+whose tautology was round 3's Critical finding. The invariant `I1` ("the labeller
+must not read a property that can carry the user's value") is likewise gone: there is
+no labeller and no DOM read left to constrain.
+
+Regression tests reproduce the reported attack on both the card and identity paths,
+each asserting the attack actually ran (`select.name === "<the secret>"`) before
+asserting the secret is absent from the log.
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |

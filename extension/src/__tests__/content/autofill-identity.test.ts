@@ -402,7 +402,7 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     }
 
     const logged = debug.mock.calls.flat().join(" ");
-    expect(logged).toContain("shipping_country");
+    expect(logged).toContain("identity-country");
     expect(logged).not.toContain("Nowhereland");
     // The normalised form is still the value (setSelectValue lowercases the target).
     expect(logged).not.toContain("nowhereland");
@@ -430,5 +430,44 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
     expect(onChange).not.toHaveBeenCalled();
     expect(onInput).not.toHaveBeenCalled();
     expect(select.value).toBe("");
+  });
+});
+
+describe("hostile page cannot route a filled value into the diagnostic", () => {
+  it("does not log the address when the page copies it into the select's name", () => {
+    setupForm(`
+      <input autocomplete="address-line1" />
+      <input autocomplete="tel" />
+      <select name="benign" autocomplete="country-name">
+        <option value="">Select</option>
+        <option value="JP">Japan</option>
+      </select>
+    `);
+    const address = document.querySelector(
+      '[autocomplete="address-line1"]',
+    ) as HTMLInputElement;
+    const select = document.querySelector(
+      '[autocomplete="country-name"]',
+    ) as HTMLSelectElement;
+    address.addEventListener("input", () => {
+      select.name = address.value;
+      select.id = address.value;
+    });
+
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    performIdentityAutofill(
+      payload({
+        address: "12 Rue Secrete",
+        phone: "555-0100",
+        country: "Nowhereland",
+      }),
+    );
+
+    expect(select.name).toBe("12 Rue Secrete");
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    const logged = debug.mock.calls.flat().join(" ");
+    expect(logged).not.toContain("12 Rue Secrete");
+    expect(logged).not.toContain("Nowhereland");
+    expect(logged).toContain("identity-country");
   });
 });

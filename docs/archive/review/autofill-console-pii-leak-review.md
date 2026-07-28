@@ -70,6 +70,24 @@ most consequential:
   `normalizeErrorCode` returning `err.message` verbatim — an unconstrained
   `Error → string` channel feeding a cross-boundary sink from every caller.
 
+**Round 4 — the fix's own design was the last leak.** A post-push review found that
+reading the select's `name`/`id` handed the page a lever: `setInputValue` dispatches
+`input` synchronously, so a page listener runs before the next field is filled and can
+move an already-written value into the next select's `name`. Red-proved on both paths
+— `[passwd-sso] No exact match for select: 4111111111111111` (the PAN) and
+`… 12?Rue?Secrete` (the address; the `?` are only the spaces the sanitiser caught).
+The page learns nothing it did not already hold, but it gains write access to a log
+surface only the extension can reach — the leak this work exists to close, re-opened
+under attacker control. Replaced with a closed 16-member field-identifier union that
+reads nothing from the DOM, which deleted the sanitiser, the truncation, the
+`SelectIdentity` type and their tests outright.
+
+The pattern across all four rounds is the same one: **a value that is safe where it
+comes from is not safe where it arrives.** Page-authored attributes are harmless to
+the page and dangerous in the extension's log; a `SyntaxError` message is harmless in
+a debugger and dangerous in a `postMessage`; an `err.message` passthrough is harmless
+per call site and dangerous as a class.
+
 ## Recurring rules that fired
 
 - **R42 (class-membership derivation) — three times, always the same shape.** The

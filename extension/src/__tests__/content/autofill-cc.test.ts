@@ -427,7 +427,7 @@ describe("performCreditCardAutofill — select mismatch diagnostics", () => {
     }
 
     const logged = debug.mock.calls.flat().join(" ");
-    expect(logged).toContain("cc_exp_year");
+    expect(logged).toContain("cc-expiry-year");
     expect(logged).not.toContain("99");
     expect(logged).not.toContain("2099");
     expect(select.value).toBe("");
@@ -505,4 +505,47 @@ describe("performCreditCardAutofill — combined expiry with a missing payload e
       expect(field.value).toBe(expected);
     });
   }
+});
+
+describe("hostile page cannot route a filled value into the diagnostic", () => {
+  // setInputValue dispatches `input` SYNCHRONOUSLY, so a page listener runs before
+  // the next field is filled. An earlier version of the diagnostic logged the
+  // select's own name/id, which let the page move the card number there and have
+  // the extension write it to a console only the extension can reach.
+  it("does not log the card number when the page copies it into the select's name", () => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select name="benign" autocomplete="cc-exp-year">
+        <option value="">Year</option>
+        <option value="2025">2025</option>
+      </select>
+    `);
+    const number = document.querySelector(
+      '[autocomplete="cc-number"]',
+    ) as HTMLInputElement;
+    const select = document.querySelector(
+      '[autocomplete="cc-exp-year"]',
+    ) as HTMLSelectElement;
+    number.addEventListener("input", () => {
+      select.name = number.value;
+      select.id = number.value;
+    });
+
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "99",
+      cvv: "",
+    });
+
+    // The attack must have actually run, or the assertion below is vacuous.
+    expect(select.name).toBe("4111111111111111");
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    const logged = debug.mock.calls.flat().join(" ");
+    expect(logged).not.toContain("4111111111111111");
+    expect(logged).toContain("cc-expiry-year");
+  });
 });

@@ -8,7 +8,11 @@ import {
   detectExpiryFormat,
   formatCombinedExpiry,
 } from "./cc-form-detector-lib";
-import { logNoSelectMatch } from "./select-diag-lib";
+import {
+  logNoSelectMatch,
+  SELECT_DIAG_FIELD,
+  type SelectDiagField,
+} from "./select-diag-lib";
 
 // ── Visibility check ──
 
@@ -66,7 +70,12 @@ function normalizeYearValue(value: string): string {
   return String(num);
 }
 
-function setSelectValue(select: HTMLSelectElement, targetValue: string, normalizer: (v: string) => string): void {
+function setSelectValue(
+  select: HTMLSelectElement,
+  targetValue: string,
+  normalizer: (v: string) => string,
+  diagField: SelectDiagField,
+): void {
   if (!isFieldVisible(select)) return;
 
   const normalizedTarget = normalizer(targetValue);
@@ -83,9 +92,9 @@ function setSelectValue(select: HTMLSelectElement, targetValue: string, normaliz
 
   if (!match) {
     // Silent failure — no fuzzy/nearest match per security review.
-    // The label is the element's own name/id; the target VALUE never reaches a
-    // console — it is the user's card expiry.
-    logNoSelectMatch(select);
+    // Only the extension's own field identifier is logged; neither the target
+    // VALUE (the user's card expiry) nor anything read from the DOM reaches it.
+    logNoSelectMatch(diagField);
     return;
   }
 
@@ -133,14 +142,24 @@ export function performCreditCardAutofill(payload: CreditCardAutofillPayload): v
   } else {
     if (fields.expiryMonth && payload.expiryMonth) {
       if (fields.expiryMonth instanceof HTMLSelectElement) {
-        setSelectValue(fields.expiryMonth, payload.expiryMonth, normalizeMonthValue);
+        setSelectValue(
+          fields.expiryMonth,
+          payload.expiryMonth,
+          normalizeMonthValue,
+          SELECT_DIAG_FIELD.CC_EXPIRY_MONTH,
+        );
       } else {
         setInputValue(fields.expiryMonth, payload.expiryMonth);
       }
     }
     if (fields.expiryYear && payload.expiryYear) {
       if (fields.expiryYear instanceof HTMLSelectElement) {
-        setSelectValue(fields.expiryYear, payload.expiryYear, normalizeYearValue);
+        setSelectValue(
+          fields.expiryYear,
+          payload.expiryYear,
+          normalizeYearValue,
+          SELECT_DIAG_FIELD.CC_EXPIRY_YEAR,
+        );
       } else {
         setInputValue(fields.expiryYear, payload.expiryYear);
       }
