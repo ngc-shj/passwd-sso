@@ -189,15 +189,15 @@ if (events) {
           `back on a check being correct`,
       );
     }
-    // The set must be BUILT FROM the schema accessor, verified structurally.
+    // The list must be BUILT FROM the schema accessor, verified structurally.
     //
     // Two weaker versions of this check were tried and both were defeated. A
     // substring search for `getSchemaShape` matched a local
     // `getSchemaShapeStub`. Checking only that the import EXISTS is defeated by
-    // leaving the import in place while `declared()` builds a different set —
+    // leaving the import in place while the list is built from something else —
     // the import goes unused-ish and nothing notices. So resolve the imported
-    // binding (alias included) and require it to be the thing `Object.keys` is
-    // called on inside `declared()`.
+    // binding (alias included) and require it to be the callee inside the
+    // `Object.keys(...)` that initializes `DECLARED`.
     const schemaAccessors = new Set();
     for (const d of events.getImportDeclarations()) {
       if (d.getModuleSpecifierValue() !== "@/lib/env-schema") continue;

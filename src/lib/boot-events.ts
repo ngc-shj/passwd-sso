@@ -46,21 +46,10 @@ declare const envVarNameBrand: unique symbol;
 /**
  * The NAME of an environment variable — never its value.
  *
- * Branded with a module-private symbol so it cannot be produced structurally,
- * and admitted only by membership in the caller-supplied set of DECLARED
- * variable names.
- *
- * Membership, not shape. An earlier version of this function tested
- * `/^[A-Za-z_][A-Za-z0-9_]{0,63}$/` and called itself validated. It was not:
- * that pattern matches a 64-char hex master key, an `AKIA…` access key id, and
- * an `api_…` token — every secret encoding this repo actually handles is
- * identifier-shaped. `envVarName(process.env.SHARE_MASTER_KEY)` would have
- * type-checked and printed the key verbatim. A predicate over the value's FORM
- * cannot decide a question about its ORIGIN; an allowlist of names the schema
- * declares can, because no secret is ever a schema key.
- *
- * And the allowlist is built here, not passed in — see {@link declared}. Taking
- * it as a parameter moved the fail-open rather than closing it.
+ * Branded with a module-private symbol, so it cannot be produced structurally.
+ * The only values that ever carry the brand are the schema's own keys, and
+ * {@link envVarName} is the only way to obtain one — see there for why the
+ * function looks values up rather than checking them.
  */
 export type EnvVarName = string & { readonly [envVarNameBrand]: true };
 
@@ -68,28 +57,22 @@ export type EnvVarName = string & { readonly [envVarNameBrand]: true };
 const NOT_A_VAR_NAME = "<unnamed>" as EnvVarName;
 
 /**
- * The declared variable names, read from the schema itself.
- *
- * Derived HERE rather than accepted as a parameter. An earlier version took
- * `declared: ReadonlySet<string>` from the caller, which handed the trust anchor
- * to the code being constrained: `envVarName(secret, new Set([secret]))` type-checks
- * and prints the secret. A membership test is only as trustworthy as the set it
- * tests against, so the set cannot be an input.
- *
- * `@/lib/env-schema` is the side-effect-free half of env handling — it holds no
- * `parseEnv()` call — so importing it here costs nothing at boot and introduces
- * no cycle (it imports only zod and constants).
- */
-/**
  * The declared names, branded once, at the only place the brand is applied.
  *
- * The cast lands on `Object.keys(getSchemaShape())` — the schema's own key list
- * — and nowhere else. That single fact is what the function below rests on.
+ * Read from the schema here rather than accepted from a caller. An earlier
+ * version took the allowed set as a PARAMETER, which handed the trust anchor to
+ * the code being constrained: `envVarName(secret, new Set([secret]))`
+ * type-checked and printed the secret.
+ *
+ * `@/lib/env-schema` is the side-effect-free half of env handling — it holds no
+ * `parseEnv()` call — so importing it costs nothing at boot and introduces no
+ * cycle (it imports only zod and constants).
+ *
+ * `as unknown as` because a branded element type is not directly assignable from
+ * `string[]`. Deliberately NOT `.map(k => k as EnvVarName)`: a callback would be
+ * one more body to trust, whereas this array IS the schema's key list rather
+ * than something computed from it.
  */
-// `as unknown as` because a branded element type is not directly assignable
-// from `string[]`. Deliberately NOT `.map(k => k as EnvVarName)`: a callback
-// would be one more body to trust, and this array is then literally the schema's
-// key list rather than something computed from it.
 const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName[];
 
 /**
@@ -98,7 +81,7 @@ const DECLARED = Object.keys(getSchemaShape()) as unknown as readonly EnvVarName
  * `find` returns an ELEMENT OF `DECLARED`, so whatever comes back is a schema
  * key by construction. `raw` is only ever compared, never returned. That is the
  * whole guarantee, and it does not depend on the comparison being right: a
- * broken predicate here returns the WRONG VARIABLE NAME, never a secret.
+ * broken comparison here returns the WRONG VARIABLE NAME, never a secret.
  *
  * Three earlier shapes all failed because each left something to be trusted:
  *
