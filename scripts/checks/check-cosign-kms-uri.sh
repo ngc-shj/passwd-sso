@@ -77,7 +77,7 @@ OUT=$(
 # every other failure mode — a `awskms:/<arn>` (one slash) URI produced neither
 # known string and the gate reported OK, and a timeout or a future cosign error
 # message would do the same.
-if echo "$OUT" | grep -qE "UnrecognizedClientException|InvalidClientTokenId|SignatureDoesNotMatch|AccessDenied|NotFoundException"; then
+if grep -qE "UnrecognizedClientException|InvalidClientTokenId|SignatureDoesNotMatch|AccessDenied|NotFoundException" <<<"$OUT"; then
   echo "check-cosign-kms-uri: OK ($URI reached AWS KMS as a key reference)"
   exit 0
 fi
@@ -86,13 +86,13 @@ echo "ERROR: cosign did not resolve this KMS URI to a key." >&2
 echo "       URI: $URI" >&2
 echo "       Expected the dummy credentials to be rejected BY AWS, which proves" >&2
 echo "       cosign parsed the URI and issued the KMS call. Instead:" >&2
-echo "$OUT" | head -3 | sed 's/^/         /' >&2
+head -3 | sed 's/^/         /' >&2 <<<"$OUT"
 echo "" >&2
-if echo "$OUT" | grep -q "Failed to parse uri"; then
+if grep -q "Failed to parse uri" <<<"$OUT"; then
   echo "       cosign treated the ARN as an ENDPOINT HOST. The URI grammar is" >&2
   echo "       awskms://[ENDPOINT]/[ID]; with no endpoint the ARN goes in the" >&2
   echo "       path — THREE slashes: awskms:///<arn>." >&2
-elif echo "$OUT" | grep -q "should be in the format"; then
+elif grep -q "should be in the format" <<<"$OUT"; then
   echo "       cosign rejected the URI at parse time — check the slash count and" >&2
   echo "       that the ARN is well formed." >&2
 else

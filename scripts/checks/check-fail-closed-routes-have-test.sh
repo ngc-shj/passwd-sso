@@ -105,8 +105,10 @@ LEGACY_LIST="$(read_manifest "$LEGACY_FILE")"
 # pipelines — `grep -q` closes the pipe on first match, and under load
 # (parallel vitest workers) printf then dies with SIGPIPE (141), which
 # `set -o pipefail` turns into a spurious gate failure. No pipe, no race.
-is_debt()   { grep -qxF "$1" <<<"$DEBT_LIST"; }
-is_legacy() { grep -qxF "$1" <<<"$LEGACY_LIST"; }
+# The `[ -n "$1" ]` guard keeps an empty needle fail-CLOSED: a herestring feeds
+# grep one empty line, so `grep -qxF ""` would report every caller as exempt.
+is_debt()   { [ -n "$1" ] && grep -qxF "$1" <<<"$DEBT_LIST"; }
+is_legacy() { [ -n "$1" ] && grep -qxF "$1" <<<"$LEGACY_LIST"; }
 
 # manifest_count <list> — number of non-empty entries in a read_manifest
 # output string. Herestring, not a pipe (same SIGPIPE rationale as above).

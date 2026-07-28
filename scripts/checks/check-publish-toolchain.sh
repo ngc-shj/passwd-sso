@@ -53,7 +53,7 @@ ver_ge "$npm_pin" "11.5.1" || fail "release.yml: PUBLISH_NPM_VERSION=$npm_pin is
 # PUBLISH_NODE_VERSION must be an EXACT patch (X.Y.Z), so the bundled npm is
 # deterministic. (The grep above already required the X.Y.Z shape; assert the
 # captured value has no trailing `.x`/range and is a full three-part semver.)
-printf '%s' "$node_pin" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$node_pin" \
   || fail "release.yml: PUBLISH_NODE_VERSION=$node_pin must be an exact patch (X.Y.Z), not a partial or floating version"
 
 # Every setup-node in release.yml MUST resolve node-version from the pinned env —

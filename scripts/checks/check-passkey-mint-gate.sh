@@ -111,7 +111,7 @@ if [ "$EXEMPT_PARSE_FAIL" -ne 0 ]; then
 fi
 
 is_exempt() {
-  printf '%s' "$EXEMPT_LIST" | grep -qxF "$1"
+  [ -n "$1" ] && grep -qxF "$1" <<<"$EXEMPT_LIST"
 }
 
 # Token-mint and token-refresh primitives (extended regex). Trigger on the
@@ -180,7 +180,7 @@ while read -r lib_rel fn_name; do
     LIB_GATE_FAIL=1
     continue
   fi
-  if ! printf '%s' "$fn_body" | grep -qE '(^|[^A-Za-z0-9_])passkeyEnforcementBlocks\(' 2>/dev/null; then
+  if ! grep -qE '(^|[^A-Za-z0-9_])passkeyEnforcementBlocks\(' 2>/dev/null <<<"$fn_body"; then
     echo "MISSING_LIB_PASSKEY_GATE: $lib_rel function $fn_name() does not call passkeyEnforcementBlocks (gate moved from route into this lib fn — removing it leaves this token-mint path unguarded)."
     LIB_GATE_FAIL=1
   fi

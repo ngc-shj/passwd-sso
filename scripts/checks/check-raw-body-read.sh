@@ -68,7 +68,7 @@ if [ -f "$ALLOWLIST" ]; then
 fi
 
 is_allowed() {
-  printf '%s' "$ALLOW_LIST" | grep -qxF "$1"
+  [ -n "$1" ] && grep -qxF "$1" <<<"$ALLOW_LIST"
 }
 
 fail=0

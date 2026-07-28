@@ -112,8 +112,8 @@ sleep 2  # avoid rate limit
 echo ""
 echo "▸ Finding 4: Audit download CSV — actorType in header"
 BODY=$(api GET "/api/audit-logs/download?format=csv&from=$DATE_FROM&to=$DATE_TO" 2>/dev/null || echo "")
-HEADER=$(echo "$BODY" | head -1)
-if echo "$HEADER" | grep -q "actorType"; then
+HEADER=$(head -1) <<<"$BODY"
+if grep -q "actorType" <<<"$HEADER"; then
   pass "CSV header includes actorType"
 else
   fail "CSV header missing actorType: $HEADER"

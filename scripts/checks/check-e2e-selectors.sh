@@ -115,7 +115,7 @@ if [ -n "$e2e_class_selectors" ]; then
       for cls in $classes; do
         [ -z "$cls" ] && continue
         # Check if this class appears in removed lines but NOT in added lines
-        if echo "$removed_classes" | grep -q "\b${cls}\b" 2>/dev/null; then
+        if grep -q "\b${cls}\b" 2>/dev/null <<<"$removed_classes"; then
           # Verify it's actually gone (not just moved)
           added_with_class=$(git diff "${BASE}...HEAD" -- $changed_src \
             | grep -E '^\+.*className=.*\b'"${cls}"'\b' \
@@ -191,7 +191,7 @@ added_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
 
 for name in $removed_exports; do
   # Skip if re-exported under the same name
-  if echo "$added_exports" | grep -qx "$name"; then
+  if grep -qx "$name" <<<"$added_exports"; then
     continue
   fi
   # Look for the symbol inside an actual import statement only — not local
@@ -239,7 +239,7 @@ if [ -n "$e2e_aria_names" ] && [ -n "$changed_src" ]; then
   if [ -n "$removed_aria" ]; then
     for name in $e2e_aria_names; do
       [ ${#name} -lt 3 ] && continue
-      if echo "$removed_aria" | grep -qi "$name" 2>/dev/null; then
+      if grep -qi "$name" 2>/dev/null <<<"$removed_aria"; then
         added_aria=$(git diff "${BASE}...HEAD" -- $changed_src \
           | grep -E '^\+.*aria-label=.*'"$name" \
           | grep -v '^\+\+\+' || true)
@@ -272,7 +272,7 @@ if [ -n "$e2e_ids" ] && [ -n "$changed_src" ]; then
   if [ -n "$removed_ids" ]; then
     for id in $e2e_ids; do
       [ ${#id} -lt 2 ] && continue
-      if echo "$removed_ids" | grep -q "\"${id}\"" 2>/dev/null; then
+      if grep -q "\"${id}\"" 2>/dev/null <<<"$removed_ids"; then
         added_id=$(git diff "${BASE}...HEAD" -- $changed_src \
           | grep -E '^\+.*\bid=.*"'"${id}"'"' \
           | grep -v '^\+\+\+' || true)
@@ -349,12 +349,12 @@ if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
       [ "$(echo -n "$ja_pattern" | wc -m)" -lt 2 ] && continue
 
       # Check if this E2E Japanese pattern matches any removed i18n value
-      if echo "$i18n_removed_ja" | grep -qF "$ja_pattern"; then
+      if grep -qF "$ja_pattern" <<<"$i18n_removed_ja"; then
         # Verify it's NOT in the added side (i.e. the string was truly removed, not just moved)
         i18n_added_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
           | grep -E '^\+\s*"[^"]+"\s*:\s*"' \
           | grep -v '^\+\+\+' || true)
-        if ! echo "$i18n_added_ja" | grep -qF "$ja_pattern"; then
+        if ! grep -qF "$ja_pattern" <<<"$i18n_added_ja"; then
           ref_files=$(grep -rl "$ja_pattern" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
           warn "i18n value '$ja_pattern' was changed in messages/ja/ but is still used in E2E regex: $ref_files"
         fi
