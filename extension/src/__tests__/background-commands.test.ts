@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ALARM_CLEAR_CLIPBOARD,
   CMD_COPY_PASSWORD,
@@ -157,6 +157,13 @@ async function unlockVault(chromeMock: ReturnType<typeof installChromeMock>) {
 describe("X-4 keyboard shortcut commands", () => {
   let chromeMock: ReturnType<typeof installChromeMock>;
 
+  // `vi.clearAllMocks()` in beforeEach clears call history but leaves a spy
+  // installed, so a console spy from one test would silence console for every
+  // later test in the file. Same reasoning as the two autofill test files.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -263,6 +270,44 @@ describe("X-4 keyboard shortcut commands", () => {
       type: "clipboard-write",
       text: "s3cret",
     });
+  });
+
+  // V8 embeds a window of the INPUT in a JSON.parse SyntaxError, and the input on
+  // this path is decrypted vault plaintext. Before the parse was narrowed, the error
+  // fell through to `console.warn("[psso] copy command failed:", err)` and printed a
+  // prefix of the password into the service-worker console.
+  it("does not print decrypted plaintext when the blob is not valid JSON", async () => {
+    await unlockVault(chromeMock);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The first decryptData call is the list overview (see the default mock); the
+    // individual blob is decrypted afterwards, and that is the one to corrupt.
+    let call = 0;
+    cryptoMocks.decryptData.mockImplementation(async () => {
+      call++;
+      if (call <= 1) {
+        return JSON.stringify({
+          title: "Example",
+          username: "alice",
+          urlHost: "example.com",
+        });
+      }
+      return '{"username":"bob","password":S3cr3t-Passw0rd-VeryLong}';
+    });
+
+    const handler = commandHandlers[0];
+    await handler(CMD_COPY_PASSWORD);
+
+    expect(chromeMock.runtime.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ target: "offscreen", type: "clipboard-write" }),
+    );
+    // The command still reports why it failed — warnBackground takes two closed
+    // unions, so it has no slot the plaintext could occupy.
+    // The exact pin is what carries the red-proof; a `not.toContain("S3cr3t")`
+    // alongside it can never fail independently.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls.flat().join(" ")).toBe(
+      "[passwd-sso] copy-command-failed: syntax-error",
+    );
   });
 
   it("copy-username copies username to clipboard via offscreen document", async () => {

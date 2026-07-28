@@ -240,7 +240,15 @@ async function doSignAssertion(
     const aad = buildPersonalEntryAAD(userId, data.id, VAULT_TYPE.BLOB);
 
     const blobPlain = await decryptData(data.encryptedBlob, encKey, aad);
-    const blob = JSON.parse(blobPlain) as Record<string, unknown>;
+    // Narrow: a JSON.parse SyntaxError embeds a window of its input, and this
+    // function's catch hands the message to the content-script bridge, which
+    // postMessages it into the page's world.
+    let blob: Record<string, unknown>;
+    try {
+      blob = JSON.parse(blobPlain) as Record<string, unknown>;
+    } catch {
+      return { ok: false, error: "INVALID_ENTRY" };
+    }
 
     const privateKeyJwkStr = blob.passkeyPrivateKeyJwk as string | null;
     const credentialIdStr = blob.credentialId as string | null;
@@ -257,7 +265,13 @@ async function doSignAssertion(
       return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
     }
 
-    const privateKeyJwk = JSON.parse(privateKeyJwkStr) as JsonWebKey;
+    // Same narrowing, over the decrypted passkey private key.
+    let privateKeyJwk: JsonWebKey;
+    try {
+      privateKeyJwk = JSON.parse(privateKeyJwkStr) as JsonWebKey;
+    } catch {
+      return { ok: false, error: "MISSING_KEY_MATERIAL" };
+    }
     signCount += 1;
 
     const authenticatorData = await buildAssertionAuthData(rpId, signCount);

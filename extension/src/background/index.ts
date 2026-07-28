@@ -49,6 +49,7 @@ import {
   resetInMemoryKeyCache,
 } from "../lib/dpop-key";
 import { swFetchAuthenticated } from "./dpop-fetch";
+import { classifyError, warnBackground } from "./log";
 import {
   attemptTokenRefreshWith,
   revokeTokenOnServerWith,
@@ -721,7 +722,7 @@ void (async () => {
       allFrames: true,
     }]);
   } catch (err) {
-    console.warn("[passwd-sso] Failed to register WebAuthn interceptor:", err);
+    warnBackground("webauthn-interceptor-register-failed", classifyError(err));
   }
 })();
 
@@ -1009,7 +1010,15 @@ chrome.commands.onCommand.addListener(async (command) => {
             ? buildPersonalEntryAAD(currentUserId!, data.id, VAULT_TYPE.BLOB)
             : undefined;
         const plaintext = await decryptData(data.encryptedBlob, encryptionKey!, aad);
-        blob = JSON.parse(plaintext) as typeof blob;
+        // Narrow: V8 embeds a window of the INPUT in a JSON.parse SyntaxError, and
+        // the input here is decrypted vault plaintext. GCM authenticates the
+        // plaintext; it does not make it JSON.
+        try {
+          blob = JSON.parse(plaintext) as typeof blob;
+        } catch {
+          warnBackground("copy-command-failed", "syntax-error");
+          return;
+        }
       }
 
       const value =
@@ -1023,7 +1032,7 @@ chrome.commands.onCommand.addListener(async (command) => {
 
       await scheduleClipboardClear(cachedClipboardClearSeconds);
     } catch (err) {
-      console.warn("[psso] copy command failed:", err);
+      warnBackground("copy-command-failed", classifyError(err));
     }
   }
 });
@@ -1391,11 +1400,19 @@ async function fetchAndDecryptTeamBlob(
     overviewAAD,
   );
 
-  return {
-    blob: JSON.parse(blobPlain) as Record<string, unknown>,
-    overview: JSON.parse(overviewPlain) as Record<string, unknown>,
-    entryType: data.entryType,
-  };
+  // Same narrowing as the personal path: a JSON.parse SyntaxError carries a window
+  // of decrypted team plaintext, and these errors reach both the copy-command catch
+  // and — via normalizeErrorCode → humanizeError — a rendered popup toast. null is
+  // already this function's documented failure return and every caller branches on it.
+  try {
+    return {
+      blob: JSON.parse(blobPlain) as Record<string, unknown>,
+      overview: JSON.parse(overviewPlain) as Record<string, unknown>,
+      entryType: data.entryType,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function performAutofillForEntry(
@@ -1494,7 +1511,12 @@ async function performAutofillForEntry(
     entryType = data.entryType;
   }
 
-  const blob = JSON.parse(blobPlain) as {
+  // Narrow: a JSON.parse SyntaxError embeds a window of its input, and this
+  // function's callers surface the message through normalizeErrorCode into a
+  // rendered popup toast. normalizeErrorCode now refuses free-form messages, and
+  // this narrowing is the second layer — the parse failure is not diagnosable from
+  // its message anyway.
+  type DecryptedEntryBlob = {
     password?: string | null;
     username?: string | null;
     loginId?: string | null;
@@ -1527,11 +1549,20 @@ async function performAutofillForEntry(
     nationality?: string | null;
     idNumber?: string | null;
   };
-  const overview = JSON.parse(overviewPlain) as {
+  type DecryptedEntryOverview = {
     username?: string | null;
     urlHost?: string | null;
     additionalUrlHosts?: string[] | null;
   };
+
+  let blob: DecryptedEntryBlob;
+  let overview: DecryptedEntryOverview;
+  try {
+    blob = JSON.parse(blobPlain) as DecryptedEntryBlob;
+    overview = JSON.parse(overviewPlain) as DecryptedEntryOverview;
+  } catch {
+    return { ok: false, error: "INVALID_ENTRY" };
+  }
 
   // Hosts this entry is bound to. Sent to the content script so each frame can
   // self-verify its origin before writing the password (a popup/context-menu
@@ -1615,7 +1646,6 @@ async function performAutofillForEntry(
       email: blob.email ?? "",
       dateOfBirth: blob.dateOfBirth ?? "",
       nationality: blob.nationality ?? "",
-      idNumber: blob.idNumber ?? "",
     };
     try {
       await sendSensitiveFillMessage(identityPayload);

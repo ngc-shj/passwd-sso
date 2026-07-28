@@ -564,6 +564,32 @@ describe("team entries in background", () => {
       expect(res.password).toBe("team-secret");
     });
 
+    // fetchAndDecryptTeamBlob parses two decrypted team plaintexts. Before those
+    // parses were narrowed, a SyntaxError propagated to the caller's catch, where
+    // normalizeErrorCode returned err.message verbatim — and V8 embeds a window of
+    // the parse INPUT in that message. The caller renders it as a popup toast.
+    it("does not surface decrypted team plaintext when the blob is not valid JSON", async () => {
+      await unlockVault();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      cryptoMocks.decryptData.mockResolvedValueOnce(
+        '{"username":"bob","password":S3cr3t-Passw0rd-VeryLong}',
+      );
+
+      const res = (await sendMessage({
+        type: "COPY_PASSWORD",
+        entryId: "team-pw-1",
+        teamId: "team-1",
+      })) as { type: string; password: string | null; error?: string };
+
+      expect(res.password).toBeNull();
+      // A mapped constant, not a reflected message.
+      expect(res.error).toBe("FETCH_FAILED");
+      const surfaced = JSON.stringify(res) + warn.mock.calls.flat().join(" ");
+      expect(surfaced).not.toContain("S3cr3t");
+      expect(surfaced).not.toContain("SyntaxError");
+      warn.mockRestore();
+    });
+
     it("returns error when team entry fetch fails", async () => {
       fetchMock.mockImplementation(async (url: string) => {
         if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {

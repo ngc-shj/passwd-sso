@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { performIdentityAutofill } from "../../content/autofill-identity-lib";
 import { EXT_MSG } from "../../lib/constants";
 import type { IdentityAutofillPayload } from "../../types/messages";
@@ -16,6 +16,13 @@ beforeEach(() => {
     value: "en-US",
     configurable: true,
   });
+});
+
+// vi.spyOn on an already-spied method returns the existing mock with its call
+// history intact, and vitest.config.ts sets no restoreMocks — without this the
+// console assertions below become order-dependent.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function setupForm(html: string) {
@@ -42,7 +49,6 @@ function payload(
     email: "",
     dateOfBirth: "",
     nationality: "",
-    idNumber: "",
     ...overrides,
   };
 }
@@ -350,5 +356,119 @@ describe("performIdentityAutofill", () => {
 
     expect((document.querySelector('[name="fullName"]') as HTMLInputElement).value).toBe("Jane Doe");
     expect((document.querySelector('[name="phone"]') as HTMLInputElement).value).toBe("555-1234");
+  });
+});
+
+describe("performIdentityAutofill — select mismatch diagnostics", () => {
+  // The fixture must satisfy the detector or nothing runs: detectIdentityFields
+  // returns null below two fields, and performIdentityAutofill then returns before
+  // setSelectValue is ever reached — which would make every assertion below
+  // vacuously true. The <input autocomplete="tel"> is what makes fieldCount 2, and
+  // its fill is asserted to prove the form really was detected.
+  function setupCountrySelectForm() {
+    setupForm(`
+      <input autocomplete="tel" />
+      <select name="shipping_country" autocomplete="country-name">
+        <option value="">Select</option>
+        <option value="JP">Japan</option>
+        <option value="US">United States</option>
+      </select>
+    `);
+    return document.querySelector(
+      '[autocomplete="country-name"]',
+    ) as HTMLSelectElement;
+  }
+
+  it("logs the extension's own field identifier, never the identity value, when no option matches", () => {
+    const select = setupCountrySelectForm();
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    performIdentityAutofill(
+      payload({ phone: "555-0100", country: "Nowhereland" }),
+    );
+
+    expect((document.querySelector('[autocomplete="tel"]') as HTMLInputElement).value)
+      .toBe("555-0100");
+
+    // Reachability floor: universally-quantified assertions over mock.calls are all
+    // vacuously true at zero calls, which is the same hole the fixture fix closes
+    // from the other side.
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    for (const args of debug.mock.calls) {
+      expect(args).toHaveLength(1);
+      // A non-string argument would serialise in DevTools with its own contents
+      // while the join() below renders it "[object …]" — so the denials that
+      // follow would pass while the console still showed the value.
+      expect(args.every((a) => typeof a === "string")).toBe(true);
+    }
+
+    const logged = debug.mock.calls.flat().join(" ");
+    expect(logged).toContain("identity-country");
+    expect(logged).not.toContain("Nowhereland");
+    // The normalised form is still the value (setSelectValue lowercases the target).
+    expect(logged).not.toContain("nowhereland");
+    expect(select.value).toBe("");
+  });
+
+  it("does not touch the select or dispatch events when no option matches", () => {
+    const select = setupCountrySelectForm();
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const onChange = vi.fn();
+    const onInput = vi.fn();
+    select.addEventListener("change", onChange);
+    select.addEventListener("input", onInput);
+
+    performIdentityAutofill(
+      payload({ phone: "555-0100", country: "Nowhereland" }),
+    );
+
+    // Reachability floor: every assertion below is a denial, so all of them are
+    // vacuously true if the detector stops matching this fixture and the select
+    // path is never entered.
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    // setSelectValue dispatches input+change only on the match path, so this pins
+    // the early return itself rather than a value that could coincide.
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInput).not.toHaveBeenCalled();
+    expect(select.value).toBe("");
+  });
+});
+
+describe("hostile page cannot route a filled value into the diagnostic", () => {
+  it("does not log the address when the page copies it into the select's name", () => {
+    setupForm(`
+      <input autocomplete="address-line1" />
+      <input autocomplete="tel" />
+      <select name="benign" autocomplete="country-name">
+        <option value="">Select</option>
+        <option value="JP">Japan</option>
+      </select>
+    `);
+    const address = document.querySelector(
+      '[autocomplete="address-line1"]',
+    ) as HTMLInputElement;
+    const select = document.querySelector(
+      '[autocomplete="country-name"]',
+    ) as HTMLSelectElement;
+    address.addEventListener("input", () => {
+      select.name = address.value;
+      select.id = address.value;
+    });
+
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    performIdentityAutofill(
+      payload({
+        address: "12 Rue Secrete",
+        phone: "555-0100",
+        country: "Nowhereland",
+      }),
+    );
+
+    expect(select.name).toBe("12 Rue Secrete");
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    const logged = debug.mock.calls.flat().join(" ");
+    expect(logged).not.toContain("12 Rue Secrete");
+    expect(logged).not.toContain("Nowhereland");
+    expect(logged).toContain("identity-country");
   });
 });

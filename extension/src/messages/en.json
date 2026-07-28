@@ -172,6 +172,7 @@
     "autoLockInvalid": "Auto-lock must be at least 5 minutes",
     "noTotpConfigured": "No TOTP configured for this entry",
     "invalidTotp": "TOTP configuration is invalid for this entry",
-    "networkError": "Cannot connect to server. If using a self-signed certificate, open the server URL in a browser tab and accept the certificate first."
+    "networkError": "Cannot connect to server. If using a self-signed certificate, open the server URL in a browser tab and accept the certificate first.",
+    "invalidEntry": "This entry could not be read. It may have been saved in an older format."
   }
 }

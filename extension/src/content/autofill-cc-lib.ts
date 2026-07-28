@@ -8,6 +8,11 @@ import {
   detectExpiryFormat,
   formatCombinedExpiry,
 } from "./cc-form-detector-lib";
+import {
+  logNoSelectMatch,
+  SELECT_DIAG_FIELD,
+  type SelectDiagField,
+} from "./select-diag-lib";
 
 // ── Visibility check ──
 
@@ -65,7 +70,12 @@ function normalizeYearValue(value: string): string {
   return String(num);
 }
 
-function setSelectValue(select: HTMLSelectElement, targetValue: string, normalizer: (v: string) => string): void {
+function setSelectValue(
+  select: HTMLSelectElement,
+  targetValue: string,
+  normalizer: (v: string) => string,
+  diagField: SelectDiagField,
+): void {
   if (!isFieldVisible(select)) return;
 
   const normalizedTarget = normalizer(targetValue);
@@ -81,10 +91,10 @@ function setSelectValue(select: HTMLSelectElement, targetValue: string, normaliz
   });
 
   if (!match) {
-    // Silent failure — no fuzzy/nearest match per security review
-    if (typeof console !== "undefined" && console.debug) {
-      console.debug(`[passwd-sso] No exact match for select value: ${targetValue}`);
-    }
+    // Silent failure — no fuzzy/nearest match per security review.
+    // Only the extension's own field identifier is logged; neither the target
+    // VALUE (the user's card expiry) nor anything read from the DOM reaches it.
+    logNoSelectMatch(diagField);
     return;
   }
 
@@ -116,21 +126,40 @@ export function performCreditCardAutofill(payload: CreditCardAutofillPayload): v
   }
 
   // Expiry
-  if (fields.expiryFormat === "combined" && fields.expiryCombined) {
+  // The payload guarantees only the card number; expiryMonth/Year may be "".
+  // Without the payload guard, formatCombinedExpiry("", "", "MM/YY") yields "00/00"
+  // and setInputValue writes it over whatever the user typed. The split branch below
+  // has always guarded; the combined branch had not.
+  if (
+    fields.expiryFormat === "combined" &&
+    fields.expiryCombined &&
+    payload.expiryMonth &&
+    payload.expiryYear
+  ) {
     const format = detectExpiryFormat(fields.expiryCombined);
     const combined = formatCombinedExpiry(payload.expiryMonth, payload.expiryYear, format);
     setInputValue(fields.expiryCombined, combined);
   } else {
     if (fields.expiryMonth && payload.expiryMonth) {
       if (fields.expiryMonth instanceof HTMLSelectElement) {
-        setSelectValue(fields.expiryMonth, payload.expiryMonth, normalizeMonthValue);
+        setSelectValue(
+          fields.expiryMonth,
+          payload.expiryMonth,
+          normalizeMonthValue,
+          SELECT_DIAG_FIELD.CC_EXPIRY_MONTH,
+        );
       } else {
         setInputValue(fields.expiryMonth, payload.expiryMonth);
       }
     }
     if (fields.expiryYear && payload.expiryYear) {
       if (fields.expiryYear instanceof HTMLSelectElement) {
-        setSelectValue(fields.expiryYear, payload.expiryYear, normalizeYearValue);
+        setSelectValue(
+          fields.expiryYear,
+          payload.expiryYear,
+          normalizeYearValue,
+          SELECT_DIAG_FIELD.CC_EXPIRY_YEAR,
+        );
       } else {
         setInputValue(fields.expiryYear, payload.expiryYear);
       }

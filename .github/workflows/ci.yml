@@ -44,6 +44,8 @@ jobs:
               - "tsconfig*.json"
               - "vitest.config.*"
               - "eslint.config.*"
+              # Listed separately — "eslint.config.*" does not match it.
+              - "eslint.extension.config.*"
               - "next.config.*"
               - "scripts/**"
             extension:

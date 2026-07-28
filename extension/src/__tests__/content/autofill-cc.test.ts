@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { performCreditCardAutofill } from "../../content/autofill-cc-lib";
 import { EXT_MSG } from "../../lib/constants";
 
@@ -10,6 +10,13 @@ beforeEach(() => {
     value: "en-US",
     configurable: true,
   });
+});
+
+// vi.spyOn on an already-spied method returns the existing mock with its call
+// history intact, and vitest.config.ts sets no restoreMocks — without this the
+// console assertions below become order-dependent.
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 function setupForm(html: string) {
@@ -372,5 +379,173 @@ describe("performCreditCardAutofill", () => {
     expect((document.getElementById("card_number_pay") as HTMLInputElement).value).toBe("card");
     expect((document.querySelector('input[name="cardNumber"]') as HTMLInputElement).value).toBe("4111111111111111");
     expect((document.querySelector('input[name="cvv"]') as HTMLInputElement).value).toBe("123");
+  });
+});
+
+describe("performCreditCardAutofill — select mismatch diagnostics", () => {
+  // cc-number is required or detectCreditCardFields returns null and nothing runs.
+  // The year select's name must not match CC_EXPIRY_RE's combined-field pattern,
+  // or expiryFormat becomes "combined" and setSelectValue is never reached.
+  function setupYearSelectForm() {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select name="cc_exp_year" autocomplete="cc-exp-year">
+        <option value="">Year</option>
+        <option value="2025">2025</option>
+      </select>
+    `);
+    return document.querySelector(
+      '[autocomplete="cc-exp-year"]',
+    ) as HTMLSelectElement;
+  }
+
+  function cardPayload(overrides: Record<string, string>) {
+    return {
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "",
+      cvv: "",
+      ...overrides,
+    };
+  }
+
+  it("logs the extension's own field identifier, never the expiry value, when no option matches", () => {
+    const select = setupYearSelectForm();
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+    // "99" normalizes to "2099", so a leak of the raw value and a leak of the
+    // normalized value are distinguishable strings — asserting both is what makes
+    // the normalizedTarget half of the invariant testable.
+    performCreditCardAutofill(cardPayload({ expiryYear: "99" }));
+
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    for (const args of debug.mock.calls) {
+      expect(args).toHaveLength(1);
+      expect(args.every((a) => typeof a === "string")).toBe(true);
+    }
+
+    const logged = debug.mock.calls.flat().join(" ");
+    expect(logged).toContain("cc-expiry-year");
+    expect(logged).not.toContain("99");
+    expect(logged).not.toContain("2099");
+    expect(select.value).toBe("");
+  });
+
+  it("does not touch the select or dispatch events when no option matches", () => {
+    const select = setupYearSelectForm();
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    const onChange = vi.fn();
+    const onInput = vi.fn();
+    select.addEventListener("change", onChange);
+    select.addEventListener("input", onInput);
+
+    performCreditCardAutofill(cardPayload({ expiryYear: "99" }));
+
+    // Reachability floor: every assertion below is a denial, so all of them are
+    // vacuously true if the detector stops matching this fixture.
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onInput).not.toHaveBeenCalled();
+    expect(select.value).toBe("");
+  });
+});
+
+describe("performCreditCardAutofill — combined expiry with a missing payload expiry", () => {
+  function setupCombinedForm(placeholder = "MM/YY") {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <input autocomplete="cc-exp" placeholder="${placeholder}" />
+    `);
+    return document.querySelector('[autocomplete="cc-exp"]') as HTMLInputElement;
+  }
+
+  function cardPayload(month: string, year: string) {
+    return {
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: month,
+      expiryYear: year,
+      cvv: "",
+    };
+  }
+
+  // formatCombinedExpiry pads empty components to "00", so before the guard these
+  // wrote 00/00, 12/00 and 00/30 over whatever the user had typed into a live
+  // checkout field. The split branch cannot pick up the slack: detectCreditCardFields
+  // nulls expiryMonth/Year whenever a combined field is present.
+  for (const [month, year, label] of [
+    ["", "", "both empty"],
+    ["12", "", "month only"],
+    ["", "2030", "year only"],
+  ]) {
+    it(`leaves the combined field untouched when the entry has ${label}`, () => {
+      const field = setupCombinedForm();
+      const onChange = vi.fn();
+      field.addEventListener("change", onChange);
+
+      performCreditCardAutofill(cardPayload(month, year));
+
+      expect(field.value).toBe("");
+      expect(onChange).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const [placeholder, expected] of [
+    ["MM/YY", "03/26"],
+    ["MM/YYYY", "03/2026"],
+    ["MMYY", "0326"],
+    ["MMYYYY", "032026"],
+  ]) {
+    it(`still fills a complete expiry in ${placeholder} format`, () => {
+      const field = setupCombinedForm(placeholder);
+      performCreditCardAutofill(cardPayload("3", "2026"));
+      expect(field.value).toBe(expected);
+    });
+  }
+});
+
+describe("hostile page cannot route a filled value into the diagnostic", () => {
+  // setInputValue dispatches `input` SYNCHRONOUSLY, so a page listener runs before
+  // the next field is filled. An earlier version of the diagnostic logged the
+  // select's own name/id, which let the page move the card number there and have
+  // the extension write it to a console only the extension can reach.
+  it("does not log the card number when the page copies it into the select's name", () => {
+    setupForm(`
+      <input autocomplete="cc-number" />
+      <select name="benign" autocomplete="cc-exp-year">
+        <option value="">Year</option>
+        <option value="2025">2025</option>
+      </select>
+    `);
+    const number = document.querySelector(
+      '[autocomplete="cc-number"]',
+    ) as HTMLInputElement;
+    const select = document.querySelector(
+      '[autocomplete="cc-exp-year"]',
+    ) as HTMLSelectElement;
+    number.addEventListener("input", () => {
+      select.name = number.value;
+      select.id = number.value;
+    });
+
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
+    performCreditCardAutofill({
+      type: EXT_MSG.AUTOFILL_CC_FILL,
+      cardholderName: "",
+      cardNumber: "4111111111111111",
+      expiryMonth: "",
+      expiryYear: "99",
+      cvv: "",
+    });
+
+    // The attack must have actually run, or the assertion below is vacuous.
+    expect(select.name).toBe("4111111111111111");
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
+    const logged = debug.mock.calls.flat().join(" ");
+    expect(logged).not.toContain("4111111111111111");
+    expect(logged).toContain("cc-expiry-year");
   });
 });
