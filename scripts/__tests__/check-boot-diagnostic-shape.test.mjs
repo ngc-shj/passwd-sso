@@ -346,6 +346,69 @@ describe("check-boot-diagnostic-shape", () => {
     expect(output).toMatch(/type predicate/);
   });
 
+  it("rejects an anonymous default export", () => {
+    // A real egress path, not just an enumeration gap: JSON.parse returns `any`,
+    // which is not an EXPLICIT any and so slips the lint rule, and a
+    // default-imported helper is as reachable as a named one.
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport default (s: string): ReturnType<typeof envVarName> =>\n  JSON.parse(JSON.stringify(s));\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/`export default` is not permitted/);
+  });
+
+  it("rejects a star re-export", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport * from "@/lib/env-schema";\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/`export \*` re-exports/);
+  });
+
+  it("rejects a namespace re-export", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport * as schema from "@/lib/env-schema";\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/`export \* as schema` re-exports/);
+  });
+
+  it("rejects an exported namespace", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport namespace Unsafe {\n  export const mint = (s: string) => s;\n}\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/unexpected export\(s\): Unsafe/);
+  });
+
+  it("rejects `export { x as default }`", () => {
+    const path = join(root, "src/lib/boot-events.ts");
+    writeFileSync(
+      path,
+      `${readFileSync(path, "utf8")}\nexport { envVarName as default };\n`,
+      "utf8",
+    );
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toMatch(/unexpected export\(s\): default/);
+  });
+
   it("rejects an extra export even when it names no branded type", () => {
     // The type-blind axis: a caller can only reach a helper that is exported.
     const path = join(root, "src/lib/boot-events.ts");

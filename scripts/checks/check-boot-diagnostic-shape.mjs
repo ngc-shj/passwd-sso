@@ -276,12 +276,50 @@ if (events) {
     // future construct that neither the assertion rule nor the mention rule
     // recognizes still cannot be handed to anyone.
     const EXPECTED_EXPORTS = ["BOOT_EVENT", "BootEvent", "EnvVarName", "envVarName", "BootDiagnostic"];
+
+    // Forms that carry no name for the list below to check, so they have to be
+    // refused outright rather than enumerated.
+    //
+    // Verified against ts-morph rather than assumed: of the six export syntaxes,
+    // `export { x as default }` was the only one the name list already caught.
+    // `export default <expr>` is an ExportAssignment and was invisible — and it
+    // is a real egress path, since
+    //
+    //     export default (s: string): ReturnType<typeof envVarName> =>
+    //       JSON.parse(JSON.stringify(s))
+    //
+    // launders through `JSON.parse`'s `any` return, which is not an explicit
+    // `any` and so slips the lint rule too. `export *` and `export * as ns`
+    // re-export whatever the target holds, now or later.
+    for (const ea of events.getExportAssignments()) {
+      failures.push(
+        `${EVENTS_FILE}:${ea.getStartLineNumber()}: \`export ${ea.isExportEquals() ? "=" : "default"}\` ` +
+          `is not permitted — an unnamed export cannot be checked against the allowlist, and a ` +
+          `default-imported helper is as reachable as a named one`,
+      );
+    }
+    for (const ed of events.getExportDeclarations()) {
+      const ns = ed.getNamespaceExport();
+      if (ns) {
+        failures.push(
+          `${EVENTS_FILE}:${ed.getStartLineNumber()}: \`export * as ${ns.getName()}\` re-exports ` +
+            `a whole module — the surface must stay enumerable`,
+        );
+      } else if (ed.getModuleSpecifier() && ed.getNamedExports().length === 0) {
+        failures.push(
+          `${EVENTS_FILE}:${ed.getStartLineNumber()}: \`export *\` re-exports whatever the ` +
+            `target holds, now and in future — the surface must stay enumerable`,
+        );
+      }
+    }
+
     const actualExports = [
       ...events.getFunctions(),
       ...events.getTypeAliases(),
       ...events.getInterfaces(),
       ...events.getClasses(),
       ...events.getEnums(),
+      ...events.getModules(),
     ]
       .filter((d) => d.isExported?.())
       .map((d) => d.getName())
