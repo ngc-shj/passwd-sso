@@ -102,6 +102,21 @@ describe("eslint.extension.config.mjs", () => {
     expect(rules).toContain("no-restricted-syntax");
   });
 
+  // .mjs/.cjs are matched by ESLint's implicit default config, so a file with those
+  // extensions left out of `files` lints with an EMPTY rule set: no messages, exit 0,
+  // and it still counts toward the wrapper's file floor. Unlike .jsx or a .ts under
+  // public/, which fail closed with a null-ruleId warning, this one fails OPEN — so
+  // it needs its own case rather than riding on the .ts one.
+  it.each([
+    ["extension/src/lib/probe.mjs"],
+    ["extension/src/lib/probe.cjs"],
+    ["extension/public/probe.mjs"],
+  ])("rejects a console call in %s", (path) => {
+    const { exitCode, rules } = lintAs(path, 'var x = 1; console.log(x);');
+    expect(exitCode).toBe(1);
+    expect(rules).toContain("no-console");
+  });
+
   it("is not suppressed by an inline eslint-disable directive", () => {
     const { exitCode, rules } = lintAs(
       CONTENT,
@@ -151,9 +166,23 @@ describe("scripts/checks/lint-extension.mjs", () => {
     const r = spawnSync("node", ["scripts/checks/lint-extension.mjs"], {
       cwd: REPO_ROOT,
       encoding: "utf8",
-      env: { ...process.env, ...env },
+      // Fixture mode by default so the env-pollution guard does not fire under
+      // CI=true; the pollution-guard test overrides it back.
+      env: { ...process.env, EXT_LINT_FIXTURE_MODE: "1", ...env },
     });
     return { exitCode: r.status, stdout: r.stdout, stderr: r.stderr };
+  }
+
+  /** Writes a fixture config next to the real one's parser resolution. */
+  function withConfig(source, fn) {
+    const dir = mkdtempSync(join(tmpdir(), "lint-ext-"));
+    const cfg = join(dir, "fixture.config.mjs");
+    writeFileSync(cfg, source);
+    try {
+      return fn(cfg);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 
   it("passes against the real tree and reports how many files it linted", () => {
@@ -183,6 +212,58 @@ describe("scripts/checks/lint-extension.mjs", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // The gate's PRIMARY function. The wrapper deliberately does not read eslint's
+  // exit code, so this branch is the sole path from "a console call exists" to
+  // "CI is red" — and the real-tree case above can never exercise it.
+  it("fails with LINT_ERRORS when the scanned tree contains a violation", () => {
+    const source =
+      `import parser from ${JSON.stringify(PARSER_PATH)};\n` +
+      'export default [{ files: ["extension/src/**/*.{ts,tsx,js}", "extension/public/**/*.js"],' +
+      ' ignores: ["**/__tests__/**"], languageOptions: { parser },' +
+      ' rules: { "no-console": "error" } }];\n';
+    // No sanctioned-sink override, so the two real sinks become violations.
+    withConfig(source, (cfg) => {
+      const { exitCode, stderr } = runGate({ EXT_LINT_CONFIG: cfg });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("LINT_ERRORS");
+      expect(stderr).toContain("extension/src/background/log.ts");
+      expect(stderr).toContain("extension/src/content/select-diag-lib.ts");
+    });
+  });
+
+  it("fails with LINT_NO_REPORT when eslint cannot produce a report", () => {
+    withConfig("this is not valid javascript {{{\n", (cfg) => {
+      const { exitCode, stderr } = runGate({ EXT_LINT_CONFIG: cfg });
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("LINT_NO_REPORT");
+    });
+  });
+
+  it("fails with ENV_POLLUTION_GUARD when an override is set under CI without fixture mode", () => {
+    const { exitCode, stderr } = runGate({
+      CI: "true",
+      EXT_LINT_CONFIG: "whatever.mjs",
+      EXT_LINT_FIXTURE_MODE: "",
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("ENV_POLLUTION_GUARD");
+  });
+
+  it("echoes the effective config and targets so an overridden run is visible in CI logs", () => {
+    const { stdout } = runGate();
+    expect(stdout).toContain("CONFIG=eslint.extension.config.mjs");
+    expect(stdout).toContain("TARGETS=[extension/src, extension/public]");
+  });
+
+  it("accepts a single scan target — EXT_LINT_TARGETS splitting", () => {
+    // extension/src alone omits offscreen.js, so this also pins that the coverage
+    // assertion is keyed on the file rather than on the target list.
+    const { exitCode, stderr } = runGate({ EXT_LINT_TARGETS: "extension/src" });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("MISSING_COVERAGE");
+    expect(stderr).toContain("extension/public/offscreen.js");
   });
 
   it("fails with MISSING_COVERAGE when extension/public drops out of the config", () => {

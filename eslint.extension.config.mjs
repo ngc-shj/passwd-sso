@@ -23,11 +23,17 @@ import parser from "@typescript-eslint/parser";
 // designs carved out `console` in property position so `obj.console` would not be
 // flagged; that same exclusion is what blinds the rule to `globalThis.console`,
 // `top.console`, `(globalThis as T).console` and `const g = globalThis; g.console`.
-// Verified by execution: the exclusion-free form catches all 20 known bypass
-// spellings and produces zero findings across the 62 real production files beyond
-// the sanctioned sinks. An identifier or string literal named `console` for an
-// unrelated purpose would be flagged — none exists, and a security gate should not
-// carve exceptions for cases it has not observed.
+// Verified by execution: the exclusion-free form catches all 20 known statically
+// spelled bypasses and produces zero findings across the real production files
+// beyond the sanctioned sinks. An identifier or string literal named `console` for
+// an unrelated purpose would be flagged — none exists, and a security gate should
+// not carve exceptions for cases it has not observed.
+//
+// Scope of the guarantee: every STATICALLY SPELLED reference. A key assembled at
+// runtime (`globalThis["cons" + "ole"]`, `atob(...)`, `Reflect.get` with a computed
+// key) evades both selectors, and no rule short of taint analysis would catch it.
+// That is out of this gate's threat model, which is accidental re-introduction —
+// an accidental `console.debug` never looks like `atob("Y29uc29sZQ==")`.
 const CONSOLE_REFERENCE_SELECTORS = [
   {
     selector: "Identifier[name='console']",
@@ -46,7 +52,15 @@ const CONSOLE_REFERENCE_SELECTORS = [
 
 export default [
   {
-    files: ["extension/src/**/*.{ts,tsx,js}", "extension/public/**/*.js"],
+    // Every executable extension is listed. A file whose extension is absent here
+    // does NOT fail closed uniformly: .mjs/.cjs are matched by ESLint's implicit
+    // default config, so they lint with an empty rule set, emit nothing, and still
+    // count toward the wrapper's file floor — a console call in one would ship
+    // green. (.jsx / a .ts under public/ do fail closed, via a null-ruleId warning.)
+    files: [
+      "extension/src/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+      "extension/public/**/*.{js,mjs,cjs}",
+    ],
     ignores: ["**/__tests__/**", "**/*.test.*"],
     languageOptions: { parser },
     // Without noInlineConfig a single `// eslint-disable-next-line` zeroes this

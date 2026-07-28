@@ -965,6 +965,32 @@ forms, because the exclusion that spares `obj.console` is the same one that blin
 the rule to `globalThis.console`; and S17 correctly caught that revision 2's own
 table had a wrong row. Both are why the final rule set carries no exclusions at all.
 
+## Round 3 outcome (code review of the implementation)
+
+7 Testing findings (T22-T28, one of them Critical), 6 Security (S19-S24), 6
+Functionality (F20-F25). The testing expert ran 41 production mutants against a
+throwaway copy; 36 were killed and 5 survived, and every survivor became a finding.
+
+| Findings | Disposition |
+|---|---|
+| T22 (Critical) — the code-point-truncation test was a **tautology**: `JSON.parse(JSON.stringify(s)) === s` holds for every string including lone surrogates (well-formed `JSON.stringify`, ES2019), *and* the all-astral fixture put the cut on an even UTF-16 offset so no pair could split. Two independent reasons it could never fail. | Fixed: odd-offset fixture (`"a" + …`) and `label.isWellFormed()`. Verified red against the `String.prototype.slice` mutant. |
+| S19 / F20 — `performAutofillForEntry` parses decrypted personal plaintext at two sites whose `SyntaxError` reaches a rendered popup toast. Revision 2 dismissed them as "outside that try" — a predicate about the copy-command `catch`, not about `I6`'s surface, i.e. exactly the too-narrow-predicate error revision 2 itself was criticised for. | Fixed: both parses narrowed, returning the function's existing `{ ok:false, error:"INVALID_ENTRY" }`. |
+| **S20** — the same class in `background/passkey-provider.ts:243/:260`, where the second parse is over the **decrypted passkey private-key JWK** and the error is delivered by `sendResponse` → the content-script bridge → `window.postMessage` **into the page's world**. | Fixed at two levels: both parses narrowed, and `normalizeErrorCode` — the shared `Error → string` channel that made this reachable from every caller — now passes through only `SCREAMING_SNAKE` codes and returns the caller's fallback for anything else. |
+| T23 — the team-blob narrowing had no test; its mutant survived. | Fixed in `background/team-entries.test.ts`, driving the real `COPY_PASSWORD`-with-`teamId` path. Red-proved: pre-fix, the response `error` is literally `Unexpected token 'S', ..."password":S3cr3t-Pas"... is not valid JSON`. |
+| T24 — `classifyError`'s `DOMException` branch untested (`DOMException` also satisfies `instanceof Error`, so removing the branch silently reclassifies every `chrome.*` rejection). | Fixed; red-proved. |
+| T25 / T26 — the wrapper's `LINT_ERRORS` path, the gate's **only** failure propagation, had no test; `--max-warnings=0` turned out redundant with the message sweep. | Fixed: a `LINT_ERRORS` case, a `LINT_NO_REPORT` case, and a new `LINT_UNEXPECTED_EXIT` diagnostic for a non-zero eslint exit with an empty report. |
+| S21 — a third file-scoped override entry re-exempts a whole content file with both the wrapper and the self-test green; `REQUIRED_COVERAGE` sampled no `content/` or `popup/` file, and `MIN_LINTED_FILES = 50` against 64 left 14 droppable. | Fixed: four representatives (`public`, `background`, `content`, `popup`), floor raised to 60. |
+| S22 — no CI env-pollution guard on `EXT_LINT_CONFIG`/`EXT_LINT_TARGETS`, and the effective config was not echoed. | Fixed: `ENV_POLLUTION_GUARD` + a one-line `CONFIG=… TARGETS=…` echo, matching the sibling gates. |
+| S23 — `.mjs`/`.cjs` under the scan roots lint with an **empty** rule set under ESLint's implicit default, emit nothing, and count toward the file floor — the one extension-mismatch case that fails *open*. | Fixed: `files` widened; three self-test cases added. |
+| S24 — the "no exclusions, every spelling banned" claim is false for runtime-assembled keys (`globalThis["cons"+"ole"]`, `atob`, `Reflect.get`). | Comment scoped to *statically spelled* references, with the threat model (accidental re-introduction) stated. No rule change: no accidental re-introduction looks like `atob("Y29uc29sZQ==")`. |
+| T27 — the two "does not touch the select" tests are pure denials with no reachability floor. | Fixed: `expect(debug.mock.calls.length).toBeGreaterThan(0)` in both. |
+| T28, F22, F23, F24, F25 | Redundant assertions dropped; stale file counts corrected; whitespace-only `name` now falls through to `id`; `EXT_LINT_TARGETS` given a self-test case; `afterEach(vi.restoreAllMocks)` added to `background-commands.test.ts` (R3 — the same guard was applied to two of the three files that gained a console spy). |
+| F21 — `REQUIRED_COVERAGE` and the `--print-config` resolved-rule assertion strengthen C4 beyond what was locked. | Recorded here rather than reverted. The strengthening is load-bearing: with a `src`-only config, `offscreen.js` is *still* in the report (ESLint's implicit default matches `.js`), so a presence check alone would have passed — only the resolved-rule assertion fires. |
+
+One round-3 claim was refuted and is recorded rather than acted on: F20 also reported
+an unhandled rejection on the context-menu autofill path, but
+`context-menu.ts:247` already terminates it with `.catch(() => {})`.
+
 ## Go/No-Go Gate
 
 | ID | Subject | Status |

@@ -11,14 +11,18 @@
  * that is silent when it scanned nothing is indistinguishable from a gate that
  * scanned everything and found nothing, so the count is asserted here.
  *
- * `--max-warnings=0` matters independently: a file outside the config's base path is
+ * Warnings are treated as failures too — a file outside the config's base path is
  * reported as a *warning* with exit 0, so a cwd change would otherwise turn this
- * into a silent pass.
+ * into a silent pass. The `problems` sweep below is what enforces that; the
+ * `--max-warnings=0` flag is belt-and-braces, since this script deliberately does
+ * not trust ESLint's exit code as its only signal.
  *
  * Diagnostics (each fails closed with a distinct, greppable identifier):
- *   EMPTY_SCAN        — fewer than MIN_LINTED_FILES source files were linted
- *   MISSING_COVERAGE  — a required file was not among those linted
- *   LINT_ERRORS       — eslint reported problems
+ *   ENV_POLLUTION_GUARD  — an override is set under CI without fixture mode
+ *   EMPTY_SCAN           — fewer than MIN_LINTED_FILES source files were linted
+ *   MISSING_COVERAGE     — a required file was not linted, or matched no rule-bearing config
+ *   LINT_ERRORS          — eslint reported problems
+ *   LINT_UNEXPECTED_EXIT — eslint failed but reported nothing to explain why
  *
  * EXT_LINT_CONFIG / EXT_LINT_TARGETS override the config and scan targets
  * (self-test only; scripts/__tests__/lint-extension.test.mjs).
@@ -37,9 +41,29 @@ const TARGETS = (process.env.EXT_LINT_TARGETS || "extension/src extension/public
   .split(/\s+/)
   .filter(Boolean);
 
-// 62 production files today. The floor tolerates ordinary churn while catching a
-// glob that has stopped matching — the failure this wrapper exists for.
-const MIN_LINTED_FILES = 50;
+// Env-pollution guard, matching the sibling gates: a stray `export` leaking into a
+// real CI run must not silently point this gate at a different config.
+if (
+  process.env.CI === "true" &&
+  (process.env.EXT_LINT_CONFIG || process.env.EXT_LINT_TARGETS) &&
+  process.env.EXT_LINT_FIXTURE_MODE !== "1"
+) {
+  console.error(
+    "ENV_POLLUTION_GUARD: EXT_LINT_CONFIG/EXT_LINT_TARGETS set under CI=true " +
+      "without EXT_LINT_FIXTURE_MODE=1 — refusing to run against a possibly-unintended config.",
+  );
+  process.exit(1);
+}
+
+// CI-auditable: the effective config and targets on one line, so an overridden run
+// is distinguishable from a real one in the log.
+console.log(`lint-extension: CONFIG=${CONFIG} TARGETS=[${TARGETS.join(", ")}]`);
+
+// 64 production files today. The floor tolerates ordinary churn while catching a
+// glob that has stopped matching — the failure this wrapper exists for. It is set
+// close to the real count deliberately: a loose floor lets whole directories
+// (popup/ renders decrypted overviews; options/) drop out unnoticed.
+const MIN_LINTED_FILES = 60;
 
 // One representative file per `files` branch. Presence in the report is NOT enough:
 // ESLint 9 matches .js files under an implicit default config, so a file dropped
@@ -50,9 +74,14 @@ const MIN_LINTED_FILES = 50;
 // offscreen.js is the file the extension/public branch exists for: it receives the
 // cleartext password (clipboard.ts:36-43 <- background/index.ts
 // copyToClipboard(blob.password)).
+// One representative per tree that handles secret material, so a file-scoped
+// override entry — the audit surface's own escape hatch — cannot silently re-exempt
+// a whole directory. content/ is where two of the four original leak sites lived.
 const REQUIRED_COVERAGE = [
   "extension/public/offscreen.js",
   "extension/src/background/index.ts",
+  "extension/src/content/autofill-identity-lib.ts",
+  "extension/src/popup/App.tsx",
 ];
 
 const REQUIRED_RULES = ["no-console", "no-restricted-syntax"];
@@ -151,6 +180,13 @@ if (problems.length > 0) {
   for (const p of problems) {
     failures.push(`  ${p.file}:${p.line}  ${p.rule}  ${p.message}`);
   }
+} else if (eslint.status !== 0) {
+  // A non-zero exit with an empty report means eslint failed for a reason its JSON
+  // does not carry. Without this the wrapper would read that as success.
+  failures.push(
+    `LINT_UNEXPECTED_EXIT: eslint exited ${eslint.status} with no reported problems`,
+  );
+  if (eslint.stderr.trim()) failures.push(`  ${eslint.stderr.trim()}`);
 }
 
 if (failures.length > 0) {

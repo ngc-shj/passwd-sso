@@ -19,6 +19,16 @@ describe("classifyError", () => {
     expect(classifyError(new TypeError("boom"))).toBe("type-error");
   });
 
+  // DOMException also passes `instanceof Error`, so without its own branch every
+  // chrome.* API rejection — the failure mode webauthn-interceptor-register-failed
+  // exists for — silently collapses into "error".
+  it("maps a DOMException, which also satisfies instanceof Error", () => {
+    expect(new DOMException("x", "NotAllowedError") instanceof Error).toBe(true);
+    expect(classifyError(new DOMException("x", "NotAllowedError"))).toBe(
+      "dom-exception",
+    );
+  });
+
   it("maps a plain Error", () => {
     expect(classifyError(new Error("boom"))).toBe("error");
   });

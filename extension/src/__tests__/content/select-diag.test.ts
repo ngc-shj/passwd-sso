@@ -32,6 +32,12 @@ describe("describeSelect", () => {
     expect(describeSelect(sel("<select></select>"))).toBe("(unnamed)");
   });
 
+  it("falls through a whitespace-only name to the id", () => {
+    expect(describeSelect(sel('<select name=" " id="shipping"></select>'))).toBe(
+      "shipping",
+    );
+  });
+
   // The I1 red-proof. Every property the invariant forbids carries the payload
   // value here, so any implementation whose fallback chain reaches value, option
   // text, dataset, getAttribute, aria-label or outerHTML returns it.
@@ -73,14 +79,23 @@ describe("describeSelect", () => {
     );
   });
 
-  // String.prototype.slice would cut an astral character in half and emit a lone
-  // surrogate, which JSON.stringify renders as an unpaired escape — invalid UTF-8
-  // for the log ingests this sanitisation protects.
-  it("truncates on code points, so the label survives a JSON round-trip", () => {
+  // String.prototype.slice cuts UTF-16 units, so it can halve an astral character
+  // and emit a lone surrogate — invalid UTF-8 for the log ingests this sanitisation
+  // protects.
+  //
+  // Two traps this test has to avoid, both of which made an earlier version of it
+  // incapable of failing:
+  //   - the fixture must put the cut at an ODD unit offset. A name of nothing but
+  //     2-unit characters puts slice(0, 64) on an even boundary, which never splits
+  //     a pair. The leading "a" is what makes the offset odd.
+  //   - the assertion must be on well-formedness. `JSON.parse(JSON.stringify(s)) === s`
+  //     holds for EVERY string including lone surrogates (well-formed JSON.stringify,
+  //     ES2019), so a round-trip assertion is a tautology.
+  it("truncates on code points, never emitting a lone surrogate", () => {
     const el = sel("<select></select>");
-    el.setAttribute("name", "\u{10400}".repeat(SELECT_DIAG_LABEL_MAX + 5));
+    el.setAttribute("name", "a" + "\u{10400}".repeat(SELECT_DIAG_LABEL_MAX + 5));
     const label = describeSelect(el);
-    expect(JSON.parse(JSON.stringify(label))).toBe(label);
+    expect(label.isWellFormed()).toBe(true);
   });
 });
 

@@ -435,7 +435,7 @@ describe("performCreditCardAutofill — select mismatch diagnostics", () => {
 
   it("does not touch the select or dispatch events when no option matches", () => {
     const select = setupYearSelectForm();
-    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
     const onChange = vi.fn();
     const onInput = vi.fn();
     select.addEventListener("change", onChange);
@@ -443,6 +443,9 @@ describe("performCreditCardAutofill — select mismatch diagnostics", () => {
 
     performCreditCardAutofill(cardPayload({ expiryYear: "99" }));
 
+    // Reachability floor: every assertion below is a denial, so all of them are
+    // vacuously true if the detector stops matching this fixture.
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
     expect(onChange).not.toHaveBeenCalled();
     expect(onInput).not.toHaveBeenCalled();
     expect(select.value).toBe("");

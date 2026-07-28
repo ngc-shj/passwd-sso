@@ -411,7 +411,7 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
 
   it("does not touch the select or dispatch events when no option matches", () => {
     const select = setupCountrySelectForm();
-    vi.spyOn(console, "debug").mockImplementation(() => {});
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
     const onChange = vi.fn();
     const onInput = vi.fn();
     select.addEventListener("change", onChange);
@@ -421,6 +421,10 @@ describe("performIdentityAutofill — select mismatch diagnostics", () => {
       payload({ phone: "555-0100", country: "Nowhereland" }),
     );
 
+    // Reachability floor: every assertion below is a denial, so all of them are
+    // vacuously true if the detector stops matching this fixture and the select
+    // path is never entered.
+    expect(debug.mock.calls.length).toBeGreaterThan(0);
     // setSelectValue dispatches input+change only on the match path, so this pins
     // the early return itself rather than a value that could coincide.
     expect(onChange).not.toHaveBeenCalled();

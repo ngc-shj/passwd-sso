@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   ALARM_CLEAR_CLIPBOARD,
   CMD_COPY_PASSWORD,
@@ -157,6 +157,13 @@ async function unlockVault(chromeMock: ReturnType<typeof installChromeMock>) {
 describe("X-4 keyboard shortcut commands", () => {
   let chromeMock: ReturnType<typeof installChromeMock>;
 
+  // `vi.clearAllMocks()` in beforeEach clears call history but leaves a spy
+  // installed, so a console spy from one test would silence console for every
+  // later test in the file. Same reasoning as the two autofill test files.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -295,11 +302,12 @@ describe("X-4 keyboard shortcut commands", () => {
     );
     // The command still reports why it failed — warnBackground takes two closed
     // unions, so it has no slot the plaintext could occupy.
+    // The exact pin is what carries the red-proof; a `not.toContain("S3cr3t")`
+    // alongside it can never fail independently.
     expect(warn).toHaveBeenCalledTimes(1);
-    const logged = warn.mock.calls.flat().join(" ");
-    expect(logged).toBe("[passwd-sso] copy-command-failed: syntax-error");
-    expect(logged).not.toContain("S3cr3t");
-    expect(logged).not.toContain("password");
+    expect(warn.mock.calls.flat().join(" ")).toBe(
+      "[passwd-sso] copy-command-failed: syntax-error",
+    );
   });
 
   it("copy-username copies username to clipboard via offscreen document", async () => {

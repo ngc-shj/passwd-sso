@@ -1511,7 +1511,12 @@ async function performAutofillForEntry(
     entryType = data.entryType;
   }
 
-  const blob = JSON.parse(blobPlain) as {
+  // Narrow: a JSON.parse SyntaxError embeds a window of its input, and this
+  // function's callers surface the message through normalizeErrorCode into a
+  // rendered popup toast. normalizeErrorCode now refuses free-form messages, and
+  // this narrowing is the second layer — the parse failure is not diagnosable from
+  // its message anyway.
+  type DecryptedEntryBlob = {
     password?: string | null;
     username?: string | null;
     loginId?: string | null;
@@ -1544,11 +1549,20 @@ async function performAutofillForEntry(
     nationality?: string | null;
     idNumber?: string | null;
   };
-  const overview = JSON.parse(overviewPlain) as {
+  type DecryptedEntryOverview = {
     username?: string | null;
     urlHost?: string | null;
     additionalUrlHosts?: string[] | null;
   };
+
+  let blob: DecryptedEntryBlob;
+  let overview: DecryptedEntryOverview;
+  try {
+    blob = JSON.parse(blobPlain) as DecryptedEntryBlob;
+    overview = JSON.parse(overviewPlain) as DecryptedEntryOverview;
+  } catch {
+    return { ok: false, error: "INVALID_ENTRY" };
+  }
 
   // Hosts this entry is bound to. Sent to the content script so each frame can
   // self-verify its origin before writing the password (a popup/context-menu

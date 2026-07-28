@@ -21,7 +21,9 @@ const UNNAMED = "(unnamed)";
 const UNSAFE_LABEL_CHARS = /[^\p{L}\p{N}_\-.:[\]]/gu;
 
 export function describeSelect(select: SelectIdentity): string {
-  const raw = select.name || select.id;
+  // Trimmed: a page-authored `name=" "` is truthy, so an untrimmed check would
+  // short-circuit the id fallback and emit "?" — less useful than the sentinel.
+  const raw = select.name.trim() || select.id.trim();
   if (!raw) return UNNAMED;
 
   const sanitized = raw.replace(UNSAFE_LABEL_CHARS, "?");
