@@ -12,7 +12,7 @@
  * this file inserts is derived from the shared fixtures with a random
  * per-run suffix, following src/__tests__/db-integration/tenant-claim.integration.test.ts.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
 import { AuditScope, AuditAction, ActorType, AuditOutboxStatus } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
@@ -31,14 +31,6 @@ import {
 } from "../../../scripts/tenant-domain";
 
 const SKIP = !process.env.DATABASE_URL;
-// The CLI reads MIGRATION_DATABASE_URL directly; the integration harness's
-// superuser role connects through the same variable (see helpers.ts
-// getConnectionString("superuser")), so setting it here — when the runner
-// only exported DATABASE_URL — makes the CLI functions usable exactly the
-// way an operator would invoke them.
-if (!process.env.MIGRATION_DATABASE_URL && process.env.DATABASE_URL) {
-  process.env.MIGRATION_DATABASE_URL = process.env.DATABASE_URL;
-}
 
 function runToken(): string {
   return randomBytes(4).toString("hex");
@@ -49,6 +41,22 @@ const alwaysNo = async () => false;
 
 describe("tenant-domain CLI (C7)", () => {
   let ctx: TestContext;
+
+  // The CLI reads MIGRATION_DATABASE_URL per call by design (C7), and the
+  // integration harness's superuser role connects through the same variable
+  // (helpers.ts getConnectionString("superuser")). When the runner exported
+  // only DATABASE_URL, point the CLI at it so these tests invoke the commands
+  // exactly the way an operator would. Re-stubbed per test rather than
+  // assigned once at module scope: `process.env.X =` in a test file is
+  // forbidden by scripts/checks/check-test-hygiene.sh gate (c), and a single
+  // stub would not survive a future `vi.unstubAllEnvs()` in the integration
+  // setup file.
+  beforeEach(() => {
+    if (SKIP) return;
+    if (!process.env.MIGRATION_DATABASE_URL) {
+      vi.stubEnv("MIGRATION_DATABASE_URL", process.env.DATABASE_URL as string);
+    }
+  });
 
   beforeAll(async () => {
     if (SKIP) return;
