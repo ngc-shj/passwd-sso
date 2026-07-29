@@ -45,8 +45,17 @@ export function slugifyTenant(input: string): string {
 
 function sanitizeTenantClaimValue(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  // Strip all C0 (U+0000-U+001F), DEL (U+007F), and C1 (U+0080-U+009F) control characters
-  const cleaned = value.trim().replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+  // Strip all C0 (U+0000-U+001F), DEL (U+007F), C1 (U+0080-U+009F) control
+  // characters, plus Unicode bidi and zero-width formatting characters
+  // (U+200B-U+200F, U+202A-U+202E, U+2066-U+2069, U+FEFF). This value is
+  // rendered to an operator (audit metadata, Tenant.name, the CLI's terminal
+  // output), so a bidi-override or zero-width character could visually spoof
+  // the claim shown. Stripped only from the value that gets displayed — the
+  // stored/matched form is unaffected by this rider since C1's ASCII CHECK
+  // constraint already excludes these characters from what can be stored.
+  const cleaned = value
+    .trim()
+    .replace(/[\x00-\x1f\x7f-\x9f\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, "");
   if (cleaned.length === 0 || cleaned.length > MAX_TENANT_CLAIM_LENGTH) {
     return null;
   }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxExecuteRaw, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockResolveEffectiveSessionTimeouts, mockInvalidateCachedSessions } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateTenantForClaim, mockWithBypassRls, mockTxExecuteRaw, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockResolveEffectiveSessionTimeouts, mockInvalidateCachedSessions } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
@@ -30,7 +30,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockPrismaTransaction: vi.fn(),
   mockSessionMetaGetStore: vi.fn(),
   mockTenantClaimStoreGetStore: vi.fn(),
-  mockFindOrCreateSsoTenant: vi.fn(),
+  mockFindOrCreateTenantForClaim: vi.fn(),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockTxSession: {
@@ -64,7 +64,7 @@ vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimStoreGetStore },
 }));
 vi.mock("@/lib/tenant/tenant-management", () => ({
-  findOrCreateSsoTenant: mockFindOrCreateSsoTenant,
+  findOrCreateTenantForClaim: mockFindOrCreateTenantForClaim,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
@@ -115,7 +115,7 @@ describe("createCustomAdapter", () => {
     );
     // Default: no pending tenant claim
     mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
-    mockFindOrCreateSsoTenant.mockResolvedValue(null);
+    mockFindOrCreateTenantForClaim.mockResolvedValue(null);
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         tenant: { ...mockPrismaTenant, findUnique: mockTxTenant.findUnique },
@@ -195,7 +195,7 @@ describe("createCustomAdapter", () => {
 
     it("places user in SSO tenant when tenant claim is pending", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
-      mockFindOrCreateSsoTenant.mockResolvedValue({ id: "sso-tenant-1" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue({ id: "sso-tenant-1" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-2",
         name: "SSO User",
@@ -216,7 +216,7 @@ describe("createCustomAdapter", () => {
 
       // Bootstrap tenant.create should NOT be called
       expect(mockPrismaTenant.create).not.toHaveBeenCalled();
-      expect(mockFindOrCreateSsoTenant).toHaveBeenCalledWith("acme.com", expect.anything());
+      expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("acme.com", expect.anything());
       // User should be created with SSO tenant ID
       expect(mockPrismaUser.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -233,9 +233,9 @@ describe("createCustomAdapter", () => {
       });
     });
 
-    it("falls back to bootstrap when findOrCreateSsoTenant returns null", async () => {
+    it("falls back to bootstrap when findOrCreateTenantForClaim returns null", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "invalid" });
-      mockFindOrCreateSsoTenant.mockResolvedValue(null);
+      mockFindOrCreateTenantForClaim.mockResolvedValue(null);
       mockPrismaTenant.create.mockResolvedValue({ id: "bootstrap-1" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-3",
@@ -286,7 +286,7 @@ describe("createCustomAdapter", () => {
         emailVerified: null,
       });
 
-      expect(mockFindOrCreateSsoTenant).not.toHaveBeenCalled();
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
       expect(mockPrismaTenant.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ isBootstrap: true }),
         select: { id: true },
@@ -296,9 +296,9 @@ describe("createCustomAdapter", () => {
       });
     });
 
-    it("propagates error when findOrCreateSsoTenant throws", async () => {
+    it("propagates error when findOrCreateTenantForClaim throws", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
-      mockFindOrCreateSsoTenant.mockRejectedValue(new Error("DB down"));
+      mockFindOrCreateTenantForClaim.mockRejectedValue(new Error("DB down"));
 
       const adapter = createCustomAdapter();
       await expect(

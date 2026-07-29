@@ -35,6 +35,8 @@ MIGRATION_DATABASE_URL=<superuser-url> node scripts/bootstrap-rds-roles.mjs     
 MIGRATION_DATABASE_URL=<superuser-url> node scripts/audit-db-grants.mjs         # Audit live effective privileges (table/column/schema/sequence/function/database/default-ACL/role-attrs, incl. PUBLIC + inherited) vs db-grants-manifest.json (--write to regenerate)
 
 MIGRATION_DATABASE_URL=<privileged-url> npm run migrate:account-tokens               # Encrypt legacy plaintext OAuth tokens (idempotent; --dry-run available)
+
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list|unmapped|preflight|add|remove  # SSO tenant claim registry (lockout diagnosis/recovery); see README.md's "IdP domain changed / tenant locked out"
 ```
 
 Audit outbox worker (separate process):

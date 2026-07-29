@@ -26,6 +26,7 @@ import {
   MS_PER_MINUTE,
   MS_PER_SECOND,
   SEC_PER_DAY,
+  SEC_PER_HOUR,
   SEC_PER_MINUTE,
 } from "@/lib/constants/time";
 
@@ -230,6 +231,13 @@ export const envObject = z.object({
     .optional(),
   // Legacy Auth.js v4 name; referenced as fallback in src/app/api/sessions/helpers.ts:10
   NEXTAUTH_URL: nonEmpty.optional(),
+  // A07-6 (CHIPS): opt-in Partitioned attribute on the session cookie. Read
+  // directly by src/auth.config.ts, not through the validated `env`
+  // singleton — declared here for documentation/drift-check parity only.
+  COOKIE_PARTITIONED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 
   // --- Auth providers (superRefine: at least one provider set in prod) ---
   AUTH_GOOGLE_ID: nonEmpty.optional(),
@@ -260,6 +268,14 @@ export const envObject = z.object({
     .default("false")
     .transform((v) => v === "true"),
   AUDIT_LOG_APP_NAME: z.string().default("passwd-sso"),
+  // Secret HMAC pepper for auth-failure audit identifier hashing
+  // (src/lib/audit/auth-failure.ts). Optional OVERRIDE — when unset the pepper
+  // is HKDF-derived from AUTH_SECRET, so production always has real key
+  // material. Only when neither is available is no hash computed at all
+  // (identifierHash: null, identifierHashScope: "unkeyed"). There is
+  // deliberately no empty-key fallback: an unkeyed hash over an email input
+  // space is a lookup, not a protection.
+  AUDIT_IDENTIFIER_PEPPER: z.string().optional(),
 
   // --- Conditional: Cloud blob storage ---
   AWS_REGION: nonEmpty.optional(),
@@ -360,6 +376,39 @@ export const envObject = z.object({
   TAILSCALE_SOCKET: z.string().optional(),
   // SENTRY_DSN public-key segment is project-sensitive — sidecar marks secret: true.
   SENTRY_DSN: z.string().optional(),
+
+  // --- Break Glass cooling-off (C19 / OWASP A04-5) ---
+  // Delay in seconds before a first same-requester/target Break Glass grant
+  // in a 24h window executes; 0 disables the delay. Read directly by
+  // src/app/api/tenant/breakglass/route.ts, not through the validated env.
+  BREAKGLASS_COOLING_OFF_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(SEC_PER_HOUR),
+
+  // --- iOS Universal Links ---
+  // Per-deployment Apple values consumed by
+  // src/app/api/mobile/.well-known/apple-app-site-association/route.ts.
+  // No sensible default for TEAM_ID — the route degrades to 503 when unset.
+  IOS_APP_TEAM_ID: z.string().optional(),
+  // Matches PRODUCT_BUNDLE_IDENTIFIER in ios/project.yml (the PasswdSSOApp
+  // target) — the route's appIDs must associate with the installed app.
+  IOS_APP_BUNDLE_ID: z.string().default("jp.jpng.passwd-sso"),
+
+  // --- Resource quotas (C18 / OWASP A04-1) ---
+  // Per-resource soft caps read via a locally-defined envInt() helper in
+  // src/lib/quota/resource-quotas.ts (shadows the exported prisma.ts
+  // helper of the same name — a lexical scan, not a symbol-resolving one,
+  // still finds these call sites).
+  QUOTA_MAX_PASSWORDS_PER_USER: z.coerce.number().int().min(1).default(10_000),
+  QUOTA_MAX_ATTACHMENT_BYTES_PER_USER: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(1_073_741_824),
+  QUOTA_MAX_SHARE_LINKS_PER_USER: z.coerce.number().int().min(1).default(1_000),
+  QUOTA_MAX_WEBHOOKS_PER_TENANT: z.coerce.number().int().min(1).default(100),
 
   // --- Extension trust path (C1) ---
   // Allowlist of chrome-extension origins permitted to call /api/extension/bridge-code.

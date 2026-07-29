@@ -333,6 +333,10 @@ export const EXTERNAL_DELIVERY_METADATA_BLOCKLIST = new Set([
   // Network identifiers stay in top-level columns; strip if accidentally written into metadata
   "ip",
   "userAgent",
+  // AUTH_LOGIN_FAILURE's IdP claim (C6) — same sensitivity class as `reason`,
+  // which this list already strips; withholding one and forwarding the other
+  // would be an asymmetry decided by omission.
+  "claim",
 ]);
 
 /**

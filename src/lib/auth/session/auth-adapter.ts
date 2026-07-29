@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
-import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";
+import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
@@ -171,7 +171,7 @@ export function createCustomAdapter(): Adapter {
         // withBypassRls tx (no redundant inner $transaction).
         let ssoTenant: { id: string } | null = null;
         if (pendingClaim) {
-          ssoTenant = await findOrCreateSsoTenant(pendingClaim, tx);
+          ssoTenant = await findOrCreateTenantForClaim(pendingClaim, tx);
         }
 
         const tenant = ssoTenant

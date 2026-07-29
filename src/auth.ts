@@ -8,7 +8,7 @@ import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
-import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";
+import { resolveTenantByClaim, findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
@@ -16,6 +16,7 @@ import { getLogger } from "@/lib/logger";
 import {
   emitAuthLoginFailure,
   type AuthProvider,
+  type AuthLoginFailureReason,
 } from "@/lib/audit/auth-failure";
 import authConfig from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
@@ -44,11 +45,27 @@ export async function assertBootstrapSingleMember(
   }
 }
 
+// Discriminated result so a denial can carry which reason to audit-emit
+// without emitting from inside this function. Emitting here would run
+// logAuditAsync -> resolveTenantId -> withBypassRls NESTED inside the
+// bootstrap-migration prisma.$transaction below — an R9 pool-exhaustion
+// shape. The reason is instead carried out of withBypassRls (it is generic
+// over the callback's return, src/lib/tenant-rls.ts:54) and
+// emitAuthLoginFailure stays at the signIn callback, post-transaction.
+export type SignInTenantResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">;
+      tenantId: string | null;
+      claim: string | null;
+    };
+
 export async function ensureTenantMembershipForSignIn(
   userId: string,
   account?: Account | null,
   profile?: Record<string, unknown> | null,
-): Promise<boolean> {
+): Promise<SignInTenantResult> {
   const tenantClaim = extractTenantClaimValue(account, profile);
   if (!tenantClaim) {
     try {
@@ -58,179 +75,233 @@ export async function ensureTenantMembershipForSignIn(
         error instanceof Error &&
         error.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED"
       ) {
-        return false;
+        return { ok: false, reason: "tenant_mismatch", tenantId: null, claim: null };
       }
       throw error;
     }
     // Allow first-time sign-in without tenant claim.
     // Membership bootstrap is handled by the auth adapter createUser flow.
-    return true;
+    return { ok: true };
   }
 
-  const tenant = await withBypassRls(prisma, async (tx) => {
-    const found = await findOrCreateSsoTenant(tenantClaim, tx);
-
-    if (!found) return null;
-
+  return withBypassRls(prisma, async (tx) => {
+    // Both lookups run inside this single withBypassRls callback, in this
+    // order, and neither may move. Resolving before creating is D2: the old
+    // findOrCreateSsoTenant committed a tenants row before the denial check
+    // below ever ran, so a claim that was going to be denied still left a
+    // tenant behind. Reading the claim's tenant AND the user's existing
+    // tenant before any write is what lets every deny branch below skip
+    // findOrCreateTenantForClaim entirely.
+    //
+    // resolveUserTenantIdFromClient is called with the GLOBAL `prisma` proxy,
+    // not `tx` — this mirrors the pre-existing call shape and is required,
+    // not accidental. src/lib/prisma.ts's Proxy consults
+    // getTenantRlsContext() and rebinds every call to the active transaction
+    // while withBypassRls's AsyncLocalStorage context is live, so this still
+    // reads inside the bypass tx. Hoisting this call ABOVE withBypassRls
+    // would instead run it as `passwd_app` under FORCE ROW LEVEL SECURITY
+    // with no app.tenant_id set: tenantMember.findMany would return zero
+    // rows and every deny below would silently become an allow — a
+    // cross-tenant fail-open.
+    const claimTenant = await resolveTenantByClaim(tenantClaim, tx);
     const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
 
-    // Single-tenant sign-in policy: reject cross-tenant login.
-    if (existingTenantId && existingTenantId !== found.id) {
-      const existingTenant = await tx.tenant.findUnique({
-        where: { id: existingTenantId },
-        select: { isBootstrap: true },
-      });
-      const isBootstrapTenant = !!existingTenant?.isBootstrap;
-      // Allow one-time migration from bootstrap tenant to IdP tenant.
-      if (isBootstrapTenant) {
-        // Captured inside the tx for cache invalidation after commit (R3 site
-        // #10 — Session.tenantId is cached in SessionInfo, so the migration
-        // updateMany would otherwise leave stale cache entries up to TTL).
-        let migratedSessionTokens: string[] = [];
-        await prisma.$transaction(async (tx) => {
-          await assertBootstrapSingleMember(tx, existingTenantId);
-
-          // Migrate user and account rows
-          await tx.user.update({
-            where: { id: userId },
-            data: { tenantId: found.id },
-          });
-
-          await tx.account.updateMany({
-            where: { userId },
-            data: { tenantId: found.id },
-          });
-
-          // Migrate all tenant-scoped data tables
-          await tx.passwordEntry.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.tag.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.folder.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          // Capture sessionTokens before mutating tenantId so the cache
-          // invalidation after $transaction can reach the now-migrated rows.
-          const migratedSessions = await tx.session.findMany({
-            where: { userId, tenantId: existingTenantId },
-            select: { sessionToken: true },
-          });
-          migratedSessionTokens = migratedSessions.map((s) => s.sessionToken);
-          await tx.session.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.extensionToken.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.passwordEntryHistory.updateMany({
-            where: { tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.vaultKey.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          // C13: audit_logs UPDATE is revoked from passwd_app; route through
-          // the SECURITY DEFINER procedure so this privileged tenant-merge
-          // path retains its audit history continuity.
-          await tx.$executeRaw`CALL audit_log_tenant_migrate(${userId}::uuid, ${existingTenantId}::uuid, ${found.id}::uuid)`;
-          // not a state transition — tenantId reassignment, see ../auth/email-uniqueness-design.md
-          await tx.emergencyAccessGrant.updateMany({
-            where: { ownerId: userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          // emergencyAccessKeyPair/shareAccessLog have no userId column;
-          // safe because bootstrap tenants are single-user by design.
-          await tx.emergencyAccessKeyPair.updateMany({
-            where: { tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.passwordShare.updateMany({
-            where: { createdById: userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.shareAccessLog.updateMany({
-            where: { tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.attachment.updateMany({
-            where: { createdById: userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.notification.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.apiKey.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-          await tx.webAuthnCredential.updateMany({
-            where: { userId, tenantId: existingTenantId },
-            data: { tenantId: found.id },
-          });
-
-          // Create membership in new tenant and remove old
-          await tx.tenantMember.upsert({
-            where: {
-              tenantId_userId: {
-                tenantId: found.id,
-                userId,
-              },
-            },
-            create: {
-              tenantId: found.id,
-              userId,
-              role: TENANT_ROLE.MEMBER,
-            },
-            update: {},
-          });
-
-          await tx.tenantMember.deleteMany({
-            where: { userId, tenantId: existingTenantId },
-          });
-        });
-
-        // R3 site #10: Session.tenantId is part of cached SessionInfo;
-        // tombstone the migrated tokens so the proxy stops serving the
-        // stale (pre-migration) tenantId for up to SESSION_CACHE_TTL_MS.
-        if (migratedSessionTokens.length > 0) {
-          await invalidateCachedSessions(migratedSessionTokens);
-        }
-
-        // Bootstrap migration complete — skip redundant upsert below
-        return found;
-      } else {
-        return null;
+    if (existingTenantId === null) {
+      // Rows 4 / 8: no existing membership. Join the claimed tenant,
+      // creating it first if this is the first sign-in to see this claim.
+      const target = claimTenant ?? (await findOrCreateTenantForClaim(tenantClaim, tx));
+      if (!target) {
+        // Row 8b, defensive: findOrCreateTenantForClaim returns null when the
+        // claim collides with a revoked tenant_claims row (D2). Unreachable
+        // from sign-in via the length/empty path today
+        // (sanitizeTenantClaimValue already trims/bounds/rejects-empty) —
+        // covered here so the dispatch stays exhaustive.
+        return { ok: false, reason: "tenant_mismatch", tenantId: null, claim: tenantClaim };
       }
+
+      await tx.tenantMember.upsert({
+        where: { tenantId_userId: { tenantId: target.id, userId } },
+        create: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER },
+        update: {},
+      });
+      return { ok: true };
     }
 
-    await tx.tenantMember.upsert({
-      where: {
-        tenantId_userId: {
-          tenantId: found.id,
-          userId,
+    if (claimTenant && existingTenantId === claimTenant.id) {
+      // Row 5: already a member of the claimed tenant.
+      await tx.tenantMember.upsert({
+        where: { tenantId_userId: { tenantId: claimTenant.id, userId } },
+        create: { tenantId: claimTenant.id, userId, role: TENANT_ROLE.MEMBER },
+        update: {},
+      });
+      return { ok: true };
+    }
+
+    // existingTenantId names a tenant other than the one the claim resolves
+    // to (or the claim did not resolve at all). The only remaining allow
+    // path is a one-time bootstrap-tenant migration; everything else denies.
+    const existingTenant = await tx.tenant.findUnique({
+      where: { id: existingTenantId },
+      select: { isBootstrap: true },
+    });
+    const isBootstrapTenant = !!existingTenant?.isBootstrap;
+
+    if (!isBootstrapTenant) {
+      // Rows 7 / 9b — same shape (existing tenant, not bootstrap, not the
+      // claimed tenant), different operator-facing reason:
+      //   - claimTenant resolved (row 7): this user belongs somewhere else,
+      //     a tenant this deployment already knows -> tenant_mismatch.
+      //   - claimTenant did not resolve (row 9b, the reported production
+      //     bug): the IdP is sending a claim this deployment has not
+      //     registered -> tenant_claim_unmapped. Distinct because the
+      //     operator action differs (register the claim vs. investigate the
+      //     user).
+      return {
+        ok: false,
+        reason: claimTenant ? "tenant_mismatch" : "tenant_claim_unmapped",
+        tenantId: existingTenantId,
+        claim: tenantClaim,
+      };
+    }
+
+    // Bootstrap tenant: eligible for one-time migration. Resolve (or, row
+    // 9a, create) the target tenant now — creating here is on an ALLOW path,
+    // which does not conflict with D2 (D2 is about writes on paths that go
+    // on to deny). Row 9a is load-bearing (round-3 CR10): denying whenever
+    // the claim is unresolved would regress the primary bootstrap->SSO
+    // onboarding path (a magic-link user's first Google sign-in) into a hard
+    // denial of the same NF2 shape as the bug this PR fixes.
+    const target = claimTenant ?? (await findOrCreateTenantForClaim(tenantClaim, tx));
+    if (!target) {
+      // Same defensive null as row 8b (D2), reached via the bootstrap branch.
+      return { ok: false, reason: "tenant_mismatch", tenantId: existingTenantId, claim: tenantClaim };
+    }
+
+    // Rows 6 / 9a: migrate.
+    // Captured inside the tx for cache invalidation after commit (R3 site
+    // #10 — Session.tenantId is cached in SessionInfo, so the migration
+    // updateMany would otherwise leave stale cache entries up to TTL).
+    let migratedSessionTokens: string[] = [];
+    await prisma.$transaction(async (tx) => {
+      await assertBootstrapSingleMember(tx, existingTenantId); // row 6b throw
+
+      // Migrate user and account rows
+      await tx.user.update({
+        where: { id: userId },
+        data: { tenantId: target.id },
+      });
+
+      await tx.account.updateMany({
+        where: { userId },
+        data: { tenantId: target.id },
+      });
+
+      // Migrate all tenant-scoped data tables
+      await tx.passwordEntry.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.tag.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.folder.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      // Capture sessionTokens before mutating tenantId so the cache
+      // invalidation after $transaction can reach the now-migrated rows.
+      const migratedSessions = await tx.session.findMany({
+        where: { userId, tenantId: existingTenantId },
+        select: { sessionToken: true },
+      });
+      migratedSessionTokens = migratedSessions.map((s) => s.sessionToken);
+      await tx.session.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.extensionToken.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.passwordEntryHistory.updateMany({
+        where: { tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.vaultKey.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      // C13: audit_logs UPDATE is revoked from passwd_app; route through
+      // the SECURITY DEFINER procedure so this privileged tenant-merge
+      // path retains its audit history continuity.
+      await tx.$executeRaw`CALL audit_log_tenant_migrate(${userId}::uuid, ${existingTenantId}::uuid, ${target.id}::uuid)`;
+      // not a state transition — tenantId reassignment, see ../auth/email-uniqueness-design.md
+      await tx.emergencyAccessGrant.updateMany({
+        where: { ownerId: userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      // emergencyAccessKeyPair/shareAccessLog have no userId column;
+      // safe because bootstrap tenants are single-user by design.
+      await tx.emergencyAccessKeyPair.updateMany({
+        where: { tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.passwordShare.updateMany({
+        where: { createdById: userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.shareAccessLog.updateMany({
+        where: { tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.attachment.updateMany({
+        where: { createdById: userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.notification.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.apiKey.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+      await tx.webAuthnCredential.updateMany({
+        where: { userId, tenantId: existingTenantId },
+        data: { tenantId: target.id },
+      });
+
+      // Create membership in new tenant and remove old
+      await tx.tenantMember.upsert({
+        where: {
+          tenantId_userId: {
+            tenantId: target.id,
+            userId,
+          },
         },
-      },
-      create: {
-        tenantId: found.id,
-        userId,
-        role: TENANT_ROLE.MEMBER,
-      },
-      update: {},
+        create: {
+          tenantId: target.id,
+          userId,
+          role: TENANT_ROLE.MEMBER,
+        },
+        update: {},
+      });
+
+      await tx.tenantMember.deleteMany({
+        where: { userId, tenantId: existingTenantId },
+      });
     });
 
-    return found;
-  }, BYPASS_PURPOSE.AUTH_FLOW);
+    // R3 site #10: Session.tenantId is part of cached SessionInfo;
+    // tombstone the migrated tokens so the proxy stops serving the
+    // stale (pre-migration) tenantId for up to SESSION_CACHE_TTL_MS.
+    if (migratedSessionTokens.length > 0) {
+      await invalidateCachedSessions(migratedSessionTokens);
+    }
 
-  return !!tenant;
+    return { ok: true };
+  }, BYPASS_PURPOSE.AUTH_FLOW);
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -354,20 +425,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       try {
-        const ok = await ensureTenantMembershipForSignIn(
+        const result = await ensureTenantMembershipForSignIn(
           userId,
           params.account,
           (params.profile ?? null) as Record<string, unknown> | null,
         );
-        if (!ok) {
+        if (!result.ok) {
           await emitAuthLoginFailure({
             email: emailForAudit,
             provider: auditProvider,
-            reason: "tenant_mismatch",
+            reason: result.reason,
+            tenantId: result.tenantId,
             userId,
+            claim: result.claim,
           });
         }
-        return ok;
+        return result.ok;
       } catch (error) {
         // MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED is handled inside
         // ensureTenantMembershipForSignIn and returns false (not thrown here).

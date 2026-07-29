@@ -1,0 +1,251 @@
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { createHmac } from "node:crypto";
+// String constant: unaffected by the vi.resetModules() dance below, so a
+// static import is safe even though the module under test is re-imported.
+import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
+
+// `getIdentifierPepper`'s memoisation and `warnedNoPepper` flag are frozen at
+// first call, module-scope state that survives across tests within the same
+// module instance. vitest.config.ts sets isolate:true per FILE (not per
+// test), and src/__tests__/setup.ts mandates vi.stubEnv/vi.unstubAllEnvs,
+// neither of which reaches a value frozen at first call. Each test therefore
+// resets the module registry and re-imports the module under test — the
+// pattern already used by src/__tests__/audit-logger.test.ts.
+type LoggedAuditCall = { metadata: Record<string, unknown> };
+
+const { mockLogAudit } = vi.hoisted(() => ({
+  mockLogAudit: vi.fn(async (_params: LoggedAuditCall) => undefined),
+}));
+
+vi.mock("@/lib/audit/audit", () => ({
+  logAuditAsync: mockLogAudit,
+}));
+
+const { mockLoggerWarn } = vi.hoisted(() => ({
+  mockLoggerWarn: vi.fn(),
+}));
+
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ warn: mockLoggerWarn }),
+}));
+
+async function loadAuthFailure() {
+  vi.resetModules();
+  return import("@/lib/audit/auth-failure");
+}
+
+function lastMetadata(): Record<string, unknown> {
+  const call = mockLogAudit.mock.calls.at(-1);
+  if (!call) throw new Error("logAuditAsync was not called");
+  return call[0].metadata;
+}
+
+describe("emitAuthLoginFailure", () => {
+  beforeEach(() => {
+    mockLogAudit.mockClear();
+    mockLoggerWarn.mockClear();
+  });
+
+  it("emits identifierHashScope 'tenant' when tenantId is known", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.TENANT);
+    expect(metadata.identifierHash).not.toBeNull();
+  });
+
+  it("emits identifierHashScope 'global' when tenantId is unknown", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "unknown_email",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.GLOBAL);
+    expect(metadata.identifierHash).not.toBeNull();
+  });
+
+  it("emits identifierHash: null and identifierHashScope: null when there is no email at all", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: null,
+      provider: "google",
+      reason: "unknown_email",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.identifierHash).toBeNull();
+    expect(metadata.identifierHashScope).toBeNull();
+  });
+
+  it("with an explicit pepper, the hash matches the explicit-key HMAC", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "explicit-pepper-value");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "USER@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    const expected = createHmac("sha256", Buffer.from("explicit-pepper-value", "utf8"))
+      .update("user@primary.example:tenant-1")
+      .digest("hex")
+      .slice(0, 16);
+
+    expect(lastMetadata().identifierHash).toBe(expected);
+  });
+
+  it("unset pepper + AUTH_SECRET set: stable, and differs from the empty-key HMAC of the same input", async () => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+    const first = lastMetadata().identifierHash;
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+    const second = lastMetadata().identifierHash;
+
+    expect(first).toBe(second);
+
+    const emptyKeyHash = createHmac("sha256", "")
+      .update("user@primary.example:tenant-1")
+      .digest("hex")
+      .slice(0, 16);
+    expect(first).not.toBe(emptyKeyHash);
+  });
+
+  it("unset pepper + AUTH_SECRET set: differs when AUTH_SECRET differs", async () => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    const { emitAuthLoginFailure: emitWithSecretA } = await loadAuthFailure();
+    await emitWithSecretA({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+    const hashA = lastMetadata().identifierHash;
+
+    vi.stubEnv("AUTH_SECRET", "b".repeat(32));
+    const { emitAuthLoginFailure: emitWithSecretB } = await loadAuthFailure();
+    await emitWithSecretB({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+    const hashB = lastMetadata().identifierHash;
+
+    expect(hashA).not.toBe(hashB);
+  });
+
+  it("AUTH_SECRET shorter than 32 chars is treated as absent", async () => {
+    vi.stubEnv("AUTH_SECRET", "a".repeat(31));
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.identifierHash).toBeNull();
+    expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.UNKEYED);
+  });
+
+  it("both unset: identifierHash null, identifierHashScope 'unkeyed', warning emitted once across repeated calls", async () => {
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+    await emitAuthLoginFailure({
+      email: "other@primary.example",
+      tenantId: "tenant-2",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    expect(mockLogAudit).toHaveBeenCalledTimes(2);
+    for (const call of mockLogAudit.mock.calls) {
+      const metadata = call[0].metadata;
+      expect(metadata.identifierHash).toBeNull();
+      expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.UNKEYED);
+    }
+    expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
+  });
+
+  it("the warning fires on first derivation, not at module load", async () => {
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+    // Import alone must not have warned yet.
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "unknown_email",
+    });
+    expect(mockLoggerWarn).toHaveBeenCalledTimes(1);
+  });
+
+  it("claim appears in metadata, truncated at MAX_TENANT_CLAIM_LENGTH", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+    const { MAX_TENANT_CLAIM_LENGTH } = await import("@/lib/validations/common.server");
+
+    const overlong = "a".repeat(MAX_TENANT_CLAIM_LENGTH + 50);
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "tenant_claim_unmapped",
+      claim: overlong,
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.claim).toBe(overlong.slice(0, MAX_TENANT_CLAIM_LENGTH));
+    expect((metadata.claim as string).length).toBe(MAX_TENANT_CLAIM_LENGTH);
+  });
+
+  it("claim is omitted from metadata when not supplied", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    expect(lastMetadata()).not.toHaveProperty("claim");
+  });
+});

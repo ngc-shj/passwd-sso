@@ -522,6 +522,92 @@ describe("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS (C1)", () => {
   });
 });
 
+// C9: nine vars that were read by app code but undeclared in the Zod schema.
+// Each must parse when absent AND resolve to its documented default (or
+// undefined, for vars with no sensible default / a documented degraded mode).
+describe("C9 undeclared env vars", () => {
+  it("parses with all nine absent and matches documented defaults", () => {
+    const result = envObject.safeParse(baseEnv());
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.COOKIE_PARTITIONED).toBe(false);
+      expect(result.data.AUDIT_IDENTIFIER_PEPPER).toBeUndefined();
+      expect(result.data.BREAKGLASS_COOLING_OFF_SECONDS).toBe(3600);
+      expect(result.data.IOS_APP_TEAM_ID).toBeUndefined();
+      expect(result.data.IOS_APP_BUNDLE_ID).toBe("jp.jpng.passwd-sso");
+      expect(result.data.QUOTA_MAX_PASSWORDS_PER_USER).toBe(10_000);
+      expect(result.data.QUOTA_MAX_ATTACHMENT_BYTES_PER_USER).toBe(1_073_741_824);
+      expect(result.data.QUOTA_MAX_SHARE_LINKS_PER_USER).toBe(1_000);
+      expect(result.data.QUOTA_MAX_WEBHOOKS_PER_TENANT).toBe(100);
+    }
+  });
+
+  it("transforms COOKIE_PARTITIONED string to boolean", () => {
+    const result = envObject.safeParse(baseEnv({ COOKIE_PARTITIONED: "true" }));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.COOKIE_PARTITIONED).toBe(true);
+    }
+  });
+
+  it("coerces BREAKGLASS_COOLING_OFF_SECONDS from string number", () => {
+    const result = envObject.safeParse(
+      baseEnv({ BREAKGLASS_COOLING_OFF_SECONDS: "0" }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.BREAKGLASS_COOLING_OFF_SECONDS).toBe(0);
+    }
+  });
+
+  it("accepts an explicit AUDIT_IDENTIFIER_PEPPER and IOS_APP_TEAM_ID", () => {
+    const result = envObject.safeParse(
+      baseEnv({
+        AUDIT_IDENTIFIER_PEPPER: "some-pepper-value",
+        IOS_APP_TEAM_ID: "ABCDE12345",
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.AUDIT_IDENTIFIER_PEPPER).toBe("some-pepper-value");
+      expect(result.data.IOS_APP_TEAM_ID).toBe("ABCDE12345");
+    }
+  });
+
+  it("coerces QUOTA_MAX_PASSWORDS_PER_USER from string number", () => {
+    const result = envObject.safeParse(
+      baseEnv({ QUOTA_MAX_PASSWORDS_PER_USER: "5000" }),
+    );
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.QUOTA_MAX_PASSWORDS_PER_USER).toBe(5000);
+    }
+  });
+
+  it("never appears as production-required (NF2 — no new startup requirement)", () => {
+    // superRefine has no addIssue path keyed to any of the nine; a production
+    // parse with only the pre-existing required fields set must still succeed
+    // once those pre-existing requirements are met.
+    const result = envSchema.safeParse(
+      baseEnv({
+        NODE_ENV: "production",
+        AUTH_SECRET: "x".repeat(32),
+        AUTH_URL: "https://app.example.com",
+        VERIFIER_PEPPER_KEY: VALID_HEX_64,
+        SESSION_TOKEN_HMAC_KEY: VALID_HEX_64,
+        REDIS_URL: "redis://localhost:6379",
+        AUTH_GOOGLE_ID: "id",
+        AUTH_GOOGLE_SECRET: "secret",
+        AUDIT_ANCHOR_PUBLISHER_ENABLED: "true",
+        AUDIT_ANCHOR_SIGNING_KEY: VALID_HEX_64,
+        AUDIT_ANCHOR_TAG_SECRET: VALID_HEX_64,
+        AUDIT_ANCHOR_DESTINATION_FS_PATH: "/var/anchors",
+      }),
+    );
+    expect(result.success).toBe(true);
+  });
+});
+
 describe("getSchemaShape", () => {
   it("returns the envObject .shape (pickable)", () => {
     const shape = getSchemaShape();

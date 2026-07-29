@@ -1756,3 +1756,118 @@ Every new guard gets a paired allow case, not only a deny case.
 | C13 | Dev-database remediation runbook                                 | pending |
 
 All contracts are `pending` until round-3 review closes.
+
+---
+
+## Implementation Checklist (Phase 2 Step 2-1)
+
+Derived from code, 2026-07-29. Revision-5 (D1/D2/D3) governs where it conflicts
+with the C1/C3/C4 contract bodies: **release 1 keeps `Tenant.externalId`'s unique
+index, keeps writing it, and adds a resolver fallback to it.** No `DROP INDEX`,
+no `DROP CONSTRAINT` in this PR.
+
+### Files to modify / create
+
+| File | Contract | Action |
+|---|---|---|
+| `prisma/schema.prisma` | C1 | add `model TenantClaim`; `Tenant.claims TenantClaim[]`. `externalId` keeps `@unique` (D1) |
+| `prisma/migrations/<ts>_add_tenant_claims/migration.sql` | C1 | new; `BEGIN;…COMMIT;` wrapper (ddlCount>1); **no `DROP POLICY IF EXISTS`** (fires `check-destructive-migration.mjs`'s DROP matcher — verified at `scripts/checks/check-destructive-migration.mjs:189-206`) |
+| `scripts/lib/tenant-claim-backfill.sql` | C1 | new; the backfill statement, copied verbatim into the migration + drift-asserted by the test (Prisma has no `@import`) |
+| `scripts/rls-cross-tenant-tables.manifest` | C1 | `tenant_claims` line (alphabetical) + prose total 55 → 56 |
+| `scripts/rls-cross-tenant-seed.sql` | C1 | tenant-A/tenant-B rows + prose total 55 → 56 |
+| `scripts/checks/db-grants-manifest.json` | C1 | regenerate via `node scripts/audit-db-grants.mjs --write` |
+| `src/lib/tenant/tenant-claim-registry.ts` | C2 | new (NOT `tenant-claim.ts` — factory-mocked in two suites) |
+| `src/lib/tenant/tenant-claim-registry.test.ts` | C2 | new, unmocked |
+| `src/lib/tenant/tenant-management.ts` | C3, C4 | `resolveTenantByClaim`, `findOrCreateTenantForClaim`; `findOrCreateSsoTenant` deleted |
+| `src/lib/tenant/resolve-tenant-by-claim.test.ts` | C3 | new file |
+| `src/lib/tenant/tenant-management.test.ts` | C4 | rewritten (7 existing cases: see C4's table) |
+| `src/auth.ts` | C5 | `SignInTenantResult`, 12-row dispatch, reorder (resolve before create), emit `result.reason`/`claim`/`tenantId` |
+| `src/auth.test.ts` | C5 | 10 `expect(ok)` sites → `result.ok`; `tenantClaim` delegate; `vi.mock("@/lib/audit/auth-failure")` |
+| `src/lib/auth/session/auth-adapter.ts` | C4 | call-site rename only |
+| `src/lib/auth/session/auth-adapter.test.ts` | C4 | mock symbol rename only |
+| `src/lib/audit/auth-failure.ts` | C6, C8 | `tenant_claim_unmapped`, `claim`, `identifierHashScope`, HKDF pepper |
+| `src/lib/audit/auth-failure.test.ts` | C6, C8 | new file |
+| `src/lib/tenant/tenant-claim.ts` | C6 | sanitizer bidi/zero-width strip (RS6 rider) |
+| `src/lib/tenant/tenant-claim.test.ts` | C6 | rider test + **9 `process.env.X =` lines → `vi.stubEnv`** (`check-test-hygiene.sh` gate (c)) |
+| `src/__tests__/audit-logger.test.ts` | C6 | `METADATA_BLOCKLIST` case + **1 `process.env.X =` → `vi.stubEnv`** |
+| `src/lib/http/external-http.ts` | C6 | `claim` → `EXTERNAL_DELIVERY_METADATA_BLOCKLIST` |
+| `src/lib/webhook-dispatcher.test.ts` | C6 | blocklist assertion |
+| `scripts/tenant-domain.ts` | C7 | new; `#!/usr/bin/env tsx`, exported commands + `main` guard, per-call env read, RLS GUCs |
+| `package.json` | C7 | `"tenant-domain"` script |
+| `scripts/checks/raw-sql-usage.txt` | C4, C7 | entries for `src/lib/tenant/tenant-management.ts` (SAVEPOINT) and `scripts/tenant-domain.ts` (`unmapped` union) |
+| `src/__tests__/db-integration/tenant-claim.integration.test.ts` | C1, C4 | new |
+| `src/__tests__/db-integration/tenant-claim-cli.integration.test.ts` | C7 | new |
+| `src/__tests__/helpers/tenant-claim-fixtures.ts` | RT3 | new shared `primary.example` / `alias.example` |
+| `.github/workflows/ci-integration.yml` | C7 | add `scripts/tenant-domain.ts` to the paths filter |
+| `src/lib/env-schema.ts` | C9 | nine `.optional()` entries |
+| `scripts/env-descriptions.ts` | C9 | nine sidecar entries |
+| `.env.example` | C9 | regenerate |
+| `scripts/init-env.ts` | C9 | prompt for `AUDIT_IDENTIFIER_PEPPER` only |
+| `src/lib/env-schema.test.ts` | C9 | absent-parses + default assertions |
+| `scripts/env-allowlist.ts` | C10 | `INTERNAL_TEST_VERIFIER_VERSION` |
+| `scripts/check-env-docs.ts` | C11 | check 12 + `.tsx` in `scanAppEnvReaders` |
+| `.github/workflows/ci.yml` | C11 | `'src/**'` in the `env` paths filter |
+| `scripts/__tests__/fixtures/env-drift/<5 cases>/` | C11 | new fixtures |
+| `README.md`, `README.ja.md`, `docs/security/audit-log-schema.md`, `CLAUDE.md` | C12 | docs + runbooks |
+
+### Shared utilities that MUST be reused (no reimplementation)
+
+- `advisoryXactLock(client, key)` — `src/lib/tenant-rls.ts:88`. C4's serialisation. Enforced by `scripts/checks/check-count-then-create-lock.mjs`.
+- `withBypassRls` / `BYPASS_PURPOSE` — `src/lib/tenant-rls.ts:54,5`.
+- `slugifyTenant` — `src/lib/tenant/tenant-claim.ts:26`. C4 keeps using it.
+- `SLUG_MAX_LENGTH` (`src/lib/validations/common.ts`), `MAX_TENANT_CLAIM_LENGTH` / `BOOTSTRAP_SLUG_HASH_LENGTH` (`src/lib/validations/common.server.ts`).
+- `NIL_UUID`, `SYSTEM_ACTOR_ID` — `src/lib/constants/app`.
+- `logAuditAsync`, `AUDIT_ACTION`, `AUDIT_SCOPE`, `ACTOR_TYPE`, `getLogger`.
+- `resolveUserTenantIdFromClient` — `src/lib/tenant-context.ts:4`.
+- `TENANT_ROLE` — `src/lib/constants/auth/tenant-role`.
+- `createTestContext`, `raceTwoClients` (`helpers.ts:364`), `setBypassRlsGucs` — `src/__tests__/db-integration/helpers.ts`.
+- `scanAppEnvReaders` — `scripts/check-env-docs.ts:193`. C11 adds no new scanner.
+- `loadEnv` — `src/lib/load-env.ts`. C7's env load.
+
+### Patterns that must hold at every site
+
+- One `tenantClaim.findUnique` in the whole codebase, inside `tenant-management.ts`'s claim-row helper. Every other reader goes through `resolveTenantByClaim`.
+- `normalizeTenantClaim` is the sole producer of the stored form (C2 forbidden pattern: no `.toLowerCase()` in `tenant-management.ts`).
+- A `SAVEPOINT` is issued **before** the statement that may abort, never after (round-4 **N6**).
+- Deny paths assert the **mutation** (`tenant.create`, `tenantClaim.create`, `tenantMember.upsert` not called), not only the verdict (RT8).
+
+### R19 — all test trees searched
+
+`grep -rl` over `src/**/*.test.ts` (co-located), `src/__tests__/` (centralized),
+`src/__tests__/db-integration/` (integration), `scripts/__tests__/` (gate
+self-tests), `e2e/` (Playwright). `findOrCreateSsoTenant` appears in three test
+files (`src/auth.test.ts`, `src/lib/tenant/tenant-management.test.ts`,
+`src/lib/auth/session/auth-adapter.test.ts`) and in **no** e2e file — recorded
+as a negative result.
+
+### CI gate parity (Step 2-1 item 7)
+
+`extract-ci-checks.sh` yields 13 gates. Eleven are covered by `scripts/pre-pr.sh`
+under a different spelling (`node scripts/checks/check-<x>.mjs` rather than
+`npm run check:<x>`; `npx eslint .` for `npm run lint`; `npx next build` for
+`npm run typecheck`). Two genuine gaps, both pre-existing and unrelated to this
+diff, are **run explicitly in Step 2-4** rather than added to `pre-pr.sh`
+(extending the aggregate script is out of this PR's scope):
+
+- `bash scripts/check-state-mutation-centralization.sh`
+- `npm run licenses:check:strict` / `:cli:strict` / `:ext:strict`
+
+New-file gates that fire on files this PR introduces, verified from each gate's
+own `SEARCH_DIRS` / scan roots rather than from its name:
+
+| Gate | Fires on | Delta required |
+|---|---|---|
+| `check-raw-sql-usage.mjs` (`SCAN_ROOTS = ["src","scripts"]`, `.ts`/`.tsx`, `EXCLUDE_RE` covers `__tests__`) | `tenant-management.ts`, `scripts/tenant-domain.ts` | two `raw-sql-usage.txt` entries |
+| `check-migration-transaction.mjs` | the new migration (`ddlCount > 1`) | `BEGIN;`/`COMMIT;` wrapper |
+| `check-destructive-migration.mjs` | the new migration | no `DROP …` of any object type (`DROP POLICY IF EXISTS` included) |
+| `check-migration-drift.mjs` | schema vs migrations | run `db:migrate` on the real dev DB |
+| `check-test-hygiene.sh` gate (c) | `tenant-claim.test.ts`, `audit-logger.test.ts` once changed | ten pre-existing `process.env.X =` lines → `vi.stubEnv` |
+| `check-env-docs` check 12 (new) | every `src/**` env read | C9's nine declarations + C10's allowlist entry |
+| `check-count-then-create-lock.mjs` | C4's read→check→create | `advisoryXactLock` present |
+| `check-doc-paths.mjs` | C12's runbooks | `scripts/tenant-domain.ts` must exist at exactly that path |
+
+Recorded negatives (checked, N/A): `check-bypass-rls.mjs` (scans `src/` only —
+`scripts/tenant-domain.ts` needs no allowlist entry), `check-critical-audit-atomic.mjs`
+(`SEARCH_DIRS = ["src/app/api","src/lib"]`, keys on `logAuditInTx`, closed
+`CRITICAL_ACTIONS` set — SC8 adds no audit action), route-policy /
+fail-closed-manifest artefacts (no new routes).

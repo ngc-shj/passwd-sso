@@ -222,6 +222,7 @@ Key variables:
 | `MIGRATION_DATABASE_URL` | PostgreSQL connection for migrations (superuser role, e.g. `passwd_user`). Required for `npm run db:migrate` |
 | `AUTH_URL` | Application origin (e.g., `http://localhost:3000`). Used as the canonical Origin when `APP_URL` is unset |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
+| `COOKIE_PARTITIONED` | (Optional) Opt in to the Partitioned (CHIPS) session-cookie attribute. Default: `false`. Requires Secure cookies; no effect outside third-party iframe contexts |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
 | `GOOGLE_WORKSPACE_DOMAINS` | (Optional) Restrict to Google Workspace domain(s), comma-separated |
@@ -247,6 +248,8 @@ Key variables:
 | `BLOB_OBJECT_PREFIX` | Optional key prefix for cloud object paths |
 | `AUDIT_LOG_FORWARD` | (Optional) Emit structured JSON audit logs to stdout |
 | `AUDIT_LOG_APP_NAME` | (Optional) App name for audit log forwarding |
+| `AUDIT_IDENTIFIER_PEPPER` | (Optional) HMAC pepper for the identifier hashed onto `AUTH_LOGIN_FAILURE` audit events. Falls back to a key derived from `AUTH_SECRET` (HKDF, if ≥32 chars); if neither is available, no hash is computed and `identifierHashScope` is recorded as `"unkeyed"`. See [Audit Log Schema](docs/security/audit-log-schema.md) |
+| `BREAKGLASS_COOLING_OFF_SECONDS` | (Optional) Delay in seconds before a first same-requester/target Break Glass grant in a 24h window executes. Default: `3600`. Set to `0` to disable |
 | `EMAIL_PROVIDER` | (Optional) `resend` or `smtp` — leave empty to disable email |
 | `EMAIL_FROM` | Sender address for emails |
 | `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` |
@@ -260,10 +263,16 @@ Key variables:
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | (Optional) Audit outbox worker tuning. See `.env.example` for all options |
 | `NEXT_DEV_ALLOWED_ORIGINS` | (Optional) Allowed origins for dev server (e.g., Tailscale hostname) |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |
+| `IOS_APP_TEAM_ID` | Apple Developer Team ID (10-char string). Required for the AASA route to serve iOS Universal Links; the route returns 503 when unset |
+| `IOS_APP_BUNDLE_ID` | (Optional) iOS app bundle identifier. Default: `jp.jpng.passwd-sso`, matching `PRODUCT_BUNDLE_IDENTIFIER` in `ios/project.yml` |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | (Optional) Sentry DSN for error tracking |
 | `SENTRY_AUTH_TOKEN` | (Optional) Sentry auth token for source map upload |
 | `KEY_PROVIDER` | (Optional) Key provider backend: `env` (default), `azure-kv`, or `gcp-sm`. See [KMS Setup](docs/operations/key-provider-setup.md) |
 | `SM_CACHE_TTL_MS` | (Optional) TTL for KMS decrypted key cache in ms (default: 300000 = 5 min) |
+| `QUOTA_MAX_PASSWORDS_PER_USER` | (Optional) Maximum password entries per user. Default: `10000` |
+| `QUOTA_MAX_ATTACHMENT_BYTES_PER_USER` | (Optional) Maximum total attachment bytes per user. Default: `1073741824` (1 GiB) |
+| `QUOTA_MAX_SHARE_LINKS_PER_USER` | (Optional) Maximum active share links per user. Default: `1000` |
+| `QUOTA_MAX_WEBHOOKS_PER_TENANT` | (Optional) Maximum webhooks (tenant + team combined) per tenant. Default: `100` |
 
 </details>
 
@@ -282,6 +291,66 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 ```
 
 See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and rotation guidance.
+
+### IdP domain changed / tenant locked out
+
+Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in with `tenant_claim_unmapped` (claim not registered to any tenant) or `tenant_mismatch` (claim registered to a *different* tenant), visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
+
+```bash
+# See which unregistered claims were denied recently
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
+
+# Register the new claim for the existing tenant (idempotent — safe to re-run)
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <uuid|domain> --domain <new-claim> --by <operator-label>
+```
+
+`list`, `preflight`, and `remove` are also available; run the command with no subcommand for the full usage banner.
+
+**If `GOOGLE_WORKSPACE_DOMAINS` is set** (recommended in [SECURITY.md](SECURITY.md)), registering the claim alone changes nothing. `src/auth.config.ts`'s `signIn` callback denies any Google sign-in whose `hd` is not in `GOOGLE_WORKSPACE_DOMAINS` *before* tenant-claim resolution runs at all, recorded as `reason: "provider_error"` — the denial never reaches the tenant-claim check, so `tenant-domain unmapped` shows nothing for it. Add the new domain to `GOOGLE_WORKSPACE_DOMAINS` too, and note which tenant it was added for: the variable is deployment-global while the claim registry is tenant-scoped, so without that note it silently accumulates every domain any tenant has ever renamed to. Remove the entry once no tenant depends on it. **Do not unset `GOOGLE_WORKSPACE_DOMAINS` to work around a lockout** — `allowDangerousEmailAccountLinking` is derived from `allowedGoogleDomains.length > 0`, so unsetting it flips that flag to `false` (*stricter*, not looser) and produces a second, different failure, `OAuthAccountNotLinked`, on top of the original denial.
+
+**Before running `prisma migrate deploy` on an existing deployment**, run the pre-flight check — the backfill silently skips two classes of row that need an operator decision first:
+
+```bash
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
+```
+
+or, without the CLI:
+
+```sql
+-- Normalisation collisions: two tenants that would compete for one claim.
+SELECT lower(btrim(external_id) COLLATE "C") AS claim, count(*), array_agg(id ORDER BY id)
+FROM tenants
+WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id !~ '[^\x20-\x7E]'
+GROUP BY 1 HAVING count(*) > 1;
+
+-- Non-ASCII external_id values, excluded from the registry entirely.
+SELECT id, external_id FROM tenants
+WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id ~ '[^\x20-\x7E]';
+```
+
+Both queries filter the **raw** `external_id` column and fold with `lower(x COLLATE "C")`, matching the migration's backfill and CHECK constraint exactly. Every row returned needs a decision before the upgrade runs — for a collision, which tenant keeps the claim; for a non-ASCII value, whether that tenant needs an ASCII claim registered separately. Deciding after the upgrade means deciding after a lockout.
+
+**What the backfill inherits.** On any deployment that has already run the `20260228010000_tenant_external_id_and_bootstrap` migration, `tenant_claims` inherits one row per pre-existing tenant's `external_id` — which, for tenants older than that migration, is the tenant's own UUID (`UPDATE tenants SET external_id = id ...` for every non-bootstrap, non-orphan tenant). `tenant_id` is the first key `AUTH_TENANT_CLAIM_KEYS` falls back to when unset, so a bare UUID can now resolve tenant membership as a claim. Review what the backfill inherited:
+
+```sql
+SELECT tenant_id, claim, created_by, created_at FROM tenant_claims WHERE created_by = 'backfill' ORDER BY created_at;
+```
+
+This is pre-existing behavior — the same UUID has resolved sign-in through `Tenant.externalId` since that earlier migration — made visible here rather than introduced by it. Deployments running a deliberate `AUTH_TENANT_CLAIM_KEYS` should decide whether keeping `tenant_id` / `tenantId` in the default claim-key list is still wanted now that the claim namespace is explicit.
+
+**`AUTH_TENANT_CLAIM_KEYS` guidance.** Only point this at an attribute Google's `hd` provides, or at a claim bound to a specific SSO connection. Pointing it at an attribute your IdP asserts through SAML (e.g. `organization`) is safe only when this deployment provisions a single SSO connection: `saml-jackson` is one deployment-wide OIDC client, and nothing binds a claim namespace to the connection that asserted it, so with **two or more** provisioned SSO connections one customer's IdP administrator could assert another customer's registered claim string and select their tenant. The operator controls whether a connection exists; the customer's own IdP controls what it asserts through it — the exploit needs only the second. This does not fire on `hd`-only deployments, which is the shape of the incident this section exists for.
+
+**Incident: a claim was registered that should not have been.** `tenant-domain remove` soft-deletes the row (`revokedAt`) rather than deleting it — deleting it first would destroy `tenant_claims.createdAt`, one of the two timestamps the query below needs, making this procedure unexecutable in the order it will actually be followed in an incident. Removing the row does **not** undo what it already granted:
+
+- *New members.* Enumerate `TenantMember` rows created while the claim was live:
+  ```sql
+  SELECT tm.tenant_id, tm.user_id, tm.created_at AS member_created_at
+  FROM tenant_members tm
+  JOIN tenant_claims tc ON tc.tenant_id = tm.tenant_id AND tc.claim = '<claim>'
+  WHERE tm.created_at >= tc.created_at
+    AND (tc.revoked_at IS NULL OR tm.created_at <= tc.revoked_at);
+  ```
+- *Absorbed personal vaults.* A bootstrap-tenant user's first sign-in presenting the claim reassigns their **entire personal estate** into the tenant, in one transaction: `User`/`Account`, `passwordEntry`, `tag`, `folder`, `session`, `extensionToken`, `passwordEntryHistory`, `vaultKey`, `audit_logs` (via the `audit_log_tenant_migrate` procedure), `emergencyAccessGrant`, `emergencyAccessKeyPair`, `passwordShare`, `shareAccessLog`, `attachment`, `notification`, `apiKey`, `webAuthnCredential`, and `TenantMember` (see the bootstrap-migration block in `src/auth.ts`). Every table is updated **in place** — there is no history table recording the previous `tenantId`, and the migrated user's own `audit_logs` rows are reassigned to the new tenant by that same transaction, so nothing in the database still says "this used to belong to tenant X." **This case may be irreversible.** The closest available evidence is circumstantial: the affected user's `AUTH_LOGIN` row in `audit_logs` around the time the claim was live, cross-referenced against the removed claim's `tenant_claims.createdAt` / `revokedAt`.
 
 ### 3. Start services
 

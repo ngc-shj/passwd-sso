@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
 
 const {
   mockPrismaTeamWebhook,
@@ -751,6 +752,8 @@ describe("dispatchTenantWebhook", () => {
         // crypto-level keys (from METADATA_BLOCKLIST)
         secret: "should-be-stripped",
         token: "should-be-stripped",
+        // AUTH_LOGIN_FAILURE's IdP claim (C6) — same sensitivity class as `reason`
+        claim: "alias.example",
         // safe key that should remain
         webhookId: "22222222-2222-2222-2222-222222222222",
       },
@@ -776,8 +779,37 @@ describe("dispatchTenantWebhook", () => {
     // crypto keys must also be absent
     expect(sentPayload.data).not.toHaveProperty("secret");
     expect(sentPayload.data).not.toHaveProperty("token");
+    // claim must also be absent (C6)
+    expect(sentPayload.data).not.toHaveProperty("claim");
     // non-PII key must be present
     expect(sentPayload.data).toHaveProperty("webhookId", "22222222-2222-2222-2222-222222222222");
+  });
+
+  it("C6: EXTERNAL_DELIVERY_METADATA_BLOCKLIST includes claim but not identifierHashScope", async () => {
+    const { EXTERNAL_DELIVERY_METADATA_BLOCKLIST } = await import("@/lib/http/external-http");
+    expect(EXTERNAL_DELIVERY_METADATA_BLOCKLIST.has("claim")).toBe(true);
+    // identifierHashScope carries no organisational data; withholding it would
+    // make a forwarded identifierHash uninterpretable, so it stays out.
+    expect(EXTERNAL_DELIVERY_METADATA_BLOCKLIST.has("identifierHashScope")).toBe(false);
+
+    const eventWithScope = {
+      ...TENANT_EVENT,
+      data: {
+        targetUserId: "user-1",
+        identifierHashScope: IDENTIFIER_HASH_SCOPE.TENANT,
+      },
+    };
+
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
+    mockFetch.mockResolvedValue({ ok: true });
+
+    dispatchTenantWebhook(eventWithScope);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [, opts] = mockFetch.mock.calls[0];
+    const sentPayload = JSON.parse(opts.body as string);
+    expect(sentPayload.data).toHaveProperty("identifierHashScope", IDENTIFIER_HASH_SCOPE.TENANT);
   });
 });
 

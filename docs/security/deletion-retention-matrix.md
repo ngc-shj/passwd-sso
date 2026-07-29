@@ -68,6 +68,7 @@ Every remaining Prisma model, i.e. models with no row in the registry above. The
 | `TeamWebhook` | `team_webhooks` |
 | `TenantWebhook` | `tenant_webhooks` |
 | `ServiceAccount` | `service_accounts` |
+| `TenantClaim` | `tenant_claims` |
 | `WebAuthnCredential` | `webauthn_credentials` |
 | `DirectorySyncConfig` | `directory_sync_configs` |
 | `McpRefreshToken` | `mcp_refresh_tokens` |

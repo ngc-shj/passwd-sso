@@ -221,6 +221,7 @@ npm run docker:down
 | `MIGRATION_DATABASE_URL` | マイグレーション用 PostgreSQL 接続（スーパーユーザーロール、例: `passwd_user`）。`npm run db:migrate` に必要 |
 | `AUTH_URL` | アプリケーションのオリジン（例: `http://localhost:3000`）。`APP_URL` 未設定時の canonical Origin として使われます |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
+| `COOKIE_PARTITIONED` | （任意）セッション Cookie に Partitioned（CHIPS）属性を付与するオプトイン設定。デフォルト: `false`。サードパーティ iframe コンテキスト外では効果なし。Secure Cookie が必須 |
 | `AUTH_GOOGLE_ID` | Google OAuth クライアント ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth クライアントシークレット |
 | `GOOGLE_WORKSPACE_DOMAINS` | （任意）Google Workspace ドメインに制限（カンマ区切りで複数可） |
@@ -246,6 +247,8 @@ npm run docker:down
 | `BLOB_OBJECT_PREFIX` | クラウド保存時のオブジェクトキー接頭辞（任意） |
 | `AUDIT_LOG_FORWARD` | （任意）構造化 JSON 監査ログを stdout に出力 |
 | `AUDIT_LOG_APP_NAME` | （任意）監査ログ転送時のアプリ名 |
+| `AUDIT_IDENTIFIER_PEPPER` | （任意）`AUTH_LOGIN_FAILURE` 監査イベントに記録する識別子のハッシュ化に使う HMAC pepper。未設定時は `AUTH_SECRET`（32 文字以上）から HKDF 導出した鍵にフォールバックし、どちらも使えない場合はハッシュを計算せず `identifierHashScope` を `"unkeyed"` として記録します。詳細は [Audit Log Schema](docs/security/audit-log-schema.md) を参照 |
+| `BREAKGLASS_COOLING_OFF_SECONDS` | （任意）24 時間以内に同一の依頼者/対象で最初に発行される Break Glass 許可が実行されるまでの遅延（秒）。デフォルト: `3600`。`0` で無効化 |
 | `EMAIL_PROVIDER` | （任意）`resend` または `smtp` — 空欄でメール送信無効 |
 | `EMAIL_FROM` | メール送信元アドレス |
 | `RESEND_API_KEY` | `EMAIL_PROVIDER=resend` の場合に必須 |
@@ -259,10 +262,16 @@ npm run docker:down
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | （任意）監査アウトボックスワーカーの調整。詳細は `.env.example` 参照 |
 | `NEXT_DEV_ALLOWED_ORIGINS` | （任意）dev サーバー向け許可オリジン（例: Tailscale ホスト名） |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | （任意）ブラウザ拡張配布用 Chrome Web Store URL |
+| `IOS_APP_TEAM_ID` | Apple Developer Team ID（10 文字の文字列）。AASA ルートが iOS Universal Links を配信するために必須。未設定時は 503 を返す |
+| `IOS_APP_BUNDLE_ID` | （任意）iOS アプリのバンドル識別子。デフォルト: `jp.jpng.passwd-sso`（`ios/project.yml` の `PRODUCT_BUNDLE_IDENTIFIER` と一致） |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | （任意）Sentry エラートラッキング DSN |
 | `SENTRY_AUTH_TOKEN` | （任意）ソースマップアップロード用 Sentry 認証トークン |
 | `KEY_PROVIDER` | （任意）鍵プロバイダーバックエンド: `env`（デフォルト）、`azure-kv`、または `gcp-sm`。詳細は [KMS Setup](docs/operations/key-provider-setup.md) 参照 |
 | `SM_CACHE_TTL_MS` | （任意）KMS 復号済み鍵キャッシュの TTL（ms）（デフォルト: 300000 = 5 分） |
+| `QUOTA_MAX_PASSWORDS_PER_USER` | （任意）ユーザーごとのパスワードエントリ上限数。デフォルト: `10000` |
+| `QUOTA_MAX_ATTACHMENT_BYTES_PER_USER` | （任意）ユーザーごとの添付ファイル合計バイト数上限。デフォルト: `1073741824`（1 GiB） |
+| `QUOTA_MAX_SHARE_LINKS_PER_USER` | （任意）ユーザーごとのアクティブな共有リンク上限数。デフォルト: `1000` |
+| `QUOTA_MAX_WEBHOOKS_PER_TENANT` | （任意）テナントごとの Webhook 上限数（テナント + チーム合算）。デフォルト: `100` |
 
 </details>
 
@@ -281,6 +290,66 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 ```
 
 詳細は [Admin Token Setup](docs/operations/admin-tokens.md) を参照してください。
+
+### IdP のドメインが変わった / テナントがロックアウトされた
+
+**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に `tenant_claim_unmapped`（どのテナントにも未登録のクレーム）または `tenant_mismatch`（別のテナントに登録済みのクレーム）で拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+
+```bash
+# 最近拒否された未登録クレームを確認
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
+
+# 新しいクレームを既存テナントに登録（冪等 — 再実行しても安全）
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <uuid|domain> --domain <new-claim> --by <operator-label>
+```
+
+`list`・`preflight`・`remove` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。
+
+**`GOOGLE_WORKSPACE_DOMAINS` を設定している場合**（[SECURITY.md](SECURITY.md) で推奨）、クレームを登録するだけでは復旧しません。`src/auth.config.ts` の `signIn` コールバックは、`hd` が `GOOGLE_WORKSPACE_DOMAINS` に含まれない Google サインインを、テナントクレームの解決より**前**に `reason: "provider_error"` として拒否します — この拒否はテナントクレームのチェックまで到達しないため、`tenant-domain unmapped` には何も表示されません。新しいドメインを `GOOGLE_WORKSPACE_DOMAINS` にも追加し、どのテナントのために追加したかを記録してください。この変数はデプロイ全体に効くグローバル設定である一方、クレームレジストリはテナント単位のスコープなので、記録がないと過去にどのテナントかがリネームしたすべてのドメインが静かに積み上がっていきます。そのテナントが不要になった時点で、追加したエントリを削除してください。**ロックアウト回避のために `GOOGLE_WORKSPACE_DOMAINS` を未設定に戻さないでください** — `allowDangerousEmailAccountLinking` は `allowedGoogleDomains.length > 0` から導出されるため、未設定に戻すとこのフラグは `false` になり（緩くなるのではなく**厳しくなり**）、元の拒否に加えて `OAuthAccountNotLinked` という別の失敗が発生します。
+
+**既存デプロイで `prisma migrate deploy` を実行する前に**、プリフライトチェックを実行してください — バックフィールドが暗黙にスキップする 2 種類の行を、事前の運用判断のために可視化します:
+
+```bash
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
+```
+
+または CLI を使わない場合:
+
+```sql
+-- 正規化の衝突: 1 つのクレームを取り合う 2 つ以上のテナント
+SELECT lower(btrim(external_id) COLLATE "C") AS claim, count(*), array_agg(id ORDER BY id)
+FROM tenants
+WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id !~ '[^\x20-\x7E]'
+GROUP BY 1 HAVING count(*) > 1;
+
+-- レジストリから完全に除外される非 ASCII の external_id
+SELECT id, external_id FROM tenants
+WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id ~ '[^\x20-\x7E]';
+```
+
+どちらのクエリも**生の** `external_id` 列を対象にフィルタし、`lower(x COLLATE "C")` で正規化します — マイグレーションのバックフィルおよび CHECK 制約と正確に一致します。返された行にはアップグレード前の判断が必要です — 衝突であればどのテナントがクレームを保持するか、非 ASCII であればそのテナントに別途 ASCII のクレームを登録すべきか。アップグレード後に判断するということは、ロックアウトの後に判断するということです。
+
+**バックフィルが引き継ぐ内容**。`20260228010000_tenant_external_id_and_bootstrap` マイグレーションを既に実行済みのデプロイでは、`tenant_claims` は既存テナントの `external_id` を 1 行ずつ引き継ぎます — そのマイグレーションより前から存在するテナントでは、これはテナント自身の UUID です（`bootstrap-` / `u-` を除くすべてのテナントに対する `UPDATE tenants SET external_id = id ...`）。`tenant_id` は `AUTH_TENANT_CLAIM_KEYS` が未設定時にフォールバックする先頭のキーであるため、生の UUID がそのままクレームとしてテナントメンバーシップを解決できてしまいます。バックフィルが引き継いだ内容を確認するには:
+
+```sql
+SELECT tenant_id, claim, created_by, created_at FROM tenant_claims WHERE created_by = 'backfill' ORDER BY created_at;
+```
+
+これは以前からの挙動です — 同じ UUID は、この機能追加以前から `Tenant.externalId` 経由でサインインを解決してきました — 今回それが明示的なクレーム行として可視化されただけです。`AUTH_TENANT_CLAIM_KEYS` を意図的に設定しているデプロイでは、クレームの名前空間が明示化された今、デフォルトのクレームキー一覧に `tenant_id` / `tenantId` を残すかどうかを改めて検討してください。
+
+**`AUTH_TENANT_CLAIM_KEYS` の設定指針**。Google の `hd` が提供する属性、または特定の SSO 接続に紐づくクレームのみを指定してください。IdP が SAML 経由でアサートする属性（例: `organization`）を指定するのは、このデプロイが SSO 接続を 1 つしかプロビジョニングしていない場合に限り安全です。`saml-jackson` はデプロイ全体で共有される単一の OIDC クライアントであり、アサートしたクレームの名前空間をその接続に紐づける仕組みがないため、SSO 接続が **2 つ以上**プロビジョニングされていると、あるカスタマーの IdP 管理者が別のカスタマーの登録済みクレーム文字列をアサートし、そのテナントを選択できてしまいます。接続を作るかどうかはオペレーターが制御できますが、その接続を通じて何がアサートされるかはカスタマー自身の IdP が制御します — この攻撃が成立するには後者だけで十分です。`hd` のみに依存するデプロイ（本節が想定するインシデントの形）では発生しません。
+
+**インシデント対応: 登録すべきでなかったクレームが登録されてしまった場合**。`tenant-domain remove` は行を削除せず（`revokedAt`）論理削除します — 先に削除してしまうと `tenant_claims.createdAt` が失われ、これは以下のクエリが必要とする 2 つのタイムスタンプの一方であるため、実際のインシデント対応の手順では実行できなくなってしまいます。行を削除しても、それが既に許可した内容は取り消されません:
+
+- **新規メンバー**: そのクレームが有効だった期間に作成された `TenantMember` 行を列挙します:
+  ```sql
+  SELECT tm.tenant_id, tm.user_id, tm.created_at AS member_created_at
+  FROM tenant_members tm
+  JOIN tenant_claims tc ON tc.tenant_id = tm.tenant_id AND tc.claim = '<claim>'
+  WHERE tm.created_at >= tc.created_at
+    AND (tc.revoked_at IS NULL OR tm.created_at <= tc.revoked_at);
+  ```
+- **個人保管庫の吸収**: ブートストラップテナントのユーザーが、そのクレームを提示して初めてサインインすると、そのユーザーの**個人データ一式**が 1 つのトランザクションでテナントへ再割り当てされます — `User`/`Account`、`passwordEntry`、`tag`、`folder`、`session`、`extensionToken`、`passwordEntryHistory`、`vaultKey`、`audit_logs`（`audit_log_tenant_migrate` プロシージャ経由）、`emergencyAccessGrant`、`emergencyAccessKeyPair`、`passwordShare`、`shareAccessLog`、`attachment`、`notification`、`apiKey`、`webAuthnCredential`、そして `TenantMember`（`src/auth.ts` のブートストラップ移行ブロックを参照）。いずれのテーブルも**その場で**更新され、以前の `tenantId` を記録する履歴テーブルは存在しません。しかも移行されたユーザー自身の `audit_logs` 行も同じトランザクションで新テナントへ再割り当てされるため、データベース上には「これは以前テナント X に属していた」ことを示す記録が一切残りません。**このケースは復元不能な可能性があります。** 得られる手がかりは状況証拠にとどまります — 当該ユーザーの `AUTH_LOGIN` 行（クレームが有効だった時間帯の `audit_logs`）を、削除したクレームの `tenant_claims.createdAt` / `revokedAt` と突き合わせるのが最も近い方法です。
 
 ### 3. サービスの起動
 

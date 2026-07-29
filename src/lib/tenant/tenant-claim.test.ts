@@ -1,33 +1,22 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { extractTenantClaimValue, parseTenantClaimKeys, slugifyTenant } from "./tenant-claim";
 
 describe("tenant-claim", () => {
-  const original = process.env.AUTH_TENANT_CLAIM_KEYS;
-
-  beforeEach(() => {
-    delete process.env.AUTH_TENANT_CLAIM_KEYS;
-  });
-
-  afterEach(() => {
-    if (original === undefined) {
-      delete process.env.AUTH_TENANT_CLAIM_KEYS;
-    } else {
-      process.env.AUTH_TENANT_CLAIM_KEYS = original;
-    }
-    vi.restoreAllMocks();
-  });
+  // No local save/restore block: AUTH_TENANT_CLAIM_KEYS is unset by default
+  // in the test baseline, and setup.ts's global afterEach (vi.unstubAllEnvs())
+  // reverts every vi.stubEnv() call after each test.
 
   it("uses default claim keys when env is unset", () => {
     expect(parseTenantClaimKeys()).toContain("tenant_id");
   });
 
   it("parses custom claim keys from env", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant,org_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant,org_id");
     expect(parseTenantClaimKeys()).toEqual(["tenant", "org_id"]);
   });
 
   it("extracts tenant from configured claim", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant: "acme" },
@@ -53,7 +42,7 @@ describe("tenant-claim", () => {
   });
 
   it("accepts claim value of exactly 255 characters", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const exactValue = "x".repeat(255);
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
@@ -63,7 +52,7 @@ describe("tenant-claim", () => {
   });
 
   it("strips NULL bytes from claim values", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "acme\0corp" },
@@ -72,7 +61,7 @@ describe("tenant-claim", () => {
   });
 
   it("returns null when claim value is only NULL bytes", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "\0\0\0" },
@@ -85,7 +74,7 @@ describe("tenant-claim", () => {
   });
 
   it("returns null for non-string claim values (number, boolean, object)", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const account = { provider: "saml-jackson", type: "oidc" as const, providerAccountId: "x" };
     expect(extractTenantClaimValue(account, { tenant_id: 42 })).toBeNull();
     expect(extractTenantClaimValue(account, { tenant_id: true })).toBeNull();
@@ -93,7 +82,7 @@ describe("tenant-claim", () => {
   });
 
   it("returns null for whitespace-only claim values", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "   " },
@@ -102,12 +91,24 @@ describe("tenant-claim", () => {
   });
 
   it("strips control characters from claim values (boundary)", () => {
-    process.env.AUTH_TENANT_CLAIM_KEYS = "tenant_id";
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "\0abc\x1f\x7f\x9fdef\0" },
     );
     expect(v).toBe("abcdef");
+  });
+
+  it("strips bidi override and zero-width characters from claim values (RS6)", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    // U+202E (RIGHT-TO-LEFT OVERRIDE) can visually reverse the characters that
+    // follow it when rendered to an operator; U+200B (ZERO WIDTH SPACE) is
+    // invisible. Both must be stripped from the value that gets displayed.
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { tenant_id: "alias\u202Eexample\u200Bcorp" },
+    );
+    expect(v).toBe("aliasexamplecorp");
   });
 
   it("slugifyTenant generates SHA-256 fallback for empty-after-strip input", () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Writable } from "node:stream";
+import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
 
 /** Helper: create a Writable stream that collects chunks as strings. */
 function createSink() {
@@ -26,7 +27,7 @@ describe("createAuditLogger", () => {
   });
 
   it("is disabled when AUDIT_LOG_FORWARD is 'false'", async () => {
-    process.env.AUDIT_LOG_FORWARD = "false";
+    vi.stubEnv("AUDIT_LOG_FORWARD", "false");
     const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const logger = createAuditLogger();
     expect(logger.isLevelEnabled("info")).toBe(false);
@@ -125,6 +126,37 @@ describe("createAuditLogger", () => {
     expect(record.audit.metadata.count).toBe(42);
   });
 
+  it("still redacts blocklisted keys alongside AUTH_LOGIN_FAILURE's claim/identifierHashScope fields (C6)", async () => {
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
+    const { chunks, stream } = createSink();
+
+    const logger = createAuditLogger({ enabled: true, destination: stream });
+
+    logger.info(
+      {
+        audit: {
+          metadata: {
+            password: "super-secret",
+            claim: "alias.example",
+            identifierHashScope: IDENTIFIER_HASH_SCOPE.TENANT,
+          },
+        },
+      },
+      "audit.TEST",
+    );
+    logger.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(chunks.length).toBeGreaterThan(0);
+    const record = JSON.parse(chunks[0]);
+    // The blocklisted key is still redacted — the new C6 fields do not shadow
+    // or otherwise interfere with the redact-paths mechanism.
+    expect(record.audit.metadata.password).toBe("[REDACTED]");
+    // Neither new field is a blocklist member, so both pass through.
+    expect(record.audit.metadata.claim).toBe("alias.example");
+    expect(record.audit.metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.TENANT);
+  });
+
   it("uses custom appName when provided", async () => {
     const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const { chunks, stream } = createSink();
@@ -187,6 +219,9 @@ describe("METADATA_BLOCKLIST", () => {
       "newRole",
       "granteeEmail",
       "waitDays",
+      // AUTH_LOGIN_FAILURE's C6 fields — neither collides with a blocklist name.
+      "claim",
+      "identifierHashScope",
     ];
 
     for (const key of safeKeys) {
