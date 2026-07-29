@@ -11,7 +11,7 @@ import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
 // neither of which reaches a value frozen at first call. Each test therefore
 // resets the module registry and re-imports the module under test — the
 // pattern already used by src/__tests__/audit-logger.test.ts.
-type LoggedAuditCall = { metadata: Record<string, unknown> };
+type LoggedAuditCall = { metadata: Record<string, unknown>; tenantId?: string };
 
 const { mockLogAudit } = vi.hoisted(() => ({
   mockLogAudit: vi.fn(async (_params: LoggedAuditCall) => undefined),
@@ -38,6 +38,12 @@ function lastMetadata(): Record<string, unknown> {
   const call = mockLogAudit.mock.calls.at(-1);
   if (!call) throw new Error("logAuditAsync was not called");
   return call[0].metadata;
+}
+
+function lastAuditParams(): LoggedAuditCall {
+  const call = mockLogAudit.mock.calls.at(-1);
+  if (!call) throw new Error("logAuditAsync was not called");
+  return call[0];
 }
 
 // >= MIN_KEY_MATERIAL_LENGTH (32) — a shorter pepper is treated as absent.
@@ -295,5 +301,49 @@ describe("emitAuthLoginFailure", () => {
     });
 
     expect(lastMetadata()).not.toHaveProperty("claim");
+  });
+});
+
+// Round-3 Critical. The tenant binding has to survive the hop from
+// emitAuthLoginFailure into logAuditAsync, not just be accepted as an
+// argument. resolveTenantId returns params.tenantId directly when present;
+// when it is absent it falls back to a users lookup on the caller's userId —
+// and for a claim refusal on a FIRST-EVER sign-in that userId is
+// SYSTEM_ACTOR_ID, for which no users row exists, so logAuditAsync
+// dead-letters and writes neither an audit_logs nor an audit_outbox row.
+// The denial then stays invisible to `tenant-domain unmapped`, which groups
+// by tenant_id on both tables. Round 2 wired the tenant all the way to this
+// function and asserted the emit's arguments against a mocked module — which
+// is precisely why the dropped hop went unnoticed for a whole round.
+describe("emitAuthLoginFailure — tenant binding reaches logAuditAsync", () => {
+  it("forwards a supplied tenantId so the row can be bound and enqueued", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@alias.example",
+      tenantId: "tenant-owner",
+      provider: "google",
+      reason: "tenant_claim_unmapped",
+      claim: "alias.example",
+    });
+
+    expect(lastAuditParams().tenantId).toBe("tenant-owner");
+  });
+
+  it("omits tenantId when the caller has no tenant, leaving resolveTenantId to try", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@alias.example",
+      provider: "google",
+      reason: "unknown_email",
+    });
+
+    // undefined, never null: AuditLogParams.tenantId is optional, and a null
+    // would make resolveTenantId's `if (params.tenantId)` short-circuit differ
+    // from its documented contract.
+    expect(lastAuditParams().tenantId).toBeUndefined();
   });
 });

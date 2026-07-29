@@ -1,6 +1,6 @@
 # Code Review: sso-tenant-domain-alias
 Date: 2026-07-29
-Review round: 1
+Review round: 3 (rounds 1-3 recorded below)
 
 ## Changes from Previous Round
 
@@ -295,3 +295,71 @@ The release-1 `externalId` fallback resolves a deploy-window tenant but never re
 - **Shared dev DB restored to its pre-session state**: 76 leaked test tenants from today's runs and 353 child rows removed (catalog-driven iterative delete — 48 of 49 FKs to `tenants` are `RESTRICT`, so a hand-written order would have been fragile; a guard refused the batch if any non-test row appeared). Back to 264 tenants / 2 claim rows / 2 `external_id`. Pre-existing residue from earlier days left untouched.
 - **RS4 re-verified**: the dev database contains real customer domains; a repo-wide search confirms none appear in any committed file.
 
+
+
+---
+
+# Round 2 — findings and resolution
+
+Fix commit: `58af27fc9`. **6 Major, 13 Minor.** Three Majors converged across experts.
+
+| # | Finding | Func | Sec | Test | Merged |
+|---|---|---|---|---|---|
+| R2-M1 | `createUser`'s refusal emits no audit event — M1's "invisible" half | F1 Major | S1 Major | N2 Major | **Major** |
+| R2-M2 | M3's all-sides exclusion leaves the `UNIQUE(claim)` slot squattable by a third spelling | F2 Major | S2 Major | — | **Major** |
+| R2-M3 | The recommended `AUTH_TENANT_CLAIM_KEYS=hd` makes every new SAML user an OWNER | F9 Minor | S3 Major | — | **Major** (floor) |
+| R2-M4 | `unmapped` reads only `PENDING`, so terminal `FAILED` denials are invisible | F3 Major | — | — | **Major** |
+| R2-M5 | The `--from` compare-and-swap has no test; the owner re-assert can be deleted green | — | — | N1 Major | **Major** |
+| R2-M6 | New tests clean up only on the success path; 5 tenants leaked to the shared dev DB | — | — | N3 Major | **Major** |
+
+Minors: reassignment attribution (S4/F6), widened strip class canonicalising into the matching key (S5), case-sensitive `hd` gate (S6), IdP-influenceable slug in `--tenant` (S7/F5), valueless `--days` (F4), `AUDIT_IDENTIFIER_PEPPER` breaking boot change (F7/A2), READMEs describing the pre-fix backfill (F8), bare role literals (F10), M10 post-assertion cleanup (N4), M6 byte-identity decoration (N5), Sec-F5 test proving the wrong thing (N6), `deleteTestData` ordering (A1).
+
+**All Majors and Minors fixed in `58af27fc9`** — see that commit's message for the reasoning. Contract deviations introduced by the round are recorded in the deviation log.
+
+---
+
+# Round 3 — findings
+
+Reviewed `58af27fc9`. **1 Critical, 6 Major, 11 Minor, 3 Adjacent.**
+
+## CR-3 [Critical, converged Func F1 + Test T1] — the dead-letter chain broke at its last hop
+
+`src/lib/audit/auth-failure.ts` accepted `tenantId` and used it **only** for the HMAC binding and `identifierHashScope`, then called `logAuditAsync` without it. So `resolveTenantId` fell through to a `users` lookup on `SYSTEM_ACTOR_ID` (no such row), dead-lettered, and wrote neither an `audit_logs` nor an `audit_outbox` row.
+
+Round 2's commit claimed the opposite. **The claim was false**: the orchestrator verified the emit's *arguments* against a mocked module and never traced the hop into `logAuditAsync`. Both ends of that seam were mocked, so nothing in the repo could have caught it.
+
+**Fixed** — `tenantId: args.tenantId ?? undefined` forwarded, plus two tests pinning the seam. Red-proved: removing the forward gives `expected undefined to be 'tenant-owner'`.
+
+## Round-3 Majors
+
+| # | Finding | Source | Status |
+|---|---|---|---|
+| R3-M1 | A malformed claim collapses into "no claim presented", turning a **deny into an allow** (R43 widening vs Round 2) | Func F3 + Sec S3-1 | **fix in flight** |
+| R3-M2 | `findFoldedExternalIdOwner` uses `LIMIT 1` with no `ORDER BY` — the collision owner in the audit row is nondeterministic | Func F2 | **fix in flight** |
+| R3-M3 | Both READMEs still document the `--tenant <slug>` form that was removed | Func F4 | open |
+| R3-M4 | `deleteTestData`'s reorder trades an FK failure for a lock-order inversion; the observed `40P01` is that inversion | Func F5 + Test T2 | open |
+| R3-M5 | `undelivered_cnt` reports normal in-flight `PROCESSING` as degraded delivery | Func F6 | open |
+| R3-M6 | `claim_collision` has no real-Postgres proof; its JS↔Postgres fold pair is the round-1 M6/D3 class | Test T3 | open |
+| R3-M7 | `findValuelessFlag` / `VALUE_FLAG_HINTS` are unexported and untested | Test T4 | open |
+| R3-M8 | The tenant sweep misses tenants created through production code; the SAVEPOINT-retry test leaks tenants **and UNIQUE claim rows** on the red path | Test T5 | open |
+| R3-M9 | The M10 anti-vacuity guard re-reads the outbox status *after* the query, introducing a new worker-race flake | Test T6 | open |
+
+**R3-M1 is the important one.** Round 2 changed the sanitizer from strip to reject — right for the matching key — but `null` is also what the function returns for absent/non-string/empty/over-length, and both consumers read `null` as "no claim presented", which is an allow. Measured against Round 2's state, for an existing member of tenant A: `beta.example` + U+200B went from **deny `tenant_mismatch`** to **allow into A**. The precondition is only control of the asserted attribute, which every one of the six default claim keys is. This is round-1 M1's overloaded-`null` defect one layer up.
+
+## Round-3 Minors
+
+Sec: attacker-named `tenantId` on audit rows with no per-`(tenant,claim)` dedupe (S3-2); `toAuditProvider` resolving through the prototype chain (S3-3); `claim_invalid` still dead-lettering under a comment asserting the arm is unreachable (S3-4); `--days=30` bypassing the valueless-flag guard on a spelling technicality (S3-5); stale `unsafe-display-chars` header (S3-6).
+
+Func: refusal sites discarding `target.tenantId` so one lockout is attributed to three tenants (F7); stale shared-class comment and an unused global regex (F8); the unreachable-arm comment (F9); Round-2 findings unrecorded (F10 — closed by this section); a fifth un-pinned copy of the fold expression (F11).
+
+Test: PROCESSING fixture safe for an unnamed reason (T7); containment test pinning a hand-copied constant (T8); per-range not per-member table (T9); redundant block with an assertion that cannot fail (T10); `mockImplementation` inside a test body (T11); slug refusal asserted only by `ok === false` (T12).
+
+## Adjacent
+
+- **Test A1 → process**: six Round-2 contract changes absent from the deviation log, including one that **contradicts a written acceptance criterion** — plan lines 1033-1036 specify bidi characters *stripped*, the test now asserts `toBeNull()`. The behaviour change is right; nothing recorded that the criterion was superseded.
+- **Test A2 → functionality**: the dropped-`tenantId` defect was never confined to the new call site — every `emitAuthLoginFailure` caller with a tenant but no user row dead-lettered silently.
+- **Test A3 → security**: `cmdUnmapped` prints `row.claim` verbatim from `audit_logs`/`audit_outbox`, neither CHECK-constrained; pre-existing rows can still carry U+202E to the operator terminal.
+
+## Independently re-proved this round
+
+The testing expert re-ran every Round-2 red-proof rather than trusting the reports: N1's CAS tests genuinely reach `count === 0` (not an earlier pre-check); F-B reds both ways; the adapter runs the **real** `CLAIM_REFUSAL_REASON` / `AUDIT_PROVIDER_BY_ID` tables (dropping `"saml-jackson"` reds 4 tests). Four full integration runs, 95 files / 430 passed each, with the worker live and actively draining.

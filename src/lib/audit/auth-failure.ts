@@ -154,6 +154,16 @@ export async function emitAuthLoginFailure(args: {
     // SYSTEM actor: failed sign-in has no authenticated user yet.
     userId: args.userId ?? SYSTEM_ACTOR_ID,
     actorType: ACTOR_TYPE.SYSTEM,
+    // Forwarding the tenant is what makes the denial OBSERVABLE, not merely
+    // emitted. logAuditAsync -> resolveTenantId returns params.tenantId
+    // directly when present; without it a denial with no user row (every
+    // first-ever sign-in, where userId falls back to SYSTEM_ACTOR_ID and no
+    // such users row exists) resolves no tenant, dead-letters, and writes
+    // neither an audit_logs nor an audit_outbox row — leaving the failure
+    // invisible to `tenant-domain unmapped`, which groups by tenant_id on
+    // both. `?? undefined` because AuditLogParams.tenantId is optional, not
+    // nullable.
+    tenantId: args.tenantId ?? undefined,
     metadata,
     action: AUDIT_ACTION.AUTH_LOGIN_FAILURE,
   });

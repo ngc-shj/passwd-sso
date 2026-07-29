@@ -54,8 +54,48 @@ export function slugifyTenant(input: string): string {
   return slug;
 }
 
-function sanitizeTenantClaimValue(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+/**
+ * What this boundary made of one IdP-asserted tenant claim.
+ *
+ * Three arms, not two, because BOTH consumers read "no claim" as an allow:
+ * src/auth.ts falls through to the claim-less path, and the adapter's
+ * createUser creates a fresh bootstrap tenant with role OWNER. A single `null`
+ * for "absent" and "refused" therefore turns every refusal into an allow —
+ * round-2 F-D fixed the matching key by returning null instead of stripping,
+ * and in doing so aimed the refusal straight at that allow (round-3 S3-1/F3).
+ * This is round-1 M1's overloaded-null defect one layer up, with the same
+ * remedy: make the refusal a value of its own.
+ */
+export type TenantClaimExtraction =
+  | { kind: "none" }
+  | { kind: "value"; value: string }
+  | { kind: "malformed" };
+
+const CLAIM_NONE = { kind: "none" } as const satisfies TenantClaimExtraction;
+const CLAIM_MALFORMED = { kind: "malformed" } as const satisfies TenantClaimExtraction;
+
+/**
+ * Classify one attribute value.
+ *
+ * The split is "did the IdP assert something we then refused?", and the test
+ * that decides it is whether the input buys the sender anything that simply
+ * OMITTING the attribute would not:
+ *
+ *  - absent / JSON null -> `none`. Omission by another spelling; there is no
+ *    asserted value to refuse, and reporting it as a refusal would deny every
+ *    IdP that leaves the attribute empty for its non-SSO users.
+ *  - anything else -> `malformed`. A non-string (a multi-valued SAML attribute
+ *    arrives as an array), an empty or whitespace-only string, an over-long
+ *    one, or one carrying a member of the unsafe-display class are all values
+ *    the IdP DID assert and we cannot use. Each is a shape the party that
+ *    controls the attribute can choose *instead of* the value that would have
+ *    denied them, so each has to reach a refusal rather than the claim-less
+ *    allow.
+ */
+function classifyTenantClaimValue(value: unknown): TenantClaimExtraction {
+  if (value === undefined || value === null) return CLAIM_NONE;
+
+  if (typeof value !== "string") return CLAIM_MALFORMED;
 
   // Control, bidi and zero-width characters — see @/lib/security/
   // unsafe-display-chars for the members and for why the set is shared with
@@ -75,19 +115,13 @@ function sanitizeTenantClaimValue(value: unknown): string | null {
   // the shared definition. Note the direction of the dependency the old
   // comment here inverted: the ASCII CHECK does not make stripping harmless,
   // stripping is what lets a non-ASCII input satisfy the CHECK.
-  //
-  // Consequence, deliberate: an IdP value carrying one of these characters now
-  // yields no claim at all, so the sign-in proceeds on src/auth.ts's
-  // claim-less path (the existing behaviour for an IdP that sends no claim)
-  // rather than being folded onto a neighbouring tenant. Denying a
-  // cross-tenant placement is worth more than resolving a malformed claim.
-  if (UNSAFE_DISPLAY_CHARS_RE.test(value)) return null;
+  if (UNSAFE_DISPLAY_CHARS_RE.test(value)) return CLAIM_MALFORMED;
 
   const cleaned = value.trim();
   if (cleaned.length === 0 || cleaned.length > MAX_TENANT_CLAIM_LENGTH) {
-    return null;
+    return CLAIM_MALFORMED;
   }
-  return cleaned;
+  return { kind: "value", value: cleaned };
 }
 
 /**
@@ -108,30 +142,41 @@ function readClaimKey(
   key: string,
   account: Account | null | undefined,
   profile: Record<string, unknown>,
-): string | null {
+): TenantClaimExtraction {
   if (key.toLowerCase() === GOOGLE_HOSTED_DOMAIN_KEY && account?.provider !== "google") {
-    return null;
+    // Not read at all for this provider, so nothing was asserted TO US —
+    // "none", not a refusal.
+    return CLAIM_NONE;
   }
-  return sanitizeTenantClaimValue(profile[key]);
+  return classifyTenantClaimValue(profile[key]);
 }
 
 export function extractTenantClaimValue(
   account?: Account | null,
   profile?: Record<string, unknown> | null,
-): string | null {
-  if (!profile) return null;
+): TenantClaimExtraction {
+  if (!profile) return CLAIM_NONE;
+
+  // A key that yields a usable value wins over an earlier one that did not:
+  // refusing the whole extraction on the first unusable key would deny
+  // profiles that carry a perfectly good claim under another configured key.
+  // The refusal survives only when NO key produced a value — which is exactly
+  // the case an attacker reaches by mangling the attribute that names them.
+  let refused = false;
 
   const keys = parseTenantClaimKeys();
   for (const key of keys) {
-    const cleaned = readClaimKey(key, account, profile);
-    if (cleaned) return cleaned;
+    const result = readClaimKey(key, account, profile);
+    if (result.kind === "value") return result;
+    if (result.kind === "malformed") refused = true;
   }
 
   // Google Workspace fallback: hosted domain claim (hd). Unchanged for the
   // default key list, which does not name it; an operator who does name it
   // reaches the same value earlier, through the loop, and nothing else.
-  const cleaned = readClaimKey(GOOGLE_HOSTED_DOMAIN_KEY, account, profile);
-  if (cleaned) return cleaned;
+  const fallback = readClaimKey(GOOGLE_HOSTED_DOMAIN_KEY, account, profile);
+  if (fallback.kind === "value") return fallback;
+  if (fallback.kind === "malformed") refused = true;
 
-  return null;
+  return refused ? CLAIM_MALFORMED : CLAIM_NONE;
 }
