@@ -126,10 +126,17 @@ function scan(s,   i, n, j, c, cc, qpos, body, outer, found) {
 }
 {
   raw = $0
-  # A comment-only physical line is dropped BEFORE the continuation test.
-  # Joining it first and discarding the logical line for starting with `#`
-  # would let a comment ending in `|` or `\` swallow the violation below it.
-  if (buf == "" && raw ~ /^[ \t]*#/) next
+  # Physical lines that carry no command text — comment-only and blank — are
+  # dropped BEFORE the continuation test, and WITHOUT ending a logical line
+  # already in progress. Both halves matter, and each was a bypass on its own:
+  #   * joining first and then discarding the logical line for starting with
+  #     `#` let a comment ending in `|` or `\` swallow the violation below it;
+  #   * ending the logical line on them let bash-legal layouts split a pipeline
+  #     from its grep, which is exactly what the gate is looking for:
+  #         printf %s "$BODY" |
+  #           # pipeline explanation      <- or simply a blank line
+  #           grep -q needle
+  if (raw ~ /^[ \t]*#/ || raw ~ /^[ \t]*$/) next
   if (buf == "") { start = FNR; disp = $0 }
   # bash continues a line ending in `\`, and also one ending in a pipe
   # operator (`|` or `|&`) with no backslash at all.

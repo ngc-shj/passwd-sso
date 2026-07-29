@@ -242,6 +242,24 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(stdout).toMatch(/offender\.sh:4:/);
   });
 
+  // bash lets a pipeline continue across lines that carry no command text.
+  // Ending the logical line on one of them split the pipeline from its grep,
+  // which is precisely the shape being looked for.
+  it.each([
+    ["a comment line", "  # pipeline explanation"],
+    ["a blank line", ""],
+    ["an indented blank line", "   "],
+  ])("FAILS when %s sits between the pipe and the grep", (_name, filler) => {
+    writeScript(
+      "offender",
+      `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s' "$BODY" |\n${filler}\n  grep -q needle\n`,
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(1);
+    // Still anchored to the line the pipeline starts on.
+    expect(stdout).toMatch(/offender\.sh:3:/);
+  });
+
   it("PASSES a safe pipeline whose LATER stage carries -m", () => {
     // `sort -m` merges; it reads to EOF. The flag belongs to sort, not to the
     // grep, so scanning the whole line rather than the grep's own arguments
