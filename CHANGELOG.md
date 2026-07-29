@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.4.72](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.71...passwd-sso-v0.4.72) (2026-07-29)
+
+
+### Bug Fixes
+
+* **ci:** require throw in null-tenant guard body; catch || lenient fallback ([#713](https://github.com/ngc-shj/passwd-sso/issues/713)) ([649dd63](https://github.com/ngc-shj/passwd-sso/commit/649dd63088ec668107a3f9331e2232506354bf95))
+* **extension:** declare @testing-library/dom instead of relying on peer auto-install ([#737](https://github.com/ngc-shj/passwd-sso/issues/737)) ([d47f8f6](https://github.com/ngc-shj/passwd-sso/commit/d47f8f62a5d1f1e5abc4ad2dfc4eb46500b5ae5b))
+* **extension:** restrict identity/CC autofill to fillable input types & scope fills to top frame ([#717](https://github.com/ngc-shj/passwd-sso/issues/717)) ([c838edd](https://github.com/ngc-shj/passwd-sso/commit/c838edd73d87bf98549d57b4bd10c4e2ee6a300e))
+* **extension:** stop logging secrets to the console, and guard combined-expiry autofill ([#730](https://github.com/ngc-shj/passwd-sso/issues/730)) ([142aa11](https://github.com/ngc-shj/passwd-sso/commit/142aa116d01643a8bef5f0b0c92a3e49e9b54a6c))
+* **gates:** close four bypasses in the no-pipe-into-grep-q detector ([#739](https://github.com/ngc-shj/passwd-sso/issues/739)) ([28066fc](https://github.com/ngc-shj/passwd-sso/commit/28066fc6b95e81fd9fbc00d315428b5a5c5aa21f))
+* **gates:** stop reading a successful grep match as a gate failure ([#738](https://github.com/ngc-shj/passwd-sso/issues/738)) ([e750126](https://github.com/ngc-shj/passwd-sso/commit/e750126f548a1f0b2d5611c1a93dc2578285d230))
+* **prod:** close production-readiness blockers — session-token HMAC, ECS deploy ordering, image signing, DB privilege audit ([aadb0e8](https://github.com/ngc-shj/passwd-sso/commit/aadb0e864f83059386b0e73b1f899283319b6cd9))
+* remediate 2026-07 external security review residual findings ([#715](https://github.com/ngc-shj/passwd-sso/issues/715)) ([90aec86](https://github.com/ngc-shj/passwd-sso/commit/90aec86d665eb7b9bfe17bcdb3c9c6e144fefdee))
+* **security:** remediate 2026-07 triangulated security review + re-review rounds ([#716](https://github.com/ngc-shj/passwd-sso/issues/716)) ([f965048](https://github.com/ngc-shj/passwd-sso/commit/f965048aeaf515454cbb9aba28f28d2c72e8d100))
+
+
+### Code Refactoring
+
+* **extension:** dedup detector helpers, remove dead autofill.js twin ([#718](https://github.com/ngc-shj/passwd-sso/issues/718)) ([00bb3bd](https://github.com/ngc-shj/passwd-sso/commit/00bb3bda8a90bd759c0788876e4eb735de2ad3d1))
+* **security:** route production logging through audited sinks and eliminate `any` ([#723](https://github.com/ngc-shj/passwd-sso/issues/723)) ([ed06f3b](https://github.com/ngc-shj/passwd-sso/commit/ed06f3b4571981da7d375ec1c1eb6baae127d39f))
+
+
+### Performance Improvements
+
+* **pre-pr:** de-spawn two static gates and run independent steps concurrently (~160s -&gt; ~88s) ([#721](https://github.com/ngc-shj/passwd-sso/issues/721)) ([9f44db6](https://github.com/ngc-shj/passwd-sso/commit/9f44db600bdf40914aabdb5cdc0971d062323cea))
+
 ## [0.4.71](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.70...passwd-sso-v0.4.71) (2026-07-22)
 
 
