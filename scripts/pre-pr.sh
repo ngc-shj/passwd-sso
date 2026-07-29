@@ -43,13 +43,19 @@ detect_web_changes() {
   diff=$(git diff --name-only "$base"...HEAD 2>/dev/null) || return 0
   # Empty diff (e.g. nothing committed yet) ⇒ run all, can't prove iOS-only.
   [ -z "$diff" ] && return 0
-  printf '%s\n' "$diff" | grep -qE "$app_paths"
+  grep -qE "$app_paths" <<<"$diff"
 }
 if detect_web_changes; then
   RUN_WEB=1
 else
   RUN_WEB=0
 fi
+
+# Captured once, and fed to the branch-shape tests below as a herestring rather
+# than piped: `git … | grep -q` dies with SIGPIPE when grep matches and exits
+# first, and pipefail turns that into "no match" — silently skipping the very
+# steps the match was supposed to enable.
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
 
 passed=0
 failed=0
@@ -116,7 +122,7 @@ show_failure_context() {
       start_line=$(( fail_summary_line > 3 ? fail_summary_line - 3 : 1 ))
       end_line=$(( start_line + 60 ))
     else
-      first_line=$(printf "%s\n" "$matches" | head -1 | cut -d: -f1)
+      first_line=$(head -1 | cut -d: -f1) <<<"$matches"
       start_line=$(( first_line > 5 ? first_line - 5 : 1 ))
       end_line=$(( start_line + 24 ))
     fi
@@ -331,6 +337,7 @@ queue_step "Static: destructive-migration" node scripts/checks/check-destructive
 queue_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
 queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
 queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
+queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
 queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
 run_batch
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
@@ -354,7 +361,7 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
 else
   printf "  [skip: rls-cross-tenant SQL parse — local docker DB not running (npm run docker:up to enable)]\n\n"
 fi
-run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
+run_step "Static: no-deprecated-logAudit" bash -c 'hits=$(grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" || true); if [ -n "$hits" ]; then echo "Residual logAudit() calls found:"; printf "%s\n" "$hits"; exit 1; fi'
 
 # C21 / C10: forbid imports of Auth.js builtin WebAuthn providers. The project
 # uses Auth.js Credentials provider with a custom authorize() flow that calls
@@ -379,7 +386,7 @@ run_step "Static: prf-salt-migration-script-readonly" bash -c '
   # Extract just the SQL block(s) between `<<EOF` markers and the closing tag.
   # Any of UPDATE/INSERT/DELETE/TRUNCATE inside that block fails the check.
   SQL_BODY=$(awk "/^psql /,/^SQL\$/" "$SCRIPT")
-  if echo "$SQL_BODY" | grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b"; then
+  if grep -iqE "\\b(UPDATE|INSERT|DELETE|TRUNCATE)\\b" <<<"$SQL_BODY"; then
     echo "ERROR: forbidden write verb inside SQL body of $SCRIPT (A02-8 C9 immutable)"
     exit 1
   fi
@@ -404,11 +411,11 @@ run_step "Static: no-argon2-browser-reintroduce" bash -c '
   # of argon2-browser to catch accidental re-introduction (left-pad scenario
   # for an unmaintained dep). Also forbid hash-wasm imports outside the crypto
   # lib + tests + cli (CLI keeps its own argon2 dep).
-  if grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
-    src/ 2>/dev/null | grep -v "\\.test\\." | grep -q .; then
+  argon2_hits=$(grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
+    src/ 2>/dev/null | grep -v "\\.test\\." || true)
+  if [ -n "$argon2_hits" ]; then
     echo "ERROR: argon2-browser import detected — A06-2 forbids re-introduction; use hash-wasm."
-    grep -rnE "(from\s+[\x22\x27]argon2-browser[\x22\x27]|require\([\x22\x27]argon2-browser[\x22\x27]\))" \
-      src/ | grep -v "\\.test\\."
+    printf "%s\n" "$argon2_hits"
     exit 1
   fi
   if grep -qF "argon2-browser" package.json; then
@@ -621,10 +628,11 @@ fi
 # local run isn't false-failed by a stale, git-ignored
 # .refactor-phase-verify-baseline; CI's refactor-phase-verify.yml keeps using
 # --force WITHOUT the flag, so its behavior is unchanged.
-if [ "$STATIC_ONLY" != "1" ] && git rev-parse --abbrev-ref HEAD | grep -q "^refactor/"; then
+if [ "$STATIC_ONLY" != "1" ] && grep -q "^refactor/" <<<"$CURRENT_BRANCH"; then
   # two-dot -M main (working tree) mirrors verify-move-only-diff.mjs:194; do NOT
   # change to main...HEAD — the gate's rename detector must match the verifier.
-  if git diff --name-status -M main -- src | grep -qE '^[RC]'; then
+  src_rename_status=$(git diff --name-status -M main -- src 2>/dev/null || true)
+  if grep -qE '^[RC]' <<<"$src_rename_status"; then
     run_step "Refactor phase verify" node scripts/refactor-phase-verify.mjs --skip-merge-queue-guards
   else
     printf "${BOLD}▸ Refactor phase verify${RESET}\n  (skipped — content-only refactor: 0 src renames; CI's Refactor Phase Verify workflow is authoritative)\n\n"
@@ -633,8 +641,10 @@ fi
 
 # Manual-test artifact gate (R35 Tier-1) — fails if admin-IA changes ship
 # without an accompanying docs/archive/review/*-manual-test.md.
-if git diff --name-only main...HEAD | grep -q '^src/app/\[locale\]/admin/'; then
-  if ! git diff --name-only --diff-filter=A main...HEAD | grep -q '^docs/archive/review/.*-manual-test\.md$'; then
+branch_changed_files=$(git diff --name-only main...HEAD 2>/dev/null || true)
+branch_added_files=$(git diff --name-only --diff-filter=A main...HEAD 2>/dev/null || true)
+if grep -q '^src/app/\[locale\]/admin/' <<<"$branch_changed_files"; then
+  if ! grep -q '^docs/archive/review/.*-manual-test\.md$' <<<"$branch_added_files"; then
     printf "${RED}ERROR: admin/ changes detected but no docs/archive/review/*-manual-test.md added (R35 Tier-1)${RESET}\n" >&2
     failed=$((failed + 1))
     failures+=("Manual-test artifact gate (R35 Tier-1)|")
@@ -655,10 +665,9 @@ fi
 # T22 (CI via ci-integration.yml is authoritative; this local run is a preview).
 # Set PREPR_SKIP_INTEGRATION=1 to defer to CI.
 if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ] && \
-   git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
-   git diff --name-only main...HEAD | \
-     grep -E '^src/lib/(prisma|redis|tenant-(context|rls)|auth/.+-token)\.ts$|^src/lib/(prisma|tenant|auth)/' \
-     > /dev/null; then
+   grep -q "^refactor/" <<<"$CURRENT_BRANCH" && \
+   grep -qE '^src/lib/(prisma|redis|tenant-(context|rls)|auth/.+-token)\.ts$|^src/lib/(prisma|tenant|auth)/' \
+     <<<"$branch_changed_files"; then
   if [ "${PREPR_SKIP_INTEGRATION:-0}" = "1" ]; then
     printf "${BOLD}▸ Integration tests${RESET}\n"
     printf "  (skipped — PREPR_SKIP_INTEGRATION=1; CI ci-integration.yml is authoritative)\n\n"

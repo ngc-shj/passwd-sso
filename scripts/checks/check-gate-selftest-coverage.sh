@@ -108,7 +108,7 @@ if [ "$DEBT_PARSE_FAIL" -ne 0 ]; then
 fi
 
 is_debt() {
-  printf '%s' "$DEBT_LIST" | grep -qxF "$1"
+  [ -n "$1" ] && grep -qxF "$1" <<<"$DEBT_LIST"
 }
 
 # ---------------------------------------------------------------------------
@@ -190,13 +190,13 @@ while IFS= read -r debt_entry; do
   case "$debt_entry" in
     pre-pr:*)
       inline_label="${debt_entry#pre-pr:}"
-      if ! printf '%s' "$inline_keys" | grep -qxF "$debt_entry"; then
+      if ! grep -qxF "$debt_entry" <<<"$inline_keys"; then
         echo "STALE_DEBT_ENTRY: $debt_entry (no inline \"$inline_label\" bash -c gate found in $PREPR_FILE)"
         DEBT_DRIFT=1
       fi
       ;;
     *)
-      if ! printf '%s' "$check_keys" | grep -qxF "$debt_entry"; then
+      if ! grep -qxF "$debt_entry" <<<"$check_keys"; then
         echo "STALE_DEBT_ENTRY: $debt_entry (no such file under $CHECKS_DIR)"
         DEBT_DRIFT=1
       else

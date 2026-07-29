@@ -57,10 +57,10 @@ suggest_bump() {
   fi
 
   # Check for breaking changes (highest priority)
-  if echo "$commits" | grep -qiE '^[a-z]+!:|BREAKING CHANGE'; then
+  if grep -qiE '^[a-z]+!:|BREAKING CHANGE' <<<"$commits"; then
     bump="major"
   # Check for new features
-  elif echo "$commits" | grep -qE '^feat(\(.+\))?:'; then
+  elif grep -qE '^feat(\(.+\))?:' <<<"$commits"; then
     bump="minor"
   fi
 

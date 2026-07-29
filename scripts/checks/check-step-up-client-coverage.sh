@@ -209,7 +209,7 @@ if [ "$EXEMPT_PARSE_FAIL" -ne 0 ]; then
 fi
 
 is_exempt() {
-  printf '%s' "$EXEMPT_IDS" | grep -qxF "$1"
+  [ -n "$1" ] && grep -qxF "$1" <<<"$EXEMPT_IDS"
 }
 
 # ── Collect SERVER markers (set S) and enforce completeness ──────────────────
@@ -247,7 +247,7 @@ while IFS= read -r route; do
     sid="$(printf '%s' "$marker_line" | sed -E 's/.*id:([A-Za-z0-9_-]+).*/\1/')"
 
     # Per-file id uniqueness (a marker must not cover two distinct calls).
-    if printf '%s' "$file_ids" | grep -qxF "$sid"; then
+    if grep -qxF "$sid" <<<"$file_ids"; then
       echo "SERVER_MARKER_DUP_ID: $route:$H — id '$sid' is used by more than one requireRecentCurrentAuthMethod call in this file; each gated call needs a distinct id."
       fail=1
     fi
@@ -255,7 +255,7 @@ while IFS= read -r route; do
 "
 
     # Global id uniqueness across all server files.
-    if printf '%s' "$declare_ids_seen" | grep -qxF "$sid"; then
+    if grep -qxF "$sid" <<<"$declare_ids_seen"; then
       echo "SERVER_MARKER_DUP_ID_GLOBAL: $route:$H — id '$sid' is already declared by another route file; ids must be globally unique."
       fail=1
     fi
@@ -315,7 +315,7 @@ done < <(
 # ── Check 1: Coverage (S \ C) ────────────────────────────────────────────────
 while IFS= read -r sid; do
   [ -z "$sid" ] && continue
-  if printf '%s' "$CLIENT_IDS" | grep -qxF "$sid"; then
+  if grep -qxF "$sid" <<<"$CLIENT_IDS"; then
     continue
   fi
   if is_exempt "$sid"; then
@@ -328,7 +328,7 @@ done < <(printf '%s' "$SERVER_IDS" | sort -u)
 # ── Check 3: Anti-orphan (C \ S) ─────────────────────────────────────────────
 while IFS= read -r cid; do
   [ -z "$cid" ] && continue
-  if printf '%s' "$SERVER_IDS" | grep -qxF "$cid"; then
+  if grep -qxF "$cid" <<<"$SERVER_IDS"; then
     continue
   fi
   if is_exempt "$cid"; then
@@ -362,7 +362,7 @@ while IFS= read -r line; do
   [ -z "$eid" ] && continue
 
   # The exempt id must still be a real server id (else the exemption is stale).
-  if ! printf '%s' "$SERVER_IDS" | grep -qxF "$eid"; then
+  if ! grep -qxF "$eid" <<<"$SERVER_IDS"; then
     echo "STALE_EXEMPT: exempt id '$eid' has no matching server @stepup marker — remove it from stepup-client-exempt.txt."
     fail=1
     continue
@@ -386,7 +386,7 @@ while IFS= read -r line; do
   #     as the route file) must exist and contain the literal
   #     `@browser-redirect-recovery-test` marker, pinning a regression test.
   if [ "$emarker" = "@browser-redirect" ]; then
-    route_rel="$(printf '%s' "$SERVER_ID_FILES" | grep -m1 "^${eid} " | cut -d' ' -f2-)"
+    route_rel="$(grep -m1 "^${eid} " <<<"$SERVER_ID_FILES" | cut -d' ' -f2-)"
     if [ -z "$route_rel" ]; then
       echo "STALE_EXEMPT: exempt id '$eid' has no matching server route file on record — remove it from stepup-client-exempt.txt."
       fail=1
@@ -461,7 +461,7 @@ manifest_line_for() {
 
 while IFS= read -r sid; do
   [ -z "$sid" ] && continue
-  if ! printf '%s' "$MANIFEST_IDS" | grep -qxF "$sid"; then
+  if ! grep -qxF "$sid" <<<"$MANIFEST_IDS"; then
     echo "MANIFEST_ID_MISSING: server id '$sid' has no entry in $PATHS_FILE — add \"$sid\": { \"method\": \"<M>\", \"pathTokens\": [...] }."
     fail=1
     continue
@@ -476,7 +476,7 @@ done < <(printf '%s' "$SERVER_IDS" | sort -u)
 
 while IFS= read -r mid; do
   [ -z "$mid" ] && continue
-  if ! printf '%s' "$SERVER_IDS" | grep -qxF "$mid"; then
+  if ! grep -qxF "$mid" <<<"$SERVER_IDS"; then
     echo "MANIFEST_ID_STALE: manifest id '$mid' (in $PATHS_FILE) has no matching server @stepup marker — remove it or the route was renamed/removed."
     fail=1
   fi
@@ -629,7 +629,7 @@ EOF
     [ "$token_hit" -eq 1 ] || continue
 
     # Escape hatch: a suppression comment for this exact id near the call line.
-    if printf '%s' "$suppress_window" | grep -qE "@stepup-path-ok[[:space:]]+id:${mid}([[:space:]]|$)"; then
+    if grep -qE "@stepup-path-ok[[:space:]]+id:${mid}([[:space:]]|$)" <<<"$suppress_window"; then
       # Reason discipline: require >=10 chars of trailing text on that line.
       suppress_line="$(printf '%s' "$suppress_window" | grep -E "@stepup-path-ok[[:space:]]+id:${mid}" | head -n1)"
       reason="$(printf '%s' "$suppress_line" | sed -E "s/.*@stepup-path-ok[[:space:]]+id:${mid}//")"
@@ -642,7 +642,7 @@ EOF
       continue
     fi
 
-    if ! printf '%s' "$file_marker_ids" | grep -qxF "$mid"; then
+    if ! grep -qxF "$mid" <<<"$file_marker_ids"; then
       echo "UNMARKED_CALLSITE_CANDIDATE: $rel:$fline — fetchApi( call site matches gated id '$mid' ($method) by path token, but this file has no '@stepup id:$mid' marker. Add the marker + step-up handling, or suppress with '// @stepup-path-ok id:$mid <reason>' if this is a confirmed false positive."
       fail=1
     fi

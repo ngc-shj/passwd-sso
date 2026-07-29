@@ -110,7 +110,7 @@ if [ "$EXEMPT_PARSE_FAIL" -ne 0 ]; then
 fi
 
 is_exempt() {
-  printf '%s' "$EXEMPT_LIST" | grep -qxF "$1"
+  [ -n "$1" ] && grep -qxF "$1" <<<"$EXEMPT_LIST"
 }
 
 # Irreversible vault-data delete primitives (extended regex). Keep table-name
