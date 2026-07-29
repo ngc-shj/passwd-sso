@@ -228,9 +228,16 @@ describe("tenant_claims (C1)", () => {
                 where: { claim: normalised },
                 select: { claim: true },
               });
-              // Byte identity, not merely "equivalent": a re-fold on either
-              // side would surface here as a differing code unit.
+              // This is the equivalence M6 asked for: what JS accepted, the
+              // CHECK stores unchanged.
               expect(stored?.claim, testCase.label).toBe(normalised);
+              // The byte comparison guards the ENCODING round-trip (driver
+              // and column collation), not folding: `tenant_claims_claim_
+              // normalized` is a CHECK predicate, not a BEFORE INSERT
+              // trigger, so Postgres never rewrites the stored string, and
+              // every value reaching this arm is printable ASCII by
+              // construction. It cannot detect a re-fold — the assertion
+              // above is what carries that.
               expect(
                 Buffer.from(stored?.claim ?? "", "utf8").equals(Buffer.from(normalised, "utf8")),
                 `${testCase.label}: byte identity`,

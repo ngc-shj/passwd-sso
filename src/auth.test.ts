@@ -817,6 +817,33 @@ describe("signIn callback", () => {
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
+  // The Auth.js provider id -> audit enum mapping now lives in
+  // @/lib/audit/auth-failure-mapping (shared with the adapter's first-ever
+  // sign-in refusal site). SAML is the arm with two spellings and no previous
+  // coverage: dropping either one would silently downgrade every SAML denial
+  // to provider "unknown" while the google cases above stayed green.
+  it.each(["boxyhq-saml", "saml-jackson"])(
+    "maps the %s provider id to the saml audit provider",
+    async (providerId) => {
+      mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+      mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
+      mockResolveTenantByClaim.mockResolvedValue({ id: "00000000-0000-4000-a000-000000000001" });
+      mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
+      mockPrisma.tenant.findUnique.mockResolvedValue({ isBootstrap: false });
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "user@acme.com" },
+        account: { provider: providerId },
+        profile: {},
+      });
+
+      expect(result).toBe(false);
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "saml" }),
+      );
+    },
+  );
+
   describe("nodemailer provider", () => {
     it("returns true for new user (no existing DB record)", async () => {
       // user.findUnique returns null twice: once for nodemailer check, once for userId lookup

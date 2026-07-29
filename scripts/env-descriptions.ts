@@ -208,8 +208,14 @@ export const descriptions: Record<
       "from the OIDC token (e.g. 'tenant,org_id'). Leaving this unset selects a\n" +
       "list of self-asserted profile attributes (tenant_id, tenantId,\n" +
       "organization, org, company, company_id), tried before Google's attested\n" +
-      "'hd' claim — it does NOT mean 'hd only'. Set it to 'hd' to accept only\n" +
-      "the Google hosted-domain claim, or name the attribute your IdP asserts.",
+      "'hd' claim — it does NOT mean 'hd only'.\n" +
+      "'hd' is GOOGLE-ONLY: it is honoured only when the account's provider is\n" +
+      "google, so on a SAML deployment AUTH_TENANT_CLAIM_KEYS=hd resolves no\n" +
+      "claim for any sign-in — nothing is denied, and first-time users are\n" +
+      "created in their own personal bootstrap tenant as OWNER instead of\n" +
+      "joining the org's tenant. For SAML, name the attribute your IdP asserts\n" +
+      "and provision only ONE SSO connection per deployment; see the README\n" +
+      "section 'IdP domain changed / tenant locked out' before setting this.",
     example: "tenant",
   },
   SAML_PROVIDER_NAME: {
@@ -569,7 +575,9 @@ export const descriptions: Record<
     description:
       "HMAC pepper for hashing the identifier recorded on AUTH_LOGIN_FAILURE\n" +
       "audit events. 64-character hex string (256 bits, npm run generate:key);\n" +
-      "a shorter value is refused at boot and ignored at the derivation site.\n" +
+      "anything else is refused at boot — too short, too long, or the right\n" +
+      "length but not hex. Changing this value changes the HMAC key, so hashes\n" +
+      "written afterwards no longer correlate with existing audit rows.\n" +
       "Optional override — when unset, the pepper is derived from\n" +
       "AUTH_SECRET via HKDF, so production always has real key material. Only if\n" +
       "neither is available is no hash computed at all (identifierHash: null,\n" +

@@ -248,4 +248,50 @@ divergence has produced on this branch.
 
 ## Resolution Status
 
-_(populated after fixes)_
+Fix commit: `c360415fd`. All Critical and Major findings fixed; no deferrals.
+
+### CR1 [Critical] Two tests fail in CI; C8's unkeyed branch never exercised there
+- Action: three test files now assert their own preconditions (`vi.stubEnv(<key>, "")` in `beforeEach`) instead of inheriting ambient absence. Verified by running the changed unit-test surface under the **full `app-ci` env block**, not just `AUTH_SECRET`: 9 files / 217 tests pass. Red-proved: removing the two stubs under CI's `AUTH_SECRET` gives 4 failures.
+- Modified: `src/lib/audit/auth-failure.test.ts`, `src/lib/tenant/tenant-claim.test.ts`, `src/app/api/mobile/.well-known/apple-app-site-association/route.test.ts`
+
+### M1 [Major, converged Func+Sec] Revoked claim admits one sign-in as OWNER
+- Action: `findOrCreateTenantForClaim` returns `ClaimTenantResolution` (`{kind:"tenant";id} | {kind:"claim_taken"} | {kind:"claim_invalid"}`). `createUser` branches on **whether a claim was presented**, not on whether resolution produced a tenant, and throws `TENANT_CLAIM_UNUSABLE` on either refusal — aborting the `withBypassRls` tx so no tenant, user or OWNER membership survives.
+- Modified: `src/lib/tenant/tenant-management.ts`, `src/lib/auth/session/auth-adapter.ts` (+ both test files)
+
+### M2 [Major] Revoked-claim denial emitted the reason its own diagnostic filters out
+- Action: `CLAIM_REFUSAL_REASON` const-object (`satisfies`-constrained) maps `claim_taken → tenant_claim_unmapped`, `claim_invalid → tenant_mismatch` at both `src/auth.ts` refusal sites. **The reviewer's premise was corrected**: the plan is not self-contradictory — row 8b's trigger is the schema reject, D2's is the revoked row; the implementation had collapsed two triggers into one `null`. Root cause was the orchestrator's Batch C brief.
+- Modified: `src/auth.ts:80-86,141-150`, `src/auth.test.ts`
+
+### M3 [Major] Backfill merged case/whitespace-variant tenants across the tenant boundary
+- Action: both copies of the backfill exclude **every** side of a collision, so release 1's exact-match `externalId` fallback keeps both tenants resolving as they do today. Verified against the live DB with seeded 2-way and 3-way collisions inside `BEGIN…ROLLBACK`; the pre-fix statement reproduced the one-winner behaviour, so the new assertion genuinely reds. Migration re-applied by the user-chosen method — checksum-only `UPDATE` (dev has zero collisions, so old and new produce identical data); `prisma migrate status` and `check-migration-drift` green afterwards.
+- Modified: `prisma/migrations/20260729110000_add_tenant_claims/migration.sql`, `scripts/lib/tenant-claim-backfill.sql`, `src/__tests__/db-integration/tenant-claim.integration.test.ts`
+
+### M4 [Major] SC7's premise false; the documented safe configuration was unreachable
+- Action (user-chosen, non-breaking): `hd` is now selectable in `AUTH_TENANT_CLAIM_KEYS`, **behind a provider gate** (`account.provider === "google"`) — so a SAML profile carrying a self-asserted field literally named `hd` does not resolve. That gate is what turns "named `hd`" into "attested by Google". `DEFAULT_TENANT_CLAIM_KEYS` untouched; unset behaviour byte-identical. READMEs and the sidecar now state that leaving the variable unset selects an assertion-sourced list tried *before* `hd`.
+- Modified: `src/lib/tenant/tenant-claim.ts`, `scripts/env-descriptions.ts`, `README.md`, `README.ja.md`
+
+### M5 [Major] No claim-reassignment path; the CLI's own remediation looped
+- Action: `add --from <current-owner-uuid>` moves a claim atomically. `--from` takes a bare UUID only, refuses on owner mismatch, prints both tenants with active member counts plus the absorption warning, and re-asserts the owner in the `WHERE` so a concurrent change is a refusal rather than a silent overwrite. **Revoke-first was deliberately not required**: it adds a step without adding a check (`--from` already supplies the deliberateness) and opens a window in which the claim resolves to nobody, denying *both* tenants' members — the wrong direction for a tool whose purpose is ending lockouts. The looping refusal message now names the flag.
+- Modified: `scripts/tenant-domain.ts`, `src/__tests__/db-integration/tenant-claim-cli.integration.test.ts`, both READMEs
+
+### M6-M12 [Major] Assertions that could not fail for the reason claimed
+- **M6** — the missing normalisation-equivalence criterion is implemented against real Postgres: 9 adversarial values through the real `normalizeTenantClaim`, accept arm asserting byte-identical round-trip (string **and** `Buffer.equals`), reject arm asserting a real CHECK violation, with anti-vacuity counters proving both arms fire. The D3 case behaves as predicted — JS folds `İ` to `i`+U+0307, which the CHECK's ASCII clause rejects.
+- **M7** — 50-iteration race per the helper's own contract. **Red-proved**: a copy of the function with `advisoryXactLock` removed fails the loop.
+- **M8** — pre-flight now seeds a collision and a non-ASCII row and asserts they are reported. Red-proved four ways (predicate inverted, `btrim` dropped, `WHERE` dropped, fold-vs-raw swapped).
+- **M9** — SAVEPOINT ordering asserted by SQL text **and** `invocationCallOrder` vs `tenant.create`. **Red-proved**: moving the SAVEPOINT into the catch block gives `expected 14 to be less than 13`, while the old call-count assertion stayed green under the same mutation.
+- **M10** — the `unmapped` test neutralises its `PENDING` outbox row before cleanup, closing the worker window rather than narrowing it.
+- **M11** — "no connection attempted" is now asserted via a spy on the client factory. Red-proved by building the client before the env check.
+- **M12** — mixed-case fallback cases added to both files, pinning the **raw** claim spelling that D-3 makes load-bearing.
+
+### Minor findings — all fixed
+Func F4 (`--days` flag, honest wording), Func F5 (strip-then-trim), Func F6 (`example` dropped; verified by running `init-env.ts` in a tmpdir with Enter at every prompt — proves the mechanism, not the absence), Func F8 (slug/`external_id` fallback in `--tenant`), Sec F5 (`hex64.optional()` **and** a 32-char floor at the derivation site, since that module reads `process.env` directly), Sec F6 (one shared class in `src/lib/security/unsafe-display-chars.ts`, widened by U+2028/2029/2060/180E/00AD/061C, both call sites migrated), Sec F8 (inline predicate removed from both READMEs, which point at `preflight`), M2/F7 (`createdBy` never overwritten on un-revoke), Test F9/F10/F11/F12/F13, Test F14 (pre-flight scan bounded).
+
+### Deferred with an owner — Func F3
+The release-1 `externalId` fallback resolves a deploy-window tenant but never registers its claim row. **Not fixed in this PR, deliberately**: `resolveTenantByClaim` must stay read-only (I5), and a naive "register what the fallback resolved" write would insert the *raw* spelling and could itself collide with a backfilled row — re-creating the round-2 S1 shape the finding also names. Which spelling converges, and what happens on collision, is one design decision that belongs with SC10's fallback removal, where the ASCII narrowing takes effect anyway.
+**Anti-Deferral** — Worst case: deploy-window tenants lock out when release 2 removes the fallback. Likelihood: only for tenants first seen during a migration-first roll. Cost to fix later: one re-backfill run. **Required**: SC10's release-2 work must carry an explicit item — *"re-backfill or converge deploy-window tenants before removing the fallback"* — or those tenants lock out with nothing assigned to catch them.
+
+### Environment findings resolved this round (not code defects)
+- **Integration non-determinism causally proven, not assumed**: with `passwd-sso-audit-outbox-worker-1` stopped, the full suite is 95/95 / 426 pass / exit 0; with it running, a different pre-existing outbox/retention test fails each run. Worker restarted. CI runs no such container. One member of the class (`rate-limit-fail-closed.integration.test.ts`) was observed outside this PR's files.
+- **Shared dev DB restored to its pre-session state**: 76 leaked test tenants from today's runs and 353 child rows removed (catalog-driven iterative delete — 48 of 49 FKs to `tenants` are `RESTRICT`, so a hand-written order would have been fragile; a guard refused the batch if any non-test row appeared). Back to 264 tenants / 2 claim rows / 2 `external_id`. Pre-existing residue from earlier days left untouched.
+- **RS4 re-verified**: the dev database contains real customer domains; a repo-wide search confirms none appear in any committed file.
+

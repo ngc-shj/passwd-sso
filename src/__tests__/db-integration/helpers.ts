@@ -4,6 +4,12 @@
  * Each test file should call createTestContext() in beforeAll and
  * ctx.cleanup() in afterAll. Within each test, use ctx.createTenant()
  * to get an isolated tenant UUID and ctx.deleteTestData(tenantId) in afterEach.
+ *
+ * Per-test cleanup is a best effort, not the guarantee: a trailing
+ * deleteTestData line is skipped the moment an assertion above it throws.
+ * ctx.cleanup() therefore sweeps every tenant createTenant() handed out and
+ * deleteTestData() never removed, so a failed test cannot leak rows onto the
+ * shared dev database.
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -91,13 +97,13 @@ export interface TestContext {
   worker: PrismaWithPool;
   /** Retention-GC-worker role (passwd_retention_gc_worker) — for sweeper privilege tests (C7/C10) */
   retentionWorker: PrismaWithPool;
-  /** Create a tenant row and return its UUID */
+  /** Create a tenant row and return its UUID (swept by cleanup() if never deleted) */
   createTenant: () => Promise<string>;
   /** Create a user row belonging to a tenant and return its UUID */
   createUser: (tenantId: string) => Promise<string>;
   /** Delete all test data for a tenant (FK-safe order) */
   deleteTestData: (tenantId: string) => Promise<void>;
-  /** Disconnect all pools */
+  /** Sweep any tenant createTenant() handed out and never deleted, then disconnect all pools */
   cleanup: () => Promise<void>;
 }
 
@@ -109,6 +115,12 @@ export async function createTestContext(): Promise<TestContext> {
 
   // Verify connectivity
   await su.prisma.$executeRaw`SELECT 1`;
+
+  // Every id createTenant() hands out, minus the ones deleteTestData() has
+  // already removed. A test that throws before its trailing cleanup line
+  // leaks its tenant onto the shared dev database, so cleanup() sweeps
+  // whatever is left here rather than relying on each test's discipline.
+  const outstandingTenantIds = new Set<string>();
 
   async function createTenant(): Promise<string> {
     const id = randomUUID();
@@ -123,6 +135,7 @@ export async function createTestContext(): Promise<TestContext> {
         slug,
       );
     });
+    outstandingTenantIds.add(id);
     return id;
   }
 
@@ -169,10 +182,17 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM audit_chain_anchors WHERE tenant_id = $1::uuid`,
         tenantId,
       );
-      await tx.$executeRawUnsafe(
-        `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
-        tenantId,
-      );
+      // audit_outbox BEFORE audit_logs, deliberately. The live
+      // audit-outbox-worker claims PENDING rows and then inserts the
+      // corresponding audit_logs row; audit_logs_tenant_id_fkey is RESTRICT,
+      // so a claim that lands after the audit_logs delete re-creates a child
+      // row and the terminal `DELETE FROM tenants` below fails. Draining the
+      // outbox first closes that window for every caller: the UPDATE locks
+      // this tenant's rows (claimBatch uses FOR UPDATE SKIP LOCKED, so it
+      // skips them) and the DELETE removes them before commit, while
+      // anything the worker inserted earlier is still caught by the
+      // audit_logs delete that now follows.
+      //
       // The before-delete trigger blocks DELETE of PENDING/PROCESSING rows,
       // so first move them to FAILED (which the trigger allows).
       await tx.$executeRawUnsafe(
@@ -182,6 +202,10 @@ export async function createTestContext(): Promise<TestContext> {
       );
       await tx.$executeRawUnsafe(
         `DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
         tenantId,
       );
       // MCP / delegation cleanup (FK-safe order)
@@ -265,9 +289,47 @@ export async function createTestContext(): Promise<TestContext> {
         tenantId,
       );
     });
+    // Only after the tx commits: a delete that threw leaves the tenant for
+    // the cleanup() sweep. Ids this context never handed out (tenants a test
+    // inserted itself) are simply not members, so this is a no-op for them.
+    outstandingTenantIds.delete(tenantId);
+  }
+
+  /**
+   * Delete every tenant createTenant() handed out that no deleteTestData()
+   * call removed. Idempotent (each id is dropped once its delete commits, and
+   * deleteTestData is scoped to a single id) and incapable of touching a
+   * tenant this context did not create, which matters because the dev
+   * database is shared between working copies.
+   *
+   * Failures are reported rather than thrown: the sweep only has work to do
+   * when a test already failed, and turning that into a second failure in
+   * afterAll would bury the first. The ids are printed so a leak that the
+   * sweep cannot resolve is still actionable.
+   */
+  async function sweepOutstandingTenants(): Promise<void> {
+    const leaked = [...outstandingTenantIds];
+    if (leaked.length === 0) return;
+    const unresolved: string[] = [];
+    for (const tenantId of leaked) {
+      try {
+        await deleteTestData(tenantId);
+      } catch (e) {
+        unresolved.push(`${tenantId} (${e instanceof Error ? e.message : String(e)})`);
+      }
+    }
+    console.warn(
+      `[db-integration] swept ${leaked.length - unresolved.length} leaked test tenant(s) left by a failed test.`,
+    );
+    if (unresolved.length > 0) {
+      console.warn(
+        `[db-integration] could NOT delete ${unresolved.length} test tenant(s) — they remain on the shared database:\n  ${unresolved.join("\n  ")}`,
+      );
+    }
   }
 
   async function cleanup(): Promise<void> {
+    await sweepOutstandingTenants();
     await Promise.all([
       su.prisma.$disconnect().then(() => su.pool.end()),
       app.prisma.$disconnect().then(() => app.pool.end()),

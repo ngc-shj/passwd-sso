@@ -575,13 +575,40 @@ describe("C9 undeclared env vars", () => {
     }
   });
 
-  it("rejects an AUDIT_IDENTIFIER_PEPPER that is not a 256-bit key", () => {
-    // The derivation site (src/lib/audit/auth-failure.ts) treats a short
-    // override as absent; the schema refuses it outright, so the two cannot
-    // disagree about what counts as key material (round-1 Sec F5).
+  it("rejects an AUDIT_IDENTIFIER_PEPPER that is not a 256-bit hex key", () => {
     for (const tooWeak of ["x", "c".repeat(31), "z".repeat(64)]) {
       const result = envObject.safeParse(baseEnv({ AUDIT_IDENTIFIER_PEPPER: tooWeak }));
       expect(result.success).toBe(false);
+    }
+  });
+
+  it("is strictly narrower than the derivation site's floor, which is a deliberately different predicate", () => {
+    // Round-1 Sec F5 added two independent guards, and they are NOT the same
+    // predicate: the schema is hex64 (exactly 64 hex chars) while
+    // src/lib/audit/auth-failure.ts:77,89 accepts any string of length >= 32.
+    // That module reads process.env directly — worker processes never run the
+    // full schema — so its floor has to hold for values the schema never saw.
+    // Asserted rather than glossed, because the asymmetry only stays safe in
+    // one direction.
+    const DERIVATION_SITE_MIN_LENGTH = 32; // mirrors MIN_KEY_MATERIAL_LENGTH
+
+    // Rejected by the schema, accepted by the derivation site.
+    const nonHexPassphrase = "z".repeat(40);
+    expect(nonHexPassphrase.length).toBeGreaterThanOrEqual(DERIVATION_SITE_MIN_LENGTH);
+    expect(
+      envObject.safeParse(baseEnv({ AUDIT_IDENTIFIER_PEPPER: nonHexPassphrase })).success,
+    ).toBe(false);
+
+    // The containment that makes the divergence safe: everything the schema
+    // admits also clears the derivation floor, so no schema-validated
+    // deployment can end up with an under-length HMAC key. Loosening hex64
+    // below 32 characters reds here.
+    const accepted = envObject.safeParse(baseEnv({ AUDIT_IDENTIFIER_PEPPER: "c".repeat(64) }));
+    expect(accepted.success).toBe(true);
+    if (accepted.success) {
+      expect(accepted.data.AUDIT_IDENTIFIER_PEPPER?.length).toBeGreaterThanOrEqual(
+        DERIVATION_SITE_MIN_LENGTH,
+      );
     }
   });
 

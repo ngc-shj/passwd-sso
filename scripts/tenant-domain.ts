@@ -40,10 +40,11 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove --tenant <ref> --domain <domain> [--yes]
 //
 // `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
-// claims (normalised the same way `add`/`remove` normalise `--domain`), its
-// `tenants.slug`, or its `tenants.external_id`. The last two matter at
-// incident time: a tenant whose backfill row `preflight` reports as skipped
-// has NO claim row, and would otherwise be nameable only by UUID.
+// claims (normalised the same way `add`/`remove` normalise `--domain`), or its
+// `tenants.external_id`. The last matters at incident time: a tenant whose
+// backfill row `preflight` reports as skipped has NO claim row, and would
+// otherwise be nameable only by UUID. `tenants.slug` is NOT accepted — see
+// resolveTenantRef for why (round-2 F-F).
 //
 // `--by` is a self-asserted operator label (NOT authenticated attribution —
 // there is no application user identity on this connection, see SC8) stored
@@ -115,17 +116,32 @@ export const migrationClientFactory = {
 // `--tenant` resolution, in priority order:
 //   1. a literal UUID names the tenant directly;
 //   2. an already-registered claim (normalised the same way `--domain` is) —
-//      the registry is authoritative, so it wins over 3 and 4;
-//   3. `tenants.slug` (@unique), exact match on the raw ref;
-//   4. `tenants.external_id` (@unique), exact match on the raw ref.
+//      the registry is authoritative, so it wins over 3;
+//   3. `tenants.external_id` (@unique), exact match on the raw ref.
 //
-// 3 and 4 exist because a tenant that `preflight` reports as SKIPPED by the
-// backfill (normalisation collision, or non-ASCII external_id) has no claim
-// row at all, and would otherwise be nameable only by UUID at exactly the
-// moment an operator is trying to repair it. They match the raw ref rather
-// than the normalised one because both columns are stored, and matched
-// elsewhere, verbatim (D-3's release-1 externalId fallback is an exact match
-// too); normalising here would resolve refs that no other code path resolves.
+// 3 exists because a tenant that `preflight` reports as SKIPPED by the backfill
+// (normalisation collision, or non-ASCII external_id) has no claim row at all,
+// and would otherwise be nameable only by UUID at exactly the moment an
+// operator is trying to repair it. It matches the raw ref rather than the
+// normalised one because the column is stored, and matched elsewhere, verbatim
+// (D-3's release-1 externalId fallback is an exact match too); normalising here
+// would resolve refs that no other code path resolves.
+//
+// `tenants.slug` is deliberately NOT a resolution path (round-2 F-F). A
+// sign-in-created tenant gets `slug = slugifyTenant(rawClaim)`, which collapses
+// `[^a-z0-9]+`, so the mapping from IdP claim to slug is many-to-one and the
+// first tenant to take a slug keeps it: an attacker who can cause one tenant to
+// be created — the same "one mistyped or squatted sign-in" cmdAdd's `--from`
+// comment names — can pre-empt the slug an operator would later type (assert
+// `"acme com"` to own `acme-com`). `--tenant` names the GAINING side of a
+// reassignment, so a wrong resolution hands the claim to the attacker's tenant,
+// and `--yes` removes the visual check. `external_id` carries no such hazard:
+// it is @unique and matched verbatim, so the ref the operator types names at
+// most one tenant, and owning it requires having asserted that exact string
+// before the legitimate tenant existed. Dropping slug costs no reachability
+// either — every tenant `preflight` reports has a non-null `external_id` by
+// construction (all three of its queries require it), which is the need 3 was
+// added for.
 //
 // Revoked claims still resolve a tenant reference here — the row still
 // occupies its slot in UNIQUE(claim) and identifying "which tenant used to
@@ -149,9 +165,6 @@ async function resolveTenantRef(
   if (row) {
     return tx.tenant.findUnique({ where: { id: row.tenantId }, select });
   }
-
-  const bySlug = await tx.tenant.findUnique({ where: { slug: ref }, select });
-  if (bySlug) return bySlug;
 
   return tx.tenant.findUnique({ where: { externalId: ref }, select });
 }
@@ -242,7 +255,16 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
 
 // ─── unmapped ────────────────────────────────────────────────────
 
-type UnmappedRow = { tenant_id: string; claim: string; cnt: bigint | number; last_seen: Date };
+type UnmappedRow = {
+  tenant_id: string;
+  claim: string;
+  cnt: bigint | number;
+  last_seen: Date;
+  // How many of `cnt` come from audit_outbox rows that are NOT PENDING, i.e.
+  // PROCESSING (a worker crashed mid-delivery) or FAILED (delivery exhausted
+  // its attempts). Those denials will never reach audit_logs on their own.
+  undelivered_cnt: bigint | number;
+};
 
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
 // deployment's actual retention, so it can only ever be the default window —
@@ -266,7 +288,18 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
       "An empty result does NOT by itself mean nothing was denied."
     );
   }
-  return `${rows.length} unmapped-claim denial group(s) in the last ${days} days.`;
+  const undelivered = rows.reduce((sum, r) => sum + Number(r.undelivered_cnt), 0);
+  const base = `${rows.length} unmapped-claim denial group(s) in the last ${days} days.`;
+  if (undelivered === 0) return base;
+  // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
+  // because these rows are the ones that would have been INVISIBLE while the
+  // union looked only at PENDING — a report that under-reports precisely in the
+  // stopped/crashed-worker case the union exists to cover.
+  return (
+    `${base} ${undelivered} of the denial event(s) are still in audit_outbox with a ` +
+    "non-PENDING status (PROCESSING or FAILED): the outbox worker's delivery is degraded, " +
+    "so those events will not reach audit_logs without operator action."
+  );
 }
 
 export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResult> {
@@ -293,18 +326,30 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // operator needs this report. Two DIFFERENT JSON paths, not one:
         // audit_logs.metadata is a plain Json column, audit_outbox.payload
         // wraps the same shape one level deeper under `metadata`.
+        //
+        // Every NON-SENT outbox status, not just PENDING (round-2 F-B).
+        // AuditOutboxStatus has four members: PENDING, PROCESSING, SENT,
+        // FAILED. SENT is the only one whose event is already in audit_logs,
+        // so it is the only one that must be excluded here — including it
+        // would double-count. PROCESSING is a worker that crashed mid-claim
+        // and FAILED is a row that exhausted OUTBOX_MAX_ATTEMPTS and is
+        // retained for OUTBOX_FAILED_RETENTION_DAYS; both are in neither
+        // audit_logs nor PENDING, so the previous predicate under-reported
+        // exactly in the degraded-worker case the union exists for.
         const rows = await tx.$queryRawUnsafe<UnmappedRow[]>(
-          `SELECT tenant_id::text AS tenant_id, claim, count(*)::int AS cnt, max(created_at) AS last_seen
+          `SELECT tenant_id::text AS tenant_id, claim, count(*)::int AS cnt,
+                  max(created_at) AS last_seen, sum(undelivered)::int AS undelivered_cnt
              FROM (
-               SELECT tenant_id, metadata->>'claim' AS claim, created_at
+               SELECT tenant_id, metadata->>'claim' AS claim, created_at, 0 AS undelivered
                  FROM audit_logs
                 WHERE action = 'AUTH_LOGIN_FAILURE'::"AuditAction"
                   AND metadata->>'reason' = 'tenant_claim_unmapped'
                   AND created_at >= now() - make_interval(days => $1::int)
                UNION ALL
-               SELECT tenant_id, payload->'metadata'->>'claim' AS claim, created_at
+               SELECT tenant_id, payload->'metadata'->>'claim' AS claim, created_at,
+                      CASE WHEN status = 'PENDING'::"AuditOutboxStatus" THEN 0 ELSE 1 END AS undelivered
                  FROM audit_outbox
-                WHERE status = 'PENDING'::"AuditOutboxStatus"
+                WHERE status <> 'SENT'::"AuditOutboxStatus"
                   AND payload->>'action' = 'AUTH_LOGIN_FAILURE'
                   AND payload->'metadata'->>'reason' = 'tenant_claim_unmapped'
                   AND created_at >= now() - make_interval(days => $1::int)
@@ -316,8 +361,10 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         );
 
         for (const row of rows) {
+          const undelivered = Number(row.undelivered_cnt);
           console.log(
-            `  tenant=${row.tenant_id}  claim="${row.claim}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}`,
+            `  tenant=${row.tenant_id}  claim="${row.claim}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
+              (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
           );
         }
 
@@ -360,8 +407,16 @@ export async function cmdPreflight(): Promise<CmdResult> {
       async (tx) => {
         // Query 1 — normalisation collisions: tenants whose RAW external_id
         // folds (lower(btrim(x) COLLATE "C"), matching the CHECK/backfill —
-        // round-5 D3) to the same claim as another tenant's. These are what
-        // the backfill's ON CONFLICT DO NOTHING silently skips.
+        // round-5 D3) to the same claim as another tenant's. The backfill
+        // excludes EVERY side of a collision (round-1 M3, via its
+        // `NOT IN (… GROUP BY 1 HAVING count(*) > 1)` clause — not via
+        // ON CONFLICT, which now only covers a claim row that already exists),
+        // so none of the tenants listed here gets a claim row at all. They keep
+        // resolving through the release-1 exact-match external_id fallback
+        // until an operator decides who owns the claim; a third spelling that
+        // neither stores verbatim is refused rather than allowed to squat the
+        // free slot (round-2 F-A, findOrCreateTenantForClaim's
+        // claim_collision arm).
         const collisions = await tx.$queryRawUnsafe<CollisionRow[]>(
           `SELECT lower(btrim(external_id) COLLATE "C") AS normalized_claim,
                   array_agg(id ORDER BY id) AS tenant_ids,
@@ -859,6 +914,33 @@ function getStringFlag(flags: Map<string, string | true>, name: string): string 
   return typeof v === "string" ? v : undefined;
 }
 
+// Every flag that takes a VALUE, with the hint printed when it arrives without
+// one. `--yes` is the only boolean flag and is deliberately absent.
+//
+// Round-2 F-E. parseFlags stores a valueless flag as `true` and getStringFlag
+// maps `true` to `undefined` — indistinguishable from "flag not given". For
+// `--days` that silently queried the default window while the operator believed
+// they had widened it; for `--tenant`/`--domain`/`--by` it degraded into a bare
+// usage dump that never names the flag at fault. The `--from` guard closed this
+// for one flag only; the member set is derived here from the flag table itself,
+// so a new value-taking flag joins the check by being added to it rather than
+// by someone remembering to write a fourth bespoke guard.
+const VALUE_FLAG_HINTS = {
+  tenant: "a tenant UUID, one of its registered claims, or its external id",
+  domain: "the domain to register or remove",
+  by: "a self-asserted operator label",
+  from: "the current owner's tenant UUID, exactly as `list` prints it",
+  days: "a positive integer number of days",
+} as const satisfies Record<string, string>;
+
+/** The first value-taking flag that was given without a value, if any. */
+function findValuelessFlag(flags: Map<string, string | true>): string | null {
+  for (const name of Object.keys(VALUE_FLAG_HINTS)) {
+    if (flags.get(name) === true) return name;
+  }
+  return null;
+}
+
 function printUsage(): void {
   console.error(
     [
@@ -869,7 +951,7 @@ function printUsage(): void {
       "  tenant-domain add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
       "  tenant-domain remove --tenant <ref> --domain <domain> [--yes]",
       "",
-      "<ref> is a tenant UUID, one of its registered claims, its slug, or its external id.",
+      "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
       "UUID only, and `add` refuses if it does not match the row's actual owner.",
       "",
@@ -883,6 +965,17 @@ async function main(): Promise<void> {
   const [subcommand, ...rest] = process.argv.slice(2);
   const flags = parseFlags(rest);
   const yes = flags.get("yes") === true;
+
+  const valueless = findValuelessFlag(flags);
+  if (valueless) {
+    console.error(
+      `--${valueless} requires a value (${VALUE_FLAG_HINTS[valueless as keyof typeof VALUE_FLAG_HINTS]}). ` +
+        "Refusing rather than falling back to the default: a flag written without its value " +
+        "is an instruction the operator believes was applied.",
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   let result: CmdResult;
   switch (subcommand) {
@@ -906,15 +999,11 @@ async function main(): Promise<void> {
       const tenant = getStringFlag(flags, "tenant");
       const domain = getStringFlag(flags, "domain");
       const by = getStringFlag(flags, "by");
-      const from = getStringFlag(flags, "from");
       // A valueless `--from` (e.g. `--from --yes`) must not silently degrade
       // into "no reassignment requested" — that would turn an intended move
-      // into the wrong-owner refusal, or worse, read as a plain add.
-      if (flags.has("from") && from === undefined) {
-        console.error("--from requires the current owner's tenant UUID as its value.");
-        process.exitCode = 1;
-        return;
-      }
+      // into the wrong-owner refusal, or worse, read as a plain add. Handled by
+      // findValuelessFlag above, together with every other value-taking flag.
+      const from = getStringFlag(flags, "from");
       if (!tenant || !domain || !by) {
         printUsage();
         process.exitCode = 1;

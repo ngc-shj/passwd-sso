@@ -222,11 +222,11 @@ Key variables:
 | `MIGRATION_DATABASE_URL` | PostgreSQL connection for migrations (superuser role, e.g. `passwd_user`). Required for `npm run db:migrate` |
 | `AUTH_URL` | Application origin (e.g., `http://localhost:3000`). Used as the canonical Origin when `APP_URL` is unset |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
-| `COOKIE_PARTITIONED` | (Optional) Opt in to the Partitioned (CHIPS) session-cookie attribute. Default: `false`. Requires Secure cookies; no effect outside third-party iframe contexts |
+| `COOKIE_PARTITIONED` | (Optional) Opt in to the Partitioned (CHIPS) session-cookie attribute. Accepts `true` or `false` only. Default: `false`. Requires Secure cookies; no effect outside third-party iframe contexts. See [Upgrade notes](#upgrade-notes-environment-variables-that-now-fail-closed) |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
 | `GOOGLE_WORKSPACE_DOMAINS` | (Optional) Restrict to Google Workspace domain(s), comma-separated |
-| `AUTH_TENANT_CLAIM_KEYS` | (Optional) Comma-separated IdP claim keys for tenant resolution, tried in order. **Leaving it unset is not "no configuration"** — it selects `tenant_id, tenantId, organization, org, company, company_id`, all of which are IdP-asserted, and all of which are tried *before* Google's attested `hd`. Set `AUTH_TENANT_CLAIM_KEYS=hd` for the attested-only configuration. See the guidance under [IdP domain changed / tenant locked out](#idp-domain-changed--tenant-locked-out) |
+| `AUTH_TENANT_CLAIM_KEYS` | (Optional) Comma-separated IdP claim keys for tenant resolution, tried in order. **Leaving it unset is not "no configuration"** — it selects `tenant_id, tenantId, organization, org, company, company_id`, all of which are IdP-asserted, and all of which are tried *before* Google's attested `hd`. `AUTH_TENANT_CLAIM_KEYS=hd` is the attested-only configuration **for Google sign-in only**: `hd` is honoured for the `google` provider alone, so on a SAML deployment it resolves no claim at all and new users land in personal bootstrap tenants as OWNER. Read the guidance under [IdP domain changed / tenant locked out](#idp-domain-changed--tenant-locked-out) before setting it |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
@@ -248,8 +248,8 @@ Key variables:
 | `BLOB_OBJECT_PREFIX` | Optional key prefix for cloud object paths |
 | `AUDIT_LOG_FORWARD` | (Optional) Emit structured JSON audit logs to stdout |
 | `AUDIT_LOG_APP_NAME` | (Optional) App name for audit log forwarding |
-| `AUDIT_IDENTIFIER_PEPPER` | (Optional) HMAC pepper for the identifier hashed onto `AUTH_LOGIN_FAILURE` audit events. Falls back to a key derived from `AUTH_SECRET` (HKDF, if ≥32 chars); if neither is available, no hash is computed and `identifierHashScope` is recorded as `"unkeyed"`. See [Audit Log Schema](docs/security/audit-log-schema.md) |
-| `BREAKGLASS_COOLING_OFF_SECONDS` | (Optional) Delay in seconds before a first same-requester/target Break Glass grant in a 24h window executes. Default: `3600`. Set to `0` to disable |
+| `AUDIT_IDENTIFIER_PEPPER` | (Optional) HMAC pepper for the identifier hashed onto `AUTH_LOGIN_FAILURE` audit events. Must be exactly 64 hex characters (`npm run generate:key`) when set. Falls back to a key derived from `AUTH_SECRET` (HKDF, if ≥32 chars); if neither is available, no hash is computed and `identifierHashScope` is recorded as `"unkeyed"`. See [Upgrade notes](#upgrade-notes-environment-variables-that-now-fail-closed) and [Audit Log Schema](docs/security/audit-log-schema.md) |
+| `BREAKGLASS_COOLING_OFF_SECONDS` | (Optional) Delay in seconds before a first same-requester/target Break Glass grant in a 24h window executes. Non-negative integer. Default: `3600`. Set to `0` to disable. See [Upgrade notes](#upgrade-notes-environment-variables-that-now-fail-closed) |
 | `EMAIL_PROVIDER` | (Optional) `resend` or `smtp` — leave empty to disable email |
 | `EMAIL_FROM` | Sender address for emails |
 | `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` |
@@ -279,6 +279,23 @@ Key variables:
 > **Redis is required in production.** In dev/test, omit `REDIS_URL` for in-memory fallback.
 >
 > **Canonical origin is required for cookie-authenticated mutating APIs.** `assertOrigin()` now fails closed when neither `APP_URL` nor `AUTH_URL` is configured, instead of deriving same-origin from request `Host` headers.
+
+### Upgrade notes: environment variables that now fail closed
+
+Three variables that were previously read loosely are now validated when the environment schema is parsed. Each fails **closed** — the process refuses to start rather than run with a value it cannot interpret, which is the intended direction, but a deployment whose current value was silently tolerated will **not boot** after the upgrade. Check all three before rolling out.
+
+| Variable | Previously | Now | What breaks |
+| --- | --- | --- | --- |
+| `AUDIT_IDENTIFIER_PEPPER` | Any string, used verbatim as the HMAC key; unset meant an empty-key HMAC | Exactly 64 hex characters (`npm run generate:key`) when set, or unset | **Boot failure** for any value that is not 64 hex characters — including one that is too long or the right length but not hex, not only one that is too short. See the hash-correlation note below |
+| `COOKIE_PARTITIONED` | Compared with `=== "true"`, so `1`, `TRUE` and `yes` all read as *off* | `true` or `false`, or unset (`false`) | **Boot failure** for any other spelling. A deployment that intended to enable CHIPS with `COOKIE_PARTITIONED=1` never had it enabled — set `true` |
+| `BREAKGLASS_COOLING_OFF_SECONDS` | Unvalidated | Non-negative integer (seconds), or unset (`3600`) | **Boot failure** for a non-numeric value such as `1h` |
+
+**`AUDIT_IDENTIFIER_PEPPER` also breaks hash correlation, whichever way you fix it.** `identifierHash` on `AUTH_LOGIN_FAILURE` is an HMAC keyed by the pepper, so any change of key makes new hashes unrelated to the ones already in `audit_logs` — the same identifier no longer produces the same hash, and correlation across the upgrade boundary is lost. This happens in every migration path, not just the boot failure:
+
+- a set-but-not-64-hex value **must** change to boot at all;
+- a deployment that never set the variable also changes key, because the empty-key fallback is gone: the pepper is now derived from `AUTH_SECRET` by HKDF (or, if `AUTH_SECRET` is absent too, no hash is computed and `identifierHashScope` records `"unkeyed"`).
+
+There is no supported way to keep the old hashes correlating; treat the upgrade as the start of a new correlation window and keep the cutover timestamp with your audit records. See [Audit Log Schema](docs/security/audit-log-schema.md).
 
 ### Admin / maintenance scripts
 
@@ -327,13 +344,20 @@ Before writing anything, `add --from` prints both tenants — id, name, slug and
 
 **If `GOOGLE_WORKSPACE_DOMAINS` is set** (recommended in [SECURITY.md](SECURITY.md)), registering the claim alone changes nothing. `src/auth.config.ts`'s `signIn` callback denies any Google sign-in whose `hd` is not in `GOOGLE_WORKSPACE_DOMAINS` *before* tenant-claim resolution runs at all, recorded as `reason: "provider_error"` — the denial never reaches the tenant-claim check, so `tenant-domain unmapped` shows nothing for it. Add the new domain to `GOOGLE_WORKSPACE_DOMAINS` too, and note which tenant it was added for: the variable is deployment-global while the claim registry is tenant-scoped, so without that note it silently accumulates every domain any tenant has ever renamed to. Remove the entry once no tenant depends on it. **Do not unset `GOOGLE_WORKSPACE_DOMAINS` to work around a lockout** — `allowDangerousEmailAccountLinking` is derived from `allowedGoogleDomains.length > 0`, so unsetting it flips that flag to `false` (*stricter*, not looser) and produces a second, different failure, `OAuthAccountNotLinked`, on top of the original denial.
 
-**Before running `prisma migrate deploy` on an existing deployment**, run the pre-flight check — the backfill silently skips two classes of row that need an operator decision first:
+**Before running `prisma migrate deploy` on an existing deployment**, run the pre-flight check — the backfill excludes two classes of row from the registry, and both need an operator decision first:
 
 ```bash
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
 ```
 
-It reports three things: **normalisation collisions** (two or more tenants whose `external_id` folds to one claim, so the backfill keeps one and silently skips the rest), **non-ASCII `external_id` values** (excluded from the registry entirely), and **fold mismatches** between Postgres and the application's own normalisation. Every row returned needs a decision before the upgrade runs — for a collision, which tenant keeps the claim; for a non-ASCII value, whether that tenant needs an ASCII claim registered separately. Deciding after the upgrade means deciding after a lockout.
+It reports three things: **normalisation collisions** (two or more tenants whose `external_id` folds to one claim), **non-ASCII `external_id` values**, and **fold mismatches** between Postgres and the application's own normalisation. All three are excluded from the registry.
+
+**A collision excludes every side of it, not just the losers.** The backfill registers the claim for **none** of the colliding tenants — do not read a reported collision as "one of them already holds the claim and the others need registering". Keeping one would silently place the other tenants' *new* members into the winner's tenant, because those tenants are distinct today (the pre-upgrade resolver matched `external_id` exactly) and nothing would raise an error. Every row the pre-flight check returns therefore needs an explicit decision, followed by an explicit registration:
+
+- for a collision, which tenant gets the shared claim string, and what the others are given instead — then `tenant-domain add` for each;
+- for a non-ASCII `external_id`, whether that tenant needs an ASCII claim registered separately — then `tenant-domain add` for it.
+
+Re-running the backfill will not fill any of these in. The exclusion is unconditional rather than skip-if-present, so a second run is a **no-op** for exactly this population, by construction; `tenant-domain add` is the only thing that registers them. Until then each of these tenants keeps resolving through the release-1 `external_id` exact-match fallback, exactly as it does today — so the upgrade itself does not lock them out. That fallback is removed in a later release, and at that point a tenant with no registered claim is a lockout: decide before then, not after.
 
 Run the CLI rather than hand-written SQL. The printable-ASCII predicate the checks turn on has one source of truth, `NON_PRINTABLE_ASCII_SQL_CLASS` in `src/lib/tenant/tenant-claim-registry.ts`, and a drift guard pins the migration's CHECK, the backfill and its extracted `.sql` twin to it. A predicate retyped from documentation is outside that guard, and a pre-flight check whose predicate has drifted from the CHECK reports a confident "all clear" at exactly the moment it matters. If your environment genuinely cannot run the CLI, copy the predicate and the fold expression out of `scripts/tenant-domain.ts`'s `cmdPreflight` — do not retype them.
 
@@ -345,7 +369,11 @@ SELECT tenant_id, claim, created_by, created_at FROM tenant_claims WHERE created
 
 This is pre-existing behavior — the same UUID has resolved sign-in through `Tenant.externalId` since that earlier migration — made visible here rather than introduced by it. Deployments running a deliberate `AUTH_TENANT_CLAIM_KEYS` should decide whether keeping `tenant_id` / `tenantId` in the default claim-key list is still wanted now that the claim namespace is explicit.
 
-**`AUTH_TENANT_CLAIM_KEYS` guidance.** Only point this at an attribute Google's `hd` provides, or at a claim bound to a specific SSO connection:
+**`AUTH_TENANT_CLAIM_KEYS` guidance.** The safe value depends on which provider your users sign in through. The configuration that hardens a Google deployment silently disables tenant resolution on a SAML one, so read the section for your provider — not the other.
+
+**Leaving the variable unset does not reach any hardened configuration** — it selects the built-in list `tenant_id, tenantId, organization, org, company, company_id`, every member of which is an IdP-asserted attribute, and all six are tried *before* `hd` is consulted at all. A multi-connection SAML deployment that never sets the variable is therefore already in the unsafe configuration described below, not outside it.
+
+**Google sign-in — `hd` is the attested-only configuration:**
 
 ```bash
 # Attested-only: `hd` is asserted by Google, not carried in a self-describing
@@ -353,9 +381,20 @@ This is pre-existing behavior — the same UUID has resolved sign-in through `Te
 AUTH_TENANT_CLAIM_KEYS=hd
 ```
 
-**Leaving the variable unset does not reach that configuration** — it selects the built-in list `tenant_id, tenantId, organization, org, company, company_id`, every member of which is an IdP-asserted attribute, and all six are tried *before* `hd` is consulted at all. A multi-connection SAML deployment that never sets the variable is therefore already in the unsafe configuration described next, not outside it.
+**`hd` is Google-only. Do not set it on a deployment whose users sign in through SAML.** The key is honoured only when the account's provider is `google` — a SAML assertion carrying a field literally named `hd` is ignored, and that provider gate is exactly what makes "named `hd`" mean "attested by Google". So on a SAML-only deployment, `AUTH_TENANT_CLAIM_KEYS=hd` makes claim extraction resolve **nothing, for every sign-in**. That is not a denial and it produces no diagnostic:
 
-Pointing it at an attribute your IdP asserts through SAML (e.g. `organization`) is safe only when this deployment provisions a single SSO connection: `saml-jackson` is one deployment-wide OIDC client, and nothing binds a claim namespace to the connection that asserted it, so with **two or more** provisioned SSO connections one customer's IdP administrator could assert another customer's registered claim string and select their tenant. The operator controls whether a connection exists; the customer's own IdP controls what it asserts through it — the exploit needs only the second. This does not fire on `hd`-only deployments, which is the shape of the incident this section exists for.
+- a sign-in resolving no claim is treated as *"no claim was presented"*, so nothing is refused and no `AUTH_LOGIN_FAILURE` row is written;
+- a **first-ever** user is then created in their own personal bootstrap tenant, as its **OWNER**, instead of joining the organisation's tenant — one new tenant per user, fanning out silently;
+- `tenant-domain unmapped` shows none of it, because it lists claims that were presented and refused, and here none was presented;
+- it also arms the absorption path described under *Incident: a claim was registered that should not have been* — the moment a claim does resolve for those users, each personal estate is migrated into the tenant in place.
+
+**SAML sign-in — bind the tenant to the connection, not to a claim the customer's IdP chooses.** There is no deployment-wide claim key that is attested for SAML the way `hd` is for Google: every SAML attribute that reaches this app is asserted by the customer's own IdP, and `saml-jackson` is a single deployment-wide OIDC client, so nothing binds the claim namespace to the connection that asserted it. Consequently:
+
+- pointing the variable at an attribute your IdP asserts through SAML (e.g. `organization`) is safe **only** while this deployment provisions exactly **one** SSO connection — then the single customer's IdP is the only one that can assert through it;
+- with **two or more** provisioned SSO connections, one customer's IdP administrator can assert another customer's registered claim string and select their tenant. The operator controls whether a connection exists; the customer's own IdP controls what it asserts through it — the exploit needs only the second;
+- the answer for a multi-customer SAML estate is therefore **per-connection tenant binding**: the tenant is decided by which SSO connection the sign-in arrived on, not by an attribute inside the assertion. This deployment shape does not provide that binding today, so until it does, keep one provisioned SSO connection per deployment (a separate deployment, with its own Jackson OIDC client, per customer) and review registered claims with `tenant-domain list`.
+
+None of this fires on Google-`hd`-only deployments, which is the shape of the incident this section exists for.
 
 **Incident: a claim was registered that should not have been.** `tenant-domain remove` soft-deletes the row (`revokedAt`) rather than deleting it — deleting it first would destroy `tenant_claims.createdAt`, one of the two timestamps the query below needs, making this procedure unexecutable in the order it will actually be followed in an incident. Removing the row does **not** undo what it already granted:
 

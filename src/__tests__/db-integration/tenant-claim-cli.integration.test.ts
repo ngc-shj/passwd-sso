@@ -410,11 +410,126 @@ describe("tenant-domain CLI (C7)", () => {
     });
   });
 
+  describe("add — compare-and-swap on the confirmation window", () => {
+    // The compare-and-swap in the `updateMany` WHERE is the security claim
+    // M5 rests on: "a concurrent change is a refusal rather than a silent
+    // overwrite". Nothing above reaches it — the wrong-owner cases exit at
+    // the pre-check, hundreds of lines earlier — so the two cases below drive
+    // the transaction to the write with the row changed underneath it.
+    //
+    // No sleep is involved and none is needed. The confirmation prompt runs
+    // INSIDE the command's open transaction (D-14), so the `confirm` seam is
+    // the window itself: by the time it is called the command has issued only
+    // plain SELECTs (no FOR UPDATE), so it holds no lock on the claim row and
+    // a write from a DIFFERENT client commits immediately. Under READ
+    // COMMITTED the subsequent updateMany re-reads the new row version, its
+    // re-asserted owner predicate no longer matches, and count is 0.
+    it.skipIf(SKIP)(
+      "reassignment: refuses without overwriting when the owner changes between the read and the write (CAS)",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const raceWinnerTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+        let raced = false;
+        const confirmAfterConcurrentMove = async () => {
+          await ctx.su.prisma.tenantClaim.update({
+            where: { claim },
+            data: { tenantId: raceWinnerTenant },
+          });
+          raced = true;
+          return true;
+        };
+
+        try {
+          const result = await cmdAdd({
+            tenant: gainingTenant,
+            domain: claim,
+            by: "test-op",
+            from: losingTenant,
+            confirm: confirmAfterConcurrentMove,
+          });
+
+          // Anti-vacuity: a refusal that happened before the confirmation
+          // would satisfy every assertion below without the CAS existing.
+          expect(raced).toBe(true);
+          expect(result.ok).toBe(false);
+          expect(result.code).not.toBe(0);
+          expect(result.message).toContain("was modified concurrently by another process");
+          // "current owner" is the reassignment branch's wording; the
+          // un-revoke branch says "current state". Pins WHICH CAS refused.
+          expect(result.message).toContain("current owner");
+
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          // The whole point: the row still belongs to the tenant that won the
+          // race, not to the gaining tenant the operator was shown.
+          expect(row?.tenantId).toBe(raceWinnerTenant);
+        } finally {
+          await ctx.deleteTestData(losingTenant);
+          await ctx.deleteTestData(gainingTenant);
+          await ctx.deleteTestData(raceWinnerTenant);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "un-revoke: refuses without clearing revokedAt when the row is moved away between the read and the write (CAS)",
+      async () => {
+        // Same tenant on both sides (so this is the un-revoke branch, not a
+        // reassignment) and a revoked row (so it is not the idempotent
+        // no-write early return).
+        const tenantId = await ctx.createTenant();
+        const raceWinnerTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        const revokedAt = new Date();
+        await ctx.su.prisma.tenantClaim.create({
+          data: { tenantId, claim, createdBy: "seed", revokedAt },
+        });
+
+        let raced = false;
+        const confirmAfterConcurrentMove = async () => {
+          await ctx.su.prisma.tenantClaim.update({
+            where: { claim },
+            data: { tenantId: raceWinnerTenant },
+          });
+          raced = true;
+          return true;
+        };
+
+        try {
+          const result = await cmdAdd({
+            tenant: tenantId,
+            domain: claim,
+            by: "test-op",
+            confirm: confirmAfterConcurrentMove,
+          });
+
+          expect(raced).toBe(true);
+          expect(result.ok).toBe(false);
+          expect(result.code).not.toBe(0);
+          expect(result.message).toContain("was modified concurrently by another process");
+          expect(result.message).toContain("current state");
+
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          expect(row?.tenantId).toBe(raceWinnerTenant);
+          // Un-revoking here would have handed an active claim to a tenant
+          // the operator never named.
+          expect(row?.revokedAt?.getTime()).toBe(revokedAt.getTime());
+        } finally {
+          await ctx.deleteTestData(tenantId);
+          await ctx.deleteTestData(raceWinnerTenant);
+        }
+      },
+    );
+  });
+
   // Func F8 — the tenant whose backfill row `preflight` reports as skipped
   // has no claim row, so a claim-only resolver leaves it nameable by UUID
   // alone at incident time.
   describe("--tenant resolution", () => {
-    it.skipIf(SKIP)("resolves a tenant by slug and by external_id, not only by UUID or a claim", async () => {
+    it.skipIf(SKIP)("resolves a tenant by external_id, and refuses a slug (round-2 F-F)", async () => {
       const tenantId = await ctx.createTenant();
       const externalId = `${runToken()}-ext.${ALIAS_CLAIM}`;
       await ctx.su.prisma.$transaction(async (tx) => {
@@ -429,11 +544,18 @@ describe("tenant-domain CLI (C7)", () => {
 
       // finally, as in the preflight test: external_id is globally visible.
       try {
+        // `tenants.slug` is NOT a resolution path: slugifyTenant collapses
+        // [^a-z0-9]+, so the claim → slug mapping is many-to-one and one
+        // squatted sign-in can pre-empt the slug an operator would later
+        // type. --tenant names the GAINING side of a reassignment, so a
+        // wrong resolution hands the claim away. Asserted here rather than
+        // left to the resolver's comment, because the tenant below really
+        // does have that slug — only the resolver refuses to look at it.
         const bySlug = `${runToken()}.${ALIAS_CLAIM}`;
         const slugResult = await cmdAdd({ tenant: tenant.slug, domain: bySlug, by: "test-op", yes: true });
-        expect(slugResult.ok).toBe(true);
+        expect(slugResult.ok).toBe(false);
         const slugRow = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: bySlug } });
-        expect(slugRow?.tenantId).toBe(tenantId);
+        expect(slugRow).toBeNull();
 
         const byExternal = `${runToken()}.${ALIAS_CLAIM}`;
         const externalResult = await cmdAdd({ tenant: externalId, domain: byExternal, by: "test-op", yes: true });
@@ -621,36 +743,140 @@ describe("tenant-domain CLI (C7)", () => {
           });
         });
 
-        const result = await cmdUnmapped();
+        try {
+          const result = await cmdUnmapped();
 
-        expect(result.ok).toBe(true);
-        const rows = (result.rows ?? []) as { tenant_id: string; claim: string }[];
-        expect(rows.some((r) => r.tenant_id === tenantId && r.claim === outboxOnlyClaim)).toBe(true);
-        expect(rows.some((r) => r.tenant_id === tenantId && r.claim === auditLogClaim)).toBe(true);
-        // F9: `toBeTruthy()` held for every branch. These two tokens hold
-        // only for the non-empty branch, and only for the window queried.
-        expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
-        expect(result.message).toContain("denial group(s)");
+          // The outbox arm is only the outbox arm while the row is still
+          // PENDING. If the live worker drained it between the create above
+          // and this call, the same claim also exists in audit_logs and the
+          // assertion below would pass through the audit_logs arm — deleting
+          // the audit_outbox half of the UNION would then stay green. Asserting
+          // the seeded state first makes a drained row red, not silently
+          // proven by the wrong arm.
+          const seeded = await ctx.su.prisma.auditOutbox.findFirst({
+            where: { tenantId },
+            select: { status: true },
+          });
+          expect(seeded?.status).toBe(AuditOutboxStatus.PENDING);
 
-        // M10: neutralise the drainable row HERE, before deleteTestData.
-        // The live audit-outbox-worker claims status='PENDING' rows and
-        // inserts into audit_logs; audit_logs_tenant_id_fkey is RESTRICT, so
-        // a claim landing between deleteTestData's audit_logs delete and its
-        // tenants delete reds the cleanup. Setting the row non-claimable and
-        // then deleting it closes the window rather than narrowing it. Both
-        // statements are scoped to this test's own tenant — the dev DB is
-        // shared.
-        await ctx.su.prisma.$transaction(async (tx) => {
-          await setBypassRlsGucs(tx);
-          await tx.$executeRawUnsafe(
-            `UPDATE audit_outbox SET status = 'FAILED'::"AuditOutboxStatus"
-              WHERE tenant_id = $1::uuid AND status IN ('PENDING', 'PROCESSING')`,
-            tenantId,
-          );
-          await tx.$executeRawUnsafe(`DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`, tenantId);
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { tenant_id: string; claim: string }[];
+          expect(rows.some((r) => r.tenant_id === tenantId && r.claim === outboxOnlyClaim)).toBe(true);
+          expect(rows.some((r) => r.tenant_id === tenantId && r.claim === auditLogClaim)).toBe(true);
+          // F9: `toBeTruthy()` held for every branch. These two tokens hold
+          // only for the non-empty branch, and only for the window queried.
+          expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
+          expect(result.message).toContain("denial group(s)");
+        } finally {
+          // M10: neutralise the drainable row before deleteTestData — in a
+          // `finally`, because a failing assertion above is exactly when the
+          // PENDING row would otherwise be left behind for the live worker to
+          // claim, i.e. the failure M10 fixed, relocated to the red path.
+          // deleteTestData now drains the outbox before audit_logs for every
+          // caller, so this is defence in depth for the one test that
+          // deliberately manufactures a claimable row; both statements are
+          // scoped to this test's own tenant — the dev DB is shared.
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(
+              `UPDATE audit_outbox SET status = 'FAILED'::"AuditOutboxStatus"
+                WHERE tenant_id = $1::uuid AND status IN ('PENDING', 'PROCESSING')`,
+              tenantId,
+            );
+            await tx.$executeRawUnsafe(`DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`, tenantId);
+          });
+
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // Round-2 F-B end to end. The predicate is `status <> 'SENT'`, not
+    // `status = 'PENDING'`: PROCESSING is a worker that crashed mid-claim and
+    // FAILED is a row that exhausted its attempts, so both are in neither
+    // audit_logs nor PENDING — invisible under the old predicate in exactly
+    // the degraded-worker case the union exists for. Nothing else in this
+    // suite drives those two statuses through cmdUnmapped, so narrowing the
+    // predicate back would otherwise stay green.
+    it.skipIf(SKIP)(
+      "reports denials stuck in PROCESSING or terminal FAILED and counts them as undelivered",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const processingClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const failedClaim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        const outboxPayload = (claim: string) => ({
+          scope: AuditScope.PERSONAL,
+          action: AuditAction.AUTH_LOGIN_FAILURE,
+          userId: randomUUID(),
+          actorType: ActorType.SYSTEM,
+          serviceAccountId: null,
+          teamId: null,
+          targetType: null,
+          targetId: null,
+          metadata: { reason: "tenant_claim_unmapped", claim, provider: "google" },
+          ip: null,
+          userAgent: null,
         });
 
-        await ctx.deleteTestData(tenantId);
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          // Neither status is claimable by the live worker (claimBatch selects
+          // PENDING), so this seeds no drainable row — but the cleanup still
+          // sits in the `finally` below, for the same reason the PENDING case
+          // does: a failing assertion must not leave the rows behind.
+          await tx.auditOutbox.create({
+            data: {
+              tenantId,
+              status: AuditOutboxStatus.PROCESSING,
+              payload: outboxPayload(processingClaim),
+            },
+          });
+          await tx.auditOutbox.create({
+            data: {
+              tenantId,
+              status: AuditOutboxStatus.FAILED,
+              payload: outboxPayload(failedClaim),
+            },
+          });
+        });
+
+        try {
+          const result = await cmdUnmapped();
+
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as {
+            tenant_id: string;
+            claim: string;
+            cnt: number;
+            undelivered_cnt: number;
+          }[];
+
+          for (const [label, claim] of [
+            ["PROCESSING", processingClaim],
+            ["FAILED", failedClaim],
+          ] as const) {
+            const row = rows.find((r) => r.tenant_id === tenantId && r.claim === claim);
+            expect(row, `${label} denial must be reported`).toBeDefined();
+            expect(Number(row?.cnt), label).toBe(1);
+            // The count that tells the operator delivery is degraded: a
+            // PENDING row contributes 0 here, these contribute 1 each.
+            expect(Number(row?.undelivered_cnt), `${label} must count as undelivered`).toBe(1);
+          }
+
+          expect(result.message).toContain("PROCESSING or FAILED");
+        } finally {
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(
+              `UPDATE audit_outbox SET status = 'FAILED'::"AuditOutboxStatus"
+                WHERE tenant_id = $1::uuid AND status IN ('PENDING', 'PROCESSING')`,
+              tenantId,
+            );
+            await tx.$executeRawUnsafe(`DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`, tenantId);
+          });
+          await ctx.deleteTestData(tenantId);
+        }
       },
     );
 
@@ -664,11 +890,29 @@ describe("tenant-domain CLI (C7)", () => {
 
     it("formatUnmappedMessage summarises a non-empty result and names the requested window", () => {
       const message = formatUnmappedMessage(
-        [{ tenant_id: randomUUID(), claim: "alias.example", cnt: 3, last_seen: new Date() }],
+        [{ tenant_id: randomUUID(), claim: "alias.example", cnt: 3, last_seen: new Date(), undelivered_cnt: 0 }],
         90,
       );
       expect(message).toContain("1 unmapped-claim denial group(s) in the last 90 days");
       expect(message).not.toContain("No unmapped-claim denials");
+      // Nothing undelivered — the degraded-delivery sentence must not appear,
+      // or it would read as a standing warning on every healthy report.
+      expect(message).not.toContain("audit_outbox");
+    });
+
+    it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
+      const message = formatUnmappedMessage(
+        [
+          { tenant_id: randomUUID(), claim: "alias.example", cnt: 3, last_seen: new Date(), undelivered_cnt: 2 },
+          { tenant_id: randomUUID(), claim: "other.example", cnt: 1, last_seen: new Date(), undelivered_cnt: 1 },
+        ],
+        30,
+      );
+      expect(message).toContain("2 unmapped-claim denial group(s) in the last 30 days");
+      // Summed across groups, not per-row: the operator is being told how
+      // many denial events will never reach audit_logs on their own.
+      expect(message).toContain("3 of the denial event(s)");
+      expect(message).toContain("PROCESSING or FAILED");
     });
 
     it.skipIf(SKIP)("--days widens the query window and is reported in the message", async () => {

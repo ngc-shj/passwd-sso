@@ -11,6 +11,7 @@ const { mockPrisma, mockSlugifyTenant, mockAdvisoryXactLock } = vi.hoisted(() =>
       findUnique: vi.fn(),
     },
     $executeRaw: vi.fn(),
+    $queryRaw: vi.fn(),
   };
   return {
     mockPrisma,
@@ -46,6 +47,9 @@ describe("findOrCreateTenantForClaim", () => {
     mockSlugifyTenant.mockReturnValue("acme-com");
     mockAdvisoryXactLock.mockResolvedValue(undefined);
     mockPrisma.$executeRaw.mockResolvedValue(1);
+    // No tenant's external_id folds onto the claim — the default for every
+    // case below except the F-A collision ones, which override it.
+    mockPrisma.$queryRaw.mockResolvedValue([]);
   });
 
   it("resolves an already-registered claim via the claim registry, without creating", async () => {
@@ -145,7 +149,9 @@ describe("findOrCreateTenantForClaim", () => {
     // Distinct from claim_taken (round-1 M1/M2): this arm is the SC9
     // narrowing, and src/auth.ts maps it to tenant_mismatch, not to
     // tenant_claim_unmapped.
-    expect(result).toEqual({ kind: "claim_invalid" });
+    // tenantId is null by construction: no tenant exists for an unstorable
+    // claim, so there is nothing for the caller's audit row to bind to.
+    expect(result).toEqual({ kind: "claim_invalid", tenantId: null });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });
 
@@ -211,7 +217,11 @@ describe("findOrCreateTenantForClaim", () => {
 
     // claim_taken, NOT claim_invalid: src/auth.ts maps this one to
     // tenant_claim_unmapped so `tenant-domain unmapped` can see the lockout.
-    expect(result).toEqual({ kind: "claim_taken" });
+    // The owning tenant rides along so the caller's emitAuthLoginFailure can
+    // bind the audit row. Without it logAuditAsync dead-letters on a
+    // first-ever sign-in (no user row for SYSTEM_ACTOR_ID) and the denial
+    // never reaches `tenant-domain unmapped`.
+    expect(result).toEqual({ kind: "claim_taken", tenantId: "tenant-owner" });
     // No fallback either — a revoked row is taken, not "not found".
     expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
@@ -252,5 +262,53 @@ describe("findOrCreateTenantForClaim", () => {
       select: { tenantId: true, revokedAt: true },
     });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
+  });
+
+  // ── Round-2 F-A: the free UNIQUE(claim) slot left by M3's collision-aware
+  // backfill must not be squattable by a third spelling.
+
+  it("returns claim_collision instead of creating when an existing tenant's external_id folds onto the claim", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null); // no claim row (M3 excluded both sides)
+    mockPrisma.tenant.findUnique.mockResolvedValue(null); // "Acme.com" matches neither raw external_id
+    mockPrisma.$queryRaw.mockResolvedValue([{ id: "tenant-a" }]); // but "acme.com" folds onto tenant A
+
+    const result = await findOrCreateTenantForClaim("Acme.com", db);
+
+    // claim_collision, NOT claim_taken: there is no row to un-revoke, and the
+    // operator's entry point is `preflight`, not `list`.
+    // Same binding requirement as claim_taken — here the folded owner.
+    expect(result).toEqual({ kind: "claim_collision", tenantId: "tenant-a" });
+    // The whole point: tenant C is never created, so the claim row that would
+    // outrank A's and B's externalId fallback is never written.
+    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
+    expect(mockPrisma.$executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("binds the folded-external_id probe as a query parameter, never interpolated", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.findUnique.mockResolvedValue(null);
+    mockPrisma.$queryRaw.mockResolvedValue([]);
+    mockPrisma.tenant.create.mockResolvedValue({ id: "tenant-new" });
+
+    await findOrCreateTenantForClaim("Acme.com'; DROP TABLE tenants; --", db);
+
+    // $queryRaw is a tagged template: [0] is the TemplateStringsArray, the
+    // rest are the bound values. The claim must appear ONLY among the values.
+    const [strings, ...values] = mockPrisma.$queryRaw.mock.calls[0];
+    expect(values).toEqual(["acme.com'; drop table tenants; --"]);
+    expect(strings.join("?")).not.toContain("acme.com");
+    expect(strings.join("?")).toContain('lower(btrim(external_id) COLLATE "C")');
+  });
+
+  it("does not probe for a fold collision when the exact-match externalId fallback already resolved", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-legacy" });
+
+    const result = await findOrCreateTenantForClaim("acme.com", db);
+
+    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy" });
+    // A tenant that owns the raw spelling resolves to itself; the probe would
+    // find that same tenant and turn a working sign-in into a refusal.
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
   });
 });

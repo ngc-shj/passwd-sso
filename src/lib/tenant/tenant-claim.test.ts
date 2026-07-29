@@ -61,6 +61,47 @@ describe("tenant-claim", () => {
     expect(v).toBeNull();
   });
 
+  // Round-2 F-C: AUTH_TENANT_CLAIM_KEYS is operator-typed free text. A key that
+  // differs from `hd` only in case used to escape the provider gate entirely,
+  // so `HD` was read from ANY provider, un-attested, while the operator
+  // believed they had configured attested-only mode.
+  it.each(["HD", "Hd", "hD"])(
+    "AUTH_TENANT_CLAIM_KEYS=%s still gates on the google provider",
+    (key) => {
+      vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", key);
+      const v = extractTenantClaimValue(
+        { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+        { [key]: "attacker.example" },
+      );
+      expect(v).toBeNull();
+    },
+  );
+
+  it("AUTH_TENANT_CLAIM_KEYS=HD still resolves the Google hosted domain", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "HD");
+    // The key itself is not case-folded — Google spells the attribute `hd`, so
+    // `profile["HD"]` is empty and the attested fallback at the bottom of
+    // extractTenantClaimValue supplies the value, as it does when the variable
+    // is unset.
+    const v = extractTenantClaimValue(
+      { provider: "google", type: "oauth", providerAccountId: "x" },
+      { hd: "example.com" },
+    );
+    expect(v).toBe("example.com");
+  });
+
+  it("does not case-fold non-hd claim keys", () => {
+    // parseTenantClaimKeys must keep camelCase keys verbatim: profile attribute
+    // names are case-sensitive, and `tenantId` is one of the shipped defaults.
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenantId");
+    expect(parseTenantClaimKeys()).toEqual(["tenantId"]);
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { tenantId: "acme" },
+    );
+    expect(v).toBe("acme");
+  });
+
   it("unset AUTH_TENANT_CLAIM_KEYS keeps the default list ahead of the hd fallback", () => {
     const v = extractTenantClaimValue(
       { provider: "google", type: "oauth", providerAccountId: "x" },
@@ -96,13 +137,15 @@ describe("tenant-claim", () => {
     expect(v).toBe(exactValue);
   });
 
-  it("strips NULL bytes from claim values", () => {
+  it("rejects a claim value containing a NULL byte instead of stripping it (F-D)", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "acme\0corp" },
     );
-    expect(v).toBe("acmecorp");
+    // Stripping would have produced "acmecorp" — a value that selects, or
+    // creates, the acmecorp tenant with no record of the character removed.
+    expect(v).toBeNull();
   });
 
   it("returns null when claim value is only NULL bytes", () => {
@@ -135,52 +178,67 @@ describe("tenant-claim", () => {
     expect(v).toBeNull();
   });
 
-  it("strips control characters from claim values (boundary)", () => {
+  it("rejects control characters in claim values (boundary)", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "\0abc\x1f\x7f\x9fdef\0" },
     );
-    expect(v).toBe("abcdef");
+    // Stripping would have produced "abcdef" — see the F-D table below.
+    expect(v).toBeNull();
   });
 
-  it("strips bidi override and zero-width characters from claim values (RS6)", () => {
+  it("rejects bidi override and zero-width characters in claim values (RS6)", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     // U+202E (RIGHT-TO-LEFT OVERRIDE) can visually reverse the characters that
     // follow it when rendered to an operator; U+200B (ZERO WIDTH SPACE) is
-    // invisible. Both must be stripped from the value that gets displayed.
+    // invisible. Neither may reach the matching key OR the operator's terminal.
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
       { tenant_id: "alias\u202Eexample\u200Bcorp" },
     );
-    expect(v).toBe("aliasexamplecorp");
+    expect(v).toBeNull();
   });
 
-  it("strips the formatting characters the delegation boundary also rejects (Sec F6)", () => {
+  // Round-2 F-D: this function's output IS the matching key and the stored
+  // externalId/name, so a member of the unsafe class must DENY the claim, not
+  // canonicalise it into a NEIGHBOURING one. One case per member, because the
+  // hazard is per-character: a class that quietly lost one member would still
+  // pass a single combined fixture through the remaining ones.
+  it.each([
+    ["U+0000 NULL", 0x0000],
+    ["U+001F UNIT SEPARATOR", 0x001f],
+    ["U+007F DELETE", 0x007f],
+    ["U+009F APPLICATION PROGRAM COMMAND", 0x009f],
+    ["U+00AD SOFT HYPHEN", 0x00ad],
+    ["U+061C ARABIC LETTER MARK", 0x061c],
+    ["U+180E MONGOLIAN VOWEL SEPARATOR", 0x180e],
+    ["U+200B ZERO WIDTH SPACE", 0x200b],
+    ["U+200F RIGHT-TO-LEFT MARK", 0x200f],
+    ["U+2028 LINE SEPARATOR", 0x2028],
+    ["U+2029 PARAGRAPH SEPARATOR", 0x2029],
+    ["U+202E RIGHT-TO-LEFT OVERRIDE", 0x202e],
+    ["U+2060 WORD JOINER", 0x2060],
+    ["U+2066 LEFT-TO-RIGHT ISOLATE", 0x2066],
+    ["U+FEFF ZERO WIDTH NO-BREAK SPACE", 0xfeff],
+  ])("rejects a claim whose only difference from an existing one is %s", (_label, cp) => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
-    // The six members the two copies of this class both missed before they
-    // were merged: U+2028/U+2029 (line/paragraph separators), U+2060 (word
-    // joiner), U+180E, U+00AD (soft hyphen), U+061C (Arabic letter mark).
-    // Each is invisible or line-breaking on the operator's terminal.
-    const widened = [0x2028, 0x2029, 0x2060, 0x180e, 0x00ad, 0x061c]
-      .map((cp) => String.fromCodePoint(cp))
-      .join("");
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
-      { tenant_id: `alias${widened}.example` },
+      { tenant_id: `alias${String.fromCodePoint(cp as number)}.example` },
     );
-    expect(v).toBe("alias.example");
+    // The stripping implementation returned "alias.example" for every row —
+    // selecting the existing alias.example tenant with nothing recorded, and
+    // invisible to `preflight`'s non-ASCII report because the character was
+    // gone before storage.
+    expect(v).toBeNull();
   });
 
-  it("strips before trimming, so a space hidden behind a zero-width char is removed (Func F5)", () => {
+  it("still trims surrounding whitespace from an otherwise clean value", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
-    // U+200B is not White_Space, so trimming first stops at it and leaves the
-    // space in front of the value — which then becomes Tenant.name and the
-    // fallback's exact-match key.
-    const zwsp = String.fromCodePoint(0x200b);
     const v = extractTenantClaimValue(
       { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
-      { tenant_id: ` ${zwsp} alias.example ` },
+      { tenant_id: "  alias.example  " },
     );
     expect(v).toBe("alias.example");
   });

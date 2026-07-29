@@ -19,9 +19,15 @@ import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant
 import { getLogger } from "@/lib/logger";
 import {
   emitAuthLoginFailure,
-  type AuthProvider,
   type AuthLoginFailureReason,
 } from "@/lib/audit/auth-failure";
+// Shared with the adapter's first-ever-sign-in refusal site, which classifies
+// the same refusal arms (see that module's header for why it is not hosted in
+// either of the two files that use it).
+import {
+  CLAIM_REFUSAL_REASON,
+  toAuditProvider,
+} from "@/lib/audit/auth-failure-mapping";
 import authConfig from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 
@@ -64,26 +70,6 @@ export type SignInTenantResult =
       tenantId: string | null;
       claim: string | null;
     };
-
-// Deny reason per refusal arm of findOrCreateTenantForClaim (round-1 M2).
-// The two arms have different triggers and different operator remedies, and
-// collapsing them — as the single `null` used to — hid the one that matters
-// most:
-//   claim_taken   — a revoked tenant_claims row owns the claim (D2). Emitted
-//                   as tenant_claim_unmapped because that is the reason
-//                   `tenant-domain unmapped` filters on; without it a
-//                   revoked-claim lockout is invisible to the tool this PR
-//                   ships for exactly that diagnosis.
-//   claim_invalid — the claim fails storableClaimSchema (SC9). Nothing is
-//                   registrable, so "register the claim" is not the remedy;
-//                   tenant_mismatch, as row 8b always specified.
-const CLAIM_REFUSAL_REASON = {
-  claim_taken: "tenant_claim_unmapped",
-  claim_invalid: "tenant_mismatch",
-} as const satisfies Record<
-  Exclude<ClaimTenantResolution["kind"], "tenant">,
-  Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">
->;
 
 export async function ensureTenantMembershipForSignIn(
   userId: string,
@@ -363,16 +349,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       const provider = params.account?.provider;
       const emailForAudit = params.user?.email ?? null;
       // C11 (OWASP A09-1): map Auth.js provider strings to our audit enum.
-      const auditProvider: AuthProvider =
-        provider === "google"
-          ? "google"
-          : provider === "nodemailer"
-            ? "nodemailer"
-            : provider === "boxyhq-saml" || provider === "saml-jackson"
-              ? "saml"
-              : provider === "credentials"
-                ? "credentials"
-                : "unknown";
+      const auditProvider = toAuditProvider(provider);
 
       const baseSignIn = authConfig.callbacks?.signIn;
       if (baseSignIn) {

@@ -10,7 +10,14 @@ import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
+import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
+import {
+  CLAIM_REFUSAL_REASON,
+  toAuditProvider,
+  type ClaimRefusalKind,
+} from "@/lib/audit/auth-failure-mapping";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
@@ -23,6 +30,39 @@ import {
   DECRYPT_FAILURE_KIND,
 } from "@/lib/crypto/account-token-crypto";
 import logger from "@/lib/logger";
+
+/**
+ * Refusal of a presented tenant claim, thrown from inside `createUser`'s
+ * transaction so the whole thing rolls back. Carries the refusal ARM, not just
+ * the fact of refusal: the arms map to different audit reasons and
+ * different operator remedies (CLAIM_REFUSAL_REASON), and a bare
+ * `Error("TENANT_CLAIM_UNUSABLE")` collapsed them again — round-1 M2, one
+ * layer down. The message is unchanged so existing log greps still match.
+ */
+export class TenantClaimUnusableError extends Error {
+  readonly kind: ClaimRefusalKind;
+  /**
+   * The tenant that already owns the claim — the revoked row's owner for
+   * `claim_taken`, the folded `external_id` owner for `claim_collision`,
+   * null for `claim_invalid` (no tenant exists for an unstorable claim).
+   *
+   * It rides on the error because the audit emit below NEEDS it: a
+   * first-ever sign-in has no user row, so logAuditAsync -> resolveTenantId
+   * falls back to a users lookup on SYSTEM_ACTOR_ID, finds nothing, and
+   * returns WITHOUT enqueuing. Emitting without a tenantId therefore writes
+   * neither an audit_logs nor an audit_outbox row, and `tenant-domain
+   * unmapped` — which groups by tenant_id on both — stays blind to exactly
+   * the lockout it exists to diagnose.
+   */
+  readonly tenantId: string | null;
+
+  constructor(kind: ClaimRefusalKind, tenantId: string | null) {
+    super("TENANT_CLAIM_UNUSABLE");
+    this.name = "TenantClaimUnusableError";
+    this.kind = kind;
+    this.tenantId = tenantId;
+  }
+}
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -187,8 +227,9 @@ export function createCustomAdapter(): Adapter {
             // Either way the claim is not this deployment's to hand out, and
             // the operator's remedy is in `tenant-domain`, not in a new
             // tenant. Throwing aborts the withBypassRls tx, so no user, no
-            // tenant, and no membership row survives.
-            throw new Error("TENANT_CLAIM_UNUSABLE");
+            // tenant, and no membership row survives; the arm travels on the
+            // error so the catch below can audit it as itself.
+            throw new TenantClaimUnusableError(resolution.kind, resolution.tenantId);
           }
           tenant = { id: resolution.id };
         } else {
@@ -225,12 +266,39 @@ export function createCustomAdapter(): Adapter {
             userId: createdUser.id,
             // OWNER only on the no-claim bootstrap path — same predicate as
             // the tenant selection above, for the same M1 reason.
-            role: pendingClaim ? "MEMBER" : "OWNER",
+            role: pendingClaim ? TENANT_ROLE.MEMBER : TENANT_ROLE.OWNER,
           },
         });
 
         return createdUser;
-      }, BYPASS_PURPOSE.AUTH_FLOW);
+      }, BYPASS_PURPOSE.AUTH_FLOW).catch(async (error: unknown) => {
+        // Round-2 M1's other half. Aborting the transaction closes the write
+        // side, but on a first-ever sign-in nothing reports the refusal:
+        // src/auth.ts's signIn callback returns early when no user row exists
+        // yet, so its emitAuthLoginFailure never runs, and Auth.js turns this
+        // throw into an AdapterError. Probing a deliberately revoked claim
+        // therefore left NO AUTH_LOGIN_FAILURE row at all, and
+        // `tenant-domain unmapped` — which filters
+        // metadata.reason = 'tenant_claim_unmapped' — showed nothing (A09).
+        //
+        // The emit must stay HERE, after withBypassRls has settled:
+        // emitAuthLoginFailure -> logAuditAsync resolves a tenant through its
+        // own withBypassRls, and nesting that inside the still-open
+        // transaction is the R9 pool-exhaustion shape recorded on
+        // SignInTenantResult in src/auth.ts.
+        if (error instanceof TenantClaimUnusableError) {
+          await emitAuthLoginFailure({
+            email: user.email ?? null,
+            provider: toAuditProvider(sessionMetaStorage.getStore()?.provider),
+            reason: CLAIM_REFUSAL_REASON[error.kind],
+            claim: pendingClaim,
+            // Binds the row so logAuditAsync enqueues instead of
+            // dead-lettering (see TenantClaimUnusableError.tenantId).
+            tenantId: error.tenantId,
+          });
+        }
+        throw error;
+      });
       if (!created.email) {
         throw new Error("USER_EMAIL_MISSING");
       }

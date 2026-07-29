@@ -1,6 +1,6 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
-import { UNSAFE_DISPLAY_CHARS_GLOBAL_RE } from "@/lib/security/unsafe-display-chars";
+import { UNSAFE_DISPLAY_CHARS_RE } from "@/lib/security/unsafe-display-chars";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 import { MAX_TENANT_CLAIM_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 
@@ -56,21 +56,34 @@ export function slugifyTenant(input: string): string {
 
 function sanitizeTenantClaimValue(value: unknown): string | null {
   if (typeof value !== "string") return null;
+
   // Control, bidi and zero-width characters — see @/lib/security/
   // unsafe-display-chars for the members and for why the set is shared with
   // the delegation metadata boundary.
-  // This value is rendered to an operator (audit metadata, Tenant.name, the
-  // CLI's terminal output), so a bidi-override or zero-width character could
-  // visually spoof the claim shown. Stripped only from the value that gets
-  // displayed — the stored/matched form is unaffected by this rider since C1's
-  // ASCII CHECK constraint already excludes these characters from what can be
-  // stored.
   //
-  // Strip BEFORE trimming: a zero-width character is not White_Space, so
-  // trimming first leaves the space it was hiding behind at the edge of the
-  // value, and that value becomes Tenant.name/externalId and the D1 fallback's
-  // exact-match key.
-  const cleaned = value.replace(UNSAFE_DISPLAY_CHARS_GLOBAL_RE, "").trim();
+  // REJECT, do not strip (round-2 F-D). This function's return value is not a
+  // display copy: it becomes `tenantClaim`, which is the key
+  // resolveTenantByClaim / findOrCreateTenantForClaim match on and the value
+  // stored verbatim as Tenant.externalId and Tenant.name. Stripping is what
+  // would let `ac<U+00AD>me.example` — a value an operator reads as distinct
+  // from `acme.example` — pass C1's printable-ASCII CHECK and select the
+  // existing `acme.example` tenant, with nothing recorded anywhere: the
+  // character is gone before storage, so `preflight`'s non-ASCII report can
+  // never see it. The delegation metadata boundary
+  // (src/lib/auth/access/delegation.ts's isSafeMetadataString) already takes
+  // this policy for the same class; this is the same rule at the other end of
+  // the shared definition. Note the direction of the dependency the old
+  // comment here inverted: the ASCII CHECK does not make stripping harmless,
+  // stripping is what lets a non-ASCII input satisfy the CHECK.
+  //
+  // Consequence, deliberate: an IdP value carrying one of these characters now
+  // yields no claim at all, so the sign-in proceeds on src/auth.ts's
+  // claim-less path (the existing behaviour for an IdP that sends no claim)
+  // rather than being folded onto a neighbouring tenant. Denying a
+  // cross-tenant placement is worth more than resolving a malformed claim.
+  if (UNSAFE_DISPLAY_CHARS_RE.test(value)) return null;
+
+  const cleaned = value.trim();
   if (cleaned.length === 0 || cleaned.length > MAX_TENANT_CLAIM_LENGTH) {
     return null;
   }
@@ -80,13 +93,25 @@ function sanitizeTenantClaimValue(value: unknown): string | null {
 /**
  * Read one claim key off the profile. `hd` carries the provider gate described
  * on GOOGLE_HOSTED_DOMAIN_KEY; every other key is read as presented.
+ *
+ * The gate compares case-INSENSITIVELY (round-2 F-C). `AUTH_TENANT_CLAIM_KEYS`
+ * is operator-typed free text, and an operator who writes `HD` — following the
+ * README's "attested claim only" guidance — was previously getting no gate at
+ * all: `profile["HD"]` was read from ANY provider, self-asserted, while the
+ * configuration read as attested-only. The key itself is NOT case-folded, since
+ * profile attribute names are case-sensitive (`tenantId` must stay `tenantId`);
+ * only the gate's decision is. A Google profile spells the attribute `hd`, so
+ * `HD` reads nothing there and the fallback at the bottom of
+ * extractTenantClaimValue supplies the attested value as before.
  */
 function readClaimKey(
   key: string,
   account: Account | null | undefined,
   profile: Record<string, unknown>,
 ): string | null {
-  if (key === GOOGLE_HOSTED_DOMAIN_KEY && account?.provider !== "google") return null;
+  if (key.toLowerCase() === GOOGLE_HOSTED_DOMAIN_KEY && account?.provider !== "google") {
+    return null;
+  }
   return sanitizeTenantClaimValue(profile[key]);
 }
 

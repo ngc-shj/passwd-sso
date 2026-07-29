@@ -27,6 +27,32 @@ async function findClaimRow(
 }
 
 /**
+ * Is the free `UNIQUE(claim)` slot for `claim` already spoken for by an
+ * existing tenant's `external_id`, under the SAME fold the registry uses
+ * (`lower(btrim(x) COLLATE "C")`, matching the C1 CHECK, the backfill and
+ * `tenant-domain preflight`)?
+ *
+ * Reached only after the exact-match `externalId` fallback has already
+ * missed, so a hit here means the raw spellings differ but the folded forms
+ * collide — the round-2 F-A shape.
+ *
+ * Bound parameter, no interpolation: the claim is IdP-supplied. The `COLLATE
+ * "C"` and the column name are the only literal SQL.
+ */
+async function findFoldedExternalIdOwner(
+  db: TxOrPrisma,
+  claim: string,
+): Promise<string | null> {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    SELECT id
+      FROM tenants
+     WHERE external_id IS NOT NULL
+       AND lower(btrim(external_id) COLLATE "C") = ${claim}
+     LIMIT 1`;
+  return rows[0]?.id ?? null;
+}
+
+/**
  * Resolve a raw IdP-supplied claim to its tenant.
  *
  * Release-1 semantics (D1 — expand-and-contract): when no `tenant_claims`
@@ -77,6 +103,20 @@ export async function resolveTenantByClaim(
  * a fresh bootstrap tenant with OWNER — so a deliberately revoked claim
  * bought a silent first sign-in. Each refusal is now its own arm and every
  * caller has to name which one it is handling.
+ *
+ * Every arm carries a `tenantId`, including the one where it is `null`. That
+ * is not decoration: on a first-ever sign-in there is no user row, so
+ * `emitAuthLoginFailure` runs with `userId = SYSTEM_ACTOR_ID`, and
+ * `logAuditAsync`'s `resolveTenantId` (src/lib/audit/audit.ts:167) can only
+ * find a tenant through `params.tenantId`, the team, or a `users` row — the
+ * sentinel matches none, so the denial DEAD-LETTERS: no `audit_logs` row, no
+ * `audit_outbox` row, and `tenant-domain unmapped` (which groups by
+ * `tenant_id` on both tables) shows nothing. Both refusals that HAVE an owning
+ * tenant already know it at the point they are constructed, so they carry it
+ * out rather than making the caller re-query. `claim_invalid` is `null`
+ * because no tenant owns an unregistrable claim — spelled explicitly so a
+ * future arm has to state which case it is rather than inheriting an
+ * `undefined`.
  */
 export type ClaimTenantResolution =
   | { kind: "tenant"; id: string }
@@ -84,10 +124,22 @@ export type ClaimTenantResolution =
   // UNIQUE(claim) is taken and needs an operator decision, not a silent
   // resurrection — callers report this as `tenant_claim_unmapped`, the reason
   // `tenant-domain unmapped` filters on.
-  | { kind: "claim_taken" }
+  | { kind: "claim_taken"; tenantId: string }
+  // No `tenant_claims` row owns the claim, but an existing tenant's
+  // `external_id` FOLDS onto it (round-2 F-A). Distinct from `claim_taken`:
+  // there is no row for `tenant-domain list` to show and nothing to
+  // un-revoke, so the operator's diagnosis starts at `tenant-domain
+  // preflight` (which reports exactly this population) and ends at an
+  // explicit `add` naming the tenant that should own the claim. Kept a
+  // separate arm rather than folded into `claim_taken` for the same reason
+  // round-1 M1/M2 split that one out of a bare `null`: a third trigger
+  // wearing a second trigger's name is how the wrong remedy gets applied,
+  // and a test asserting the shared arm could not tell which branch fired.
+  | { kind: "claim_collision"; tenantId: string }
   // The normalised claim fails `storableClaimSchema` (SC9's ASCII narrowing).
-  // Nothing is registrable, so registering a claim is not the remedy.
-  | { kind: "claim_invalid" };
+  // Nothing is registrable, so registering a claim is not the remedy — and no
+  // tenant owns it, so this is the one arm that cannot carry a tenantId.
+  | { kind: "claim_invalid"; tenantId: null };
 
 /**
  * Find or create a tenant for an IdP-supplied claim, registering the claim
@@ -124,7 +176,14 @@ export async function findOrCreateTenantForClaim(
     // tenant_claims_claim_key.
     return row.revokedAt === null
       ? { kind: "tenant", id: row.tenantId }
-      : { kind: "claim_taken" };
+      // The owning tenant rides on the refusal so the caller can emit an
+      // audit row that resolveTenantId() can actually bind. Without it the
+      // emit dead-letters: a first-ever sign-in has no user row, so
+      // logAuditAsync -> resolveTenantId falls back to a users lookup on
+      // SYSTEM_ACTOR_ID, finds nothing, and returns without enqueuing —
+      // leaving the denial invisible to `tenant-domain unmapped`, which is
+      // the whole point of distinguishing this refusal.
+      : { kind: "claim_taken", tenantId: row.tenantId };
   }
 
   // Release-1 externalId fallback (D1), same raw-claim semantics as
@@ -136,7 +195,28 @@ export async function findOrCreateTenantForClaim(
   if (byExternalId) return { kind: "tenant", id: byExternalId.id };
 
   const parsed = storableClaimSchema.safeParse(claim);
-  if (!parsed.success) return { kind: "claim_invalid" };
+  // No tenant exists for an unstorable claim — nothing to bind an audit row
+  // to, so this arm stays tenant-less by construction.
+  if (!parsed.success) return { kind: "claim_invalid", tenantId: null };
+
+  // Round-2 F-A. Round-1 M3 made the backfill exclude EVERY side of a fold
+  // collision, so tenants A (`external_id = 'acme.com'`) and B (`'ACME.COM'`)
+  // hold no claim row and keep resolving through the exact-match `externalId`
+  // fallback above — correct, but it leaves the `UNIQUE(claim)` slot for
+  // `acme.com` FREE. Without this probe a third spelling (`'Acme.com'`) that
+  // neither tenant stores verbatim misses the registry, misses the exact-match
+  // fallback, and creates a NEW tenant C that registers `acme.com` — after
+  // which the claim row outranks the fallback and A's and B's existing members
+  // are denied while their new members are created inside C.
+  //
+  // Refusing to create is the fix: the free slot belongs to whichever of the
+  // colliding tenants the operator names with `tenant-domain add`, not to
+  // whoever asks first with a third spelling. The refusal is loud and
+  // diagnosable — `src/auth.ts` emits it as `tenant_claim_unmapped`, the reason
+  // `tenant-domain unmapped` filters on, and `preflight` already reports the
+  // collision itself.
+  const foldedOwner = await findFoldedExternalIdOwner(db, claim);
+  if (foldedOwner) return { kind: "claim_collision", tenantId: foldedOwner };
 
   const tenantSlug = slugifyTenant(tenantClaim);
 

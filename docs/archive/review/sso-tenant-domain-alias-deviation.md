@@ -416,3 +416,191 @@ reports drift. Neither is a defect:
   branch is committed.
 
 Both must be re-run after the first commit.
+
+---
+
+# Round-1 fix round (commit `c360415fd`)
+
+Everything above was introduced by Phase 2. The entries below were introduced by
+the round-1 fix commit, which changed contracts the plan states. They were
+recorded only narratively in
+`docs/archive/review/sso-tenant-domain-alias-code-review.md`'s Resolution Status;
+they belong here, with the reasoning rather than the diff.
+
+## D-19 — C4's `{ id } | null` return became a discriminated `ClaimTenantResolution`
+
+**Plan (C3/C4)**: `findOrCreateTenantForClaim(...): Promise<{ id: string } | null>`,
+and the dispatch table's row 8b exists *because* "`findOrCreateTenantForClaim`
+returns `{ id } | null`".
+
+**Implemented**: `Promise<ClaimTenantResolution>`, where `ClaimTenantResolution` is
+`{ kind: "tenant"; id: string } | { kind: "claim_taken" } | { kind: "claim_invalid" }`.
+
+**Why**: round-1 M1. Phase 2 gave `null` a third, operator-reachable meaning (D2's
+revoked-claim refusal) on top of the two the plan had, and `createUser` in
+`src/lib/auth/session/auth-adapter.ts` read that `null` as "no claim was
+presented" — falling through to a fresh `isBootstrap` tenant with
+`role: "OWNER"`. A deliberately revoked claim therefore admitted one sign-in, as
+the owner of a new tenant, with no `tenant_claim_unmapped` row to show it. A
+nullable return cannot distinguish "no tenant" from "refused", so two callers
+adjudicating the same predicate necessarily read it differently and the weaker
+reading allowed. The discriminant turns each outcome into a case the compiler
+forces every caller to handle, and it is what lets M2's `CLAIM_REFUSAL_REASON`
+map the two refusals to their two distinct audit reasons instead of collapsing
+both into `tenant_mismatch`.
+
+## D-20 — `add --from`: a new CLI verb, a new privileged operation, and no revoke-first requirement
+
+**Plan (C7)**: `add --tenant <ref> --domain <domain> --by <label> [--yes]`, which
+*refuses* when the named tenant does not own the named claim. No reassignment
+path exists.
+
+**Implemented**: `add … [--from <current-owner-uuid>]` moves a registered claim
+from one tenant to another, atomically.
+
+**Why the verb exists**: round-1 M5. The plan's refusal told the operator to run
+`remove` on the owning tenant first, but `remove` is a soft delete (`revokedAt`
+set, `tenantId` unchanged), so the following `add` re-enters the same refusal —
+the instructed recovery loops, and the only exit is hand-written SQL. The
+wrong-owner state is reachable with no operator action at all, because
+`findOrCreateTenantForClaim` auto-registers `createdBy: "signin"` rows: one
+sign-in with a mistyped or squatted claim binds it permanently to a junk tenant.
+That falsified SC1's anti-deferral claim that "the CLI fully restores a
+locked-out tenant".
+
+**Why revoke-first is deliberately NOT required**: it would add a step without
+adding a check — `--from` already supplies the "name the losing side"
+deliberateness that the requirement would be standing in for — and it opens a
+window in which the claim resolves to nobody, so **both** tenants' members are
+denied until the second command lands. Trading one atomic move for a
+self-inflicted lockout window is the wrong direction for a tool whose reason to
+exist is ending lockouts. A revoked row is reassignable too and comes out active:
+the operator has just asked for this claim to select the gaining tenant.
+
+**Guards, because this is a new privileged operation**: `--from` takes a bare
+tenant UUID and nothing else — not a slug, claim or `external_id` — because a
+reassignment can deny an entire tenant's members and so must not be reachable by
+a typo; the other `--tenant` ref forms stay as they are. It refuses when `--from`
+is not the row's actual owner, and when the claim is registered to nobody. Before
+writing, it prints both tenants (id, name, slug, **active member count**) plus
+the row-6/9a absorption warning and asks for confirmation. The write is
+`updateMany` with the owner re-asserted in `WHERE`, not `update`: the
+confirmation prompt runs inside the open transaction (D-14) but the read happened
+before the human answered, so a concurrent change must surface as `count === 0` —
+a clean refusal — never as a silent overwrite of an owner the operator was never
+shown. `createdBy` is left untouched by the move (M2 / SC8): it records who first
+registered the claim, which is the evidence an incident needs.
+
+## D-21 — `unmapped --days`
+
+**Plan (C7)**: `unmapped` takes no flags; the window is `AUDIT_LOG_RETENTION_MIN`
+and the command "prints the retention window".
+
+**Implemented**: `unmapped [--days <n>]` — `n` a bounded positive integer,
+defaulting to that same floor — and the output names the number of days it
+actually covered, stating that this is a *query* window and not this deployment's
+retention.
+
+**Why**: round-1 Func F4. `AUDIT_LOG_RETENTION_MIN` is the configurable **floor**,
+so on any deployment retaining longer than the floor the plan's wording asserted
+that still-retained denials had been checked when the query had never looked at
+them. The failure mode is an operator concluding "nothing was denied" at incident
+time from a window they did not choose. Honest wording alone was not enough: it
+has to end in an action, and "re-run with `--days <n>`" needs the flag to exist.
+
+## D-22 — `hd` is selectable in `AUTH_TENANT_CLAIM_KEYS`
+
+**Plan (SC7)**: claim-source attestation deferred, on the stated premise that the
+exploit needs "a deliberate `AUTH_TENANT_CLAIM_KEYS` configuration naming an
+IdP-asserted attribute". `hd` is a hard-coded Google-only fallback consulted
+after the key list, not a member of it.
+
+**Implemented**: `hd` may be named in `AUTH_TENANT_CLAIM_KEYS`, and carries a
+provider gate (`account.provider === "google"`) wherever it is reached — through
+the key list or through the fallback. `DEFAULT_TENANT_CLAIM_KEYS` is untouched;
+unset behaviour is byte-identical.
+
+**Why**: round-1 M4. Four of the six shipped defaults (`organization`, `org`,
+`company`, `company_id`) are exactly the class SC7's premise treats as needing
+deliberate configuration, and all six are tried *before* `hd`, so a
+multi-connection SAML deployment that never set the variable was already inside
+the unsafe configuration rather than outside it. Worse, the documented escape
+hatch named a state an operator could not reach: `AUTH_TENANT_CLAIM_KEYS=hd` was
+not expressible. The user chose this over the stricter alternative — narrowing
+`DEFAULT_TENANT_CLAIM_KEYS` to attested sources only — which is a breaking change
+for deployments relying on those keys.
+
+The provider gate is what turns "named `hd`" into "attested by Google": a SAML
+profile carrying a self-asserted field literally named `hd` does not resolve.
+**That same gate makes `AUTH_TENANT_CLAIM_KEYS=hd` a harmful configuration on a
+SAML-only deployment** — extraction returns `null` for every sign-in, which is an
+allow rather than a denial, so a first-ever SAML user gets their own bootstrap
+tenant as OWNER, invisibly, and the absorption path is armed for later. Round 2
+(documentation finding D-A) found the READMEs recommending exactly that to
+multi-connection SAML deployments; the documentation now scopes the
+recommendation to Google sign-in and gives SAML deployments per-connection tenant
+binding as their answer.
+
+## D-23 — C8's pepper floor is two different predicates, deliberately
+
+**Plan (C8)**: one floor — the identifier pepper must be "real key material".
+
+**Implemented**: two predicates that do not agree.
+
+- `src/lib/env-schema.ts`: `AUDIT_IDENTIFIER_PEPPER: hex64.optional()` — exactly
+  64 hex characters, or absent.
+- `src/lib/audit/auth-failure.ts`: `explicit.length >= MIN_KEY_MATERIAL_LENGTH`
+  (32) over any characters at all.
+
+**Why the asymmetry is deliberate**: `auth-failure.ts` reads `process.env`
+directly rather than the validated `env` singleton, and it runs in processes that
+never parse the full schema — the audit-outbox and retention-GC workers — so a
+value that never passed `hex64` still reaches the derivation site. The check
+there is the last line of defence and therefore has to be independent of the
+schema rather than a restatement of it. It is looser on purpose because it
+answers a different question: not "is this the shape this deployment is required
+to configure?" but "is there enough key material to key an HMAC at all, whatever
+this process was started with?" — and a one-byte HMAC key is worse than the
+honest unkeyed branch, because the record then claims key material it does not
+have (round-1 Sec F5). The schema is free to be stricter, and is, holding the app
+to the same 256-bit shape as every other secret in `envObject`.
+
+**Consequence recorded for operators**: the schema predicate is a boot-time
+breaking change — the variable already exists on `main` — for any deployment with
+a set-but-not-64-hex pepper, and correcting it changes the HMAC key, so new
+`identifierHash` values no longer correlate with the ones already in
+`audit_logs`. Both READMEs now carry this under *Upgrade notes: environment
+variables that now fail closed* (round-2 documentation finding D-C), together
+with the same boot-failure shape for `COOKIE_PARTITIONED` and
+`BREAKGLASS_COOLING_OFF_SECONDS`.
+
+## D-24 — Environment fact: the dev DB's integration failures are the live outbox worker, not the tests
+
+**Causally proven, not inferred.** With the `audit-outbox-worker` container
+stopped, the full integration suite is 95/95 files / 426 tests / exit 0. With it
+running, a *different* pre-existing test fails on each run. The mechanism is the
+worker draining `audit_outbox` into `audit_logs` concurrently with
+`deleteTestData`, against `audit_logs_tenant_id_fkey`, which is `RESTRICT`: the
+worker inserts a child row for a tenant the cleanup is in the middle of deleting.
+
+**Why it matters next time**: the non-determinism is local-only — CI runs no such
+container — so it is not a defect to "fix" in the tests, and chasing it there
+costs a round. Stop the worker before a local integration run and restart it
+afterwards. One member of the class was observed outside this PR's files
+(`src/__tests__/db-integration/rate-limit-fail-closed.integration.test.ts`), so a
+failure in an unrelated suite is not evidence against this explanation.
+
+## D-25 — Environment fact: the local unit suite is not environment-equivalent to CI
+
+`.github/workflows/ci.yml` sets `AUTH_SECRET`, `SHARE_MASTER_KEY`, `AUTH_URL`,
+`VERIFIER_PEPPER_KEY`, `REDIS_URL` and `DATABASE_URL` at **job level** for
+`app-ci`. The divergence therefore runs in the unusual direction — CI supplies
+variables the local shell does not — which is why a test asserting the *absence*
+of `AUTH_SECRET` passed locally and failed in CI (round-1 CR1), and why C8's
+no-key-material branch never executed in CI at all.
+
+**Standing consequence**: a test that depends on an environment variable being
+unset must assert that precondition itself (`vi.stubEnv(<key>, "")` in
+`beforeEach`) rather than inherit ambient absence, and a change to that surface
+should be re-run under the **full** `app-ci` env block, not just the one variable
+a failure happened to name.
