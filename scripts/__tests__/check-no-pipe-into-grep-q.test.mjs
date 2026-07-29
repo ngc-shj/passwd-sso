@@ -225,6 +225,54 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(runGuard().exitCode).toBe(0);
   });
 
+  // A comment-only line is dropped before the continuation test. Joining it
+  // first and then discarding the logical line for starting with `#` let a
+  // comment ending in an operator swallow the violation underneath it.
+  it.each([
+    ["|", "# documented pipeline |"],
+    ["\\", "# documented continuation \\"],
+  ])("FAILS when a comment ending in `%s` precedes the violation", (_op, comment) => {
+    writeScript(
+      "offender",
+      `#!/usr/bin/env bash\nset -euo pipefail\n${comment}\nprintf '%s' "$BODY" | grep -q needle\n`,
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    // Reported against the pipeline, not the comment.
+    expect(stdout).toMatch(/offender\.sh:4:/);
+  });
+
+  it("PASSES a safe pipeline whose LATER stage carries -m", () => {
+    // `sort -m` merges; it reads to EOF. The flag belongs to sort, not to the
+    // grep, so scanning the whole line rather than the grep's own arguments
+    // would reject valid code.
+    writeScript(
+      "clean",
+      '#!/usr/bin/env bash\nset -euo pipefail\nprintf "x\\n" | grep x | sort -m\n',
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
+  it("still FAILS when the grep pattern itself contains a `|`", () => {
+    // The operator scan is quote-aware: the `|` inside the alternation is not
+    // a pipe, and must not truncate the arguments before `-q` is seen.
+    writeScript(
+      "offender",
+      '#!/usr/bin/env bash\nset -euo pipefail\nif cat f | grep -E "a|b" -q; then true; fi\n',
+    );
+    expect(runGuard().exitCode).toBe(1);
+  });
+
+  it("PASSES a quoted `| grep -q` inside a string literal", () => {
+    writeScript(
+      "clean",
+      '#!/usr/bin/env bash\nset -euo pipefail\nmsg="never write: foo | grep -q bar"\nprintf "%s" "$msg"\n',
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
   it("does not trip on the prose that documents the rule", () => {
     writeScript(
       "clean",
