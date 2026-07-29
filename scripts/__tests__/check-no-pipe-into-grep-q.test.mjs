@@ -225,6 +225,126 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(runGuard().exitCode).toBe(0);
   });
 
+  // A comment-only line is dropped before the continuation test. Joining it
+  // first and then discarding the logical line for starting with `#` let a
+  // comment ending in an operator swallow the violation underneath it.
+  it.each([
+    ["|", "# documented pipeline |"],
+    ["\\", "# documented continuation \\"],
+  ])("FAILS when a comment ending in `%s` precedes the violation", (_op, comment) => {
+    writeScript(
+      "offender",
+      `#!/usr/bin/env bash\nset -euo pipefail\n${comment}\nprintf '%s' "$BODY" | grep -q needle\n`,
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode).toBe(1);
+    // Reported against the pipeline, not the comment.
+    expect(stdout).toMatch(/offender\.sh:4:/);
+  });
+
+  // bash lets a pipeline continue across lines that carry no command text.
+  // Ending the logical line on one of them split the pipeline from its grep,
+  // which is precisely the shape being looked for.
+  it.each([
+    ["a comment line", "  # pipeline explanation"],
+    ["a blank line", ""],
+    ["an indented blank line", "   "],
+  ])("FAILS when %s sits between the pipe and the grep", (_name, filler) => {
+    writeScript(
+      "offender",
+      `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s' "$BODY" |\n${filler}\n  grep -q needle\n`,
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(1);
+    // Still anchored to the line the pipeline starts on.
+    expect(stdout).toMatch(/offender\.sh:3:/);
+  });
+
+  // The operator is still the last thing bash sees on the line; only the
+  // scanner saw a comment after it and stopped treating the line as continued.
+  it.each([
+    ["|", `printf '%s' "$BODY" | # pipeline explanation`, "grep -q needle"],
+    ["|&", "producer |& # comment", "grep --silent pattern"],
+  ])(
+    "FAILS when a comment trails the `%s` on the operator's own line",
+    (_op, first, second) => {
+      writeScript(
+        "offender",
+        `#!/usr/bin/env bash\nset -euo pipefail\n${first}\n  ${second}\n`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toMatch(/offender\.sh:3:/);
+    },
+  );
+
+  // A blank is not required before `#`: an unquoted metacharacter ends the
+  // word too, so the operator and the comment can touch.
+  it.each([
+    ["|", "producer |#comment", "grep -q pattern"],
+    ["|&", "producer |&#comment", "grep --silent pattern"],
+  ])(
+    "FAILS when a comment touches the `%s` with no space",
+    (_op, first, second) => {
+      writeScript(
+        "offender",
+        `#!/usr/bin/env bash\nset -euo pipefail\n${first}\n  ${second}\n`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toMatch(/offender\.sh:3:/);
+    },
+  );
+
+  // Each of these puts a non-comment `#` BEFORE the violation on the same line,
+  // so truncating there would hide the violation rather than merely mangle the
+  // text — the failure mode a passing gate would not show.
+  it.each([
+    ["a `#` inside a word", 'cat f#1 | grep -q x'],
+    ["a `#` inside a quoted pattern", 'cat f | grep -q "#tag"'],
+    ["`${f#pre}` (parameter expansion)", 'cat "${f#pre}" | grep -q x'],
+    ["`${#f}` (length expansion)", 'n="${#f}"; cat f | grep -q x'],
+    ["`$#` (positional count)", 'a="$#"; cat f | grep -q x'],
+  ])("still FAILS with %s — that is not a comment", (_name, body) => {
+    writeScript(
+      "offender",
+      `#!/usr/bin/env bash\nset -euo pipefail\n${body}\n`,
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(1);
+  });
+
+  it("PASSES a safe pipeline whose LATER stage carries -m", () => {
+    // `sort -m` merges; it reads to EOF. The flag belongs to sort, not to the
+    // grep, so scanning the whole line rather than the grep's own arguments
+    // would reject valid code.
+    writeScript(
+      "clean",
+      '#!/usr/bin/env bash\nset -euo pipefail\nprintf "x\\n" | grep x | sort -m\n',
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
+  it("still FAILS when the grep pattern itself contains a `|`", () => {
+    // The operator scan is quote-aware: the `|` inside the alternation is not
+    // a pipe, and must not truncate the arguments before `-q` is seen.
+    writeScript(
+      "offender",
+      '#!/usr/bin/env bash\nset -euo pipefail\nif cat f | grep -E "a|b" -q; then true; fi\n',
+    );
+    expect(runGuard().exitCode).toBe(1);
+  });
+
+  it("PASSES a quoted `| grep -q` inside a string literal", () => {
+    writeScript(
+      "clean",
+      '#!/usr/bin/env bash\nset -euo pipefail\nmsg="never write: foo | grep -q bar"\nprintf "%s" "$msg"\n',
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+  });
+
   it("does not trip on the prose that documents the rule", () => {
     writeScript(
       "clean",
