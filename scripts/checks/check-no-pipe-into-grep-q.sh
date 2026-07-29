@@ -124,11 +124,20 @@ function scan(s,   i, n, j, c, cc, qpos, body, outer, found) {
   outer = outer substr(s, i)
   return (found || offends(outer))
 }
-# Truncates a physical line at the shell comment that starts it, if any. A `#`
-# opens a comment only when it begins a word and is not quoted, so `${x#y}`,
-# `file#1` and `"a # b"` all survive. Everything downstream works on this
-# effective line, which is why a trailing comment can neither hide the operator
-# a continuation depends on nor be mistaken for command text.
+# Truncates a physical line at the shell comment that starts it, if any.
+#
+# A `#` opens a comment when it begins a word and is not quoted. A word begins
+# at the start of the line, after a blank, and after an UNQUOTED metacharacter —
+# blanks are not required, so `producer |#comment` is a comment too. The
+# metacharacter set was measured rather than assumed: with `#zzz` placed
+# directly after each candidate, bash treats it as a comment after
+# `| & ; ( ) < >` and a blank, and as literal text after `$ { } =` or any
+# word character. That is what keeps `${x#y}`, `${#x}`, `$#`, `file#1` and
+# `"#tag"` intact.
+#
+# Everything downstream works on this effective line, which is why a trailing
+# comment can neither hide the operator a continuation depends on nor be
+# mistaken for command text.
 function strip_comment(s,   i, n, c, q, prev) {
   n = length(s); q = ""; prev = ""
   for (i = 1; i <= n; i++) {
@@ -139,9 +148,9 @@ function strip_comment(s,   i, n, c, q, prev) {
       prev = c
       continue
     }
-    if (c == "\\") { i++; prev = ""; continue }
+    if (c == "\\") { i++; prev = "x"; continue }
     if (c == "\047" || c == "\"") { q = c; prev = c; continue }
-    if (c == "#" && (i == 1 || prev == " " || prev == "\t")) return substr(s, 1, i - 1)
+    if (c == "#" && (i == 1 || prev ~ /^[ \t|&;()<>]$/)) return substr(s, 1, i - 1)
     prev = c
   }
   return s

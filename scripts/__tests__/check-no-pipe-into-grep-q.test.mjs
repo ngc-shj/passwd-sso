@@ -278,10 +278,33 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     },
   );
 
+  // A blank is not required before `#`: an unquoted metacharacter ends the
+  // word too, so the operator and the comment can touch.
+  it.each([
+    ["|", "producer |#comment", "grep -q pattern"],
+    ["|&", "producer |&#comment", "grep --silent pattern"],
+  ])(
+    "FAILS when a comment touches the `%s` with no space",
+    (_op, first, second) => {
+      writeScript(
+        "offender",
+        `#!/usr/bin/env bash\nset -euo pipefail\n${first}\n  ${second}\n`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toMatch(/offender\.sh:3:/);
+    },
+  );
+
+  // Each of these puts a non-comment `#` BEFORE the violation on the same line,
+  // so truncating there would hide the violation rather than merely mangle the
+  // text — the failure mode a passing gate would not show.
   it.each([
     ["a `#` inside a word", 'cat f#1 | grep -q x'],
     ["a `#` inside a quoted pattern", 'cat f | grep -q "#tag"'],
-    ["a `#` in a parameter expansion", 'cat "${f#pre}" | grep -q x'],
+    ["`${f#pre}` (parameter expansion)", 'cat "${f#pre}" | grep -q x'],
+    ["`${#f}` (length expansion)", 'n="${#f}"; cat f | grep -q x'],
+    ["`$#` (positional count)", 'a="$#"; cat f | grep -q x'],
   ])("still FAILS with %s — that is not a comment", (_name, body) => {
     writeScript(
       "offender",
