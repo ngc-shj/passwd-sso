@@ -69,6 +69,27 @@ export async function resolveTenantByClaim(
 }
 
 /**
+ * Outcome of `findOrCreateTenantForClaim`.
+ *
+ * Deliberately NOT `{ id } | null` (round-1 M1/M2): the two refusals below
+ * are operator-actionable in different ways, and a bare `null` let one caller
+ * (`auth-adapter.createUser`) read them as "no claim was presented" and grant
+ * a fresh bootstrap tenant with OWNER — so a deliberately revoked claim
+ * bought a silent first sign-in. Each refusal is now its own arm and every
+ * caller has to name which one it is handling.
+ */
+export type ClaimTenantResolution =
+  | { kind: "tenant"; id: string }
+  // A revoked `tenant_claims` row owns the claim (D2). The slot in
+  // UNIQUE(claim) is taken and needs an operator decision, not a silent
+  // resurrection — callers report this as `tenant_claim_unmapped`, the reason
+  // `tenant-domain unmapped` filters on.
+  | { kind: "claim_taken" }
+  // The normalised claim fails `storableClaimSchema` (SC9's ASCII narrowing).
+  // Nothing is registrable, so registering a claim is not the remedy.
+  | { kind: "claim_invalid" };
+
+/**
  * Find or create a tenant for an IdP-supplied claim, registering the claim
  * atomically with the tenant it creates. Replaces `findOrCreateSsoTenant`.
  *
@@ -83,7 +104,7 @@ export async function resolveTenantByClaim(
 export async function findOrCreateTenantForClaim(
   tenantClaim: string,
   db: TxOrPrisma,
-): Promise<{ id: string } | null> {
+): Promise<ClaimTenantResolution> {
   const claim = normalizeTenantClaim(tenantClaim);
 
   // Serialises concurrent creation for the same claim BEFORE the resolve, so
@@ -98,10 +119,12 @@ export async function findOrCreateTenantForClaim(
   const row = await findClaimRow(db, claim);
   if (row) {
     // Revoked (D2): the claim is taken and needs an operator decision.
-    // Returning null here (not falling through to create) is what keeps a
-    // revoked row from being resurrected — creating would hit P2002 on
+    // Refusing here (not falling through to create) is what keeps a revoked
+    // row from being resurrected — creating would hit P2002 on
     // tenant_claims_claim_key.
-    return row.revokedAt === null ? { id: row.tenantId } : null;
+    return row.revokedAt === null
+      ? { kind: "tenant", id: row.tenantId }
+      : { kind: "claim_taken" };
   }
 
   // Release-1 externalId fallback (D1), same raw-claim semantics as
@@ -110,10 +133,10 @@ export async function findOrCreateTenantForClaim(
     where: { externalId: tenantClaim },
     select: { id: true },
   });
-  if (byExternalId) return byExternalId;
+  if (byExternalId) return { kind: "tenant", id: byExternalId.id };
 
   const parsed = storableClaimSchema.safeParse(claim);
-  if (!parsed.success) return null;
+  if (!parsed.success) return { kind: "claim_invalid" };
 
   const tenantSlug = slugifyTenant(tenantClaim);
 
@@ -161,5 +184,5 @@ export async function findOrCreateTenantForClaim(
     });
   }
   await db.$executeRaw`RELEASE SAVEPOINT tenant_claim_create`;
-  return created;
+  return { kind: "tenant", id: created.id };
 }

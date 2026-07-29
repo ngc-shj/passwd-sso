@@ -228,7 +228,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     // tests override to null for the rows where the claim has not been
     // registered yet (8 / 8b / 9a / 9b).
     mockResolveTenantByClaim.mockResolvedValue({ id: TENANT_CLAIMED });
-    mockFindOrCreateTenantForClaim.mockResolvedValue({ id: TENANT_NEW });
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "tenant", id: TENANT_NEW });
     mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string } }) => {
       if (where.id === TENANT_BOOTSTRAP) return { isBootstrap: true };
       if (where.id === TENANT_OTHER) return { isBootstrap: false };
@@ -493,11 +493,27 @@ describe("ensureTenantMembershipForSignIn", () => {
     });
   });
 
-  // Row 8b (defensive, D2): findOrCreateTenantForClaim returns null (claim
-  // collides with a revoked tenant_claims row) -> deny tenant_mismatch, no write.
-  it("row 8b: denies with tenant_mismatch when creation returns null (defensive, D2)", async () => {
+  // Row 8b, arm 1 (D2, round-1 M2): the claim is owned by a REVOKED
+  // tenant_claims row -> deny tenant_claim_unmapped. The reason is the
+  // load-bearing part: `tenant-domain unmapped` filters on exactly this
+  // string, so emitting tenant_mismatch here would make a revoked-claim
+  // lockout invisible to the tool shipped to diagnose it.
+  it("row 8b: denies with tenant_claim_unmapped when the claim is taken by a revoked row (D2)", async () => {
     mockResolveTenantByClaim.mockResolvedValue(null);
-    mockFindOrCreateTenantForClaim.mockResolvedValue(null);
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "claim_taken" });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: false, reason: "tenant_claim_unmapped", tenantId: null, claim: "tenant-acme" });
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+  });
+
+  // Row 8b, arm 2 (SC9): the claim fails storableClaimSchema -> deny
+  // tenant_mismatch. Nothing is registrable, so "register the claim" is not
+  // the operator remedy and this must NOT report as unmapped.
+  it("row 8b: denies with tenant_mismatch when the claim fails storableClaimSchema (SC9)", async () => {
+    mockResolveTenantByClaim.mockResolvedValue(null);
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "claim_invalid" });
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -542,11 +558,24 @@ describe("ensureTenantMembershipForSignIn", () => {
     });
   });
 
-  // Row 9a defensive null (D2): same as row 8b but reached via the bootstrap
-  // branch -> deny tenant_mismatch, no write.
-  it("row 9a: denies with tenant_mismatch when creation returns null on the bootstrap branch (defensive, D2)", async () => {
+  // Row 9a refusals (round-1 M2): same two arms as row 8b, reached via the
+  // bootstrap branch -> deny with the arm's own reason, no write, and no
+  // migration transaction.
+  it("row 9a: denies with tenant_claim_unmapped when the claim is taken by a revoked row on the bootstrap branch (D2)", async () => {
     mockResolveTenantByClaim.mockResolvedValue(null);
-    mockFindOrCreateTenantForClaim.mockResolvedValue(null);
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "claim_taken" });
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: false, reason: "tenant_claim_unmapped", tenantId: TENANT_BOOTSTRAP, claim: "tenant-acme" });
+    expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+  });
+
+  it("row 9a: denies with tenant_mismatch when the claim fails storableClaimSchema on the bootstrap branch (SC9)", async () => {
+    mockResolveTenantByClaim.mockResolvedValue(null);
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "claim_invalid" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});

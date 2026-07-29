@@ -25,8 +25,15 @@ import {
   type TestContext,
   type PrismaWithPool,
 } from "./helpers";
-import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import {
+  findOrCreateTenantForClaim,
+  resolveTenantByClaim,
+} from "@/lib/tenant/tenant-management";
 import { slugifyTenant } from "@/lib/tenant/tenant-claim";
+import {
+  normalizeTenantClaim,
+  storableClaimSchema,
+} from "@/lib/tenant/tenant-claim-registry";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
   PRIMARY_CLAIM,
@@ -156,6 +163,95 @@ describe("tenant_claims (C1)", () => {
     });
   });
 
+  /**
+   * Normalisation equivalence (plan C1, RT1 / round-1 M6). Feeds an
+   * adversarial table through the REAL `normalizeTenantClaim` in JS and hands
+   * the result to Postgres: every value must either pass the CHECK and
+   * round-trip byte-identically, or be rejected by `storableClaimSchema`
+   * before the insert AND by the CHECK when the insert is attempted anyway.
+   *
+   * This is the assertion that pins the two engines against each other. The
+   * unit test in `tenant-claim-registry.test.ts` runs the SQL character class
+   * through `new RegExp` in V8, so it cannot observe a Postgres/JS divergence
+   * at all — only a real INSERT can.
+   */
+  describe("normalisation equivalence (RT1)", () => {
+    /**
+     * `t` is a per-case ASCII uniquifier (UNIQUE(claim) is deployment-global,
+     * F15). Every case keeps the property it is named for after prefixing.
+     */
+    const ADVERSARIAL_CLAIMS: ReadonlyArray<{ label: string; raw: (t: string) => string }> = [
+      { label: "already normalised ASCII", raw: (t) => `${t}-alias.example` },
+      { label: "mixed case", raw: (t) => `${t}-Alias.Example` },
+      { label: "surrounding whitespace", raw: (t) => `  ${t}-alias.example \t ` },
+      { label: "uppercase non-domain claim", raw: (t) => `${t}-ACMECORP` },
+      { label: "U+00E9 — café", raw: (t) => `${t}-café.example` },
+      { label: "full-width CJK", raw: (t) => `${t}-全角.example` },
+      { label: "U+00DF — ß, no ASCII lowercase form", raw: (t) => `${t}-ß.example` },
+      // U+0130: JS lowercases it to "i" + U+0307 COMBINING DOT ABOVE while
+      // Postgres `lower(x COLLATE "C")` leaves it untouched — the exact D3
+      // divergence the printable-ASCII narrowing exists to make unreachable.
+      { label: "U+0130 — Turkish dotted capital I", raw: (t) => `${t}-İ.example` },
+      { label: "whitespace only", raw: () => "  \t " },
+    ];
+
+    it.skipIf(SKIP)(
+      "every adversarial value either round-trips byte-identically or is rejected by both storableClaimSchema and the CHECK",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const token = runToken();
+        let acceptedCount = 0;
+        let rejectedCount = 0;
+
+        try {
+          for (const [i, testCase] of ADVERSARIAL_CLAIMS.entries()) {
+            const raw = testCase.raw(`${token}c${i}`);
+            const normalised = normalizeTenantClaim(raw);
+            const accepted = storableClaimSchema.safeParse(normalised).success;
+
+            let caught: unknown;
+            try {
+              await ctx.su.prisma.$executeRawUnsafe(
+                `INSERT INTO tenant_claims (id, tenant_id, claim) VALUES ($1::uuid, $2::uuid, $3)`,
+                randomUUID(),
+                tenantId,
+                normalised,
+              );
+            } catch (e) {
+              caught = e;
+            }
+
+            if (accepted) {
+              acceptedCount++;
+              expect(caught, `${testCase.label}: insert must succeed`).toBeUndefined();
+              const stored = await ctx.su.prisma.tenantClaim.findUnique({
+                where: { claim: normalised },
+                select: { claim: true },
+              });
+              // Byte identity, not merely "equivalent": a re-fold on either
+              // side would surface here as a differing code unit.
+              expect(stored?.claim, testCase.label).toBe(normalised);
+              expect(
+                Buffer.from(stored?.claim ?? "", "utf8").equals(Buffer.from(normalised, "utf8")),
+                `${testCase.label}: byte identity`,
+              ).toBe(true);
+            } else {
+              rejectedCount++;
+              expect(isCheckViolation(caught), `${testCase.label}: CHECK must reject`).toBe(true);
+            }
+          }
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+
+        // Anti-vacuity: the table has to drive both arms, or the loop above
+        // proves only one half of the equivalence.
+        expect(acceptedCount).toBeGreaterThan(0);
+        expect(rejectedCount).toBeGreaterThan(0);
+      },
+    );
+  });
+
   describe("non-domain claim (NF2)", () => {
     it.skipIf(SKIP)("a non-domain claim like acmecorp inserts successfully", async () => {
       const tenantA = await ctx.createTenant();
@@ -236,15 +332,39 @@ describe("tenant_claims (C1)", () => {
      * tenants created fresh by this test, which the migration-time backfill
      * never saw — so deleting the INSERT from the file leaves this
      * assertion red, not green.
+     *
+     * The statement is unavoidably unscoped here: the D-7 drift guard pins it
+     * byte-for-byte against the migration's copy, so it cannot be given a
+     * test-only WHERE clause without breaking the guard that keeps the two
+     * copies honest. On the shared dev database it therefore also writes rows
+     * for tenants other working copies own. `ownTenantIds` bounds the blast
+     * radius: every row this execution added outside those tenants is deleted
+     * afterwards (round-1 Test F13). Rows that already existed — including the
+     * real migration's own `created_by = 'backfill'` rows — are identified by
+     * an id snapshot and left alone; a blanket
+     * `deleteMany({ createdBy: "backfill" })` would destroy them.
      */
-    async function runBackfillFile(): Promise<void> {
+    async function runBackfillFile(ownTenantIds: string[]): Promise<void> {
       const raw = readFileSync(BACKFILL_SQL_PATH, "utf8");
       const sql = raw
         .split("\n")
         .filter((line) => !line.trim().startsWith("--"))
         .join("\n")
         .trim();
-      await ctx.su.prisma.$executeRawUnsafe(sql);
+
+      const before = await ctx.su.prisma.tenantClaim.findMany({ select: { id: true } });
+      const preexisting = before.map((r) => r.id);
+      try {
+        await ctx.su.prisma.$executeRawUnsafe(sql);
+      } finally {
+        await ctx.su.prisma.tenantClaim.deleteMany({
+          where: {
+            createdBy: "backfill",
+            id: { notIn: preexisting },
+            tenantId: { notIn: ownTenantIds },
+          },
+        });
+      }
     }
 
     async function createTenantWithExternalId(externalId: string | null): Promise<string> {
@@ -265,7 +385,7 @@ describe("tenant_claims (C1)", () => {
     }
 
     it.skipIf(SKIP)(
-      "backfills external_id into tenant_claims, skips a normalisation collision without error, and skips a non-ASCII value entirely (SC9)",
+      "backfills external_id into tenant_claims, excludes BOTH sides of a normalisation collision, and skips a non-ASCII value entirely (SC9)",
       async () => {
         const token = runToken();
         const mixedCase = `${token}-Alias.Example`;
@@ -294,16 +414,28 @@ describe("tenant_claims (C1)", () => {
           where: { tenantId: { in: allTenants } },
         });
 
-        await runBackfillFile();
+        await runBackfillFile(allTenants);
 
-        // Exactly one of the two colliding tenants won the claim (ON CONFLICT
-        // DO NOTHING), and no error was thrown getting here.
+        // Round-1 M3: NEITHER side of the collision may take the claim. The
+        // two tenants are distinct today — the pre-PR resolver matched
+        // external_id exactly — so handing the claim to one of them would put
+        // the other's NEW members into the winner's tenant, silently.
         const collisionRows = await ctx.su.prisma.tenantClaim.findMany({
+          where: { tenantId: { in: [tenantMixedCase, tenantPaddedLower] } },
+        });
+        expect(collisionRows).toHaveLength(0);
+        const rowsForFoldedClaim = await ctx.su.prisma.tenantClaim.findMany({
           where: { claim: normalised },
         });
-        expect(collisionRows).toHaveLength(1);
-        expect([tenantMixedCase, tenantPaddedLower]).toContain(collisionRows[0].tenantId);
-        expect(collisionRows[0].createdBy).toBe("backfill");
+        expect(rowsForFoldedClaim).toHaveLength(0);
+
+        // The security property the exclusion exists for: with no claim row,
+        // release-1's exact-match external_id fallback still resolves each
+        // colliding tenant to ITSELF — neither resolves to the other.
+        const resolvedMixedCase = await resolveTenantByClaim(mixedCase, ctx.su.prisma);
+        const resolvedPaddedLower = await resolveTenantByClaim(paddedLower, ctx.su.prisma);
+        expect(resolvedMixedCase?.id).toBe(tenantMixedCase);
+        expect(resolvedPaddedLower?.id).toBe(tenantPaddedLower);
 
         const nonDomainRows = await ctx.su.prisma.tenantClaim.findMany({
           where: { tenantId: tenantNonDomain },
@@ -372,38 +504,69 @@ describe("findOrCreateTenantForClaim (C4)", () => {
   it.skipIf(SKIP)(
     "two concurrent calls for the same claim create exactly one tenant and one claim row, and both callers get the same id (advisory lock proof)",
     async () => {
-      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      // 50 iterations, per raceTwoClients' own contract (helpers.ts:353-363)
+      // and both in-repo precedents. A single Promise.all on a pooled DB
+      // frequently serialises without contention, so one iteration stays
+      // green even with advisoryXactLock removed — and this is C4's only
+      // real-Postgres proof of I6.
+      const ITERATIONS = 50;
+      const claims: string[] = [];
 
-      const [resultA, resultB] = await raceTwoClients(
-        ctx.app.prisma,
-        second.prisma,
-        (c) =>
-          withBypassRls(
-            c,
-            (tx) => findOrCreateTenantForClaim(claim, tx),
-            BYPASS_PURPOSE.AUTH_FLOW,
-          ),
-        (c) =>
-          withBypassRls(
-            c,
-            (tx) => findOrCreateTenantForClaim(claim, tx),
-            BYPASS_PURPOSE.AUTH_FLOW,
-          ),
-      );
+      try {
+        for (let i = 0; i < ITERATIONS; i++) {
+          const claim = `${runToken()}i${i}.${ALIAS_CLAIM}`;
+          claims.push(claim);
 
-      expect(resultA).not.toBeNull();
-      expect(resultB).not.toBeNull();
-      expect(resultA?.id).toBe(resultB?.id);
+          const [resultA, resultB] = await raceTwoClients(
+            ctx.app.prisma,
+            second.prisma,
+            (c) =>
+              withBypassRls(
+                c,
+                (tx) => findOrCreateTenantForClaim(claim, tx),
+                BYPASS_PURPOSE.AUTH_FLOW,
+              ),
+            (c) =>
+              withBypassRls(
+                c,
+                (tx) => findOrCreateTenantForClaim(claim, tx),
+                BYPASS_PURPOSE.AUTH_FLOW,
+              ),
+          );
 
-      const claimRows = await ctx.su.prisma.tenantClaim.findMany({ where: { claim } });
-      expect(claimRows).toHaveLength(1);
-      expect(claimRows[0].tenantId).toBe(resultA?.id);
+          // Narrow before comparing ids: a non-"tenant" kind is a distinct
+          // failure from a mismatched id and must not be reported as one.
+          if (resultA.kind !== "tenant") {
+            throw new Error(`iteration ${i}: client A returned ${resultA.kind}`);
+          }
+          if (resultB.kind !== "tenant") {
+            throw new Error(`iteration ${i}: client B returned ${resultB.kind}`);
+          }
+          expect(resultB.id).toBe(resultA.id);
 
-      const tenantRows = await ctx.su.prisma.tenant.findMany({ where: { externalId: claim } });
-      expect(tenantRows).toHaveLength(1);
+          const claimRows = await ctx.su.prisma.tenantClaim.findMany({ where: { claim } });
+          expect(claimRows).toHaveLength(1);
+          expect(claimRows[0].tenantId).toBe(resultA.id);
 
-      if (resultA) await ctx.deleteTestData(resultA.id);
+          const tenantRows = await ctx.su.prisma.tenant.findMany({ where: { externalId: claim } });
+          expect(tenantRows).toHaveLength(1);
+
+          await ctx.deleteTestData(resultA.id);
+        }
+      } finally {
+        // Sweeps the iteration that threw, if any — the per-iteration delete
+        // above never runs for it, and this file's tenants must not outlive
+        // the run on a shared database.
+        const leftovers = await ctx.su.prisma.tenant.findMany({
+          where: { externalId: { in: claims } },
+          select: { id: true },
+        });
+        for (const leftover of leftovers) {
+          await ctx.deleteTestData(leftover.id);
+        }
+      }
     },
+    180_000,
   );
 
   it.skipIf(SKIP)(
@@ -472,11 +635,11 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         await setBypassRlsGucs(tx);
         const resultA = await findOrCreateTenantForClaim(claimA, tx);
         const resultB = await findOrCreateTenantForClaim(claimB, tx);
-        expect(resultA).not.toBeNull();
-        expect(resultB).not.toBeNull();
-        expect(resultA?.id).not.toBe(resultB?.id);
-        if (resultA) created.push(resultA);
-        if (resultB) created.push(resultB);
+        if (resultA.kind !== "tenant") throw new Error(`claimA returned ${resultA.kind}`);
+        if (resultB.kind !== "tenant") throw new Error(`claimB returned ${resultB.kind}`);
+        expect(resultA.id).not.toBe(resultB.id);
+        created.push({ id: resultA.id });
+        created.push({ id: resultB.id });
       });
 
       const tenants = await ctx.su.prisma.tenant.findMany({

@@ -43,12 +43,22 @@ ALTER TABLE "tenant_claims" ADD CONSTRAINT "tenant_claims_claim_normalized"
 -- resolveTenantByClaim starts reading tenant_claims. Copied verbatim from
 -- scripts/lib/tenant-claim-backfill.sql (Prisma has no @import); a drift
 -- test asserts the two have not diverged.
+--
+-- Every side of a normalisation collision is excluded, not just the losers
+-- (round-1 M3): those tenants are distinct today, so handing the claim to one
+-- of them would place the others' new members into the winner's tenant. With
+-- no row for any of them, release 1's external_id fallback preserves today's
+-- resolution for all sides.
 INSERT INTO tenant_claims (id, tenant_id, claim, created_by)
 SELECT gen_random_uuid(), id, lower(btrim(external_id) COLLATE "C"), 'backfill'
 FROM tenants
 WHERE external_id IS NOT NULL
   AND btrim(external_id) <> ''
   AND external_id !~ '[^\x20-\x7E]'
+  AND lower(btrim(external_id) COLLATE "C") NOT IN (
+    SELECT lower(btrim(external_id) COLLATE "C") FROM tenants
+     WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id !~ '[^\x20-\x7E]'
+     GROUP BY 1 HAVING count(*) > 1)
 ON CONFLICT (claim) DO NOTHING;
 
 -- Tenant-RLS isolation: rows are visible to a tenant's app session only

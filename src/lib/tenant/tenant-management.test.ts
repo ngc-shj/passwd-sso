@@ -56,7 +56,7 @@ describe("findOrCreateTenantForClaim", () => {
 
     const result = await findOrCreateTenantForClaim("acme.com", db);
 
-    expect(result).toEqual({ id: "tenant-1" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-1" });
     expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
       where: { claim: "acme.com" },
       select: { tenantId: true, revokedAt: true },
@@ -71,7 +71,7 @@ describe("findOrCreateTenantForClaim", () => {
 
     const result = await findOrCreateTenantForClaim("acme.com", db);
 
-    expect(result).toEqual({ id: "tenant-new" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-new" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
       data: {
         externalId: "acme.com", // D1: release 1 still writes it
@@ -105,7 +105,7 @@ describe("findOrCreateTenantForClaim", () => {
 
     const result = await findOrCreateTenantForClaim("acme.com", db);
 
-    expect(result).toEqual({ id: "tenant-fallback" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-fallback" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledTimes(2);
     const secondCreate = mockPrisma.tenant.create.mock.calls[1][0];
     expect(secondCreate.data.slug).toMatch(/^acme-com-[0-9a-f]{8}$/);
@@ -114,12 +114,25 @@ describe("findOrCreateTenantForClaim", () => {
       create: { claim: "acme.com", createdBy: "signin" },
     });
     // SAVEPOINT, then ROLLBACK TO SAVEPOINT (on the P2002), then RELEASE
-    // SAVEPOINT (after the retry succeeds) — issued BEFORE the statement
-    // that may abort, per round-4 N6.
-    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(3);
+    // SAVEPOINT (after the retry succeeds). Asserted by SQL text and by
+    // invocation order against tenant.create, NOT by call count (round-1 M9):
+    // a count of three survives moving the SAVEPOINT *after* the create,
+    // which is the exact round-4 N6 regression — a savepoint opened after an
+    // aborting statement cannot recover the session. `$executeRaw` is a
+    // tagged template, so each call's first argument is the
+    // TemplateStringsArray and [0] is its literal SQL.
+    const sql = mockPrisma.$executeRaw.mock.calls.map((c) => c[0][0]);
+    expect(sql).toEqual([
+      "SAVEPOINT tenant_claim_create",
+      "ROLLBACK TO SAVEPOINT tenant_claim_create",
+      "RELEASE SAVEPOINT tenant_claim_create",
+    ]);
+    expect(mockPrisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      mockPrisma.tenant.create.mock.invocationCallOrder[0],
+    );
   });
 
-  it("returns null when the normalised claim fails storableClaimSchema, with no create (I5)", async () => {
+  it("returns claim_invalid when the normalised claim fails storableClaimSchema, with no create (I5)", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.findUnique.mockResolvedValue(null);
 
@@ -129,7 +142,10 @@ describe("findOrCreateTenantForClaim", () => {
     // storableClaimSchema rejects (min length 1).
     const result = await findOrCreateTenantForClaim(" ", db);
 
-    expect(result).toBeNull();
+    // Distinct from claim_taken (round-1 M1/M2): this arm is the SC9
+    // narrowing, and src/auth.ts maps it to tenant_mismatch, not to
+    // tenant_claim_unmapped.
+    expect(result).toEqual({ kind: "claim_invalid" });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });
 
@@ -159,7 +175,7 @@ describe("findOrCreateTenantForClaim", () => {
 
     const result = await findOrCreateTenantForClaim("acmecorp", db);
 
-    expect(result).toEqual({ id: "tenant-nf2" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-nf2" });
     expect(mockPrisma.tenant.create).toHaveBeenCalledWith({
       data: {
         externalId: "acmecorp",
@@ -185,7 +201,7 @@ describe("findOrCreateTenantForClaim", () => {
     expect(lockOrder).toBeLessThan(resolveOrder);
   });
 
-  it("returns null for a revoked claim row and does not create (D2)", async () => {
+  it("returns claim_taken for a revoked claim row and does not create (D2)", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue({
       tenantId: "tenant-owner",
       revokedAt: new Date("2026-01-01T00:00:00Z"),
@@ -193,7 +209,9 @@ describe("findOrCreateTenantForClaim", () => {
 
     const result = await findOrCreateTenantForClaim("alias.example", db);
 
-    expect(result).toBeNull();
+    // claim_taken, NOT claim_invalid: src/auth.ts maps this one to
+    // tenant_claim_unmapped so `tenant-domain unmapped` can see the lockout.
+    expect(result).toEqual({ kind: "claim_taken" });
     // No fallback either — a revoked row is taken, not "not found".
     expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
@@ -205,10 +223,33 @@ describe("findOrCreateTenantForClaim", () => {
 
     const result = await findOrCreateTenantForClaim("alias.example", db);
 
-    expect(result).toEqual({ id: "tenant-legacy" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy" });
     expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
       where: { externalId: "alias.example" },
       select: { id: true },
+    });
+    expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
+  });
+
+  // Round-1 M12: the case above cannot distinguish raw from normalised —
+  // "alias.example" is its own normal form. D-3 makes the RAW spelling
+  // load-bearing: the fallback exists to keep NF2 true in release 1 for a
+  // deployment whose tenants.external_id was stored un-normalised, and
+  // folding the key before the lookup would miss exactly those rows.
+  it("queries the externalId fallback with the RAW claim while the registry gets the normalised one (D-3)", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-legacy-mixed" });
+
+    const result = await findOrCreateTenantForClaim("Alias.Example", db);
+
+    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy-mixed" });
+    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
+      where: { externalId: "Alias.Example" },
+      select: { id: true },
+    });
+    expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
+      where: { claim: "alias.example" },
+      select: { tenantId: true, revokedAt: true },
     });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });

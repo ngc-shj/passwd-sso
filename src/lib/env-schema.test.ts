@@ -561,16 +561,27 @@ describe("C9 undeclared env vars", () => {
   });
 
   it("accepts an explicit AUDIT_IDENTIFIER_PEPPER and IOS_APP_TEAM_ID", () => {
+    const pepper = "c".repeat(64);
     const result = envObject.safeParse(
       baseEnv({
-        AUDIT_IDENTIFIER_PEPPER: "some-pepper-value",
+        AUDIT_IDENTIFIER_PEPPER: pepper,
         IOS_APP_TEAM_ID: "ABCDE12345",
       }),
     );
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.AUDIT_IDENTIFIER_PEPPER).toBe("some-pepper-value");
+      expect(result.data.AUDIT_IDENTIFIER_PEPPER).toBe(pepper);
       expect(result.data.IOS_APP_TEAM_ID).toBe("ABCDE12345");
+    }
+  });
+
+  it("rejects an AUDIT_IDENTIFIER_PEPPER that is not a 256-bit key", () => {
+    // The derivation site (src/lib/audit/auth-failure.ts) treats a short
+    // override as absent; the schema refuses it outright, so the two cannot
+    // disagree about what counts as key material (round-1 Sec F5).
+    for (const tooWeak of ["x", "c".repeat(31), "z".repeat(64)]) {
+      const result = envObject.safeParse(baseEnv({ AUDIT_IDENTIFIER_PEPPER: tooWeak }));
+      expect(result.success).toBe(false);
     }
   });
 

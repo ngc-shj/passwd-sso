@@ -115,7 +115,10 @@ describe("createCustomAdapter", () => {
     );
     // Default: no pending tenant claim
     mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
-    mockFindOrCreateTenantForClaim.mockResolvedValue(null);
+    // Resolvable by default; the refusal arms (claim_taken / claim_invalid)
+    // are opted into per test, since they now fail the sign-in closed rather
+    // than degrading to a bootstrap tenant.
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "tenant", id: "sso-tenant-default" });
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         tenant: { ...mockPrismaTenant, findUnique: mockTxTenant.findUnique },
@@ -195,7 +198,7 @@ describe("createCustomAdapter", () => {
 
     it("places user in SSO tenant when tenant claim is pending", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
-      mockFindOrCreateTenantForClaim.mockResolvedValue({ id: "sso-tenant-1" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "tenant", id: "sso-tenant-1" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-2",
         name: "SSO User",
@@ -233,36 +236,35 @@ describe("createCustomAdapter", () => {
       });
     });
 
-    it("falls back to bootstrap when findOrCreateTenantForClaim returns null", async () => {
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "invalid" });
-      mockFindOrCreateTenantForClaim.mockResolvedValue(null);
-      mockPrismaTenant.create.mockResolvedValue({ id: "bootstrap-1" });
-      mockPrismaUser.create.mockResolvedValue({
-        id: "user-3",
-        name: "Fallback User",
-        email: "user@invalid.test",
-        image: null,
-        emailVerified: null,
-      });
-      mockPrismaTenantMember.create.mockResolvedValue({ id: "tm-3" });
+    // Round-1 M1: a claim WAS presented but is unusable. Before the
+    // discriminated result this reached the same branch as "no claim
+    // presented", so a deliberately revoked claim bought one successful
+    // first-ever sign-in as OWNER of a fresh bootstrap tenant, with no
+    // tenant_claim_unmapped audit row — and the next sign-in absorbed that
+    // estate into the real tenant via the bootstrap migration. Both refusal
+    // arms must now fail closed.
+    it.each([
+      ["claim_taken", "a revoked tenant_claims row owns the claim (D2)"],
+      ["claim_invalid", "the claim fails storableClaimSchema (SC9)"],
+    ])("throws TENANT_CLAIM_UNUSABLE without a bootstrap tenant when %s — %s", async (kind) => {
+      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue({ kind });
 
       const adapter = createCustomAdapter();
-      await adapter.createUser!({
-        id: "",
-        name: "Fallback User",
-        email: "user@invalid.test",
-        image: null,
-        emailVerified: null,
-      });
+      await expect(
+        adapter.createUser!({
+          id: "",
+          name: "Refused User",
+          email: "user@alias.example",
+          image: null,
+          emailVerified: null,
+        }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
 
-      // Bootstrap tenant should be created as fallback
-      expect(mockPrismaTenant.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ isBootstrap: true }),
-        select: { id: true },
-      });
-      expect(mockPrismaTenantMember.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ role: "OWNER" }),
-      });
+      // No bootstrap tenant, no user, and above all no OWNER membership.
+      expect(mockPrismaTenant.create).not.toHaveBeenCalled();
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockPrismaTenantMember.create).not.toHaveBeenCalled();
     });
 
     it("creates bootstrap tenant when no tenant claim store exists", async () => {

@@ -169,20 +169,38 @@ export function createCustomAdapter(): Adapter {
       const created = await withBypassRls(prisma, async (tx) => {
         // Resolve SSO tenant, then create tenant/user/member — all on the single
         // withBypassRls tx (no redundant inner $transaction).
-        let ssoTenant: { id: string } | null = null;
+        //
+        // The bootstrap fall-through below keys off whether a claim was
+        // PRESENTED, not off whether resolution produced a tenant. Those were
+        // the same question while the resolver returned `{ id } | null`, and
+        // conflating them was round-1 M1: a claim whose tenant_claims row an
+        // operator had deliberately revoked read as "no claim", so the user
+        // got a fresh bootstrap tenant as OWNER, with no
+        // tenant_claim_unmapped audit row to show it — and their next sign-in
+        // absorbed that estate into the real tenant via the bootstrap
+        // migration. An unusable claim now fails the sign-in closed.
+        let tenant: { id: string };
         if (pendingClaim) {
-          ssoTenant = await findOrCreateTenantForClaim(pendingClaim, tx);
+          const resolution = await findOrCreateTenantForClaim(pendingClaim, tx);
+          if (resolution.kind !== "tenant") {
+            // Revoked claim row (D2) or storableClaimSchema reject (SC9).
+            // Either way the claim is not this deployment's to hand out, and
+            // the operator's remedy is in `tenant-domain`, not in a new
+            // tenant. Throwing aborts the withBypassRls tx, so no user, no
+            // tenant, and no membership row survives.
+            throw new Error("TENANT_CLAIM_UNUSABLE");
+          }
+          tenant = { id: resolution.id };
+        } else {
+          tenant = await tx.tenant.create({
+            data: {
+              name: user.email ?? user.name ?? "User",
+              slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, BOOTSTRAP_SLUG_HASH_LENGTH)}`,
+              isBootstrap: true,
+            },
+            select: { id: true },
+          });
         }
-
-        const tenant = ssoTenant
-          ?? await tx.tenant.create({
-              data: {
-                name: user.email ?? user.name ?? "User",
-                slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, BOOTSTRAP_SLUG_HASH_LENGTH)}`,
-                isBootstrap: true,
-              },
-              select: { id: true },
-            });
 
         const createdUser = await tx.user.create({
           data: {
@@ -205,7 +223,9 @@ export function createCustomAdapter(): Adapter {
           data: {
             tenantId: tenant.id,
             userId: createdUser.id,
-            role: ssoTenant ? "MEMBER" : "OWNER",
+            // OWNER only on the no-claim bootstrap path — same predicate as
+            // the tenant selection above, for the same M1 reason.
+            role: pendingClaim ? "MEMBER" : "OWNER",
           },
         });
 

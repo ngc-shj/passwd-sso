@@ -205,7 +205,11 @@ export const descriptions: Record<
     order: 7,
     description:
       "Comma-separated JWT claim keys used to extract the tenant identifier\n" +
-      "from the OIDC token (e.g. 'tenant,org_id').",
+      "from the OIDC token (e.g. 'tenant,org_id'). Leaving this unset selects a\n" +
+      "list of self-asserted profile attributes (tenant_id, tenantId,\n" +
+      "organization, org, company, company_id), tried before Google's attested\n" +
+      "'hd' claim — it does NOT mean 'hd only'. Set it to 'hd' to accept only\n" +
+      "the Google hosted-domain claim, or name the attribute your IdP asserts.",
     example: "tenant",
   },
   SAML_PROVIDER_NAME: {
@@ -564,7 +568,9 @@ export const descriptions: Record<
     order: 4,
     description:
       "HMAC pepper for hashing the identifier recorded on AUTH_LOGIN_FAILURE\n" +
-      "audit events. Optional override — when unset, the pepper is derived from\n" +
+      "audit events. 64-character hex string (256 bits, npm run generate:key);\n" +
+      "a shorter value is refused at boot and ignored at the derivation site.\n" +
+      "Optional override — when unset, the pepper is derived from\n" +
       "AUTH_SECRET via HKDF, so production always has real key material. Only if\n" +
       "neither is available is no hash computed at all (identifierHash: null,\n" +
       "identifierHashScope: \"unkeyed\", warned once) — there is no empty-key\n" +
@@ -1036,7 +1042,11 @@ export const descriptions: Record<
     description:
       "Apple Developer Team ID (10-char string). Required for the AASA route\n" +
       "to serve iOS Universal Links; the route returns 503 when unset.",
-    example: "ABCDE12345",
+    // No `example` on purpose: init:env offers it as the Enter-through
+    // default, so a placeholder Team ID would be written to .env and the AASA
+    // route would publish an appID no installed app owns — Universal Links
+    // then fail silently instead of reporting "not configured" (round-1
+    // Func F6).
   },
   IOS_APP_BUNDLE_ID: {
     group: "iOS Universal Links",

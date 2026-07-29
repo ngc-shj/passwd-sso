@@ -13,9 +13,9 @@
  * that does not exist: it is null when there was no email to hash at all.
  *
  * Pepper resolution (C8):
- *   1. AUDIT_IDENTIFIER_PEPPER           — explicit override
- *   2. AUTH_SECRET (>= 32 chars)         — HKDF-derived, domain-separated
- *   3. neither                           — no hash is computed
+ *   1. AUDIT_IDENTIFIER_PEPPER (>= 32 chars) — explicit override
+ *   2. AUTH_SECRET (>= 32 chars)             — HKDF-derived, domain-separated
+ *   3. neither                               — no hash is computed
  * Unlike src/lib/auth/session/session-cache.ts, there is no dev fallback to
  * another real secret: that fallback exists to preserve digest compatibility
  * with pre-existing rows, a requirement this module does not have. Emitting
@@ -68,8 +68,13 @@ export type IdentifierHashScope =
 const IDENTIFIER_PEPPER_INFO = "audit-identifier-pepper-v1";
 // Matches envSchema's production floor for AUTH_SECRET (superRefine, prod-only —
 // the field itself is .optional()), checked again here because this module
-// runs regardless of NODE_ENV.
-const MIN_AUTH_SECRET_LENGTH = 32;
+// runs regardless of NODE_ENV. The same floor applies to the explicit override:
+// envSchema narrows AUDIT_IDENTIFIER_PEPPER further (hex64), but this module
+// reads process.env directly rather than the validated singleton, so an
+// override that never passed the schema still has to be rejected here. A
+// one-byte HMAC key is worse than the honest unkeyed branch, because the
+// record then claims key material it does not have (round-1 Sec F5).
+const MIN_KEY_MATERIAL_LENGTH = 32;
 
 // Memoised pepper, derived on first use rather than at module load so the
 // "no pepper configured" warning reflects the branch actually taken.
@@ -81,13 +86,13 @@ function getIdentifierPepper(): Buffer | null {
   if (identifierPepper !== undefined) return identifierPepper;
 
   const explicit = process.env.AUDIT_IDENTIFIER_PEPPER;
-  if (explicit) {
+  if (explicit && explicit.length >= MIN_KEY_MATERIAL_LENGTH) {
     identifierPepper = Buffer.from(explicit, "utf8");
     return identifierPepper;
   }
 
   const authSecret = process.env.AUTH_SECRET;
-  if (authSecret && authSecret.length >= MIN_AUTH_SECRET_LENGTH) {
+  if (authSecret && authSecret.length >= MIN_KEY_MATERIAL_LENGTH) {
     // HKDF-domain-separate so AUTH_SECRET is never used verbatim as the HMAC key.
     const okm = hkdfSync("sha256", authSecret, "", IDENTIFIER_PEPPER_INFO, 32);
     identifierPepper = Buffer.from(okm);
@@ -97,7 +102,7 @@ function getIdentifierPepper(): Buffer | null {
   if (!warnedNoPepper) {
     warnedNoPepper = true;
     getLogger().warn(
-      "AUDIT_IDENTIFIER_PEPPER not configured and AUTH_SECRET unavailable/too short; auth-failure identifier hashes are unkeyed",
+      "AUDIT_IDENTIFIER_PEPPER and AUTH_SECRET are both unavailable or too short; auth-failure identifier hashes are unkeyed",
     );
   }
   identifierPepper = null;

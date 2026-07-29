@@ -274,8 +274,10 @@ export const envObject = z.object({
   // material. Only when neither is available is no hash computed at all
   // (identifierHash: null, identifierHashScope: "unkeyed"). There is
   // deliberately no empty-key fallback: an unkeyed hash over an email input
-  // space is a lookup, not a protection.
-  AUDIT_IDENTIFIER_PEPPER: z.string().optional(),
+  // space is a lookup, not a protection — and by the same argument the
+  // override carries the same 256-bit floor as every other secret here, so a
+  // one-character value cannot pose as key material (round-1 Sec F5).
+  AUDIT_IDENTIFIER_PEPPER: hex64.optional(),
 
   // --- Conditional: Cloud blob storage ---
   AWS_REGION: nonEmpty.optional(),

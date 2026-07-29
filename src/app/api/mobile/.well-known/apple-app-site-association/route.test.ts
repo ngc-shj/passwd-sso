@@ -1,10 +1,20 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET } from "./route";
 
 describe("GET /api/mobile/.well-known/apple-app-site-association", () => {
-  // No local save/restore block: both IOS_APP_* vars are unset in the test
-  // baseline, and setup.ts's global afterEach (vi.unstubAllEnvs()) reverts
-  // every vi.stubEnv() call after each test.
+  beforeEach(() => {
+    // Assert the precondition instead of inheriting an ambient absence: the
+    // 503 case below is only meaningful when the var really is unset, and an
+    // environment that supplies it (a CI job-level env block, an operator's
+    // .env) would otherwise turn that case green for the wrong reason —
+    // round-1 CR1. "" is falsy at the route's read site, so it is a faithful
+    // "unset"; setup.ts's afterEach (vi.unstubAllEnvs()) reverts it.
+    vi.stubEnv("IOS_APP_TEAM_ID", "");
+    // Same reasoning for the bundle id: the default-bundle case below asserts
+    // what the route falls back to when it is unset. The route reads it with
+    // `||`, so "" takes the fallback exactly as an unset var does.
+    vi.stubEnv("IOS_APP_BUNDLE_ID", "");
+  });
 
   it("returns 503 when IOS_APP_TEAM_ID is unset", async () => {
     const response = GET();

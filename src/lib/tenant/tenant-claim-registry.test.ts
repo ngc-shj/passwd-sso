@@ -112,24 +112,21 @@ describe("NON_PRINTABLE_ASCII_SQL_CLASS drift guard", () => {
   const MIGRATION = "prisma/migrations/20260729110000_add_tenant_claims/migration.sql";
   const BACKFILL = "scripts/lib/tenant-claim-backfill.sql";
 
-  // The constant carries JS-escaped backslashes; the SQL files carry them raw.
-  const sqlLiteral = NON_PRINTABLE_ASCII_SQL_CLASS.replace(/\\\\/g, "\\");
-
   it("is the predicate the CHECK constraint enforces", () => {
-    expect(read(MIGRATION)).toContain(`claim !~ '${sqlLiteral}'`);
+    expect(read(MIGRATION)).toContain(`claim !~ '${NON_PRINTABLE_ASCII_SQL_CLASS}'`);
   });
 
   it("is the predicate the backfill filters the raw external_id on", () => {
     // Raw column, not the folded output — round-5 D3.
-    expect(read(BACKFILL)).toContain(`external_id !~ '${sqlLiteral}'`);
-    expect(read(MIGRATION)).toContain(`external_id !~ '${sqlLiteral}'`);
+    expect(read(BACKFILL)).toContain(`external_id !~ '${NON_PRINTABLE_ASCII_SQL_CLASS}'`);
+    expect(read(MIGRATION)).toContain(`external_id !~ '${NON_PRINTABLE_ASCII_SQL_CLASS}'`);
   });
 
   it("agrees with the JS predicate storableClaimSchema applies", () => {
     // Behavioural cross-check: the SQL class and the JS regex must classify
     // the same values the same way, or a claim can pass one engine and fail
     // the other — the exact split round-5 D3 was raised about.
-    const sqlClassRe = new RegExp(sqlLiteral);
+    const sqlClassRe = new RegExp(NON_PRINTABLE_ASCII_SQL_CLASS);
     for (const value of ["alias.example", "acmecorp", "a-b_c~1", "\u00e0bc", "\u0130stanbul", "\u3042"]) {
       const rejectedBySql = sqlClassRe.test(value);
       const rejectedByJs = !storableClaimSchema.safeParse(value).success;

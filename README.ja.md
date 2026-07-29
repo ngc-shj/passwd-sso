@@ -225,7 +225,7 @@ npm run docker:down
 | `AUTH_GOOGLE_ID` | Google OAuth クライアント ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth クライアントシークレット |
 | `GOOGLE_WORKSPACE_DOMAINS` | （任意）Google Workspace ドメインに制限（カンマ区切りで複数可） |
-| `AUTH_TENANT_CLAIM_KEYS` | （任意）tenant 解決に使う IdP クレームキー（例: `tenant_id,organization`） |
+| `AUTH_TENANT_CLAIM_KEYS` | （任意）tenant 解決に使う IdP クレームキーをカンマ区切りで指定し、記載順に評価します。**未設定は「設定なし」ではありません** — `tenant_id, tenantId, organization, org, company, company_id` が選択され、いずれも IdP がアサートする属性であり、Google の検証済み `hd` より**先に**評価されます。検証済みクレームのみを使う構成にするには `AUTH_TENANT_CLAIM_KEYS=hd` を設定してください。詳細は [IdP のドメインが変わった / テナントがロックアウトされた](#idp-のドメインが変わった--テナントがロックアウトされた) の項を参照 |
 | `JACKSON_URL` | SAML Jackson URL（デフォルト: `http://localhost:5225`） |
 | `AUTH_JACKSON_ID` | Jackson OIDC クライアント ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |
@@ -296,14 +296,33 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 **症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に `tenant_claim_unmapped`（どのテナントにも未登録のクレーム）または `tenant_mismatch`（別のテナントに登録済みのクレーム）で拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
 
 ```bash
-# 最近拒否された未登録クレームを確認
+# 最近拒否された未登録クレームを確認（既定の期間: 30 日）
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
 
 # 新しいクレームを既存テナントに登録（冪等 — 再実行しても安全）
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <uuid|domain> --domain <new-claim> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
 ```
 
+`<ref>` にはテナントの UUID、登録済みクレームのいずれか、`slug`、`external_id` を指定できます。後ろの 2 つは、後述のプリフライトチェックがバックフィルのスキップを報告したテナント — つまり指定できるクレームを持たないテナント — を扱うときに必要になります。
+
+`unmapped` が対象とするのは「問い合わせた期間」であり、このデプロイの保持期間ではありません。既定値は設定可能な保持期間の下限（30 日）で、出力にもその期間が明記されます。「何も拒否されていない」と判断する前に `--days <n>` で期間を広げてください。
+
 `list`・`preflight`・`remove` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。
+
+**`tenant_mismatch`: クレームが誤ったテナントに登録されている場合**。この状態はオペレーターが何もしなくても発生します — 打ち間違えた、あるいは他者に先取りされたクレームを提示するサインインが 1 回あるだけで、そのサインインが作成したテナントに対してクレームが登録されます（`created_by = 'signin'`）。`remove` ではクレームは解放されません — 行を論理削除して `revoked_at` を設定するだけで所有テナントは変わらないため、続けて `add` を実行しても再び拒否されます。現在の所有テナントを明示する `add --from` でクレームを移動してください:
+
+```bash
+# --from には現在の所有テナントの UUID を、`list` が出力するとおりに指定します。
+# slug・クレーム・external_id からは解決しません: 再割り当ては 1 つのテナントの
+# メンバー全員を拒否しうる操作であり、打ち間違いで到達できてはならないためです。
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
+  --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
+  --from <current-owner-uuid>
+```
+
+`add --from` は書き込みの前に、両テナントの id・name・slug・**アクティブメンバー数**と、移動によって失う側が被る影響を表示し、確認を求めます（非対話実行では `--yes`）。`--from` が実際の所有テナントと一致しない場合は拒否されます。また、対象行が事前に revoke されている必要は**ありません** — revoke してから再割り当てする手順では、クレームがどのテナントにも解決しない期間が生じ、両方のテナントのメンバーが拒否されてしまうためです。移動しても行の `created_by` は書き換えません — この値は「誰が最初にそのクレームを登録したか」というインシデント調査に必要な証跡です。誰が移動を実行したかはこのコマンドの出力にしか残らないため、出力はインシデント記録とともに保管してください。
 
 **`GOOGLE_WORKSPACE_DOMAINS` を設定している場合**（[SECURITY.md](SECURITY.md) で推奨）、クレームを登録するだけでは復旧しません。`src/auth.config.ts` の `signIn` コールバックは、`hd` が `GOOGLE_WORKSPACE_DOMAINS` に含まれない Google サインインを、テナントクレームの解決より**前**に `reason: "provider_error"` として拒否します — この拒否はテナントクレームのチェックまで到達しないため、`tenant-domain unmapped` には何も表示されません。新しいドメインを `GOOGLE_WORKSPACE_DOMAINS` にも追加し、どのテナントのために追加したかを記録してください。この変数はデプロイ全体に効くグローバル設定である一方、クレームレジストリはテナント単位のスコープなので、記録がないと過去にどのテナントかがリネームしたすべてのドメインが静かに積み上がっていきます。そのテナントが不要になった時点で、追加したエントリを削除してください。**ロックアウト回避のために `GOOGLE_WORKSPACE_DOMAINS` を未設定に戻さないでください** — `allowDangerousEmailAccountLinking` は `allowedGoogleDomains.length > 0` から導出されるため、未設定に戻すとこのフラグは `false` になり（緩くなるのではなく**厳しくなり**）、元の拒否に加えて `OAuthAccountNotLinked` という別の失敗が発生します。
 
@@ -313,21 +332,9 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <uuid|domain>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
 ```
 
-または CLI を使わない場合:
+報告される内容は 3 つです。**正規化の衝突**（複数のテナントの `external_id` が 1 つのクレームに畳み込まれ、バックフィルが 1 件だけを残して残りを暗黙にスキップするケース）、**非 ASCII の `external_id`**（レジストリから完全に除外されるもの）、そして **Postgres 側とアプリケーション側の正規化のずれ**です。返された行にはアップグレード前の判断が必要です — 衝突であればどのテナントがクレームを保持するか、非 ASCII であればそのテナントに別途 ASCII のクレームを登録すべきか。アップグレード後に判断するということは、ロックアウトの後に判断するということです。
 
-```sql
--- 正規化の衝突: 1 つのクレームを取り合う 2 つ以上のテナント
-SELECT lower(btrim(external_id) COLLATE "C") AS claim, count(*), array_agg(id ORDER BY id)
-FROM tenants
-WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id !~ '[^\x20-\x7E]'
-GROUP BY 1 HAVING count(*) > 1;
-
--- レジストリから完全に除外される非 ASCII の external_id
-SELECT id, external_id FROM tenants
-WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id ~ '[^\x20-\x7E]';
-```
-
-どちらのクエリも**生の** `external_id` 列を対象にフィルタし、`lower(x COLLATE "C")` で正規化します — マイグレーションのバックフィルおよび CHECK 制約と正確に一致します。返された行にはアップグレード前の判断が必要です — 衝突であればどのテナントがクレームを保持するか、非 ASCII であればそのテナントに別途 ASCII のクレームを登録すべきか。アップグレード後に判断するということは、ロックアウトの後に判断するということです。
+手書き SQL ではなく CLI を実行してください。このチェックが依存する「印字可能 ASCII」の述語は `src/lib/tenant/tenant-claim-registry.ts` の `NON_PRINTABLE_ASCII_SQL_CLASS` を唯一の出所とし、ドリフト検知テストがマイグレーションの CHECK・バックフィル・その `.sql` 版をこの定数に固定しています。ドキュメントから書き写した述語はこの保護の外側にあり、CHECK からずれたプリフライトは、最も重要な場面で自信を持って「問題なし」と報告します。どうしても CLI を実行できない環境では、述語と正規化式を `scripts/tenant-domain.ts` の `cmdPreflight` からコピーしてください — 書き写さないでください。
 
 **バックフィルが引き継ぐ内容**。`20260228010000_tenant_external_id_and_bootstrap` マイグレーションを既に実行済みのデプロイでは、`tenant_claims` は既存テナントの `external_id` を 1 行ずつ引き継ぎます — そのマイグレーションより前から存在するテナントでは、これはテナント自身の UUID です（`bootstrap-` / `u-` を除くすべてのテナントに対する `UPDATE tenants SET external_id = id ...`）。`tenant_id` は `AUTH_TENANT_CLAIM_KEYS` が未設定時にフォールバックする先頭のキーであるため、生の UUID がそのままクレームとしてテナントメンバーシップを解決できてしまいます。バックフィルが引き継いだ内容を確認するには:
 
@@ -337,7 +344,17 @@ SELECT tenant_id, claim, created_by, created_at FROM tenant_claims WHERE created
 
 これは以前からの挙動です — 同じ UUID は、この機能追加以前から `Tenant.externalId` 経由でサインインを解決してきました — 今回それが明示的なクレーム行として可視化されただけです。`AUTH_TENANT_CLAIM_KEYS` を意図的に設定しているデプロイでは、クレームの名前空間が明示化された今、デフォルトのクレームキー一覧に `tenant_id` / `tenantId` を残すかどうかを改めて検討してください。
 
-**`AUTH_TENANT_CLAIM_KEYS` の設定指針**。Google の `hd` が提供する属性、または特定の SSO 接続に紐づくクレームのみを指定してください。IdP が SAML 経由でアサートする属性（例: `organization`）を指定するのは、このデプロイが SSO 接続を 1 つしかプロビジョニングしていない場合に限り安全です。`saml-jackson` はデプロイ全体で共有される単一の OIDC クライアントであり、アサートしたクレームの名前空間をその接続に紐づける仕組みがないため、SSO 接続が **2 つ以上**プロビジョニングされていると、あるカスタマーの IdP 管理者が別のカスタマーの登録済みクレーム文字列をアサートし、そのテナントを選択できてしまいます。接続を作るかどうかはオペレーターが制御できますが、その接続を通じて何がアサートされるかはカスタマー自身の IdP が制御します — この攻撃が成立するには後者だけで十分です。`hd` のみに依存するデプロイ（本節が想定するインシデントの形）では発生しません。
+**`AUTH_TENANT_CLAIM_KEYS` の設定指針**。Google の `hd` が提供する属性、または特定の SSO 接続に紐づくクレームのみを指定してください:
+
+```bash
+# 検証済みクレームのみの構成。`hd` は自己申告のプロフィール属性ではなく Google が
+# アサートする値であり、Google プロバイダーの場合にのみ採用されます。
+AUTH_TENANT_CLAIM_KEYS=hd
+```
+
+**この変数を未設定にしてもその構成にはなりません** — 組み込みの一覧 `tenant_id, tenantId, organization, org, company, company_id` が選択され、そのすべてが IdP のアサートする属性であり、6 つすべてが `hd` を参照する**前に**評価されます。したがって、この変数を一度も設定していない複数接続の SAML デプロイは、次に述べる危険な構成の外側にいるのではなく、すでにその内側にいます。
+
+IdP が SAML 経由でアサートする属性（例: `organization`）を指定するのは、このデプロイが SSO 接続を 1 つしかプロビジョニングしていない場合に限り安全です。`saml-jackson` はデプロイ全体で共有される単一の OIDC クライアントであり、アサートしたクレームの名前空間をその接続に紐づける仕組みがないため、SSO 接続が **2 つ以上**プロビジョニングされていると、あるカスタマーの IdP 管理者が別のカスタマーの登録済みクレーム文字列をアサートし、そのテナントを選択できてしまいます。接続を作るかどうかはオペレーターが制御できますが、その接続を通じて何がアサートされるかはカスタマー自身の IdP が制御します — この攻撃が成立するには後者だけで十分です。`hd` のみに依存するデプロイ（本節が想定するインシデントの形）では発生しません。
 
 **インシデント対応: 登録すべきでなかったクレームが登録されてしまった場合**。`tenant-domain remove` は行を削除せず（`revokedAt`）論理削除します — 先に削除してしまうと `tenant_claims.createdAt` が失われ、これは以下のクエリが必要とする 2 つのタイムスタンプの一方であるため、実際のインシデント対応の手順では実行できなくなってしまいます。行を削除しても、それが既に許可した内容は取り消されません:
 

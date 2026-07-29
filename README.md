@@ -226,7 +226,7 @@ Key variables:
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
 | `GOOGLE_WORKSPACE_DOMAINS` | (Optional) Restrict to Google Workspace domain(s), comma-separated |
-| `AUTH_TENANT_CLAIM_KEYS` | (Optional) IdP claim keys for tenant resolution (e.g. `tenant_id,organization`) |
+| `AUTH_TENANT_CLAIM_KEYS` | (Optional) Comma-separated IdP claim keys for tenant resolution, tried in order. **Leaving it unset is not "no configuration"** — it selects `tenant_id, tenantId, organization, org, company, company_id`, all of which are IdP-asserted, and all of which are tried *before* Google's attested `hd`. Set `AUTH_TENANT_CLAIM_KEYS=hd` for the attested-only configuration. See the guidance under [IdP domain changed / tenant locked out](#idp-domain-changed--tenant-locked-out) |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC client secret |
@@ -297,14 +297,33 @@ See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and r
 Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in with `tenant_claim_unmapped` (claim not registered to any tenant) or `tenant_mismatch` (claim registered to a *different* tenant), visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
 
 ```bash
-# See which unregistered claims were denied recently
+# See which unregistered claims were denied recently (default window: 30 days)
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
 
 # Register the new claim for the existing tenant (idempotent — safe to re-run)
-MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <uuid|domain> --domain <new-claim> --by <operator-label>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
 ```
 
+`<ref>` is the tenant's UUID, one of its already-registered claims, its `slug`, or its `external_id` — the last two matter when the pre-flight check below reports that a tenant's backfill row was skipped, because such a tenant has no claim to be named by.
+
+`unmapped`'s window is a *query* window, not this deployment's retention: it defaults to the configurable retention floor (30 days) and says so in its output. Widen it with `--days <n>` before concluding that nothing was denied.
+
 `list`, `preflight`, and `remove` are also available; run the command with no subcommand for the full usage banner.
+
+**`tenant_mismatch`: the claim is registered to the wrong tenant.** This is reachable with no operator action at all — a single sign-in presenting a mistyped or squatted claim registers it (`created_by = 'signin'`) against whatever tenant that sign-in created. `remove` will *not* free it: it soft-deletes the row (sets `revoked_at`) and leaves the owner unchanged, so a following `add` refuses again. Move the claim with `add --from`, naming the current owner:
+
+```bash
+# --from takes the current owner's tenant UUID exactly as `list` prints it.
+# It is not resolved through slugs, claims or external ids: a reassignment can
+# deny an entire tenant's members, so it must not be reachable by a typo.
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
+  --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
+  --from <current-owner-uuid>
+```
+
+Before writing anything, `add --from` prints both tenants — id, name, slug and **active member count** — plus what the move costs the losing side, and asks for confirmation (`--yes` for non-interactive use). It refuses if `--from` is not the row's actual owner, and it does **not** require the row to be revoked first: a revoke-then-reassign sequence would open a window in which the claim resolves to nobody and *both* tenants' members are denied. The row's `created_by` is left untouched by the move — it records who first registered the claim, which is the evidence an incident needs; who performed the move appears only in this command's printed output, so keep it with the incident record.
 
 **If `GOOGLE_WORKSPACE_DOMAINS` is set** (recommended in [SECURITY.md](SECURITY.md)), registering the claim alone changes nothing. `src/auth.config.ts`'s `signIn` callback denies any Google sign-in whose `hd` is not in `GOOGLE_WORKSPACE_DOMAINS` *before* tenant-claim resolution runs at all, recorded as `reason: "provider_error"` — the denial never reaches the tenant-claim check, so `tenant-domain unmapped` shows nothing for it. Add the new domain to `GOOGLE_WORKSPACE_DOMAINS` too, and note which tenant it was added for: the variable is deployment-global while the claim registry is tenant-scoped, so without that note it silently accumulates every domain any tenant has ever renamed to. Remove the entry once no tenant depends on it. **Do not unset `GOOGLE_WORKSPACE_DOMAINS` to work around a lockout** — `allowDangerousEmailAccountLinking` is derived from `allowedGoogleDomains.length > 0`, so unsetting it flips that flag to `false` (*stricter*, not looser) and produces a second, different failure, `OAuthAccountNotLinked`, on top of the original denial.
 
@@ -314,21 +333,9 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <uuid|domain>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
 ```
 
-or, without the CLI:
+It reports three things: **normalisation collisions** (two or more tenants whose `external_id` folds to one claim, so the backfill keeps one and silently skips the rest), **non-ASCII `external_id` values** (excluded from the registry entirely), and **fold mismatches** between Postgres and the application's own normalisation. Every row returned needs a decision before the upgrade runs — for a collision, which tenant keeps the claim; for a non-ASCII value, whether that tenant needs an ASCII claim registered separately. Deciding after the upgrade means deciding after a lockout.
 
-```sql
--- Normalisation collisions: two tenants that would compete for one claim.
-SELECT lower(btrim(external_id) COLLATE "C") AS claim, count(*), array_agg(id ORDER BY id)
-FROM tenants
-WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id !~ '[^\x20-\x7E]'
-GROUP BY 1 HAVING count(*) > 1;
-
--- Non-ASCII external_id values, excluded from the registry entirely.
-SELECT id, external_id FROM tenants
-WHERE external_id IS NOT NULL AND btrim(external_id) <> '' AND external_id ~ '[^\x20-\x7E]';
-```
-
-Both queries filter the **raw** `external_id` column and fold with `lower(x COLLATE "C")`, matching the migration's backfill and CHECK constraint exactly. Every row returned needs a decision before the upgrade runs — for a collision, which tenant keeps the claim; for a non-ASCII value, whether that tenant needs an ASCII claim registered separately. Deciding after the upgrade means deciding after a lockout.
+Run the CLI rather than hand-written SQL. The printable-ASCII predicate the checks turn on has one source of truth, `NON_PRINTABLE_ASCII_SQL_CLASS` in `src/lib/tenant/tenant-claim-registry.ts`, and a drift guard pins the migration's CHECK, the backfill and its extracted `.sql` twin to it. A predicate retyped from documentation is outside that guard, and a pre-flight check whose predicate has drifted from the CHECK reports a confident "all clear" at exactly the moment it matters. If your environment genuinely cannot run the CLI, copy the predicate and the fold expression out of `scripts/tenant-domain.ts`'s `cmdPreflight` — do not retype them.
 
 **What the backfill inherits.** On any deployment that has already run the `20260228010000_tenant_external_id_and_bootstrap` migration, `tenant_claims` inherits one row per pre-existing tenant's `external_id` — which, for tenants older than that migration, is the tenant's own UUID (`UPDATE tenants SET external_id = id ...` for every non-bootstrap, non-orphan tenant). `tenant_id` is the first key `AUTH_TENANT_CLAIM_KEYS` falls back to when unset, so a bare UUID can now resolve tenant membership as a claim. Review what the backfill inherited:
 
@@ -338,7 +345,17 @@ SELECT tenant_id, claim, created_by, created_at FROM tenant_claims WHERE created
 
 This is pre-existing behavior — the same UUID has resolved sign-in through `Tenant.externalId` since that earlier migration — made visible here rather than introduced by it. Deployments running a deliberate `AUTH_TENANT_CLAIM_KEYS` should decide whether keeping `tenant_id` / `tenantId` in the default claim-key list is still wanted now that the claim namespace is explicit.
 
-**`AUTH_TENANT_CLAIM_KEYS` guidance.** Only point this at an attribute Google's `hd` provides, or at a claim bound to a specific SSO connection. Pointing it at an attribute your IdP asserts through SAML (e.g. `organization`) is safe only when this deployment provisions a single SSO connection: `saml-jackson` is one deployment-wide OIDC client, and nothing binds a claim namespace to the connection that asserted it, so with **two or more** provisioned SSO connections one customer's IdP administrator could assert another customer's registered claim string and select their tenant. The operator controls whether a connection exists; the customer's own IdP controls what it asserts through it — the exploit needs only the second. This does not fire on `hd`-only deployments, which is the shape of the incident this section exists for.
+**`AUTH_TENANT_CLAIM_KEYS` guidance.** Only point this at an attribute Google's `hd` provides, or at a claim bound to a specific SSO connection:
+
+```bash
+# Attested-only: `hd` is asserted by Google, not carried in a self-describing
+# profile attribute, and is honoured for the Google provider alone.
+AUTH_TENANT_CLAIM_KEYS=hd
+```
+
+**Leaving the variable unset does not reach that configuration** — it selects the built-in list `tenant_id, tenantId, organization, org, company, company_id`, every member of which is an IdP-asserted attribute, and all six are tried *before* `hd` is consulted at all. A multi-connection SAML deployment that never sets the variable is therefore already in the unsafe configuration described next, not outside it.
+
+Pointing it at an attribute your IdP asserts through SAML (e.g. `organization`) is safe only when this deployment provisions a single SSO connection: `saml-jackson` is one deployment-wide OIDC client, and nothing binds a claim namespace to the connection that asserted it, so with **two or more** provisioned SSO connections one customer's IdP administrator could assert another customer's registered claim string and select their tenant. The operator controls whether a connection exists; the customer's own IdP controls what it asserts through it — the exploit needs only the second. This does not fire on `hd`-only deployments, which is the shape of the incident this section exists for.
 
 **Incident: a claim was registered that should not have been.** `tenant-domain remove` soft-deletes the row (`revokedAt`) rather than deleting it — deleting it first would destroy `tenant_claims.createdAt`, one of the two timestamps the query below needs, making this procedure unexecutable in the order it will actually be followed in an incident. Removing the row does **not** undo what it already granted:
 

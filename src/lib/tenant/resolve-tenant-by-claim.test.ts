@@ -117,4 +117,26 @@ describe("resolveTenantByClaim", () => {
       select: { id: true },
     });
   });
+
+  // Round-1 M12: "alias.example" is its own normal form, so the case above
+  // holds whether the fallback is passed the raw or the normalised claim. D-3
+  // makes the RAW spelling load-bearing — the fallback is what keeps NF2 true
+  // in release 1 for a deployment whose tenants.external_id was stored
+  // un-normalised, and those rows are invisible to a folded lookup.
+  it("queries the externalId fallback with the RAW claim while the registry gets the normalised one (D-3)", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "tenant-legacy-mixed" });
+
+    const result = await resolveTenantByClaim("Alias.Example");
+
+    expect(result).toEqual({ id: "tenant-legacy-mixed" });
+    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
+      where: { externalId: "Alias.Example" },
+      select: { id: true },
+    });
+    expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
+      where: { claim: "alias.example" },
+      select: { tenantId: true, revokedAt: true },
+    });
+  });
 });

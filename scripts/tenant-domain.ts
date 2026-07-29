@@ -33,17 +33,27 @@
 // need it set.
 //
 // Usage:
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <uuid|domain>]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <ref>]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped [--days <n>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add    --tenant <uuid|domain> --domain <domain> --by <label> [--yes]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove --tenant <uuid|domain> --domain <domain> [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove --tenant <ref> --domain <domain> [--yes]
 //
-// `--tenant` accepts either the tenant's UUID or one of its already-
-// registered claims (normalised the same way `add`/`remove` normalise
-// `--domain`). `--by` is a self-asserted operator label (NOT authenticated
-// attribution — there is no application user identity on this connection,
-// see SC8) stored verbatim in TenantClaim.createdBy.
+// `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
+// claims (normalised the same way `add`/`remove` normalise `--domain`), its
+// `tenants.slug`, or its `tenants.external_id`. The last two matter at
+// incident time: a tenant whose backfill row `preflight` reports as skipped
+// has NO claim row, and would otherwise be nameable only by UUID.
+//
+// `--by` is a self-asserted operator label (NOT authenticated attribution —
+// there is no application user identity on this connection, see SC8) stored
+// verbatim in TenantClaim.createdBy when a row is CREATED. It is deliberately
+// not written on the un-revoke or reassign paths, which preserve the original
+// registrant — see cmdAdd.
+//
+// `--from` is `add`'s reassignment flag: it names the tenant that currently
+// owns the claim, and moves the claim off it. See cmdAdd for why it is a bare
+// UUID and why it does not require a prior `remove`.
 
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
@@ -89,37 +99,61 @@ function missingUrlResult(): CmdResult {
 // Never `src/lib/prisma.ts`'s singleton — it reads DATABASE_URL (the
 // RLS-bound passwd_app role). Built fresh per command invocation, never at
 // module scope, so the client's lifetime matches the command's.
-function createMigrationClient(connectionString: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
-}
+//
+// Exported as an object rather than a bare function so it is a real seam:
+// C7's acceptance criterion for a missing MIGRATION_DATABASE_URL is "non-zero
+// exit with an actionable message, and no database client built" — a property
+// of the ORDER of two statements, which no assertion on the returned
+// CmdResult can distinguish. The integration test spies on `.create` to prove
+// it. Same motivation as the `confirm` seam below.
+export const migrationClientFactory = {
+  create(connectionString: string): PrismaClient {
+    return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  },
+};
 
-// `--tenant` resolution: a literal UUID names the tenant directly; anything
-// else is treated as one of the tenant's already-registered claims
-// (normalised the same way `--domain` is). Revoked claims still resolve a
-// tenant reference here — the row still occupies its slot in UNIQUE(claim)
-// and identifying "which tenant used to own this" is a legitimate operator
-// need (e.g. re-registering the same domain to the same tenant after a
-// mistaken `remove`).
+// `--tenant` resolution, in priority order:
+//   1. a literal UUID names the tenant directly;
+//   2. an already-registered claim (normalised the same way `--domain` is) —
+//      the registry is authoritative, so it wins over 3 and 4;
+//   3. `tenants.slug` (@unique), exact match on the raw ref;
+//   4. `tenants.external_id` (@unique), exact match on the raw ref.
+//
+// 3 and 4 exist because a tenant that `preflight` reports as SKIPPED by the
+// backfill (normalisation collision, or non-ASCII external_id) has no claim
+// row at all, and would otherwise be nameable only by UUID at exactly the
+// moment an operator is trying to repair it. They match the raw ref rather
+// than the normalised one because both columns are stored, and matched
+// elsewhere, verbatim (D-3's release-1 externalId fallback is an exact match
+// too); normalising here would resolve refs that no other code path resolves.
+//
+// Revoked claims still resolve a tenant reference here — the row still
+// occupies its slot in UNIQUE(claim) and identifying "which tenant used to
+// own this" is a legitimate operator need (e.g. re-registering the same
+// domain to the same tenant after a mistaken `remove`).
 async function resolveTenantRef(
   tx: TxClient,
   ref: string,
 ): Promise<{ id: string; name: string; slug: string } | null> {
+  const select = { id: true, name: true, slug: true } as const;
+
   if (UUID_RE.test(ref)) {
-    return tx.tenant.findUnique({
-      where: { id: ref },
-      select: { id: true, name: true, slug: true },
-    });
+    return tx.tenant.findUnique({ where: { id: ref }, select });
   }
+
   const claim = normalizeTenantClaim(ref);
   const row = await tx.tenantClaim.findUnique({
     where: { claim },
     select: { tenantId: true },
   });
-  if (!row) return null;
-  return tx.tenant.findUnique({
-    where: { id: row.tenantId },
-    select: { id: true, name: true, slug: true },
-  });
+  if (row) {
+    return tx.tenant.findUnique({ where: { id: row.tenantId }, select });
+  }
+
+  const bySlug = await tx.tenant.findUnique({ where: { slug: ref }, select });
+  if (bySlug) return bySlug;
+
+  return tx.tenant.findUnique({ where: { externalId: ref }, select });
 }
 
 async function activeMemberCount(tx: TxClient, tenantId: string): Promise<number> {
@@ -129,8 +163,9 @@ async function activeMemberCount(tx: TxClient, tenantId: string): Promise<number
 function printTenantSummary(
   tenant: { id: string; name: string; slug: string },
   activeMembers: number,
+  label = "Tenant:",
 ): void {
-  console.log("Tenant:");
+  console.log(label);
   console.log(`  id:             ${tenant.id}`);
   console.log(`  name:           ${tenant.name}`);
   console.log(`  slug:           ${tenant.slug}`);
@@ -159,7 +194,7 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  const prisma = createMigrationClient(url);
+  const prisma = migrationClientFactory.create(url);
   try {
     return await withBypassRls(
       prisma,
@@ -209,26 +244,45 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
 
 type UnmappedRow = { tenant_id: string; claim: string; cnt: bigint | number; last_seen: Date };
 
+// `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
+// deployment's actual retention, so it can only ever be the default window —
+// never a claim about what is retained. A deployment retaining a year of
+// audit logs still has its older denials excluded here; `--days` is how an
+// operator widens the query to them, and every message names the window it
+// actually queried rather than calling it "the retained window" (Func F4).
+export const DEFAULT_UNMAPPED_WINDOW_DAYS = AUDIT_LOG_RETENTION_MIN;
+const MAX_UNMAPPED_WINDOW_DAYS = 3650;
+
 // Pure — exported so a test can pin the S12 "empty is not the same as
 // silent" wording without depending on the shared dev DB happening to have
 // zero real tenant_claim_unmapped denials at test time (other working
 // copies on this same feature branch may be exercising sign-in concurrently).
-export function formatUnmappedMessage(rows: UnmappedRow[]): string {
+export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string {
   if (rows.length === 0) {
     return (
-      `No unmapped-claim denials in the retained window (last ${AUDIT_LOG_RETENTION_MIN} days). ` +
-      "This means either nothing is unmapped, or the denial fell outside the window — " +
-      "it does NOT necessarily mean nothing was denied."
+      `No unmapped-claim denials in the last ${days} days. That is the window this query ` +
+      `covered, NOT this deployment's retention — a denial older than ${days} days is ` +
+      "outside it whether or not the row still exists. Re-run with --days <n> to widen. " +
+      "An empty result does NOT by itself mean nothing was denied."
     );
   }
-  return `${rows.length} unmapped-claim denial group(s) in the last ${AUDIT_LOG_RETENTION_MIN} days.`;
+  return `${rows.length} unmapped-claim denial group(s) in the last ${days} days.`;
 }
 
-export async function cmdUnmapped(): Promise<CmdResult> {
+export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  const prisma = createMigrationClient(url);
+  const days = args.days ?? DEFAULT_UNMAPPED_WINDOW_DAYS;
+  if (!Number.isInteger(days) || days < 1 || days > MAX_UNMAPPED_WINDOW_DAYS) {
+    return {
+      ok: false,
+      code: 1,
+      message: `Invalid --days "${days}": expected an integer between 1 and ${MAX_UNMAPPED_WINDOW_DAYS}.`,
+    };
+  }
+
+  const prisma = migrationClientFactory.create(url);
   try {
     return await withBypassRls(
       prisma,
@@ -258,7 +312,7 @@ export async function cmdUnmapped(): Promise<CmdResult> {
             WHERE claim IS NOT NULL
             GROUP BY tenant_id, claim
             ORDER BY last_seen DESC`,
-          AUDIT_LOG_RETENTION_MIN,
+          days,
         );
 
         for (const row of rows) {
@@ -273,7 +327,7 @@ export async function cmdUnmapped(): Promise<CmdResult> {
         // wrapper AND the integration test observe the identical text,
         // without depending on the shared dev DB happening to be globally
         // empty of unmapped-claim denials at test time.
-        const message = formatUnmappedMessage(rows);
+        const message = formatUnmappedMessage(rows, days);
 
         return { ok: true, code: 0, rows, message };
       },
@@ -290,11 +344,16 @@ type CollisionRow = { normalized_claim: string; tenant_ids: string[]; collision_
 type NonAsciiRow = { id: string; external_id: string };
 type RawExternalIdRow = { id: string; external_id: string; pg_fold: string };
 
+// Bound on the one pre-flight query that materialises rows instead of an
+// aggregate. Chosen well above any plausible tenant count for this
+// deployment shape (264 today) so it is a backstop, not a paging scheme.
+const PREFLIGHT_FOLD_SCAN_LIMIT = 50_000;
+
 export async function cmdPreflight(): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  const prisma = createMigrationClient(url);
+  const prisma = migrationClientFactory.create(url);
   try {
     return await withBypassRls(
       prisma,
@@ -334,12 +393,25 @@ export async function cmdPreflight(): Promise<CmdResult> {
         // can run in SQL; the JS half runs here against the real
         // normalizeTenantClaim (never reimplemented) and the two are
         // compared in application code.
-        const allExternalIds = await tx.$queryRawUnsafe<RawExternalIdRow[]>(
+        //
+        // This is the one query that pulls whole rows into memory rather
+        // than an aggregate, so it carries an explicit bound. Fetching
+        // LIMIT+1 makes truncation detectable, and a truncated scan says so
+        // loudly — a silently short scan here would be the "confidently
+        // wrong all-clear" pre-flight exists to prevent.
+        const scanned = await tx.$queryRawUnsafe<RawExternalIdRow[]>(
           `SELECT id, external_id, lower(btrim(external_id) COLLATE "C") AS pg_fold
              FROM tenants
             WHERE external_id IS NOT NULL
-              AND btrim(external_id) <> ''`,
+              AND btrim(external_id) <> ''
+            ORDER BY id
+            LIMIT $1::int`,
+          PREFLIGHT_FOLD_SCAN_LIMIT + 1,
         );
+        const foldScanTruncated = scanned.length > PREFLIGHT_FOLD_SCAN_LIMIT;
+        const allExternalIds = foldScanTruncated
+          ? scanned.slice(0, PREFLIGHT_FOLD_SCAN_LIMIT)
+          : scanned;
         const foldMismatches = allExternalIds
           .filter((r) => r.pg_fold !== normalizeTenantClaim(r.external_id))
           .map((r) => ({
@@ -358,12 +430,24 @@ export async function cmdPreflight(): Promise<CmdResult> {
         for (const n of nonAscii) {
           console.log(`    tenant=${n.id} external_id="${n.external_id}"`);
         }
-        console.log(`  Postgres/JS fold mismatches: ${foldMismatches.length}`);
+        console.log(
+          `  Postgres/JS fold mismatches: ${foldMismatches.length} (over ${allExternalIds.length} tenant(s) scanned)`,
+        );
         for (const m of foldMismatches) {
           console.log(`    tenant=${m.id} external_id="${m.externalId}" pgFold="${m.pgFold}" jsFold="${m.jsFold}"`);
         }
+        if (foldScanTruncated) {
+          console.log(
+            `    WARNING: more than ${PREFLIGHT_FOLD_SCAN_LIMIT} tenants carry an external_id; ` +
+              "the fold-mismatch scan covered only the first page (ordered by id). " +
+              "Treat this result as INCOMPLETE.",
+          );
+        }
 
-        const message = `${collisions.length} collision(s), ${nonAscii.length} non-ASCII, ${foldMismatches.length} fold mismatch(es).`;
+        const message =
+          `${collisions.length} collision(s), ${nonAscii.length} non-ASCII, ` +
+          `${foldMismatches.length} fold mismatch(es)` +
+          (foldScanTruncated ? ` (fold scan TRUNCATED at ${PREFLIGHT_FOLD_SCAN_LIMIT} tenants).` : ".");
         return { ok: true, code: 0, rows: [...collisions, ...nonAscii, ...foldMismatches], message };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
@@ -383,10 +467,20 @@ const ROW_6_9A_WARNING = [
   "and audit history) is reassigned into this tenant on that sign-in.",
 ].join("\n");
 
+const REASSIGNMENT_WARNING = [
+  "Reassigning this claim takes it AWAY from the losing tenant shown above:",
+  "from now on every sign-in presenting it selects the gaining tenant instead.",
+  "A losing-tenant member who signs in through this claim and holds no other",
+  "registered claim is denied from that moment on. Nothing already signed in is",
+  "logged out, no data moves back, and no estate absorbed under the old owner is",
+  "returned by this command.",
+].join("\n");
+
 export async function cmdAdd(args: {
   tenant: string;
   domain: string;
   by: string;
+  from?: string;
   yes?: boolean;
   confirm?: ConfirmFn;
 }): Promise<CmdResult> {
@@ -395,6 +489,25 @@ export async function cmdAdd(args: {
 
   if (!args.by || args.by.trim().length === 0) {
     return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
+  }
+
+  // `--from` is the reassignment flag, and it takes a bare tenant UUID —
+  // deliberately NOT the `<ref>` forms `--tenant` accepts. Reassignment is
+  // the one operation here that can deny an entire existing tenant's members,
+  // and the wrong-owner state it repairs is reachable with no operator action
+  // at all (findOrCreateTenantForClaim auto-registers `createdBy: "signin"`
+  // rows), so the guard has to be something a typo cannot produce. A UUID the
+  // operator can only have got from `list` output is that; a domain or slug
+  // one character off is exactly what put the claim on the wrong tenant.
+  if (args.from !== undefined && !UUID_RE.test(args.from)) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `Invalid --from "${args.from}": expected the current owner's tenant UUID, ` +
+        'exactly as "list" prints it. --from is not resolved through slugs, claims ' +
+        "or external ids — a claim reassignment must not be reachable by a typo.",
+    };
   }
 
   // Validated BEFORE any query, and before the client is even constructed
@@ -412,7 +525,7 @@ export async function cmdAdd(args: {
   }
   const claim = parsed.data;
 
-  const prisma = createMigrationClient(url);
+  const prisma = migrationClientFactory.create(url);
   try {
     return await withBypassRls(
       prisma,
@@ -429,19 +542,44 @@ export async function cmdAdd(args: {
         // revoked rows to null so sign-in cannot resurrect them silently).
         const existing = await tx.tenantClaim.findUnique({
           where: { claim },
-          select: { id: true, tenantId: true, revokedAt: true },
+          select: { id: true, tenantId: true, revokedAt: true, createdBy: true, createdAt: true },
         });
 
-        // D2: a row owned by a DIFFERENT tenant is always a refusal,
-        // revoked or not — re-registering someone else's claim is a
-        // deliberate operator act on THAT row, not something `add` decides
-        // unilaterally by naming a different tenant.
-        if (existing && existing.tenantId !== tenant.id) {
+        if (args.from !== undefined && !existing) {
+          return {
+            ok: false,
+            code: 1,
+            message: `--from was given but claim "${claim}" is not registered to any tenant — there is nothing to reassign. Re-run without --from to register it.`,
+          };
+        }
+        if (args.from !== undefined && existing && args.from !== existing.tenantId) {
+          return {
+            ok: false,
+            code: 1,
+            message: `--from ${args.from} does not own claim "${claim}" — tenant ${existing.tenantId} does. Refusing to reassign; naming the actual current owner is what makes this a deliberate act rather than a typo.`,
+          };
+        }
+
+        const isReassignment = existing !== null && existing.tenantId !== tenant.id;
+
+        // D2: a row owned by a DIFFERENT tenant is never reassigned
+        // implicitly — but there has to BE a way to reassign it, or a claim
+        // auto-registered onto a junk tenant by one mistyped sign-in is
+        // permanent and the tool cannot fix the `tenant_mismatch` symptom it
+        // is shipped for. `--from` is that way, and this message names it
+        // instead of the old "run remove first" instruction, which looped:
+        // `remove` soft-deletes (revokedAt) and leaves tenant_id unchanged,
+        // so the next `add` re-entered this same branch.
+        if (existing && isReassignment && args.from === undefined) {
           const state = existing.revokedAt ? "revoked and owned by" : "owned by";
           return {
             ok: false,
             code: 1,
-            message: `Claim "${claim}" is ${state} tenant ${existing.tenantId}, not ${tenant.id}. Refusing to reassign — run "remove" on the owning tenant first if this is intentional.`,
+            message:
+              `Claim "${claim}" is ${state} tenant ${existing.tenantId}, not ${tenant.id}. ` +
+              "Refusing to reassign implicitly. To move it, name the current owner: " +
+              `add --tenant ${tenant.id} --domain ${claim} --by <label> --from ${existing.tenantId}. ` +
+              '("remove" does not free a claim — it soft-deletes, leaving the owner unchanged.)',
           };
         }
 
@@ -450,20 +588,47 @@ export async function cmdAdd(args: {
         // D2 idempotency (VE2): already owned by this tenant and not
         // revoked — success, no write, no confirmation prompt (nothing is
         // about to mutate).
-        if (existing && existing.revokedAt === null) {
+        if (existing && !isReassignment && existing.revokedAt === null) {
           printTenantSummary(tenant, activeMembers);
           console.log(`Claim "${claim}" is already registered to this tenant. No change made.`);
           return { ok: true, code: 0, tenantId: tenant.id, claim, message: "already registered (idempotent)" };
         }
 
-        printTenantSummary(tenant, activeMembers);
+        printTenantSummary(tenant, activeMembers, isReassignment ? "Gaining tenant:" : "Tenant:");
+
+        if (existing && isReassignment) {
+          const losing = await tx.tenant.findUnique({
+            where: { id: existing.tenantId },
+            select: { id: true, name: true, slug: true },
+          });
+          const losingMembers = await activeMemberCount(tx, existing.tenantId);
+          if (losing) {
+            printTenantSummary(losing, losingMembers, "Losing tenant:");
+          } else {
+            // Unreachable while the FK holds; printed rather than assumed
+            // away, because the blast radius is the whole point of this block.
+            console.log(`Losing tenant:\n  id:             ${existing.tenantId} (no tenants row found)`);
+          }
+          console.log("");
+          console.log(REASSIGNMENT_WARNING);
+          console.log("");
+        }
+
         console.log("Target claim row:");
         console.log(`  claim: ${claim}`);
-        console.log(
-          existing
-            ? `  status: REVOKED at ${existing.revokedAt!.toISOString()} — this add will CLEAR revokedAt (D2 recovery)`
-            : "  status: NEW — no existing row",
-        );
+        if (!existing) {
+          console.log("  status: NEW — no existing row");
+        } else if (existing.revokedAt) {
+          console.log(
+            `  status: REVOKED at ${existing.revokedAt.toISOString()} — this add will CLEAR revokedAt` +
+              (isReassignment ? " and MOVE the row (D2 recovery + reassignment)" : " (D2 recovery)"),
+          );
+        } else {
+          console.log("  status: ACTIVE — this add will MOVE the row to the gaining tenant");
+        }
+        if (existing) {
+          console.log(`  registered by: ${existing.createdBy ?? "-"} at ${existing.createdAt.toISOString()} (preserved)`);
+        }
         console.log("");
         console.log(ROW_6_9A_WARNING);
 
@@ -472,11 +637,54 @@ export async function cmdAdd(args: {
           return { ok: false, code: 1, message: "Aborted: not confirmed." };
         }
 
-        if (existing) {
-          await tx.tenantClaim.update({
-            where: { id: existing.id },
-            data: { revokedAt: null, createdBy: args.by },
+        // Reassignment does NOT require the row to be revoked first, and the
+        // choice is deliberate. Revoke-first would add a step without adding
+        // a check — `--from` already supplies the "name the losing side"
+        // deliberateness that the requirement would be standing in for — and
+        // it would open a window in which the claim resolves to nobody, so
+        // BOTH tenants' members are denied until the second command lands.
+        // Trading a single atomic move for a self-inflicted lockout window is
+        // the wrong direction for a tool whose reason to exist is ending
+        // lockouts. A revoked row is reassignable too, and comes out active:
+        // the operator asked for this claim to select the gaining tenant.
+        //
+        // updateMany with the owner re-asserted in WHERE, not update(): the
+        // confirmation prompt runs inside this transaction (D-14) but the
+        // read happened before the human answered, so a concurrent change
+        // must surface as count === 0 — a clean refusal — never as a silent
+        // overwrite of an owner the operator was never shown.
+        if (existing && isReassignment) {
+          const moved = await tx.tenantClaim.updateMany({
+            where: { id: existing.id, tenantId: existing.tenantId },
+            data: { tenantId: tenant.id, revokedAt: null },
           });
+          if (moved.count === 0) {
+            return {
+              ok: false,
+              code: 1,
+              message: `Claim "${claim}" was modified concurrently by another process. Re-run "list" to see its current owner.`,
+            };
+          }
+        } else if (existing) {
+          // M2 / SC8: `createdBy` is NOT overwritten with `--by`. SC8 defers
+          // application-level audit for claim registration on the premise
+          // that "the row itself carries the timeline and the self-asserted
+          // actor an incident needs" — overwriting it on the un-revoke path
+          // erased exactly that, leaving no record of who first registered
+          // the claim. The un-revoker is recorded only in this command's
+          // printed output; recording it in the row needs a new column, and
+          // therefore a migration, which is out of scope here.
+          const unrevoked = await tx.tenantClaim.updateMany({
+            where: { id: existing.id, tenantId: tenant.id },
+            data: { revokedAt: null },
+          });
+          if (unrevoked.count === 0) {
+            return {
+              ok: false,
+              code: 1,
+              message: `Claim "${claim}" was modified concurrently by another process. Re-run "list" to see its current state.`,
+            };
+          }
         } else {
           try {
             await tx.tenantClaim.create({ data: { tenantId: tenant.id, claim, createdBy: args.by } });
@@ -492,11 +700,20 @@ export async function cmdAdd(args: {
           }
         }
 
-        console.log(
-          existing
-            ? `Un-revoked claim "${claim}" for tenant ${tenant.id}.`
-            : `Registered claim "${claim}" for tenant ${tenant.id}.`,
-        );
+        if (existing && isReassignment) {
+          console.log(`Reassigned claim "${claim}" from tenant ${existing.tenantId} to tenant ${tenant.id}.`);
+        } else if (existing) {
+          console.log(`Un-revoked claim "${claim}" for tenant ${tenant.id}.`);
+        } else {
+          console.log(`Registered claim "${claim}" for tenant ${tenant.id}.`);
+        }
+        if (existing) {
+          console.log(
+            `createdBy stays "${existing.createdBy ?? "-"}" (${existing.createdAt.toISOString()}) — the row records who ` +
+              `FIRST registered this claim, not who last changed it. This change was made by "${args.by}"; that is ` +
+              "recorded only here, so keep this output with the incident record.",
+          );
+        }
         console.log(
           "Reminder: if this deployment sets GOOGLE_WORKSPACE_DOMAINS, src/auth.config.ts's " +
             "signIn callback (:207-215) denies any Google sign-in whose `hd` is not in that list " +
@@ -540,7 +757,7 @@ export async function cmdRemove(args: {
   }
   const claim = parsed.data;
 
-  const prisma = createMigrationClient(url);
+  const prisma = migrationClientFactory.create(url);
   try {
     return await withBypassRls(
       prisma,
@@ -646,11 +863,15 @@ function printUsage(): void {
   console.error(
     [
       "Usage:",
-      "  tenant-domain list [--tenant <uuid|domain>]",
-      "  tenant-domain unmapped",
+      "  tenant-domain list [--tenant <ref>]",
+      `  tenant-domain unmapped [--days <n>]            (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
       "  tenant-domain preflight",
-      "  tenant-domain add    --tenant <uuid|domain> --domain <domain> --by <label> [--yes]",
-      "  tenant-domain remove --tenant <uuid|domain> --domain <domain> [--yes]",
+      "  tenant-domain add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
+      "  tenant-domain remove --tenant <ref> --domain <domain> [--yes]",
+      "",
+      "<ref> is a tenant UUID, one of its registered claims, its slug, or its external id.",
+      "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
+      "UUID only, and `add` refuses if it does not match the row's actual owner.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",
@@ -668,9 +889,16 @@ async function main(): Promise<void> {
     case "list":
       result = await cmdList({ tenant: getStringFlag(flags, "tenant") });
       break;
-    case "unmapped":
-      result = await cmdUnmapped();
+    case "unmapped": {
+      const rawDays = getStringFlag(flags, "days");
+      if (rawDays !== undefined && !/^\d+$/.test(rawDays)) {
+        console.error(`Invalid --days "${rawDays}": expected a positive integer number of days.`);
+        process.exitCode = 1;
+        return;
+      }
+      result = await cmdUnmapped(rawDays === undefined ? {} : { days: Number(rawDays) });
       break;
+    }
     case "preflight":
       result = await cmdPreflight();
       break;
@@ -678,12 +906,21 @@ async function main(): Promise<void> {
       const tenant = getStringFlag(flags, "tenant");
       const domain = getStringFlag(flags, "domain");
       const by = getStringFlag(flags, "by");
+      const from = getStringFlag(flags, "from");
+      // A valueless `--from` (e.g. `--from --yes`) must not silently degrade
+      // into "no reassignment requested" — that would turn an intended move
+      // into the wrong-owner refusal, or worse, read as a plain add.
+      if (flags.has("from") && from === undefined) {
+        console.error("--from requires the current owner's tenant UUID as its value.");
+        process.exitCode = 1;
+        return;
+      }
       if (!tenant || !domain || !by) {
         printUsage();
         process.exitCode = 1;
         return;
       }
-      result = await cmdAdd({ tenant, domain, by, yes });
+      result = await cmdAdd({ tenant, domain, by, from, yes });
       break;
     }
     case "remove": {

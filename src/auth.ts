@@ -8,7 +8,11 @@ import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
-import { resolveTenantByClaim, findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import {
+  resolveTenantByClaim,
+  findOrCreateTenantForClaim,
+  type ClaimTenantResolution,
+} from "@/lib/tenant/tenant-management";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
@@ -61,6 +65,26 @@ export type SignInTenantResult =
       claim: string | null;
     };
 
+// Deny reason per refusal arm of findOrCreateTenantForClaim (round-1 M2).
+// The two arms have different triggers and different operator remedies, and
+// collapsing them — as the single `null` used to — hid the one that matters
+// most:
+//   claim_taken   — a revoked tenant_claims row owns the claim (D2). Emitted
+//                   as tenant_claim_unmapped because that is the reason
+//                   `tenant-domain unmapped` filters on; without it a
+//                   revoked-claim lockout is invisible to the tool this PR
+//                   ships for exactly that diagnosis.
+//   claim_invalid — the claim fails storableClaimSchema (SC9). Nothing is
+//                   registrable, so "register the claim" is not the remedy;
+//                   tenant_mismatch, as row 8b always specified.
+const CLAIM_REFUSAL_REASON = {
+  claim_taken: "tenant_claim_unmapped",
+  claim_invalid: "tenant_mismatch",
+} as const satisfies Record<
+  Exclude<ClaimTenantResolution["kind"], "tenant">,
+  Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">
+>;
+
 export async function ensureTenantMembershipForSignIn(
   userId: string,
   account?: Account | null,
@@ -109,14 +133,21 @@ export async function ensureTenantMembershipForSignIn(
     if (existingTenantId === null) {
       // Rows 4 / 8: no existing membership. Join the claimed tenant,
       // creating it first if this is the first sign-in to see this claim.
-      const target = claimTenant ?? (await findOrCreateTenantForClaim(tenantClaim, tx));
-      if (!target) {
-        // Row 8b, defensive: findOrCreateTenantForClaim returns null when the
-        // claim collides with a revoked tenant_claims row (D2). Unreachable
-        // from sign-in via the length/empty path today
-        // (sanitizeTenantClaimValue already trims/bounds/rejects-empty) —
-        // covered here so the dispatch stays exhaustive.
-        return { ok: false, reason: "tenant_mismatch", tenantId: null, claim: tenantClaim };
+      const target: ClaimTenantResolution = claimTenant
+        ? { kind: "tenant", id: claimTenant.id }
+        : await findOrCreateTenantForClaim(tenantClaim, tx);
+      if (target.kind !== "tenant") {
+        // Row 8b: the claim is unusable, so there is no tenant to join. The
+        // reason distinguishes the two refusals (see CLAIM_REFUSAL_REASON) —
+        // the storableClaimSchema arm is unreachable from sign-in today
+        // (sanitizeTenantClaimValue already trims/bounds/rejects-empty), the
+        // revoked-row arm is operator-reachable.
+        return {
+          ok: false,
+          reason: CLAIM_REFUSAL_REASON[target.kind],
+          tenantId: null,
+          claim: tenantClaim,
+        };
       }
 
       await tx.tenantMember.upsert({
@@ -171,10 +202,17 @@ export async function ensureTenantMembershipForSignIn(
     // the claim is unresolved would regress the primary bootstrap->SSO
     // onboarding path (a magic-link user's first Google sign-in) into a hard
     // denial of the same NF2 shape as the bug this PR fixes.
-    const target = claimTenant ?? (await findOrCreateTenantForClaim(tenantClaim, tx));
-    if (!target) {
-      // Same defensive null as row 8b (D2), reached via the bootstrap branch.
-      return { ok: false, reason: "tenant_mismatch", tenantId: existingTenantId, claim: tenantClaim };
+    const target: ClaimTenantResolution = claimTenant
+      ? { kind: "tenant", id: claimTenant.id }
+      : await findOrCreateTenantForClaim(tenantClaim, tx);
+    if (target.kind !== "tenant") {
+      // Same refusal dispatch as row 8b, reached via the bootstrap branch.
+      return {
+        ok: false,
+        reason: CLAIM_REFUSAL_REASON[target.kind],
+        tenantId: existingTenantId,
+        claim: tenantClaim,
+      };
     }
 
     // Rows 6 / 9a: migrate.

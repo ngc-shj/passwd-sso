@@ -131,11 +131,17 @@ describe("check-env-docs.ts", () => {
     expect(result.stderr).toMatch(/SRC_READ_TSX_UNDECLARED_VAR/);
   });
 
-  it("returns exit 0 for dynamic key construction (process.env[name]) alongside a declared static read", () => {
+  it("excludes dynamic keys (process.env[name]) while still reporting an undeclared static read in the same file", () => {
+    // One case, two verdicts: the fixture reads an undeclared var statically
+    // AND an undeclared var through a computed key. Exit 1 naming only the
+    // static one proves the scanner ran (a dead scanner reports nothing) and
+    // that computed keys are outside its domain. The earlier form asserted
+    // exit 0 against a *declared* static read, which a dead scanner satisfies
+    // just as well (round-1 Test F11).
     const result = runChecker(resolve(FIXTURES, "src-read-dynamic-key"));
-    if (result.status !== 0) {
-      console.error("check-env-docs stderr:", result.stderr);
-    }
-    expect(result.status).toBe(0);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/src-read-undeclared/);
+    expect(result.stderr).toMatch(/SRC_READ_DYNAMIC_KEY_STATIC_UNDECLARED/);
+    expect(result.stderr).not.toMatch(/SRC_READ_DYNAMIC_KEY_UNDECLARED\b/);
   });
 });

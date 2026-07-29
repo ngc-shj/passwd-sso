@@ -1,10 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { extractTenantClaimValue, parseTenantClaimKeys, slugifyTenant } from "./tenant-claim";
 
 describe("tenant-claim", () => {
-  // No local save/restore block: AUTH_TENANT_CLAIM_KEYS is unset by default
-  // in the test baseline, and setup.ts's global afterEach (vi.unstubAllEnvs())
-  // reverts every vi.stubEnv() call after each test.
+  beforeEach(() => {
+    // Assert the precondition instead of inheriting an ambient absence: the
+    // default-key cases below are only meaningful when the var really is
+    // unset, and an environment that supplies it (a CI job-level env block,
+    // an operator's .env) would silently test a different key list —
+    // round-1 CR1. "" is falsy at parseTenantClaimKeys's read site, so it is
+    // a faithful "unset"; setup.ts's afterEach (vi.unstubAllEnvs()) reverts
+    // it, and individual tests override it with vi.stubEnv.
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "");
+  });
 
   it("uses default claim keys when env is unset", () => {
     expect(parseTenantClaimKeys()).toContain("tenant_id");
@@ -30,6 +37,44 @@ describe("tenant-claim", () => {
       { hd: "example.com" },
     );
     expect(v).toBe("example.com");
+  });
+
+  it("AUTH_TENANT_CLAIM_KEYS=hd selects the Google hosted-domain claim and nothing else", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "hd");
+    const v = extractTenantClaimValue(
+      { provider: "google", type: "oauth", providerAccountId: "x" },
+      { hd: "example.com", organization: "self-asserted-corp" },
+    );
+    // The attested claim wins, and the self-asserted attribute the default
+    // list would have preferred is not consulted at all (round-1 M4).
+    expect(v).toBe("example.com");
+  });
+
+  it("AUTH_TENANT_CLAIM_KEYS=hd ignores an hd attribute from a non-Google provider", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "hd");
+    // `hd` means "Google asserted this hosted domain". A SAML profile carrying
+    // a field of the same name is self-asserted, so it must not resolve.
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { hd: "attacker.example" },
+    );
+    expect(v).toBeNull();
+  });
+
+  it("unset AUTH_TENANT_CLAIM_KEYS keeps the default list ahead of the hd fallback", () => {
+    const v = extractTenantClaimValue(
+      { provider: "google", type: "oauth", providerAccountId: "x" },
+      { organization: "acme", hd: "example.com" },
+    );
+    expect(v).toBe("acme");
+    expect(parseTenantClaimKeys()).toEqual([
+      "tenant_id",
+      "tenantId",
+      "organization",
+      "org",
+      "company",
+      "company_id",
+    ]);
   });
 
   it("returns null for claim values exceeding 255 characters", () => {
@@ -109,6 +154,35 @@ describe("tenant-claim", () => {
       { tenant_id: "alias\u202Eexample\u200Bcorp" },
     );
     expect(v).toBe("aliasexamplecorp");
+  });
+
+  it("strips the formatting characters the delegation boundary also rejects (Sec F6)", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    // The six members the two copies of this class both missed before they
+    // were merged: U+2028/U+2029 (line/paragraph separators), U+2060 (word
+    // joiner), U+180E, U+00AD (soft hyphen), U+061C (Arabic letter mark).
+    // Each is invisible or line-breaking on the operator's terminal.
+    const widened = [0x2028, 0x2029, 0x2060, 0x180e, 0x00ad, 0x061c]
+      .map((cp) => String.fromCodePoint(cp))
+      .join("");
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { tenant_id: `alias${widened}.example` },
+    );
+    expect(v).toBe("alias.example");
+  });
+
+  it("strips before trimming, so a space hidden behind a zero-width char is removed (Func F5)", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    // U+200B is not White_Space, so trimming first stops at it and leaves the
+    // space in front of the value — which then becomes Tenant.name and the
+    // fallback's exact-match key.
+    const zwsp = String.fromCodePoint(0x200b);
+    const v = extractTenantClaimValue(
+      { provider: "saml-jackson", type: "oidc", providerAccountId: "x" },
+      { tenant_id: ` ${zwsp} alias.example ` },
+    );
+    expect(v).toBe("alias.example");
   });
 
   it("slugifyTenant generates SHA-256 fallback for empty-after-strip input", () => {

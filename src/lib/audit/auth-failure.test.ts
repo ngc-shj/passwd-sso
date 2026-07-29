@@ -40,14 +40,23 @@ function lastMetadata(): Record<string, unknown> {
   return call[0].metadata;
 }
 
+// >= MIN_KEY_MATERIAL_LENGTH (32) — a shorter pepper is treated as absent.
+const TEST_PEPPER = "test-pepper-value-of-at-least-32-chars";
+
 describe("emitAuthLoginFailure", () => {
   beforeEach(() => {
     mockLogAudit.mockClear();
     mockLoggerWarn.mockClear();
+    // Assert the precondition rather than inherit it: CI's app-ci job sets
+    // AUTH_SECRET at job level, which silently moved every "no key material"
+    // case onto the HKDF branch (round-1 CR1). "" is falsy at both read sites,
+    // so it is a faithful "absent"; setup.ts's vi.unstubAllEnvs() reverts it.
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "");
+    vi.stubEnv("AUTH_SECRET", "");
   });
 
   it("emits identifierHashScope 'tenant' when tenantId is known", async () => {
-    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
     const { emitAuthLoginFailure } = await loadAuthFailure();
 
     await emitAuthLoginFailure({
@@ -63,7 +72,7 @@ describe("emitAuthLoginFailure", () => {
   });
 
   it("emits identifierHashScope 'global' when tenantId is unknown", async () => {
-    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
     const { emitAuthLoginFailure } = await loadAuthFailure();
 
     await emitAuthLoginFailure({
@@ -78,7 +87,7 @@ describe("emitAuthLoginFailure", () => {
   });
 
   it("emits identifierHash: null and identifierHashScope: null when there is no email at all", async () => {
-    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
     const { emitAuthLoginFailure } = await loadAuthFailure();
 
     await emitAuthLoginFailure({
@@ -93,7 +102,8 @@ describe("emitAuthLoginFailure", () => {
   });
 
   it("with an explicit pepper, the hash matches the explicit-key HMAC", async () => {
-    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "explicit-pepper-value");
+    const explicit = "explicit-pepper-value-of-at-least-32-chars";
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", explicit);
     const { emitAuthLoginFailure } = await loadAuthFailure();
 
     await emitAuthLoginFailure({
@@ -103,7 +113,7 @@ describe("emitAuthLoginFailure", () => {
       reason: "tenant_mismatch",
     });
 
-    const expected = createHmac("sha256", Buffer.from("explicit-pepper-value", "utf8"))
+    const expected = createHmac("sha256", Buffer.from(explicit, "utf8"))
       .update("user@primary.example:tenant-1")
       .digest("hex")
       .slice(0, 16);
@@ -180,6 +190,44 @@ describe("emitAuthLoginFailure", () => {
     expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.UNKEYED);
   });
 
+  it("AUDIT_IDENTIFIER_PEPPER shorter than 32 chars is treated as absent", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "x");
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.identifierHash).toBeNull();
+    expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.UNKEYED);
+  });
+
+  it("a too-short pepper does not shadow a usable AUTH_SECRET", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "x");
+    vi.stubEnv("AUTH_SECRET", "a".repeat(32));
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      tenantId: "tenant-1",
+      provider: "google",
+      reason: "tenant_mismatch",
+    });
+
+    const oneByteKeyHash = createHmac("sha256", Buffer.from("x", "utf8"))
+      .update("user@primary.example:tenant-1")
+      .digest("hex")
+      .slice(0, 16);
+
+    const metadata = lastMetadata();
+    expect(metadata.identifierHashScope).toBe(IDENTIFIER_HASH_SCOPE.TENANT);
+    expect(metadata.identifierHash).not.toBe(oneByteKeyHash);
+  });
+
   it("both unset: identifierHash null, identifierHashScope 'unkeyed', warning emitted once across repeated calls", async () => {
     const { emitAuthLoginFailure } = await loadAuthFailure();
 
@@ -219,7 +267,7 @@ describe("emitAuthLoginFailure", () => {
   });
 
   it("claim appears in metadata, truncated at MAX_TENANT_CLAIM_LENGTH", async () => {
-    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
     const { emitAuthLoginFailure } = await loadAuthFailure();
     const { MAX_TENANT_CLAIM_LENGTH } = await import("@/lib/validations/common.server");
 
@@ -237,7 +285,7 @@ describe("emitAuthLoginFailure", () => {
   });
 
   it("claim is omitted from metadata when not supplied", async () => {
-    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", "test-pepper");
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
     const { emitAuthLoginFailure } = await loadAuthFailure();
 
     await emitAuthLoginFailure({
