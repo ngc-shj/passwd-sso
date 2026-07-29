@@ -260,6 +260,37 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     expect(stdout).toMatch(/offender\.sh:3:/);
   });
 
+  // The operator is still the last thing bash sees on the line; only the
+  // scanner saw a comment after it and stopped treating the line as continued.
+  it.each([
+    ["|", `printf '%s' "$BODY" | # pipeline explanation`, "grep -q needle"],
+    ["|&", "producer |& # comment", "grep --silent pattern"],
+  ])(
+    "FAILS when a comment trails the `%s` on the operator's own line",
+    (_op, first, second) => {
+      writeScript(
+        "offender",
+        `#!/usr/bin/env bash\nset -euo pipefail\n${first}\n  ${second}\n`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(1);
+      expect(stdout).toMatch(/offender\.sh:3:/);
+    },
+  );
+
+  it.each([
+    ["a `#` inside a word", 'cat f#1 | grep -q x'],
+    ["a `#` inside a quoted pattern", 'cat f | grep -q "#tag"'],
+    ["a `#` in a parameter expansion", 'cat "${f#pre}" | grep -q x'],
+  ])("still FAILS with %s — that is not a comment", (_name, body) => {
+    writeScript(
+      "offender",
+      `#!/usr/bin/env bash\nset -euo pipefail\n${body}\n`,
+    );
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(1);
+  });
+
   it("PASSES a safe pipeline whose LATER stage carries -m", () => {
     // `sort -m` merges; it reads to EOF. The flag belongs to sort, not to the
     // grep, so scanning the whole line rather than the grep's own arguments

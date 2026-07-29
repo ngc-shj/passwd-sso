@@ -124,19 +124,39 @@ function scan(s,   i, n, j, c, cc, qpos, body, outer, found) {
   outer = outer substr(s, i)
   return (found || offends(outer))
 }
+# Truncates a physical line at the shell comment that starts it, if any. A `#`
+# opens a comment only when it begins a word and is not quoted, so `${x#y}`,
+# `file#1` and `"a # b"` all survive. Everything downstream works on this
+# effective line, which is why a trailing comment can neither hide the operator
+# a continuation depends on nor be mistaken for command text.
+function strip_comment(s,   i, n, c, q, prev) {
+  n = length(s); q = ""; prev = ""
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (q != "") {
+      if (c == "\\" && q == "\"") { i++; prev = ""; continue }
+      if (c == q) q = ""
+      prev = c
+      continue
+    }
+    if (c == "\\") { i++; prev = ""; continue }
+    if (c == "\047" || c == "\"") { q = c; prev = c; continue }
+    if (c == "#" && (i == 1 || prev == " " || prev == "\t")) return substr(s, 1, i - 1)
+    prev = c
+  }
+  return s
+}
 {
-  raw = $0
-  # Physical lines that carry no command text — comment-only and blank — are
-  # dropped BEFORE the continuation test, and WITHOUT ending a logical line
-  # already in progress. Both halves matter, and each was a bypass on its own:
-  #   * joining first and then discarding the logical line for starting with
-  #     `#` let a comment ending in `|` or `\` swallow the violation below it;
-  #   * ending the logical line on them let bash-legal layouts split a pipeline
-  #     from its grep, which is exactly what the gate is looking for:
-  #         printf %s "$BODY" |
-  #           # pipeline explanation      <- or simply a blank line
-  #           grep -q needle
-  if (raw ~ /^[ \t]*#/ || raw ~ /^[ \t]*$/) next
+  # The effective line is what bash would execute. Once comments are gone, a
+  # physical line carrying no command text is simply an empty one — whether it
+  # was blank, a standalone comment, or a comment trailing a pipe operator. It
+  # is dropped WITHOUT ending a logical line already in progress, because bash
+  # continues a pipeline across all three:
+  #     printf %s "$BODY" |   # pipeline explanation
+  #                           <- or a blank line, or a standalone comment
+  #       grep -q needle
+  raw = strip_comment($0)
+  if (raw ~ /^[ \t]*$/) next
   if (buf == "") { start = FNR; disp = $0 }
   # bash continues a line ending in `\`, and also one ending in a pipe
   # operator (`|` or `|&`) with no backslash at all.
