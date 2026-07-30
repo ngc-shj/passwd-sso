@@ -96,14 +96,33 @@ describe("audit-chain RLS enforcement", () => {
   it("passwd_app cannot UPDATE cross-tenant anchor row", async () => {
     const differentTenantId = "00000000-0000-0000-0000-000000000001";
 
-    // Attempt to update a cross-tenant anchor (should affect 0 rows due to RLS)
-    await ctx.app.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.tenant_id', ${differentTenantId}, true)`;
-      await tx.$executeRawUnsafe(
-        `UPDATE audit_chain_anchors SET chain_seq = 999 WHERE tenant_id = $1::uuid`,
-        tenantIdA,
-      );
-    });
+    // This used to assert RLS filtered the UPDATE down to 0 rows. It cannot any
+    // more, and the reason is that the control got STRONGER: migration
+    // 20260522000200 revokes UPDATE on audit_chain_anchors from passwd_app
+    // outright, so Postgres refuses at the GRANT layer before RLS is consulted.
+    //
+    // Asserting the refusal ITSELF rather than "0 rows affected" is deliberate.
+    // The old shape would go green again the moment the grant came back — which
+    // is exactly what happened for a period, because
+    // scripts/bootstrap-rds-roles.mjs's table-blind
+    // `GRANT ... ON ALL TABLES ... TO passwd_app` re-granted it on every
+    // convergence run. A test that passes under both the strong and the weak
+    // control cannot tell you which one you have.
+    //
+    // Residual, stated rather than implied: with no role-level UPDATE there is
+    // no longer a way to exercise RLS's row filtering for passwd_app on this
+    // table. The row-filtering behaviour is still covered for SELECT by the case
+    // above; for the roles that DO hold UPDATE here (the outbox worker) it is
+    // not covered by this file.
+    await expect(
+      ctx.app.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${differentTenantId}, true)`;
+        await tx.$executeRawUnsafe(
+          `UPDATE audit_chain_anchors SET chain_seq = 999 WHERE tenant_id = $1::uuid`,
+          tenantIdA,
+        );
+      }),
+    ).rejects.toThrow(/permission denied for table audit_chain_anchors/);
 
     // Verify anchor was NOT modified
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
