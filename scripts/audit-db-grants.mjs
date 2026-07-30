@@ -32,26 +32,17 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
+import { loadDeniedPolicy, deniedFile } from "./lib/denied-privileges.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const MANIFEST_FILE =
   process.env.DB_GRANTS_MANIFEST ?? `${REPO_ROOT}scripts/checks/db-grants-manifest.json`;
 
-// PRESCRIPTIVE companion to the manifest above. The manifest is a SNAPSHOT of a
-// live database (`--write`), so it records whatever is there — including a
-// control that has been silently undone, which is exactly how the
-// audit_logs/audit_chain_anchors REVOKE from migration 20260522000200 came to be
-// reported as expected. This file states what must never be granted regardless
-// of what any database says. See its own _comment for the incident.
-// Resolved per CALL, never memoised at import. A module-level const is read
-// before any test or wrapper can set the override, so the override is
-// silently ignored and the REAL policy file is used — which, for a function
-// whose job is to REVOKE privileges, means a test aimed at a throwaway probe
-// role executes against the production roles instead. Same reason
-// scripts/tenant-domain.ts reads MIGRATION_DATABASE_URL per call.
-function deniedFile() {
-  return process.env.DB_DENIED_PRIVILEGES ?? `${REPO_ROOT}scripts/checks/app-role-denied-privileges.json`;
-}
+// The PRESCRIPTIVE companion to the manifest above, loaded and validated by the
+// SAME module the bootstrap uses. The manifest is a SNAPSHOT of a live database
+// (`--write`), so it records whatever is there — including a control that has
+// been silently undone, which is exactly how the audit_logs/audit_chain_anchors
+// REVOKE from migration 20260522000200 came to be reported as expected.
 
 /** Roles whose ACLs are audited. Anything not listed here is out of scope. */
 const AUDITED_ROLES = [
@@ -299,40 +290,6 @@ async function readLiveGrants(client) {
 }
 
 /**
- * The declared must-never-be-granted set.
- *
- * Returns the ENTRIES, not pre-rendered keys: a denied `UPDATE` on a table has
- * to match a column-scoped grant too, and that cannot be expressed as one exact
- * key. See `violatesDenied`.
- *
- * A MISSING file is a hard error. It used to return an empty set on the reasoning
- * that the self-test overrides the path — but the self-test always writes a real
- * file, and the case that actually occurs is the production image not shipping
- * it, where "no policy" silently means "nothing is forbidden". That is the
- * failure this file exists to prevent, so it fails closed.
- */
-function readDeniedEntries() {
-  const file = deniedFile();
-  if (!existsSync(file)) {
-    console.error(
-      `DENIED_POLICY_MISSING: ${file}\n` +
-        "This file declares the privileges that must never be granted. Without it " +
-        "the prescriptive half of this audit is inert and `--write` would happily " +
-        "record an over-privileged database as the expected state. Ship it with " +
-        "the runtime image (see the Dockerfile COPY for scripts/checks/) or set " +
-        "DB_DENIED_PRIVILEGES.",
-    );
-    process.exit(1);
-  }
-  const parsed = JSON.parse(readFileSync(file, "utf8"));
-  if (!Array.isArray(parsed.denied)) {
-    console.error(`DENIED_INVALID: ${file} has no "denied" array.`);
-    process.exit(1);
-  }
-  return parsed.denied;
-}
-
-/**
  * Every key in `keys` that a denied entry forbids.
  *
  * Table-level AND column-level, because PostgreSQL lets the two disagree:
@@ -435,7 +392,26 @@ async function main() {
     await client.end();
   }
 
-  const denied = readDeniedEntries();
+  const denied = loadDeniedPolicy();
+
+  // A policy entry naming a role this audit does not READ is inert: `readLiveGrants`
+  // only emits keys for AUDITED_ROLES, so `violatesDenied` would find nothing and
+  // the entry would look enforced while enforcing nothing. That is the same
+  // silently-ineffective-control shape this whole file exists to close, so it is
+  // a hard error rather than a shrug. Surfaced by writing the subprocess test:
+  // the first version used a throwaway role and the audit reported no finding.
+  const unaudited = [...new Set(denied.map((d) => d.role))].filter(
+    (r) => !AUDITED_ROLES.includes(r),
+  );
+  if (unaudited.length > 0) {
+    console.error(
+      `DENIED_POLICY_UNAUDITED_ROLE: ${unaudited.join(", ")}\n` +
+        `${deniedFile()} forbids privileges for role(s) this audit does not read. ` +
+        `Add them to AUDITED_ROLES in ${"scripts/audit-db-grants.mjs"}, or the ` +
+        "entry is enforced by the bootstrap alone and invisible here.",
+    );
+    process.exit(1);
+  }
 
   if (write) {
     // A regeneration against a database where a declared control is not in

@@ -42,26 +42,17 @@
 
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
-import { existsSync, readFileSync } from "node:fs";
+// ONE loader/validator, shared with scripts/audit-db-grants.mjs. Two copies of
+// a security policy converge on the weaker one — which had already happened
+// here: this file validated every entry and the audit validated only that a
+// `denied` array existed.
+import { loadDeniedPolicy } from "./lib/denied-privileges.mjs";
+// Re-exported so the integration test drives the SAME loader the script uses,
+// rather than a second import path that could diverge from it.
+export { loadDeniedPolicy };
 
 // The prescriptive must-never-be-granted declaration, shared with
 // scripts/audit-db-grants.mjs. See applyDeniedPrivileges below.
-// Resolved per CALL, never memoised at import. A module-level const is read
-// before any test or wrapper can set the override, so the override is
-// silently ignored and the REAL policy file is used — which, for a function
-// whose job is to REVOKE privileges, means a test aimed at a throwaway probe
-// role executes against the production roles instead. Same reason
-// scripts/tenant-domain.ts reads MIGRATION_DATABASE_URL per call.
-function deniedFile() {
-  return process.env.DB_DENIED_PRIVILEGES ?? new URL("./checks/app-role-denied-privileges.json", import.meta.url).pathname;
-}
-
-// DDL takes neither bound parameters nor quoted identifiers, so the declaration
-// is interpolated — and therefore validated first. The file is committed policy,
-// not input, so this is a loud-failure guard against a malformed edit rather
-// than an injection boundary.
-const SQL_IDENT_RE = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
-const SQL_PRIV_RE = /^(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER)$/;
 
 // Roles created here. Table-specific GRANTs for the worker roles are issued by
 // the Prisma migrations that create those tables (they carry IF NOT EXISTS role
@@ -111,55 +102,6 @@ function quoteIdent(name) {
  * Exported for the same reason `convergeRole` is: the integration test drives
  * the real function against a throwaway probe role and table.
  */
-/**
- * Read and FULLY VALIDATE the declaration before any database change.
- *
- * Separated from the apply step on purpose: a malformed policy discovered
- * halfway through the privilege sequence would leave the blanket GRANT
- * committed and the REVOKEs not applied — the exact state this control exists
- * to prevent.
- *
- * A MISSING file is a hard error, not an empty policy. The two conditions are
- * different and only one of them is normal:
- *   - "the table does not exist yet" is normal on a pre-migration run, and is
- *     handled per-entry by the `to_regclass` guard below;
- *   - "the policy file is absent" means this process cannot know what must be
- *     revoked, and silently converging to the blanket grant is precisely the
- *     failure being fixed. The production image had exactly this shape until the
- *     Dockerfile learned to copy the file.
- */
-export function loadDeniedPolicy() {
-  const file = deniedFile();
-  if (!existsSync(file)) {
-    throw new Error(
-      `DENIED_POLICY_MISSING: ${file}\n` +
-        "This file declares the privileges that must never be granted. Without it " +
-        "this script would converge to its blanket GRANT and silently leave the " +
-        "immutable audit tables writable. Ship it with the runtime image (see the " +
-        "Dockerfile COPY for scripts/checks/) or set DB_DENIED_PRIVILEGES.",
-    );
-  }
-  const parsed = JSON.parse(readFileSync(file, "utf8"));
-  if (!Array.isArray(parsed.denied)) {
-    throw new Error(`DENIED_POLICY_INVALID: ${file} has no "denied" array.`);
-  }
-  for (const d of parsed.denied) {
-    // DDL takes neither bound parameters nor quoted identifiers, so these are
-    // interpolated — and therefore validated. Committed policy, not input: this
-    // is a loud-failure guard against a malformed edit.
-    if (!SQL_IDENT_RE.test(d.table ?? "") || !SQL_IDENT_RE.test(d.role ?? "")) {
-      throw new Error(`DENIED_POLICY_INVALID: malformed table/role in ${file}: ${d.role} / ${d.table}`);
-    }
-    if (!Array.isArray(d.privileges) || d.privileges.length === 0) {
-      throw new Error(`DENIED_POLICY_INVALID: ${file} entry for ${d.table} lists no privileges`);
-    }
-    if (!d.privileges.every((x) => SQL_PRIV_RE.test(x))) {
-      throw new Error(`DENIED_POLICY_INVALID: malformed privilege in ${file} for ${d.table}`);
-    }
-  }
-  return parsed.denied;
-}
-
 /**
  * Re-apply the declared must-never-be-granted set.
  *

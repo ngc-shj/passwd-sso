@@ -28,10 +28,10 @@
  * transaction's changes.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { Client } from "pg";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -65,9 +65,18 @@ function auditEnv(manifestPath: string): NodeJS.ProcessEnv {
  * — hence the try/finally cleanup in each test rather than a wrapping
  * transaction (a rolled-back grant would be invisible to a second connection).
  */
-function runAudit(manifestPath: string) {
+function runAudit(manifestPath: string, extraEnv: Record<string, string> = {}) {
   return spawnSync(process.execPath, [AUDIT], {
-    env: auditEnv(manifestPath),
+    env: { ...auditEnv(manifestPath), ...extraEnv },
+    encoding: "utf8",
+    timeout: 60_000,
+    cwd: REPO_ROOT,
+  });
+}
+
+function runAuditWrite(manifestPath: string, extraEnv: Record<string, string> = {}) {
+  return spawnSync(process.execPath, [AUDIT, "--write"], {
+    env: { ...auditEnv(manifestPath), ...extraEnv },
     encoding: "utf8",
     timeout: 60_000,
     cwd: REPO_ROOT,
@@ -306,5 +315,133 @@ describe("audit-db-grants (real DB)", () => {
     expect(r.stderr).toContain(
       "MISSING_GRANT: TABLE:passwd_app public.a_table_that_does_not_exist SELECT",
     );
+  });
+
+  /**
+   * The PRESCRIPTIVE half, driven through the real subprocess.
+   *
+   * The declaration in `scripts/checks/app-role-denied-privileges.json` states
+   * privileges that must never be held whatever the live database says. It is
+   * what stops `--write` recording a database whose control has been undone as
+   * the expected state — which is how the audit_logs REVOKE became invisible.
+   *
+   * Driven against a THROWAWAY probe role and table with an overridden policy
+   * file, so the cases prove the MECHANISM rather than the current contents of
+   * the committed declaration, and never touch the real roles.
+   */
+  describe("prescriptive deny policy", () => {
+    // The AUDITED role, against a THROWAWAY table. It has to be an audited role
+    // or the audit reads no keys for it and the deny check is inert (see
+    // DENIED_POLICY_UNAUDITED_ROLE); it must be a throwaway TABLE so nothing the
+    // app depends on is touched.
+    const PROBE = "passwd_app";
+    const PROBE_TABLE = "audit_denied_probe_tbl";
+    let policyPath: string;
+
+    const policy = (privileges: string[]) =>
+      JSON.stringify({
+        denied: [
+          { role: PROBE, table: `public.${PROBE_TABLE}`, privileges, reason: "test" },
+        ],
+      });
+
+    beforeEach(async () => {
+      policyPath = join(tmpDir, "denied.json");
+      await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
+      await su.query(`CREATE TABLE ${PROBE_TABLE} (id int, metadata jsonb)`);
+      // The default ACL grants the app role arwd on any new table, so start from
+      // a known-empty state.
+      await su.query(`REVOKE ALL ON ${PROBE_TABLE} FROM ${PROBE}`);
+    });
+
+    afterEach(async () => {
+      await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
+      rmSync(policyPath, { force: true });
+    });
+
+    it("fails closed when the policy file is absent", () => {
+      // The production shape: the Dockerfile shipped the scripts and the
+      // descriptive manifest but not the declaration, and an absent file used to
+      // read as "nothing is forbidden".
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: join(tmpDir, "no-such.json") });
+      expect(r.status).not.toBe(0);
+      expect(`${r.stdout}${r.stderr}`).toContain("DENIED_POLICY_MISSING");
+    });
+
+    it.each([
+      ["no privileges", JSON.stringify({ denied: [{ role: "r", table: "public.t", privileges: [] }] })],
+      ["unknown privilege", JSON.stringify({ denied: [{ role: "r", table: "public.t", privileges: ["DROP"] }] })],
+      ["not an array", JSON.stringify({ denied: "nope" })],
+    ])("fails closed on a %s policy", (_label, body) => {
+      // The Low this closes: the audit used to validate only that a `denied`
+      // array existed, while the bootstrap validated every entry — so a policy
+      // that stopped a bootstrap run passed a deploy-time audit. One loader now
+      // serves both.
+      writeFileSync(policyPath, body);
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status).not.toBe(0);
+      expect(`${r.stdout}${r.stderr}`).toContain("DENIED_POLICY_INVALID");
+    });
+
+    it("reports DENIED_PRIVILEGE_HELD for a table-level grant", async () => {
+      writeFileSync(policyPath, policy(["UPDATE"]));
+      await su.query(`GRANT UPDATE ON ${PROBE_TABLE} TO ${PROBE}`);
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain(
+        `DENIED_PRIVILEGE_HELD: TABLE:${PROBE} public.${PROBE_TABLE} UPDATE`,
+      );
+    });
+
+    it("reports DENIED_PRIVILEGE_HELD for a COLUMN-level grant", async () => {
+      // PostgreSQL lets table and column privileges disagree:
+      //   GRANT UPDATE (metadata)  ->  has_table_privilege  = false
+      //                                has_column_privilege = true
+      // Matching only the TABLE key therefore passed a role that can rewrite the
+      // one column that matters.
+      writeFileSync(policyPath, policy(["UPDATE"]));
+      await su.query(`GRANT UPDATE (metadata) ON ${PROBE_TABLE} TO ${PROBE}`);
+      const [{ granted }] = (
+        await su.query(
+          `SELECT has_table_privilege($1, $2, 'UPDATE') AS granted`,
+          [PROBE, `public.${PROBE_TABLE}`],
+        )
+      ).rows;
+      // Anti-vacuity: the table-level privilege really is absent, so the finding
+      // below can only come from the column sweep.
+      expect(granted).toBe(false);
+
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain(
+        `DENIED_PRIVILEGE_HELD: COLUMN:${PROBE} public.${PROBE_TABLE}.metadata UPDATE`,
+      );
+    });
+
+    it("refuses --write while a denied privilege is held, and writes nothing", async () => {
+      writeFileSync(policyPath, policy(["UPDATE"]));
+      await su.query(`GRANT UPDATE ON ${PROBE_TABLE} TO ${PROBE}`);
+      const target = join(tmpDir, "would-be-laundered.json");
+      rmSync(target, { force: true });
+
+      const r = runAuditWrite(target, { DB_DENIED_PRIVILEGES: policyPath });
+
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("REFUSING to regenerate the manifest");
+      // The point: a regeneration must not record the loss of the control as the
+      // expected state.
+      expect(existsSync(target)).toBe(false);
+    });
+
+    it("passes and allows --write once the denied privilege is gone", async () => {
+      // The allow side — the policy must not make a clean database unauditable.
+      writeFileSync(policyPath, policy(["UPDATE"]));
+      const target = join(tmpDir, "clean-write.json");
+      rmSync(target, { force: true });
+
+      const r = runAuditWrite(target, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status, r.stderr).toBe(0);
+      expect(existsSync(target)).toBe(true);
+    });
   });
 });

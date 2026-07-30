@@ -37,6 +37,23 @@ function checksAssetsReadBy(scriptPath: string): string[] {
   return [...src.matchAll(/scripts\/checks\/[A-Za-z0-9._-]+\.json/g)].map((m) => m[0]);
 }
 
+/**
+ * Local `.mjs` modules a script imports, resolved to repo paths.
+ *
+ * A shared module is a runtime asset exactly like a JSON file, and extracting
+ * one is a NEW way for the image to be missing part of the control:
+ * `scripts/checks/check-mjs-imports.mjs` proves a specifier resolves in the
+ * REPO, not in the image. Added when `lib/denied-privileges.mjs` was extracted so
+ * that the extraction could not reintroduce the defect this test exists for.
+ */
+function localModulesImportedBy(scriptPath: string): string[] {
+  const src = readFileSync(resolve(REPO_ROOT, scriptPath), "utf8");
+  const dir = scriptPath.slice(0, scriptPath.lastIndexOf("/"));
+  return [...src.matchAll(/from\s+"(\.\/[A-Za-z0-9._/-]+\.mjs)"/g)].map(
+    (m) => `${dir}/${m[1].slice(2)}`,
+  );
+}
+
 /** True when the Dockerfile has a COPY whose destination is this path. */
 function isCopiedIntoImage(repoPath: string): boolean {
   return dockerfile
@@ -65,5 +82,22 @@ describe("Dockerfile carries every deploy-time runtime asset", () => {
       missing,
       `${scriptPath} reads these at runtime but the Dockerfile does not COPY them`,
     ).toEqual([]);
+  });
+
+  it.each(RUNTIME_SCRIPTS)("copies every local module imported by %s", (scriptPath) => {
+    const modules = [...new Set(localModulesImportedBy(scriptPath))];
+    const missing = modules.filter((m) => !isCopiedIntoImage(m));
+    expect(
+      missing,
+      `${scriptPath} imports these at runtime but the Dockerfile does not COPY them`,
+    ).toEqual([]);
+  });
+
+  it("sees the shared policy module as a required asset (anti-vacuity for the import scan)", () => {
+    // Pins that the import regex actually matches the extraction it was written
+    // for. A regex that silently stopped matching would make the case above
+    // vacuously green.
+    const all = RUNTIME_SCRIPTS.flatMap(localModulesImportedBy);
+    expect(all).toContain("scripts/lib/denied-privileges.mjs");
   });
 });
