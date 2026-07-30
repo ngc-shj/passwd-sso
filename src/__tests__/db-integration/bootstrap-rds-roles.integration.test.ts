@@ -42,6 +42,66 @@ function superuserUrl(): string {
 }
 
 /**
+ * Effective table privilege for a role, as the audit and the gate both ask it.
+ *
+ * One helper rather than the four inline copies this file had grown: a bare
+ * `holds`, a hardcoded-UPDATE `holdsUpdate`, an anonymous IIFE repeating it, and
+ * a two-column variant. Four copies of a two-line query is four places for the
+ * probe to be subtly wrong while the tests still look thorough.
+ */
+async function hasTablePrivilege(
+  su: Client,
+  role: string,
+  table: string,
+  privilege: string,
+): Promise<boolean> {
+  const { rows } = await su.query(
+    "SELECT has_table_privilege($1, $2, $3) AS granted",
+    [role, table, privilege],
+  );
+  return rows[0].granted as boolean;
+}
+
+/**
+ * The policy-file fixture both T6 and T7 need: a temp declaration pointed at by
+ * `DB_DENIED_PRIVILEGES`, torn down with the probe table and roles.
+ *
+ * `vi.stubEnv`, not a direct assignment — check-test-hygiene gate (c) forbids
+ * `process.env.X =` in a changed test file, and the integration setup wires no
+ * global unstub, so this unstubs its own.
+ *
+ * Extracted because the two copies were byte-identical apart from the tmpdir
+ * prefix and the table name — diffed before merging, so no condition handling
+ * was averaged away. Hooks registered from a plain function called at
+ * describe-body evaluation time behave identically to writing them inline.
+ */
+function useDeniedPolicyFixture(tmpPrefix: string, probeTable: string): { file: string } {
+  const decl = { file: "" };
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), tmpPrefix));
+    decl.file = join(dir, "denied.json");
+    vi.stubEnv("DB_DENIED_PRIVILEGES", decl.file);
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    rmSync(dir, { recursive: true, force: true });
+    const su = new Client({ connectionString: superuserUrl() });
+    await su.connect();
+    try {
+      await su.query(`DROP TABLE IF EXISTS ${probeTable}`);
+      await dropProbeRoles(su);
+    } finally {
+      await su.end();
+    }
+  });
+
+  return decl;
+}
+
+/**
  * Open a connection AS the probe role to prove a password actually works.
  *
  * Distinguishes an AUTH failure from an AUTHORIZATION failure: this database has
@@ -228,8 +288,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
    */
   describe("T6: applyDeniedPrivileges", () => {
     const PROBE_TABLE = "bootstrap_probe_denied_tbl";
-    let declDir: string;
-    let declFile: string;
+    const decl = useDeniedPolicyFixture("denied-privs-", PROBE_TABLE);
 
     async function setup(su: Client): Promise<void> {
       await su.query(`CREATE TABLE IF NOT EXISTS ${PROBE_TABLE} (id int)`);
@@ -238,39 +297,14 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
     }
 
-    async function holds(su: Client, priv: string): Promise<boolean> {
-      const { rows } = await su.query(
-        "SELECT has_table_privilege($1, $2, $3) AS granted",
-        [PROBE, `public.${PROBE_TABLE}`, priv],
-      );
-      return rows[0].granted;
-    }
+    const holds = (su: Client, priv: string) =>
+      hasTablePrivilege(su, PROBE, `public.${PROBE_TABLE}`, priv);
 
-    beforeEach(() => {
-      declDir = mkdtempSync(join(tmpdir(), "denied-privs-"));
-      declFile = join(declDir, "denied.json");
-      // vi.stubEnv, not a direct assignment: check-test-hygiene gate (c) forbids
-      // `process.env.X =` in a test file, and the integration setup wires no
-      // global unstub — so this file unstubs its own in afterEach.
-      vi.stubEnv("DB_DENIED_PRIVILEGES", declFile);
-    });
 
-    afterEach(async () => {
-      vi.unstubAllEnvs();
-      rmSync(declDir, { recursive: true, force: true });
-      const su = new Client({ connectionString: superuserUrl() });
-      await su.connect();
-      try {
-        await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
-        await dropProbeRoles(su);
-      } finally {
-        await su.end();
-      }
-    });
 
     it("revokes the declared privileges and leaves the others alone", async () => {
       writeFileSync(
-        declFile,
+        decl.file,
         JSON.stringify({
           denied: [
             {
@@ -309,7 +343,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       // named table is absent — that must be a no-op, not an error, or bootstrap
       // fails on a fresh RDS instance.
       writeFileSync(
-        declFile,
+        decl.file,
         JSON.stringify({
           denied: [
             { role: PROBE, table: "public.no_such_table_yet", privileges: ["UPDATE"], reason: "t" },
@@ -359,27 +393,9 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
    */
   describe("T7: fail-closed policy load + transactional privilege changes", () => {
     const PROBE_TABLE = "bootstrap_probe_tx_tbl";
-    let declDir: string;
-    let declFile: string;
+    const decl = useDeniedPolicyFixture("denied-tx-", PROBE_TABLE);
 
-    beforeEach(() => {
-      declDir = mkdtempSync(join(tmpdir(), "denied-tx-"));
-      declFile = join(declDir, "denied.json");
-      vi.stubEnv("DB_DENIED_PRIVILEGES", declFile);
-    });
 
-    afterEach(async () => {
-      vi.unstubAllEnvs();
-      rmSync(declDir, { recursive: true, force: true });
-      const su = new Client({ connectionString: superuserUrl() });
-      await su.connect();
-      try {
-        await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
-        await dropProbeRoles(su);
-      } finally {
-        await su.end();
-      }
-    });
 
     it("THROWS when the policy file is absent, instead of treating it as an empty policy", () => {
       // The production shape of this bug: the Dockerfile shipped the scripts and
@@ -389,7 +405,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       //
       // Distinct from "the table does not exist yet", which IS normal on a
       // pre-migration run and is handled per entry by the to_regclass guard.
-      rmSync(declFile, { force: true });
+      rmSync(decl.file, { force: true });
       expect(() => loadDeniedPolicy()).toThrow(/DENIED_POLICY_MISSING/);
     });
 
@@ -399,7 +415,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       ["malformed privilege", JSON.stringify({ denied: [{ role: "r", table: "public.t", privileges: ["DROP"] }] })],
       ["no privileges", JSON.stringify({ denied: [{ role: "r", table: "public.t", privileges: [] }] })],
     ])("THROWS on a %s policy, before any database change", (_label, body) => {
-      writeFileSync(declFile, body);
+      writeFileSync(decl.file, body);
       // Throwing, not `process.exit`: the helper runs inside the caller's
       // transaction, and killing the process there skips the ROLLBACK — which
       // commits the blanket grant without the revokes, i.e. exactly the state
@@ -409,7 +425,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
 
     it("rolls the blanket grant back when the sequence fails after it", async () => {
       writeFileSync(
-        declFile,
+        decl.file,
         JSON.stringify({
           denied: [
             { role: PROBE, table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "test" },
@@ -423,13 +439,8 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         await convergeRole(su, PROBE, "probe-pw-tx");
         await su.query(`REVOKE ALL ON ${PROBE_TABLE} FROM ${PROBE}`);
 
-        const holdsUpdate = async () => {
-          const { rows } = await su.query(
-            "SELECT has_table_privilege($1, $2, 'UPDATE') AS granted",
-            [PROBE, `public.${PROBE_TABLE}`],
-          );
-          return rows[0].granted as boolean;
-        };
+        const holdsUpdate = () =>
+          hasTablePrivilege(su, PROBE, `public.${PROBE_TABLE}`, "UPDATE");
         expect(await holdsUpdate()).toBe(false);
 
         // main()'s shape: BEGIN -> blanket grant -> (failure) -> ROLLBACK.
@@ -439,13 +450,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
           // Anti-vacuity: the grant is real and visible INSIDE the transaction,
           // so the assertion after the rollback is about the rollback and not
           // about the grant never having happened.
-          expect(await (async () => {
-            const { rows } = await su.query(
-              "SELECT has_table_privilege($1, $2, 'UPDATE') AS granted",
-              [PROBE, `public.${PROBE_TABLE}`],
-            );
-            return rows[0].granted as boolean;
-          })()).toBe(true);
+          expect(await holdsUpdate()).toBe(true);
           throw new Error("simulated failure between the grant and the deny revokes");
         } catch (e) {
           await su.query("ROLLBACK");
@@ -463,7 +468,7 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       // The allow side: the transaction must not be so defensive that the
       // intended state never lands.
       writeFileSync(
-        declFile,
+        decl.file,
         JSON.stringify({
           denied: [
             { role: PROBE, table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "test" },
@@ -481,13 +486,10 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         await applyDeniedPrivileges(su, loadDeniedPolicy());
         await su.query("COMMIT");
 
-        const { rows } = await su.query(
-          `SELECT has_table_privilege($1, $2, 'UPDATE') AS upd,
-                  has_table_privilege($1, $2, 'SELECT') AS sel`,
-          [PROBE, `public.${PROBE_TABLE}`],
-        );
-        expect(rows[0].upd).toBe(false);
-        expect(rows[0].sel).toBe(true);
+        const table = `public.${PROBE_TABLE}`;
+        expect(await hasTablePrivilege(su, PROBE, table, "UPDATE")).toBe(false);
+        // Narrow, not blanket: what the declaration does NOT name must survive.
+        expect(await hasTablePrivilege(su, PROBE, table, "SELECT")).toBe(true);
       } finally {
         await su.end();
       }

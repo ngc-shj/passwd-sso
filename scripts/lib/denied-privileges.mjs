@@ -12,9 +12,9 @@
  * That is the same defect this policy exists to prevent, one level up: a
  * security rule with two implementations converges on the weaker one. Hence a
  * single module. Both consumers are already copied into the runtime image, and
- * `scripts/__tests__/dockerfile-runtime-assets.test.ts` derives this file as a
- * required asset from their import statements — adding a shared module must not
- * become a new way for the production image to be missing part of the control.
+ * `scripts/checks/check-runtime-image-assets.mjs` derives this file as a required
+ * asset by following their imports — adding a shared module must not become a new
+ * way for the production image to be missing part of the control.
  */
 import { existsSync, readFileSync } from "node:fs";
 

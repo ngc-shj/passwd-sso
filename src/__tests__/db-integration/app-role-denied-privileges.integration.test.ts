@@ -21,9 +21,13 @@
  * PUBLIC or via inheritance.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { createTestContext, type TestContext } from "./helpers";
+// The SAME loader production uses, not a second parse path. A hand-rolled
+// `JSON.parse(...) as {denied: …}` here accepted anything shaped like the type,
+// so this test asserted a weaker contract than the scripts do against the very
+// same file — which is the "one policy, two implementations" shape the shared
+// module exists to remove.
+import { loadDeniedPolicy } from "../../../scripts/lib/denied-privileges.mjs";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -34,12 +38,7 @@ type DeniedEntry = {
   reason: string;
 };
 
-const DECLARATION = JSON.parse(
-  readFileSync(
-    resolve(__dirname, "../../../scripts/checks/app-role-denied-privileges.json"),
-    "utf8",
-  ),
-) as { denied: DeniedEntry[] };
+const DECLARATION = { denied: loadDeniedPolicy() as DeniedEntry[] };
 
 /**
  * The privileges PostgreSQL can scope to a column. `GRANT DELETE (col)` does not

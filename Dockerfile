@@ -254,13 +254,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/db-grants-manifest
 # whatever the live database says. Both consumers above read it, and both now
 # fail closed without it: shipping the scripts and the descriptive manifest but
 # NOT this file left the control inert in the production image while every local
-# check stayed green. `scripts/__tests__/dockerfile-runtime-assets.test.ts`
-# derives the required set from the scripts themselves so a third data file
-# cannot be forgotten the same way.
+# check stayed green. `scripts/checks/check-runtime-image-assets.mjs` derives the
+# required set from the scripts themselves — transitively through their local
+# imports — so a third data file cannot be forgotten the same way.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/app-role-denied-privileges.json ./scripts/checks/app-role-denied-privileges.json
 # The loader/validator both scripts above import. A shared module is a runtime
 # asset exactly like the JSON — `check-mjs-imports.mjs` proves a specifier
-# resolves in the REPO, not in the image — so the same test derives it from their
+# resolves in the REPO, not in the image — so the same gate derives it from their
 # import statements.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/lib/denied-privileges.mjs ./scripts/lib/denied-privileges.mjs
 
