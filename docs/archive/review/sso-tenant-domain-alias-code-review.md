@@ -1050,8 +1050,10 @@ its finding 1. All four were re-verified at file:line here rather than accepted.
   clean: **95 files / 441 passed**, 1 skipped, 4 todo. No run failed in a file
   this PR touches.
 - `npx eslint .` 0 errors (3 pre-existing warnings, none in changed files).
-- `scripts/pre-pr.sh` and the two commit-only gates (`check-test-hygiene`,
-  `check-security-matrices`) — see below.
+- `scripts/pre-pr.sh` **66/66** (65 before — the new gate is the +1).
+- The two gates that can only be judged after the commit (D-11) re-run against
+  `85b8ee8bc`: `check-test-hygiene` OK (18 changed test files scanned),
+  `check-security-matrices` OK.
 
 ## Round-6 — Resolution Status
 
@@ -1146,4 +1148,4 @@ the pattern is visible:
 `scripts/checks/check-operator-echo-escaped.mjs` (new),
 `scripts/checks/operator-echo-baseline.txt` (new), `scripts/pre-pr.sh`,
 `README.md`, `README.ja.md`, the plan (SC7 / SC8 / SC11) and this log,
-plus nine test files.
+plus thirteen test files (three of them new).
