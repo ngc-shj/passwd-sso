@@ -42,6 +42,26 @@
 
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
+import { existsSync, readFileSync } from "node:fs";
+
+// The prescriptive must-never-be-granted declaration, shared with
+// scripts/audit-db-grants.mjs. See applyDeniedPrivileges below.
+// Resolved per CALL, never memoised at import. A module-level const is read
+// before any test or wrapper can set the override, so the override is
+// silently ignored and the REAL policy file is used — which, for a function
+// whose job is to REVOKE privileges, means a test aimed at a throwaway probe
+// role executes against the production roles instead. Same reason
+// scripts/tenant-domain.ts reads MIGRATION_DATABASE_URL per call.
+function deniedFile() {
+  return process.env.DB_DENIED_PRIVILEGES ?? new URL("./checks/app-role-denied-privileges.json", import.meta.url).pathname;
+}
+
+// DDL takes neither bound parameters nor quoted identifiers, so the declaration
+// is interpolated — and therefore validated first. The file is committed policy,
+// not input, so this is a loud-failure guard against a malformed edit rather
+// than an injection boundary.
+const SQL_IDENT_RE = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
+const SQL_PRIV_RE = /^(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|REFERENCES|TRIGGER)$/;
 
 // Roles created here. Table-specific GRANTs for the worker roles are issued by
 // the Prisma migrations that create those tables (they carry IF NOT EXISTS role
@@ -77,6 +97,45 @@ const ROLE_ATTR_EXPECTATIONS = {
 // names read back from pg_roles, which are not part of our hardcoded allowlist.
 function quoteIdent(name) {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Apply `scripts/checks/app-role-denied-privileges.json`.
+ *
+ * Kept as data rather than statements in this file so that the SAME declaration
+ * drives both this script and `scripts/audit-db-grants.mjs`'s
+ * DENIED_PRIVILEGE_HELD / DENIED_PRIVILEGE_IN_MANIFEST checks. Two copies of a
+ * security policy is how the first one came to be undone without anything
+ * noticing.
+ *
+ * Exported for the same reason `convergeRole` is: the integration test drives
+ * the real function against a throwaway probe role and table.
+ */
+export async function applyDeniedPrivileges(client) {
+  if (!existsSync(deniedFile())) return;
+  const parsed = JSON.parse(readFileSync(deniedFile(), "utf8"));
+  for (const d of parsed.denied ?? []) {
+    if (!SQL_IDENT_RE.test(d.table) || !SQL_IDENT_RE.test(d.role)) {
+      console.error(`ERROR: malformed table/role in ${deniedFile()}: ${d.role} / ${d.table}`);
+      process.exit(1);
+    }
+    if (!d.privileges?.every((x) => SQL_PRIV_RE.test(x))) {
+      console.error(`ERROR: malformed privilege in ${deniedFile()} for ${d.table}`);
+      process.exit(1);
+    }
+    const privs = d.privileges.join(", ");
+    // to_regclass returns NULL for a table that does not exist, which is the
+    // normal state when this script runs before the first migration.
+    await client.query(
+      `DO $$ BEGIN
+         IF to_regclass('${d.table}') IS NOT NULL
+            AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${d.role}') THEN
+           REVOKE ${privs} ON ${d.table} FROM ${d.role};
+         END IF;
+       END $$`,
+    );
+    console.log(`  denied: REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
+  }
 }
 
 /**
@@ -194,6 +253,23 @@ async function main() {
     await client.query(
       "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app",
     );
+
+    // Re-apply the declared must-never-be-granted set, AFTER the blanket grant
+    // above and derived from a single prescriptive file rather than spelled
+    // here.
+    //
+    // The blanket `GRANT ... ON ALL TABLES` is table-blind, so on any run that
+    // happens AFTER the migrations it re-granted exactly what migration
+    // 20260522000200_audit_log_revoke_via_definer had revoked: UPDATE/DELETE on
+    // audit_logs and audit_chain_anchors. The comment on the worker block below
+    // shows the authors reasoned carefully about grants the migrations ADD; what
+    // was missed is that a migration can also install a NEGATIVE grant, and this
+    // script is documented as convergent and re-runnable — so every convergence
+    // run silently reopened an OWASP A04-2 control.
+    //
+    // Idempotent, and safe on a pre-migration run: REVOKE on a table that does
+    // not exist yet is skipped by the to_regclass guard.
+    await applyDeniedPrivileges(client);
 
     // Worker roles: SCHEMA-level and DEFAULT privileges only.
     //

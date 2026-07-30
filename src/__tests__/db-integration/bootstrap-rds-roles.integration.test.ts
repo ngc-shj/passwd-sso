@@ -20,9 +20,12 @@
  * app and workers depend on.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { Client } from "pg";
-import { convergeRole } from "../../../scripts/bootstrap-rds-roles.mjs";
+import { convergeRole, applyDeniedPrivileges } from "../../../scripts/bootstrap-rds-roles.mjs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const PROBE = "bootstrap_probe_app";
 const GRANTOR = "bootstrap_probe_grantor";
@@ -200,5 +203,129 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     // and our own connection is still usable.
     const { rows } = await su.query("SELECT 1 AS ok");
     expect(rows[0].ok).toBe(1);
+  });
+
+  /**
+   * T6 — the declared must-never-be-granted set survives the blanket grant.
+   *
+   * This is the defect that motivated `applyDeniedPrivileges`: the passwd_app
+   * convergence above runs a table-blind
+   * `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES ... TO passwd_app`,
+   * which re-granted exactly what migration
+   * `20260522000200_audit_log_revoke_via_definer` had revoked on `audit_logs`
+   * and `audit_chain_anchors`. Because the script is convergent and re-runnable,
+   * every run reopened it.
+   *
+   * Driven against a THROWAWAY probe role and a throwaway table, following this
+   * file's rule — the real passwd_* roles and the real audit tables are what
+   * this database's app and workers depend on, and a test must not converge
+   * them. The declaration is supplied through DB_DENIED_PRIVILEGES so the case
+   * proves the MECHANISM rather than the current contents of the committed file.
+   */
+  describe("T6: applyDeniedPrivileges", () => {
+    const PROBE_TABLE = "bootstrap_probe_denied_tbl";
+    let declDir: string;
+    let declFile: string;
+
+    async function setup(su: Client): Promise<void> {
+      await su.query(`CREATE TABLE IF NOT EXISTS ${PROBE_TABLE} (id int)`);
+      await convergeRole(su, PROBE, "probe-pw-denied");
+      // The state the blanket GRANT leaves behind.
+      await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
+    }
+
+    async function holds(su: Client, priv: string): Promise<boolean> {
+      const { rows } = await su.query(
+        "SELECT has_table_privilege($1, $2, $3) AS granted",
+        [PROBE, `public.${PROBE_TABLE}`, priv],
+      );
+      return rows[0].granted;
+    }
+
+    beforeEach(() => {
+      declDir = mkdtempSync(join(tmpdir(), "denied-privs-"));
+      declFile = join(declDir, "denied.json");
+      process.env.DB_DENIED_PRIVILEGES = declFile;
+    });
+
+    afterEach(async () => {
+      delete process.env.DB_DENIED_PRIVILEGES;
+      rmSync(declDir, { recursive: true, force: true });
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
+        await dropProbeRoles(su);
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("revokes the declared privileges and leaves the others alone", async () => {
+      writeFileSync(
+        declFile,
+        JSON.stringify({
+          denied: [
+            {
+              role: PROBE,
+              table: `public.${PROBE_TABLE}`,
+              privileges: ["UPDATE", "DELETE"],
+              reason: "test",
+            },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await setup(su);
+        // Anti-vacuity: the blanket grant really did grant them, so the
+        // assertions below cannot pass by the privileges never existing.
+        expect(await holds(su, "UPDATE")).toBe(true);
+        expect(await holds(su, "DELETE")).toBe(true);
+
+        await applyDeniedPrivileges(su);
+
+        expect(await holds(su, "UPDATE")).toBe(false);
+        expect(await holds(su, "DELETE")).toBe(false);
+        // Narrow, not blanket: the privileges the declaration does NOT name must
+        // survive, or convergence would break the app instead of hardening it.
+        expect(await holds(su, "SELECT")).toBe(true);
+        expect(await holds(su, "INSERT")).toBe(true);
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("is idempotent and tolerates a table that does not exist yet", async () => {
+      // The script is documented to run BEFORE the first migration, where the
+      // named table is absent — that must be a no-op, not an error, or bootstrap
+      // fails on a fresh RDS instance.
+      writeFileSync(
+        declFile,
+        JSON.stringify({
+          denied: [
+            { role: PROBE, table: "public.no_such_table_yet", privileges: ["UPDATE"], reason: "t" },
+            {
+              role: PROBE,
+              table: `public.${PROBE_TABLE}`,
+              privileges: ["UPDATE"],
+              reason: "t",
+            },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await setup(su);
+        await applyDeniedPrivileges(su);
+        await applyDeniedPrivileges(su);
+        expect(await holds(su, "UPDATE")).toBe(false);
+        expect(await holds(su, "SELECT")).toBe(true);
+      } finally {
+        await su.end();
+      }
+    });
   });
 });

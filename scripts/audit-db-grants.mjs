@@ -37,6 +37,22 @@ const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const MANIFEST_FILE =
   process.env.DB_GRANTS_MANIFEST ?? `${REPO_ROOT}scripts/checks/db-grants-manifest.json`;
 
+// PRESCRIPTIVE companion to the manifest above. The manifest is a SNAPSHOT of a
+// live database (`--write`), so it records whatever is there — including a
+// control that has been silently undone, which is exactly how the
+// audit_logs/audit_chain_anchors REVOKE from migration 20260522000200 came to be
+// reported as expected. This file states what must never be granted regardless
+// of what any database says. See its own _comment for the incident.
+// Resolved per CALL, never memoised at import. A module-level const is read
+// before any test or wrapper can set the override, so the override is
+// silently ignored and the REAL policy file is used — which, for a function
+// whose job is to REVOKE privileges, means a test aimed at a throwaway probe
+// role executes against the production roles instead. Same reason
+// scripts/tenant-domain.ts reads MIGRATION_DATABASE_URL per call.
+function deniedFile() {
+  return process.env.DB_DENIED_PRIVILEGES ?? `${REPO_ROOT}scripts/checks/app-role-denied-privileges.json`;
+}
+
 /** Roles whose ACLs are audited. Anything not listed here is out of scope. */
 const AUDITED_ROLES = [
   "passwd_app",
@@ -282,6 +298,25 @@ async function readLiveGrants(client) {
   return [...new Set(keys)].sort();
 }
 
+/**
+ * The declared must-never-be-granted set, as manifest keys.
+ *
+ * Absent file = empty set rather than a hard failure: this tool is also run
+ * against fresh databases and by the self-test with an overridden path, and a
+ * missing PRESCRIPTIVE file is not the same failure as a missing snapshot.
+ */
+function readDeniedKeys() {
+  if (!existsSync(deniedFile())) return [];
+  const parsed = JSON.parse(readFileSync(deniedFile(), "utf8"));
+  if (!Array.isArray(parsed.denied)) {
+    console.error(`DENIED_INVALID: ${deniedFile()} has no "denied" array.`);
+    process.exit(1);
+  }
+  return parsed.denied.flatMap((d) =>
+    d.privileges.map((priv) => `TABLE:${d.role}\t${d.table}\t${priv}`),
+  );
+}
+
 function readManifest() {
   if (!existsSync(MANIFEST_FILE)) {
     console.error(
@@ -353,7 +388,28 @@ async function main() {
     await client.end();
   }
 
+  const denied = readDeniedKeys();
+  const deniedSet = new Set(denied);
+
   if (write) {
+    // A regeneration against a database where a declared control is not in
+    // effect would record the breakage AS the expectation — which is how the
+    // audit_logs REVOKE became invisible. Refuse instead.
+    const laundered = live.filter((k) => deniedSet.has(k));
+    if (laundered.length > 0) {
+      console.error("REFUSING to regenerate the manifest:\n");
+      for (const k of laundered) {
+        console.error(`  DENIED_PRIVILEGE_HELD: ${k.replace(/\t/g, " ")}`);
+      }
+      console.error(
+        `\nThese privileges are declared must-never-be-granted in` +
+          `\n${deniedFile()}, but the database holds them. Writing the manifest` +
+          `\nnow would record the loss of that control as the expected state.` +
+          `\nRepair the database first (see that file for the sanctioned` +
+          `\nmutation paths), then regenerate.\n`,
+      );
+      process.exit(1);
+    }
     writeManifest(live);
     return;
   }
@@ -362,6 +418,18 @@ async function main() {
   const liveSet = new Set(live);
 
   const findings = [];
+  // Checked FIRST and against both sides. A denied privilege that is merely
+  // absent from the manifest already shows up as UNEXPECTED_GRANT below; what
+  // that check cannot see is a denied privilege the manifest SANCTIONS, which
+  // is the state this whole file exists to make impossible.
+  for (const key of denied) {
+    if (liveSet.has(key)) {
+      findings.push(`DENIED_PRIVILEGE_HELD: ${key.replace(/\t/g, " ")}`);
+    }
+    if (expected.has(key)) {
+      findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
+    }
+  }
   for (const key of live) {
     if (!expected.has(key)) {
       findings.push(`UNEXPECTED_GRANT: ${key.replace(/\t/g, " ")}`);
@@ -380,7 +448,13 @@ async function main() {
       `\nAn UNEXPECTED_GRANT means a role holds a privilege the manifest` +
         `\ndoes not sanction — revoke it, or if a migration granted it` +
         `\nintentionally, regenerate the manifest with --write and review the diff.` +
-        `\nA MISSING_GRANT usually means migrations have not been applied.\n`,
+        `\nA MISSING_GRANT usually means migrations have not been applied.` +
+        `\nA DENIED_PRIVILEGE_HELD means a declared control is NOT in effect on` +
+        `\nthis database; re-run scripts/bootstrap-rds-roles.mjs, which now` +
+        `\nre-applies these revokes, or issue the REVOKE directly.` +
+        `\nA DENIED_PRIVILEGE_IN_MANIFEST means the manifest sanctions something` +
+        `\n${deniedFile()} forbids — the manifest was regenerated against a broken` +
+        `\ndatabase. Repair the database, then regenerate.\n`,
     );
     process.exit(1);
   }
