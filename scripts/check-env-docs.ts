@@ -1,7 +1,7 @@
 /**
  * Drift checker for env-config-sync (§D of env-config-sync-and-generator-plan.md).
  *
- * Implements all 11 checks:
+ * Implements all 12 checks:
  *   1. Zod vs .env.example: every schema key in .env.example (KEY= or # KEY=)
  *   2. .env.example vs Zod: every .env.example key is in Zod or allowlist
  *   3. Compose vs (Zod ∪ allowlist): all docker-compose*.yml vars are covered
@@ -14,6 +14,11 @@
  *   9. Allowlist app-read violation: literal-key entries not read by src/**
  *  10. Allowlist entry shape validation (including regex safety)
  *  11. Allowlist file presence
+ *  12. src-read-undeclared: every key read by src/** (scanAppEnvReaders) is
+ *      declared in either the Zod schema or the allowlist. This is check 9's
+ *      missing reverse direction — nothing previously asked "is a key read
+ *      by src/** declared anywhere?", which is how nine variables
+ *      accumulated undeclared before this check existed.
  *
  * LIMITATION (check 8): Zod fields that are only conditionally required via
  * superRefine (e.g. SMTP_HOST when EMAIL_PROVIDER=smtp) are NOT flagged when
@@ -187,8 +192,8 @@ async function scanComposeFiles(root: string): Promise<Set<string>> {
 }
 
 // ---------------------------------------------------------------------------
-// Scan src/**/*.ts for process.env.VAR and envInt/envBool/envStr("VAR") reads
-// (excludes test files)
+// Scan src/**/*.{ts,tsx} for process.env.VAR and envInt/envBool/envStr("VAR")
+// reads (excludes test files)
 // ---------------------------------------------------------------------------
 function scanAppEnvReaders(root: string): Set<string> {
   const srcDir = resolve(root, "src");
@@ -204,7 +209,7 @@ function scanAppEnvReaders(root: string): Set<string> {
         walk(full);
       } else if (
         entry.isFile() &&
-        entry.name.endsWith(".ts") &&
+        (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
         !entry.name.endsWith(".test.ts") &&
         !entry.name.endsWith(".test.tsx") &&
         !entry.name.endsWith(".test.mjs")
@@ -615,6 +620,20 @@ export async function main(argv: string[]): Promise<number> {
       for (const e of shapeErrs) {
         errors.push(`check 10 [allowlist-shape]: ${e}`);
       }
+    }
+  }
+
+  // Check 12: src-read-undeclared — the reverse of check 9. Every key read
+  // by src/** (appReaders, computed above for check 9 — no new scanner) must
+  // be declared in either the Zod schema or the allowlist (any type, not
+  // just readByApp — a plain literal/regex entry also counts as declared).
+  // Dynamic key construction (process.env[name]) is lexically invisible to
+  // scanAppEnvReaders by design and is not a member of this check's domain.
+  for (const key of appReaders) {
+    if (!zodKeys.has(key) && !isInAllowlist(key)) {
+      errors.push(
+        `check 12 [src-read-undeclared]: "${key}" is read by src/** but is in neither the Zod schema nor scripts/env-allowlist.ts — add it to envObject (operator-configurable) or to the allowlist with readByApp: true (framework/test-only)`
+      );
     }
   }
 

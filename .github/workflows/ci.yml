@@ -73,6 +73,9 @@ jobs:
               - "docker-compose.override.yml"
               - "docker-compose.ha.yml"
               - "docker-compose.logging.yml"
+              # check 12 [src-read-undeclared] fires on any new env read
+              # under src/**, regardless of which file it lands in.
+              - "src/**"
 
   # ─── Env Drift Check ──────────────────────────────────────
   env-drift-check:

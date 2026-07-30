@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxExecuteRaw, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockResolveEffectiveSessionTimeouts, mockInvalidateCachedSessions } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateTenantForClaim, mockWithBypassRls, mockTxExecuteRaw, mockTxSession, mockTxTenant, mockLogAudit, mockEmitAuthLoginFailure, mockCreateNotification, mockResolveEffectiveSessionTimeouts, mockInvalidateCachedSessions } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
@@ -30,7 +30,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockPrismaTransaction: vi.fn(),
   mockSessionMetaGetStore: vi.fn(),
   mockTenantClaimStoreGetStore: vi.fn(),
-  mockFindOrCreateSsoTenant: vi.fn(),
+  mockFindOrCreateTenantForClaim: vi.fn(),
   mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
   mockTxExecuteRaw: vi.fn().mockResolvedValue(1),
   mockTxSession: {
@@ -42,6 +42,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
     findUnique: vi.fn(),
   },
   mockLogAudit: vi.fn(),
+  mockEmitAuthLoginFailure: vi.fn(),
   mockCreateNotification: vi.fn(),
   mockResolveEffectiveSessionTimeouts: vi.fn(),
   mockInvalidateCachedSessions: vi.fn().mockResolvedValue(undefined),
@@ -64,7 +65,7 @@ vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimStoreGetStore },
 }));
 vi.mock("@/lib/tenant/tenant-management", () => ({
-  findOrCreateSsoTenant: mockFindOrCreateSsoTenant,
+  findOrCreateTenantForClaim: mockFindOrCreateTenantForClaim,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
@@ -76,6 +77,13 @@ vi.mock("@auth/prisma-adapter", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+}));
+// Only the emitter is mocked. @/lib/audit/auth-failure-mapping is deliberately
+// left REAL, so the reason assertions below run through the production
+// CLAIM_REFUSAL_REASON table — a mocked table would let the two arms collapse
+// again (round-1 M2) with these tests still green.
+vi.mock("@/lib/audit/auth-failure", () => ({
+  emitAuthLoginFailure: mockEmitAuthLoginFailure,
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
@@ -96,6 +104,8 @@ vi.mock("@/lib/auth/session/session-cache", () => ({
 }));
 
 import { createCustomAdapter } from "./auth-adapter";
+// Real producer — `ClaimRefusalDiagnosis` is branded (round-6 SEC-R6-3).
+import { claimRefusal } from "@/lib/tenant/claim-refusal";
 import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
@@ -113,9 +123,20 @@ describe("createCustomAdapter", () => {
     mockWithBypassRls.mockImplementation(
       async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
+    // Same hazard, one mock further (round-3 T11): the refusal-arm test
+    // installs an implementation that writes to ITS OWN closure variable, and
+    // `vi.clearAllMocks()` clears calls but NOT implementations — so without
+    // this line that implementation stays live for every later test in the
+    // file, mutating a variable from a test that has already finished. Reset
+    // here rather than in the one test body, because the leak is a property of
+    // the file's mock lifecycle, not of that test.
+    mockEmitAuthLoginFailure.mockImplementation(async () => {});
     // Default: no pending tenant claim
     mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
-    mockFindOrCreateSsoTenant.mockResolvedValue(null);
+    // Resolvable by default; the refusal arms (claim_taken / claim_invalid)
+    // are opted into per test, since they now fail the sign-in closed rather
+    // than degrading to a bootstrap tenant.
+    mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "tenant", id: "sso-tenant-default" });
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
         tenant: { ...mockPrismaTenant, findUnique: mockTxTenant.findUnique },
@@ -195,7 +216,7 @@ describe("createCustomAdapter", () => {
 
     it("places user in SSO tenant when tenant claim is pending", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
-      mockFindOrCreateSsoTenant.mockResolvedValue({ id: "sso-tenant-1" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue({ kind: "tenant", id: "sso-tenant-1" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-2",
         name: "SSO User",
@@ -216,7 +237,7 @@ describe("createCustomAdapter", () => {
 
       // Bootstrap tenant.create should NOT be called
       expect(mockPrismaTenant.create).not.toHaveBeenCalled();
-      expect(mockFindOrCreateSsoTenant).toHaveBeenCalledWith("acme.com", expect.anything());
+      expect(mockFindOrCreateTenantForClaim).toHaveBeenCalledWith("acme.com", expect.anything());
       // User should be created with SSO tenant ID
       expect(mockPrismaUser.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -233,40 +254,191 @@ describe("createCustomAdapter", () => {
       });
     });
 
-    it("falls back to bootstrap when findOrCreateSsoTenant returns null", async () => {
-      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "invalid" });
-      mockFindOrCreateSsoTenant.mockResolvedValue(null);
-      mockPrismaTenant.create.mockResolvedValue({ id: "bootstrap-1" });
-      mockPrismaUser.create.mockResolvedValue({
-        id: "user-3",
-        name: "Fallback User",
-        email: "user@invalid.test",
-        image: null,
-        emailVerified: null,
-      });
-      mockPrismaTenantMember.create.mockResolvedValue({ id: "tm-3" });
+    // Round-1 M1: a claim WAS presented but is unusable. Before the
+    // discriminated result this reached the same branch as "no claim
+    // presented", so a deliberately revoked claim bought one successful
+    // first-ever sign-in as OWNER of a fresh bootstrap tenant, with no
+    // tenant_claim_unmapped audit row — and the next sign-in absorbed that
+    // estate into the real tenant via the bootstrap migration. Both refusal
+    // arms must now fail closed.
+    it.each([
+      ["claim_taken", "a revoked tenant_claims row owns the claim (D2)"],
+      ["claim_collision", "an existing tenant's external_id folds onto the claim (F-A)"],
+      ["claim_invalid", "the claim fails storableClaimSchema (SC9)"],
+    ])("throws TENANT_CLAIM_UNUSABLE without a bootstrap tenant when %s — %s", async (kind) => {
+      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue({ kind });
 
       const adapter = createCustomAdapter();
-      await adapter.createUser!({
-        id: "",
-        name: "Fallback User",
-        email: "user@invalid.test",
-        image: null,
-        emailVerified: null,
-      });
+      await expect(
+        adapter.createUser!({
+          id: "",
+          name: "Refused User",
+          email: "user@alias.example",
+          image: null,
+          emailVerified: null,
+        }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
 
-      // Bootstrap tenant should be created as fallback
-      expect(mockPrismaTenant.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ isBootstrap: true }),
-        select: { id: true },
+      // No bootstrap tenant, no user, and above all no OWNER membership.
+      expect(mockPrismaTenant.create).not.toHaveBeenCalled();
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockPrismaTenantMember.create).not.toHaveBeenCalled();
+    });
+
+    // Round-2 M1, the "invisible" half. Failing the sign-in closed is only
+    // half of the finding: on a FIRST-EVER sign-in src/auth.ts's signIn
+    // callback returns early (no user row yet), so its emitAuthLoginFailure
+    // never runs, and Auth.js turns this throw into an AdapterError. Without
+    // the emit below, probing a deliberately revoked claim produced ZERO
+    // AUTH_LOGIN_FAILURE rows and `tenant-domain unmapped` — which filters
+    // metadata.reason = 'tenant_claim_unmapped' — showed nothing (OWASP A09).
+    // The reason must be the one CLAIM_REFUSAL_REASON assigns the arm, per
+    // round-1 M2: claim_taken is the operator-reachable one and is the only
+    // reason `unmapped` can see.
+    //
+    // Round-6 F1 adds the diagnosis column. `claim_invalid` carries one and the
+    // other two do not, and the difference is load-bearing: `tenant-domain
+    // unmapped` buckets on whether `claimRefusal` is set, so dropping it on
+    // this path would file a first-ever sign-in's unstorable-claim denial under
+    // "registered to a DIFFERENT tenant — move it with `add --from`" while the
+    // identical denial on the existing-user path (src/auth.ts) was filed
+    // correctly. Asserting the field on all three arms is what makes the
+    // asymmetry visible rather than incidental.
+    it.each([
+      ["claim_taken", "tenant_claim_unmapped", "tenant-owner", null],
+      ["claim_collision", "tenant_claim_unmapped", "tenant-folded-owner", null],
+      ["claim_invalid", "tenant_mismatch", null, claimRefusal("claim must be printable ASCII")],
+    ] as const)("emits AUTH_LOGIN_FAILURE with the arm's own reason when %s", async (kind, reason, tenantId, refusal) => {
+      // R9: emitAuthLoginFailure -> logAuditAsync resolves a tenant through
+      // its OWN withBypassRls. Emitting while the createUser transaction is
+      // still open is the documented pool-exhaustion shape, so track whether
+      // the bypass transaction was open at emit time.
+      let txOpen = false;
+      let emittedInsideTx: boolean | null = null;
+      mockWithBypassRls.mockImplementation(async (prisma: unknown, fn: (tx: unknown) => unknown) => {
+        txOpen = true;
+        try {
+          return await fn(prisma);
+        } finally {
+          txOpen = false;
+        }
       });
-      expect(mockPrismaTenantMember.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({ role: "OWNER" }),
+      mockEmitAuthLoginFailure.mockImplementation(async () => {
+        emittedInsideTx = txOpen;
+      });
+      mockSessionMetaGetStore.mockReturnValue({ provider: "saml-jackson" });
+      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue(
+        refusal === null ? { kind, tenantId } : { kind, tenantId, refusal },
+      );
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({
+          id: "",
+          name: "Refused User",
+          email: "user@alias.example",
+          image: null,
+          emailVerified: null,
+        }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
+
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledTimes(1);
+      // tenantId is what makes the denial OBSERVABLE rather than merely
+      // emitted. logAuditAsync -> resolveTenantId returns params.tenantId
+      // directly when present; without it, a first-ever sign-in falls through
+      // to a users lookup on SYSTEM_ACTOR_ID (no such row), and logAuditAsync
+      // dead-letters without enqueuing — so nothing reaches audit_logs or
+      // audit_outbox and `tenant-domain unmapped` stays blind.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "user@alias.example",
+        provider: "saml",
+        reason,
+        claim: "alias.example",
+        claimRefusal: refusal,
+        tenantId,
+      });
+      expect(emittedInsideTx).toBe(false);
+    });
+
+    // The two operator-reachable arms must carry a BINDABLE tenant, not just
+    // any tenantId field: a null here is the dead-letter above.
+    it.each([
+      ["claim_taken", "tenant-owner"],
+      ["claim_collision", "tenant-folded-owner"],
+    ])("binds the audit row to the owning tenant for %s", async (kind, owner) => {
+      mockSessionMetaGetStore.mockReturnValue({ provider: "google" });
+      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
+      mockFindOrCreateTenantForClaim.mockResolvedValue({ kind, tenantId: owner });
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({
+          id: "",
+          name: "Refused User",
+          email: "user@alias.example",
+          image: null,
+          emailVerified: null,
+        }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
+
+      const emitted = mockEmitAuthLoginFailure.mock.calls[0][0];
+      expect(emitted.tenantId).toBe(owner);
+      expect(emitted.tenantId).not.toBeNull();
+    });
+
+    // Round-5 S1 — the fifth site of the overloaded-signal class, and the one
+    // where OWNER is actually granted. This test USED to assert the
+    // fall-through: no ALS store meant a claim the deployment could not
+    // propagate was read as "no claim asserted", and the user got OWNER of a
+    // fresh tenant with nothing denied and nothing audited. Round 4 closed the
+    // producer of that signal for exactly this reason and left the consumer
+    // — including the test that pinned it as intended behaviour.
+    it("refuses to create a user when the tenant-claim store is absent", async () => {
+      mockTenantClaimStoreGetStore.mockReturnValue(undefined);
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({
+          id: "",
+          name: "No Store User",
+          email: "user@example.com",
+          image: null,
+          emailVerified: null,
+        }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
+
+      // Nothing survives: no bootstrap tenant, no user, and above all no
+      // OWNER membership.
+      expect(mockPrismaTenant.create).not.toHaveBeenCalled();
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockPrismaTenantMember.create).not.toHaveBeenCalled();
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+      // And the refusal is observable, through the same catch the resolution
+      // arms use — with the same REASON the producer of this signal emits
+      // (round-6 F3/SEC-R6-1). `toHaveBeenCalledTimes(1)` was the whole
+      // assertion, so the arm could carry any word at all: it carried
+      // `claim_invalid`, whose definition is "the claim failed
+      // storableClaimSchema" and which on this path is doubly wrong — nothing
+      // was resolved, and `src/auth.ts`'s guard for the identical condition
+      // emits `provider_error`.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledTimes(1);
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "user@example.com",
+        provider: "google",
+        reason: "provider_error",
+        claim: null,
+        claimRefusal: null,
+        tenantId: null,
       });
     });
 
-    it("creates bootstrap tenant when no tenant claim store exists", async () => {
-      mockTenantClaimStoreGetStore.mockReturnValue(undefined);
+    it("creates a bootstrap tenant with OWNER when the store exists and holds no claim", async () => {
+      // The allow side of the same guard: a store that is present and empty
+      // IS "the IdP asserted no claim", which is the ordinary first-ever
+      // magic-link sign-in and must keep working.
+      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
       mockPrismaTenant.create.mockResolvedValue({ id: "bootstrap-2" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-4",
@@ -286,7 +458,7 @@ describe("createCustomAdapter", () => {
         emailVerified: null,
       });
 
-      expect(mockFindOrCreateSsoTenant).not.toHaveBeenCalled();
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
       expect(mockPrismaTenant.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ isBootstrap: true }),
         select: { id: true },
@@ -296,9 +468,9 @@ describe("createCustomAdapter", () => {
       });
     });
 
-    it("propagates error when findOrCreateSsoTenant throws", async () => {
+    it("propagates error when findOrCreateTenantForClaim throws", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "acme.com" });
-      mockFindOrCreateSsoTenant.mockRejectedValue(new Error("DB down"));
+      mockFindOrCreateTenantForClaim.mockRejectedValue(new Error("DB down"));
 
       const adapter = createCustomAdapter();
       await expect(

@@ -27,6 +27,8 @@ on:
       - 'src/app/api/**'
       - 'src/lib/emergency-access/**'
       - 'src/lib/access-request/**'
+      # C7: the offline operator CLI, tested from src/__tests__/db-integration/.
+      - 'scripts/**'
 
 permissions:
   # Round 4 S23 fix: principle of least privilege — only content read needed.

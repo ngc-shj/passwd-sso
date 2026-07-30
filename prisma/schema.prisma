@@ -558,6 +558,7 @@ model Tenant {
   serviceAccounts            ServiceAccount[]
   serviceAccountTokens       ServiceAccountToken[]
   operatorTokens             OperatorToken[]
+  claims                     TenantClaim[]
   accessRequests             AccessRequest[]
   mcpClients                 McpClient[]
   mcpAccessTokens            McpAccessToken[]
@@ -1782,6 +1783,26 @@ model OperatorToken {
   @@index([subjectUserId, revokedAt])
   @@index([expiresAt])
   @@map("operator_tokens")
+}
+
+// tenant_claims: the single claim→tenant resolution table (SSO tenant claim
+// registry). A claim string is not necessarily a domain — parseTenantClaimKeys()
+// defaults include organization/company keys, so validating it as a hostname
+// would break deployments that legitimately store values like "acmecorp".
+// The normalisation CHECK (lower(claim COLLATE "C") + btrim + ASCII-only) lives
+// in the migration, since Prisma's schema language cannot express it.
+model TenantClaim {
+  id        String    @id @default(uuid(4)) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  claim     String    @unique @db.VarChar(255)
+  createdBy String?   @map("created_by") @db.VarChar(255)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_claims")
 }
 
 // ─── API Key Models ─────────────────────────────────────────

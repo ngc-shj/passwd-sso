@@ -62,6 +62,7 @@
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
+scripts/tenant-domain.ts # operator CLI: unmapped-claim report unions audit_logs + audit_outbox by static SQL + $N params, no interpolation
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
 src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw
 src/app/api/maintenance/audit-outbox-purge-failed/route.ts # operator-gated purge of FAILED outbox rows, tagged-template $queryRaw
@@ -82,6 +83,7 @@ src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
+src/lib/tenant/tenant-management.ts # SAVEPOINT-protected slug-collision retry when creating a tenant + claim row
 src/lib/vault/key-version-guard.ts # row lock (FOR SHARE) reading users.key_version for the personal-vault stale-write guard
 src/lib/vault/rotate-key-server.ts # row lock (FOR UPDATE) on users for the pre-write rotation tuple-CAS (key_version/vault_setup_at/account_salt)
 src/lib/vault/vault-reset.ts # row lock (FOR UPDATE) on users, acquired first for lock-order consistency with rotation before entry deletes

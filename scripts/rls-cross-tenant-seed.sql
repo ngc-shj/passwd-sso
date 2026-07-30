@@ -2,7 +2,7 @@
 --
 -- Seeds two tenants A (00000000-0000-0000-0000-0000000000A0) and
 -- B (00000000-0000-0000-0000-0000000000B0) with exactly one row per
--- tenant in each of the 55 tenant-scoped tables (see
+-- tenant in each of the 56 tenant-scoped tables (see
 -- rls-cross-tenant-tables.manifest). mcp_clients also gets a third row
 -- with tenant_id = NULL (DCR pre-claimed clients).
 --
@@ -146,6 +146,10 @@ INSERT INTO sessions (id, user_id, tenant_id, session_token, expires) VALUES
 INSERT INTO tags (id, tenant_id, user_id, name, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'rls-x-a-tag', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B1', 'rls-x-b-tag', NOW());
+
+INSERT INTO tenant_claims (id, tenant_id, claim, created_by) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', 'rls-x-a-claim.test', 'rls-x-seed'),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', 'rls-x-b-claim.test', 'rls-x-seed');
 
 INSERT INTO tenant_members (id, tenant_id, user_id, role, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A1', 'OWNER', NOW()),

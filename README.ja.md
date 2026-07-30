@@ -221,10 +221,11 @@ npm run docker:down
 | `MIGRATION_DATABASE_URL` | マイグレーション用 PostgreSQL 接続（スーパーユーザーロール、例: `passwd_user`）。`npm run db:migrate` に必要 |
 | `AUTH_URL` | アプリケーションのオリジン（例: `http://localhost:3000`）。`APP_URL` 未設定時の canonical Origin として使われます |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
+| `COOKIE_PARTITIONED` | （任意）セッション Cookie に Partitioned（CHIPS）属性を付与するオプトイン設定。値は `true` / `false` のみ。デフォルト: `false`。サードパーティ iframe コンテキスト外では効果なし。Secure Cookie が必須。[アップグレード時の注意](#アップグレード時の注意-fail-closed-になった環境変数) 参照 |
 | `AUTH_GOOGLE_ID` | Google OAuth クライアント ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth クライアントシークレット |
 | `GOOGLE_WORKSPACE_DOMAINS` | （任意）Google Workspace ドメインに制限（カンマ区切りで複数可） |
-| `AUTH_TENANT_CLAIM_KEYS` | （任意）tenant 解決に使う IdP クレームキー（例: `tenant_id,organization`） |
+| `AUTH_TENANT_CLAIM_KEYS` | （任意）tenant 解決に使う IdP クレームキーをカンマ区切りで指定し、記載順に評価します。**未設定は「設定なし」ではありません** — `tenant_id, tenantId, organization, org, company, company_id` が選択され、いずれも IdP がアサートする属性であり、Google の検証済み `hd` より**先に**評価されます。`AUTH_TENANT_CLAIM_KEYS=hd` は**Google サインインに限った**検証済みクレームのみの構成です: `hd` は `google` プロバイダーの場合にのみ採用されるため、SAML デプロイでは一切クレームが解決されず、新規ユーザーは個人のブートストラップテナントに OWNER として作成されます。設定する前に [IdP のドメインが変わった / テナントがロックアウトされた](#idp-のドメインが変わった--テナントがロックアウトされた) の項を必ず参照してください |
 | `JACKSON_URL` | SAML Jackson URL（デフォルト: `http://localhost:5225`） |
 | `AUTH_JACKSON_ID` | Jackson OIDC クライアント ID |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC クライアントシークレット |
@@ -246,6 +247,8 @@ npm run docker:down
 | `BLOB_OBJECT_PREFIX` | クラウド保存時のオブジェクトキー接頭辞（任意） |
 | `AUDIT_LOG_FORWARD` | （任意）構造化 JSON 監査ログを stdout に出力 |
 | `AUDIT_LOG_APP_NAME` | （任意）監査ログ転送時のアプリ名 |
+| `AUDIT_IDENTIFIER_PEPPER` | （任意）`AUTH_LOGIN_FAILURE` 監査イベントに記録する識別子のハッシュ化に使う HMAC pepper。設定する場合はちょうど 64 文字の 16 進数（`npm run generate:key`）。未設定時は `AUTH_SECRET`（32 文字以上）から HKDF 導出した鍵にフォールバックし、どちらも使えない場合はハッシュを計算せず `identifierHashScope` を `"unkeyed"` として記録します。詳細は [アップグレード時の注意](#アップグレード時の注意-fail-closed-になった環境変数) と [Audit Log Schema](docs/security/audit-log-schema.md) を参照 |
+| `BREAKGLASS_COOLING_OFF_SECONDS` | （任意）24 時間以内に同一の依頼者/対象で最初に発行される Break Glass 許可が実行されるまでの遅延（秒）。0 以上の整数。デフォルト: `3600`。`0` で無効化。[アップグレード時の注意](#アップグレード時の注意-fail-closed-になった環境変数) 参照 |
 | `EMAIL_PROVIDER` | （任意）`resend` または `smtp` — 空欄でメール送信無効 |
 | `EMAIL_FROM` | メール送信元アドレス |
 | `RESEND_API_KEY` | `EMAIL_PROVIDER=resend` の場合に必須 |
@@ -259,16 +262,40 @@ npm run docker:down
 | `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | （任意）監査アウトボックスワーカーの調整。詳細は `.env.example` 参照 |
 | `NEXT_DEV_ALLOWED_ORIGINS` | （任意）dev サーバー向け許可オリジン（例: Tailscale ホスト名） |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | （任意）ブラウザ拡張配布用 Chrome Web Store URL |
+| `IOS_APP_TEAM_ID` | Apple Developer Team ID（10 文字の文字列）。AASA ルートが iOS Universal Links を配信するために必須。未設定時は 503 を返す |
+| `IOS_APP_BUNDLE_ID` | （任意）iOS アプリのバンドル識別子。デフォルト: `jp.jpng.passwd-sso`（`ios/project.yml` の `PRODUCT_BUNDLE_IDENTIFIER` と一致） |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | （任意）Sentry エラートラッキング DSN |
 | `SENTRY_AUTH_TOKEN` | （任意）ソースマップアップロード用 Sentry 認証トークン |
 | `KEY_PROVIDER` | （任意）鍵プロバイダーバックエンド: `env`（デフォルト）、`azure-kv`、または `gcp-sm`。詳細は [KMS Setup](docs/operations/key-provider-setup.md) 参照 |
 | `SM_CACHE_TTL_MS` | （任意）KMS 復号済み鍵キャッシュの TTL（ms）（デフォルト: 300000 = 5 分） |
+| `QUOTA_MAX_PASSWORDS_PER_USER` | （任意）ユーザーごとのパスワードエントリ上限数。デフォルト: `10000` |
+| `QUOTA_MAX_ATTACHMENT_BYTES_PER_USER` | （任意）ユーザーごとの添付ファイル合計バイト数上限。デフォルト: `1073741824`（1 GiB） |
+| `QUOTA_MAX_SHARE_LINKS_PER_USER` | （任意）ユーザーごとのアクティブな共有リンク上限数。デフォルト: `1000` |
+| `QUOTA_MAX_WEBHOOKS_PER_TENANT` | （任意）テナントごとの Webhook 上限数（テナント + チーム合算）。デフォルト: `100` |
 
 </details>
 
 > **Redis は本番必須です。** 開発/テスト環境では `REDIS_URL` 未設定時に in-memory フォールバックを利用できます。
 >
 > **Cookie 認証の破壊的 API では canonical origin の設定が必要です。** `assertOrigin()` は `APP_URL` / `AUTH_URL` のどちらも無い場合、`Host` ヘッダーから same-origin を推測せず fail-closed で 403 を返します。
+
+### アップグレード時の注意: fail-closed になった環境変数
+
+これまで緩く読まれていた 4 つの環境変数が、環境スキーマの検証対象になりました。いずれも **fail-closed** です — 解釈できない値のまま動き続けるのではなく、プロセスが起動を拒否します。方向としては正しい変更ですが、これまで黙って許容されていた値を設定しているデプロイは、アップグレード後に**起動しなくなります**。ロールアウト前に 4 つとも確認してください。
+
+| 環境変数 | 従来 | 現在 | 起こること |
+| --- | --- | --- | --- |
+| `AUDIT_IDENTIFIER_PEPPER` | 任意の文字列をそのまま HMAC 鍵として使用。未設定時は空鍵 HMAC | 設定する場合はちょうど 64 文字の 16 進数（`npm run generate:key`）、または未設定 | 64 文字の 16 進数**でない**値はすべて**起動失敗**。短い値だけでなく、長すぎる値や、長さは合っていても 16 進数でない値も拒否されます。ハッシュの相関については下記参照 |
+| `COOKIE_PARTITIONED` | `=== "true"` による比較のため、`1` / `TRUE` / `yes` はすべて *off* と解釈 | `true` または `false`、あるいは未設定（`false`） | それ以外の表記はすべて**起動失敗**。`COOKIE_PARTITIONED=1` で CHIPS を有効化したつもりだったデプロイは、実際には一度も有効になっていません — `true` を設定してください |
+| `BREAKGLASS_COOLING_OFF_SECONDS` | 検証なし | 0 以上の整数（秒）、または未設定（`3600`） | `1h` のような非数値は**起動失敗** |
+| `AUTH_TENANT_CLAIM_KEYS` | 任意の文字列。何も指していないエントリは捨てられていたため、`,` は未設定とまったく同じ挙動になっていた | 設定する場合は少なくとも 1 つのクレームキーを指す必要がある（未設定は可） | **どのキーも指していない値**（`,` や `,,`）だけが起動失敗。キーの重複や空エントリ混在（`org,,tenant`）は従来どおり起動します — 見た目どおりのキーを指すためです。旧来のフォールスルーは無害ではありませんでした: SAML デプロイではどのサインインでもクレームが解決されず、初回ユーザーが自分専用の bootstrap テナントの OWNER として作成されていました |
+
+**`AUDIT_IDENTIFIER_PEPPER` は、どう直しても既存ハッシュとの相関が切れます。** `AUTH_LOGIN_FAILURE` の `identifierHash` は pepper を鍵とする HMAC なので、鍵が変われば新しいハッシュは `audit_logs` に既にある値と無関係になります — 同じ識別子でも同じハッシュにはならず、アップグレードをまたいだ相関は失われます。これは起動失敗のケースに限りません:
+
+- 64 文字の 16 進数でない値を設定していた場合、起動させるために**必ず**値を変更することになります。
+- 一度もこの変数を設定していないデプロイでも鍵は変わります。空鍵フォールバックは利用できません — pepper は `AUTH_SECRET` から HKDF で導出されます（`AUTH_SECRET` も無い場合はハッシュを計算せず、`identifierHashScope` に `"unkeyed"` を記録します）。
+
+既存ハッシュとの相関を維持する方法は提供していません。アップグレードを新しい相関期間の起点とみなし、切り替え時刻を監査記録と一緒に残してください。詳細は [Audit Log Schema](docs/security/audit-log-schema.md) を参照。
 
 ### 管理 / メンテナンススクリプト
 
@@ -281,6 +308,114 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 ```
 
 詳細は [Admin Token Setup](docs/operations/admin-tokens.md) を参照してください。
+
+### IdP のドメインが変わった / テナントがロックアウトされた
+
+**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。原因は **4 つ**あり、この CLI で直せるのは最初の 2 つだけです:
+
+| `metadata.reason` | クレーム関連フィールド（`metadata.claim` / `metadata.claimRefusal`） | 原因 | 対処 |
+|---|---|---|---|
+| `tenant_claim_unmapped` | クレーム値 | どのテナントにも未登録 | `tenant-domain add` |
+| `tenant_mismatch` | クレーム値 | 別のテナントに登録済み | ユーザーを調査、または `add --from` でクレームを移動 |
+| `tenant_mismatch` | `claimRefusal` あり（`claim` は無し） | IdP が送った値が**取り込み時点で拒否**された — 対になっていないサロゲート、制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`claimRefusal` が違反したルールを示します |
+| `tenant_mismatch` | `claimRefusal` あり、かつ `claim` あり | 値は取り込みを通ったが**保存できない** — 印字可能 ASCII ではなく、レジストリの `CHECK` 制約が拒否する（後述の `preflight` を参照） | **IdP 側を修正**するか、そのテナントに ASCII のクレームを登録してください。`add` は同じ述語でこの値を拒否します |
+
+後半 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 4 つの原因を 3 つの見出しで報告します — `claimRefusal` を持つ 2 つは対処が同じなので同じ見出しにまとめています。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+
+```bash
+# 最近拒否された未登録クレームを確認（既定の期間: 30 日）
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
+
+# 新しいクレームを既存テナントに登録（冪等 — 再実行しても安全）
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
+```
+
+`<ref>` にはテナントの UUID、登録済みクレームのいずれか、`external_id` を指定できます。最後の 1 つは、後述のプリフライトチェックがバックフィルのスキップを報告したテナント — つまり指定できるクレームを持たないテナント — を扱うときに必要になります。`slug` は意図的に**受け付けません**。サインインで作成されたテナントの slug は IdP クレームから `[^a-z0-9]+` を潰して生成されるため多対一であり、そのslugを最初に取得したテナントを作らせた者に先取りされうるからです。
+
+`unmapped` が対象とするのは「問い合わせた期間」であり、このデプロイの保持期間ではありません。既定値は設定可能な保持期間の下限（30 日）で、出力にもその期間が明記されます。「何も拒否されていない」と判断する前に `--days <n>` で期間を広げてください。
+
+`list`・`preflight`・`remove` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。
+
+**`tenant_mismatch`: クレームが誤ったテナントに登録されている場合**。この状態はオペレーターが何もしなくても発生します — 打ち間違えた、あるいは他者に先取りされたクレームを提示するサインインが 1 回あるだけで、そのサインインが作成したテナントに対してクレームが登録されます（`created_by = 'signin'`）。`remove` ではクレームは解放されません — 行を論理削除して `revoked_at` を設定するだけで所有テナントは変わらないため、続けて `add` を実行しても再び拒否されます。現在の所有テナントを明示する `add --from` でクレームを移動してください:
+
+```bash
+# --from には現在の所有テナントの UUID を、`list` が出力するとおりに指定します。
+# slug・クレーム・external_id からは解決しません: 再割り当ては 1 つのテナントの
+# メンバー全員を拒否しうる操作であり、打ち間違いで到達できてはならないためです。
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
+  --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
+  --from <current-owner-uuid>
+```
+
+`add --from` は書き込みの前に、両テナントの id・name・slug・**アクティブメンバー数**と、移動によって失う側が被る影響を表示し、確認を求めます（非対話実行では `--yes`）。`--from` が実際の所有テナントと一致しない場合は拒否されます。また、対象行が事前に revoke されている必要は**ありません** — revoke してから再割り当てする手順では、クレームがどのテナントにも解決しない期間が生じ、両方のテナントのメンバーが拒否されてしまうためです。移動しても行の `created_by` は書き換えません — この値は「誰が最初にそのクレームを登録したか」というインシデント調査に必要な証跡です。**ただしレジストリは経路変更の履歴を保持しません。** 移動は `tenant_id` を上書きし、revoke 済みクレームの再登録は `revoked_at` を消すため、実行後の行からは以前の所有テナント・revoke されていた事実・変更の実行者のいずれも読み取れません。コマンドはこれらを `NOT RECOVERABLE from the row after this change` の行に出力します。この出力が唯一の記録なので、インシデント記録とともに保管してください。
+
+**`GOOGLE_WORKSPACE_DOMAINS` を設定している場合**（[SECURITY.md](SECURITY.md) で推奨）、クレームを登録するだけでは復旧しません。`src/auth.config.ts` の `signIn` コールバックは、`hd` が `GOOGLE_WORKSPACE_DOMAINS` に含まれない Google サインインを、テナントクレームの解決より**前**に `reason: "provider_error"` として拒否します — この拒否はテナントクレームのチェックまで到達しないため、`tenant-domain unmapped` には何も表示されません。新しいドメインを `GOOGLE_WORKSPACE_DOMAINS` にも追加し、どのテナントのために追加したかを記録してください。この変数はデプロイ全体に効くグローバル設定である一方、クレームレジストリはテナント単位のスコープなので、記録がないと過去にどのテナントかがリネームしたすべてのドメインが静かに積み上がっていきます。そのテナントが不要になった時点で、追加したエントリを削除してください。**ロックアウト回避のために `GOOGLE_WORKSPACE_DOMAINS` を未設定に戻さないでください** — `allowDangerousEmailAccountLinking` は `allowedGoogleDomains.length > 0` から導出されるため、未設定に戻すとこのフラグは `false` になり（緩くなるのではなく**厳しくなり**）、元の拒否に加えて `OAuthAccountNotLinked` という別の失敗が発生します。
+
+**既存デプロイで `prisma migrate deploy` を実行する前に**、プリフライトチェックを実行してください — バックフィルがレジストリから除外する 2 種類の行を、事前の運用判断のために可視化します:
+
+```bash
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
+```
+
+報告される内容は 3 つです。**正規化の衝突**（複数のテナントの `external_id` が 1 つのクレームに畳み込まれるケース）、**非 ASCII の `external_id`**、そして **Postgres 側とアプリケーション側の正規化のずれ**です。3 つともレジストリから除外されます。
+
+**衝突は「敗者だけ」ではなく、衝突したすべての側が除外されます。** バックフィルは衝突したテナントの**どれにも**クレーム行を登録しません — 報告された衝突を「片方は既にクレームを保持しているので、残りだけ登録すればよい」と読まないでください。1 件だけを残すと、他のテナントの**新規**メンバーが勝者のテナントに黙って作成されてしまいます。これらのテナントは現時点では別個のものであり（アップグレード前のリゾルバは `external_id` を完全一致で照合していました）、しかもどこにもエラーが出ません。したがってプリフライトが返した行は、すべて明示的な判断と明示的な登録を必要とします:
+
+- 衝突であれば、どのテナントが共通のクレーム文字列を取得し、他のテナントには代わりに何を割り当てるかを決めたうえで、それぞれに `tenant-domain add` を実行する。
+- 非 ASCII の `external_id` であれば、そのテナントに別途 ASCII のクレームを登録すべきかを決めたうえで、`tenant-domain add` を実行する。
+
+バックフィルを再実行しても、これらの行は登録されません。除外は「既にあればスキップ」ではなく無条件なので、2 回目の実行はこの母集団に対して構造上**何もしません**。登録できるのは `tenant-domain add` だけです。それまでの間、これらのテナントはリリース 1 の `external_id` 完全一致フォールバックによって現在とまったく同じように解決され続けます — アップグレードそのものでロックアウトされることはありません。ただしこのフォールバックは後続リリースで削除され、その時点でクレーム未登録のテナントはロックアウトになります。判断はその前に行ってください。
+
+手書き SQL ではなく CLI を実行してください。このチェックが依存する「印字可能 ASCII」の述語は `src/lib/tenant/tenant-claim-registry.ts` の `NON_PRINTABLE_ASCII_SQL_CLASS` を唯一の出所とし、ドリフト検知テストがマイグレーションの CHECK・バックフィル・その `.sql` 版をこの定数に固定しています。ドキュメントから書き写した述語はこの保護の外側にあり、CHECK からずれたプリフライトは、最も重要な場面で自信を持って「問題なし」と報告します。どうしても CLI を実行できない環境では、述語と正規化式を `scripts/tenant-domain.ts` の `cmdPreflight` からコピーしてください — 書き写さないでください。
+
+**バックフィルが引き継ぐ内容**。`20260228010000_tenant_external_id_and_bootstrap` マイグレーションを既に実行済みのデプロイでは、`tenant_claims` は既存テナントの `external_id` を 1 行ずつ引き継ぎます — そのマイグレーションより前から存在するテナントでは、これはテナント自身の UUID です（`bootstrap-` / `u-` を除くすべてのテナントに対する `UPDATE tenants SET external_id = id ...`）。`tenant_id` は `AUTH_TENANT_CLAIM_KEYS` が未設定時にフォールバックする先頭のキーであるため、生の UUID がそのままクレームとしてテナントメンバーシップを解決できてしまいます。バックフィルが引き継いだ内容を確認するには:
+
+```sql
+SELECT tenant_id, claim, created_by, created_at FROM tenant_claims WHERE created_by = 'backfill' ORDER BY created_at;
+```
+
+これは以前からの挙動です — 同じ UUID は、この機能追加以前から `Tenant.externalId` 経由でサインインを解決してきました — 今回それが明示的なクレーム行として可視化されただけです。`AUTH_TENANT_CLAIM_KEYS` を意図的に設定しているデプロイでは、クレームの名前空間が明示化された今、デフォルトのクレームキー一覧に `tenant_id` / `tenantId` を残すかどうかを改めて検討してください。
+
+**`AUTH_TENANT_CLAIM_KEYS` の設定指針**。安全な値は、ユーザーがどのプロバイダーでサインインするかによって変わります。Google デプロイを堅牢にする構成が、SAML デプロイではテナント解決を黙って無効化します。自分のプロバイダーの項だけを読んでください。
+
+**この変数を未設定にしても、堅牢な構成にはなりません** — 組み込みの一覧 `tenant_id, tenantId, organization, org, company, company_id` が選択され、そのすべてが IdP のアサートする属性であり、6 つすべてが `hd` を参照する**前に**評価されます。したがって、この変数を一度も設定していない複数接続の SAML デプロイは、後述する危険な構成の外側にいるのではなく、すでにその内側にいます。
+
+**Google サインイン — 検証済みクレームのみの構成は `hd` です:**
+
+```bash
+# 検証済みクレームのみの構成。`hd` は自己申告のプロフィール属性ではなく Google が
+# アサートする値であり、Google プロバイダーの場合にのみ採用されます。
+AUTH_TENANT_CLAIM_KEYS=hd
+```
+
+**`hd` は Google 専用です。SAML でサインインするデプロイでは設定しないでください。** このキーはアカウントのプロバイダーが `google` の場合にのみ採用されます — SAML アサーションが文字どおり `hd` という名前のフィールドを含んでいても無視されます。このプロバイダーゲートこそが「`hd` という名前である」ことを「Google がアサートした」に変える仕組みです。したがって SAML のみのデプロイで `AUTH_TENANT_CLAIM_KEYS=hd` を設定すると、**すべてのサインインで**クレームが一切解決されなくなります。これは拒否ではなく、診断にも一切現れません:
+
+- クレームが解決されないサインインは「クレームが提示されなかった」として扱われるため、何も拒否されず、`AUTH_LOGIN_FAILURE` 行も記録されません。
+- そして**初回サインインのユーザー**は、組織のテナントに参加するのではなく、自分専用のブートストラップテナントに **OWNER** として作成されます — ユーザー 1 人につきテナントが 1 つ、黙って増え続けます。
+- `tenant-domain unmapped` にも何も出ません。このコマンドは「提示されて拒否されたクレーム」を一覧するものであり、ここではそもそも何も提示されていないからです。
+- さらに、後述の *インシデント対応: 登録すべきでなかったクレームが登録されてしまった場合* にある吸収の経路を準備してしまいます — これらのユーザーにクレームが解決した瞬間、各人の個人データ一式がテナントへその場で移行されます。
+
+**SAML サインイン — テナントはアサーション内の属性ではなく、接続そのものに紐づけてください。** SAML には、Google の `hd` に相当する「デプロイ全体で使える検証済みクレームキー」は存在しません。このアプリに届く SAML 属性はすべてカスタマー自身の IdP がアサートした値であり、`saml-jackson` はデプロイ全体で共有される単一の OIDC クライアントであるため、クレームの名前空間をアサートした接続に紐づける仕組みがありません。したがって:
+
+- IdP が SAML 経由でアサートする属性（例: `organization`）を指定してよいのは、このデプロイが SSO 接続を **1 つ**しかプロビジョニングしていない場合**に限り**ます。その場合、その接続を通じてアサートできるのは当該カスタマーの IdP だけです。
+- SSO 接続が **2 つ以上**プロビジョニングされていると、あるカスタマーの IdP 管理者が別のカスタマーの登録済みクレーム文字列をアサートし、そのテナントを選択できてしまいます。接続を作るかどうかはオペレーターが制御できますが、その接続を通じて何がアサートされるかはカスタマー自身の IdP が制御します — この攻撃が成立するには後者だけで十分です。
+- 複数カスタマーを SAML で収容する場合の答えは**接続単位のテナント紐づけ**です — アサーション内の属性ではなく、どの SSO 接続から届いたサインインかでテナントを決める方式です。現在のデプロイ構成はこの紐づけを提供していないため、それが利用できるようになるまでは、SSO 接続はデプロイあたり 1 つに保ち（カスタマーごとに Jackson OIDC クライアントを分けた別デプロイにし）、登録済みクレームは `tenant-domain list` で確認してください。
+
+以上はいずれも、Google の `hd` のみに依存するデプロイ（本節が想定するインシデントの形）では発生しません。
+
+**インシデント対応: 登録すべきでなかったクレームが登録されてしまった場合**。`tenant-domain remove` は行を削除せず（`revokedAt`）論理削除します — 先に削除してしまうと `tenant_claims.createdAt` が失われ、これは以下のクエリが必要とする 2 つのタイムスタンプの一方であるため、実際のインシデント対応の手順では実行できなくなってしまいます。行を削除しても、それが既に許可した内容は取り消されません:
+
+- **新規メンバー**: そのクレームが有効だった期間に作成された `TenantMember` 行を列挙します:
+  ```sql
+  SELECT tm.tenant_id, tm.user_id, tm.created_at AS member_created_at
+  FROM tenant_members tm
+  JOIN tenant_claims tc ON tc.tenant_id = tm.tenant_id AND tc.claim = '<claim>'
+  WHERE tm.created_at >= tc.created_at
+    AND (tc.revoked_at IS NULL OR tm.created_at <= tc.revoked_at);
+  ```
+- **個人保管庫の吸収**: ブートストラップテナントのユーザーが、そのクレームを提示して初めてサインインすると、そのユーザーの**個人データ一式**が 1 つのトランザクションでテナントへ再割り当てされます — `User`/`Account`、`passwordEntry`、`tag`、`folder`、`session`、`extensionToken`、`passwordEntryHistory`、`vaultKey`、`audit_logs`（`audit_log_tenant_migrate` プロシージャ経由）、`emergencyAccessGrant`、`emergencyAccessKeyPair`、`passwordShare`、`shareAccessLog`、`attachment`、`notification`、`apiKey`、`webAuthnCredential`、そして `TenantMember`（`src/auth.ts` のブートストラップ移行ブロックを参照）。いずれのテーブルも**その場で**更新され、以前の `tenantId` を記録する履歴テーブルは存在しません。しかも移行されたユーザー自身の `audit_logs` 行も同じトランザクションで新テナントへ再割り当てされるため、データベース上には「これは以前テナント X に属していた」ことを示す記録が一切残りません。**このケースは復元不能な可能性があります。** 得られる手がかりは状況証拠にとどまります — 当該ユーザーの `AUTH_LOGIN` 行（クレームが有効だった時間帯の `audit_logs`）を、削除したクレームの `tenant_claims.createdAt` / `revokedAt` と突き合わせるのが最も近い方法です。
 
 ### 3. サービスの起動
 

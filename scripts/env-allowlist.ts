@@ -283,6 +283,21 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     reviewedAt: "2026-04-24",
   },
   {
+    type: "literal",
+    key: "INTERNAL_TEST_VERIFIER_VERSION",
+    justification:
+      "Test seam, not operator configuration: src/lib/crypto/verifier-version.ts overrides " +
+      "VERIFIER_VERSION only when NODE_ENV === 'test'. Read directly by non-test code, so " +
+      "check 9 would otherwise flag it — readByApp: true documents the exception.",
+    consumers: [
+      "src/lib/crypto/verifier-version.ts",
+      "src/lib/crypto/verifier-version.test.ts",
+      "src/__tests__/db-integration/pepper-dual-version.integration.test.ts",
+    ],
+    reviewedAt: "2026-07-29",
+    readByApp: true,
+  },
+  {
     type: "regex",
     // V11..V100: variadic verifier pepper slots not modeled as explicit Zod fields.
     // V2..V10 are explicit in env-schema.ts; V11+ use this allowlist entry.

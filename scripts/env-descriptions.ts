@@ -24,6 +24,9 @@ export const GROUPS = [
   "Sentry",
   "Tailscale",
   "Extension trust path",
+  "Break Glass",
+  "iOS Universal Links",
+  "Resource quotas",
   "Operational",
 ] as const;
 
@@ -142,6 +145,14 @@ export const descriptions: Record<
       "Optional — prefer AUTH_URL for new deployments.",
     example: "http://localhost:3000",
   },
+  COOKIE_PARTITIONED: {
+    group: "Auth",
+    order: 4,
+    description:
+      "Opt in to the Partitioned (CHIPS) session-cookie attribute. Default: false.\n" +
+      "Has no effect outside third-party iframe contexts; requires Secure cookies.",
+    example: "false",
+  },
 
   // ── Auth providers ────────────────────────────────────────────────────────
 
@@ -194,7 +205,17 @@ export const descriptions: Record<
     order: 7,
     description:
       "Comma-separated JWT claim keys used to extract the tenant identifier\n" +
-      "from the OIDC token (e.g. 'tenant,org_id').",
+      "from the OIDC token (e.g. 'tenant,org_id'). Leaving this unset selects a\n" +
+      "list of self-asserted profile attributes (tenant_id, tenantId,\n" +
+      "organization, org, company, company_id), tried before Google's attested\n" +
+      "'hd' claim — it does NOT mean 'hd only'.\n" +
+      "'hd' is GOOGLE-ONLY: it is honoured only when the account's provider is\n" +
+      "google, so on a SAML deployment AUTH_TENANT_CLAIM_KEYS=hd resolves no\n" +
+      "claim for any sign-in — nothing is denied, and first-time users are\n" +
+      "created in their own personal bootstrap tenant as OWNER instead of\n" +
+      "joining the org's tenant. For SAML, name the attribute your IdP asserts\n" +
+      "and provision only ONE SSO connection per deployment; see the README\n" +
+      "section 'IdP domain changed / tenant locked out' before setting this.",
     example: "tenant",
   },
   SAML_PROVIDER_NAME: {
@@ -547,6 +568,23 @@ export const descriptions: Record<
     order: 3,
     description: "Application name tag embedded in forwarded audit log entries. Default: passwd-sso.",
     example: "passwd-sso",
+  },
+  AUDIT_IDENTIFIER_PEPPER: {
+    group: "Logging",
+    order: 4,
+    description:
+      "HMAC pepper for hashing the identifier recorded on AUTH_LOGIN_FAILURE\n" +
+      "audit events. 64-character hex string (256 bits, npm run generate:key);\n" +
+      "anything else is refused at boot — too short, too long, or the right\n" +
+      "length but not hex. Changing this value changes the HMAC key, so hashes\n" +
+      "written afterwards no longer correlate with existing audit rows.\n" +
+      "Optional override — when unset, the pepper is derived from\n" +
+      "AUTH_SECRET via HKDF, so production always has real key material. Only if\n" +
+      "neither is available is no hash computed at all (identifierHash: null,\n" +
+      "identifierHashScope: \"unkeyed\", warned once) — there is no empty-key\n" +
+      "fallback, because an unkeyed hash over an email input space is a lookup,\n" +
+      "not a protection.",
+    secret: true,
   },
 
   // ── Health ────────────────────────────────────────────────────────────────
@@ -991,6 +1029,67 @@ export const descriptions: Record<
       "Local filesystem path for self-hosted operators without AWS/GitHub.\n" +
       "Operator's responsibility to mirror to their own immutable store.",
     example: "/var/audit-anchors",
+  },
+
+  // ── Break Glass ───────────────────────────────────────────────────────────
+
+  BREAKGLASS_COOLING_OFF_SECONDS: {
+    group: "Break Glass",
+    order: 1,
+    description:
+      "Delay (seconds) before a first same-requester/target Break Glass grant\n" +
+      "in a 24h window executes. Default: 3600. Set to 0 to disable.",
+    example: "3600",
+  },
+
+  // ── iOS Universal Links ──────────────────────────────────────────────────
+
+  IOS_APP_TEAM_ID: {
+    group: "iOS Universal Links",
+    order: 1,
+    description:
+      "Apple Developer Team ID (10-char string). Required for the AASA route\n" +
+      "to serve iOS Universal Links; the route returns 503 when unset.",
+    // No `example` on purpose: init:env offers it as the Enter-through
+    // default, so a placeholder Team ID would be written to .env and the AASA
+    // route would publish an appID no installed app owns — Universal Links
+    // then fail silently instead of reporting "not configured" (round-1
+    // Func F6).
+  },
+  IOS_APP_BUNDLE_ID: {
+    group: "iOS Universal Links",
+    order: 2,
+    description:
+      "iOS app bundle identifier. Default: jp.jpng.passwd-sso, matching\n" +
+      "PRODUCT_BUNDLE_IDENTIFIER in ios/project.yml.",
+    example: "jp.jpng.passwd-sso",
+  },
+
+  // ── Resource quotas ───────────────────────────────────────────────────────
+
+  QUOTA_MAX_PASSWORDS_PER_USER: {
+    group: "Resource quotas",
+    order: 1,
+    description: "Maximum password entries per user (C18 / OWASP A04-1). Default: 10000.",
+    example: "10000",
+  },
+  QUOTA_MAX_ATTACHMENT_BYTES_PER_USER: {
+    group: "Resource quotas",
+    order: 2,
+    description: "Maximum total attachment bytes per user. Default: 1073741824 (1 GiB).",
+    example: "1073741824",
+  },
+  QUOTA_MAX_SHARE_LINKS_PER_USER: {
+    group: "Resource quotas",
+    order: 3,
+    description: "Maximum active share links per user. Default: 1000.",
+    example: "1000",
+  },
+  QUOTA_MAX_WEBHOOKS_PER_TENANT: {
+    group: "Resource quotas",
+    order: 4,
+    description: "Maximum webhooks (tenant + team combined) per tenant. Default: 100.",
+    example: "100",
   },
 
   // ── Operational ───────────────────────────────────────────────────────────

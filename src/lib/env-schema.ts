@@ -26,6 +26,7 @@ import {
   MS_PER_MINUTE,
   MS_PER_SECOND,
   SEC_PER_DAY,
+  SEC_PER_HOUR,
   SEC_PER_MINUTE,
 } from "@/lib/constants/time";
 
@@ -230,6 +231,13 @@ export const envObject = z.object({
     .optional(),
   // Legacy Auth.js v4 name; referenced as fallback in src/app/api/sessions/helpers.ts:10
   NEXTAUTH_URL: nonEmpty.optional(),
+  // A07-6 (CHIPS): opt-in Partitioned attribute on the session cookie. Read
+  // directly by src/auth.config.ts, not through the validated `env`
+  // singleton — declared here for documentation/drift-check parity only.
+  COOKIE_PARTITIONED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((v) => v === "true"),
 
   // --- Auth providers (superRefine: at least one provider set in prod) ---
   AUTH_GOOGLE_ID: nonEmpty.optional(),
@@ -238,7 +246,39 @@ export const envObject = z.object({
   AUTH_JACKSON_SECRET: nonEmpty.optional(),
   JACKSON_URL: nonEmpty.optional(),
   GOOGLE_WORKSPACE_DOMAINS: z.string().optional(),
-  AUTH_TENANT_CLAIM_KEYS: z.string().optional(),
+  // Fails closed at boot on a value that names no usable key, or names one
+  // twice (round-6, raised independently by Codex). The parser used to filter
+  // empty entries away and return `[]`, so `","` behaved exactly like leaving
+  // the variable unset — falling through to the Google-only `hd` fallback,
+  // which on a SAML deployment resolves no claim for any sign-in and creates
+  // first-time users in their own bootstrap tenant as OWNER. An operator who
+  // configured a claim-key list must not silently get the behaviour of having
+  // configured none.
+  //
+  // `parseTenantClaimKeys` enforces the same predicate a second time, for
+  // processes that never parse this schema (the same asymmetry D-23 records for
+  // the pepper floor).
+  //
+  // Deliberately narrower than the reviewer asked for: Codex also wanted
+  // duplicates and stray empty entries rejected. Neither has a failure mode —
+  // a repeated key is read twice and takes effect once, and `org,,tenant` names
+  // exactly the two keys it appears to — so rejecting them would be a boot
+  // failure for configurations that work today, which is a breaking change with
+  // nothing behind it. The predicate is exactly the case whose behaviour is
+  // wrong.
+  AUTH_TENANT_CLAIM_KEYS: z
+    .string()
+    .optional()
+    .refine(
+      (v) => {
+        if (v === undefined || v.trim() === "") return true;
+        return v.split(",").some((k) => k.trim().length > 0);
+      },
+      {
+        message:
+          "AUTH_TENANT_CLAIM_KEYS is set but names no claim key (leave it unset for the default list)",
+      },
+    ),
   SAML_PROVIDER_NAME: z.string().default("SSO"),
 
   // --- Email (Magic Link / Resend / SMTP) ---
@@ -260,6 +300,16 @@ export const envObject = z.object({
     .default("false")
     .transform((v) => v === "true"),
   AUDIT_LOG_APP_NAME: z.string().default("passwd-sso"),
+  // Secret HMAC pepper for auth-failure audit identifier hashing
+  // (src/lib/audit/auth-failure.ts). Optional OVERRIDE — when unset the pepper
+  // is HKDF-derived from AUTH_SECRET, so production always has real key
+  // material. Only when neither is available is no hash computed at all
+  // (identifierHash: null, identifierHashScope: "unkeyed"). There is
+  // deliberately no empty-key fallback: an unkeyed hash over an email input
+  // space is a lookup, not a protection — and by the same argument the
+  // override carries the same 256-bit floor as every other secret here, so a
+  // one-character value cannot pose as key material (round-1 Sec F5).
+  AUDIT_IDENTIFIER_PEPPER: hex64.optional(),
 
   // --- Conditional: Cloud blob storage ---
   AWS_REGION: nonEmpty.optional(),
@@ -360,6 +410,39 @@ export const envObject = z.object({
   TAILSCALE_SOCKET: z.string().optional(),
   // SENTRY_DSN public-key segment is project-sensitive — sidecar marks secret: true.
   SENTRY_DSN: z.string().optional(),
+
+  // --- Break Glass cooling-off (C19 / OWASP A04-5) ---
+  // Delay in seconds before a first same-requester/target Break Glass grant
+  // in a 24h window executes; 0 disables the delay. Read directly by
+  // src/app/api/tenant/breakglass/route.ts, not through the validated env.
+  BREAKGLASS_COOLING_OFF_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(SEC_PER_HOUR),
+
+  // --- iOS Universal Links ---
+  // Per-deployment Apple values consumed by
+  // src/app/api/mobile/.well-known/apple-app-site-association/route.ts.
+  // No sensible default for TEAM_ID — the route degrades to 503 when unset.
+  IOS_APP_TEAM_ID: z.string().optional(),
+  // Matches PRODUCT_BUNDLE_IDENTIFIER in ios/project.yml (the PasswdSSOApp
+  // target) — the route's appIDs must associate with the installed app.
+  IOS_APP_BUNDLE_ID: z.string().default("jp.jpng.passwd-sso"),
+
+  // --- Resource quotas (C18 / OWASP A04-1) ---
+  // Per-resource soft caps read via a locally-defined envInt() helper in
+  // src/lib/quota/resource-quotas.ts (shadows the exported prisma.ts
+  // helper of the same name — a lexical scan, not a symbol-resolving one,
+  // still finds these call sites).
+  QUOTA_MAX_PASSWORDS_PER_USER: z.coerce.number().int().min(1).default(10_000),
+  QUOTA_MAX_ATTACHMENT_BYTES_PER_USER: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(1_073_741_824),
+  QUOTA_MAX_SHARE_LINKS_PER_USER: z.coerce.number().int().min(1).default(1_000),
+  QUOTA_MAX_WEBHOOKS_PER_TENANT: z.coerce.number().int().min(1).default(100),
 
   // --- Extension trust path (C1) ---
   // Allowlist of chrome-extension origins permitted to call /api/extension/bridge-code.

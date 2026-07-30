@@ -333,6 +333,19 @@ export const EXTERNAL_DELIVERY_METADATA_BLOCKLIST = new Set([
   // Network identifiers stay in top-level columns; strip if accidentally written into metadata
   "ip",
   "userAgent",
+  // AUTH_LOGIN_FAILURE's IdP claim (C6) — same sensitivity class as `reason`,
+  // which this list already strips; withholding one and forwarding the other
+  // would be an asymmetry decided by omission.
+  "claim",
+  // The sibling field `claim` was split into (round-5 S2). It carries no
+  // organisational data of its own — it names which ingest rule the asserted
+  // value broke — but it is only meaningful ALONGSIDE the claim, and the claim
+  // is stripped. Forwarding a bare "the value was refused for containing
+  // U+200B" to a tenant-configured endpoint tells that endpoint an
+  // authentication was attempted and mangled, which is the same disclosure
+  // `reason` is withheld for. Stripped, by the same argument that put `claim`
+  // here rather than by default.
+  "claimRefusal",
 ]);
 
 /**

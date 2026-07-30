@@ -14,11 +14,12 @@
  *   /.well-known/apple-app-site-association
  *     → /<basePath>/api/mobile/.well-known/apple-app-site-association
  *
- * Operator deployment env vars (NOT in the Zod schema — these are per-bundle
- * values set at deploy time):
+ * Operator deployment env vars (declared .optional() in the Zod schema —
+ * per-bundle values set at deploy time, no meaningful global default):
  *
  *   IOS_APP_TEAM_ID   — Apple Developer Team ID (10-char string, e.g. ABCDE12345)
- *   IOS_APP_BUNDLE_ID — App bundle identifier (default: com.passwd-sso)
+ *   IOS_APP_BUNDLE_ID — App bundle identifier (default: jp.jpng.passwd-sso,
+ *                       matching PRODUCT_BUNDLE_IDENTIFIER in ios/project.yml)
  */
 
 import { NextResponse } from "next/server";
@@ -26,7 +27,7 @@ import { BASE_PATH } from "@/lib/url-helpers";
 
 export const runtime = "nodejs";
 
-const DEFAULT_BUNDLE_ID = "com.passwd-sso";
+const DEFAULT_BUNDLE_ID = "jp.jpng.passwd-sso";
 
 export function GET() {
   const teamId = process.env.IOS_APP_TEAM_ID;

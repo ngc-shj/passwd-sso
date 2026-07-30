@@ -18,6 +18,7 @@ import {
 } from "@/lib/crypto/crypto-server";
 import type { ServerEncryptedData } from "@/lib/crypto/crypto-server";
 import { logAuditAsyncBothScopes } from "@/lib/audit/audit";
+import { UNSAFE_DISPLAY_CHARS_RE } from "@/lib/security/unsafe-display-chars";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { SEC_PER_MINUTE, SEC_PER_HOUR } from "@/lib/constants/time";
 
@@ -119,22 +120,16 @@ export function toAgentFacing(
 /**
  * Sanitization for client-supplied display metadata at the storage boundary.
  * Rejects characters that AI agents typically interpret as instruction
- * delimiters or that enable homoglyph attacks on display surfaces:
- *  - ASCII control chars + DEL (\x00-\x1F, \x7F)
- *  - Unicode bidi overrides (‪-‮, ⁦-⁩)
- *  - Line/Paragraph separators ( ,  )
- *  - Zero-width chars (​-‍, ⁠, ﻿, ᠎)
+ * delimiters or that enable homoglyph attacks on display surfaces — the
+ * shared UNSAFE_DISPLAY_CHARS_RE class (control, bidi and invisible
+ * formatting characters).
  *
  * Returns true if the string is safe. Returns false to trigger a 400 at
  * the POST /api/vault/delegation boundary.
  */
-// Intentional rejection of control characters and invisible/bidi formatting.
-const UNSAFE_METADATA_CHARS_RE =
-  /[\x00-\x1F\x7F\u202A-\u202E\u2066-\u2069\u2028\u2029\u200B-\u200D\u2060\uFEFF\u180E]/;
-
 export function isSafeMetadataString(s: string | null | undefined): boolean {
   if (s == null) return true;
-  return !UNSAFE_METADATA_CHARS_RE.test(s);
+  return !UNSAFE_DISPLAY_CHARS_RE.test(s);
 }
 
 export async function storeDelegationEntries(

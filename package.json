@@ -52,6 +52,7 @@
     "worker:retention-gc": "tsx scripts/retention-gc-worker.ts",
     "worker:audit-chain-verify": "tsx scripts/audit-chain-verify-worker.ts",
     "migrate:account-tokens": "tsx scripts/migrate-account-tokens-to-encrypted.ts",
+    "tenant-domain": "tsx scripts/tenant-domain.ts",
     "generate:env-example": "tsx scripts/generate-env-example.ts",
     "check:env-docs": "tsx scripts/check-env-docs.ts",
     "generate:security-matrices": "tsx scripts/generate-security-matrices.ts",

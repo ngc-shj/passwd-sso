@@ -4,13 +4,21 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
-import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";
+import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
+import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
+import {
+  CLAIM_REFUSAL_REASON,
+  toAuditProvider,
+  type ClaimRefusalKind,
+} from "@/lib/audit/auth-failure-mapping";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
@@ -23,6 +31,61 @@ import {
   DECRYPT_FAILURE_KIND,
 } from "@/lib/crypto/account-token-crypto";
 import logger from "@/lib/logger";
+
+/**
+ * Refusal of a presented tenant claim, thrown from inside `createUser`'s
+ * transaction so the whole thing rolls back. Carries the refusal ARM, not just
+ * the fact of refusal: the arms map to different audit reasons and
+ * different operator remedies (CLAIM_REFUSAL_REASON), and a bare
+ * `Error("TENANT_CLAIM_UNUSABLE")` collapsed them again — round-1 M2, one
+ * layer down. The message is unchanged so existing log greps still match.
+ */
+export class TenantClaimUnusableError extends Error {
+  /**
+   * Widened from `ClaimResolutionRefusalKind` to the whole `ClaimRefusalKind`
+   * set in round 6 (F3/SEC-R6-1), so the propagation failure below can name
+   * itself instead of borrowing a resolution arm's word for it.
+   */
+  readonly kind: ClaimRefusalKind;
+  /**
+   * The tenant that already owns the claim — the revoked row's owner for
+   * `claim_taken`, the folded `external_id` owner for `claim_collision`,
+   * null for `claim_invalid` (no tenant exists for an unstorable claim) and for
+   * `store_unavailable` (no claim reached the resolver at all).
+   *
+   * It rides on the error because the audit emit below NEEDS it: a
+   * first-ever sign-in has no user row, so logAuditAsync -> resolveTenantId
+   * falls back to a users lookup on SYSTEM_ACTOR_ID, finds nothing, and
+   * returns WITHOUT enqueuing. Emitting without a tenantId therefore writes
+   * neither an audit_logs nor an audit_outbox row, and `tenant-domain
+   * unmapped` — which groups by tenant_id on both — stays blind to exactly
+   * the lockout it exists to diagnose.
+   */
+  readonly tenantId: string | null;
+  /**
+   * Which rule the value broke, for the arms that know (`claim_invalid`).
+   *
+   * It rides along for the same reason `tenantId` does: `tenant-domain unmapped`
+   * buckets on whether `metadata.claimRefusal` is set, so dropping it here would
+   * file a first-ever sign-in's unstorable-claim denial under "registered to a
+   * DIFFERENT tenant — move it with `add --from`", while the identical denial on
+   * the existing-user path (src/auth.ts) was filed correctly. That asymmetry is
+   * the shape of round-4 F1, round-5 F2 and round-6 F1 (SEC-R6-3 / F1).
+   */
+  readonly refusal: ClaimRefusalDiagnosis | null;
+
+  constructor(
+    kind: ClaimRefusalKind,
+    tenantId: string | null,
+    refusal: ClaimRefusalDiagnosis | null = null,
+  ) {
+    super("TENANT_CLAIM_UNUSABLE");
+    this.name = "TenantClaimUnusableError";
+    this.kind = kind;
+    this.tenantId = tenantId;
+    this.refusal = refusal;
+  }
+}
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -164,25 +227,94 @@ export function createCustomAdapter(): Adapter {
     ): Promise<AdapterUser> {
       // Read tenant claim stored by signIn callback (e.g. Google hd).
       // If present, place user directly into the SSO tenant.
-      const pendingClaim = tenantClaimStorage.getStore()?.tenantClaim ?? null;
+      // Round-5 S1 — the FIFTH site of the overloaded-signal class, and the
+      // one where the OWNER grant below actually happens. `?? null` collapsed
+      // "the deployment could not propagate a claim" (no ALS store) into "the
+      // IdP asserted no claim", and `pendingClaim === null` is the predicate
+      // that selects the bootstrap branch AND `TENANT_ROLE.OWNER`. Round 4
+      // closed the PRODUCER of this signal (src/auth.ts's signIn callback) on
+      // the grounds that a test pinning the fall-through is how a future entry
+      // point inherits it — and left the consumer reading the same overloaded
+      // value. The two callbacks read the ALS independently, so a context lost
+      // between them passes the producer's guard and lands here.
+      const claimStore = tenantClaimStorage.getStore();
+      const pendingClaim = claimStore?.tenantClaim ?? null;
 
       const created = await withBypassRls(prisma, async (tx) => {
-        // Resolve SSO tenant, then create tenant/user/member — all on the single
-        // withBypassRls tx (no redundant inner $transaction).
-        let ssoTenant: { id: string } | null = null;
-        if (pendingClaim) {
-          ssoTenant = await findOrCreateSsoTenant(pendingClaim, tx);
+        // Fail closed INSIDE the transaction, so the refusal takes the same
+        // route as every other one: the `.catch` below turns it into an audit
+        // emit, and aborting the tx means no user, no tenant and above all no
+        // OWNER membership survives. Throwing before `withBypassRls` would
+        // skip that catch and make the denial silent — which is the property
+        // this guard exists to provide.
+        //
+        // `store_unavailable`, not `claim_invalid` (round-6 F3/SEC-R6-1). The
+        // PRODUCER of this signal — src/auth.ts's signIn callback, D-40 — emits
+        // `provider_error` for the identical condition, so the two ends of one
+        // signal were answering one predicate in two judgement vocabularies
+        // (R48) and the consumer's was factually wrong: `claim_invalid` is
+        // defined as "the claim failed storableClaimSchema", and no resolution
+        // runs on this path. The resulting row also carried neither `claim` nor
+        // `claimRefusal`, so it matched none of the three rows in the READMEs'
+        // cause table and fell outside `tenant-domain unmapped`'s filter — a
+        // denial shaped so that nothing could report it. `provider_error` puts
+        // it where a deployment fault belongs.
+        if (!claimStore) {
+          throw new TenantClaimUnusableError("store_unavailable", null);
         }
 
-        const tenant = ssoTenant
-          ?? await tx.tenant.create({
-              data: {
-                name: user.email ?? user.name ?? "User",
-                slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, BOOTSTRAP_SLUG_HASH_LENGTH)}`,
-                isBootstrap: true,
-              },
-              select: { id: true },
-            });
+        // Resolve SSO tenant, then create tenant/user/member — all on the single
+        // withBypassRls tx (no redundant inner $transaction).
+        //
+        // The bootstrap fall-through below keys off whether a claim was
+        // PRESENTED, not off whether resolution produced a tenant. Those were
+        // the same question while the resolver returned `{ id } | null`, and
+        // conflating them was round-1 M1: a claim whose tenant_claims row an
+        // operator had deliberately revoked read as "no claim", so the user
+        // got a fresh bootstrap tenant as OWNER, with no
+        // tenant_claim_unmapped audit row to show it — and their next sign-in
+        // absorbed that estate into the real tenant via the bootstrap
+        // migration. An unusable claim now fails the sign-in closed.
+        let tenant: { id: string };
+        if (pendingClaim) {
+          const resolution = await findOrCreateTenantForClaim(pendingClaim, tx);
+          if (resolution.kind !== "tenant") {
+            // Revoked claim row (D2), folded external_id collision (F-A), or
+            // storableClaimSchema reject (SC9). In every case the claim is not
+            // this deployment's to hand out, and the operator's remedy is in
+            // `tenant-domain`, not in a new tenant. Throwing aborts the
+            // withBypassRls tx, so no user, no tenant, and no membership row
+            // survives; the arm travels on the error so the catch below can
+            // audit it as itself.
+            //
+            // Observability differs by arm, and the difference is inherent
+            // rather than an oversight (round-3 S3-4). `claim_taken` and
+            // `claim_collision` carry the owning tenant, so their emit binds
+            // and lands in audit_logs/audit_outbox. `claim_invalid` has no
+            // owning tenant by construction — an unstorable claim belongs to
+            // nobody — and a first-ever sign-in has no user row either, so
+            // resolveTenantId finds nothing and logAuditAsync DEAD-LETTERS it:
+            // the synchronous structured log line is the durable record. There
+            // is nothing to bind it to; stating that is the honest position,
+            // and inventing a binding would file the denial under a tenant
+            // that has nothing to do with it.
+            throw new TenantClaimUnusableError(
+              resolution.kind,
+              resolution.tenantId,
+              resolution.kind === "claim_invalid" ? resolution.refusal : null,
+            );
+          }
+          tenant = { id: resolution.id };
+        } else {
+          tenant = await tx.tenant.create({
+            data: {
+              name: user.email ?? user.name ?? "User",
+              slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, BOOTSTRAP_SLUG_HASH_LENGTH)}`,
+              isBootstrap: true,
+            },
+            select: { id: true },
+          });
+        }
 
         const createdUser = await tx.user.create({
           data: {
@@ -205,12 +337,42 @@ export function createCustomAdapter(): Adapter {
           data: {
             tenantId: tenant.id,
             userId: createdUser.id,
-            role: ssoTenant ? "MEMBER" : "OWNER",
+            // OWNER only on the no-claim bootstrap path — same predicate as
+            // the tenant selection above, for the same M1 reason.
+            role: pendingClaim ? TENANT_ROLE.MEMBER : TENANT_ROLE.OWNER,
           },
         });
 
         return createdUser;
-      }, BYPASS_PURPOSE.AUTH_FLOW);
+      }, BYPASS_PURPOSE.AUTH_FLOW).catch(async (error: unknown) => {
+        // Round-2 M1's other half. Aborting the transaction closes the write
+        // side, but on a first-ever sign-in nothing reports the refusal:
+        // src/auth.ts's signIn callback returns early when no user row exists
+        // yet, so its emitAuthLoginFailure never runs, and Auth.js turns this
+        // throw into an AdapterError. Probing a deliberately revoked claim
+        // therefore left NO AUTH_LOGIN_FAILURE row at all, and
+        // `tenant-domain unmapped` — which filters
+        // metadata.reason = 'tenant_claim_unmapped' — showed nothing (A09).
+        //
+        // The emit must stay HERE, after withBypassRls has settled:
+        // emitAuthLoginFailure -> logAuditAsync resolves a tenant through its
+        // own withBypassRls, and nesting that inside the still-open
+        // transaction is the R9 pool-exhaustion shape recorded on
+        // SignInTenantResult in src/auth.ts.
+        if (error instanceof TenantClaimUnusableError) {
+          await emitAuthLoginFailure({
+            email: user.email ?? null,
+            provider: toAuditProvider(sessionMetaStorage.getStore()?.provider),
+            reason: CLAIM_REFUSAL_REASON[error.kind],
+            claim: pendingClaim,
+            claimRefusal: error.refusal,
+            // Binds the row so logAuditAsync enqueues instead of
+            // dead-lettering (see TenantClaimUnusableError.tenantId).
+            tenantId: error.tenantId,
+          });
+        }
+        throw error;
+      });
       if (!created.email) {
         throw new Error("USER_EMAIL_MISSING");
       }
