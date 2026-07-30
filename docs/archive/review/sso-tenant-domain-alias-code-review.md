@@ -695,3 +695,98 @@ hour against a `next_retry_at <= now()` predicate.
 - Unit: **997 files / 13,683 passed**, 1 skipped.
 - Integration, worker container live: **95 files / 437 passed**, 1 skipped,
   4 todo — no failures this run.
+
+---
+
+# Round 5 — findings and resolution
+
+Reviewed `c69d075ff..68ad007df` — round 4's changes only. The commit split made
+this the first strictly incremental round: 24 files, 2,676 lines, with the
+"anything outside this delta was reviewed in rounds 1-4" instruction that the
+earlier rounds could not give.
+
+**9 Majors (after convergence) and 13 Minors — the same count as round 4**, and
+again mostly against the previous round's fixes.
+
+The Ollama security seed produced five entries that all described the *pre-fix*
+state and recommended what the code already did; the orchestrator flagged that
+before dispatch and the expert rejected all five with evidence, finding two
+Majors of its own by execution instead.
+
+## Convergence
+
+| # | Finding | Func | Sec | Test | Merged |
+|---|---|---|---|---|---|
+| M1 | `unmapped` buckets on `reason`, printing a row-7 mismatch under "the remedy is at the IdP" | F1 Major | S3 Minor | — | **Major** |
+| M2 | `refusalTenantId` widened to a structural type, erasing the enumeration | F5 Minor | S4 Minor | T10 Minor | **Minor** |
+| M3 | Operator input echoed unescaped beside escaped values | F10 Minor | S5 Minor | — | **Minor** |
+
+## Majors
+
+### S2 [Major, Security] The refusal diagnosis was forgeable by the actor it describes
+`refused: contains U+200B` is printable ASCII under the cap, so it passes the
+ingest boundary as an ordinary claim — verified. Both READMEs told the operator
+to key their remedy on that prefix. **Fixed** by moving the diagnosis to
+`metadata.claimRefusal`; see D-41. This one decision also dissolves F1/S3.
+
+### F1 + S3 [Major, converged] The bucket split sent row 7 to the wrong remedy
+`tenant_mismatch` has three producers and only one is refused-at-ingest.
+**Fixed**: three buckets discriminated by the new field, three headings, three
+counts in the summary — and the query's `WHERE claim IS NOT NULL` widened, or
+the refusal population (which now carries no claim) would have vanished again.
+
+### F2 [Major] The attribution fix omitted `claim_collision`
+**Fixed** by deriving the owner from the arms (`lookupOwnerId`), with
+`collision` added to `ClaimLookup`. See D-42.
+
+### F3 [Major] Rows 7/9b and row 8b adjudicated "is this registrable?" differently
+**Fixed**: `unstorable` is a `ClaimLookup` arm, and `lookupRefusalReason` is the
+single mapping. See D-42.
+
+### F4 [Major] A non-ASCII-whitespace-only claim denied every sign-in
+My own round-4 regression, at the one member the round-4 parameterisation did
+not sample. **Fixed**; see D-43. Verified before and after against `main`.
+
+### S1 [Major, Security] The fifth site of the overloaded-signal class
+`createUser`'s `?? null`, at the OWNER grant. **Fixed**; see D-44.
+
+### T1 [Major, Testing] Round-4's `.toWellFormed()` guard had no test — and the path was still live
+Removing it left 388 tests green, and the expert's probe showed a lone
+surrogate reaches the boundary as a **valid** claim, not only through the
+rendering round 4 removed. **Fixed**: refused at ingest (D-43) *and* four tests
+at the audit boundary, including the mid-surrogate-pair truncation case.
+
+### T2 [Major, Testing] Round-4's `claimOwnerId` had no test
+Nulling it left 207 tests green; no fixture anywhere produced a `revoked`
+lookup. **Fixed**: parameterised over `revoked` and `collision`, asserting the
+denial is filed under the CLAIM's owner and not the user's tenant.
+
+### T3 [Major, Testing] Round-4's `cmdUnmapped` SQL change had no test
+Reverting either UNION predicate, or deleting the second print group, left the
+integration file 39/39 green — the new coverage was two pure-formatter cases
+fed hand-written rows (RT5). **Fixed**: the seeding block gains a refused-at-
+ingest row and a row-7 row. **Red-proved on throwaway copies**: reverting the
+reason predicate reds it, narrowing the NOT NULL filter reds it, and the
+unmutated copy is green.
+
+## Minors — all fixed
+M2 (`refusalTenantId`'s `tenantId` is required again); M3 (all five operator
+echoes escaped); F6 (the empty-result message names all three classes); F7 (the
+duplicate-flag message no longer explains `--yes` in terms of tenant
+reassignment); F8 + F9 (D-28 and D-27 corrected in place — D-27 for the **second**
+time, and this round's correction records the residual it had been eliding);
+T4 (a test that could not fail for its named reason, split into the parse case
+and the discriminating case); T5 (the tie-break fixture is now structural
+rather than incidental to heap order — the expert modelled the old one at
+149/300); T6 (two test names still describing the pre-round-4 contract); T7
+(the anti-drift derivation reads all three flag spellings and asserts each
+matched); T8 (the `Function.length` line is no longer described as the guard);
+T9 (a loop subsumed by the assertion above it, whose filter missed the shape it
+advertised catching).
+
+## Verification
+- `npx tsc --noEmit` exit 0; `npx next build` exit 0.
+- Unit: **997 files / 13,702 passed**, 1 skipped.
+- Integration, worker container live: **95 files / 437 passed**. One earlier
+  run showed `audit-outbox-atomicity` failing on the known D-24 worker race in
+  a file this PR does not touch; it passed on re-run.

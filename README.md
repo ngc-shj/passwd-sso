@@ -317,9 +317,9 @@ Symptom: after an IdP starts asserting a different tenant claim (a Google Worksp
 |---|---|---|---|
 | `tenant_claim_unmapped` | the claim | not registered to any tenant | `tenant-domain add` |
 | `tenant_mismatch` | the claim | registered to a *different* tenant | investigate the user, or `add --from` to move the claim |
-| `tenant_mismatch` | `refused: …` | the IdP's asserted value was **refused at ingest** — a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; the `refused: …` text names the rule the value broke |
+| `tenant_mismatch` | *(absent; `metadata.claimRefusal` is set instead)* | the IdP's asserted value was **refused at ingest** — an unpaired surrogate, a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; `claimRefusal` names the rule the value broke |
 
-`unmapped` reports the first and third under separate headings (the second only when its claim is recorded). Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
+Key the third case on the **field**, not on the text: `claimRefusal` is written only by the ingest boundary, whereas anything inside `claim` was supplied by the IdP and can be made to look like whatever the reader is told to trust. `unmapped` reports all three under separate headings. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
 
 ```bash
 # See which unregistered claims were denied recently (default window: 30 days)

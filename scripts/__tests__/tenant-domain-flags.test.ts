@@ -127,10 +127,25 @@ describe("tenant-domain flag parsing", () => {
     // the CLI: a flag `tenant-domain.ts` reads but never declared here is
     // refused at parse time, so the operator's instruction silently never
     // reaches the command. Derived by reading the CLI's own flag reads.
+    // Round-5 T7: all three spellings a flag can be read by, each asserted to
+    // have matched at least once. The union guard alone let one regex break
+    // silently, and `flags.has("x")` — the spelling parseFlags itself uses —
+    // was not matched at all.
     const cli = readFileSync(resolve(__dirname, "../tenant-domain.ts"), "utf8");
+    const SPELLINGS = [
+      /getStringFlag\(flags,\s*"([^"]+)"\)/g,
+      /flags\.get\("([^"]+)"\)/g,
+      /flags\.has\("([^"]+)"\)/g,
+    ];
     const read = new Set<string>();
-    for (const m of cli.matchAll(/getStringFlag\(flags,\s*"([^"]+)"\)/g)) read.add(m[1]);
-    for (const m of cli.matchAll(/flags\.get\("([^"]+)"\)/g)) read.add(m[1]);
+    for (const re of SPELLINGS) {
+      const found = [...cli.matchAll(re)].map((m) => m[1]);
+      // Every spelling must be exercised by the CLI, or its regex could rot
+      // unnoticed. `flags.has` is read in the parser, not the CLI, so it is
+      // allowed to be empty there — the other two are not.
+      if (re !== SPELLINGS[2]) expect(found.length, `${re}`).toBeGreaterThan(0);
+      found.forEach((f) => read.add(f));
+    }
 
     const declared = new Set<string>([...Object.keys(VALUE_FLAG_HINTS), ...BOOLEAN_FLAGS]);
     expect([...read].sort().filter((f) => !declared.has(f))).toEqual([]);

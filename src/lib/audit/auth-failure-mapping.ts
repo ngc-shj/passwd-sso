@@ -54,8 +54,9 @@ export type ClaimRefusalKind = ClaimResolutionRefusalKind | ClaimIngestRefusalKi
  *                   value is unstorable, so `tenant-domain add` cannot help
  *                   and surfacing it in `unmapped` would point the operator
  *                   at a command that must refuse. The fix is at the IdP, and
- *                   metadata.claim carries the escaped rendering that names
- *                   it. tenant_mismatch.
+ *                   `metadata.claimRefusal` — its OWN key, not a marker inside
+ *                   the attacker-supplied `metadata.claim` (round-5 S2) —
+ *                   names which rule the value broke. tenant_mismatch.
  *
  * The `satisfies` below is what forces a new arm to be classified here rather
  * than defaulting to whatever an index lookup happens to return — it is how

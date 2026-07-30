@@ -181,10 +181,34 @@ function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
   // stripping is what lets a non-ASCII input satisfy the CHECK.
   if (UNSAFE_DISPLAY_CHARS_RE.test(cleaned)) return malformed(describeUnsafeChars(cleaned));
 
+  // An unpaired surrogate is not text: it cannot round-trip through JSON or
+  // Postgres, and it is not a member of the unsafe class, not whitespace and
+  // usually under the cap — so before this arm it passed as a perfectly
+  // ordinary claim (round-5 T1, verified: `"acme\uD83D.example"` yielded
+  // `{kind:"claim"}` with `isWellFormed() === false`). It then reached
+  // `metadata.claim` verbatim, where a jsonb write fails with 22P02 and
+  // logAuditAsync swallows the row — the audit-suppression path round-4 S1
+  // closed for RENDERED values but not for accepted ones. Refused here as
+  // well as guarded at the audit boundary, because a value this deployment
+  // cannot store should not be adjudicating tenant membership either.
+  if (!cleaned.isWellFormed()) return malformed("ill-formed UTF-16 (unpaired surrogate)");
+
   // Whatever `.trim()` would still take off the ends, the ASCII trim did not —
   // U+00A0 and friends. `normalizeTenantClaim` runs `.trim()` downstream, so
   // letting these through means the value matched on is not the value
   // asserted.
+  //
+  // A value that is ENTIRELY such whitespace is `absent`, not malformed
+  // (round-5 F4). The rationale for the refusal is "the value matched on is
+  // not the value asserted", which presupposes there is a value to match on;
+  // `"　"` — a realistic unset-field artefact from a JP-locale IdP —
+  // normalises to the empty string, and both `main` and round 3 read it as
+  // absent. Refusing it denied every sign-in through that key, which is the
+  // NF2 lockout this branch exists to fix. This is the same
+  // per-sample-vs-derived miss that round-4 T2 reported: the parameterised
+  // whitespace fixtures covered the six ASCII members and never the non-ASCII
+  // whitespace-only shape.
+  if (cleaned.trim().length === 0) return ABSENT;
   if (cleaned !== cleaned.trim()) {
     return malformed("leading or trailing non-ASCII whitespace");
   }

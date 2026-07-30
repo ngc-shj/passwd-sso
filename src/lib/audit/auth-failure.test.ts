@@ -290,6 +290,97 @@ describe("emitAuthLoginFailure", () => {
     expect((metadata.claim as string).length).toBe(MAX_TENANT_CLAIM_LENGTH);
   });
 
+  /**
+   * Round-5 T1. `.toWellFormed()` was added in round 4 as the guard against an
+   * audit-suppression primitive — a lone surrogate makes the jsonb write fail
+   * with 22P02 and logAuditAsync swallows the whole row — and it shipped with
+   * NO test: removing it left 388 tests in this directory green, because the
+   * only fixture that reached the slice was pure ASCII, on which the call is a
+   * no-op.
+   *
+   * The path is live independently of the refusal rendering round 4 removed:
+   * an ingest-valid claim can carry a lone surrogate (that arm now refuses it,
+   * but this is the shared boundary EVERY caller crosses, and nothing enforces
+   * the precondition the bare slice's safety rested on).
+   */
+  it("makes a claim truncated mid-surrogate-pair well-formed", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+    const { MAX_TENANT_CLAIM_LENGTH } = await import("@/lib/validations/common.server");
+
+    // The astral character straddles the cap, so a bare slice leaves its high
+    // surrogate as the final code unit.
+    const straddling = "a".repeat(MAX_TENANT_CLAIM_LENGTH - 1) + "\u{1F600}" + "x";
+    expect(straddling.slice(0, MAX_TENANT_CLAIM_LENGTH).isWellFormed()).toBe(false);
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "tenant_claim_unmapped",
+      claim: straddling,
+    });
+
+    const claim = lastMetadata().claim as string;
+    expect(claim.isWellFormed()).toBe(true);
+    expect(claim.length).toBe(MAX_TENANT_CLAIM_LENGTH);
+  });
+
+  it("makes a claim carrying an interior lone surrogate well-formed", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "tenant_claim_unmapped",
+      claim: "acme\uD83D.example",
+    });
+
+    const claim = lastMetadata().claim as string;
+    expect(claim.isWellFormed()).toBe(true);
+    expect(claim).not.toContain("\uD83D");
+  });
+
+  /**
+   * Round-5 S2: the refusal diagnosis has its own key, so an operator (and
+   * `tenant-domain unmapped`) can tell a machine-generated refusal from a
+   * value the IdP asserted — including one asserted AS a refusal string.
+   */
+  it("records a refusal diagnosis under its own key, leaving claim untouched", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "tenant_mismatch",
+      claimRefusal: "refused: contains U+200B",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.claimRefusal).toBe("refused: contains U+200B");
+    expect(metadata.claim).toBeUndefined();
+  });
+
+  it("keeps a forged refusal string in claim, where it cannot be mistaken for the real field", async () => {
+    vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
+    const { emitAuthLoginFailure } = await loadAuthFailure();
+
+    // The exact string an actor can assert as their claim (verified against
+    // the real ingest boundary). It must land in `claim`, never in
+    // `claimRefusal`, or the discriminator is forgeable again.
+    await emitAuthLoginFailure({
+      email: "user@primary.example",
+      provider: "google",
+      reason: "tenant_claim_unmapped",
+      claim: "refused: contains U+200B",
+    });
+
+    const metadata = lastMetadata();
+    expect(metadata.claim).toBe("refused: contains U+200B");
+    expect(metadata.claimRefusal).toBeUndefined();
+  });
+
   it("claim is omitted from metadata when not supplied", async () => {
     vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
     const { emitAuthLoginFailure } = await loadAuthFailure();

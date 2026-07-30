@@ -205,7 +205,22 @@ describe("tenant-claim", () => {
     expect(v).toEqual({ kind: "claim", value: "alias.example" });
   });
 
-  it.each(ASCII_WHITESPACE)("reports an absent claim for a value that is only %s", (_label, ws) => {
+  // Round-5 F4: the whitespace-ONLY class is not the same member set as the
+  // whitespace-EDGE class. Round 4 parameterised the edge cases over the six
+  // ASCII members and reused the same list here, so a value that is entirely
+  // NON-ASCII whitespace — `"\u3000"`, a realistic unset-field artefact from a
+  // JP-locale IdP — fell through to the trim-residue arm and DENIED every
+  // sign-in through that key. Both main and round 3 read it as absent. Same
+  // per-sample-vs-derived miss round-4 T2 itself reported, one round later.
+  const ALL_WHITESPACE: ReadonlyArray<[string, string]> = [
+    ...ASCII_WHITESPACE,
+    ["U+00A0 no-break space", "\u00A0"],
+    ["U+2003 em space", "\u2003"],
+    ["U+3000 ideographic space", "\u3000"],
+    ["mixed ASCII and non-ASCII", " \u3000\t"],
+  ];
+
+  it.each(ALL_WHITESPACE)("reports an absent claim for a value that is only %s", (_label, ws) => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     // An empty assertion is not an assertion — IdPs emit empty attributes for
     // unset fields, so denying here would lock out working deployments (NF2).
@@ -257,6 +272,35 @@ describe("tenant-claim", () => {
     // Printable ASCII only, so it cannot carry a lone surrogate into jsonb.
     expect(/^[\x20-\x7E]+$/.test(v.diagnosis)).toBe(true);
     expect(v.diagnosis.isWellFormed()).toBe(true);
+  });
+
+  // Round-5 T1. An unpaired surrogate is not a member of the unsafe class, is
+  // not whitespace and is usually under the cap, so it passed as an ORDINARY
+  // claim and reached metadata.claim verbatim — where the jsonb write fails
+  // with 22P02 and logAuditAsync swallows the row. That is round-4 S1's
+  // audit-suppression path, still open for accepted values after round 4
+  // closed it for rendered ones.
+  it.each([
+    ["high surrogate alone", "acme\uD83D.example"],
+    ["low surrogate alone", "acme\uDE00.example"],
+    ["reversed pair", "acme\uDE00\uD83D.example"],
+  ])("reports a malformed claim for %s", (_label, value) => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: value })).toEqual({
+      kind: "malformed",
+      diagnosis: "refused: ill-formed UTF-16 (unpaired surrogate)",
+    });
+  });
+
+  it("accepts a well-formed astral character in a claim", () => {
+    // The arm above must not refuse legitimate non-BMP text — only ill-formed
+    // sequences. (Such a claim is still unstorable in tenant_claims by SC9's
+    // ASCII CHECK; that is a different, later adjudicator.)
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "acme\u{1F600}.example" })).toEqual({
+      kind: "claim",
+      value: "acme\u{1F600}.example",
+    });
   });
 
   it("reports a malformed claim for a NULL byte instead of stripping it (F-D)", () => {

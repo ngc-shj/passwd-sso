@@ -142,7 +142,9 @@ describe("unsafe display characters", () => {
       // astral character straddling it left a lone surrogate, which Postgres
       // rejects in jsonb (22P02) and logAuditAsync swallows into a
       // dead-letter — an actor could suppress their own denial's audit row.
-      // The signature is the guard: there is no second parameter to pass.
+      // Round-5 T8: `Function.length` is NOT the guard — it stays 1 for a
+      // re-added `maxLength = 255` default, which is the likeliest way a cap
+      // comes back. The astral fixture below is what actually reds that.
       expect(escapeUnsafeDisplayChars.length).toBe(1);
       const astral = "a".repeat(254) + "\u{1F600}" + "x";
       const out = escapeUnsafeDisplayChars(astral);

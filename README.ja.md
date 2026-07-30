@@ -316,9 +316,9 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 |---|---|---|---|
 | `tenant_claim_unmapped` | クレーム値 | どのテナントにも未登録 | `tenant-domain add` |
 | `tenant_mismatch` | クレーム値 | 別のテナントに登録済み | ユーザーを調査、または `add --from` でクレームを移動 |
-| `tenant_mismatch` | `refused: …` | IdP が送った値が**取り込み時点で拒否**された — 制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`refused: …` の文言が違反したルールを示します |
+| `tenant_mismatch` | *(無し。代わりに `metadata.claimRefusal` が設定される)* | IdP が送った値が**取り込み時点で拒否**された — 対になっていないサロゲート、制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`claimRefusal` が違反したルールを示します |
 
-`unmapped` は 1 番目と 3 番目を別の見出しで報告します（2 番目はクレームが記録されている場合のみ）。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+3 番目は文言ではなく**フィールドの有無**で判別してください。`claimRefusal` は取り込み境界だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 3 つとも別の見出しで報告します。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
 
 ```bash
 # 最近拒否された未登録クレームを確認（既定の期間: 30 日）

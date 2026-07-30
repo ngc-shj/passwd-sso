@@ -122,7 +122,20 @@ export async function emitAuthLoginFailure(args: {
   provider: AuthProvider;
   reason: AuthLoginFailureReason;
   userId?: string | null;
+  /** The value the IdP asserted. Attacker-influenceable by definition. */
   claim?: string | null;
+  /**
+   * Why the ingest boundary refused the asserted value — machine-generated,
+   * printable ASCII, and never a value any party supplied.
+   *
+   * Its own metadata key rather than a prefix inside `claim` (round-5 S2):
+   * the two are read by an operator deciding which remedy applies, and a
+   * marker that lives inside an attacker-controlled string can be asserted
+   * verbatim by that attacker. `refused: contains U+200B` passes the ingest
+   * boundary as an ordinary claim — verified — so the prefix was a forgeable
+   * trust signal in a runbook that told operators to trust it.
+   */
+  claimRefusal?: string | null;
 }): Promise<void> {
   let identifierHash: string | null = null;
   let identifierHashScope: IdentifierHashScope | null = null;
@@ -155,6 +168,14 @@ export async function emitAuthLoginFailure(args: {
     // crosses and nothing enforces the "already ≤ cap" precondition the safety
     // of the bare slice depended on.
     metadata.claim = args.claim.slice(0, MAX_TENANT_CLAIM_LENGTH).toWellFormed();
+  }
+  if (args.claimRefusal != null) {
+    // No slice or well-formedness guard needed — every producer is
+    // `malformed()` in tenant-claim.ts, which emits bounded printable ASCII.
+    // Deliberately NOT defended here anyway: a guard would suggest this field
+    // takes untrusted input, and the whole point of separating it from `claim`
+    // is that it does not.
+    metadata.claimRefusal = args.claimRefusal;
   }
 
   await logAuditAsync({

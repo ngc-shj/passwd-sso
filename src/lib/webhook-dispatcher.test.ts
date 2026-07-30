@@ -754,6 +754,7 @@ describe("dispatchTenantWebhook", () => {
         token: "should-be-stripped",
         // AUTH_LOGIN_FAILURE's IdP claim (C6) — same sensitivity class as `reason`
         claim: "alias.example",
+        claimRefusal: "refused: contains U+200B",
         // safe key that should remain
         webhookId: "22222222-2222-2222-2222-222222222222",
       },
@@ -779,8 +780,12 @@ describe("dispatchTenantWebhook", () => {
     // crypto keys must also be absent
     expect(sentPayload.data).not.toHaveProperty("secret");
     expect(sentPayload.data).not.toHaveProperty("token");
-    // claim must also be absent (C6)
+    // claim must also be absent (C6), and so must the field it was split
+    // into (round-5 S2) — a bare "the asserted value was refused" still tells
+    // a tenant-configured endpoint that an authentication was attempted and
+    // mangled, which is the disclosure `reason` is withheld for.
     expect(sentPayload.data).not.toHaveProperty("claim");
+    expect(sentPayload.data).not.toHaveProperty("claimRefusal");
     // non-PII key must be present
     expect(sentPayload.data).toHaveProperty("webhookId", "22222222-2222-2222-2222-222222222222");
   });
@@ -788,6 +793,7 @@ describe("dispatchTenantWebhook", () => {
   it("C6: EXTERNAL_DELIVERY_METADATA_BLOCKLIST includes claim but not identifierHashScope", async () => {
     const { EXTERNAL_DELIVERY_METADATA_BLOCKLIST } = await import("@/lib/http/external-http");
     expect(EXTERNAL_DELIVERY_METADATA_BLOCKLIST.has("claim")).toBe(true);
+    expect(EXTERNAL_DELIVERY_METADATA_BLOCKLIST.has("claimRefusal")).toBe(true);
     // identifierHashScope carries no organisational data; withholding it would
     // make a forwarded identifierHash uninterpretable, so it stays out.
     expect(EXTERNAL_DELIVERY_METADATA_BLOCKLIST.has("identifierHashScope")).toBe(false);

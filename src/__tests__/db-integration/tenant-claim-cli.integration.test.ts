@@ -47,7 +47,8 @@ function runToken(): string {
 function unmappedRow(over: Partial<Parameters<typeof formatUnmappedMessage>[0][number]>) {
   return {
     tenant_id: randomUUID(),
-    claim: "alias.example",
+    claim: "alias.example" as string | null,
+    claim_refusal: null as string | null,
     reason: "tenant_claim_unmapped",
     cnt: 1,
     last_seen: new Date(),
@@ -177,12 +178,12 @@ describe("tenant-domain CLI (C7)", () => {
 
       const printed = lines.join("\n");
       expect(printed).toContain("ops<U+202E>admin");
-      expect(printed).not.toContain(poisoned);
-      // Every line that mentions the label must be the escaped one — the
-      // assertion that catches a single missed site among several.
-      for (const line of lines.filter((l) => l.includes("admin"))) {
-        expect(line).not.toContain(String.fromCodePoint(0x202e));
-      }
+      // Round-5 T9: the per-line loop this replaces was subsumed by the
+      // assertion below AND filtered on `includes("admin")`, which misses the
+      // truncated-label shape it advertised catching. Asserting the character
+      // is absent from the WHOLE output is both stronger and honest about what
+      // it checks.
+      expect(printed).not.toContain(String.fromCodePoint(0x202e));
 
       await ctx.deleteTestData(tenantId);
     });
@@ -803,6 +804,8 @@ describe("tenant-domain CLI (C7)", () => {
         const tenantId = await ctx.createTenant();
         const outboxOnlyClaim = `${runToken()}.${ALIAS_CLAIM}`;
         const auditLogClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const otherTenantClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const refusalDiagnosis = `refused: contains U+200B (${runToken()})`;
 
         await ctx.su.prisma.$transaction(async (tx) => {
           await setBypassRlsGucs(tx);
@@ -850,6 +853,40 @@ describe("tenant-domain CLI (C7)", () => {
               metadata: { reason: "tenant_claim_unmapped", claim: auditLogClaim, provider: "google" },
             },
           });
+          // Round-5 T3: a REFUSED-at-ingest denial. Round-4's F3 widened the
+          // query's reason predicate to catch this population and shipped
+          // covered only by formatUnmappedMessage unit cases fed hand-written
+          // rows — so reverting either UNION arm's predicate, or deleting the
+          // second print group, left the whole integration file green. This
+          // row is what makes the SQL itself load-bearing. It carries NO
+          // claim, which is also what pins the widened NOT NULL filter.
+          await tx.auditLog.create({
+            data: {
+              tenantId,
+              scope: AuditScope.PERSONAL,
+              action: AuditAction.AUTH_LOGIN_FAILURE,
+              userId: randomUUID(),
+              actorType: ActorType.SYSTEM,
+              metadata: {
+                reason: "tenant_mismatch",
+                claimRefusal: refusalDiagnosis,
+                provider: "google",
+              },
+            },
+          });
+          // And a row-7 style mismatch: a REAL claim registered to another
+          // tenant. Round-5 F1/S3 — bucketing on `reason` swept this into the
+          // "fix it at the IdP" heading, the opposite of its actual remedy.
+          await tx.auditLog.create({
+            data: {
+              tenantId,
+              scope: AuditScope.PERSONAL,
+              action: AuditAction.AUTH_LOGIN_FAILURE,
+              userId: randomUUID(),
+              actorType: ActorType.SYSTEM,
+              metadata: { reason: "tenant_mismatch", claim: otherTenantClaim, provider: "google" },
+            },
+          });
         });
 
         try {
@@ -869,13 +906,37 @@ describe("tenant-domain CLI (C7)", () => {
           expect(seeded?.status).toBe(AuditOutboxStatus.PENDING);
 
           expect(result.ok).toBe(true);
-          const rows = (result.rows ?? []) as { tenant_id: string; claim: string }[];
-          expect(rows.some((r) => r.tenant_id === tenantId && r.claim === outboxOnlyClaim)).toBe(true);
-          expect(rows.some((r) => r.tenant_id === tenantId && r.claim === auditLogClaim)).toBe(true);
-          // F9: `toBeTruthy()` held for every branch. These two tokens hold
-          // only for the non-empty branch, and only for the window queried.
+          const rows = (result.rows ?? []) as {
+            tenant_id: string;
+            claim: string | null;
+            claim_refusal: string | null;
+            reason: string;
+          }[];
+          const mine = rows.filter((r) => r.tenant_id === tenantId);
+          expect(mine.some((r) => r.claim === outboxOnlyClaim)).toBe(true);
+          expect(mine.some((r) => r.claim === auditLogClaim)).toBe(true);
+
+          // Round-5 T3 — the SQL, not the formatter. Each of these reds a
+          // different mutation: the refusal row reds reverting either UNION
+          // arm's reason predicate AND reds narrowing the NOT NULL filter back
+          // to `claim IS NOT NULL`; the other-tenant row reds bucketing on
+          // `reason` instead of on `claim_refusal`.
+          const refusal = mine.find((r) => r.claim_refusal === refusalDiagnosis);
+          expect(refusal, "the refused-at-ingest denial must be reported").toBeDefined();
+          expect(refusal?.claim).toBeNull();
+          expect(refusal?.reason).toBe("tenant_mismatch");
+
+          const otherTenant = mine.find((r) => r.claim === otherTenantClaim);
+          expect(otherTenant, "the other-tenant mismatch must be reported").toBeDefined();
+          expect(otherTenant?.claim_refusal).toBeNull();
+          expect(otherTenant?.reason).toBe("tenant_mismatch");
+
+          // F9: `toBeTruthy()` held for every branch. These tokens hold only
+          // for the non-empty branch, and only for the window queried.
           expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
-          expect(result.message).toContain("denial group(s)");
+          // All three counts, and the two new populations are non-zero — a
+          // summary that merged them would not distinguish these numbers.
+          expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant and [1-9]\d* refused-claim/);
         } finally {
           // M10: neutralise the drainable row before deleteTestData — in a
           // `finally`, because a failing assertion above is exactly when the
@@ -1039,7 +1100,8 @@ describe("tenant-domain CLI (C7)", () => {
 
     it("formatUnmappedMessage names the window it queried when there are no rows (S12 — pure, no DB dependency)", () => {
       const message = formatUnmappedMessage([], 30);
-      expect(message).toContain("No unmapped-claim denials in the last 30 days");
+      expect(message).toContain("No claim-bearing sign-in denials");
+      expect(message).toContain("in the last 30 days");
       expect(message).toContain("does NOT by itself mean nothing was denied");
       // Func F4: the empty message must not claim to have covered retention.
       expect(message).not.toContain("retained window");
@@ -1047,7 +1109,7 @@ describe("tenant-domain CLI (C7)", () => {
 
     it("formatUnmappedMessage summarises a non-empty result and names the requested window", () => {
       const message = formatUnmappedMessage([unmappedRow({ cnt: 3 })], 90);
-      expect(message).toContain("1 unmapped-claim denial group(s)");
+      expect(message).toContain("1 unmapped-claim, 0 other-tenant and 0 refused-claim");
       expect(message).toContain("in the last 90 days");
       expect(message).not.toContain("No unmapped-claim denials");
       // Nothing undelivered — the degraded-delivery sentence must not appear,
@@ -1063,18 +1125,27 @@ describe("tenant-domain CLI (C7)", () => {
       const message = formatUnmappedMessage(
         [
           unmappedRow({ claim: "alias.example" }),
+          // Refused-at-ingest: no claim, the diagnosis in its own column
+          // (round-5 S2). Bucketed on the FIELD, so a claim whose text merely
+          // looks like a diagnosis cannot join this population.
+          unmappedRow({ claim: null, claim_refusal: "refused: contains U+200B", reason: "tenant_mismatch" }),
+          unmappedRow({ claim: null, claim_refusal: "refused: 300 characters (max 255)", reason: "tenant_mismatch" }),
+          // Row 7: a REAL claim registered to another tenant. Round-5 F1/S3 —
+          // bucketing on `reason` swept this in with the refusals and printed
+          // the opposite remedy.
+          unmappedRow({ claim: "beta.example", reason: "tenant_mismatch" }),
+          // And the forgery attempt: a claim whose text imitates a diagnosis
+          // must count as an ordinary other-tenant mismatch, not a refusal.
           unmappedRow({ claim: "refused: contains U+200B", reason: "tenant_mismatch" }),
-          unmappedRow({ claim: "refused: 300 characters (max 255)", reason: "tenant_mismatch" }),
         ],
         30,
       );
-      expect(message).toContain("1 unmapped-claim denial group(s)");
-      expect(message).toContain("2 refused-claim group(s)");
+      expect(message).toContain("1 unmapped-claim, 2 other-tenant and 2 refused-claim");
     });
 
     it("formatUnmappedMessage says zero refused groups rather than omitting the count", () => {
       const message = formatUnmappedMessage([unmappedRow({})], 30);
-      expect(message).toContain("0 refused-claim group(s)");
+      expect(message).toContain("0 other-tenant and 0 refused-claim denial group(s)");
     });
 
     it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
@@ -1085,7 +1156,7 @@ describe("tenant-domain CLI (C7)", () => {
         ],
         30,
       );
-      expect(message).toContain("2 unmapped-claim denial group(s)");
+      expect(message).toContain("2 unmapped-claim, 0 other-tenant and 0 refused-claim");
       expect(message).toContain("in the last 30 days");
       // Summed across groups, not per-row: the operator is being told how
       // many denial events will never reach audit_logs on their own.

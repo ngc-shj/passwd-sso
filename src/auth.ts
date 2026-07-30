@@ -12,6 +12,7 @@ import {
   resolveTenantByClaim,
   findOrCreateTenantForClaim,
   type ClaimTenantResolution,
+  type ClaimLookup,
 } from "@/lib/tenant/tenant-management";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -68,7 +69,24 @@ export type SignInTenantResult =
       ok: false;
       reason: Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">;
       tenantId: string | null;
+      /** The value the IdP asserted, or null when it asserted nothing usable. */
       claim: string | null;
+      /**
+       * A machine-generated description of why the ingest boundary refused the
+       * asserted value — never the value, and never operator- or
+       * IdP-supplied.
+       *
+       * Its own field, not a prefix on `claim` (round-5 S2). Round 4 wrote
+       * `refused: …` into `claim` and both READMEs told the operator to key
+       * their remedy on that prefix — but `refused: contains U+200B` is
+       * printable ASCII under the length cap, so an actor who controls the
+       * asserted attribute can assert it verbatim and manufacture a row the
+       * runbook says to trust. That is this branch's own recurring class (one
+       * representation, two meanings, one of them trusted) reproduced in the
+       * audit schema while being fixed in the code. A separate key cannot be
+       * forged from the value side at all.
+       */
+      claimRefusal: string | null;
     };
 
 /**
@@ -89,6 +107,13 @@ export type SignInTenantResult =
  * it binds the row so the denial is at least recorded, which matters most for
  * `claim_invalid`, the one arm that has no owning tenant by construction.
  *
+ * `tenantId` is REQUIRED, not optional (round-5 F5/S4/T10). Round 4 widened
+ * this parameter to `{ tenantId?: string | null }` so a hand-built literal
+ * would type-check, which erased the only property that made it a *refusal*
+ * helper: with the field optional, an arm that forgets its attribution
+ * silently inherits the fallback — the exact defect round-3 F7 and round-4 F1
+ * both reported. Every arm must state where its denial is filed.
+ *
  * Residual, considered and accepted (round-3 S3-2): the tenant these rows land
  * on is chosen by the CLAIM the caller presented, so someone who can complete
  * an IdP authentication can add AUTH_LOGIN_FAILURE rows to a tenant they do
@@ -101,10 +126,54 @@ export type SignInTenantResult =
  * capped at MAX_TENANT_CLAIM_LENGTH, and retention GC ages the rows out.
  */
 function refusalTenantId(
-  refusal: { tenantId?: string | null },
+  refusal: { tenantId: string | null },
   existingTenantId: string | null,
 ): string | null {
   return refusal.tenantId ?? existingTenantId;
+}
+
+/**
+ * The tenant a `ClaimLookup` names as the claim's owner, where it names one.
+ *
+ * Derived from the arms rather than from one of them (round-5 F2): `revoked`
+ * and `collision` both know an owner, `unstorable` and `unregistered` cannot,
+ * and a future arm has to be added here to compile.
+ */
+function lookupOwnerId(lookup: ClaimLookup): string | null {
+  switch (lookup.kind) {
+    case "revoked":
+    case "collision":
+      return lookup.tenantId;
+    case "tenant":
+    case "unstorable":
+    case "unregistered":
+      return null;
+  }
+}
+
+/**
+ * The audit reason for a lookup that did not produce a tenant.
+ *
+ * Single adjudicator with `CLAIM_REFUSAL_REASON` (round-5 F3): rows 7/9b used
+ * to decide this inline with a truthiness test, so an unstorable claim was
+ * reported as `tenant_claim_unmapped` — and `tenant-domain unmapped` then
+ * printed it under "run `tenant-domain add`", a command that must refuse it.
+ */
+function lookupRefusalReason(
+  lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
+): Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped"> {
+  switch (lookup.kind) {
+    case "revoked":
+      return CLAIM_REFUSAL_REASON.claim_taken;
+    case "collision":
+      return CLAIM_REFUSAL_REASON.claim_collision;
+    case "unstorable":
+      return CLAIM_REFUSAL_REASON.claim_invalid;
+    case "unregistered":
+      // The reported production bug: the IdP is sending a claim this
+      // deployment has not registered, and registering it IS the remedy.
+      return "tenant_claim_unmapped";
+  }
 }
 
 export async function ensureTenantMembershipForSignIn(
@@ -141,7 +210,13 @@ export async function ensureTenantMembershipForSignIn(
         error instanceof Error &&
         error.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED"
       ) {
-        return { ok: false, reason: "tenant_mismatch", tenantId: null, claim: diagnosis };
+        return {
+          ok: false,
+          reason: "tenant_mismatch",
+          tenantId: null,
+          claim: null,
+          claimRefusal: diagnosis,
+        };
       }
       throw error;
     }
@@ -151,10 +226,12 @@ export async function ensureTenantMembershipForSignIn(
         ok: false,
         reason: CLAIM_REFUSAL_REASON.claim_malformed,
         tenantId: existingTenantId,
-        // A description of the violation, never the value — see the note on
-        // `malformed()` in tenant-claim.ts. The operator's remedy is at the
-        // IdP, so what they need is which rule the value broke.
-        claim: diagnosis,
+        // No claim: the ingest boundary refused the asserted value, so there
+        // is no value this deployment is willing to record as a claim. The
+        // reason it refused goes in its own field, where the IdP cannot
+        // imitate it (round-5 S2).
+        claim: null,
+        claimRefusal: diagnosis,
       };
     }
 
@@ -185,11 +262,12 @@ export async function ensureTenantMembershipForSignIn(
     // cross-tenant fail-open.
     const lookup = await resolveTenantByClaim(tenantClaim, tx);
     const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
-    // The claim's owner where the lookup knows one. `revoked` knows it and
-    // `unregistered` does not, which is the distinction round-4 F1 restored:
-    // both used to arrive as `null` and the refusal below filed itself under
-    // the wrong tenant for the first of them.
-    const claimOwnerId = lookup.kind === "revoked" ? lookup.tenantId : null;
+    // The claim's owner where the lookup knows one — derived from the arms,
+    // not from the one arm a finding happened to name (round-5 F2). `revoked`
+    // and `collision` both know an owner; round 4 read only the first, so a
+    // fold collision was still filed under the claim's owner on one path and
+    // the user's tenant on the other.
+    const claimOwnerId = lookupOwnerId(lookup);
 
     if (existingTenantId === null) {
       // Rows 4 / 8: no existing membership. Join the claimed tenant,
@@ -210,6 +288,7 @@ export async function ensureTenantMembershipForSignIn(
           reason: CLAIM_REFUSAL_REASON[target.kind],
           tenantId: refusalTenantId(target, null),
           claim: tenantClaim,
+          claimRefusal: null,
         };
       }
 
@@ -260,9 +339,11 @@ export async function ensureTenantMembershipForSignIn(
       // look.
       return {
         ok: false,
-        reason: lookup.kind === "tenant" ? "tenant_mismatch" : "tenant_claim_unmapped",
+        reason:
+          lookup.kind === "tenant" ? "tenant_mismatch" : lookupRefusalReason(lookup),
         tenantId: refusalTenantId({ tenantId: claimOwnerId }, existingTenantId),
         claim: tenantClaim,
+        claimRefusal: null,
       };
     }
 
@@ -284,6 +365,7 @@ export async function ensureTenantMembershipForSignIn(
         reason: CLAIM_REFUSAL_REASON[target.kind],
         tenantId: refusalTenantId(target, existingTenantId),
         claim: tenantClaim,
+        claimRefusal: null,
       };
     }
 
@@ -541,7 +623,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             email: emailForAudit,
             provider: auditProvider,
             reason: CLAIM_REFUSAL_REASON.claim_malformed,
-            claim: extraction.diagnosis,
+            claimRefusal: extraction.diagnosis,
           });
           return false;
         }
@@ -586,6 +668,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             tenantId: result.tenantId,
             userId,
             claim: result.claim,
+            claimRefusal: result.claimRefusal,
           });
         }
         return result.ok;

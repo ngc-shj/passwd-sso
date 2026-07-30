@@ -90,7 +90,34 @@ export type ClaimLookup =
   | { kind: "tenant"; id: string }
   /** A revoked `tenant_claims` row owns the claim (D2). The owner is carried. */
   | { kind: "revoked"; tenantId: string }
-  /** No claim row and no `externalId` match — nobody owns this claim. */
+  /**
+   * The claim cannot be stored at all (`storableClaimSchema` — SC9's ASCII
+   * narrowing). Nobody owns it and nobody can: `tenant-domain add` would
+   * refuse it too.
+   *
+   * Round-5 F3. Without this arm the resolver answered `unregistered` for an
+   * unstorable claim while `findOrCreateTenantForClaim` — the SAME predicate,
+   * one call path away — answered `claim_invalid`. The two produced different
+   * audit reasons for one input, and after round 4 gave the operator report
+   * two different remedies: an unstorable claim was printed under
+   * "run `tenant-domain add`", a command guaranteed to refuse it. R48, and the
+   * fix is one adjudicator rather than two that agree by convention.
+   */
+  | { kind: "unstorable" }
+  /**
+   * No claim row and no exact `externalId`, but an existing tenant's
+   * `external_id` FOLDS onto this claim (round-2 F-A). The owner is carried
+   * for the same reason `revoked` carries it.
+   *
+   * Round-5 F2: round 4 closed the attribution split for `revoked` and left
+   * this member out, so a fold collision was still filed under the claim's
+   * owner on one path and under the user's tenant on the other — one lockout,
+   * two `tenant-domain unmapped` groups. The member set now comes from
+   * `ClaimTenantResolution`'s refusal arms rather than from the arms the
+   * finding happened to name.
+   */
+  | { kind: "collision"; tenantId: string }
+  /** No claim row, no `externalId`, no fold — nobody owns this claim. */
   | { kind: "unregistered" };
 
 /**
@@ -111,8 +138,9 @@ export type ClaimLookup =
  * owning tenant, because the caller has to file its denial under the tenant
  * whose claim this is (round-4 F1).
  *
- * Never writes (I5). Returns `{ kind: "unregistered" }` rather than throwing
- * when the claim fails `storableClaimSchema` — an IdP may send anything. Ordering
+ * Never writes (I5) — the two extra reads the `unstorable` / `collision` arms
+ * need run only after both lookups have missed, i.e. only for claims that
+ * resolve to nothing, so an ordinary sign-in pays for neither. Ordering
  * consequence: because the fallback is reached on the "no row" path, a claim
  * that fails `storableClaimSchema` (e.g. non-ASCII) still resolves through
  * `externalId` in release 1, exactly as it does today. That is deliberate
@@ -137,7 +165,20 @@ export async function resolveTenantByClaim(
     where: { externalId: tenantClaim },
     select: { id: true },
   });
-  return byExternalId ? { kind: "tenant", id: byExternalId.id } : { kind: "unregistered" };
+  if (byExternalId) return { kind: "tenant", id: byExternalId.id };
+
+  // From here the claim resolves to nothing, and the remaining arms exist so
+  // that this resolver and `findOrCreateTenantForClaim` answer "who owns this
+  // claim, and can it be registered at all?" the SAME way. They are evaluated
+  // in that function's order — schema before fold probe — because D-3 makes
+  // the ordering load-bearing: validating before the `externalId` fallback
+  // above would make SC9's ASCII narrowing bite in release 1.
+  if (!storableClaimSchema.safeParse(claim).success) return { kind: "unstorable" };
+
+  const foldedOwner = await findFoldedExternalIdOwner(db, claim);
+  if (foldedOwner) return { kind: "collision", tenantId: foldedOwner };
+
+  return { kind: "unregistered" };
 }
 
 /**

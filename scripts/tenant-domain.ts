@@ -234,7 +234,7 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
         if (args.tenant) {
           const tenant = await resolveTenantRef(tx, args.tenant);
           if (!tenant) {
-            return { ok: false, code: 1, message: `Tenant not found: ${args.tenant}` };
+            return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(args.tenant)}` };
           }
           tenantId = tenant.id;
         }
@@ -283,7 +283,22 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
 
 type UnmappedRow = {
   tenant_id: string;
-  claim: string;
+  /** The value the IdP asserted. NULL on a refused-at-ingest denial. */
+  claim: string | null;
+  /**
+   * Why the ingest boundary refused the asserted value, or NULL when it did
+   * not refuse one. Machine-generated and printable ASCII.
+   *
+   * This field is the bucket discriminator (round-5 S2/S3). Round 4 bucketed
+   * on `reason`, but `tenant_mismatch` has two producers — the ingest refusal
+   * and row 7, "the claim is registered to a DIFFERENT tenant" — so a genuine
+   * cross-tenant mismatch was printed under "the remedy is at the IdP", the
+   * opposite of the README's own instruction for it. Round 4's first attempt
+   * at a discriminator was a `refused: ` prefix inside `claim`, which an actor
+   * who controls the asserted attribute can assert verbatim; a separate column
+   * cannot be forged from the value side.
+   */
+  claim_refusal: string | null;
   cnt: bigint | number;
   last_seen: Date;
   // How many of `cnt` are denials that will NOT reach audit_logs without
@@ -299,20 +314,20 @@ type UnmappedRow = {
   // read from THIS process's environment, so the message names the value it
   // applied (round-4 F6).
   undelivered_cnt: bigint | number;
-  /**
-   * `tenant_claim_unmapped` or `tenant_mismatch` — bucketed, not merged
-   * (round-4 F3).
-   *
-   * The two reasons have opposite remedies and merging them would send an
-   * operator to the wrong one. But reporting only the first left the round-3
-   * `claim_malformed` denial — an IdP that starts emitting a zero-width
-   * character locks out EVERY user of the deployment — completely invisible
-   * to this command, which would print "no unmapped-claim denials" while the
-   * tenant was down. A denial class this tool cannot see is the NF2-shaped
-   * invisibility the whole tool exists to end.
-   */
+  /** `tenant_claim_unmapped` or `tenant_mismatch`. */
   reason: string;
 };
+
+/**
+ * The three populations this report separates, each with a different remedy.
+ * Derived from the row rather than from `reason` alone — see `claim_refusal`.
+ */
+type UnmappedBucket = "unregistered" | "other_tenant" | "refused";
+
+function bucketOf(row: UnmappedRow): UnmappedBucket {
+  if (row.claim_refusal !== null) return "refused";
+  return row.reason === UNMAPPED_REASON ? "unregistered" : "other_tenant";
+}
 
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
 // deployment's actual retention, so it can only ever be the default window —
@@ -353,21 +368,26 @@ const PROCESSING_LEASE_SECONDS = Math.ceil(
 // copies on this same feature branch may be exercising sign-in concurrently).
 export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string {
   if (rows.length === 0) {
+    // Names every class the query covers, not just the first (round-5 F6):
+    // an operator using this to rule out the README's third cause would
+    // otherwise get a message that never mentions it.
     return (
-      `No unmapped-claim denials in the last ${days} days. That is the window this query ` +
-      `covered, NOT this deployment's retention — a denial older than ${days} days is ` +
-      "outside it whether or not the row still exists. Re-run with --days <n> to widen. " +
-      "An empty result does NOT by itself mean nothing was denied."
+      `No claim-bearing sign-in denials — unregistered, other-tenant or refused — in the ` +
+      `last ${days} days. That is the window this query covered, NOT this deployment's ` +
+      `retention: a denial older than ${days} days is outside it whether or not the row ` +
+      "still exists. Re-run with --days <n> to widen. An empty result does NOT by itself " +
+      "mean nothing was denied."
     );
   }
   const undelivered = rows.reduce((sum, r) => sum + Number(r.undelivered_cnt), 0);
-  const unmapped = rows.filter((r) => r.reason === UNMAPPED_REASON).length;
-  const refused = rows.length - unmapped;
-  // Both counts, always — a report that names only the registrable population
-  // reads as "nothing else is wrong" (round-4 F3).
+  const count = (bucket: UnmappedBucket) => rows.filter((r) => bucketOf(r) === bucket).length;
+  // All three counts, always — a report that names only the registrable
+  // population reads as "nothing else is wrong" (round-4 F3), and a report
+  // that merges the other two sends the operator to the wrong remedy for one
+  // of them (round-5 F1/S3).
   const base =
-    `${unmapped} unmapped-claim denial group(s) and ${refused} refused-claim group(s) ` +
-    `in the last ${days} days.`;
+    `${count("unregistered")} unmapped-claim, ${count("other_tenant")} other-tenant and ` +
+    `${count("refused")} refused-claim denial group(s) in the last ${days} days.`;
   if (undelivered === 0) return base;
   // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
   // because these rows are the ones that would have been INVISIBLE while the
@@ -434,10 +454,12 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // emitting a zero-width character denied every sign-in in the
         // deployment while this report printed "no unmapped-claim denials".
         const rows = await tx.$queryRawUnsafe<UnmappedRow[]>(
-          `SELECT tenant_id::text AS tenant_id, claim, reason, count(*)::int AS cnt,
-                  max(created_at) AS last_seen, sum(undelivered)::int AS undelivered_cnt
+          `SELECT tenant_id::text AS tenant_id, claim, claim_refusal, reason,
+                  count(*)::int AS cnt, max(created_at) AS last_seen,
+                  sum(undelivered)::int AS undelivered_cnt
              FROM (
                SELECT tenant_id, metadata->>'claim' AS claim,
+                      metadata->>'claimRefusal' AS claim_refusal,
                       metadata->>'reason' AS reason, created_at, 0 AS undelivered
                  FROM audit_logs
                 WHERE action = 'AUTH_LOGIN_FAILURE'::"AuditAction"
@@ -445,6 +467,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                   AND created_at >= now() - make_interval(days => $1::int)
                UNION ALL
                SELECT tenant_id, payload->'metadata'->>'claim' AS claim,
+                      payload->'metadata'->>'claimRefusal' AS claim_refusal,
                       payload->'metadata'->>'reason' AS reason, created_at,
                       CASE
                         WHEN status = 'PENDING'::"AuditOutboxStatus" THEN 0
@@ -458,8 +481,12 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                   AND payload->'metadata'->>'reason' IN ('tenant_claim_unmapped', 'tenant_mismatch')
                   AND created_at >= now() - make_interval(days => $1::int)
              ) combined
-            WHERE claim IS NOT NULL
-            GROUP BY tenant_id, claim, reason
+            -- Either column identifies a reportable denial. Filtering on the
+            -- claim alone would drop every refused-at-ingest row, since those
+            -- now carry no claim at all (round-5 S2) -- the exact population
+            -- round-4 F3 widened this query to catch.
+            WHERE claim IS NOT NULL OR claim_refusal IS NOT NULL
+            GROUP BY tenant_id, claim, claim_refusal, reason
             ORDER BY last_seen DESC`,
           days,
           PROCESSING_LEASE_SECONDS,
@@ -471,24 +498,38 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // landed can still carry U+202E. This is the report an operator reads
         // while deciding which claim to register, so a value that renders as
         // something other than what it is would be acted on.
-        const printGroup = (heading: string, group: UnmappedRow[]) => {
+        const printGroup = (heading: string, bucket: UnmappedBucket) => {
+          const group = rows.filter((r) => bucketOf(r) === bucket);
           if (group.length === 0) return;
           console.log(heading);
           for (const row of group) {
             const undelivered = Number(row.undelivered_cnt);
+            // The refused rows have no claim; they have the reason it was
+            // refused. Both are escaped: `claim` because pre-existing rows are
+            // not CHECK-constrained, `claim_refusal` for one rendering
+            // convention per terminal rather than an exception for values we
+            // believe we generated (round-5 S5).
+            const what =
+              row.claim_refusal !== null
+                ? `refusal="${escapeUnsafeDisplayChars(row.claim_refusal)}"`
+                : `claim="${escapeUnsafeDisplayChars(row.claim ?? "")}"`;
             console.log(
-              `  tenant=${row.tenant_id}  claim="${escapeUnsafeDisplayChars(row.claim)}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
+              `  tenant=${row.tenant_id}  ${what}  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
                 (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
             );
           }
         };
         printGroup(
           "Unregistered claims — remedy: `tenant-domain add --tenant <ref> --domain <claim>`:",
-          rows.filter((r) => r.reason === UNMAPPED_REASON),
+          "unregistered",
+        );
+        printGroup(
+          "Claims registered to a DIFFERENT tenant — investigate the user, or move the claim with `add --from`:",
+          "other_tenant",
         );
         printGroup(
           "Claims REFUSED at ingest — `add` cannot help; the remedy is at the IdP:",
-          rows.filter((r) => r.reason !== UNMAPPED_REASON),
+          "refused",
         );
 
         // S12: an empty result says so explicitly, with the window it
@@ -711,7 +752,7 @@ export async function cmdAdd(args: {
       ok: false,
       code: 1,
       message:
-        `Invalid --from "${args.from}": expected the current owner's tenant UUID, ` +
+        `Invalid --from "${escapeUnsafeDisplayChars(args.from)}": expected the current owner's tenant UUID, ` +
         'exactly as "list" prints it. --from is not resolved through slugs, claims ' +
         "or external ids — a claim reassignment must not be reachable by a typo.",
     };
@@ -727,7 +768,7 @@ export async function cmdAdd(args: {
     return {
       ok: false,
       code: 1,
-      message: `Invalid --domain "${args.domain}": ${parsed.error.issues[0]?.message ?? "does not satisfy operatorDomainSchema"} (example: alias.example)`,
+      message: `Invalid --domain "${escapeUnsafeDisplayChars(args.domain)}": ${parsed.error.issues[0]?.message ?? "does not satisfy operatorDomainSchema"} (example: alias.example)`,
     };
   }
   const claim = parsed.data;
@@ -739,7 +780,7 @@ export async function cmdAdd(args: {
       async (tx) => {
         const tenant = await resolveTenantRef(tx, args.tenant);
         if (!tenant) {
-          return { ok: false, code: 1, message: `Tenant not found: ${args.tenant}` };
+          return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(args.tenant)}` };
         }
 
         // The ONE tenantClaim.findUnique call site outside
@@ -763,7 +804,7 @@ export async function cmdAdd(args: {
           return {
             ok: false,
             code: 1,
-            message: `--from ${args.from} does not own claim "${claim}" — tenant ${existing.tenantId} does. Refusing to reassign; naming the actual current owner is what makes this a deliberate act rather than a typo.`,
+            message: `--from ${escapeUnsafeDisplayChars(args.from)} does not own claim "${escapeUnsafeDisplayChars(claim)}" — tenant ${existing.tenantId} does. Refusing to reassign; naming the actual current owner is what makes this a deliberate act rather than a typo.`,
           };
         }
 
@@ -928,7 +969,7 @@ export async function cmdAdd(args: {
             existing.createdBy === null ? "-" : escapeUnsafeDisplayChars(existing.createdBy);
           console.log(
             `createdBy stays "${registeredBySoFar}" (${existing.createdAt.toISOString()}) — the row records who ` +
-              `FIRST registered this claim, not who last changed it. This change was made by "${args.by}"; that is ` +
+              `FIRST registered this claim, not who last changed it. This change was made by "${escapeUnsafeDisplayChars(args.by)}"; that is ` +
               "recorded only here, so keep this output with the incident record.",
           );
         }
@@ -970,7 +1011,7 @@ export async function cmdRemove(args: {
     return {
       ok: false,
       code: 1,
-      message: `Invalid --domain "${args.domain}": ${parsed.error.issues[0]?.message ?? "does not satisfy storableClaimSchema"}`,
+      message: `Invalid --domain "${escapeUnsafeDisplayChars(args.domain)}": ${parsed.error.issues[0]?.message ?? "does not satisfy storableClaimSchema"}`,
     };
   }
   const claim = parsed.data;
@@ -982,7 +1023,7 @@ export async function cmdRemove(args: {
       async (tx) => {
         const tenant = await resolveTenantRef(tx, args.tenant);
         if (!tenant) {
-          return { ok: false, code: 1, message: `Tenant not found: ${args.tenant}` };
+          return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(args.tenant)}` };
         }
 
         const existing = await tx.tenantClaim.findUnique({

@@ -204,9 +204,30 @@ export function createCustomAdapter(): Adapter {
     ): Promise<AdapterUser> {
       // Read tenant claim stored by signIn callback (e.g. Google hd).
       // If present, place user directly into the SSO tenant.
-      const pendingClaim = tenantClaimStorage.getStore()?.tenantClaim ?? null;
+      // Round-5 S1 — the FIFTH site of the overloaded-signal class, and the
+      // one where the OWNER grant below actually happens. `?? null` collapsed
+      // "the deployment could not propagate a claim" (no ALS store) into "the
+      // IdP asserted no claim", and `pendingClaim === null` is the predicate
+      // that selects the bootstrap branch AND `TENANT_ROLE.OWNER`. Round 4
+      // closed the PRODUCER of this signal (src/auth.ts's signIn callback) on
+      // the grounds that a test pinning the fall-through is how a future entry
+      // point inherits it — and left the consumer reading the same overloaded
+      // value. The two callbacks read the ALS independently, so a context lost
+      // between them passes the producer's guard and lands here.
+      const claimStore = tenantClaimStorage.getStore();
+      const pendingClaim = claimStore?.tenantClaim ?? null;
 
       const created = await withBypassRls(prisma, async (tx) => {
+        // Fail closed INSIDE the transaction, so the refusal takes the same
+        // route as every other one: the `.catch` below turns it into an audit
+        // emit, and aborting the tx means no user, no tenant and above all no
+        // OWNER membership survives. Throwing before `withBypassRls` would
+        // skip that catch and make the denial silent — which is the property
+        // this guard exists to provide.
+        if (!claimStore) {
+          throw new TenantClaimUnusableError("claim_invalid", null);
+        }
+
         // Resolve SSO tenant, then create tenant/user/member — all on the single
         // withBypassRls tx (no redundant inner $transaction).
         //

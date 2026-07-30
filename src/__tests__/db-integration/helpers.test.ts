@@ -118,12 +118,24 @@ describe("withCleanupConflictRetry", () => {
     expect(isRetryableCleanupConflict(err)).toBe(false);
   });
 
-  it("reads the SQLSTATE positionally, not by searching the error for digits", () => {
+  it("parses the SQLSTATE out of Prisma's `Code: \u0060…\u0060` message form", () => {
+    // Round-5 T4: this used to be named "reads the SQLSTATE positionally" and
+    // stayed green under the old substring classifier, because its fixture
+    // answered `true` either way. The discriminating case is the sibling
+    // above; this one covers the message-form parse, which is what its name
+    // now says.
     const err = new Error("Raw query failed. Code: `23503`.");
-    Object.assign(err, { code: "P2010", meta: { query: "…", params: ["23505"] } });
-    // 23503 from the message form is retryable; the 23505 sitting in `params`
-    // is data, not a code, and must not be consulted either way.
+    Object.assign(err, { code: "P2010", meta: { query: "…", params: [] } });
     expect(isRetryableCleanupConflict(err)).toBe(true);
+  });
+
+  it("ignores a retryable code that appears only in the query parameters", () => {
+    // The half T4 said was never adjudicated: a non-retryable failure whose
+    // BOUND PARAMETER happens to contain a retryable code — a claim, slug or
+    // id like "40001.example" — must not be retried.
+    const err = new Error("Raw query failed. Code: `42P01`.");
+    Object.assign(err, { code: "P2010", meta: { query: "…", params: ["40001.example"] } });
+    expect(isRetryableCleanupConflict(err)).toBe(false);
   });
 
   it("gives up after a bounded number of attempts rather than looping", async () => {

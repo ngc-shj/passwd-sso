@@ -96,11 +96,16 @@ export function parseFlags(argv: string[]): FlagParseResult {
     // and the member set is derived from the parser's own state machine
     // rather than from the spellings that happened to be reported.
     if (flags.has(name)) {
+      // The rationale that generalises is the module's own rule, not the
+      // reassignment case (round-5 F7): this guard fires for `--yes` and
+      // `--days` too, and telling an operator repeating `--days` that "the
+      // discarded token names a different tenant" is internal jargon about
+      // someone else's flag.
       return {
         ok: false,
         error:
           `--${name} was given more than once. Refusing rather than taking the last one: ` +
-          "on a reassignment the discarded token names a different tenant.",
+          "a flag the operator wrote must either take effect or stop the command.",
       };
     }
 

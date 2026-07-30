@@ -343,7 +343,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, null);
 
-    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: null });
+    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: null, claimRefusal: null });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
   });
@@ -372,11 +372,12 @@ describe("ensureTenantMembershipForSignIn", () => {
       // resolve a tenant and the denial reaches audit_logs instead of
       // dead-lettering (CR-3).
       tenantId: TENANT_OTHER,
-      // The DIAGNOSIS, not the value (round-4 S1/S2). What reaches the audit
-      // row describes the violation; the value itself never leaves the ingest
-      // boundary, so no attacker-chosen bytes travel to jsonb, the CSV export
-      // or the operator's terminal.
-      claim: "refused: contains U+200B",
+      // The diagnosis lands in its OWN field (round-5 S2). `claim` is null:
+      // the ingest boundary refused the asserted value, so there is no value
+      // this deployment will record as a claim — and a marker living inside
+      // `claim` would be forgeable by the actor who supplies it.
+      claim: null,
+      claimRefusal: "refused: contains U+200B",
     });
     // Nothing may be looked up, created or joined from a value we refused.
     expect(mockResolveTenantByClaim).not.toHaveBeenCalled();
@@ -395,7 +396,8 @@ describe("ensureTenantMembershipForSignIn", () => {
       ok: false,
       reason: "tenant_mismatch",
       tenantId: null,
-      claim: "refused: 312 characters (max 255)",
+      claim: null,
+      claimRefusal: "refused: 312 characters (max 255)",
     });
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -423,9 +425,64 @@ describe("ensureTenantMembershipForSignIn", () => {
       ok: false,
       reason: "tenant_mismatch",
       tenantId: null,
-      claim: "refused: contains U+200B",
+      claim: null,
+      claimRefusal: "refused: contains U+200B",
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+  });
+
+  // Round-5 T2. Round 4's F1 fix — "file the denial under the tenant that
+  // OWNS the contested claim, not the user's" — had NO test at the site it
+  // fixed: nulling `claimOwnerId` left 207 tests green, because every row-9b
+  // fixture used an `unregistered` lookup where the owner is null anyway.
+  // Round 5 then found the same fix was missing a member (`collision`), which
+  // an untested attribution rule is exactly how you get.
+  it.each([
+    ["revoked", { kind: "revoked", tenantId: TENANT_CLAIM_OWNER }, "tenant_claim_unmapped"],
+    ["collision", { kind: "collision", tenantId: TENANT_CLAIM_OWNER }, "tenant_claim_unmapped"],
+  ] as const)(
+    "row 9b: files a %s claim's denial under the CLAIM's owner, not the user's tenant",
+    async (_label, lookupArm, reason) => {
+      mockResolveTenantByClaim.mockResolvedValue(lookup(lookupArm));
+      mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
+      mockPrisma.tenant.findUnique.mockResolvedValue({ isBootstrap: false });
+
+      const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+      // TENANT_CLAIM_OWNER, not TENANT_OTHER: `tenant-domain unmapped` groups
+      // by (tenant_id, claim), and the no-membership path files this same
+      // lockout under the claim's owner. Disagreeing splits one incident into
+      // two groups and halves the count(*) an operator reads.
+      expect(result).toEqual({
+        ok: false,
+        reason,
+        tenantId: TENANT_CLAIM_OWNER,
+        claim: "tenant-acme",
+        claimRefusal: null,
+      });
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  // Round-5 F3: the resolver, not the dispatch, decides whether a claim is
+  // registrable — so an unstorable claim reports the reason whose remedy is
+  // NOT "register it", and `tenant-domain unmapped` stops printing it under a
+  // command that must refuse it.
+  it("row 9b: reports an unstorable claim as tenant_mismatch, not as unmapped", async () => {
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unstorable" }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
+    mockPrisma.tenant.findUnique.mockResolvedValue({ isBootstrap: false });
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({
+      ok: false,
+      reason: "tenant_mismatch",
+      tenantId: TENANT_OTHER,
+      claim: "tenant-acme",
+      claimRefusal: null,
+    });
   });
 
   // Row 4: claim resolves, no existing membership -> upsert -> allow.
@@ -565,6 +622,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_mismatch",
       tenantId: TENANT_OTHER,
       claim: "tenant-acme",
+      claimRefusal: null,
     });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
@@ -637,6 +695,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_claim_unmapped",
       tenantId: TENANT_CLAIM_OWNER,
       claim: "tenant-acme",
+      claimRefusal: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -658,6 +717,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_claim_unmapped",
       tenantId: TENANT_CLAIM_OWNER,
       claim: "tenant-acme",
+      claimRefusal: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -671,7 +731,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});
 
-    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: "tenant-acme" });
+    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: "tenant-acme", claimRefusal: null });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
@@ -731,6 +791,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_claim_unmapped",
       tenantId: TENANT_CLAIM_OWNER,
       claim: "tenant-acme",
+      claimRefusal: null,
     });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -743,7 +804,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});
 
-    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: TENANT_BOOTSTRAP, claim: "tenant-acme" });
+    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: TENANT_BOOTSTRAP, claim: "tenant-acme", claimRefusal: null });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -764,6 +825,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_claim_unmapped",
       tenantId: TENANT_OTHER,
       claim: "tenant-acme",
+      claimRefusal: null,
     });
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -918,7 +980,7 @@ describe("signIn callback", () => {
       email: "new@acme.example",
       provider: "google",
       reason: "tenant_mismatch",
-      claim: "refused: contains U+00AD",
+      claimRefusal: "refused: contains U+00AD",
     });
   });
 
@@ -1017,6 +1079,7 @@ describe("signIn callback", () => {
       tenantId: "00000000-0000-4000-a000-000000000003",
       userId: "real-db-id",
       claim: "newco.example",
+      claimRefusal: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -1042,6 +1105,7 @@ describe("signIn callback", () => {
       tenantId: "00000000-0000-4000-a000-000000000003",
       userId: "real-db-id",
       claim: "tenant-acme",
+      claimRefusal: null,
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });

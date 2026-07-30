@@ -374,8 +374,43 @@ describe("createCustomAdapter", () => {
       expect(emitted.tenantId).not.toBeNull();
     });
 
-    it("creates bootstrap tenant when no tenant claim store exists", async () => {
+    // Round-5 S1 — the fifth site of the overloaded-signal class, and the one
+    // where OWNER is actually granted. This test USED to assert the
+    // fall-through: no ALS store meant a claim the deployment could not
+    // propagate was read as "no claim asserted", and the user got OWNER of a
+    // fresh tenant with nothing denied and nothing audited. Round 4 closed the
+    // producer of that signal for exactly this reason and left the consumer
+    // — including the test that pinned it as intended behaviour.
+    it("refuses to create a user when the tenant-claim store is absent", async () => {
       mockTenantClaimStoreGetStore.mockReturnValue(undefined);
+
+      const adapter = createCustomAdapter();
+      await expect(
+        adapter.createUser!({
+          id: "",
+          name: "No Store User",
+          email: "user@example.com",
+          image: null,
+          emailVerified: null,
+        }),
+      ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
+
+      // Nothing survives: no bootstrap tenant, no user, and above all no
+      // OWNER membership.
+      expect(mockPrismaTenant.create).not.toHaveBeenCalled();
+      expect(mockPrismaUser.create).not.toHaveBeenCalled();
+      expect(mockPrismaTenantMember.create).not.toHaveBeenCalled();
+      expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
+      // And the refusal is observable, through the same catch the resolution
+      // arms use.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it("creates a bootstrap tenant with OWNER when the store exists and holds no claim", async () => {
+      // The allow side of the same guard: a store that is present and empty
+      // IS "the IdP asserted no claim", which is the ordinary first-ever
+      // magic-link sign-in and must keep working.
+      mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
       mockPrismaTenant.create.mockResolvedValue({ id: "bootstrap-2" });
       mockPrismaUser.create.mockResolvedValue({
         id: "user-4",

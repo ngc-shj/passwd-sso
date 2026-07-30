@@ -16,6 +16,9 @@ const mockPrisma = vi.hoisted(() => ({
     findUnique: vi.fn(),
     create: vi.fn(),
   },
+  // The fold probe added in round-5 F2. Present on the mock surface because
+  // the resolver now reaches it on the no-match path.
+  $queryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -27,6 +30,10 @@ import { resolveTenantByClaim } from "./tenant-management";
 describe("resolveTenantByClaim", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The fold probe (round-5 F2) runs only after both lookups miss. Default
+    // it to "no collision" so the pre-existing cases keep testing what they
+    // name; the collision case overrides it.
+    mockPrisma.$queryRaw.mockResolvedValue([]);
   });
 
   it("resolves a registered claim to its tenant", async () => {
@@ -82,15 +89,45 @@ describe("resolveTenantByClaim", () => {
     expect(result).toEqual({ kind: "tenant", id: "tenant-3" });
   });
 
-  it("returns null, without throwing, for a claim that fails storableClaimSchema", async () => {
+  it("reports an UNSTORABLE claim distinctly from an unregistered one", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.findUnique.mockResolvedValue(null);
 
-    // "café.example" normalises to a non-ASCII value storableClaimSchema
-    // rejects; resolveTenantByClaim does not validate it explicitly — the
-    // row simply never existed to be found (SC9), and the externalId
-    // fallback (also not found here) leaves null.
-    await expect(resolveTenantByClaim("café.example")).resolves.toEqual({ kind: "unregistered" });
+    // Round-5 F3. "café.example" normalises to a non-ASCII value
+    // storableClaimSchema rejects, so no `tenant-domain add` can ever
+    // register it. Reporting it as `unregistered` made the dispatch emit
+    // `tenant_claim_unmapped`, and `tenant-domain unmapped` then printed it
+    // under "run tenant-domain add" — a command guaranteed to refuse it. The
+    // resolver is now the single adjudicator of "is this registrable at all".
+    await expect(resolveTenantByClaim("café.example")).resolves.toEqual({ kind: "unstorable" });
+    // Still no writes, and the probe is not reached: an unstorable claim
+    // cannot collide with anything.
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it("reports a fold COLLISION with the colliding tenant, after both lookups miss", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.findUnique.mockResolvedValue(null);
+    mockPrisma.$queryRaw.mockResolvedValue([{ id: "tenant-folded-owner" }]);
+
+    const result = await resolveTenantByClaim("Alias.Example");
+
+    // Round-5 F2: without this arm the dispatch filed a fold-collision denial
+    // under the USER's tenant while the no-membership path filed the same
+    // lockout under the colliding tenant — one incident, two `unmapped`
+    // groups.
+    expect(result).toEqual({ kind: "collision", tenantId: "tenant-folded-owner" });
+  });
+
+  it("does not run the fold probe when the claim resolves", async () => {
+    mockPrisma.tenantClaim.findUnique.mockResolvedValue({ tenantId: "tenant-1", revokedAt: null });
+
+    await resolveTenantByClaim("alias.example");
+
+    // An ordinary sign-in must not pay for the two extra reads the refusal
+    // arms need.
+    expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();
+    expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();
   });
 
   it("reports a revoked claim row WITH its owner, and does NOT consult the externalId fallback", async () => {

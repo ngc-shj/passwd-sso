@@ -791,6 +791,21 @@ describe("findOrCreateTenantForClaim (C4)", () => {
       );
     });
 
+    // Round-5 T5. The batched UPDATE above leaves the two heap tuples in
+    // whatever order the plan rewrote them, and `id IN (...)` happens to drive
+    // an ascending index scan on this database — so the test was red 24/24 by
+    // accident of physical order, not by construction (a modelled version with
+    // plain inserts picks the lower id 149/300 times). Re-writing the LOWER id
+    // last makes it the physically later tuple, so a plan without `id ASC`
+    // returns the HIGHER one and the assertion reds deterministically.
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `UPDATE tenants SET external_id = external_id WHERE id = $1::uuid`,
+        lowerId,
+      );
+    });
+
     try {
       const result = await withBypassRls(
         ctx.su.prisma,

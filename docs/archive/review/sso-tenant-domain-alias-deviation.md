@@ -682,10 +682,25 @@ Bootstrap-tenant creation happens only on a first-ever sign-in.
 The reachable case is not exotic either. SAML attributes are multi-valued by
 specification and BoxyHQ Jackson surfaces them into the OIDC profile as JSON
 arrays, so a deployment whose `organization` or `company` — both in
-`DEFAULT_TENANT_CLAIM_KEYS` — arrives as `["acme"]` went from resolving
-correctly to denying every sign-in. With `AUTH_TENANT_CLAIM_KEYS="groups,hd"`
+`DEFAULT_TENANT_CLAIM_KEYS` — arrives as `["acme"]` went from allowing every
+sign-in to denying every sign-in. With `AUTH_TENANT_CLAIM_KEYS="groups,hd"`
 it is worse: round 2 skipped the array-valued `groups` and resolved through
 `hd`; round 3 stopped the walk at `groups` and never read `hd` at all.
+
+**Second correction, round-5 F9.** The sentence above originally read "went
+from *resolving correctly* to denying", which is false — and it is the second
+factual error in this entry. On `main` an array value hits
+`if (typeof value !== "string") return null` and falls through, so the claim
+never resolved: those users signed in CLAIM-LESS, into their existing tenant.
+Round 4 restores that and fixes the lockout; it does not make the array
+resolve. The residual, recorded rather than implied: in such a deployment a
+first-ever SSO sign-in still reaches the claim-less path and gets a fresh
+bootstrap tenant with role OWNER. If Jackson array claims are a supported
+deployment shape, the fix is to unwrap a single-element string array at the
+ingest boundary — deliberately NOT done here, because that is new resolution
+behaviour rather than a regression repair, and three rounds of this branch
+have been spent on defects introduced by fixes that went one step past their
+finding. The multi-key case DID resolve correctly on main, and does again.
 
 The arm now classifies as **absent**, and the walk continues. Denying was
 conflating two decisions — *stop the key walk* and *deny the sign-in* — where
@@ -708,7 +723,15 @@ signal — now excludes a PROCESSING row still inside the worker's claim lease.
 An in-flight row is normal, and reporting it as degraded told an operator their
 audit pipeline was broken in the middle of a lockout diagnosis. The staleness
 boundary is `AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS`, the worker's own reap
-threshold, so the report and the component that acts on it cannot disagree.
+threshold, so the report and the component that acts on it agree whenever both
+read the same environment.
+
+**Corrected (round-5 F8)**: this originally claimed they "cannot disagree".
+Round-4 F6 found that false — `AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS` resolves
+from the CLI process's own environment, and the documented way to run the tool
+is from a workstation against a remote deployment — and corrected it at the
+call site while leaving this entry stale. The report now prints the lease value
+it applied.
 
 ## D-29 — `ClaimTenantResolution` gained a `claim_collision` arm
 
@@ -987,3 +1010,113 @@ Unreachable through the wired entry point (`tenantClaimStorage.run()` wraps
 both Auth.js handlers and there is no other caller), and recorded anyway
 because the previous test **pinned the fall-through as intended behaviour**,
 which is precisely how the next entry point would have inherited it.
+
+---
+
+# Round-5 fix round
+
+Round 5 returned 9 Majors and 13 Minors — the same count as round 4, and again
+mostly against the previous round's fixes. The entries below are the contract
+changes; corrections to D-27 and D-28 are made in place, above.
+
+## D-41 — The refusal diagnosis moves to its own metadata key
+
+**Round 4 (D-35)**: the malformed arm's diagnosis was written to
+`metadata.claim`, prefixed `refused: `, and both READMEs told the operator to
+key their remedy on that prefix.
+
+**Round 5 (user-chosen)**: `metadata.claimRefusal`, a separate key.
+`metadata.claim` means "the value the IdP asserted" and nothing else.
+
+**Why**: round-5 S2, verified against the real ingest boundary —
+
+```
+tenant_id: "refused: contains U+200B"  →  { kind: "claim", value: "refused: contains U+200B" }
+```
+
+The diagnosis strings are printable ASCII under the length cap, so an actor who
+controls the asserted attribute — the precondition this whole branch is written
+against — can assert one verbatim and manufacture a row the shipped runbook
+tells an operator to read as a machine-generated ingest refusal. **This is the
+branch's own recurring class** (one representation, two meanings, one of them
+trusted) reproduced in the audit schema while being fixed in the code. A
+separate key cannot be forged from the value side at all.
+
+Three findings collapse into this one change: S2 (forgery), F1/S3 (the report
+bucketed on `reason`, which swept a genuine row-7 "registered to a different
+tenant" denial under the heading "the remedy is at the IdP" — the opposite of
+its README remedy), and the shape of T3's missing test.
+
+**Egress (C6 re-decided, not inherited)**: `claimRefusal` is added to
+`EXTERNAL_DELIVERY_METADATA_BLOCKLIST`. It carries no organisational data of
+its own, but it is only meaningful alongside the claim, and the claim is
+stripped; forwarding a bare "an asserted value was refused for containing
+U+200B" tells a tenant-configured endpoint that an authentication was attempted
+and mangled, which is the disclosure `reason` is already withheld for.
+
+## D-42 — `ClaimLookup` gains `unstorable` and `collision`; one adjudicator decides both attribution and reason
+
+**Round 4 (D-36)**: three arms — `tenant | revoked | unregistered`.
+
+**Round 5**: five — `tenant | revoked | unstorable | collision | unregistered`,
+with `lookupOwnerId` and `lookupRefusalReason` deriving attribution and audit
+reason from the arm rather than from an inline truthiness test.
+
+**Why, two findings**:
+- **F2**: round 4 closed the attribution split for `revoked` and left
+  `claim_collision` out, so a fold collision was still filed under the claim's
+  owner on the no-membership path and under the user's tenant on row 9b — one
+  lockout, two `unmapped` groups, and the `count(*)` D-33 depends on split
+  between them. D-36 claimed the closure worked because "the compiler
+  enumerated every consumer"; the compiler enumerates consumers, not
+  attribution SOURCES, so the claim was stronger than the fix.
+- **F3**: rows 7/9b never consulted `storableClaimSchema`, while
+  `findOrCreateTenantForClaim` — the same predicate one call path away — did.
+  A non-ASCII claim was reported as `tenant_claim_unmapped` and, after round
+  4's headings, printed under "run `tenant-domain add`" — a command guaranteed
+  to refuse it. R48: two adjudicators, verdict decided by which path the user
+  happened to take.
+
+**Cost**: two extra reads on the resolver's miss path. They run only after both
+lookups have missed — i.e. only for claims that resolve to nothing — so an
+ordinary sign-in pays for neither, and the create path re-probes once. Accepted
+for one adjudicator over two that agree by convention.
+
+## D-43 — Two more ingest arms corrected
+
+- **Whitespace-only under EITHER trim is `absent`** (round-5 F4). Round 4's
+  ASCII trim left a value that is entirely NON-ASCII whitespace — `"　"`,
+  a realistic unset-field artefact from a JP-locale IdP — to fall through to
+  the trim-residue arm and DENY. Both `main` and round 3 read it as absent.
+  The round-4 fixtures parameterised the whitespace EDGE class over six ASCII
+  members and reused that list for the whitespace-ONLY class, which is the
+  per-sample-vs-derived miss round-4 T2 itself reported, one round later.
+- **An unpaired surrogate is `malformed`** (round-5 T1). It is not in the
+  unsafe class, not whitespace and usually under the cap, so it passed as an
+  ordinary claim and reached `metadata.claim` verbatim — where the jsonb write
+  fails with 22P02 and `logAuditAsync` swallows the row. That is round-4 S1's
+  audit-suppression path, still open for ACCEPTED values after round 4 closed
+  it for rendered ones. Refused at ingest as well as guarded at the audit
+  boundary: a value this deployment cannot store should not be adjudicating
+  tenant membership either.
+
+## D-44 — The consumer end of the tenant-claim store fails closed
+
+Round-5 S1, the **fifth** site of the overloaded-signal class and the one where
+the OWNER grant actually happens: `getStore()?.tenantClaim ?? null` in
+`createUser` collapsed "the deployment could not propagate a claim" into "the
+IdP asserted no claim", and `pendingClaim === null` selects both the bootstrap
+branch and `TENANT_ROLE.OWNER`.
+
+Round 4 (D-40) closed the PRODUCER of this signal on the grounds that a test
+pinning the fall-through is how a future entry point inherits it — and left the
+consumer reading the same overloaded value, with its own test pinning it. The
+two callbacks read the ALS independently, so a context lost between them passes
+the producer's guard and lands here. Applying that standard to one end of a
+two-ended signal and not the other is a partial fix.
+
+The guard throws **inside** `withBypassRls`, so the refusal takes the same route
+as every other one: the existing `.catch` turns it into an audit emit, and
+aborting the transaction means no user, no tenant and no OWNER membership
+survive. Throwing before the transaction would have skipped that catch and made
+the denial silent — the property the guard exists to provide.
