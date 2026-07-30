@@ -3,6 +3,9 @@ import { createHmac } from "node:crypto";
 // String constant: unaffected by the vi.resetModules() dance below, so a
 // static import is safe even though the module under test is re-imported.
 import { IDENTIFIER_HASH_SCOPE } from "@/lib/audit/auth-failure";
+// The real producer — `claimRefusal` is the only thing that can make a
+// `ClaimRefusalDiagnosis` (round-6 SEC-R6-3).
+import { claimRefusal } from "@/lib/tenant/claim-refusal";
 
 // `getIdentifierPepper`'s memoisation and `warnedNoPepper` flag are frozen at
 // first call, module-scope state that survives across tests within the same
@@ -345,6 +348,11 @@ describe("emitAuthLoginFailure", () => {
    * Round-5 S2: the refusal diagnosis has its own key, so an operator (and
    * `tenant-domain unmapped`) can tell a machine-generated refusal from a
    * value the IdP asserted — including one asserted AS a refusal string.
+   *
+   * Round-6 SEC-R6-3: the value comes from the REAL producer. The parameter is
+   * branded, so a string literal no longer type-checks here — which is the
+   * enforcement, and it also means the `refused: ` prefix asserted below is
+   * production's spelling rather than this file's copy of it.
    */
   it("records a refusal diagnosis under its own key, leaving claim untouched", async () => {
     vi.stubEnv("AUDIT_IDENTIFIER_PEPPER", TEST_PEPPER);
@@ -354,7 +362,7 @@ describe("emitAuthLoginFailure", () => {
       email: "user@primary.example",
       provider: "google",
       reason: "tenant_mismatch",
-      claimRefusal: "refused: contains U+200B",
+      claimRefusal: claimRefusal("contains U+200B"),
     });
 
     const metadata = lastMetadata();

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { extractTenantClaimValue, parseTenantClaimKeys, slugifyTenant } from "./tenant-claim";
 import { MAX_TENANT_CLAIM_LENGTH } from "@/lib/validations/common.server";
+import { UNSAFE_DISPLAY_CHAR_RANGES } from "@/lib/security/unsafe-display-chars";
 
 const SAML_ACCOUNT = {
   provider: "saml-jackson",
@@ -33,6 +34,32 @@ describe("tenant-claim", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant,org_id");
     expect(parseTenantClaimKeys()).toEqual(["tenant", "org_id"]);
   });
+
+  /**
+   * Round-6, raised independently by Codex. A value that names no usable key
+   * used to be filtered down to `[]` and behave exactly like leaving the
+   * variable unset — the walk read nothing and fell through to the Google-only
+   * `hd` fallback, which on a SAML deployment resolves no claim for ANY sign-in
+   * and creates first-time users in their own bootstrap tenant as OWNER.
+   *
+   * Throwing is fail-closed: it reaches `src/auth.ts`'s signIn catch, which
+   * emits `provider_error` and writes nothing. `envSchema` rejects the same
+   * value at boot; this is the second predicate, for processes that never parse
+   * the schema (D-23's shape).
+   */
+  it.each([",", ",,", " , ", " "])(
+    "refuses a configured claim-key list that names no key (%j)",
+    (value) => {
+      vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", value);
+      // `" "` trims to empty at the read site, so it IS "unset" — the other
+      // three are configured-but-unusable and must stop the sign-in.
+      if (value.trim() === "") {
+        expect(parseTenantClaimKeys()).toContain("tenant_id");
+        return;
+      }
+      expect(() => parseTenantClaimKeys()).toThrow(/AUTH_TENANT_CLAIM_KEYS/);
+    },
+  );
 
   it("extracts tenant from configured claim", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant");
@@ -423,6 +450,117 @@ describe("tenant-claim", () => {
   it("reports a malformed hd claim reached through the fallback", () => {
     const v = extractTenantClaimValue(GOOGLE_ACCOUNT, { hd: "exa\u00ADmple.com" });
     expect(v).toEqual({ kind: "malformed", diagnosis: "refused: contains U+00AD" });
+  });
+
+  /**
+   * ─── The ingest classification, DERIVED from its defining primitives ───
+   *
+   * Round-6 F2, and the third consecutive round in which this classification was
+   * wrong for the same reason: the member set was written down by sampling
+   * instead of computed. Round-4 T2 found the whitespace EDGE class sampled at
+   * its one exceptional member; round-5 F4 found the whitespace-ONLY class
+   * inheriting round 4's six-member ASCII list; round-6 F2 found the same class
+   * missing the three members that intersect the unsafe class.
+   *
+   * The repo's standing rule is that a class which escapes a hand-enumeration
+   * twice gets a MECHANISM. The mechanism here has to execute the real function,
+   * because the property is a runtime classification over a character set — so
+   * it is a derived enumeration in the unit suite (which `app-ci` and
+   * `scripts/pre-pr.sh` both run) rather than a `scripts/checks` gate. Both
+   * classes below are computed from their DEFINING primitive:
+   *
+   *   whitespace     `String.prototype.trim` itself — every code point in the
+   *                  BMP for which `String.fromCharCode(cp).trim() === ""`. No
+   *                  list to fall behind the spec.
+   *   unsafe display `UNSAFE_DISPLAY_CHAR_RANGES`, the single definition the
+   *                  regex is also built from (round-3 T9 established that
+   *                  direction for the same reason).
+   *
+   * A change to either primitive changes the input set here automatically, and a
+   * reorder of the arms in `sanitizeTenantClaimValue` changes a verdict. The
+   * anti-vacuity counters below are what stop an empty derivation from passing.
+   */
+  describe("ingest classification (derived, not sampled)", () => {
+    /** Every BMP code point JS `.trim()` strips — the primitive itself. */
+    const JS_TRIM_WHITESPACE: number[] = [];
+    for (let cp = 0; cp <= 0xffff; cp++) {
+      const ch = String.fromCharCode(cp);
+      if (ch.trim() === "") JS_TRIM_WHITESPACE.push(cp);
+    }
+
+    /** Every member of the unsafe display class — from its single definition. */
+    const UNSAFE_MEMBERS: number[] = [];
+    for (const [lo, hi] of UNSAFE_DISPLAY_CHAR_RANGES) {
+      for (let cp = lo; cp <= hi; cp++) UNSAFE_MEMBERS.push(cp);
+    }
+
+    const hex = (cp: number) => `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
+    const read = (value: string) =>
+      extractTenantClaimValue(SAML_ACCOUNT, { organization: value });
+
+    it("derives non-empty input sets (anti-vacuity)", () => {
+      // 25 today; asserted as a floor rather than an equality so a future
+      // engine adding a whitespace code point does not red this, while an empty
+      // or truncated derivation does.
+      expect(JS_TRIM_WHITESPACE.length).toBeGreaterThanOrEqual(25);
+      expect(UNSAFE_MEMBERS.length).toBe(86);
+      // The intersection is the population all three rounds got wrong. If it
+      // ever becomes empty, the case below stops testing anything.
+      const intersection = JS_TRIM_WHITESPACE.filter((cp) => UNSAFE_MEMBERS.includes(cp));
+      expect(intersection.length).toBeGreaterThan(0);
+    });
+
+    it("classifies a whitespace-ONLY value as absent for EVERY whitespace code point", () => {
+      // The rule: a value that normalises to the empty string asserted nothing.
+      // It holds for the whole class, including the three members that are also
+      // unsafe-class members (U+2028, U+2029, U+FEFF) — the ones an
+      // arm-ordering bug denied while the ASCII members passed.
+      const denied = JS_TRIM_WHITESPACE.filter(
+        (cp) => read(String.fromCharCode(cp)).kind !== "absent",
+      ).map(hex);
+      expect(denied, "whitespace-only values must be absent, not refused").toEqual([]);
+    });
+
+    it("refuses a real claim carrying ANY unsafe display character", () => {
+      // The other side of the same ordering: a value with a non-whitespace
+      // character must still be REFUSED, never silently canonicalised onto its
+      // neighbour. Moving the whitespace test up must not weaken this.
+      const accepted = UNSAFE_MEMBERS.filter(
+        (cp) => read(`acme${String.fromCharCode(cp)}.example`).kind !== "malformed",
+      ).map(hex);
+      expect(accepted, "an unsafe character inside a claim must be refused").toEqual([]);
+    });
+
+    it("accepts a claim whose only whitespace is on an ASCII edge", () => {
+      // The round-4 T2 case, kept as the allow side: `"acme.example\n"` is the
+      // ordinary shape of a pretty-printed SAML <AttributeValue>, and the six
+      // ASCII whitespace members are C0 controls, i.e. unsafe-class members too.
+      const ASCII_WS = [0x20, 0x09, 0x0a, 0x0d, 0x0b, 0x0c];
+      for (const cp of ASCII_WS) {
+        const ch = String.fromCharCode(cp);
+        expect(read(`${ch}acme.example${ch}`), hex(cp)).toEqual({
+          kind: "claim",
+          value: "acme.example",
+        });
+      }
+    });
+
+    it("refuses a claim whose edge whitespace only JS .trim() would take", () => {
+      // The residue arm: whatever `.trim()` strips and the ASCII trim leaves,
+      // for every such code point that is not itself unsafe-class (those are
+      // refused one arm earlier, with a different diagnosis).
+      const residue = JS_TRIM_WHITESPACE.filter(
+        (cp) => !UNSAFE_MEMBERS.includes(cp) && ![0x20, 0x09, 0x0a, 0x0d, 0x0b, 0x0c].includes(cp),
+      );
+      expect(residue.length).toBeGreaterThan(0);
+      const wrong = residue
+        .filter((cp) => {
+          const r = read(`${String.fromCharCode(cp)}acme.example`);
+          return r.kind !== "malformed";
+        })
+        .map(hex);
+      expect(wrong, "edge whitespace .trim() would strip must be refused").toEqual([]);
+    });
   });
 
   it("slugifies tenant strings", () => {

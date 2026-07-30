@@ -1,0 +1,12 @@
+# Pre-existing unescaped operator-input interpolations under scripts/**, one
+# line per file: "<count> <path>".
+#
+# Read by scripts/checks/check-operator-echo-escaped.mjs. The gate fails when a
+# file's count RISES above its baseline (a new violation) and also when it FALLS
+# below it (a fixed one — the number must be lowered deliberately, so a stale
+# baseline cannot become a budget for a regression nobody notices).
+#
+# Empty on purpose: the round-6 sweep left zero. Adding a line here is a
+# decision to ship a rendering hazard, and needs the same justification as any
+# other exemption — prefer the in-line `operator-echo-exempt: <reason>` marker
+# when the interpolation is genuinely not display output.

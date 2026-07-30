@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
+import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
@@ -14,7 +15,7 @@ import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
 import {
   CLAIM_REFUSAL_REASON,
   toAuditProvider,
-  type ClaimResolutionRefusalKind,
+  type ClaimRefusalKind,
 } from "@/lib/audit/auth-failure-mapping";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
@@ -40,11 +41,17 @@ import logger from "@/lib/logger";
  * layer down. The message is unchanged so existing log greps still match.
  */
 export class TenantClaimUnusableError extends Error {
-  readonly kind: ClaimResolutionRefusalKind;
+  /**
+   * Widened from `ClaimResolutionRefusalKind` to the whole `ClaimRefusalKind`
+   * set in round 6 (F3/SEC-R6-1), so the propagation failure below can name
+   * itself instead of borrowing a resolution arm's word for it.
+   */
+  readonly kind: ClaimRefusalKind;
   /**
    * The tenant that already owns the claim — the revoked row's owner for
    * `claim_taken`, the folded `external_id` owner for `claim_collision`,
-   * null for `claim_invalid` (no tenant exists for an unstorable claim).
+   * null for `claim_invalid` (no tenant exists for an unstorable claim) and for
+   * `store_unavailable` (no claim reached the resolver at all).
    *
    * It rides on the error because the audit emit below NEEDS it: a
    * first-ever sign-in has no user row, so logAuditAsync -> resolveTenantId
@@ -55,12 +62,28 @@ export class TenantClaimUnusableError extends Error {
    * the lockout it exists to diagnose.
    */
   readonly tenantId: string | null;
+  /**
+   * Which rule the value broke, for the arms that know (`claim_invalid`).
+   *
+   * It rides along for the same reason `tenantId` does: `tenant-domain unmapped`
+   * buckets on whether `metadata.claimRefusal` is set, so dropping it here would
+   * file a first-ever sign-in's unstorable-claim denial under "registered to a
+   * DIFFERENT tenant — move it with `add --from`", while the identical denial on
+   * the existing-user path (src/auth.ts) was filed correctly. That asymmetry is
+   * the shape of round-4 F1, round-5 F2 and round-6 F1 (SEC-R6-3 / F1).
+   */
+  readonly refusal: ClaimRefusalDiagnosis | null;
 
-  constructor(kind: ClaimResolutionRefusalKind, tenantId: string | null) {
+  constructor(
+    kind: ClaimRefusalKind,
+    tenantId: string | null,
+    refusal: ClaimRefusalDiagnosis | null = null,
+  ) {
     super("TENANT_CLAIM_UNUSABLE");
     this.name = "TenantClaimUnusableError";
     this.kind = kind;
     this.tenantId = tenantId;
+    this.refusal = refusal;
   }
 }
 
@@ -224,8 +247,20 @@ export function createCustomAdapter(): Adapter {
         // OWNER membership survives. Throwing before `withBypassRls` would
         // skip that catch and make the denial silent — which is the property
         // this guard exists to provide.
+        //
+        // `store_unavailable`, not `claim_invalid` (round-6 F3/SEC-R6-1). The
+        // PRODUCER of this signal — src/auth.ts's signIn callback, D-40 — emits
+        // `provider_error` for the identical condition, so the two ends of one
+        // signal were answering one predicate in two judgement vocabularies
+        // (R48) and the consumer's was factually wrong: `claim_invalid` is
+        // defined as "the claim failed storableClaimSchema", and no resolution
+        // runs on this path. The resulting row also carried neither `claim` nor
+        // `claimRefusal`, so it matched none of the three rows in the READMEs'
+        // cause table and fell outside `tenant-domain unmapped`'s filter — a
+        // denial shaped so that nothing could report it. `provider_error` puts
+        // it where a deployment fault belongs.
         if (!claimStore) {
-          throw new TenantClaimUnusableError("claim_invalid", null);
+          throw new TenantClaimUnusableError("store_unavailable", null);
         }
 
         // Resolve SSO tenant, then create tenant/user/member — all on the single
@@ -263,7 +298,11 @@ export function createCustomAdapter(): Adapter {
             // is nothing to bind it to; stating that is the honest position,
             // and inventing a binding would file the denial under a tenant
             // that has nothing to do with it.
-            throw new TenantClaimUnusableError(resolution.kind, resolution.tenantId);
+            throw new TenantClaimUnusableError(
+              resolution.kind,
+              resolution.tenantId,
+              resolution.kind === "claim_invalid" ? resolution.refusal : null,
+            );
           }
           tenant = { id: resolution.id };
         } else {
@@ -326,6 +365,7 @@ export function createCustomAdapter(): Adapter {
             provider: toAuditProvider(sessionMetaStorage.getStore()?.provider),
             reason: CLAIM_REFUSAL_REASON[error.kind],
             claim: pendingClaim,
+            claimRefusal: error.refusal,
             // Binds the row so logAuditAsync enqueues instead of
             // dead-lettering (see TenantClaimUnusableError.tenantId).
             tenantId: error.tenantId,

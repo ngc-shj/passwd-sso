@@ -104,6 +104,8 @@ vi.mock("@/lib/auth/session/session-cache", () => ({
 }));
 
 import { createCustomAdapter } from "./auth-adapter";
+// Real producer — `ClaimRefusalDiagnosis` is branded (round-6 SEC-R6-3).
+import { claimRefusal } from "@/lib/tenant/claim-refusal";
 import {
   expectInvalidatedAfterCommit,
   expectNotInvalidatedOnDbThrow,
@@ -294,11 +296,20 @@ describe("createCustomAdapter", () => {
     // The reason must be the one CLAIM_REFUSAL_REASON assigns the arm, per
     // round-1 M2: claim_taken is the operator-reachable one and is the only
     // reason `unmapped` can see.
+    //
+    // Round-6 F1 adds the diagnosis column. `claim_invalid` carries one and the
+    // other two do not, and the difference is load-bearing: `tenant-domain
+    // unmapped` buckets on whether `claimRefusal` is set, so dropping it on
+    // this path would file a first-ever sign-in's unstorable-claim denial under
+    // "registered to a DIFFERENT tenant — move it with `add --from`" while the
+    // identical denial on the existing-user path (src/auth.ts) was filed
+    // correctly. Asserting the field on all three arms is what makes the
+    // asymmetry visible rather than incidental.
     it.each([
-      ["claim_taken", "tenant_claim_unmapped", "tenant-owner"],
-      ["claim_collision", "tenant_claim_unmapped", "tenant-folded-owner"],
-      ["claim_invalid", "tenant_mismatch", null],
-    ])("emits AUTH_LOGIN_FAILURE with the arm's own reason when %s", async (kind, reason, tenantId) => {
+      ["claim_taken", "tenant_claim_unmapped", "tenant-owner", null],
+      ["claim_collision", "tenant_claim_unmapped", "tenant-folded-owner", null],
+      ["claim_invalid", "tenant_mismatch", null, claimRefusal("claim must be printable ASCII")],
+    ] as const)("emits AUTH_LOGIN_FAILURE with the arm's own reason when %s", async (kind, reason, tenantId, refusal) => {
       // R9: emitAuthLoginFailure -> logAuditAsync resolves a tenant through
       // its OWN withBypassRls. Emitting while the createUser transaction is
       // still open is the documented pool-exhaustion shape, so track whether
@@ -318,7 +329,9 @@ describe("createCustomAdapter", () => {
       });
       mockSessionMetaGetStore.mockReturnValue({ provider: "saml-jackson" });
       mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: "alias.example" });
-      mockFindOrCreateTenantForClaim.mockResolvedValue({ kind, tenantId });
+      mockFindOrCreateTenantForClaim.mockResolvedValue(
+        refusal === null ? { kind, tenantId } : { kind, tenantId, refusal },
+      );
 
       const adapter = createCustomAdapter();
       await expect(
@@ -343,6 +356,7 @@ describe("createCustomAdapter", () => {
         provider: "saml",
         reason,
         claim: "alias.example",
+        claimRefusal: refusal,
         tenantId,
       });
       expect(emittedInsideTx).toBe(false);
@@ -402,8 +416,22 @@ describe("createCustomAdapter", () => {
       expect(mockPrismaTenantMember.create).not.toHaveBeenCalled();
       expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
       // And the refusal is observable, through the same catch the resolution
-      // arms use.
+      // arms use — with the same REASON the producer of this signal emits
+      // (round-6 F3/SEC-R6-1). `toHaveBeenCalledTimes(1)` was the whole
+      // assertion, so the arm could carry any word at all: it carried
+      // `claim_invalid`, whose definition is "the claim failed
+      // storableClaimSchema" and which on this path is doubly wrong — nothing
+      // was resolved, and `src/auth.ts`'s guard for the identical condition
+      // emits `provider_error`.
       expect(mockEmitAuthLoginFailure).toHaveBeenCalledTimes(1);
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "user@example.com",
+        provider: "google",
+        reason: "provider_error",
+        claim: null,
+        claimRefusal: null,
+        tenantId: null,
+      });
     });
 
     it("creates a bootstrap tenant with OWNER when the store exists and holds no claim", async () => {

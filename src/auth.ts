@@ -3,7 +3,7 @@ import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { prisma } from "@/lib/prisma";
+import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
@@ -11,9 +11,12 @@ import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import {
   resolveTenantByClaim,
   findOrCreateTenantForClaim,
+  refusalFromLookup,
+  claimRefusalOf,
   type ClaimTenantResolution,
   type ClaimLookup,
 } from "@/lib/tenant/tenant-management";
+import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
@@ -72,9 +75,11 @@ export type SignInTenantResult =
       /** The value the IdP asserted, or null when it asserted nothing usable. */
       claim: string | null;
       /**
-       * A machine-generated description of why the ingest boundary refused the
+       * A machine-generated description of why this deployment refused the
        * asserted value — never the value, and never operator- or
-       * IdP-supplied.
+       * IdP-supplied. Two producers, both at a REFUSAL adjudicator: the ingest
+       * boundary (`extractTenantClaimValue`) and `storableClaimSchema`
+       * (round-6 F1, the population the round-5 field split left out).
        *
        * Its own field, not a prefix on `claim` (round-5 S2). Round 4 wrote
        * `refused: …` into `claim` and both READMEs told the operator to key
@@ -84,9 +89,12 @@ export type SignInTenantResult =
        * runbook says to trust. That is this branch's own recurring class (one
        * representation, two meanings, one of them trusted) reproduced in the
        * audit schema while being fixed in the code. A separate key cannot be
-       * forged from the value side at all.
+       * forged from the value side at all — and since round 6 the TYPE says so:
+       * `ClaimRefusalDiagnosis` is branded and `claimRefusal()` is its only
+       * producer, so "written by us" is checked by `tsc` rather than promised in
+       * a comment (SEC-R6-3).
        */
-      claimRefusal: string | null;
+      claimRefusal: ClaimRefusalDiagnosis | null;
     };
 
 /**
@@ -133,22 +141,19 @@ function refusalTenantId(
 }
 
 /**
- * The tenant a `ClaimLookup` names as the claim's owner, where it names one.
+ * Everything a refusal contributes to the audit row, derived from the ARM.
  *
- * Derived from the arms rather than from one of them (round-5 F2): `revoked`
- * and `collision` both know an owner, `unstorable` and `unregistered` cannot,
- * and a future arm has to be added here to compile.
+ * Round-6 F5 collapsed three parallel enumerations of `ClaimLookup` — owner,
+ * reason, diagnosis — into one: `refusalFromLookup` maps a refusing lookup onto
+ * the corresponding `findOrCreateTenantForClaim` arm, and everything below reads
+ * that one mapping. D-42 claimed round 4's closure worked because "the compiler
+ * enumerated every consumer", and round 5 answered that the compiler enumerates
+ * consumers, not attribution SOURCES. Three sources is how `collision` came to
+ * be missing from one of them; one source is the fix.
  */
 function lookupOwnerId(lookup: ClaimLookup): string | null {
-  switch (lookup.kind) {
-    case "revoked":
-    case "collision":
-      return lookup.tenantId;
-    case "tenant":
-    case "unstorable":
-    case "unregistered":
-      return null;
-  }
+  if (lookup.kind === "tenant" || lookup.kind === "unregistered") return null;
+  return refusalFromLookup(lookup).tenantId;
 }
 
 /**
@@ -162,18 +167,43 @@ function lookupOwnerId(lookup: ClaimLookup): string | null {
 function lookupRefusalReason(
   lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
 ): Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped"> {
-  switch (lookup.kind) {
-    case "revoked":
-      return CLAIM_REFUSAL_REASON.claim_taken;
-    case "collision":
-      return CLAIM_REFUSAL_REASON.claim_collision;
-    case "unstorable":
-      return CLAIM_REFUSAL_REASON.claim_invalid;
-    case "unregistered":
-      // The reported production bug: the IdP is sending a claim this
-      // deployment has not registered, and registering it IS the remedy.
-      return "tenant_claim_unmapped";
-  }
+  // The reported production bug: the IdP is sending a claim this deployment has
+  // not registered, and registering it IS the remedy. Every other arm reads the
+  // shared table through the shared mapping.
+  if (lookup.kind === "unregistered") return "tenant_claim_unmapped";
+  // No narrowing needed for `store_unavailable`'s `provider_error`: no lookup
+  // arm maps to it, and the indexed access proves that — this return type is
+  // narrower than the table's value union because `refusalFromLookup`'s own
+  // return type is narrower than `ClaimRefusalKind`.
+  return CLAIM_REFUSAL_REASON[refusalFromLookup(lookup).kind];
+}
+
+/** The diagnosis a refusing lookup carries, where its arm has one. */
+function lookupRefusalDiagnosis(
+  lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
+): ClaimRefusalDiagnosis | null {
+  if (lookup.kind === "unregistered") return null;
+  return claimRefusalOf(refusalFromLookup(lookup));
+}
+
+/**
+ * Rows 4/8 and 6/9a: the tenant this sign-in should join, or the refusal that
+ * stops it.
+ *
+ * Only `unregistered` reaches `findOrCreateTenantForClaim` (round-6 F5). Before
+ * this, every non-`tenant` lookup did — taking the advisory lock and re-running
+ * four reads to arrive at the arm `resolveTenantByClaim` had already named one
+ * statement earlier, and giving the same question two adjudicators that agreed
+ * only by convention.
+ */
+async function resolveTargetTenant(
+  lookup: ClaimLookup,
+  tenantClaim: string,
+  db: TxOrPrisma,
+): Promise<ClaimTenantResolution> {
+  if (lookup.kind === "tenant") return { kind: "tenant", id: lookup.id };
+  if (lookup.kind === "unregistered") return findOrCreateTenantForClaim(tenantClaim, db);
+  return refusalFromLookup(lookup);
 }
 
 export async function ensureTenantMembershipForSignIn(
@@ -272,10 +302,7 @@ export async function ensureTenantMembershipForSignIn(
     if (existingTenantId === null) {
       // Rows 4 / 8: no existing membership. Join the claimed tenant,
       // creating it first if this is the first sign-in to see this claim.
-      const target: ClaimTenantResolution =
-        lookup.kind === "tenant"
-          ? { kind: "tenant", id: lookup.id }
-          : await findOrCreateTenantForClaim(tenantClaim, tx);
+      const target = await resolveTargetTenant(lookup, tenantClaim, tx);
       if (target.kind !== "tenant") {
         // Row 8b: the claim is unusable, so there is no tenant to join. The
         // reason distinguishes the refusals (see CLAIM_REFUSAL_REASON) —
@@ -288,7 +315,7 @@ export async function ensureTenantMembershipForSignIn(
           reason: CLAIM_REFUSAL_REASON[target.kind],
           tenantId: refusalTenantId(target, null),
           claim: tenantClaim,
-          claimRefusal: null,
+          claimRefusal: claimRefusalOf(target),
         };
       }
 
@@ -343,7 +370,7 @@ export async function ensureTenantMembershipForSignIn(
           lookup.kind === "tenant" ? "tenant_mismatch" : lookupRefusalReason(lookup),
         tenantId: refusalTenantId({ tenantId: claimOwnerId }, existingTenantId),
         claim: tenantClaim,
-        claimRefusal: null,
+        claimRefusal: lookup.kind === "tenant" ? null : lookupRefusalDiagnosis(lookup),
       };
     }
 
@@ -354,10 +381,7 @@ export async function ensureTenantMembershipForSignIn(
     // the claim is unresolved would regress the primary bootstrap->SSO
     // onboarding path (a magic-link user's first Google sign-in) into a hard
     // denial of the same NF2 shape as the bug this PR fixes.
-    const target: ClaimTenantResolution =
-      lookup.kind === "tenant"
-        ? { kind: "tenant", id: lookup.id }
-        : await findOrCreateTenantForClaim(tenantClaim, tx);
+    const target = await resolveTargetTenant(lookup, tenantClaim, tx);
     if (target.kind !== "tenant") {
       // Same refusal dispatch as row 8b, reached via the bootstrap branch.
       return {
@@ -365,7 +389,7 @@ export async function ensureTenantMembershipForSignIn(
         reason: CLAIM_REFUSAL_REASON[target.kind],
         tenantId: refusalTenantId(target, existingTenantId),
         claim: tenantClaim,
-        claimRefusal: null,
+        claimRefusal: claimRefusalOf(target),
       };
     }
 
@@ -639,13 +663,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // there is no other entry point), and the previous test pinned the
         // fall-through as intended behaviour, which is precisely how the next
         // entry point would have inherited it.
+        //
+        // Round-6 F3/SEC-R6-1: the reason now comes from the shared table
+        // instead of a literal spelled here. The CONSUMER end of this same
+        // signal (createUser, D-44) was emitting `claim_invalid`'s
+        // `tenant_mismatch` for the identical condition — two judgement words
+        // for one predicate (R48), and the wrong one, since `claim_invalid`
+        // means "the claim failed storableClaimSchema" and on this path no
+        // resolution runs at all.
         const store = tenantClaimStorage.getStore();
         if (extraction.kind === "claim") {
           if (!store) {
             await emitAuthLoginFailure({
               email: emailForAudit,
               provider: auditProvider,
-              reason: "provider_error",
+              reason: CLAIM_REFUSAL_REASON.store_unavailable,
             });
             return false;
           }

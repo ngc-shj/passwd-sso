@@ -45,11 +45,13 @@ describe("toAuditProvider", () => {
 });
 
 describe("CLAIM_REFUSAL_REASON", () => {
-  // Every arm that can deny a sign-in over a claim, from BOTH adjudicators:
-  // the three refusals findOrCreateTenantForClaim can return, plus the ingest
-  // boundary's refusal of the asserted value (round-3 M1). The `satisfies` in
-  // the source makes a missing arm a compile error; this pins the CHOICE each
-  // arm was given, which the type cannot.
+  // Every arm that can deny a sign-in over a claim, from ALL THREE
+  // adjudicators: the three refusals findOrCreateTenantForClaim can return, the
+  // ingest boundary's refusal of the asserted value (round-3 M1), and the
+  // deployment's failure to propagate a claim between the two Auth.js callbacks
+  // (round-6 F3/SEC-R6-1). The `satisfies` in the source makes a missing arm a
+  // compile error; this pins the CHOICE each arm was given, which the type
+  // cannot.
   it("maps every refusal arm to the reason its remedy matches", () => {
     expect(CLAIM_REFUSAL_REASON).toEqual({
       // Registering the claim IS the remedy, and tenant_claim_unmapped is what
@@ -60,6 +62,13 @@ describe("CLAIM_REFUSAL_REASON", () => {
       // them at a command that must refuse.
       claim_invalid: "tenant_mismatch",
       claim_malformed: "tenant_mismatch",
+      // Not a judgement on the claim at all — the sign-in machinery lost the
+      // AsyncLocalStorage context. Neither claim reason applies: the operator's
+      // problem is the deployment, not a user or a registration. Round 6 found
+      // the two ends of this one signal answering it in two vocabularies, with
+      // the consumer using `claim_invalid`'s word for a path where no
+      // resolution runs.
+      store_unavailable: "provider_error",
     });
   });
 

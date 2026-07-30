@@ -13,7 +13,17 @@
  * stop the command.** Never a silent fallback to a default. This tool is used
  * at incident time, where "I widened the window and it found nothing" and "I
  * did not widen the window" are the same output but opposite conclusions.
+ *
+ * Every message below renders `process.argv` content, so every interpolation of
+ * it goes through `escapeUnsafeDisplayChars` — round-6 F4. Round 5's "all five
+ * operator echoes escaped" enumerated the CLI file and never looked at this
+ * one, which is where argv is first turned into text: four of the six missed
+ * sites are here, including one whose surrounding string round 5 edited. These
+ * are the LEAST validated echoes in the tool — a rejected flag is printed
+ * before any schema has seen it — so they are exactly the wrong ones to miss.
  */
+
+import { escapeUnsafeDisplayChars } from "@/lib/security/unsafe-display-chars";
 
 /**
  * Every flag that takes a VALUE, with the hint printed when it arrives without
@@ -77,7 +87,7 @@ export function parseFlags(argv: string[]): FlagParseResult {
       return {
         ok: false,
         error:
-          `Unexpected argument "${tok}". Every input to this command is a flag; ` +
+          `Unexpected argument "${escapeUnsafeDisplayChars(tok)}". Every input to this command is a flag; ` +
           "a bare word is either a typo or a value whose flag was dropped.",
       };
     }
@@ -104,21 +114,24 @@ export function parseFlags(argv: string[]): FlagParseResult {
       return {
         ok: false,
         error:
-          `--${name} was given more than once. Refusing rather than taking the last one: ` +
+          `--${escapeUnsafeDisplayChars(name)} was given more than once. Refusing rather than taking the last one: ` +
           "a flag the operator wrote must either take effect or stop the command.",
       };
     }
 
     if (isBooleanFlag(name)) {
       if (inlineValue !== undefined) {
-        return { ok: false, error: `--${name} takes no value (got "${inlineValue}").` };
+        return {
+          ok: false,
+          error: `--${escapeUnsafeDisplayChars(name)} takes no value (got "${escapeUnsafeDisplayChars(inlineValue)}").`,
+        };
       }
       flags.set(name, true);
       continue;
     }
 
     if (!isValueFlag(name)) {
-      return { ok: false, error: `Unknown flag --${name}. ${usageHint()}` };
+      return { ok: false, error: `Unknown flag --${escapeUnsafeDisplayChars(name)}. ${usageHint()}` };
     }
 
     if (inlineValue !== undefined) {

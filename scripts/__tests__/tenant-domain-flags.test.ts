@@ -34,6 +34,37 @@ function errorOf(argv: string[]): string {
 }
 
 describe("tenant-domain flag parsing", () => {
+  /**
+   * Round-6 F4. Round 5 declared the operator-echo escape class closed at "all
+   * five sites"; it had enumerated the CLI file only, and four of the misses are
+   * in this module — including one whose surrounding message string round 5
+   * edited without escaping the interpolation inside it.
+   *
+   * These are the least validated echoes in the whole tool: a refused flag is
+   * printed before any schema has seen it, straight off `process.argv`. Every
+   * refusal message is checked here rather than one of them, because the missing
+   * sites were siblings of a fixed one — which is the shape a per-site test does
+   * not catch.
+   */
+  const RLO = String.fromCodePoint(0x202e);
+
+  it.each([
+    ["a bare positional", [`ops${RLO}admin`]],
+    ["an unknown flag", [`--ops${RLO}admin`, "x"]],
+    ["a repeated flag", ["--tenant", "a", "--tenant", "b"]],
+    ["a boolean flag given a value", [`--yes=ops${RLO}admin`]],
+  ])("escapes operator input in the refusal for %s", (_label, argv) => {
+    const error = errorOf(argv as string[]);
+    expect(error).not.toContain(RLO);
+  });
+
+  it("still renders the offending token, escaped rather than dropped", () => {
+    // Escaping, not stripping: a stripped `ops<U+202E>admin` prints as
+    // `opsadmin`, so the operator is shown a token they did not type and told it
+    // was refused.
+    expect(errorOf([`ops${RLO}admin`])).toContain("ops<U+202E>admin");
+  });
+
   it("parses the space-separated form", () => {
     const flags = flagsOf(["--tenant", "acmecorp", "--domain", "alias.example"]);
     expect(getStringFlag(flags, "tenant")).toBe("acmecorp");
@@ -127,24 +158,33 @@ describe("tenant-domain flag parsing", () => {
     // the CLI: a flag `tenant-domain.ts` reads but never declared here is
     // refused at parse time, so the operator's instruction silently never
     // reaches the command. Derived by reading the CLI's own flag reads.
-    // Round-5 T7: all three spellings a flag can be read by, each asserted to
-    // have matched at least once. The union guard alone let one regex break
-    // silently, and `flags.has("x")` — the spelling parseFlags itself uses —
-    // was not matched at all.
+    // Round-5 T7 wanted all three spellings proved live. Round-6 T5: it did not
+    // get that. `flags.has("x")` matches NOTHING in the CLI — the parser's only
+    // use is `flags.has(name)`, with a variable — so the guard exempted it from
+    // the non-empty check, and the review log's claim that all three were
+    // "asserted each matched" was false for exactly the one that could not.
+    //
+    // Two different properties, separated here rather than conflated:
+    //   1. the REGEX is well-formed and matches the shape it names — proved
+    //      against a synthetic sample, so a spelling the CLI does not use today
+    //      still cannot rot into one that matches nothing;
+    //   2. the CLI's actual flag reads are a subset of the declared tables —
+    //      proved against the file, and only spellings the CLI genuinely uses
+    //      can carry that half.
     const cli = readFileSync(resolve(__dirname, "../tenant-domain.ts"), "utf8");
     const SPELLINGS = [
-      /getStringFlag\(flags,\s*"([^"]+)"\)/g,
-      /flags\.get\("([^"]+)"\)/g,
-      /flags\.has\("([^"]+)"\)/g,
+      { re: /getStringFlag\(flags,\s*"([^"]+)"\)/g, sample: 'getStringFlag(flags, "probe")' },
+      { re: /flags\.get\("([^"]+)"\)/g, sample: 'flags.get("probe")' },
+      { re: /flags\.has\("([^"]+)"\)/g, sample: 'flags.has("probe")' },
     ];
     const read = new Set<string>();
-    for (const re of SPELLINGS) {
-      const found = [...cli.matchAll(re)].map((m) => m[1]);
-      // Every spelling must be exercised by the CLI, or its regex could rot
-      // unnoticed. `flags.has` is read in the parser, not the CLI, so it is
-      // allowed to be empty there — the other two are not.
-      if (re !== SPELLINGS[2]) expect(found.length, `${re}`).toBeGreaterThan(0);
-      found.forEach((f) => read.add(f));
+    for (const { re, sample } of SPELLINGS) {
+      // (1) Self-test: the regex can match, and captures the flag name.
+      expect([...sample.matchAll(re)].map((m) => m[1]), `${re} against its own sample`).toEqual([
+        "probe",
+      ]);
+      // (2) Whatever it finds in the CLI joins the member set.
+      [...cli.matchAll(re)].map((m) => m[1]).forEach((f) => read.add(f));
     }
 
     const declared = new Set<string>([...Object.keys(VALUE_FLAG_HINTS), ...BOOLEAN_FLAGS]);

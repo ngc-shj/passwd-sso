@@ -282,13 +282,14 @@ Key variables:
 
 ### Upgrade notes: environment variables that now fail closed
 
-Three variables that were previously read loosely are now validated when the environment schema is parsed. Each fails **closed** — the process refuses to start rather than run with a value it cannot interpret, which is the intended direction, but a deployment whose current value was silently tolerated will **not boot** after the upgrade. Check all three before rolling out.
+Four variables that were previously read loosely are now validated when the environment schema is parsed. Each fails **closed** — the process refuses to start rather than run with a value it cannot interpret, which is the intended direction, but a deployment whose current value was silently tolerated will **not boot** after the upgrade. Check all four before rolling out.
 
 | Variable | Previously | Now | What breaks |
 | --- | --- | --- | --- |
 | `AUDIT_IDENTIFIER_PEPPER` | Any string, used verbatim as the HMAC key; unset meant an empty-key HMAC | Exactly 64 hex characters (`npm run generate:key`) when set, or unset | **Boot failure** for any value that is not 64 hex characters — including one that is too long or the right length but not hex, not only one that is too short. See the hash-correlation note below |
 | `COOKIE_PARTITIONED` | Compared with `=== "true"`, so `1`, `TRUE` and `yes` all read as *off* | `true` or `false`, or unset (`false`) | **Boot failure** for any other spelling. A deployment that intended to enable CHIPS with `COOKIE_PARTITIONED=1` never had it enabled — set `true` |
 | `BREAKGLASS_COOLING_OFF_SECONDS` | Unvalidated | Non-negative integer (seconds), or unset (`3600`) | **Boot failure** for a non-numeric value such as `1h` |
+| `AUTH_TENANT_CLAIM_KEYS` | Any string; entries that named nothing were dropped, so `,` behaved exactly like leaving it unset | Must name at least one claim key when set, or be unset | **Boot failure** only for a value that names *no* key at all (`,`, `,,`). A repeated key and a stray empty entry (`org,,tenant`) still boot — they name the keys they appear to. The old fall-through was not harmless: on a SAML deployment it silently resolved no claim for any sign-in, so first-time users were created in their own bootstrap tenant as OWNER |
 
 **`AUDIT_IDENTIFIER_PEPPER` also breaks hash correlation, whichever way you fix it.** `identifierHash` on `AUTH_LOGIN_FAILURE` is an HMAC keyed by the pepper, so any change of key makes new hashes unrelated to the ones already in `audit_logs` — the same identifier no longer produces the same hash, and correlation across the upgrade boundary is lost. This happens in every migration path, not just the boot failure:
 
@@ -311,15 +312,16 @@ See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and r
 
 ### IdP domain changed / tenant locked out
 
-Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **three** causes, and only the first two are fixed with this tool:
+Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **four** causes, and only the first two are fixed with this tool:
 
-| `metadata.reason` | `metadata.claim` | Cause | Remedy |
+| `metadata.reason` | claim fields (`metadata.claim` / `metadata.claimRefusal`) | Cause | Remedy |
 |---|---|---|---|
 | `tenant_claim_unmapped` | the claim | not registered to any tenant | `tenant-domain add` |
 | `tenant_mismatch` | the claim | registered to a *different* tenant | investigate the user, or `add --from` to move the claim |
-| `tenant_mismatch` | *(absent; `metadata.claimRefusal` is set instead)* | the IdP's asserted value was **refused at ingest** — an unpaired surrogate, a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; `claimRefusal` names the rule the value broke |
+| `tenant_mismatch` | `claimRefusal` set (`claim` absent) | the IdP's asserted value was **refused at ingest** — an unpaired surrogate, a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; `claimRefusal` names the rule the value broke |
+| `tenant_mismatch` | `claimRefusal` set **and** `claim` present | the asserted value passed ingest but **cannot be stored** — it is not printable ASCII, which the registry's `CHECK` constraint rejects (see `preflight` below) | **fix it at the IdP**, or register an ASCII claim for the tenant. `add` refuses this value on the same predicate |
 
-Key the third case on the **field**, not on the text: `claimRefusal` is written only by the ingest boundary, whereas anything inside `claim` was supplied by the IdP and can be made to look like whatever the reader is told to trust. `unmapped` reports all three under separate headings. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
+Key the last two cases on the **field**, not on the text: `claimRefusal` is written only by this deployment's own refusal adjudicators, whereas anything inside `claim` was supplied by the IdP and can be made to look like whatever the reader is told to trust. `unmapped` reports the four causes under three headings — the two `claimRefusal` cases share one, because they share a remedy. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
 
 ```bash
 # See which unregistered claims were denied recently (default window: 30 days)
@@ -348,7 +350,7 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
   --from <current-owner-uuid>
 ```
 
-Before writing anything, `add --from` prints both tenants — id, name, slug and **active member count** — plus what the move costs the losing side, and asks for confirmation (`--yes` for non-interactive use). It refuses if `--from` is not the row's actual owner, and it does **not** require the row to be revoked first: a revoke-then-reassign sequence would open a window in which the claim resolves to nobody and *both* tenants' members are denied. The row's `created_by` is left untouched by the move — it records who first registered the claim, which is the evidence an incident needs; who performed the move appears only in this command's printed output, so keep it with the incident record.
+Before writing anything, `add --from` prints both tenants — id, name, slug and **active member count** — plus what the move costs the losing side, and asks for confirmation (`--yes` for non-interactive use). It refuses if `--from` is not the row's actual owner, and it does **not** require the row to be revoked first: a revoke-then-reassign sequence would open a window in which the claim resolves to nobody and *both* tenants' members are denied. The row's `created_by` is left untouched by the move — it records who first registered the claim, which is the evidence an incident needs. **The registry keeps no history of routing changes.** A move overwrites `tenant_id`, and re-registering a revoked claim clears `revoked_at`, so after either the row cannot tell you the previous owner, that it had been revoked, or who made the change. The command prints all three under `NOT RECOVERABLE from the row after this change`; that output is the only record, so retain it with the incident.
 
 **If `GOOGLE_WORKSPACE_DOMAINS` is set** (recommended in [SECURITY.md](SECURITY.md)), registering the claim alone changes nothing. `src/auth.config.ts`'s `signIn` callback denies any Google sign-in whose `hd` is not in `GOOGLE_WORKSPACE_DOMAINS` *before* tenant-claim resolution runs at all, recorded as `reason: "provider_error"` — the denial never reaches the tenant-claim check, so `tenant-domain unmapped` shows nothing for it. Add the new domain to `GOOGLE_WORKSPACE_DOMAINS` too, and note which tenant it was added for: the variable is deployment-global while the claim registry is tenant-scoped, so without that note it silently accumulates every domain any tenant has ever renamed to. Remove the entry once no tenant depends on it. **Do not unset `GOOGLE_WORKSPACE_DOMAINS` to work around a lockout** — `allowDangerousEmailAccountLinking` is derived from `allowedGoogleDomains.length > 0`, so unsetting it flips that flag to `false` (*stricter*, not looser) and produces a second, different failure, `OAuthAccountNotLinked`, on top of the original denial.
 

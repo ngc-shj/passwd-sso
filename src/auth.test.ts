@@ -165,10 +165,23 @@ vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimGetStore },
 }));
 
-vi.mock("@/lib/tenant/tenant-management", () => ({
-  resolveTenantByClaim: mockResolveTenantByClaim,
-  findOrCreateTenantForClaim: mockFindOrCreateTenantForClaim,
-}));
+// `refusalFromLookup` and `claimRefusalOf` are passed through UNMOCKED (round-6
+// F5). Together they are the single adjudicator that turns a refusing
+// `ClaimLookup` into its resolution arm and reads that arm's diagnosis, and
+// src/auth.ts derives attribution, audit reason and `claimRefusal` from them —
+// so a stub here would let all three assertions below agree with a table this
+// file wrote rather than with the one production uses (RT5). Both are pure and
+// touch no Prisma, which is why they can be real while the two async functions
+// beside them are mocked.
+vi.mock("@/lib/tenant/tenant-management", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/tenant/tenant-management")>();
+  return {
+    refusalFromLookup: actual.refusalFromLookup,
+    claimRefusalOf: actual.claimRefusalOf,
+    resolveTenantByClaim: mockResolveTenantByClaim,
+    findOrCreateTenantForClaim: mockFindOrCreateTenantForClaim,
+  };
+});
 
 vi.mock("@/lib/audit/auth-failure", () => ({
   emitAuthLoginFailure: mockEmitAuthLoginFailure,
@@ -185,6 +198,11 @@ vi.mock("./auth.config", () => ({
 import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
 import type { ClaimLookup, ClaimTenantResolution } from "@/lib/tenant/tenant-management";
 import type { TenantClaimExtraction } from "@/lib/tenant/tenant-claim";
+// The REAL producer, not a literal (round-6 SEC-R6-3): `ClaimRefusalDiagnosis`
+// is branded, so a fixture cannot spell one — which is the point. It also means
+// the `refused: ` prefix comes from production code, so a change to it cannot
+// leave these expectations asserting the old wording.
+import { claimRefusal } from "@/lib/tenant/claim-refusal";
 // Real production predicate (NOT mocked): the fail-closed test asserts the
 // actual enforcement verdict, not a re-implemented condition (RT5).
 import { passkeyEnforcementBlocks } from "@/lib/auth/policy/passkey-enforcement";
@@ -359,7 +377,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   it("denies with tenant_mismatch when the asserted claim was refused at ingest", async () => {
     mockExtractTenantClaimValue.mockReturnValue(extraction({
       kind: "malformed",
-      diagnosis: "refused: contains U+200B",
+      diagnosis: claimRefusal("contains U+200B"),
     }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
 
@@ -377,7 +395,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       // this deployment will record as a claim — and a marker living inside
       // `claim` would be forgeable by the actor who supplies it.
       claim: null,
-      claimRefusal: "refused: contains U+200B",
+      claimRefusal: claimRefusal("contains U+200B"),
     });
     // Nothing may be looked up, created or joined from a value we refused.
     expect(mockResolveTenantByClaim).not.toHaveBeenCalled();
@@ -387,7 +405,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 
   it("denies a refused claim with a null tenantId when the user has no membership yet", async () => {
-    mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "malformed", diagnosis: "refused: 312 characters (max 255)" }));
+    mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "malformed", diagnosis: claimRefusal("312 characters (max 255)") }));
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});
@@ -397,7 +415,7 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_mismatch",
       tenantId: null,
       claim: null,
-      claimRefusal: "refused: 312 characters (max 255)",
+      claimRefusal: claimRefusal("312 characters (max 255)"),
     });
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
@@ -405,7 +423,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("denies a refused claim when the user has multiple active memberships", async () => {
     mockExtractTenantClaimValue.mockReturnValue(
-      extraction({ kind: "malformed", diagnosis: "refused: contains U+200B" }),
+      extraction({ kind: "malformed", diagnosis: claimRefusal("contains U+200B") }),
     );
     mockPrisma.tenantMember.findMany.mockResolvedValue([
       { tenantId: "tenant-a" },
@@ -417,16 +435,19 @@ describe("ensureTenantMembershipForSignIn", () => {
     // Round-4 T1. The MULTI_TENANT throw beats the refusal to the exit, so
     // `ok === false` alone made this test an exact duplicate of row 3 — it
     // stayed green with BOTH malformed dispatch branches deleted, while its
-    // name claimed to cover the refusal. `claim` is what separates the two
-    // exits: row 3 (no claim asserted) carries null, and this exit now carries
+    // name claimed to cover the refusal. `claimRefusal` is what separates the
+    // two exits: row 3 (no claim asserted) carries null, and this exit carries
     // the diagnosis, because a multi-tenant user whose IdP is mangling the
-    // claim should not get a denial that hides why (round-4 F8).
+    // claim should not get a denial that hides why (round-4 F8). `claim` is
+    // null on BOTH, so naming it as the discriminator — as this comment did
+    // until round-6 T6 — described the pre-round-5 field split, not the assert
+    // below it.
     expect(result).toEqual({
       ok: false,
       reason: "tenant_mismatch",
       tenantId: null,
       claim: null,
-      claimRefusal: "refused: contains U+200B",
+      claimRefusal: claimRefusal("contains U+200B"),
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -469,8 +490,18 @@ describe("ensureTenantMembershipForSignIn", () => {
   // registrable — so an unstorable claim reports the reason whose remedy is
   // NOT "register it", and `tenant-domain unmapped` stops printing it under a
   // command that must refuse it.
-  it("row 9b: reports an unstorable claim as tenant_mismatch, not as unmapped", async () => {
-    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unstorable" }));
+  //
+  // Round-6 F1: reporting `tenant_mismatch` was only half the answer.
+  // `tenant-domain unmapped` buckets on whether `claimRefusal` is SET, so a
+  // `tenant_mismatch` with a claim and no diagnosis was printed under
+  // "registered to a DIFFERENT tenant — move it with `add --from`" — for a
+  // claim registered nowhere, and one `add` refuses on the same predicate that
+  // produced this arm. Dropping the diagnosis here reds this and the two rows
+  // below.
+  it("row 9b: reports an unstorable claim as tenant_mismatch WITH a refusal diagnosis", async () => {
+    mockResolveTenantByClaim.mockResolvedValue(
+      lookup({ kind: "unstorable", refusal: claimRefusal("claim must be printable ASCII") }),
+    );
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_OTHER }]);
     mockPrisma.tenant.findUnique.mockResolvedValue({ isBootstrap: false });
 
@@ -481,8 +512,13 @@ describe("ensureTenantMembershipForSignIn", () => {
       reason: "tenant_mismatch",
       tenantId: TENANT_OTHER,
       claim: "tenant-acme",
-      claimRefusal: null,
+      claimRefusal: claimRefusal("claim must be printable ASCII"),
     });
+    // Round-6 F5: a refusing lookup is dispatched straight from the arm. It
+    // used to be answered by calling findOrCreateTenantForClaim, which retook
+    // the advisory lock and re-ran four reads to reach the arm the lookup had
+    // already named — and gave one question two adjudicators.
+    expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
   });
 
   // Row 4: claim resolves, no existing membership -> upsert -> allow.
@@ -727,11 +763,21 @@ describe("ensureTenantMembershipForSignIn", () => {
   // the operator remedy and this must NOT report as unmapped.
   it("row 8b: denies with tenant_mismatch when the claim fails storableClaimSchema (SC9)", async () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
-    mockFindOrCreateTenantForClaim.mockResolvedValue(refusal({ kind: "claim_invalid", tenantId: null }));
+    mockFindOrCreateTenantForClaim.mockResolvedValue(
+      refusal({ kind: "claim_invalid", tenantId: null, refusal: claimRefusal("claim must be printable ASCII") }),
+    );
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});
 
-    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: null, claim: "tenant-acme", claimRefusal: null });
+    expect(result).toEqual({
+      ok: false,
+      reason: "tenant_mismatch",
+      tenantId: null,
+      claim: "tenant-acme",
+      // Round-6 F1: the diagnosis travels with the arm, so `unmapped` buckets
+      // this as refused rather than as "move it with `add --from`".
+      claimRefusal: claimRefusal("claim must be printable ASCII"),
+    });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
@@ -799,12 +845,20 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("row 9a: denies with tenant_mismatch when the claim fails storableClaimSchema on the bootstrap branch (SC9)", async () => {
     mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "unregistered" }));
-    mockFindOrCreateTenantForClaim.mockResolvedValue(refusal({ kind: "claim_invalid", tenantId: null }));
+    mockFindOrCreateTenantForClaim.mockResolvedValue(
+      refusal({ kind: "claim_invalid", tenantId: null, refusal: claimRefusal("claim must be printable ASCII") }),
+    );
     mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: TENANT_BOOTSTRAP }]);
 
     const result = await ensureTenantMembershipForSignIn("user-1", null, {});
 
-    expect(result).toEqual({ ok: false, reason: "tenant_mismatch", tenantId: TENANT_BOOTSTRAP, claim: "tenant-acme", claimRefusal: null });
+    expect(result).toEqual({
+      ok: false,
+      reason: "tenant_mismatch",
+      tenantId: TENANT_BOOTSTRAP,
+      claim: "tenant-acme",
+      claimRefusal: claimRefusal("claim must be printable ASCII"),
+    });
     expect(mockPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
@@ -957,7 +1011,7 @@ describe("signIn callback", () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
     mockExtractTenantClaimValue.mockReturnValue(extraction({
       kind: "malformed",
-      diagnosis: "refused: contains U+00AD",
+      diagnosis: claimRefusal("contains U+00AD"),
     }));
 
     const result = await signInCallback({
@@ -980,7 +1034,7 @@ describe("signIn callback", () => {
       email: "new@acme.example",
       provider: "google",
       reason: "tenant_mismatch",
-      claimRefusal: "refused: contains U+00AD",
+      claimRefusal: claimRefusal("contains U+00AD"),
     });
   });
 
@@ -1106,6 +1160,47 @@ describe("signIn callback", () => {
       userId: "real-db-id",
       claim: "tenant-acme",
       claimRefusal: null,
+    });
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Round-6 T1. `claimRefusal: result.claimRefusal` at the emit site had NO
+   * test: replacing it with `null` left the whole unit suite green, because both
+   * signIn-driven emit tests above are cases where the diagnosis IS null.
+   *
+   * That forward is the only path by which an EXISTING user's refusal diagnosis
+   * reaches the audit trail — the first-ever-sign-in branch emits its own,
+   * earlier, from `extraction.diagnosis`. Dropping it would also make the whole
+   * refused population invisible: these rows carry no `claim` either, so with
+   * `claimRefusal` null they match neither side of `cmdUnmapped`'s
+   * `claim IS NOT NULL OR claim_refusal IS NOT NULL`, and the report the
+   * operator runs to find them returns nothing at all.
+   */
+  it("forwards the refusal diagnosis to emitAuthLoginFailure (existing user, driven through signIn)", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "malformed", diagnosis: claimRefusal("contains U+200B") }),
+    );
+    mockPrisma.tenantMember.findMany.mockResolvedValue([
+      { tenantId: "00000000-0000-4000-a000-000000000003" },
+    ]);
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "user@acme.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(false);
+    expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+      email: "user@acme.com",
+      provider: "google",
+      reason: "tenant_mismatch",
+      tenantId: "00000000-0000-4000-a000-000000000003",
+      userId: "real-db-id",
+      claim: null,
+      claimRefusal: claimRefusal("contains U+200B"),
     });
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });

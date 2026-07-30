@@ -1120,3 +1120,233 @@ as every other one: the existing `.catch` turns it into an audit emit, and
 aborting the transaction means no user, no tenant and no OWNER membership
 survive. Throwing before the transaction would have skipped that catch and made
 the denial silent — the property the guard exists to provide.
+
+---
+
+# Round-6 fix round
+
+Round 6 returned 8 Majors and 6 Minors, plus four findings from an independent
+Codex review of the same branch. The entries below are the contract changes; the
+corrections to SC7 and SC8, and the new SC11, are made in the plan.
+
+The round's defining decision is not in any single entry: three separate classes
+had each been closed by hand and reopened twice or more, always by enumerating
+members from a file instead of deriving them from the primitive that defines
+them. Three mutation-verified guards now hold those classes — see the review
+log's Resolution Status for each guard's red-proof table.
+
+## D-45 — `metadata.claimRefusal` is a BRANDED type, not a string
+
+**Round 5 (D-41)**: the diagnosis moved to its own metadata key, so an IdP could
+not forge the signal from the value side.
+
+**Round 6 (SEC-R6-3)**: `ClaimRefusalDiagnosis`, a branded string whose only
+producer is `claimRefusal()` in the new `src/lib/tenant/claim-refusal.ts`.
+
+**Why**: a separate key stops the IdP forging the signal; it does not stop a
+caller in this repo from writing an arbitrary string into it, and
+`emitAuthLoginFailure`'s parameter was a bare `string | null` with the guarantee
+living in a comment ("every producer is `malformed()` in tenant-claim.ts"). That
+comment was a survey of callers, i.e. exactly the shape this branch has been
+finding wrong for six rounds. The brand makes it a compile error.
+
+**It paid for itself immediately**: every test fixture that spelled a diagnosis as
+a literal became a type error, so five files now call the real producer — which
+also means the `refused: ` prefix asserted in those tests is production's spelling
+rather than each file's private copy of it.
+
+**Second producer, admitted deliberately**: `storableClaimSchema`'s refusal
+(D-46) also emits one. Both are refusal ADJUDICATORS, and the brand is what makes
+adding a producer a visible act rather than an accident.
+
+## D-46 — the `unstorable` / `claim_invalid` arms carry a refusal diagnosis
+
+**Round 5 (D-42)**: `ClaimLookup` gained `unstorable`, and `lookupRefusalReason`
+gave it `tenant_mismatch` — the reason whose remedy is not "register the claim".
+
+**Round 6 (F1)**: both arms now carry `refusal: ClaimRefusalDiagnosis`, derived
+from `storableClaimSchema`'s own issue message rather than written out.
+
+**Why**: round 5 fixed the REASON and left the FIELD. `tenant-domain unmapped`
+buckets on whether `claimRefusal` is set (D-41), so a `tenant_mismatch` with a
+claim and no diagnosis is byte-identical to a row-7 "registered to a different
+tenant" denial — and this population was therefore printed under *"move the claim
+with `add --from`"*, a command guaranteed to refuse it on the very predicate that
+produced the arm. Round 4 had it right by accident (the population fell on the
+refused side before the field split existed), so this is a regression against
+round 4 introduced by round 5's fix.
+
+Deriving the message from the schema's issue rather than hard-coding "not
+printable ASCII" is deliberate: `storableClaimSchema` has four refinements, only
+one of which is reachable from sign-in today, and a hard-coded message would
+describe the wrong rule the moment that changes.
+
+`printGroup` also prints BOTH fields when a row has both. An ingest refusal
+carries no claim by construction; an unstorable one carries the value AND the
+rule, and the operator needs the value to know which population is affected.
+
+## D-47 — store loss is `store_unavailable` / `provider_error` at both ends
+
+**Round 4/5 (D-40, D-44)**: the producer (`src/auth.ts`'s signIn callback) and the
+consumer (`createUser`) were each made to fail closed on a missing
+`tenantClaimStorage` context.
+
+**Round 6 (F3 + SEC-R6-1, converged)**: they did so in two different judgement
+vocabularies. The producer emitted `provider_error`; the consumer threw
+`TenantClaimUnusableError("claim_invalid", null)`, i.e. `tenant_mismatch`.
+
+**Why the consumer's word was wrong, not merely different**: `claim_invalid`'s
+definition is "the claim fails `storableClaimSchema`", and on this path no
+resolution runs at all. The resulting audit row carried neither `claim` nor
+`claimRefusal`, so it matched none of the three rows in the READMEs' cause table
+and fell outside `cmdUnmapped`'s `claim IS NOT NULL OR claim_refusal IS NOT NULL`
+filter — a denial shaped so that nothing could report it. D-44's claim that the
+refusal "takes the same route as every other one" was also overstated: with
+`tenantId = null` it dead-letters, which is inherent (D-30) rather than a defect,
+but was not what the entry said.
+
+**Implemented**: `CLAIM_REFUSAL_REASON` gains `store_unavailable: "provider_error"`,
+under the same `satisfies` that forced `claim_collision` to be classified when it
+was added. `TenantClaimUnusableError.kind` widens from
+`ClaimResolutionRefusalKind` to `ClaimRefusalKind` so the arm can name itself
+instead of borrowing a resolution arm's word. `provider_error` joins the table's
+value union — a small loss of precision for the other arms, accepted because the
+alternative is two tables, which is the defect.
+
+## D-48 — only `unregistered` reaches `findOrCreateTenantForClaim`
+
+**Before**: `src/auth.ts` answered every non-`tenant` lookup by calling
+`findOrCreateTenantForClaim`, which retook the advisory lock and re-ran four reads
+to arrive at the arm `resolveTenantByClaim` had named one statement earlier.
+
+**Implemented (round-6 F5)**: `refusalFromLookup(lookup)` maps a refusing lookup
+onto its resolution arm, and `resolveTargetTenant` sends only `unregistered` to
+the creator.
+
+**Why it is more than a saved read**: attribution (`lookupOwnerId`), audit reason
+(`lookupRefusalReason`) and diagnosis (`lookupRefusalDiagnosis`) were three
+independent enumerations of `ClaimLookup`'s arms. D-42 recorded that round 4's
+closure of the first was claimed on the grounds that "the compiler enumerated
+every consumer", and that the compiler enumerates consumers rather than
+attribution SOURCES — which is how `collision` came to be missing from one of
+them. All three now read `refusalFromLookup`, so there is one source. The removed
+call is what made two adjudicators of one question possible.
+
+`claimRefusalOf` moved from `src/auth.ts` to `tenant-management.ts` and is
+exported, so the CLI's bucket guard can ask production the same question the
+dispatch asks rather than restating the answer.
+
+## D-49 — `add`'s compare-and-swap covers `revokedAt`, not only the owner
+
+**Round 1 (D-20)**: `add --from` re-asserts the owner in the `WHERE` so a
+concurrent change is a refusal rather than a silent overwrite.
+
+**Round 6 (raised independently by Codex)**: it re-asserted `id` and `tenantId`
+only. The preview prints the row's revocation state and the write CLEARS it, so a
+concurrent `remove` landing while the operator reads the absorption warning (which
+is deliberately long — D-14) was silently undone: the move succeeded and set
+`revokedAt: null`, reversing another operator's incident containment with no
+notice to either of them.
+
+**Implemented**: both mutating paths in `cmdAdd` assert the exact `revokedAt` they
+read. `cmdRemove` already did, which is what made the asymmetry findable.
+
+**The rule this generalises to, stated because the instance patch is not the
+point**: every field the preview showed and the write changes belongs in the
+`WHERE`. The two existing CAS tests could not catch this one — both race by
+changing the OWNER, the field the old predicate did cover — so a per-field case is
+what shows which fields are actually covered.
+
+## D-50 — `AUTH_TENANT_CLAIM_KEYS` fails closed when it names no key
+
+**Before**: the parser filtered empty entries away and returned `[]`, so `","`
+behaved exactly like leaving the variable unset — the key walk read nothing and
+fell through to the Google-only `hd` fallback.
+
+**Round 6 (raised independently by Codex)**: two predicates, following D-23's
+shape. `envSchema` refuses the value at boot; `parseTenantClaimKeys` throws for
+processes that never parse the schema (it reads `process.env` directly, as
+`auth-failure.ts` does).
+
+**Why it matters**: on a SAML deployment the fall-through resolves no claim for
+ANY sign-in, so first-time users are created in their own bootstrap tenant as
+OWNER, invisibly, with the row-6/9a absorption armed for later — the outcome
+D-22 already records for the deliberate `AUTH_TENANT_CLAIM_KEYS=hd`
+misconfiguration, reached here by a typo instead. Throwing is fail-closed: it
+reaches `src/auth.ts`'s signIn catch, which emits `provider_error` and writes
+nothing.
+
+**Narrower than the reviewer asked, deliberately.** Codex also wanted duplicate
+keys and stray empty entries (`org,,tenant`) rejected. Neither has a failure mode
+— a repeated key is read twice and takes effect once, and `org,,tenant` names
+exactly the two keys it appears to — so rejecting them would fail the boot of
+configurations that work today for no behavioural gain. Per the
+no-false-technical-justification rule, a boot failure needs a consequence behind
+it. Both READMEs' *"environment variables that now fail closed"* table gains the
+row, and says which shapes still boot.
+
+## D-51 — the whitespace-only arm runs BEFORE the unsafe-class test
+
+**Round 5 (D-43)**: whitespace-only under either trim is `absent`, placed after
+the unsafe-class test.
+
+**Round 6 (F2)**: moved above it. Of the 25 code points JS `.trim()` strips, three
+(U+2028, U+2029, U+FEFF) are also `UNSAFE_DISPLAY_CHAR_RANGES` members, so they
+never reached the new arm and were DENIED — while `main` and round 3 read all
+three as absent.
+
+**Why the move is safe, stated because the ordering was chosen deliberately in
+round 4**: the unsafe test comes first so a value is never canonicalised onto a
+neighbouring claim. A value that is entirely JS-trim whitespace normalises to the
+EMPTY string, so it has no neighbour to land on; every value with a
+non-whitespace character still meets the unsafe test first. The reject-don't-strip
+policy is unchanged.
+
+**Third round in a row for this table** (r4 T2, r5 F4, r6 F2), and the last one
+fixed as an instance: the classification is now enumerated from
+`String.prototype.trim` and `UNSAFE_DISPLAY_CHAR_RANGES` directly. See the review
+log for that guard's three red-proofs.
+
+## D-52 — `unmapped`'s reason set and bucket table live in one shared module
+
+**Before**: `bucketOf` and the bucket names were private to
+`scripts/tenant-domain.ts`, and the selected reasons were spelled inline in each
+of the two UNION arms.
+
+**Implemented**: `scripts/lib/tenant-domain-buckets.ts` (pure, so it is unit
+testable without importing the CLI — the same reason `tenant-domain-flags.ts`
+exists), holding `UNMAPPED_BUCKET`, `bucketOf`, `UNMAPPED_SELECTED_REASONS`,
+`REFUSAL_BUCKET` and `RESOLVED_ELSEWHERE_BUCKET`. The reason set is bound as a
+query parameter rather than spelled twice.
+
+**Why**: round-4 F3 was a reason missing from an inline predicate, and round 6
+found that round 5's red-proof of that fix covered only one of the two copies —
+precisely because there were two. One source removes the possibility rather than
+testing for it. `REFUSAL_BUCKET`'s `satisfies Record<ClaimRefusalKind, …>` is what
+makes a new refusal arm state which population it joins before it compiles, and
+`RESOLVED_ELSEWHERE_BUCKET` names the one reported population that is not a
+refusal (rows 7/9b) instead of leaving it as whatever the else-branch returns.
+
+## D-53 — SEC-R6-2: no expression index, and the reviewer's mechanism was wrong
+
+The security expert reported `findFoldedExternalIdOwner` as an unindexed
+sequential scan. **Measured against the dev database, it is not:**
+
+```
+Limit -> Sort (Sort Key: created_at, id)
+          -> Index Scan using tenants_external_id_key
+               Index Cond: (external_id IS NOT NULL)
+               Filter: lower(btrim(external_id)) = $1
+               Rows Removed by Filter: 2
+Execution Time: 0.104 ms
+```
+
+**Accepted as a residual rather than fixed.** The scan is bounded by the non-null
+`external_id` population — 2 of 269 here, and by construction only tenants
+provisioned before the registry existed — it is reached only after both lookups
+have missed, and SC10 removes the column in release 2. An expression index
+(`ON tenants (lower(btrim(external_id) COLLATE "C")) WHERE external_id IS NOT NULL`)
+would be a migration, an RLS/grants delta and a new object with a measured benefit
+of a fraction of a millisecond. Recorded with the measurement rather than with the
+reviewer's stated mechanism, per the rule that an accepted residual must name the
+real one.

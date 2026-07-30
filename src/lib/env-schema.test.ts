@@ -30,6 +30,40 @@ describe("envObject (raw schema, no superRefine)", () => {
     }
   });
 
+  /**
+   * Round-6, raised independently by Codex. `AUTH_TENANT_CLAIM_KEYS` was
+   * `z.string().optional()`, so `","` booted fine and behaved exactly like
+   * leaving the variable unset — falling through to the Google-only `hd`
+   * fallback, which on a SAML deployment resolves no claim for any sign-in and
+   * creates first-time users in their own bootstrap tenant as OWNER. An
+   * operator who configured a claim-key list must not silently get the
+   * behaviour of having configured none.
+   */
+  it.each([",", ",,", " , ", " ,, "])(
+    "rejects an AUTH_TENANT_CLAIM_KEYS that is set but names no claim key (%j)",
+    (value) => {
+      const result = envObject.safeParse(baseEnv({ AUTH_TENANT_CLAIM_KEYS: value }));
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(
+          result.error.issues.some((i) => i.path[0] === "AUTH_TENANT_CLAIM_KEYS"),
+        ).toBe(true);
+      }
+    },
+  );
+
+  // The allow side, including the two shapes deliberately NOT rejected: a
+  // repeated key takes effect once, and a stray empty entry names exactly the
+  // keys it appears to. Rejecting either would fail the boot of a deployment
+  // that works today, for no behavioural gain.
+  it.each([undefined, "", "organization", "org,tenant_id,hd", "org,,tenant", "org,org"])(
+    "accepts an AUTH_TENANT_CLAIM_KEYS of %j",
+    (value) => {
+      const result = envObject.safeParse(baseEnv({ AUTH_TENANT_CLAIM_KEYS: value }));
+      expect(result.success).toBe(true);
+    },
+  );
+
   it("rejects empty DATABASE_URL", () => {
     const result = envObject.safeParse({
       DATABASE_URL: "",

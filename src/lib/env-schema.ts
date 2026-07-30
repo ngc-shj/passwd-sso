@@ -246,7 +246,39 @@ export const envObject = z.object({
   AUTH_JACKSON_SECRET: nonEmpty.optional(),
   JACKSON_URL: nonEmpty.optional(),
   GOOGLE_WORKSPACE_DOMAINS: z.string().optional(),
-  AUTH_TENANT_CLAIM_KEYS: z.string().optional(),
+  // Fails closed at boot on a value that names no usable key, or names one
+  // twice (round-6, raised independently by Codex). The parser used to filter
+  // empty entries away and return `[]`, so `","` behaved exactly like leaving
+  // the variable unset — falling through to the Google-only `hd` fallback,
+  // which on a SAML deployment resolves no claim for any sign-in and creates
+  // first-time users in their own bootstrap tenant as OWNER. An operator who
+  // configured a claim-key list must not silently get the behaviour of having
+  // configured none.
+  //
+  // `parseTenantClaimKeys` enforces the same predicate a second time, for
+  // processes that never parse this schema (the same asymmetry D-23 records for
+  // the pepper floor).
+  //
+  // Deliberately narrower than the reviewer asked for: Codex also wanted
+  // duplicates and stray empty entries rejected. Neither has a failure mode —
+  // a repeated key is read twice and takes effect once, and `org,,tenant` names
+  // exactly the two keys it appears to — so rejecting them would be a boot
+  // failure for configurations that work today, which is a breaking change with
+  // nothing behind it. The predicate is exactly the case whose behaviour is
+  // wrong.
+  AUTH_TENANT_CLAIM_KEYS: z
+    .string()
+    .optional()
+    .refine(
+      (v) => {
+        if (v === undefined || v.trim() === "") return true;
+        return v.split(",").some((k) => k.trim().length > 0);
+      },
+      {
+        message:
+          "AUTH_TENANT_CLAIM_KEYS is set but names no claim key (leave it unset for the default list)",
+      },
+    ),
   SAML_PROVIDER_NAME: z.string().default("SSO"),
 
   // --- Email (Magic Link / Resend / SMTP) ---

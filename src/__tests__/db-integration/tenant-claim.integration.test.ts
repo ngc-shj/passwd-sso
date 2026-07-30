@@ -770,52 +770,74 @@ describe("findOrCreateTenantForClaim (C4)", () => {
    * what the second sort key exists for, and without a case for it the clause
    * could be deleted with everything still green.
    */
-  it.skipIf(SKIP)("breaks a created_at tie on id, deterministically", async () => {
-    const token = runToken();
-    const [a, b] = [await ctx.createTenant(), await ctx.createTenant()];
-    const lowerId = a < b ? a : b;
-    const higherId = a < b ? b : a;
+  /**
+   * Round-6 T4. Round 5 tried to make this deterministic with a no-op
+   * `UPDATE tenants SET external_id = external_id` that rewrote the lower id's
+   * heap tuple last. **That fix does not work, and the mechanism it named is not
+   * the one at play.** Measured plan for `findFoldedExternalIdOwner` against the
+   * dev database:
+   *
+   *     Limit -> Sort (Sort Key: created_at, id)
+   *               -> Index Scan using tenants_external_id_key
+   *                    Index Cond: (external_id IS NOT NULL)
+   *                    Filter: lower(btrim(external_id)) = $1
+   *
+   * Heap order is never consulted. What decided the pre-fix redness was the
+   * order the two rows arrive in from the `external_id` index — Postgres's
+   * quicksort leaves equal keys in input order for a 2-element run — and that
+   * order is a property of the two `external_id` VALUES, which the fixture
+   * assigns but never pins. Swapping which tenant gets the leading-space
+   * spelling turns the round-5 version GREEN under the same mutation.
+   *
+   * So the fixture is parameterised over both assignments instead. Dropping
+   * `id ASC` reds at least one arm whichever way the index happens to order the
+   * two spellings, and neither arm depends on a property nothing states.
+   */
+  it.each([
+    ["lower id holds the leading-space spelling", true],
+    ["higher id holds the leading-space spelling", false],
+  ] as const)(
+    "breaks a created_at tie on id, deterministically (%s)",
+    async (_label, leadingSpaceOnLowerId) => {
+      if (SKIP) return;
+      const token = runToken();
+      const [a, b] = [await ctx.createTenant(), await ctx.createTenant()];
+      const lowerId = a < b ? a : b;
+      const higherId = a < b ? b : a;
+      // The two raw spellings fold together and neither equals the folded
+      // claim, so only the probe can resolve it. Which tenant gets which is the
+      // parameter.
+      const spaced = ` ${token}-TIE.EXAMPLE `;
+      const plain = `${token}-Tie.Example`;
+      const forLower = leadingSpaceOnLowerId ? spaced : plain;
+      const forHigher = leadingSpaceOnLowerId ? plain : spaced;
 
-    await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      // Identical created_at, set in one statement so the two cannot drift.
-      await tx.$executeRawUnsafe(
-        `UPDATE tenants
-            SET external_id = CASE id WHEN $1::uuid THEN $3 ELSE $4 END,
-                created_at = timestamptz '2020-01-01 00:00:00+00'
-          WHERE id IN ($1::uuid, $2::uuid)`,
-        lowerId,
-        higherId,
-        `${token}-Tie.Example`,
-        ` ${token}-TIE.EXAMPLE `,
-      );
-    });
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        // Identical created_at, set in one statement so the two cannot drift.
+        await tx.$executeRawUnsafe(
+          `UPDATE tenants
+              SET external_id = CASE id WHEN $1::uuid THEN $3 ELSE $4 END,
+                  created_at = timestamptz '2020-01-01 00:00:00+00'
+            WHERE id IN ($1::uuid, $2::uuid)`,
+          lowerId,
+          higherId,
+          forLower,
+          forHigher,
+        );
+      });
 
-    // Round-5 T5. The batched UPDATE above leaves the two heap tuples in
-    // whatever order the plan rewrote them, and `id IN (...)` happens to drive
-    // an ascending index scan on this database — so the test was red 24/24 by
-    // accident of physical order, not by construction (a modelled version with
-    // plain inserts picks the lower id 149/300 times). Re-writing the LOWER id
-    // last makes it the physically later tuple, so a plan without `id ASC`
-    // returns the HIGHER one and the assertion reds deterministically.
-    await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      await tx.$executeRawUnsafe(
-        `UPDATE tenants SET external_id = external_id WHERE id = $1::uuid`,
-        lowerId,
-      );
-    });
-
-    try {
-      const result = await withBypassRls(
-        ctx.su.prisma,
-        (tx) => findOrCreateTenantForClaim(`${token}-tIe.ExAmPlE`, tx),
-        BYPASS_PURPOSE.AUTH_FLOW,
-      );
-      expect(result).toEqual({ kind: "claim_collision", tenantId: lowerId });
-    } finally {
-      await ctx.deleteTestData(a);
-      await ctx.deleteTestData(b);
-    }
-  });
+      try {
+        const result = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(`${token}-tIe.ExAmPlE`, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        expect(result).toEqual({ kind: "claim_collision", tenantId: lowerId });
+      } finally {
+        await ctx.deleteTestData(a);
+        await ctx.deleteTestData(b);
+      }
+    },
+  );
 });

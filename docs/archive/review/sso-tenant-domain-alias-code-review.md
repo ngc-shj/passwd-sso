@@ -790,3 +790,360 @@ advertised catching).
 - Integration, worker container live: **95 files / 437 passed**. One earlier
   run showed `audit-outbox-atomicity` failing on the known D-24 worker race in
   a file this PR does not touch; it passed on re-run.
+
+---
+
+# Round 6 — findings and resolution
+
+Reviewed `68ad007df..HEAD` — round 5's changes only (24 files, +980/−114), the
+second strictly incremental round. **8 Majors (after convergence) and 6 Minors**,
+plus **4 findings from an independent Codex review** the user ran in parallel on
+the same branch.
+
+Round 6 is the round where the recurring META-defect stopped being treated as a
+sequence of findings. Three separate classes had now been "closed" by hand and
+reopened at least twice each, always the same way: the member set was enumerated
+by reading a file instead of derived from the primitive that defines it. Per the
+skill's Step 3-8 and the user's standing rule (a gate that is escaped twice gets
+a new mechanism, not more cases), the convergence artifact for this round is
+**three mutation-verified guards**, not three more fixes.
+
+## Convergence
+
+| # | Finding | Func | Sec | Test | Merged |
+|---|---|---|---|---|---|
+| M1 | Store loss judged in two vocabularies, and the consumer's was `claim_invalid` | F3 Major | SEC-R6-1 Major | — | **Major** |
+
+## Majors
+
+### M1 (Func F3 + Sec SEC-R6-1, converged) — the two ends of one signal answered one predicate differently
+
+`src/lib/auth/session/auth-adapter.ts:227` threw
+`TenantClaimUnusableError("claim_invalid", null)` when the ALS store was absent,
+while the PRODUCER of that same condition (`src/auth.ts:642-651`, D-40) emitted
+`provider_error`. R48, and the consumer's word was also factually wrong:
+`claim_invalid` is defined as "failed `storableClaimSchema`", and on that path no
+resolution runs at all. The resulting row carried neither `claim` nor
+`claimRefusal`, so it matched none of the three rows in the READMEs' cause table
+and fell outside `cmdUnmapped`'s filter — a denial shaped so that nothing could
+report it. D-44's "travels the same route as every other refusal" was also
+overstated: with `tenantId = null` it dead-letters.
+
+- **Fixed**: `CLAIM_REFUSAL_REASON` gains `store_unavailable: "provider_error"`,
+  classified by the same `satisfies` that forced `claim_collision` to be
+  classified. Both sites now read the table. The adapter test pinned only
+  `toHaveBeenCalledTimes(1)`, so it asserted no reason at all; it now asserts the
+  whole payload.
+
+### M2 (Func F1) — an unstorable claim was sent to a command that must refuse it
+
+`scripts/tenant-domain.ts`'s `bucketOf` discriminates on `claim_refusal`, and the
+`unstorable`/`claim_invalid` producer did not set it — so those rows were
+byte-identical to a row-7 "registered to a different tenant" denial and printed
+under *"move the claim with `add --from`"*, for a claim registered nowhere.
+**A regression against round 4**, where the same population fell on the
+refused-at-ingest side and got the right remedy. Both READMEs were wrong too.
+
+- **Fixed**: `ClaimLookup.unstorable` and `ClaimTenantResolution.claim_invalid`
+  carry a `refusal: ClaimRefusalDiagnosis`, derived from the schema's own issue
+  rather than written out, so a later refinement is described correctly without an
+  edit. The discriminator stays a FIELD, never text inside `claim` (D-41's
+  argument, applied to the population it did not cover). `printGroup` now prints
+  BOTH fields when a row has both — the operator needs the value to know which
+  population is affected and the rule to know `add` cannot help. Both READMEs gain
+  the fourth cause.
+
+### M3 (Func F2) — the whitespace class was wrong for the third round running
+
+`src/lib/tenant/tenant-claim.ts`: the "whitespace-only → absent" test sat AFTER
+the unsafe-class test, so the three members of the whitespace class that are also
+unsafe-class members could never reach it. Measured against the real function:
+
+```
+JS-trim whitespace code points: 25
+NOT absent (3): U+2028 -> malformed / U+2029 -> malformed / U+FEFF -> malformed
+```
+
+`main` and round 3 read all three as absent, so this is the round-4 regression at
+its remaining members — and the third consecutive round to get this table wrong
+for the same reason (r4 T2, r5 F4, r6 F2).
+
+- **Fixed**: the check moves above the unsafe test. It cannot canonicalise
+  anything onto a neighbour, which is the hazard that puts the unsafe class first:
+  a value that is entirely JS-trim whitespace normalises to the EMPTY string, so
+  there is no neighbour to land on.
+- **This is guard 1's class.** See Resolution Status.
+
+### M4 (Func F4) — the escape sweep missed a whole module
+
+Round 5's "all five operator echoes escaped" enumerated the CLI file. Six more
+sites: `scripts/lib/tenant-domain-flags.ts:80,107,114,121` (argv straight to a
+message, before any schema has seen it — round 5 edited the string at `:107`
+without escaping the interpolation inside it) and
+`scripts/tenant-domain.ts`'s `Invalid --days "${rawDays}"` arm, which fires
+precisely when the value did NOT match `/^\d+$/`.
+
+- **Fixed**, and the ~17 raw `${claim}` echoes wrapped too — those are
+  schema-validated so the escape is identity, but round 5's own comment claims one
+  rendering convention per terminal, and one convention with no exceptions is what
+  makes the gate below need no exception list.
+- **This is guard 2's class.** See Resolution Status.
+
+### M5 (Test T1) — the refusal-diagnosis forward had no test
+
+`src/auth.ts:671`'s `claimRefusal: result.claimRefusal` could be replaced with
+`null` and the whole unit suite stayed green: both signIn-driven emit tests are
+cases where the diagnosis IS null. It is the only path by which an EXISTING
+user's refusal reaches the audit trail, and dropping it makes the refused
+population *invisible* — those rows carry no `claim` either, so they match neither
+side of `claim IS NOT NULL OR claim_refusal IS NOT NULL`.
+
+- **Fixed**: a sibling of the two existing signIn-driven tests, with a non-null
+  diagnosis. Red-proved: nulling the forward reds it and nothing else.
+
+### M6 (Test T2) — round 5's red-proof was true of two arms out of three
+
+Round 5's Resolution Status claimed the `cmdUnmapped` SQL change was red-proved
+both ways. Independently re-run:
+
+| mutation | result |
+|---|---|
+| revert the `audit_logs` reason predicate | RED ✓ |
+| narrow the NOT NULL filter | RED ✓ |
+| revert the **`audit_outbox`** reason predicate | **GREEN 39/39** ✗ |
+
+The refusal row was seeded only in `audit_logs`, and every outbox row the fixture
+seeded already carried `tenant_claim_unmapped`. The outbox arm is the
+stopped-worker case the union exists for — the state an operator is in when they
+reach for this tool.
+
+- **Fixed** two ways: a refusal row seeded in `audit_outbox` (structurally
+  unclaimable, `nextRetryAt` an hour ahead), AND the reason set bound as a single
+  query parameter so the two UNION arms can no longer disagree at all. The round-5
+  claim is corrected here rather than left standing.
+
+### M7 (Test T3) — the three print groups had no test
+
+Deleting the `other_tenant` group and letting `refused` take its heading — i.e.
+reproducing round-5 F1/S3 exactly, the finding those headings exist to answer —
+left the integration file 39/39 green.
+
+- **Fixed**: a `console.log` capture asserts each row appears under ITS OWN
+  heading, computed as "the last heading printed before this line" rather than
+  per-pair, so a reordering or a fourth heading cannot make it pass by coincidence.
+
+### M8 (Test T4) — round 5's determinism fix was inert, and named the wrong mechanism
+
+Round 5 added a no-op `UPDATE tenants SET external_id = external_id` to make the
+`id ASC` tie-break fixture red deterministically, on the stated grounds that it
+rewrites the lower id's heap tuple last. Measured plan:
+
+```
+Limit -> Sort (Sort Key: created_at, id)
+          -> Index Scan using tenants_external_id_key
+               Index Cond: (external_id IS NOT NULL)
+               Filter: lower(btrim(external_id)) = $1
+```
+
+Heap order is never consulted. What decided the redness was the order the two
+rows arrive in from the `external_id` index — a property of the two `external_id`
+VALUES, which the fixture assigned but never pinned. Swapping which tenant gets
+the leading-space spelling turns the round-5 version GREEN under the same
+mutation.
+
+- **Fixed**: `it.each` over both assignments; the no-op UPDATE and its comment
+  deleted. Dropping `id ASC` now reds at least one arm whichever way the index
+  orders the spellings.
+
+## Minors — all fixed
+
+- **SEC-R6-2** — no expression index for the fold probe. **The reviewer's
+  mechanism was wrong and is not recorded as stated**: measured, the query uses
+  `tenants_external_id_key` under `external_id IS NOT NULL` with the fold as a
+  Filter, not a sequential scan. Accepted as a residual rather than fixed: the
+  scan is bounded by the non-null `external_id` population (2 of 269 here, and by
+  construction only tenants provisioned before the registry), it is reached only
+  on the resolve-to-nothing path, and SC10 removes the column. A migration for
+  that is a new surface with a measured cost of ~0.1 ms.
+- **SEC-R6-3** — `claimRefusal`'s unforgeability lived in a comment. Fixed with a
+  branded `ClaimRefusalDiagnosis` whose only producer is `claimRefusal()`, so
+  "written by us, never by a party to the authentication" is a compile error. It
+  immediately earned its place: every test fixture spelling a diagnosis as a
+  literal became a type error and now calls the real producer, so the `refused: `
+  prefix is production's spelling rather than each file's copy of it.
+- **Func F5** — two vocabularies alive in one function: rows 4/8 and 6/9a called
+  `findOrCreateTenantForClaim` for a refusing lookup, retaking the advisory lock
+  and re-running four reads to reach the arm the lookup had already named. Fixed
+  with `refusalFromLookup`, which is now the single source for attribution, audit
+  reason AND diagnosis — collapsing the three parallel enumerations of
+  `ClaimLookup` that produced round-5 F2. Only `unregistered` reaches the creator.
+- **Func F6** — the READMEs' cause table named `metadata.claim` in a column header
+  whose third row lives in `metadata.claimRefusal`. Header widened, and the fourth
+  cause (M2's population) added.
+- **Test T5** — the third flag-spelling regex (`flags.has("…")`) matches nothing
+  in the CLI and was explicitly exempted from the non-empty guard, so round 5's
+  "all three asserted each matched" was false for the one that could not. Split
+  into two properties: each regex is self-tested against a synthetic sample
+  (proving it is live), and only the spellings the CLI genuinely uses carry the
+  subset check. The round-5 claim is corrected above.
+- **Test T6** — a comment naming `claim` as the discriminator between two exits
+  where the assertion uses `claimRefusal`.
+
+## Codex review (independent, same branch)
+
+The user ran Codex against the branch in parallel. Verdict: conditional No-Go on
+its finding 1. All four were re-verified at file:line here rather than accepted.
+
+- **Codex 1 [High] — a claim is not bound to the provider / connection / claim
+  key.** Real, and it is **SC7**, already recorded with its threat statement.
+  Codex reached it from the schema (`TenantClaim` stores a bare unique string;
+  extraction returns only the value; resolution matches on the value alone) rather
+  than from the plan — two independent derivations of one threat, which is worth
+  recording. Verified pre-existing and identical on `main`
+  (`findOrCreateSsoTenant` resolves `tenant.findUnique({ externalId: claim })` on
+  the same unbound string), so this PR neither introduces nor widens it. Codex's
+  proposed interim — a startup check refusing multi-connection SAML — is
+  **rejected**: a new startup requirement (NF2) that fails the boot of working
+  deployments to mitigate a hazard they already have. SC7 updated with the
+  convergence and the rejection.
+- **Codex 2 [Medium] — no durable history for claim routing changes.** **Accepted,
+  and it falsifies SC8's stated justification.** SC8 defers application-level
+  audit because "the row itself carries the timeline"; that is true of
+  register-then-revoke and false of the two verbs later rounds added — `add --from`
+  overwrites `tenant_id` (D-20), and the un-revoke path nulls `revokedAt` (D2).
+  Both change which tenant an IdP claim authenticates into and destroy the state
+  they changed. SC8's justification is corrected in place and the work is recorded
+  as **SC11**, deferred with an owner and a REQUIRED item (it must land before
+  SC10 removes `Tenant.externalId`, currently the only other place a claim's
+  original owner is recoverable from). What ships now: the CAS fix below, plus a
+  `NOT RECOVERABLE from the row after this change` line naming the destroyed
+  values, with a test on both sides.
+- **Codex 3 [Medium] — `add --from`'s CAS omitted `revokedAt`.** Confirmed at
+  `scripts/tenant-domain.ts:909`. A concurrent `remove` landing while the operator
+  read the (deliberately long) absorption warning was silently undone: the move
+  succeeded and set `revokedAt: null`, reversing another operator's containment
+  with no notice to either of them. The two existing CAS tests could not catch it —
+  both race by changing the OWNER, which the old predicate did cover. **Fixed** on
+  both mutating paths (`cmdRemove` already had it), with a per-field test.
+- **Codex 4 [Low] — `AUTH_TENANT_CLAIM_KEYS` fails open on a value that names no
+  key.** Confirmed: `","` was filtered to `[]` and behaved exactly like leaving the
+  variable unset, falling through to the Google-only `hd` fallback — which on a
+  SAML deployment resolves no claim for any sign-in, so first-time users are
+  created in their own bootstrap tenant as OWNER. **Fixed** with two predicates
+  (D-23's shape): a boot-time Zod refine, and a throw in `parseTenantClaimKeys`
+  for processes that never parse the schema. **Narrower than Codex asked**: the
+  duplicate-key and stray-empty-entry cases are deliberately still accepted —
+  neither has a failure mode, so rejecting them would fail the boot of
+  configurations that work today for no behavioural gain.
+
+## Verification
+
+- `npx tsc --noEmit` exit 0; `npx next build` exit 0.
+- Unit: **999 files / 13,748 passed**, 1 skipped.
+- The changed unit surface re-run under the **full `app-ci` env block** (D-25):
+  57 files / 429 passed.
+- Integration, with the outbox worker container **live** (D-24's reliably-red
+  configuration): three runs. Two failed in files this PR does not touch —
+  `webhook-delivery-durable` (`F1-runtime`, then `T-deadletter`:
+  `expected 'PROCESSING' to be 'FAILED'`) and `audit-delivery-rate-limit`
+  (`remaining rows stay PENDING`), both the D-24 worker-drain shape. The third was
+  clean: **95 files / 441 passed**, 1 skipped, 4 todo. No run failed in a file
+  this PR touches.
+- `npx eslint .` 0 errors (3 pre-existing warnings, none in changed files).
+- `scripts/pre-pr.sh` and the two commit-only gates (`check-test-hygiene`,
+  `check-security-matrices`) — see below.
+
+## Round-6 — Resolution Status
+
+All 8 Majors, all 6 Minors and all 4 Codex findings resolved; one deferral with an
+owner (SC11, Codex 2) and one accepted residual (SEC-R6-2), both with their
+reasoning in the plan.
+
+### The three R42 classes, closed by mechanism
+
+Step 3-8 rules that when an R42 class has expanded twice, "all experts report No
+findings" is not a sufficient stopping condition — the convergence artifact is a
+**mutation-verified CI guard**, and recommending one is not allowed to stand in
+for building it. Three classes qualified. Each guard below was red-proven by
+running the mutation, not by inspection.
+
+**R42 class `ingest-classification`: member-set expanded 3× (r4 T2, r5 F4, r6 F2)
+— closed by mutation-verified guard `src/lib/tenant/tenant-claim.test.ts`
+(`describe("ingest classification (derived, not sampled)")`), wired in the unit
+suite (`app-ci` + `scripts/pre-pr.sh`).**
+The two input classes are computed from their defining primitives —
+`String.prototype.trim` itself (every BMP code point it strips) and
+`UNSAFE_DISPLAY_CHAR_RANGES` (the single definition the regex is built from) — so
+no written list can fall behind either. Red-proven three ways on a throwaway
+rsync copy, real source never mutated:
+
+| mutation | result |
+|---|---|
+| move the whitespace-only check back after the unsafe test (the r6 F2 state) | RED — `expected [ 'U+2028', 'U+2029', 'U+FEFF' ] to deeply equal []` |
+| delete the unsafe-class refusal | RED — 23 tests |
+| narrow `[0x202a,0x202e]` to `[0x202c,0x202e]` (the r3 T9 shape) | RED — `expected 84 to be 86` (the anti-vacuity count; the derived input set narrows with the constant, so only that pin catches it) |
+
+Not a `scripts/checks` gate deliberately: the property is a runtime classification
+over 111 code points, which only executing the real function can decide.
+
+**R42 class `operator-input-echo`: member-set expanded 3× (r3 A3/D-32 → r4 F4 →
+r5 M3 → r6 F4) — closed by mutation-verified guard
+`scripts/checks/check-operator-echo-escaped.mjs`, wired as
+`queue_step "Static: operator-echo-escaped"` in `scripts/pre-pr.sh` (which CI's
+`static-checks` job runs verbatim via `PRE_PR_STATIC_ONLY=1`).**
+An intraprocedural, per-SCOPE taint analysis with a fixed source set
+(`process.argv`, an `argv` parameter, every parameter of a `cmd*` function, and the
+parsed-flag accessors), propagating through property access and method calls ON
+tainted text but deliberately NOT through a free function call — so
+`resolveTenantRef(tx, args.tenant)`'s database row is not tainted and
+`${tenant.id}` is not a finding. Scope is **all of `scripts/**`**, not the
+tenant-domain files: scoping the enumeration to one file is what round 5 did.
+Red-proven by 13 fixture cases in `scripts/__tests__/check-operator-echo-escaped.test.mjs`,
+one per round-6 F4 site plus the round-5 `args.*` shape, plus the two false
+positives the rule must not produce (cross-scope name collision, free-call result)
+and the baseline in both directions. Baseline is empty; the repo is clean.
+
+**R42 class `refusal-population-to-remedy`: member-set expanded 3× (r4 F3, r5
+F1/S3, r6 F1) — closed by mutation-verified guard
+`scripts/__tests__/tenant-domain-buckets.test.ts` over
+`scripts/lib/tenant-domain-buckets.ts`, wired in the unit suite.**
+`REFUSAL_BUCKET` is `satisfies Record<ClaimRefusalKind, UnmappedBucket | null>`, so
+a new refusal arm cannot compile without a declared population — and each
+declaration is checked against the row the REAL producers emit
+(`CLAIM_REFUSAL_REASON` for the reason, `refusalFromLookup` + `claimRefusalOf` for
+the diagnosis, `extractTenantClaimValue` for the ingest arm), not against a row
+restated in the test. `UNMAPPED_SELECTED_REASONS` is now a single constant bound as
+a query parameter, so the two UNION arms cannot disagree. Red-proven three ways:
+
+| mutation | result |
+|---|---|
+| `claim_invalid` stops carrying its diagnosis (the r6 F1 state) | RED — `expected 'other_tenant' to be 'refused'`, 2 tests |
+| bucket on `reason` instead of the field (the r5 F1/S3 state) | RED — `expected 'refused' to be 'other_tenant'`, 2 tests |
+| drop `tenant_mismatch` from the selected reasons (the r4 F3 state) | RED — `claim_invalid is declared reported as refused but its reason tenant_mismatch is not selected` |
+
+### Corrections to earlier rounds' claims, made here rather than left standing
+
+Three statements in this log were stronger than the work behind them. Round 6
+found all three, and they are corrected in place above as well as listed here so
+the pattern is visible:
+
+- Round 5's *"Red-proved on throwaway copies: reverting the reason predicate reds
+  it"* was true of the `audit_logs` arm and false of the `audit_outbox` arm (M6).
+- Round 5's *"the anti-drift derivation reads all three flag spellings and asserts
+  each matched"* was false for the third spelling, which matches nothing and was
+  explicitly exempted (T5).
+- Round 5's *"the tie-break fixture is now structural rather than incidental to
+  heap order"* named a mechanism the query plan does not use, and the fix it
+  described was inert (M8).
+
+### Modified
+
+`src/lib/tenant/claim-refusal.ts` (new), `src/lib/tenant/tenant-claim.ts`,
+`src/lib/tenant/tenant-management.ts`, `src/lib/audit/auth-failure.ts`,
+`src/lib/audit/auth-failure-mapping.ts`, `src/lib/auth/session/auth-adapter.ts`,
+`src/auth.ts`, `src/lib/env-schema.ts`, `scripts/tenant-domain.ts`,
+`scripts/lib/tenant-domain-flags.ts`, `scripts/lib/tenant-domain-buckets.ts` (new),
+`scripts/checks/check-operator-echo-escaped.mjs` (new),
+`scripts/checks/operator-echo-baseline.txt` (new), `scripts/pre-pr.sh`,
+`README.md`, `README.ja.md`, the plan (SC7 / SC8 / SC11) and this log,
+plus nine test files.

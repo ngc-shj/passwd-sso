@@ -28,6 +28,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { MAX_TENANT_CLAIM_LENGTH } from "@/lib/validations/common.server";
+import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { getLogger } from "@/lib/logger";
 
 export type AuthLoginFailureReason =
@@ -125,7 +126,7 @@ export async function emitAuthLoginFailure(args: {
   /** The value the IdP asserted. Attacker-influenceable by definition. */
   claim?: string | null;
   /**
-   * Why the ingest boundary refused the asserted value — machine-generated,
+   * Why this deployment refused the asserted value — machine-generated,
    * printable ASCII, and never a value any party supplied.
    *
    * Its own metadata key rather than a prefix inside `claim` (round-5 S2):
@@ -134,8 +135,15 @@ export async function emitAuthLoginFailure(args: {
    * verbatim by that attacker. `refused: contains U+200B` passes the ingest
    * boundary as an ordinary claim — verified — so the prefix was a forgeable
    * trust signal in a runbook that told operators to trust it.
+   *
+   * The BRAND is round-6 SEC-R6-3. A separate key stops the IdP forging the
+   * signal from the value side; it does not stop a caller in this repo from
+   * writing an arbitrary string into it, which is what the comment below used
+   * to be standing in for. `ClaimRefusalDiagnosis` can only come out of
+   * `claimRefusal()` in `@/lib/tenant/claim-refusal`, so the guarantee is now
+   * a compile error rather than a convention.
    */
-  claimRefusal?: string | null;
+  claimRefusal?: ClaimRefusalDiagnosis | null;
 }): Promise<void> {
   let identifierHash: string | null = null;
   let identifierHashScope: IdentifierHashScope | null = null;
@@ -170,8 +178,10 @@ export async function emitAuthLoginFailure(args: {
     metadata.claim = args.claim.slice(0, MAX_TENANT_CLAIM_LENGTH).toWellFormed();
   }
   if (args.claimRefusal != null) {
-    // No slice or well-formedness guard needed — every producer is
-    // `malformed()` in tenant-claim.ts, which emits bounded printable ASCII.
+    // No slice or well-formedness guard needed, and the reason is now
+    // structural rather than a survey of callers: `ClaimRefusalDiagnosis` comes
+    // only from `claimRefusal()`, whose two producers (the ingest boundary and
+    // `storableClaimSchema`'s own issue text) emit bounded printable ASCII.
     // Deliberately NOT defended here anyway: a guard would suggest this field
     // takes untrusted input, and the whole point of separating it from `claim`
     // is that it does not.

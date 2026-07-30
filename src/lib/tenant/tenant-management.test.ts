@@ -154,7 +154,15 @@ describe("findOrCreateTenantForClaim", () => {
     // tenant_claim_unmapped.
     // tenantId is null by construction: no tenant exists for an unstorable
     // claim, so there is nothing for the caller's audit row to bind to.
-    expect(result).toEqual({ kind: "claim_invalid", tenantId: null });
+    // Round-6 F1: the arm carries the diagnosis, taken from the schema's own
+    // issue, because `tenant-domain unmapped` buckets on that field. `" "`
+    // normalises to the empty string, so the issue is the min-length one rather
+    // than the printable-ASCII one — which is the point of deriving it.
+    expect(result).toEqual({
+      kind: "claim_invalid",
+      tenantId: null,
+      refusal: expect.stringMatching(/^refused: /) as unknown as string,
+    });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });
 

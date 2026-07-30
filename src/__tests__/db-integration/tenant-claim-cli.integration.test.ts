@@ -372,6 +372,72 @@ describe("tenant-domain CLI (C7)", () => {
       await ctx.deleteTestData(gainingTenant);
     });
 
+    /**
+     * Round-6, Codex. `add --from` overwrites `tenant_id` and clears
+     * `revokedAt`, so after the move the row cannot tell an investigator who
+     * owned the claim before or that it had been revoked — which falsifies SC8's
+     * "the row itself carries the timeline" for exactly the two verbs that change
+     * authentication routing. SC11 defers the append-only history; until it
+     * lands, this printed statement IS the record, so it has to name the values
+     * rather than allude to them.
+     */
+    it.skipIf(SKIP)("names the state the move destroys, since nothing else records it", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      const revokedAt = new Date("2026-07-01T00:00:00.000Z");
+      await ctx.su.prisma.tenantClaim.create({
+        data: { tenantId: losingTenant, claim, createdBy: "signin", revokedAt },
+      });
+
+      const lines: string[] = [];
+      const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(" "));
+      });
+      try {
+        const result = await cmdAdd({
+          tenant: gainingTenant,
+          domain: claim,
+          by: "test-op",
+          from: losingTenant,
+          confirm: alwaysYes,
+        });
+        expect(result.ok).toBe(true);
+      } finally {
+        log.mockRestore();
+      }
+
+      const printed = lines.join("\n");
+      expect(printed).toContain("NOT RECOVERABLE from the row after this change");
+      // Both destroyed values, by value — a message that merely says "history is
+      // lost" is not a record of what was lost.
+      expect(printed).toContain(`previous owner tenant ${losingTenant}`);
+      expect(printed).toContain(`revokedAt ${revokedAt.toISOString()}`);
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("does not claim anything was destroyed on a plain first registration", async () => {
+      // The allow side: a create overwrites nothing, so the warning must not
+      // fire — otherwise it becomes noise an operator learns to skip past.
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      const lines: string[] = [];
+      const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(" "));
+      });
+      try {
+        await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
+      } finally {
+        log.mockRestore();
+      }
+      expect(lines.join("\n")).not.toContain("NOT RECOVERABLE");
+
+      await ctx.deleteTestData(tenantId);
+    });
+
     it.skipIf(SKIP)("refuses and does NOT move the row when --from is not the current owner", async () => {
       const losingTenant = await ctx.createTenant();
       const gainingTenant = await ctx.createTenant();
@@ -616,6 +682,65 @@ describe("tenant-domain CLI (C7)", () => {
         }
       },
     );
+
+    /**
+     * Round-6, raised independently by Codex. The reassignment CAS re-asserted
+     * `id` and `tenantId` but NOT `revokedAt` — the field the preview prints and
+     * this write clears. So a concurrent `remove` landing while the operator
+     * reads the (deliberately long) absorption warning was silently undone: the
+     * move succeeded and set `revokedAt: null`, reversing another operator's
+     * incident containment with no notice to either of them.
+     *
+     * The existing two cases above could not catch it: both race by changing the
+     * OWNER, which the old predicate did cover. The class is "every field the
+     * preview showed and the write changes must be in the WHERE", and only a
+     * per-field case shows which fields were actually covered.
+     */
+    it.skipIf(SKIP)(
+      "reassignment: refuses when a concurrent remove revokes the row between the read and the write (CAS on revokedAt)",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({
+          data: { tenantId: losingTenant, claim, createdBy: "signin" },
+        });
+
+        let raced = false;
+        const revokedAt = new Date();
+        const confirmAfterConcurrentRevoke = async () => {
+          // Exactly what `tenant-domain remove` does: soft delete, owner
+          // unchanged. The owner predicate therefore still matches.
+          await ctx.su.prisma.tenantClaim.update({ where: { claim }, data: { revokedAt } });
+          raced = true;
+          return true;
+        };
+
+        try {
+          const result = await cmdAdd({
+            tenant: gainingTenant,
+            domain: claim,
+            by: "test-op",
+            from: losingTenant,
+            confirm: confirmAfterConcurrentRevoke,
+          });
+
+          expect(raced).toBe(true);
+          expect(result.ok).toBe(false);
+          expect(result.code).not.toBe(0);
+          expect(result.message).toContain("was modified concurrently by another process");
+
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          // Neither half of the containment may be reversed: the claim stays
+          // revoked AND stays with the tenant that owned it.
+          expect(row?.revokedAt?.getTime()).toBe(revokedAt.getTime());
+          expect(row?.tenantId).toBe(losingTenant);
+        } finally {
+          await ctx.deleteTestData(losingTenant);
+          await ctx.deleteTestData(gainingTenant);
+        }
+      },
+    );
   });
 
   // Func F8 — the tenant whose backfill row `preflight` reports as skipped
@@ -806,6 +931,8 @@ describe("tenant-domain CLI (C7)", () => {
         const auditLogClaim = `${runToken()}.${ALIAS_CLAIM}`;
         const otherTenantClaim = `${runToken()}.${ALIAS_CLAIM}`;
         const refusalDiagnosis = `refused: contains U+200B (${runToken()})`;
+        const outboxRefusalDiagnosis = `refused: contains U+202E (${runToken()})`;
+        const unstorableClaim = `${runToken()}.${ALIAS_CLAIM}`;
 
         await ctx.su.prisma.$transaction(async (tx) => {
           await setBypassRlsGucs(tx);
@@ -887,10 +1014,71 @@ describe("tenant-domain CLI (C7)", () => {
               metadata: { reason: "tenant_mismatch", claim: otherTenantClaim, provider: "google" },
             },
           });
+          // Round-6 T2. The refusal row above is seeded ONLY in `audit_logs`,
+          // so round 5's claim to have red-proved BOTH reason predicates was
+          // false for the OUTBOX arm: every outbox row it seeded already used
+          // `tenant_claim_unmapped`, so reverting
+          // `payload->'metadata'->>'reason' IN (…)` back to `= 'tenant_claim_unmapped'`
+          // left the file 39/39 green. The outbox arm is the one that matters
+          // most — a stopped or degraded worker is the scenario this whole union
+          // exists for, and it is the scenario an operator is in when they reach
+          // for this tool.
+          //
+          // Structurally unclaimable for the same reason as the row above
+          // (`nextRetryAt` an hour ahead vs claimBatch's `next_retry_at <= now()`).
+          await tx.auditOutbox.create({
+            data: {
+              tenantId,
+              status: AuditOutboxStatus.PENDING,
+              nextRetryAt: new Date(Date.now() + 60 * 60 * 1000),
+              payload: {
+                scope: AuditScope.PERSONAL,
+                action: AuditAction.AUTH_LOGIN_FAILURE,
+                userId: randomUUID(),
+                actorType: ActorType.SYSTEM,
+                serviceAccountId: null,
+                teamId: null,
+                targetType: null,
+                targetId: null,
+                metadata: {
+                  reason: "tenant_mismatch",
+                  claimRefusal: outboxRefusalDiagnosis,
+                  provider: "google",
+                },
+                ip: null,
+                userAgent: null,
+              },
+            },
+          });
+          // Round-6 F1's population: a claim that PASSES ingest and fails
+          // `storableClaimSchema`. It carries BOTH fields — the value the IdP
+          // asserted and the rule it broke — which is the shape that used to be
+          // indistinguishable from the row-7 row above and was therefore printed
+          // under "move it with `add --from`".
+          await tx.auditLog.create({
+            data: {
+              tenantId,
+              scope: AuditScope.PERSONAL,
+              action: AuditAction.AUTH_LOGIN_FAILURE,
+              userId: randomUUID(),
+              actorType: ActorType.SYSTEM,
+              metadata: {
+                reason: "tenant_mismatch",
+                claim: unstorableClaim,
+                claimRefusal: "refused: claim must be printable ASCII",
+                provider: "google",
+              },
+            },
+          });
         });
 
+        const printed: string[] = [];
+        const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+          printed.push(args.map(String).join(" "));
+        });
         try {
           const result = await cmdUnmapped();
+          log.mockRestore();
 
           // The outbox arm is only the outbox arm while the row is still
           // PENDING and absent from audit_logs: a drained row exists in BOTH
@@ -931,13 +1119,81 @@ describe("tenant-domain CLI (C7)", () => {
           expect(otherTenant?.claim_refusal).toBeNull();
           expect(otherTenant?.reason).toBe("tenant_mismatch");
 
+          // Round-6 T2: the OUTBOX arm's reason predicate. Every outbox row the
+          // round-5 fixture seeded already carried `tenant_claim_unmapped`, so
+          // reverting `payload->'metadata'->>'reason' IN (…)` to
+          // `= 'tenant_claim_unmapped'` stayed green — and that arm is the
+          // stopped-worker case the union exists for.
+          const outboxRefusal = mine.find((r) => r.claim_refusal === outboxRefusalDiagnosis);
+          expect(
+            outboxRefusal,
+            "a refused-at-ingest denial present ONLY in audit_outbox must be reported",
+          ).toBeDefined();
+          expect(outboxRefusal?.claim).toBeNull();
+
+          // Round-6 F1: a claim that passes ingest and cannot be STORED carries
+          // both fields, and must not be reported as an other-tenant mismatch.
+          const unstorable = mine.find((r) => r.claim === unstorableClaim);
+          expect(unstorable, "the unstorable-claim denial must be reported").toBeDefined();
+          expect(unstorable?.claim_refusal).toBe("refused: claim must be printable ASCII");
+
           // F9: `toBeTruthy()` held for every branch. These tokens hold only
           // for the non-empty branch, and only for the window queried.
           expect(result.message).toContain(`in the last ${DEFAULT_UNMAPPED_WINDOW_DAYS} days`);
           // All three counts, and the two new populations are non-zero — a
           // summary that merged them would not distinguish these numbers.
           expect(result.message).toMatch(/[1-9]\d* unmapped-claim, [1-9]\d* other-tenant and [1-9]\d* refused-claim/);
+
+          // ─── Round-6 T3: the print GROUPS ────────────────────────────────
+          //
+          // The three `printGroup` calls had no test at all: deleting the
+          // `other_tenant` group and letting `refused` take its heading — i.e.
+          // reproducing round-5 F1/S3 exactly, the finding those headings exist
+          // to answer — left this file 39/39 green. The assertion has to be that
+          // each row appears UNDER ITS OWN heading, which is a property of the
+          // output's structure, not of any single line.
+          const headingIndex = (needle: string) => printed.findIndex((l) => l.includes(needle));
+          const rowIndex = (needle: string) => printed.findIndex((l) => l.includes(needle));
+          const unregisteredHeading = headingIndex("Unregistered claims");
+          const otherTenantHeading = headingIndex("registered to a DIFFERENT tenant");
+          const refusedHeading = headingIndex("REFUSED");
+          expect(unregisteredHeading).toBeGreaterThanOrEqual(0);
+          expect(otherTenantHeading).toBeGreaterThanOrEqual(0);
+          expect(refusedHeading).toBeGreaterThanOrEqual(0);
+
+          // Each row falls under the LAST heading printed before it. Computed
+          // rather than asserted per-pair, so a fourth heading or a reordering
+          // cannot make this pass by coincidence.
+          const headings = [
+            { at: unregisteredHeading, name: "unregistered" },
+            { at: otherTenantHeading, name: "other_tenant" },
+            { at: refusedHeading, name: "refused" },
+          ];
+          const bucketOfPrintedRow = (needle: string): string | null => {
+            const at = rowIndex(needle);
+            expect(at, `printed line for ${needle}`).toBeGreaterThanOrEqual(0);
+            const owner = headings
+              .filter((h) => h.at < at)
+              .sort((a, b) => b.at - a.at)[0];
+            return owner?.name ?? null;
+          };
+          expect(bucketOfPrintedRow(outboxOnlyClaim)).toBe("unregistered");
+          expect(bucketOfPrintedRow(auditLogClaim)).toBe("unregistered");
+          expect(bucketOfPrintedRow(otherTenantClaim)).toBe("other_tenant");
+          expect(bucketOfPrintedRow(refusalDiagnosis)).toBe("refused");
+          expect(bucketOfPrintedRow(outboxRefusalDiagnosis)).toBe("refused");
+          // The one round-6 F1 exists for: it carries a claim, so before the
+          // diagnosis was produced it was indistinguishable from the row-7 row
+          // and printed under "move it with `add --from`".
+          expect(bucketOfPrintedRow(unstorableClaim)).toBe("refused");
+          // And its printed line shows BOTH fields — the operator needs the
+          // value to know which population is affected, and the rule to know
+          // that `add` cannot help.
+          expect(printed[rowIndex(unstorableClaim)]).toContain(
+            'refusal="refused: claim must be printable ASCII"',
+          );
         } finally {
+          log.mockRestore();
           // M10: neutralise the drainable row before deleteTestData — in a
           // `finally`, because a failing assertion above is exactly when the
           // PENDING row would otherwise be left behind for the live worker to

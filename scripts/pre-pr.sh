@@ -331,6 +331,7 @@ queue_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 queue_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
 queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
+queue_step "Static: operator-echo-escaped" node scripts/checks/check-operator-echo-escaped.mjs
 queue_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
 queue_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 queue_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs

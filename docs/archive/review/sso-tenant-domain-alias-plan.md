@@ -1678,6 +1678,28 @@ Every new guard gets a paired allow case, not only a deny case.
   to `extractTenantClaimValue` that round 2 showed breaks four consumers and two test
   suites in a way no type-checker catches, and a widening of `TenantClaimStore`. It is a
   separate hardening from the lockout fix and belongs with SC5.
+  **Independently re-derived in round 6 by Codex, and graded a release blocker there.**
+  Codex reached this from the schema rather than from the plan: `TenantClaim` stores a
+  globally-unique bare string, `extractTenantClaimValue` returns only the value, and
+  `resolveTenantByClaim` matches on that value alone — so nothing binds a claim to the
+  provider, the SSO connection, or the claim key that asserted it, and a second customer's
+  SAML admin asserting `organization=<their claim>` selects their tenant. That is the same
+  threat this entry states, arrived at along a different path, which is worth recording:
+  two independent derivations agreeing raises the confidence in the THREAT without
+  changing the scope decision.
+  **The scope decision does not change, and the reasons are unchanged rather than
+  restated**: the primitive is pre-existing and identical on `main`
+  (`findOrCreateSsoTenant` resolves `tenant.findUnique({ externalId: claim })` on the same
+  unbound string), so this PR neither introduces nor widens it; it does not fire on the
+  `hd`-only configuration that is the reported incident; and the correct control —
+  `(provider, connectionId, claimKey, claim)` as the resolution key — is a resolution-model
+  change that has to land with SC5's self-service connection management, not alongside a
+  lockout repair. Codex's proposed interim, a startup check refusing more than one SSO
+  connection, is **rejected**: it is a new startup requirement (NF2) that would fail the
+  boot of working multi-connection deployments to mitigate a hazard they already have,
+  which is a worse trade than the documentation C12 already ships. What round 1 added
+  (D-22 — `hd` selectable, behind a provider gate) is what makes the safe configuration
+  reachable, and it is the honest half this PR can carry.
   **IDN canonicalisation folds in here.** Round-1 Security F14 (Minor) noted a U-label
   and its A-label spelling would be two rows resolving to two tenants. Canonicalising
   requires first deciding whether a claim *is* a hostname — the same conflation C2 exists
@@ -1702,6 +1724,25 @@ Every new guard gets a paired allow case, not only a deny case.
   this PR. Until then, C12's runbook directs incident responders to Postgres logs and to
   `tenant_claims.createdAt`, and the CLI prints exactly what it changed.
 
+  **Correction (round 6, raised independently by Codex): the justification above is now
+  FALSE for two of the CLI's own operations, and it became false inside this PR.** "The
+  row itself carries the timeline" holds for register-then-revoke. It does not hold for
+  the two verbs review rounds added afterwards:
+
+  - `add --from` (D-20, round-1 M5) **overwrites `tenant_id`**. The prior owner is gone
+    from the row the moment the move commits.
+  - the un-revoke path (D2) **sets `revokedAt` back to `NULL`**. That the claim was ever
+    revoked, and when, is gone.
+
+  Both change which tenant an IdP claim authenticates into — the most privileged thing
+  this registry can do — and both leave a row indistinguishable from one that was simply
+  registered once and never touched. `createdBy` is preserved (round-1 M2), but it records
+  the FIRST registrant, not the actor of either change, and the CLI says so in its own
+  output. So the deferral now costs real forensic evidence rather than a duplicate
+  timestamp, and the correct fix is an append-only history, not an audit action. That is
+  **SC11**, below; SC8 stands only for the register/revoke pair whose timeline the row
+  genuinely does carry.
+
 - **SC9 — Non-ASCII claim strings.** Narrowed in this PR, deliberately. C1's CHECK
   restricts a *stored* claim to printable ASCII, and `storableClaimSchema` rejects the
   rest at the application boundary. This is round-3 **M23**'s remedy: `btrim()` strips
@@ -1719,6 +1760,42 @@ Every new guard gets a paired allow case, not only a deny case.
   turns a working sign-in into a `tenant_mismatch` denial. It does not exist in this
   deployment (2 of 264 tenants have an `external_id`, both ASCII), and C12's pre-flight
   query surfaces the affected rows **before** the upgrade rather than after.
+
+- **SC11 — Append-only history for claim routing changes.** Deferred **with an owner**,
+  and recorded because SC8's justification no longer covers it (see the correction
+  there). Raised in round 6 by Codex, independently of the three expert perspectives.
+
+  **What is missing.** `add --from` and the un-revoke path each change which tenant an IdP
+  claim authenticates into, and each destroys the state it changed: the reassignment
+  overwrites `tenant_id`, the un-revoke nulls `revokedAt`. Afterwards the row cannot tell
+  an investigator who owned the claim before, when it was revoked, or who made either
+  change. The CLI prints all three, and printed terminal output is not a record — it is
+  not queryable, not retained, and not available to anyone who was not at the keyboard.
+
+  **The correct control** is a `TenantClaimEvent`-shaped append-only table written in the
+  SAME transaction as the mutation: operation, claim, old tenant, new tenant, prior
+  `revokedAt`, `--by` label, and the database principal (`current_user`, which is real
+  attribution rather than a self-asserted one — the CLI runs as a named Postgres role).
+
+  **Anti-Deferral cost-justification.** Worst case: an incident responder cannot
+  reconstruct a claim's routing history from the database, and a reassignment made in
+  error is not attributable at all. Likelihood: only on deployments that use `--from` or
+  re-register a revoked claim, which are the recovery paths, i.e. exactly the operations
+  performed under incident pressure. Cost to fix later: a new model, a migration, the
+  three-location RLS maintenance contract (manifest + seed + both prose counts), a
+  `db-grants-manifest.json` regeneration, and writes inside the two existing CLI
+  transactions — bounded, and it does not require re-deciding anything this PR settled.
+  Cost of doing it here: the same work, on the sixth review round of a branch where five
+  consecutive rounds produced more Majors against the previous round's fixes than against
+  the original implementation, in a PR that already adds a table, a CLI, a gate and eleven
+  contracts. **Required**: it must land before `add --from` is documented as a routine
+  operation rather than a recovery one, and SC10's release-2 work must not remove
+  `Tenant.externalId` before it exists — that column is currently the only other place a
+  claim's original owner is recoverable from.
+
+  **What ships instead, this round**: the CAS on both mutating paths now includes
+  `revokedAt` (round 6, Codex), so a concurrent `remove` can no longer be silently
+  reversed; and the un-revoke output states that the change is recorded only there.
 
 ### Risks
 

@@ -75,7 +75,6 @@ import {
   UNSAFE_DISPLAY_CHARS_RE,
 } from "@/lib/security/unsafe-display-chars";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
-import { CLAIM_REFUSAL_REASON } from "@/lib/audit/auth-failure-mapping";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
@@ -85,6 +84,12 @@ import {
   findValuelessFlag,
   valuelessError,
 } from "./lib/tenant-domain-flags";
+import {
+  bucketOf,
+  UNMAPPED_BUCKET,
+  UNMAPPED_SELECTED_REASONS,
+  type UnmappedBucket,
+} from "./lib/tenant-domain-buckets";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -286,8 +291,18 @@ type UnmappedRow = {
   /** The value the IdP asserted. NULL on a refused-at-ingest denial. */
   claim: string | null;
   /**
-   * Why the ingest boundary refused the asserted value, or NULL when it did
-   * not refuse one. Machine-generated and printable ASCII.
+   * Why this deployment refused the asserted value, or NULL when it did not
+   * refuse one. Machine-generated and printable ASCII.
+   *
+   * TWO producers, not one (round-6 F1): the ingest boundary
+   * (`extractTenantClaimValue`) and `storableClaimSchema`. Round 5 shipped only
+   * the first, so the `unstorable`/`claim_invalid` population — a claim that
+   * passes ingest but cannot be STORED, which is SC9's printable-ASCII
+   * narrowing — arrived with `reason = tenant_mismatch`, a claim, and no
+   * diagnosis. That is byte-identical to a row-7 "registered to a different
+   * tenant" denial, so it bucketed as `other_tenant` and the report told the
+   * operator to move the claim with `add --from` — for a claim registered
+   * nowhere, using a command that refuses it on the same predicate.
    *
    * This field is the bucket discriminator (round-5 S2/S3). Round 4 bucketed
    * on `reason`, but `tenant_mismatch` has two producers — the ingest refusal
@@ -318,17 +333,6 @@ type UnmappedRow = {
   reason: string;
 };
 
-/**
- * The three populations this report separates, each with a different remedy.
- * Derived from the row rather than from `reason` alone — see `claim_refusal`.
- */
-type UnmappedBucket = "unregistered" | "other_tenant" | "refused";
-
-function bucketOf(row: UnmappedRow): UnmappedBucket {
-  if (row.claim_refusal !== null) return "refused";
-  return row.reason === UNMAPPED_REASON ? "unregistered" : "other_tenant";
-}
-
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
 // deployment's actual retention, so it can only ever be the default window —
 // never a claim about what is retained. A deployment retaining a year of
@@ -337,13 +341,6 @@ function bucketOf(row: UnmappedRow): UnmappedBucket {
 // actually queried rather than calling it "the retained window" (Func F4).
 export const DEFAULT_UNMAPPED_WINDOW_DAYS = AUDIT_LOG_RETENTION_MIN;
 const MAX_UNMAPPED_WINDOW_DAYS = 3650;
-
-/**
- * The reason whose remedy is `tenant-domain add`. Everything else this report
- * groups is a claim-bearing denial the operator must fix somewhere ELSE, so
- * the two are printed under separate headings rather than summed (round-4 F3).
- */
-const UNMAPPED_REASON = CLAIM_REFUSAL_REASON.claim_taken;
 
 // The worker's own "this claim is abandoned" threshold, reused rather than
 // re-chosen (round-3 M5): reapStuckRows resets PROCESSING rows older than
@@ -386,8 +383,9 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
   // that merges the other two sends the operator to the wrong remedy for one
   // of them (round-5 F1/S3).
   const base =
-    `${count("unregistered")} unmapped-claim, ${count("other_tenant")} other-tenant and ` +
-    `${count("refused")} refused-claim denial group(s) in the last ${days} days.`;
+    `${count(UNMAPPED_BUCKET.UNREGISTERED)} unmapped-claim, ` +
+    `${count(UNMAPPED_BUCKET.OTHER_TENANT)} other-tenant and ` +
+    `${count(UNMAPPED_BUCKET.REFUSED)} refused-claim denial group(s) in the last ${days} days.`;
   if (undelivered === 0) return base;
   // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
   // because these rows are the ones that would have been INVISIBLE while the
@@ -414,6 +412,8 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
     return {
       ok: false,
       code: 1,
+      // operator-echo-exempt: `days` is a number here, not operator text — the
+      // string form is refused earlier, in main()'s /^\d+$/ arm, which IS escaped.
       message: `Invalid --days "${days}": expected an integer between 1 and ${MAX_UNMAPPED_WINDOW_DAYS}.`,
     };
   }
@@ -463,7 +463,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                       metadata->>'reason' AS reason, created_at, 0 AS undelivered
                  FROM audit_logs
                 WHERE action = 'AUTH_LOGIN_FAILURE'::"AuditAction"
-                  AND metadata->>'reason' IN ('tenant_claim_unmapped', 'tenant_mismatch')
+                  AND metadata->>'reason' = ANY($3::text[])
                   AND created_at >= now() - make_interval(days => $1::int)
                UNION ALL
                SELECT tenant_id, payload->'metadata'->>'claim' AS claim,
@@ -478,7 +478,7 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                  FROM audit_outbox
                 WHERE status <> 'SENT'::"AuditOutboxStatus"
                   AND payload->>'action' = 'AUTH_LOGIN_FAILURE'
-                  AND payload->'metadata'->>'reason' IN ('tenant_claim_unmapped', 'tenant_mismatch')
+                  AND payload->'metadata'->>'reason' = ANY($3::text[])
                   AND created_at >= now() - make_interval(days => $1::int)
              ) combined
             -- Either column identifies a reportable denial. Filtering on the
@@ -490,6 +490,12 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
             ORDER BY last_seen DESC`,
           days,
           PROCESSING_LEASE_SECONDS,
+          // ONE source for the reason set, bound as a parameter rather than
+          // spelled in each UNION arm (round-6 T2). Round-4 F3 was a reason
+          // missing from an inline predicate, and round 5's red-proof of the
+          // fix covered only the audit_logs arm precisely because the two
+          // copies could disagree.
+          [...UNMAPPED_SELECTED_REASONS],
         );
 
         // Round-3 A3, and here it is not merely defensive: `claim` comes out
@@ -504,32 +510,44 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
           console.log(heading);
           for (const row of group) {
             const undelivered = Number(row.undelivered_cnt);
-            // The refused rows have no claim; they have the reason it was
-            // refused. Both are escaped: `claim` because pre-existing rows are
-            // not CHECK-constrained, `claim_refusal` for one rendering
-            // convention per terminal rather than an exception for values we
-            // believe we generated (round-5 S5).
-            const what =
-              row.claim_refusal !== null
-                ? `refusal="${escapeUnsafeDisplayChars(row.claim_refusal)}"`
-                : `claim="${escapeUnsafeDisplayChars(row.claim ?? "")}"`;
+            // Whichever fields the row HAS, rather than one or the other
+            // (round-6 F1). An ingest refusal carries no claim by construction
+            // (round-5 S2) but an UNSTORABLE claim carries both — the value the
+            // IdP asserted and the rule it broke — and the operator needs the
+            // value to know which tenant is affected. Printing only the
+            // diagnosis for those rows would drop the one field that names the
+            // population.
+            //
+            // Both are escaped: `claim` because pre-existing rows are not
+            // CHECK-constrained, `claim_refusal` for one rendering convention
+            // per terminal rather than an exception for values we believe we
+            // generated (round-5 S5).
+            const parts: string[] = [];
+            if (row.claim !== null) parts.push(`claim="${escapeUnsafeDisplayChars(row.claim)}"`);
+            if (row.claim_refusal !== null) {
+              parts.push(`refusal="${escapeUnsafeDisplayChars(row.claim_refusal)}"`);
+            }
             console.log(
-              `  tenant=${row.tenant_id}  ${what}  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
+              `  tenant=${row.tenant_id}  ${parts.join("  ")}  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
                 (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
             );
           }
         };
         printGroup(
           "Unregistered claims — remedy: `tenant-domain add --tenant <ref> --domain <claim>`:",
-          "unregistered",
+          UNMAPPED_BUCKET.UNREGISTERED,
         );
         printGroup(
           "Claims registered to a DIFFERENT tenant — investigate the user, or move the claim with `add --from`:",
-          "other_tenant",
+          UNMAPPED_BUCKET.OTHER_TENANT,
         );
+        // "REFUSED", not "refused at ingest" (round-6 F1): the bucket now also
+        // holds claims that PASS ingest and fail `storableClaimSchema` — SC9's
+        // printable-ASCII narrowing. Both share the remedy this heading names,
+        // and neither is registrable, which is what the heading has to convey.
         printGroup(
-          "Claims REFUSED at ingest — `add` cannot help; the remedy is at the IdP:",
-          "refused",
+          "Claims this deployment REFUSED (at ingest, or as unstorable) — `add` cannot register them; the remedy is at the IdP:",
+          UNMAPPED_BUCKET.REFUSED,
         );
 
         // S12: an empty result says so explicitly, with the window it
@@ -797,7 +815,7 @@ export async function cmdAdd(args: {
           return {
             ok: false,
             code: 1,
-            message: `--from was given but claim "${claim}" is not registered to any tenant — there is nothing to reassign. Re-run without --from to register it.`,
+            message: `--from was given but claim "${escapeUnsafeDisplayChars(claim)}" is not registered to any tenant — there is nothing to reassign. Re-run without --from to register it.`,
           };
         }
         if (args.from !== undefined && existing && args.from !== existing.tenantId) {
@@ -824,9 +842,9 @@ export async function cmdAdd(args: {
             ok: false,
             code: 1,
             message:
-              `Claim "${claim}" is ${state} tenant ${existing.tenantId}, not ${tenant.id}. ` +
+              `Claim "${escapeUnsafeDisplayChars(claim)}" is ${state} tenant ${existing.tenantId}, not ${tenant.id}. ` +
               "Refusing to reassign implicitly. To move it, name the current owner: " +
-              `add --tenant ${tenant.id} --domain ${claim} --by <label> --from ${existing.tenantId}. ` +
+              `add --tenant ${tenant.id} --domain ${escapeUnsafeDisplayChars(claim)} --by <label> --from ${existing.tenantId}. ` +
               '("remove" does not free a claim — it soft-deletes, leaving the owner unchanged.)',
           };
         }
@@ -838,7 +856,7 @@ export async function cmdAdd(args: {
         // about to mutate).
         if (existing && !isReassignment && existing.revokedAt === null) {
           printTenantSummary(tenant, activeMembers);
-          console.log(`Claim "${claim}" is already registered to this tenant. No change made.`);
+          console.log(`Claim "${escapeUnsafeDisplayChars(claim)}" is already registered to this tenant. No change made.`);
           return { ok: true, code: 0, tenantId: tenant.id, claim, message: "already registered (idempotent)" };
         }
 
@@ -863,7 +881,7 @@ export async function cmdAdd(args: {
         }
 
         console.log("Target claim row:");
-        console.log(`  claim: ${claim}`);
+        console.log(`  claim: ${escapeUnsafeDisplayChars(claim)}`);
         if (!existing) {
           console.log("  status: NEW — no existing row");
         } else if (existing.revokedAt) {
@@ -905,16 +923,25 @@ export async function cmdAdd(args: {
         // read happened before the human answered, so a concurrent change
         // must surface as count === 0 — a clean refusal — never as a silent
         // overwrite of an owner the operator was never shown.
+        //
+        // `revokedAt` is part of the compare-and-swap, not just `tenantId`
+        // (round-6, raised independently by Codex). The preview above prints
+        // the row's revocation state and this write CLEARS it, so a concurrent
+        // `remove` landing while the operator reads the warning was silently
+        // undone: the move succeeded and set `revokedAt: null`, reversing
+        // another operator's incident containment with no notice to either of
+        // them. Every field the preview showed and this write changes has to be
+        // in the WHERE, or the CAS only covers the fields someone remembered.
         if (existing && isReassignment) {
           const moved = await tx.tenantClaim.updateMany({
-            where: { id: existing.id, tenantId: existing.tenantId },
+            where: { id: existing.id, tenantId: existing.tenantId, revokedAt: existing.revokedAt },
             data: { tenantId: tenant.id, revokedAt: null },
           });
           if (moved.count === 0) {
             return {
               ok: false,
               code: 1,
-              message: `Claim "${claim}" was modified concurrently by another process. Re-run "list" to see its current owner.`,
+              message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current owner.`,
             };
           }
         } else if (existing) {
@@ -926,15 +953,19 @@ export async function cmdAdd(args: {
           // the claim. The un-revoker is recorded only in this command's
           // printed output; recording it in the row needs a new column, and
           // therefore a migration, which is out of scope here.
+          // Same total CAS as the reassignment above: the row was revoked when
+          // it was read, and it is the revocation this write clears, so a
+          // concurrent change to either field is a refusal rather than a
+          // silent overwrite.
           const unrevoked = await tx.tenantClaim.updateMany({
-            where: { id: existing.id, tenantId: tenant.id },
+            where: { id: existing.id, tenantId: tenant.id, revokedAt: existing.revokedAt },
             data: { revokedAt: null },
           });
           if (unrevoked.count === 0) {
             return {
               ok: false,
               code: 1,
-              message: `Claim "${claim}" was modified concurrently by another process. Re-run "list" to see its current state.`,
+              message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
             };
           }
         } else {
@@ -945,7 +976,7 @@ export async function cmdAdd(args: {
               return {
                 ok: false,
                 code: 1,
-                message: `Claim "${claim}" was registered concurrently by another process. Re-run "list" to see its current owner.`,
+                message: `Claim "${escapeUnsafeDisplayChars(claim)}" was registered concurrently by another process. Re-run "list" to see its current owner.`,
               };
             }
             throw e;
@@ -953,11 +984,11 @@ export async function cmdAdd(args: {
         }
 
         if (existing && isReassignment) {
-          console.log(`Reassigned claim "${claim}" from tenant ${existing.tenantId} to tenant ${tenant.id}.`);
+          console.log(`Reassigned claim "${escapeUnsafeDisplayChars(claim)}" from tenant ${existing.tenantId} to tenant ${tenant.id}.`);
         } else if (existing) {
-          console.log(`Un-revoked claim "${claim}" for tenant ${tenant.id}.`);
+          console.log(`Un-revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
         } else {
-          console.log(`Registered claim "${claim}" for tenant ${tenant.id}.`);
+          console.log(`Registered claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
         }
         if (existing) {
           // Escaped for the same reason as the preview above (round-4 F4 —
@@ -972,6 +1003,25 @@ export async function cmdAdd(args: {
               `FIRST registered this claim, not who last changed it. This change was made by "${escapeUnsafeDisplayChars(args.by)}"; that is ` +
               "recorded only here, so keep this output with the incident record.",
           );
+          // What this write DESTROYED, named explicitly (round-6, Codex — see
+          // plan SC11). SC8 defers application-level audit on the grounds that
+          // "the row itself carries the timeline"; that is true of
+          // register-then-revoke and false of both operations below, because
+          // each overwrites the state it changed. Until SC11's append-only
+          // history exists, this line is the only statement of what was lost,
+          // and it must name the values rather than allude to them.
+          const destroyed: string[] = [];
+          if (isReassignment) destroyed.push(`previous owner tenant ${existing.tenantId}`);
+          if (existing.revokedAt !== null) {
+            destroyed.push(`revokedAt ${existing.revokedAt.toISOString()}`);
+          }
+          if (destroyed.length > 0) {
+            console.log(
+              `NOT RECOVERABLE from the row after this change: ${destroyed.join("; ")}. ` +
+                "The registry keeps no history of routing changes yet (plan SC11), so this " +
+                "output is the record — retain it.",
+            );
+          }
         }
         console.log(
           "Reminder: if this deployment sets GOOGLE_WORKSPACE_DOMAINS, src/auth.config.ts's " +
@@ -1031,7 +1081,7 @@ export async function cmdRemove(args: {
           select: { id: true, tenantId: true, revokedAt: true, createdAt: true },
         });
         if (!existing) {
-          return { ok: false, code: 1, message: `No claim "${claim}" is registered to any tenant.` };
+          return { ok: false, code: 1, message: `No claim "${escapeUnsafeDisplayChars(claim)}" is registered to any tenant.` };
         }
 
         // Round-2 S4: `claim` is globally unique, so without this check
@@ -1041,19 +1091,19 @@ export async function cmdRemove(args: {
           return {
             ok: false,
             code: 1,
-            message: `Claim "${claim}" is owned by tenant ${existing.tenantId}, not ${tenant.id}. Refusing to remove.`,
+            message: `Claim "${escapeUnsafeDisplayChars(claim)}" is owned by tenant ${existing.tenantId}, not ${tenant.id}. Refusing to remove.`,
           };
         }
 
         if (existing.revokedAt !== null) {
-          console.log(`Claim "${claim}" is already revoked (since ${existing.revokedAt.toISOString()}). No change made.`);
+          console.log(`Claim "${escapeUnsafeDisplayChars(claim)}" is already revoked (since ${existing.revokedAt.toISOString()}). No change made.`);
           return { ok: true, code: 0, tenantId: tenant.id, claim, message: "already revoked (idempotent)" };
         }
 
         const activeMembers = await activeMemberCount(tx, tenant.id);
         printTenantSummary(tenant, activeMembers);
         console.log("Target claim row:");
-        console.log(`  claim:     ${claim}`);
+        console.log(`  claim:     ${escapeUnsafeDisplayChars(claim)}`);
         console.log(`  createdAt: ${existing.createdAt.toISOString()}`);
         console.log("");
         console.log(
@@ -1080,11 +1130,11 @@ export async function cmdRemove(args: {
           return {
             ok: false,
             code: 1,
-            message: `Claim "${claim}" was modified concurrently by another process. Re-run "list" to see its current state.`,
+            message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
           };
         }
 
-        console.log(`Revoked claim "${claim}" for tenant ${tenant.id}.`);
+        console.log(`Revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
         return { ok: true, code: 0, tenantId: tenant.id, claim };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
@@ -1142,7 +1192,12 @@ async function main(): Promise<void> {
     case "unmapped": {
       const rawDays = getStringFlag(flags, "days");
       if (rawDays !== undefined && !/^\d+$/.test(rawDays)) {
-        console.error(`Invalid --days "${rawDays}": expected a positive integer number of days.`);
+        // Escaped: this is the arm for a value that did NOT match /^\d+$/, i.e.
+        // arbitrary operator text, printed before anything has validated it
+        // (round-6 F4 — the sixth site of the class round 5 declared closed).
+        console.error(
+          `Invalid --days "${escapeUnsafeDisplayChars(rawDays)}": expected a positive integer number of days.`,
+        );
         process.exitCode = 1;
         return;
       }

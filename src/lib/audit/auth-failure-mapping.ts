@@ -28,8 +28,27 @@ export type ClaimResolutionRefusalKind = Exclude<ClaimTenantResolution["kind"], 
  */
 export type ClaimIngestRefusalKind = "claim_malformed";
 
-/** Every arm that can deny a sign-in over a claim, from either adjudicator. */
-export type ClaimRefusalKind = ClaimResolutionRefusalKind | ClaimIngestRefusalKind;
+/**
+ * Not a judgement on a claim at all: the deployment could not PROPAGATE the one
+ * the IdP asserted, because the `tenantClaimStorage` AsyncLocalStorage context
+ * was not live (D-40 producer / D-44 consumer).
+ *
+ * It belongs in this table because it is the third adjudicator of the same
+ * predicate — "can this sign-in's claim be honoured?" — and round 6 (F3 + SEC-R6-1)
+ * found the two ends answering it in two different vocabularies: the producer in
+ * `src/auth.ts` emitted `provider_error`, while the consumer in `createUser`
+ * emitted `claim_invalid`'s `tenant_mismatch`. Two judgement words for one
+ * predicate is R48, and `claim_invalid` was also factually wrong — its
+ * definition is "the claim fails `storableClaimSchema`", and on this path no
+ * resolution runs at all.
+ */
+export type ClaimPropagationFailureKind = "store_unavailable";
+
+/** Every arm that can deny a sign-in over a claim, from any adjudicator. */
+export type ClaimRefusalKind =
+  | ClaimResolutionRefusalKind
+  | ClaimIngestRefusalKind
+  | ClaimPropagationFailureKind;
 
 /**
  * Deny reason per refusal arm of `findOrCreateTenantForClaim` (round-1 M2).
@@ -57,19 +76,36 @@ export type ClaimRefusalKind = ClaimResolutionRefusalKind | ClaimIngestRefusalKi
  *                   `metadata.claimRefusal` — its OWN key, not a marker inside
  *                   the attacker-supplied `metadata.claim` (round-5 S2) —
  *                   names which rule the value broke. tenant_mismatch.
+ *   store_unavailable — the claim could not be PROPAGATED between the two
+ *                   Auth.js callbacks (no ALS context). Nothing is wrong with
+ *                   the claim, the tenant or the user, so neither claim reason
+ *                   applies: reporting it as `tenant_mismatch` would put a
+ *                   deployment fault in front of an operator looking for a
+ *                   misrouted user, and reporting it as `tenant_claim_unmapped`
+ *                   would send them to `tenant-domain add` for a claim that
+ *                   never reached the resolver. `provider_error` is the reason
+ *                   this deployment already uses for "the sign-in machinery
+ *                   failed", and the producer side was already emitting it —
+ *                   round-6 F3/SEC-R6-1 was that the CONSUMER was not.
  *
  * The `satisfies` below is what forces a new arm to be classified here rather
  * than defaulting to whatever an index lookup happens to return — it is how
- * claim_collision was caught the day it was added.
+ * claim_collision was caught the day it was added, and it is what makes
+ * `store_unavailable`'s third reason an explicit classification rather than a
+ * literal spelled at two sites.
  */
 export const CLAIM_REFUSAL_REASON = {
   claim_taken: "tenant_claim_unmapped",
   claim_collision: "tenant_claim_unmapped",
   claim_invalid: "tenant_mismatch",
   claim_malformed: "tenant_mismatch",
+  store_unavailable: "provider_error",
 } as const satisfies Record<
   ClaimRefusalKind,
-  Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">
+  Extract<
+    AuthLoginFailureReason,
+    "tenant_mismatch" | "tenant_claim_unmapped" | "provider_error"
+  >
 >;
 
 // Auth.js provider ids that map onto the audit enum. A table rather than the

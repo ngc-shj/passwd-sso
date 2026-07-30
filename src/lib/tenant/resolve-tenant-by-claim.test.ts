@@ -26,6 +26,9 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 import { resolveTenantByClaim } from "./tenant-management";
+// Real producer: `ClaimRefusalDiagnosis` is branded (round-6 SEC-R6-3), so this
+// expectation cannot be spelled as a literal.
+import { claimRefusal } from "./claim-refusal";
 
 describe("resolveTenantByClaim", () => {
   beforeEach(() => {
@@ -99,7 +102,16 @@ describe("resolveTenantByClaim", () => {
     // `tenant_claim_unmapped`, and `tenant-domain unmapped` then printed it
     // under "run tenant-domain add" — a command guaranteed to refuse it. The
     // resolver is now the single adjudicator of "is this registrable at all".
-    await expect(resolveTenantByClaim("café.example")).resolves.toEqual({ kind: "unstorable" });
+    // Round-6 F1: the arm carries the DIAGNOSIS, derived from the schema's own
+    // issue rather than written here, because `tenant-domain unmapped` buckets
+    // on whether `claimRefusal` is set — without it this population printed
+    // under "registered to a DIFFERENT tenant — move it with `add --from`".
+    // The message is `storableClaimSchema`'s, so a refinement whose wording
+    // changes is described correctly without an edit here.
+    await expect(resolveTenantByClaim("café.example")).resolves.toEqual({
+      kind: "unstorable",
+      refusal: claimRefusal("claim must be printable ASCII"),
+    });
     // Still no writes, and the probe is not reached: an unstorable claim
     // cannot collide with anything.
     expect(mockPrisma.$queryRaw).not.toHaveBeenCalled();

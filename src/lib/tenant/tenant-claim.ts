@@ -1,5 +1,6 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
+import { claimRefusal, type ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { UNSAFE_DISPLAY_CHARS_RE } from "@/lib/security/unsafe-display-chars";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 import { MAX_TENANT_CLAIM_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
@@ -23,13 +24,47 @@ const DEFAULT_TENANT_CLAIM_KEYS = [
  */
 const GOOGLE_HOSTED_DOMAIN_KEY = "hd";
 
+/**
+ * Thrown when `AUTH_TENANT_CLAIM_KEYS` is set to something that names no key at
+ * all (`","`, `",,"`, `" , "`). Round-6, raised independently by Codex.
+ *
+ * The old parser filtered the empty entries away and returned `[]`, so the walk
+ * read nothing and fell through to the `hd` fallback — which on a SAML
+ * deployment resolves no claim for any sign-in, and a first-ever SAML user is
+ * then created in their own bootstrap tenant as OWNER. An operator who
+ * configured a claim-key list got the behaviour of having configured none, with
+ * no signal. That is the module's own rule from
+ * `scripts/lib/tenant-domain-flags.ts` at the env boundary: an instruction the
+ * operator believes was applied must either take effect or stop the command.
+ *
+ * Throwing (rather than falling back) is fail-closed: it propagates to
+ * `src/auth.ts`'s signIn catch, which emits `provider_error` and writes
+ * nothing. `envSchema` rejects the same value at boot, so in a normally-started
+ * app this branch is unreachable — the asymmetry is deliberate and has the same
+ * shape as D-23's pepper floor: this module reads `process.env` directly, so a
+ * process that never parsed the schema still has to be refused here.
+ *
+ * A DUPLICATE key is deliberately NOT an error here. Reading the same profile
+ * attribute twice takes effect exactly once and changes no outcome, so it is
+ * config hygiene rather than a silently-dropped instruction; `envSchema`
+ * rejects it at boot, where hygiene belongs.
+ */
+export class TenantClaimKeysMisconfiguredError extends Error {
+  constructor() {
+    super("AUTH_TENANT_CLAIM_KEYS_NAMES_NO_KEY");
+    this.name = "TenantClaimKeysMisconfiguredError";
+  }
+}
+
 export function parseTenantClaimKeys(): string[] {
   const configured = process.env.AUTH_TENANT_CLAIM_KEYS?.trim();
   if (!configured) return [...DEFAULT_TENANT_CLAIM_KEYS];
-  return configured
+  const keys = configured
     .split(",")
     .map((k) => k.trim())
     .filter((k) => k.length > 0);
+  if (keys.length === 0) throw new TenantClaimKeysMisconfiguredError();
+  return keys;
 }
 
 const RESERVED_SLUG_PREFIXES = ["bootstrap-", "u-"];
@@ -74,7 +109,7 @@ export function slugifyTenant(input: string): string {
  * |---|---|---|
  * | key absent / `undefined` / `null` | absent | nothing was asserted |
  * | value present, not a string | absent | round-4 F2/S6 — see below |
- * | empty or ASCII-whitespace-only | absent | an empty assertion is not an assertion; IdPs emit empty attributes for unset fields, and refusing would deny sign-ins that work today (NF2) for no gain, since the same actor can just omit the key |
+ * | empty, or whitespace-only under EITHER trim | absent | an empty assertion is not an assertion; IdPs emit empty attributes for unset fields, and refusing would deny sign-ins that work today (NF2) for no gain, since the same actor can just omit the key |
  * | unsafe display characters | **malformed** | round-2 F-D: the value must not be canonicalised onto a neighbouring claim, and must not be dropped either |
  * | edges JS `.trim()` would strip but ASCII trim does not (e.g. U+00A0) | **malformed** | `normalizeTenantClaim` trims with JS semantics downstream, so accepting these means the value MATCHED on is not the value asserted — the same canonicalisation hazard as the unsafe class |
  * | longer than `MAX_TENANT_CLAIM_LENGTH` | **malformed** | a claim that cannot be stored cannot be honoured, and padding a losing claim past the cap must not convert its denial into the claim-less allow |
@@ -107,7 +142,7 @@ export function slugifyTenant(input: string): string {
 type ClaimKeyRead =
   | { kind: "claim"; value: string }
   | { kind: "absent" }
-  | { kind: "malformed"; diagnosis: string };
+  | { kind: "malformed"; diagnosis: ClaimRefusalDiagnosis };
 
 const ABSENT: ClaimKeyRead = { kind: "absent" };
 
@@ -133,9 +168,15 @@ const ASCII_WHITESPACE_EDGES_RE = /^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g;
  * remedy that actually applies (fix the IdP), because the operator needs to
  * know WHICH RULE the value broke, not what the value was — and the value is
  * unregistrable, so `tenant-domain add` could not consume it anyway.
+ *
+ * The `refused: ` prefix and the branded return type both come from
+ * `claimRefusal()` (round-6 SEC-R6-3): round 5 gave the diagnosis its own
+ * metadata key so an IdP could not forge it from the value side, but left the
+ * key typed as a bare `string`, so the unforgeability was a convention. It is
+ * now a compile-time property.
  */
-function malformed(diagnosis: string): ClaimKeyRead {
-  return { kind: "malformed", diagnosis: `refused: ${diagnosis}` };
+function malformed(rule: string): ClaimKeyRead {
+  return { kind: "malformed", diagnosis: claimRefusal(rule) };
 }
 
 /** Distinct offending code points, sorted, at most three — enough to fix the IdP. */
@@ -160,6 +201,24 @@ function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
 
   const cleaned = value.replace(ASCII_WHITESPACE_EDGES_RE, "");
   if (cleaned.length === 0) return ABSENT;
+
+  // Whitespace-only under EITHER trim is `absent`, and this test has to run
+  // BEFORE the unsafe-class test below (round-6 F2). Round 5 fixed the same
+  // rule for `"　"` and placed the check after the unsafe test, which left the
+  // three members of the whitespace class that are ALSO unsafe-class members
+  // unable to reach it. Derived rather than sampled, which is how the
+  // classification was wrong for three rounds running (r4 T2, r5 F4, r6 F2):
+  // of the 25 code points JS `.trim()` strips, U+2028, U+2029 and U+FEFF are
+  // in UNSAFE_DISPLAY_CHAR_RANGES, so a value consisting only of one of them
+  // was DENIED — on `main` and in round 3 all three read as absent, so this is
+  // the round-4 regression at its remaining members.
+  //
+  // Moving it up cannot canonicalise anything onto a neighbouring claim, which
+  // is the hazard that puts the unsafe class ahead of everything else: a value
+  // that is entirely JS-trim whitespace normalises to the EMPTY string, so
+  // there is no neighbour for it to land on. The reject-don't-strip policy
+  // still governs every value that has a non-whitespace character.
+  if (cleaned.trim().length === 0) return ABSENT;
 
   // Control, bidi and zero-width characters — see @/lib/security/
   // unsafe-display-chars for the members and for why the set is shared with
@@ -196,19 +255,9 @@ function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
   // Whatever `.trim()` would still take off the ends, the ASCII trim did not —
   // U+00A0 and friends. `normalizeTenantClaim` runs `.trim()` downstream, so
   // letting these through means the value matched on is not the value
-  // asserted.
-  //
-  // A value that is ENTIRELY such whitespace is `absent`, not malformed
-  // (round-5 F4). The rationale for the refusal is "the value matched on is
-  // not the value asserted", which presupposes there is a value to match on;
-  // `"　"` — a realistic unset-field artefact from a JP-locale IdP —
-  // normalises to the empty string, and both `main` and round 3 read it as
-  // absent. Refusing it denied every sign-in through that key, which is the
-  // NF2 lockout this branch exists to fix. This is the same
-  // per-sample-vs-derived miss that round-4 T2 reported: the parameterised
-  // whitespace fixtures covered the six ASCII members and never the non-ASCII
-  // whitespace-only shape.
-  if (cleaned.trim().length === 0) return ABSENT;
+  // asserted. A value that is ENTIRELY such whitespace was already returned as
+  // `absent` above (round-5 F4, round-6 F2); this arm is the residue case,
+  // where a real claim carries JS-trim whitespace on an edge.
   if (cleaned !== cleaned.trim()) {
     return malformed("leading or trailing non-ASCII whitespace");
   }
