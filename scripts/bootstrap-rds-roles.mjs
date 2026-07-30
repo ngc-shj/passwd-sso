@@ -197,16 +197,51 @@ async function main() {
     console.error("ERROR: MIGRATION_DATABASE_URL is required (SUPERUSER connection).");
     process.exit(1);
   }
-  for (const r of ROLES) {
-    if (!process.env[r.pwEnv]) {
-      console.error(`ERROR: ${r.pwEnv} is required (password for ${r.name}).`);
-      process.exit(1);
+
+  // `--denied-only` applies the must-never-be-granted policy and nothing else.
+  //
+  // It exists because of an ORDERING property that is easy to get wrong: this
+  // script's full run happens BEFORE the first migration, where the audit tables
+  // do not exist yet and the `to_regclass` guard correctly skips them. Any
+  // pipeline that issues a blanket `GRANT ... ON ALL TABLES` AFTER the migrations
+  // therefore re-grants what migration 20260522000200 revoked, with nothing left
+  // to take it back.
+  //
+  // `.github/workflows/ci-integration.yml` did exactly that on every run — the
+  // third instance of this class after the RDS bootstrap itself. Rather than
+  // spell the policy a fourth time in YAML, that step now calls this mode, so
+  // there is still one source for what may never be granted.
+  const deniedOnly = process.argv.includes("--denied-only");
+
+  if (!deniedOnly) {
+    for (const r of ROLES) {
+      if (!process.env[r.pwEnv]) {
+        console.error(`ERROR: ${r.pwEnv} is required (password for ${r.name}).`);
+        process.exit(1);
+      }
     }
   }
 
   // Validated BEFORE the client is even built: a malformed or missing policy
   // must stop the run while the database is still untouched.
   const denied = loadDeniedPolicy();
+
+  if (deniedOnly) {
+    const client = new Client({ connectionString });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await applyDeniedPrivileges(client, denied);
+      await client.query("COMMIT");
+      console.log("bootstrap-rds-roles: denied-privilege policy applied");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      await client.end();
+    }
+    return;
+  }
 
   const client = new Client({ connectionString });
   await client.connect();

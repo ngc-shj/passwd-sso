@@ -22,6 +22,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { Client } from "pg";
+import { spawnSync } from "node:child_process";
 import {
   convergeRole,
   applyDeniedPrivileges,
@@ -29,7 +30,11 @@ import {
 } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Repo root, for spawning the CLI under test as a subprocess. */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const PROBE = "bootstrap_probe_app";
 const GRANTOR = "bootstrap_probe_grantor";
@@ -493,6 +498,81 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       } finally {
         await su.end();
       }
+    });
+  });
+
+  /**
+   * T8 — the `--denied-only` CLI mode, which is what CI now depends on.
+   *
+   * `.github/workflows/ci-integration.yml` runs `prisma migrate deploy` and THEN
+   * a table-blind `GRANT ... ON ALL TABLES ... TO passwd_app`, so every
+   * integration run re-granted what migration 20260522000200 revoked and tested a
+   * database whose audit tables the app role could rewrite. The workflow now
+   * calls this mode instead of spelling the policy a fourth time in YAML.
+   *
+   * Driven as a SUBPROCESS, because the property under test is the CLI entry
+   * point — argv parsing, the transaction, the exit code — not the helper the
+   * other cases already cover. Pointed at a throwaway policy naming a probe role
+   * and table so it never touches the real roles.
+   */
+  describe("T8: --denied-only", () => {
+    const PROBE_TABLE = "bootstrap_probe_cli_tbl";
+    const decl = useDeniedPolicyFixture("denied-cli-", PROBE_TABLE);
+
+    function runDeniedOnly() {
+      return spawnSync(
+        process.execPath,
+        [resolve(REPO_ROOT, "scripts/bootstrap-rds-roles.mjs"), "--denied-only"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            MIGRATION_DATABASE_URL: superuserUrl(),
+            DB_DENIED_PRIVILEGES: decl.file,
+          },
+        },
+      );
+    }
+
+    it("revokes the declared privileges without needing role passwords", async () => {
+      // The full run requires every ROLES password; this mode must not, or CI
+      // would have to carry secrets it has no other use for.
+      writeFileSync(
+        decl.file,
+        JSON.stringify({
+          denied: [
+            { role: PROBE, table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "t" },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`CREATE TABLE ${PROBE_TABLE} (id int)`);
+        await convergeRole(su, PROBE, "probe-pw-cli");
+        // Reproduce CI's shape: the blanket grant lands AFTER the migrations.
+        await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
+        const table = `public.${PROBE_TABLE}`;
+        expect(await hasTablePrivilege(su, PROBE, table, "UPDATE")).toBe(true);
+
+        const r = runDeniedOnly();
+        expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
+
+        expect(await hasTablePrivilege(su, PROBE, table, "UPDATE")).toBe(false);
+        // Narrow, not blanket.
+        expect(await hasTablePrivilege(su, PROBE, table, "SELECT")).toBe(true);
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("exits non-zero on a missing policy rather than silently doing nothing", () => {
+      // A CI step that quietly succeeds without applying anything is how the
+      // control would go missing again, this time with a green pipeline.
+      rmSync(decl.file, { force: true });
+      const r = runDeniedOnly();
+      expect(r.status).not.toBe(0);
+      expect(`${r.stdout}${r.stderr}`).toContain("DENIED_POLICY_MISSING");
     });
   });
 });
