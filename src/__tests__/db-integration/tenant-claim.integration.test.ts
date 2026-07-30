@@ -549,6 +549,10 @@ describe("findOrCreateTenantForClaim (C4)", () => {
           if (resultB.kind !== "tenant") {
             throw new Error(`iteration ${i}: client B returned ${resultB.kind}`);
           }
+          // Production code created this tenant, so ctx knows nothing about
+          // it until told (round-3 M8). Registered before the assertions
+          // below, not after, since it is the assertions that throw.
+          ctx.trackTenant(resultA.id);
           expect(resultB.id).toBe(resultA.id);
 
           const claimRows = await ctx.su.prisma.tenantClaim.findMany({ where: { claim } });
@@ -644,20 +648,108 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         const resultB = await findOrCreateTenantForClaim(claimB, tx);
         if (resultA.kind !== "tenant") throw new Error(`claimA returned ${resultA.kind}`);
         if (resultB.kind !== "tenant") throw new Error(`claimB returned ${resultB.kind}`);
-        expect(resultA.id).not.toBe(resultB.id);
+        // Tracked before the assertion that can throw, and tracked at all
+        // because production code — not ctx.createTenant() — created these
+        // (round-3 M8). Without it, a red here left two tenants and their
+        // UNIQUE(claim) rows on the shared dev database, and the claim rows
+        // then collide with the next run of this same test.
         created.push({ id: resultA.id });
         created.push({ id: resultB.id });
+        ctx.trackTenant(resultA.id);
+        ctx.trackTenant(resultB.id);
+        expect(resultA.id).not.toBe(resultB.id);
       });
 
-      const tenants = await ctx.su.prisma.tenant.findMany({
-        where: { id: { in: created.map((c) => c.id) } },
-      });
-      expect(tenants).toHaveLength(2);
-      expect(tenants[0].slug).not.toBe(tenants[1].slug);
-
-      for (const c of created) {
-        await ctx.deleteTestData(c.id);
+      try {
+        const tenants = await ctx.su.prisma.tenant.findMany({
+          where: { id: { in: created.map((c) => c.id) } },
+        });
+        expect(tenants).toHaveLength(2);
+        expect(tenants[0].slug).not.toBe(tenants[1].slug);
+      } finally {
+        // The assertions above are outside the transaction, so a red one
+        // leaves committed rows behind. ctx.trackTenant is the backstop; this
+        // keeps the common path from depending on it.
+        for (const c of created) {
+          await ctx.deleteTestData(c.id);
+        }
       }
+    },
+  );
+
+  /**
+   * Round-3 M6 + M2. `claim_collision` — the arm that refuses to create a
+   * tenant when an existing tenant's `external_id` FOLDS onto the claim —
+   * had only mocked coverage, and the fold it depends on is a JS/Postgres
+   * pair: `normalizeTenantClaim` in JS decides what to look up,
+   * `lower(btrim(x) COLLATE "C")` in Postgres decides what matches. That is
+   * exactly the round-1 M6/D3 class, where a unit test running the SQL class
+   * through V8 cannot observe a divergence at all.
+   *
+   * It also pins M2's `ORDER BY`: a collision has two sides by construction,
+   * so the arm must name the SAME one every time — the tenant id it reports
+   * binds the AUTH_LOGIN_FAILURE row, and an unordered `LIMIT 1` would split
+   * one lockout across two `tenant-domain unmapped` groups.
+   */
+  it.skipIf(SKIP)(
+    "refuses to create for a third spelling that folds onto existing tenants, and names the oldest colliding tenant every time",
+    async () => {
+      const token = runToken();
+      // Two tenants whose RAW external_ids differ but FOLD to the same claim.
+      // Round-1 M3's backfill excludes both sides, so neither holds a claim
+      // row and the UNIQUE(claim) slot is free — the round-2 F-A shape.
+      const older = await ctx.createTenant();
+      const newer = await ctx.createTenant();
+      const foldedClaim = `${token}-alias.example`;
+
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        // created_at is set explicitly rather than relying on insertion order:
+        // the ORDER BY under test is on created_at, so the fixture has to make
+        // the intended winner unambiguous. `newer` is inserted with the EARLIER
+        // id lexicographically half the time, which is what makes this
+        // distinguish created_at ordering from id ordering.
+        await tx.$executeRawUnsafe(
+          `UPDATE tenants SET external_id = $2, created_at = now() - interval '2 days' WHERE id = $1::uuid`,
+          older,
+          `${token}-Alias.Example`,
+        );
+        await tx.$executeRawUnsafe(
+          `UPDATE tenants SET external_id = $2, created_at = now() - interval '1 day' WHERE id = $1::uuid`,
+          newer,
+          ` ${token}-ALIAS.EXAMPLE `,
+        );
+      });
+
+      // Neither raw spelling equals the folded claim, so the exact-match
+      // externalId fallback cannot resolve it — the probe is the only thing
+      // standing between a third spelling and a NEW tenant that would
+      // register the claim and outrank both existing tenants' fallback.
+      expect(normalizeTenantClaim(`${token}-Alias.Example`)).toBe(foldedClaim);
+      expect(normalizeTenantClaim(` ${token}-ALIAS.EXAMPLE `)).toBe(foldedClaim);
+
+      const tenantsBefore = await ctx.su.prisma.tenant.count();
+
+      // Repeated, because the defect M2 fixes is NONDETERMINISM: one call
+      // proves nothing about which side an unordered LIMIT 1 would pick.
+      for (let i = 0; i < 5; i++) {
+        const result = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(`${token}-aLiAs.ExAmPlE`, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        expect(result).toEqual({ kind: "claim_collision", tenantId: older });
+      }
+
+      // The refusal is the point: no tenant, and the free UNIQUE(claim) slot
+      // is still free for the operator's explicit `tenant-domain add`.
+      expect(await ctx.su.prisma.tenant.count()).toBe(tenantsBefore);
+      expect(
+        await ctx.su.prisma.tenantClaim.findMany({ where: { claim: foldedClaim } }),
+      ).toHaveLength(0);
+
+      await ctx.deleteTestData(older);
+      await ctx.deleteTestData(newer);
     },
   );
 });

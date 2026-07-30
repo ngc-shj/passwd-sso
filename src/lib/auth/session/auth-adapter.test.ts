@@ -121,6 +121,14 @@ describe("createCustomAdapter", () => {
     mockWithBypassRls.mockImplementation(
       async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
+    // Same hazard, one mock further (round-3 T11): the refusal-arm test
+    // installs an implementation that writes to ITS OWN closure variable, and
+    // `vi.clearAllMocks()` clears calls but NOT implementations — so without
+    // this line that implementation stays live for every later test in the
+    // file, mutating a variable from a test that has already finished. Reset
+    // here rather than in the one test body, because the leak is a property of
+    // the file's mock lifecycle, not of that test.
+    mockEmitAuthLoginFailure.mockImplementation(async () => {});
     // Default: no pending tenant claim
     mockTenantClaimStoreGetStore.mockReturnValue({ tenantClaim: null });
     // Resolvable by default; the refusal arms (claim_taken / claim_invalid)

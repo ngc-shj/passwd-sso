@@ -604,3 +604,218 @@ unset must assert that precondition itself (`vi.stubEnv(<key>, "")` in
 `beforeEach`) rather than inherit ambient absence, and a change to that surface
 should be re-run under the **full** `app-ci` env block, not just the one variable
 a failure happened to name.
+
+---
+
+# Round-2 fix round (commit `58af27fc9`)
+
+Recorded here in the round-3 fix round, because round 3 (**Test A1**) found them
+recorded only as a commit message. All six change a contract the plan states.
+
+## D-26 — `sanitizeTenantClaimValue` rejects where the plan says it strips
+
+**Plan (C6, lines 1033-1036)**: the claim reaches audit metadata "with
+bidi/zero-width characters **stripped** — asserted with a fixture containing
+U+202E".
+
+**Implemented (round 2)**: the value is **refused**; the test asserts
+`toBeNull()`.
+
+**Why the criterion is superseded, not merely unmet**: this function's output is
+the resolution key and the stored `Tenant.externalId`/`name`, not a display
+copy. Stripping is what lets `ac<U+00AD>me.example` pass C1's printable-ASCII
+CHECK and select the *existing* `acme.example` tenant, with nothing recorded
+anywhere — the character is gone before storage, so `preflight`'s non-ASCII
+report can never see it. The plan's criterion was written when the strip was
+believed to be a display-only concern.
+
+**Round 3 amended this again** — see D-27 — because rejecting without
+distinguishing the refusal from an absent claim turned a denial into an allow.
+
+## D-27 — `extractTenantClaimValue` returns a discriminated result
+
+**Plan (C2/C6)**: `extractTenantClaimValue(...): string | null`, and revision 3
+explicitly *dropped* the shape change round 2 had proposed for it (see the
+plan's "Simplifications this revision also makes").
+
+**Implemented (round 3)**:
+`{ kind: "claim"; value } | { kind: "absent" } | { kind: "malformed"; display }`.
+
+**Why**: round-3 M1. D-26's reject arm produced the same `null` as an absent
+attribute, and both consumers read `null` as "the IdP asserted no claim", which
+is an ALLOW. Measured against round 2, an existing member of tenant A
+presenting `beta.example` + U+200B went from a `tenant_mismatch` denial to a
+sign-in; on the first-ever-sign-in path it produced a fresh bootstrap tenant
+with role OWNER and the row-6/9a absorption armed for the next sign-in. That is
+round-1 M1's overloaded `null`, one layer up, and the same remedy applies.
+
+Revision 3's reason for dropping the shape change was that it would break four
+consumers and nine assertions. There are now **two** consumers (`src/auth.ts`
+only), because C5 moved the dispatch, so the cost that justified the
+simplification no longer exists.
+
+**The classification is per-cause, not per-`return null`** — the omission that
+produced M1 in the first place:
+
+| Cause | Arm | Why |
+|---|---|---|
+| key absent / `undefined` / `null` | absent | nothing was asserted |
+| empty or whitespace-only string | absent | an empty assertion is not an assertion; IdPs emit empty attributes for unset fields, and refusing would deny working deployments (NF2) for no gain — the same actor can omit the key |
+| value present, not a string | **malformed** | the key the operator made authoritative WAS asserted; falling through would let a lower-priority, self-asserted attribute decide the tenant |
+| unsafe display characters | **malformed** | D-26's case, now routed to a denial instead of an allow |
+| longer than `MAX_TENANT_CLAIM_LENGTH` | **malformed** | a claim that cannot be stored cannot be honoured |
+
+A malformed read also **stops the key walk**, for the same reason: continuing
+would make the tenant depend on which higher-priority key happened to be
+unreadable.
+
+**Narrowing recorded with its cost**: a deployment whose IdP sends a non-string
+value under an early claim key, and a usable string under a later one, is now
+denied where it previously fell through. That deployment is unlikely to have
+been working — it would have been placing every user in their own bootstrap
+tenant — but the change is a denial and is named here rather than discovered.
+
+## D-28 — `unmapped` reads every non-SENT outbox status, and counts only *stranded* ones
+
+**Plan (C7)**: `unmapped` reads `audit_logs` **union** *pending* `audit_outbox`
+payloads.
+
+**Implemented (round 2)**: the predicate is `status <> 'SENT'`. PENDING is not
+the only status whose event is absent from `audit_logs`; PROCESSING and FAILED
+are too, and they are exactly the degraded-worker case the union exists for.
+
+**Amended (round 3, M5)**: the *reported* set is unchanged, but the
+`undelivered` count — the operator-facing "your audit delivery is degraded"
+signal — now excludes a PROCESSING row still inside the worker's claim lease.
+An in-flight row is normal, and reporting it as degraded told an operator their
+audit pipeline was broken in the middle of a lockout diagnosis. The staleness
+boundary is `AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS`, the worker's own reap
+threshold, so the report and the component that acts on it cannot disagree.
+
+## D-29 — `ClaimTenantResolution` gained a `claim_collision` arm
+
+**Plan (D2)**: two outcomes — the claim resolves, or it is taken by a revoked
+row.
+
+**Implemented (round 2, F-A)**: a third refusal. Round-1 M3 made the backfill
+exclude **every** side of a fold collision, which leaves the `UNIQUE(claim)`
+slot free; without this arm a third spelling neither colliding tenant stores
+verbatim would create a NEW tenant, register the claim, and outrank both
+tenants' `externalId` fallback — denying their existing members and placing
+their new ones in the new tenant.
+
+Kept a separate arm rather than folded into `claim_taken` for round-1 M2's
+reason: a third trigger wearing a second trigger's name is how the wrong remedy
+gets applied. `CLAIM_REFUSAL_REASON`'s `satisfies` is what forced it to be
+classified.
+
+## D-30 — `createUser` emits its own AUTH_LOGIN_FAILURE
+
+**Plan (C5/C6)**: the emit lives at the `signIn` callback, post-transaction.
+
+**Implemented (round 2, M1)**: a second emit site in
+`auth-adapter.createUser`'s `.catch`. On a first-ever sign-in `src/auth.ts`
+returns early — there is no user row yet — so its emit never runs, and probing
+a deliberately revoked claim left no audit row at all.
+
+The emit stays **after** `withBypassRls` settles: `emitAuthLoginFailure` →
+`logAuditAsync` resolves a tenant through its own `withBypassRls`, and nesting
+that inside the open transaction is the R9 pool-exhaustion shape.
+
+**Observability limit, stated rather than assumed** (round-3 S3-4): the emit
+binds a tenant for `claim_taken` and `claim_collision`, which carry the owning
+tenant. `claim_invalid` has none by construction, and neither does the round-3
+`claim_malformed` refusal in `src/auth.ts`'s first-ever-sign-in branch — so
+those two dead-letter, and the synchronous structured log line is their durable
+record. There is nothing to bind them to; inventing a binding would file the
+denial under an unrelated tenant.
+
+## D-31 — `--tenant` no longer resolves a slug; `--from` never did
+
+**Plan (C7)**: `--tenant <uuid|domain>`. Round-1 Func F8 widened it to
+`uuid | claim | slug | external_id`.
+
+**Implemented (round 2, F-F)**: slug removed. `slugifyTenant` collapses
+`[^a-z0-9]+`, so the claim → slug mapping is many-to-one and the first tenant
+to take a slug keeps it: one squatted sign-in (`"acme com"`) pre-empts the slug
+an operator would later type (`acme-com`). `--tenant` names the GAINING side of
+a reassignment, so a wrong resolution hands the claim to the squatter's tenant,
+and `--yes` removes the visual check. `external_id` carries no such hazard — it
+is `@unique` and matched verbatim — and it is the form that keeps a
+backfill-skipped tenant nameable, which is what F8 was for.
+
+Round 3 (**M3**) found both READMEs still documenting the slug form; they now
+state the exclusion and why.
+
+---
+
+# Round-3 fix round
+
+## D-32 — Display escaping is a third policy on the shared unsafe-character class
+
+**Before**: the shared class (`src/lib/security/unsafe-display-chars.ts`)
+offered detect and strip. Both ingest boundaries reject; nothing rendered.
+
+**Implemented**: `escapeUnsafeDisplayChars(value, maxLength?)` rewrites each
+member as its visible `<U+XXXX>` form, and every CLI print site plus the
+malformed-claim audit metadata goes through it (round-3 A3).
+
+**Why escape rather than strip**: stripping `ac<U+00AD>me.example` prints
+`acme.example` — a *different*, existing claim. The reader is shown a value
+that resolves and told it was refused. The escape is the only rendering that is
+both safe to print and honest about what arrived.
+
+**Where it is applied, and why each**: `list` (claim + the unvalidated
+operator-supplied `createdBy`), `unmapped` (claim, read out of
+`audit_logs`/`audit_outbox`, neither CHECK-constrained, and rows predating this
+PR's ingest boundary can carry U+202E), `preflight` (its entire purpose is to
+report values that are not printable ASCII), and `printTenantSummary`'s
+`tenant.name`. `--by` is additionally **rejected** at input, matching the claim
+boundary: it is stored attribution, and what is stored stays what was typed.
+
+## D-33 — The refusal's own tenant decides which tenant a lockout is filed under
+
+**Plan**: silent on this; each refusal site chose independently.
+
+**Implemented (round-3 F7)**: `refusalTenantId(refusal, existingTenantId)` —
+the claim's owning tenant where one exists, the user's existing tenant
+otherwise. One lockout was previously attributed to three different tenants
+depending on which site observed it, and `tenant-domain unmapped` groups by
+`tenant_id`, so one incident arrived as three unrelated groups — two pointing at
+tenants the operator cannot act on, and the `null` one not arriving at all.
+
+**Residual, considered and accepted** (round-3 S3-2): the tenant these rows land
+on is chosen by the claim the caller presented, so someone who can complete an
+IdP authentication can add rows to a tenant they do not belong to.
+Per-`(tenant, claim)` write-time dedupe was **rejected on correctness, not
+cost**: `unmapped` GROUPs BY exactly that pair and reports `count(*)`, which is
+how an operator tells one confused user from a whole tenant locked out.
+Collapsing duplicates would delete the number the report exists to show.
+
+## D-34 — `deleteTestData` retries a transient conflict instead of re-ordering again
+
+**Implemented (round-3 M4)**: the cleanup transaction is wrapped in a bounded
+(4-attempt) retry on `40P01`, `40001` and `23503`, and each retry is announced
+on `console.warn`.
+
+**Why not another re-ordering**: this transaction and the live outbox worker
+touch the same `audit_outbox` rows, `audit_logs` rows and `tenants` row, and the
+worker's acquisition order is not ours to choose — re-ordering relocates the
+cycle rather than removing it. **No specific cycle is claimed**: the exact
+interleaving behind the observed `40P01` was not reproduced, and asserting an
+untraced mechanism is how the previous two rounds' wrong diagnoses happened.
+What is certain is that the conflict is transient, which is all the remedy
+needs.
+
+The bound is what keeps it from masking a real FK-ordering bug in the delete
+list — that fails all four attempts identically.
+
+**Verified, with its limit stated**: six consecutive local integration runs
+**with the worker container live** — the configuration D-24 recorded as
+reliably red — gave five clean 95/95 runs and one failure in
+`webhook-delivery-durable.integration.test.ts` (`R2c: concurrent failures
+increment fail_count atomically`), a file this PR does not touch. The retry
+itself **never fired** in those runs, so they are not evidence that it works;
+`src/__tests__/db-integration/helpers.test.ts` proves the mechanism directly
+against fabricated errors of both Prisma error shapes, including that it gives
+up after four attempts.

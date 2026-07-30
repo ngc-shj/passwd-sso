@@ -70,8 +70,20 @@ import {
   NON_PRINTABLE_ASCII_SQL_CLASS,
 } from "@/lib/tenant/tenant-claim-registry";
 import { UUID_RE } from "@/lib/constants/app";
+import {
+  escapeUnsafeDisplayChars,
+  UNSAFE_DISPLAY_CHARS_RE,
+} from "@/lib/security/unsafe-display-chars";
+import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+import { MS_PER_SECOND } from "@/lib/constants/time";
 import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
+import {
+  parseFlags,
+  getStringFlag,
+  findValuelessFlag,
+  valuelessError,
+} from "./lib/tenant-domain-flags";
 
 type TxClient = Prisma.TransactionClient;
 
@@ -178,9 +190,14 @@ function printTenantSummary(
   activeMembers: number,
   label = "Tenant:",
 ): void {
+  // `Tenant.name` is the raw claim for a sign-in-created tenant and the user's
+  // email for a bootstrap one — neither CHECK-constrained, and rows predating
+  // this PR's ingest boundary can carry anything the old stripping sanitizer
+  // let through. Escaped for display (round-3 A3); `id` and `slug` are
+  // structurally constrained and left alone.
   console.log(label);
   console.log(`  id:             ${tenant.id}`);
-  console.log(`  name:           ${tenant.name}`);
+  console.log(`  name:           ${escapeUnsafeDisplayChars(tenant.name)}`);
   console.log(`  slug:           ${tenant.slug}`);
   console.log(`  active members: ${activeMembers}`);
 }
@@ -227,13 +244,21 @@ export async function cmdList(args: { tenant?: string }): Promise<CmdResult> {
           orderBy: { claim: "asc" },
         });
 
-        // Printed verbatim (post C6-sanitizer strip) — there is no
-        // punycode/IDN canonicalisation in this PR (C2), so there is
-        // nothing to render beyond the stored string.
+        // Rendered through the shared display escape, not printed verbatim
+        // (round-3 A3). A row this PR wrote cannot carry a bidi or zero-width
+        // character — the C1 CHECK restricts the stored form to printable
+        // ASCII and the ingest boundary refuses the rest — but this table
+        // predates neither constraint's enforcement on rows written by other
+        // means, and `createdBy` is an operator-supplied free-text label that
+        // no CHECK constrains at all. The escape costs nothing on a clean
+        // value (byte-identical) and is the difference between reading a row
+        // and being spoofed by one. There is still no punycode/IDN
+        // canonicalisation in this PR (C2), so nothing else is rendered.
         for (const row of rows) {
           const status = row.revokedAt ? `revoked ${row.revokedAt.toISOString()}` : "active";
+          const createdBy = row.createdBy === null ? "-" : escapeUnsafeDisplayChars(row.createdBy);
           console.log(
-            `${row.claim}\ttenant=${row.tenantId}\tcreatedBy=${row.createdBy ?? "-"}\tcreatedAt=${row.createdAt.toISOString()}\t${status}`,
+            `${escapeUnsafeDisplayChars(row.claim)}\ttenant=${row.tenantId}\tcreatedBy=${createdBy}\tcreatedAt=${row.createdAt.toISOString()}\t${status}`,
           );
         }
 
@@ -260,9 +285,18 @@ type UnmappedRow = {
   claim: string;
   cnt: bigint | number;
   last_seen: Date;
-  // How many of `cnt` come from audit_outbox rows that are NOT PENDING, i.e.
-  // PROCESSING (a worker crashed mid-delivery) or FAILED (delivery exhausted
-  // its attempts). Those denials will never reach audit_logs on their own.
+  // How many of `cnt` are denials that will NOT reach audit_logs without
+  // operator action: FAILED (delivery exhausted its attempts), or PROCESSING
+  // past the worker's own claim lease (a worker that crashed mid-delivery).
+  //
+  // PROCESSING *within* the lease is deliberately excluded (round-3 M5). It is
+  // the normal in-flight state — a worker is delivering that row right now —
+  // and counting it made a healthy queue read as degraded, which is worse than
+  // silence: the message tells an operator their audit delivery is broken at
+  // the moment they are diagnosing a lockout. The staleness boundary is
+  // AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS, the same threshold the worker's own
+  // reaper uses to declare a claim abandoned, so this report cannot disagree
+  // with the component that acts on it.
   undelivered_cnt: bigint | number;
 };
 
@@ -274,6 +308,15 @@ type UnmappedRow = {
 // actually queried rather than calling it "the retained window" (Func F4).
 export const DEFAULT_UNMAPPED_WINDOW_DAYS = AUDIT_LOG_RETENTION_MIN;
 const MAX_UNMAPPED_WINDOW_DAYS = 3650;
+
+// The worker's own "this claim is abandoned" threshold, reused rather than
+// re-chosen (round-3 M5): reapStuckRows resets PROCESSING rows older than
+// AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS, so a row younger than that is one the
+// worker still considers its own. A second, independently-picked number here
+// would let this report and the reaper disagree about the same row.
+const PROCESSING_LEASE_SECONDS = Math.ceil(
+  AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND,
+);
 
 // Pure — exported so a test can pin the S12 "empty is not the same as
 // silent" wording without depending on the shared dev DB happening to have
@@ -296,8 +339,8 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
   // union looked only at PENDING — a report that under-reports precisely in the
   // stopped/crashed-worker case the union exists to cover.
   return (
-    `${base} ${undelivered} of the denial event(s) are still in audit_outbox with a ` +
-    "non-PENDING status (PROCESSING or FAILED): the outbox worker's delivery is degraded, " +
+    `${base} ${undelivered} of the denial event(s) are stranded in audit_outbox (FAILED, or ` +
+    "PROCESSING past the worker's claim lease): the outbox worker's delivery is degraded, " +
     "so those events will not reach audit_logs without operator action."
   );
 }
@@ -331,11 +374,18 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // AuditOutboxStatus has four members: PENDING, PROCESSING, SENT,
         // FAILED. SENT is the only one whose event is already in audit_logs,
         // so it is the only one that must be excluded here — including it
-        // would double-count. PROCESSING is a worker that crashed mid-claim
-        // and FAILED is a row that exhausted OUTBOX_MAX_ATTEMPTS and is
-        // retained for OUTBOX_FAILED_RETENTION_DAYS; both are in neither
-        // audit_logs nor PENDING, so the previous predicate under-reported
-        // exactly in the degraded-worker case the union exists for.
+        // would double-count. PROCESSING and FAILED are in neither audit_logs
+        // nor PENDING, so the previous predicate under-reported exactly in the
+        // degraded-worker case the union exists for.
+        //
+        // `undelivered` is a narrower question than "is this row in the
+        // outbox": it asks whether the event is STRANDED. A PROCESSING row
+        // inside the worker's claim lease is in flight, not stranded
+        // (round-3 M5) — the lease boundary is the worker's own reaper
+        // threshold, passed as $2 seconds. A PROCESSING row with a NULL
+        // processing_started_at is counted as stranded: the comparison is
+        // NULL, so it falls through to 1, which is the safe direction for a
+        // row whose lease start is unknown.
         const rows = await tx.$queryRawUnsafe<UnmappedRow[]>(
           `SELECT tenant_id::text AS tenant_id, claim, count(*)::int AS cnt,
                   max(created_at) AS last_seen, sum(undelivered)::int AS undelivered_cnt
@@ -347,7 +397,12 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                   AND created_at >= now() - make_interval(days => $1::int)
                UNION ALL
                SELECT tenant_id, payload->'metadata'->>'claim' AS claim, created_at,
-                      CASE WHEN status = 'PENDING'::"AuditOutboxStatus" THEN 0 ELSE 1 END AS undelivered
+                      CASE
+                        WHEN status = 'PENDING'::"AuditOutboxStatus" THEN 0
+                        WHEN status = 'PROCESSING'::"AuditOutboxStatus"
+                             AND processing_started_at > now() - make_interval(secs => $2::int) THEN 0
+                        ELSE 1
+                      END AS undelivered
                  FROM audit_outbox
                 WHERE status <> 'SENT'::"AuditOutboxStatus"
                   AND payload->>'action' = 'AUTH_LOGIN_FAILURE'
@@ -358,12 +413,19 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
             GROUP BY tenant_id, claim
             ORDER BY last_seen DESC`,
           days,
+          PROCESSING_LEASE_SECONDS,
         );
 
+        // Round-3 A3, and here it is not merely defensive: `claim` comes out
+        // of audit_logs.metadata / audit_outbox.payload, neither of which is
+        // CHECK-constrained, and rows written before this PR's ingest boundary
+        // landed can still carry U+202E. This is the report an operator reads
+        // while deciding which claim to register, so a value that renders as
+        // something other than what it is would be acted on.
         for (const row of rows) {
           const undelivered = Number(row.undelivered_cnt);
           console.log(
-            `  tenant=${row.tenant_id}  claim="${row.claim}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
+            `  tenant=${row.tenant_id}  claim="${escapeUnsafeDisplayChars(row.claim)}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
               (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
           );
         }
@@ -476,20 +538,32 @@ export async function cmdPreflight(): Promise<CmdResult> {
             jsFold: normalizeTenantClaim(r.external_id),
           }));
 
+        // Every value below is escaped for display (round-3 A3). This command
+        // is the one place in the tool whose PURPOSE is to report values that
+        // are not printable ASCII — `tenants.external_id` carries no CHECK,
+        // and the non-ASCII query exists precisely to surface the rows the
+        // backfill excluded. Printing those verbatim would put a bidi override
+        // on the operator's terminal in the report that exists to warn them
+        // about it.
         console.log("Pre-upgrade checks (C12):");
         console.log(`  normalisation collisions: ${collisions.length}`);
         for (const c of collisions) {
-          console.log(`    claim="${c.normalized_claim}" tenants=${c.tenant_ids.join(",")} count=${Number(c.collision_count)}`);
+          console.log(
+            `    claim="${escapeUnsafeDisplayChars(c.normalized_claim)}" tenants=${c.tenant_ids.join(",")} count=${Number(c.collision_count)}`,
+          );
         }
         console.log(`  non-ASCII external_id (excluded by backfill): ${nonAscii.length}`);
         for (const n of nonAscii) {
-          console.log(`    tenant=${n.id} external_id="${n.external_id}"`);
+          console.log(`    tenant=${n.id} external_id="${escapeUnsafeDisplayChars(n.external_id)}"`);
         }
         console.log(
           `  Postgres/JS fold mismatches: ${foldMismatches.length} (over ${allExternalIds.length} tenant(s) scanned)`,
         );
         for (const m of foldMismatches) {
-          console.log(`    tenant=${m.id} external_id="${m.externalId}" pgFold="${m.pgFold}" jsFold="${m.jsFold}"`);
+          console.log(
+            `    tenant=${m.id} external_id="${escapeUnsafeDisplayChars(m.externalId)}" ` +
+              `pgFold="${escapeUnsafeDisplayChars(m.pgFold)}" jsFold="${escapeUnsafeDisplayChars(m.jsFold)}"`,
+          );
         }
         if (foldScanTruncated) {
           console.log(
@@ -544,6 +618,23 @@ export async function cmdAdd(args: {
 
   if (!args.by || args.by.trim().length === 0) {
     return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
+  }
+
+  // `--by` is stored verbatim in TenantClaim.createdBy, which no CHECK
+  // constrains, and it is read back by `list` and by the next operator's `add`
+  // preview — the audit trail the whole soft-delete design (S3-4) rests on.
+  // A label carrying a bidi override would misrepresent who registered a claim
+  // at exactly the moment someone is deciding whether to trust the row.
+  // Rejected rather than escaped on the way in, matching the claim ingest
+  // boundary: what is stored stays what was typed.
+  if (UNSAFE_DISPLAY_CHARS_RE.test(args.by)) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "--by contains a control, bidi or zero-width character. Use a plain label: " +
+        "it is stored as the registration's attribution and read back by `list`.",
+    };
   }
 
   // `--from` is the reassignment flag, and it takes a bare tenant UUID —
@@ -682,7 +773,11 @@ export async function cmdAdd(args: {
           console.log("  status: ACTIVE — this add will MOVE the row to the gaining tenant");
         }
         if (existing) {
-          console.log(`  registered by: ${existing.createdBy ?? "-"} at ${existing.createdAt.toISOString()} (preserved)`);
+          // `createdBy` is an unvalidated operator-supplied label (`--by`), so
+          // it is the one field here an earlier operator could have poisoned.
+          const registeredBy =
+            existing.createdBy === null ? "-" : escapeUnsafeDisplayChars(existing.createdBy);
+          console.log(`  registered by: ${registeredBy} at ${existing.createdAt.toISOString()} (preserved)`);
         }
         console.log("");
         console.log(ROW_6_9A_WARNING);
@@ -892,55 +987,6 @@ export async function cmdRemove(args: {
 
 // ─── CLI wrapper ─────────────────────────────────────────────────
 
-function parseFlags(argv: string[]): Map<string, string | true> {
-  const flags = new Map<string, string | true>();
-  for (let i = 0; i < argv.length; i++) {
-    const tok = argv[i];
-    if (!tok.startsWith("--")) continue;
-    const name = tok.slice(2);
-    const next = argv[i + 1];
-    if (next !== undefined && !next.startsWith("--")) {
-      flags.set(name, next);
-      i += 1;
-    } else {
-      flags.set(name, true);
-    }
-  }
-  return flags;
-}
-
-function getStringFlag(flags: Map<string, string | true>, name: string): string | undefined {
-  const v = flags.get(name);
-  return typeof v === "string" ? v : undefined;
-}
-
-// Every flag that takes a VALUE, with the hint printed when it arrives without
-// one. `--yes` is the only boolean flag and is deliberately absent.
-//
-// Round-2 F-E. parseFlags stores a valueless flag as `true` and getStringFlag
-// maps `true` to `undefined` — indistinguishable from "flag not given". For
-// `--days` that silently queried the default window while the operator believed
-// they had widened it; for `--tenant`/`--domain`/`--by` it degraded into a bare
-// usage dump that never names the flag at fault. The `--from` guard closed this
-// for one flag only; the member set is derived here from the flag table itself,
-// so a new value-taking flag joins the check by being added to it rather than
-// by someone remembering to write a fourth bespoke guard.
-const VALUE_FLAG_HINTS = {
-  tenant: "a tenant UUID, one of its registered claims, or its external id",
-  domain: "the domain to register or remove",
-  by: "a self-asserted operator label",
-  from: "the current owner's tenant UUID, exactly as `list` prints it",
-  days: "a positive integer number of days",
-} as const satisfies Record<string, string>;
-
-/** The first value-taking flag that was given without a value, if any. */
-function findValuelessFlag(flags: Map<string, string | true>): string | null {
-  for (const name of Object.keys(VALUE_FLAG_HINTS)) {
-    if (flags.get(name) === true) return name;
-  }
-  return null;
-}
-
 function printUsage(): void {
   console.error(
     [
@@ -963,16 +1009,18 @@ function printUsage(): void {
 
 async function main(): Promise<void> {
   const [subcommand, ...rest] = process.argv.slice(2);
-  const flags = parseFlags(rest);
+  const parsed = parseFlags(rest);
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    process.exitCode = 1;
+    return;
+  }
+  const flags = parsed.flags;
   const yes = flags.get("yes") === true;
 
   const valueless = findValuelessFlag(flags);
   if (valueless) {
-    console.error(
-      `--${valueless} requires a value (${VALUE_FLAG_HINTS[valueless as keyof typeof VALUE_FLAG_HINTS]}). ` +
-        "Refusing rather than falling back to the default: a flag written without its value " +
-        "is an instruction the operator believes was applied.",
-    );
+    console.error(valuelessError(valueless));
     process.exitCode = 1;
     return;
   }

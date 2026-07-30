@@ -322,7 +322,7 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped --days 180
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domain <new-claim> --by <operator-label>
 ```
 
-`<ref>` is the tenant's UUID, one of its already-registered claims, its `slug`, or its `external_id` — the last two matter when the pre-flight check below reports that a tenant's backfill row was skipped, because such a tenant has no claim to be named by.
+`<ref>` is the tenant's UUID, one of its already-registered claims, or its `external_id` — the last matters when the pre-flight check below reports that a tenant's backfill row was skipped, because such a tenant has no claim to be named by. `slug` is deliberately **not** accepted: a sign-in-created tenant's slug is derived from the IdP claim with `[^a-z0-9]+` collapsed, so it is many-to-one and can be pre-empted by whoever causes the first tenant to take it.
 
 `unmapped`'s window is a *query* window, not this deployment's retention: it defaults to the configurable retention floor (30 days) and says so in its output. Widen it with `--days <n>` before concluding that nothing was denied.
 

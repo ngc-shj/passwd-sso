@@ -29,6 +29,26 @@ export function normalizeTenantClaim(input: string): string {
  */
 export const NON_PRINTABLE_ASCII_SQL_CLASS = "[^\\x20-\\x7E]";
 
+/**
+ * The Postgres-side fold that turns a raw `tenants.external_id` into the form
+ * `tenant_claims.claim` stores — the SQL twin of `normalizeTenantClaim`.
+ *
+ * `COLLATE "C"` is load-bearing and is round-5 D3's remedy: `lower()` is
+ * LC_CTYPE-dependent, so without it the same column folds differently on two
+ * deployments and a claim that resolves on one silently does not on the other.
+ *
+ * FIVE places spell this: the migration's backfill, its extracted `.sql` twin,
+ * two `tenant-domain preflight` queries, and `findFoldedExternalIdOwner` —
+ * which decides whether a sign-in creating a tenant collides with an existing
+ * one. Round-3 F11 found the fifth had no guard at all, so a divergence there
+ * would silently disagree with the report an operator runs to predict it. The
+ * `.sql` files cannot import this constant, and the two `.ts` copies sit
+ * inside tagged-template SQL where interpolating it would mean `Prisma.raw`;
+ * `tenant-claim-registry.test.ts` therefore pins all five by reading the files,
+ * the same shape D-18 used for the ASCII class above.
+ */
+export const EXTERNAL_ID_FOLD_SQL = 'lower(btrim(external_id) COLLATE "C")';
+
 // The JS mirror of the same predicate. `asciiPrintable` is the repo's existing
 // shared constant for this character class (used by the generator-prefs
 // validators); it is `*`-quantified, and `storableClaimSchema`'s `.min(1)`

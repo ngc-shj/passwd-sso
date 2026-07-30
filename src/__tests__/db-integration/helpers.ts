@@ -86,6 +86,91 @@ export async function setBypassRlsGucs(client: any): Promise<void> {
   await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
 }
 
+/**
+ * Retry a cleanup transaction that lost a deadlock or a serialisation
+ * check (round-3 M4).
+ *
+ * The FK-safe ordering below closes the window where the live
+ * audit-outbox-worker re-creates an `audit_logs` child after we deleted it.
+ * It cannot close the LOCK-ORDER window: this transaction and the worker
+ * touch the same `audit_outbox` rows, the same `audit_logs` rows and the
+ * same `tenants` row, and the worker's acquisition order is not ours to
+ * choose. Reordering our side is not a fix either — it relocates the cycle
+ * rather than removing it, and each relocation has to be re-derived against
+ * whatever the worker does next.
+ *
+ * Deliberately NOT claiming a specific cycle: the exact interleaving behind
+ * the observed 40P01 was not reproduced, and asserting a mechanism that has
+ * not been traced is how the last two rounds' wrong diagnoses happened. What
+ * IS certain is the property the remedy needs: a conflict with a concurrent
+ * writer is transient — Postgres kills exactly one side of a deadlock, and a
+ * child row inserted a moment ago is gone once the retry deletes it. The
+ * retry is bounded, so a genuine repeatable conflict (a real FK ordering bug
+ * in the list below, say) still surfaces as a failure instead of hanging.
+ *
+ * Local-only in practice — CI runs no worker container (D-24) — but the
+ * retry costs nothing there and removes a class of flake that has already
+ * cost one review round chasing it in the tests.
+ */
+export const RETRYABLE_CLEANUP_SQLSTATES = [
+  "40P01", // deadlock_detected
+  "40001", // serialization_failure
+  // foreign_key_violation. Included for the SAME reason, and it is the
+  // failure D-24 actually recorded: the worker inserts an `audit_logs` child
+  // for a tenant whose parent row this transaction is about to delete. The
+  // ordering below removes the window it can do that in from the outbox
+  // side, but an insert that landed just before we started still leaves a
+  // child. A retry re-runs the whole delete, which now sees and removes that
+  // child first. A REAL ordering bug in the list above fails all four
+  // attempts identically, so this cannot mask one.
+  "23503",
+] as const;
+
+export function isRetryableCleanupConflict(error: unknown): boolean {
+  // Prisma surfaces a raw-SQL failure as P2010 and carries the SQLSTATE in
+  // `meta` (nested under `driverAdapterError.cause.code` for the pg driver
+  // adapter this repo uses), while some paths put it in the message. Search
+  // both rather than guessing which shape a given failure takes.
+  const parts = [error instanceof Error ? error.message : String(error)];
+  const meta = (error as { meta?: unknown })?.meta;
+  if (meta !== undefined) {
+    try {
+      parts.push(JSON.stringify(meta));
+    } catch {
+      parts.push(String(meta));
+    }
+  }
+  const text = parts.join(" ");
+  return RETRYABLE_CLEANUP_SQLSTATES.some((code) => text.includes(code));
+}
+
+export async function withCleanupConflictRetry<T>(fn: () => Promise<T>): Promise<T> {
+  const MAX_ATTEMPTS = 4;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isRetryableCleanupConflict(e)) throw e;
+      lastError = e;
+      // Announced, not silent. A retry means a concurrent writer really did
+      // conflict with the cleanup, which is exactly the condition this
+      // helper exists to survive — and a run where it never fires is a run
+      // that proves nothing about the retry. Without the line, "the suite
+      // is green" could equally mean "the retry works" or "the race did not
+      // happen today", and the two need different follow-ups.
+      console.warn(
+        `[db-integration] cleanup conflict on attempt ${attempt}, retrying: ` +
+          `${e instanceof Error ? e.message.split("\n")[0] : String(e)}`,
+      );
+      // Linear backoff: the competing party is a 1s-poll worker, so a short
+      // wait is enough for its transaction to finish and release.
+      await new Promise((r) => setTimeout(r, 100 * attempt));
+    }
+  }
+  throw lastError;
+}
+
 // ─── Test context ───────────────────────────────────────────────
 
 export interface TestContext {
@@ -99,6 +184,19 @@ export interface TestContext {
   retentionWorker: PrismaWithPool;
   /** Create a tenant row and return its UUID (swept by cleanup() if never deleted) */
   createTenant: () => Promise<string>;
+  /**
+   * Put a tenant this context did NOT create under the same sweep.
+   *
+   * Round-3 M8: `createTenant()` is not the only way a test brings a tenant
+   * into existence. A test that exercises `findOrCreateTenantForClaim` — the
+   * production path — gets a tenant id back from code that never touched this
+   * helper, so the sweep could not see it and a failed assertion leaked the
+   * tenant AND its `UNIQUE(claim)` row onto the shared dev database, where the
+   * claim row then collides with the next run of the same test.
+   *
+   * Call this with any id obtained that way, as soon as it is known.
+   */
+  trackTenant: (tenantId: string) => void;
   /** Create a user row belonging to a tenant and return its UUID */
   createUser: (tenantId: string) => Promise<string>;
   /** Delete all test data for a tenant (FK-safe order) */
@@ -139,6 +237,10 @@ export async function createTestContext(): Promise<TestContext> {
     return id;
   }
 
+  function trackTenant(tenantId: string): void {
+    outstandingTenantIds.add(tenantId);
+  }
+
   async function createUser(tenantId: string): Promise<string> {
     const id = randomUUID();
     await su.prisma.$transaction(async (tx) => {
@@ -163,7 +265,7 @@ export async function createTestContext(): Promise<TestContext> {
   }
 
   async function deleteTestData(tenantId: string): Promise<void> {
-    await su.prisma.$transaction(async (tx) => {
+    await withCleanupConflictRetry(() => su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       // FK-safe deletion order
       await tx.$executeRawUnsafe(
@@ -288,7 +390,7 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM tenants WHERE id = $1::uuid`,
         tenantId,
       );
-    });
+    }));
     // Only after the tx commits: a delete that threw leaves the tenant for
     // the cleanup() sweep. Ids this context never handed out (tenants a test
     // inserted itself) are simply not members, so this is a no-op for them.
@@ -296,11 +398,12 @@ export async function createTestContext(): Promise<TestContext> {
   }
 
   /**
-   * Delete every tenant createTenant() handed out that no deleteTestData()
-   * call removed. Idempotent (each id is dropped once its delete commits, and
+   * Delete every tenant this context was told about — createTenant()'s own
+   * ids plus anything trackTenant() registered — that no deleteTestData() call
+   * removed. Idempotent (each id is dropped once its delete commits, and
    * deleteTestData is scoped to a single id) and incapable of touching a
-   * tenant this context did not create, which matters because the dev
-   * database is shared between working copies.
+   * tenant no test in this file named, which matters because the dev database
+   * is shared between working copies.
    *
    * Failures are reported rather than thrown: the sweep only has work to do
    * when a test already failed, and turning that into a second failure in
@@ -338,7 +441,17 @@ export async function createTestContext(): Promise<TestContext> {
     ]);
   }
 
-  return { su, app, worker, retentionWorker, createTenant, createUser, deleteTestData, cleanup };
+  return {
+    su,
+    app,
+    worker,
+    retentionWorker,
+    createTenant,
+    trackTenant,
+    createUser,
+    deleteTestData,
+    cleanup,
+  };
 }
 
 // ─── Deferred barrier for concurrency tests ─────────────────────

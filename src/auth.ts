@@ -71,15 +71,64 @@ export type SignInTenantResult =
       claim: string | null;
     };
 
+/**
+ * Which tenant a claim refusal is filed under (round-3 F7).
+ *
+ * One lockout used to be attributed to three different tenants depending on
+ * which site observed it: the adapter's first-ever-sign-in refusal filed it
+ * under the claim's owning tenant (`TenantClaimUnusableError.tenantId`), row
+ * 8b filed it under `null`, and the bootstrap branch filed it under the user's
+ * EXISTING tenant. `tenant-domain unmapped` groups by tenant_id, so the same
+ * incident arrived as three unrelated groups — two of them pointing at tenants
+ * the operator cannot act on, and the `null` one not arriving at all
+ * (logAuditAsync dead-letters a tenant-less emit).
+ *
+ * The refusal's own tenant wins wherever it exists, because it is the tenant
+ * that OWNS the contested claim and therefore the one the operator's
+ * `tenant-domain add` has to name. The user's existing tenant is the fallback:
+ * it binds the row so the denial is at least recorded, which matters most for
+ * `claim_invalid`, the one arm that has no owning tenant by construction.
+ *
+ * Residual, considered and accepted (round-3 S3-2): the tenant these rows land
+ * on is chosen by the CLAIM the caller presented, so someone who can complete
+ * an IdP authentication can add AUTH_LOGIN_FAILURE rows to a tenant they do
+ * not belong to. Per-(tenant, claim) write-time dedupe was rejected, and not
+ * for cost: `tenant-domain unmapped` GROUPs BY exactly that pair and reports
+ * `count(*)`, which is how an operator distinguishes one confused user from a
+ * whole tenant locked out. Collapsing duplicates would delete the number the
+ * report exists to show. The volume is bounded by completed IdP
+ * authentications rather than by unauthenticated requests, the payload is
+ * capped at MAX_TENANT_CLAIM_LENGTH, and retention GC ages the rows out.
+ */
+function refusalTenantId(
+  refusal: Exclude<ClaimTenantResolution, { kind: "tenant" }>,
+  existingTenantId: string | null,
+): string | null {
+  return refusal.tenantId ?? existingTenantId;
+}
+
 export async function ensureTenantMembershipForSignIn(
   userId: string,
   account?: Account | null,
   profile?: Record<string, unknown> | null,
 ): Promise<SignInTenantResult> {
-  const tenantClaim = extractTenantClaimValue(account, profile);
-  if (!tenantClaim) {
+  const extraction = extractTenantClaimValue(account, profile);
+  if (extraction.kind !== "claim") {
+    // "The IdP asserted nothing" and "the IdP asserted something this
+    // deployment refuses" must not arrive here as the same value: the branch
+    // below is an ALLOW (rows 1-3), so collapsing them turns a denial into a
+    // sign-in. That collapse is round-3 M1 — measured against round 2, an
+    // existing member of tenant A presenting `beta.example` + U+200B went
+    // from denied to allowed, and the precondition is only control of the
+    // asserted attribute.
+    //
+    // Both arms still need the user's current tenant: the allow to validate
+    // single-tenancy (unchanged), the refusal to BIND its audit row —
+    // emitAuthLoginFailure without a tenantId dead-letters (CR-3), which
+    // would make the new denial invisible rather than merely unobserved.
+    let existingTenantId: string | null = null;
     try {
-      await resolveUserTenantId(userId);
+      existingTenantId = await resolveUserTenantId(userId);
     } catch (error) {
       if (
         error instanceof Error &&
@@ -89,10 +138,25 @@ export async function ensureTenantMembershipForSignIn(
       }
       throw error;
     }
+
+    if (extraction.kind === "malformed") {
+      return {
+        ok: false,
+        reason: CLAIM_REFUSAL_REASON.claim_malformed,
+        tenantId: existingTenantId,
+        // The escaped rendering, never the raw value — see ClaimKeyRead. It
+        // is what lets an operator see WHICH claim their IdP started
+        // mangling; the raw value is refused precisely because it must not be
+        // printed or matched.
+        claim: extraction.display,
+      };
+    }
+
     // Allow first-time sign-in without tenant claim.
     // Membership bootstrap is handled by the auth adapter createUser flow.
     return { ok: true };
   }
+  const tenantClaim = extraction.value;
 
   return withBypassRls(prisma, async (tx) => {
     // Both lookups run inside this single withBypassRls callback, in this
@@ -124,14 +188,15 @@ export async function ensureTenantMembershipForSignIn(
         : await findOrCreateTenantForClaim(tenantClaim, tx);
       if (target.kind !== "tenant") {
         // Row 8b: the claim is unusable, so there is no tenant to join. The
-        // reason distinguishes the two refusals (see CLAIM_REFUSAL_REASON) —
-        // the storableClaimSchema arm is unreachable from sign-in today
-        // (sanitizeTenantClaimValue already trims/bounds/rejects-empty), the
-        // revoked-row arm is operator-reachable.
+        // reason distinguishes the refusals (see CLAIM_REFUSAL_REASON) —
+        // the storableClaimSchema arm is reachable from sign-in only through
+        // SC9's ASCII narrowing (the ingest boundary already rejects the
+        // other unstorable shapes), the revoked-row and fold-collision arms
+        // are operator- and data-reachable.
         return {
           ok: false,
           reason: CLAIM_REFUSAL_REASON[target.kind],
-          tenantId: null,
+          tenantId: refusalTenantId(target, null),
           claim: tenantClaim,
         };
       }
@@ -196,7 +261,7 @@ export async function ensureTenantMembershipForSignIn(
       return {
         ok: false,
         reason: CLAIM_REFUSAL_REASON[target.kind],
-        tenantId: existingTenantId,
+        tenantId: refusalTenantId(target, existingTenantId),
         claim: tenantClaim,
       };
     }
@@ -428,13 +493,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Store the tenant claim so createUser can place the user directly
       // into the SSO tenant instead of creating a bootstrap tenant.
       if (!userId) {
-        const claim = extractTenantClaimValue(
+        const extraction = extractTenantClaimValue(
           params.account,
           (params.profile ?? null) as Record<string, unknown> | null,
         );
+        // The second half of round-3 M1, and the more damaging one. A refused
+        // claim used to arrive here as the same `null` an absent one does, so
+        // it fell through to createUser with no pending claim — which is the
+        // bootstrap-tenant path, granting the user role OWNER of a brand-new
+        // tenant, invisibly, with the row-6/9a absorption armed for their next
+        // sign-in. Refusing HERE rather than in createUser is deliberate: the
+        // adjudicator is the ingest boundary, nothing has been written yet,
+        // and a claim this deployment refuses must never become a *pending*
+        // claim.
+        //
+        // Observability limit, stated rather than assumed (CR-3's lesson):
+        // there is no user row and no tenant here, so this emit resolves no
+        // tenantId and logAuditAsync DEAD-LETTERS it — the synchronous
+        // structured log line is the durable record, not an audit_logs row.
+        // That is inherent to a refusal with no tenant (claim_invalid has the
+        // same limit), not an oversight: there is nothing to bind to. The
+        // existing-user path above does bind, because there the user's tenant
+        // is known.
+        if (extraction.kind === "malformed") {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: auditProvider,
+            reason: CLAIM_REFUSAL_REASON.claim_malformed,
+            claim: extraction.display,
+          });
+          return false;
+        }
         const store = tenantClaimStorage.getStore();
-        if (store && claim) {
-          store.tenantClaim = claim;
+        if (store && extraction.kind === "claim") {
+          store.tenantClaim = extraction.value;
         }
         return true;
       }

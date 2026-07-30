@@ -32,7 +32,10 @@ vi.mock("@/lib/tenant-rls", () => ({
   advisoryXactLock: mockAdvisoryXactLock,
 }));
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { findOrCreateTenantForClaim } from "./tenant-management";
+import { EXTERNAL_ID_FOLD_SQL } from "./tenant-claim-registry";
 
 // findOrCreateTenantForClaim's `db` parameter is REQUIRED (no `= prisma`
 // default — see the doc comment: a default would let the advisory lock run
@@ -297,7 +300,28 @@ describe("findOrCreateTenantForClaim", () => {
     const [strings, ...values] = mockPrisma.$queryRaw.mock.calls[0];
     expect(values).toEqual(["acme.com'; drop table tenants; --"]);
     expect(strings.join("?")).not.toContain("acme.com");
-    expect(strings.join("?")).toContain('lower(btrim(external_id) COLLATE "C")');
+    // Round-3 T8: the fold used to be a hand-copied string literal here, so
+    // this assertion pinned the test's own copy against the source's — two
+    // copies agreeing with each other and with nothing else. It now imports
+    // the shared constant, which the registry's drift guard pins against all
+    // five spellings (the migration, the backfill, both preflight queries and
+    // this probe).
+    expect(strings.join("?")).toContain(EXTERNAL_ID_FOLD_SQL);
+  });
+
+  it("orders the folded-external_id probe so a multi-way collision names one tenant deterministically", () => {
+    // Round-3 M2. `LIMIT 1` with no `ORDER BY` lets Postgres return any side
+    // of the collision, and the id it returns binds the AUTH_LOGIN_FAILURE
+    // row — so one lockout would be filed under a different tenant on
+    // different runs and `tenant-domain unmapped`, which groups by tenant_id,
+    // would split it into two groups. The behavioural proof is in
+    // tenant-claim.integration.test.ts against real Postgres; this pins the
+    // clause itself, which a mock cannot exercise.
+    const sql = readFileSync(
+      resolve(__dirname, "tenant-management.ts"),
+      "utf8",
+    );
+    expect(sql).toMatch(/ORDER BY created_at ASC, id ASC\s*\n\s*LIMIT 1/);
   });
 
   it("does not probe for a fold collision when the exact-match externalId fallback already resolved", async () => {

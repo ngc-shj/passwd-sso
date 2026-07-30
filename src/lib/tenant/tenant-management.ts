@@ -38,6 +38,21 @@ async function findClaimRow(
  *
  * Bound parameter, no interpolation: the claim is IdP-supplied. The `COLLATE
  * "C"` and the column name are the only literal SQL.
+ *
+ * A fold collision has two or more sides by definition (round-1 M3's backfill
+ * excludes every one of them), so `LIMIT 1` has to say WHICH side it takes.
+ * Without an `ORDER BY`, Postgres is free to return any row — plan- and
+ * heap-order-dependent — and the tenant id it picked is not a detail: it binds
+ * the AUTH_LOGIN_FAILURE row, so the same denial would be filed under a
+ * different tenant on different runs and `tenant-domain unmapped`, which
+ * groups by tenant_id, would split one lockout across two groups (round-3 M2).
+ *
+ * Ordering by `created_at` names the OLDEST colliding tenant: of the spellings
+ * in a collision, the one that existed first is the one whose members are
+ * likeliest to be the population being denied. `id` breaks the tie so the
+ * answer is total, not merely usually-stable. This picks a reporting anchor,
+ * not an owner — the operator's remedy is `tenant-domain preflight`, which
+ * lists every side, followed by an explicit `add`.
  */
 async function findFoldedExternalIdOwner(
   db: TxOrPrisma,
@@ -48,6 +63,7 @@ async function findFoldedExternalIdOwner(
       FROM tenants
      WHERE external_id IS NOT NULL
        AND lower(btrim(external_id) COLLATE "C") = ${claim}
+     ORDER BY created_at ASC, id ASC
      LIMIT 1`;
   return rows[0]?.id ?? null;
 }

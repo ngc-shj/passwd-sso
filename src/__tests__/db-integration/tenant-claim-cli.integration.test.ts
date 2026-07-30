@@ -16,6 +16,7 @@ import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } 
 import { randomUUID, randomBytes } from "node:crypto";
 import { AuditScope, AuditAction, ActorType, AuditOutboxStatus } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import {
   PRIMARY_CLAIM,
   ALIAS_CLAIM,
@@ -554,6 +555,12 @@ describe("tenant-domain CLI (C7)", () => {
         const bySlug = `${runToken()}.${ALIAS_CLAIM}`;
         const slugResult = await cmdAdd({ tenant: tenant.slug, domain: bySlug, by: "test-op", yes: true });
         expect(slugResult.ok).toBe(false);
+        // Round-3 T12: `ok === false` alone does not say the SLUG was refused
+        // — a missing `--by`, a rejected `--domain`, or an unset
+        // MIGRATION_DATABASE_URL all produce it, and each would keep this test
+        // green with the slug path fully restored. The message pins that the
+        // refusal is "this ref resolves to no tenant", naming the slug.
+        expect(slugResult.message).toBe(`Tenant not found: ${tenant.slug}`);
         const slugRow = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: bySlug } });
         expect(slugRow).toBeNull();
 
@@ -710,10 +717,21 @@ describe("tenant-domain CLI (C7)", () => {
           await setBypassRlsGucs(tx);
           // Present ONLY in audit_outbox — models a stopped outbox worker
           // (round-2 N14): the row never made it into audit_logs.
+          //
+          // `nextRetryAt` in the future is what makes that model hold against
+          // a LIVE worker (round-3 M9). claimBatch selects
+          // `status = 'PENDING' AND next_retry_at <= now()`, so a row dated
+          // forward is structurally unclaimable — still PENDING, still absent
+          // from audit_logs, which is exactly the state under test. The
+          // previous fixture was claimable and relied on an after-the-fact
+          // status re-read to notice, which turned one race (drained before
+          // the query) into two (drained after it, reddening a run whose
+          // query saw the right state).
           await tx.auditOutbox.create({
             data: {
               tenantId,
               status: AuditOutboxStatus.PENDING,
+              nextRetryAt: new Date(Date.now() + 60 * 60 * 1000),
               payload: {
                 scope: AuditScope.PERSONAL,
                 action: AuditAction.AUTH_LOGIN_FAILURE,
@@ -747,12 +765,12 @@ describe("tenant-domain CLI (C7)", () => {
           const result = await cmdUnmapped();
 
           // The outbox arm is only the outbox arm while the row is still
-          // PENDING. If the live worker drained it between the create above
-          // and this call, the same claim also exists in audit_logs and the
-          // assertion below would pass through the audit_logs arm — deleting
-          // the audit_outbox half of the UNION would then stay green. Asserting
-          // the seeded state first makes a drained row red, not silently
-          // proven by the wrong arm.
+          // PENDING and absent from audit_logs: a drained row exists in BOTH
+          // tables, so the assertion below would pass through the audit_logs
+          // arm and deleting the audit_outbox half of the UNION would stay
+          // green. The forward `nextRetryAt` above makes that unreachable
+          // rather than merely detectable, so this assertion is a fixture
+          // check — it cannot be reddened by worker timing (round-3 M9).
           const seeded = await ctx.su.prisma.auditOutbox.findFirst({
             where: { tenantId },
             select: { status: true },
@@ -799,11 +817,12 @@ describe("tenant-domain CLI (C7)", () => {
     // suite drives those two statuses through cmdUnmapped, so narrowing the
     // predicate back would otherwise stay green.
     it.skipIf(SKIP)(
-      "reports denials stuck in PROCESSING or terminal FAILED and counts them as undelivered",
+      "reports denials stuck in PROCESSING or terminal FAILED and counts them as undelivered, but not one still inside the worker's lease",
       async () => {
         const tenantId = await ctx.createTenant();
         const processingClaim = `${runToken()}.${ALIAS_CLAIM}`;
         const failedClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const inFlightClaim = `${runToken()}.${ALIAS_CLAIM}`;
 
         const outboxPayload = (claim: string) => ({
           scope: AuditScope.PERSONAL,
@@ -821,15 +840,40 @@ describe("tenant-domain CLI (C7)", () => {
 
         await ctx.su.prisma.$transaction(async (tx) => {
           await setBypassRlsGucs(tx);
-          // Neither status is claimable by the live worker (claimBatch selects
-          // PENDING), so this seeds no drainable row — but the cleanup still
-          // sits in the `finally` below, for the same reason the PENDING case
-          // does: a failing assertion must not leave the rows behind.
+          // Round-3 T7: neither status is claimable by the live worker
+          // (claimBatch selects `status = 'PENDING'`), which is WHY this
+          // fixture is race-free — stated, because the previous version was
+          // safe for that reason without saying so, and a later edit that
+          // switched a status to PENDING would have re-armed the race
+          // silently. The cleanup still sits in the `finally` below, for the
+          // same reason the PENDING case does: a failing assertion must not
+          // leave the rows behind.
+          //
+          // `processingStartedAt` is explicit on both PROCESSING rows, because
+          // it is now the field that decides the outcome (round-3 M5). Leaving
+          // it null would make the stuck row count as undelivered for the
+          // wrong reason — the null fallback — and leave the lease boundary
+          // itself untested.
           await tx.auditOutbox.create({
             data: {
               tenantId,
               status: AuditOutboxStatus.PROCESSING,
+              // Older than the worker's own reap threshold: abandoned.
+              processingStartedAt: new Date(
+                Date.now() - AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS - 60_000,
+              ),
               payload: outboxPayload(processingClaim),
+            },
+          });
+          await tx.auditOutbox.create({
+            data: {
+              tenantId,
+              status: AuditOutboxStatus.PROCESSING,
+              // Just claimed: a worker is delivering this right now. Reporting
+              // it as degraded told an operator their audit pipeline was
+              // broken while it was working normally.
+              processingStartedAt: new Date(),
+              payload: outboxPayload(inFlightClaim),
             },
           });
           await tx.auditOutbox.create({
@@ -852,19 +896,36 @@ describe("tenant-domain CLI (C7)", () => {
             undelivered_cnt: number;
           }[];
 
+          // Reported (the round-2 F-B property: the predicate is
+          // `status <> 'SENT'`, so a non-PENDING row is still visible) AND
+          // counted as undelivered (the operator-facing degradation signal).
           for (const [label, claim] of [
-            ["PROCESSING", processingClaim],
+            ["stale PROCESSING", processingClaim],
             ["FAILED", failedClaim],
           ] as const) {
             const row = rows.find((r) => r.tenant_id === tenantId && r.claim === claim);
             expect(row, `${label} denial must be reported`).toBeDefined();
             expect(Number(row?.cnt), label).toBe(1);
-            // The count that tells the operator delivery is degraded: a
-            // PENDING row contributes 0 here, these contribute 1 each.
             expect(Number(row?.undelivered_cnt), `${label} must count as undelivered`).toBe(1);
           }
 
-          expect(result.message).toContain("PROCESSING or FAILED");
+          // Round-3 M5, the other side of the same boundary: an in-flight
+          // PROCESSING row is still REPORTED — the denial happened and the
+          // operator needs to see the claim — but must NOT count as
+          // undelivered, or a healthy queue reads as a broken audit pipeline
+          // in the middle of a lockout diagnosis. The two assertions together
+          // are what distinguish "excluded from the report" (wrong) from
+          // "reported, not degraded" (right).
+          const inFlight = rows.find((r) => r.tenant_id === tenantId && r.claim === inFlightClaim);
+          expect(inFlight, "in-flight denial must still be reported").toBeDefined();
+          expect(Number(inFlight?.cnt)).toBe(1);
+          expect(
+            Number(inFlight?.undelivered_cnt),
+            "a PROCESSING row inside the worker's lease is in flight, not stranded",
+          ).toBe(0);
+
+          expect(result.message).toContain("stranded in audit_outbox");
+          expect(result.message).toContain("PROCESSING past the worker's claim lease");
         } finally {
           await ctx.su.prisma.$transaction(async (tx) => {
             await setBypassRlsGucs(tx);
@@ -912,7 +973,7 @@ describe("tenant-domain CLI (C7)", () => {
       // Summed across groups, not per-row: the operator is being told how
       // many denial events will never reach audit_logs on their own.
       expect(message).toContain("3 of the denial event(s)");
-      expect(message).toContain("PROCESSING or FAILED");
+      expect(message).toContain("stranded in audit_outbox");
     });
 
     it.skipIf(SKIP)("--days widens the query window and is reported in the message", async () => {
@@ -995,7 +1056,17 @@ describe("tenant-domain CLI (C7)", () => {
         expect(rows.some((r) => r.id === tenantA && typeof r.external_id === "string")).toBe(false);
         expect(rows.some((r) => r.id === tenantB && typeof r.external_id === "string")).toBe(false);
 
-        expect(typeof result.message).toBe("string");
+        // Round-3 T10: `typeof message === "string"` was the assertion here,
+        // and it holds for every possible message including "0 collision(s),
+        // 0 non-ASCII" — the exact output that would follow from the query
+        // this test seeds rows for silently returning nothing. The summary
+        // line is what an operator reads before deciding to migrate, so it
+        // has to be pinned to a count that reflects the seeded rows.
+        const summary = result.message ?? "";
+        const collisionCount = Number(/^(\d+) collision\(s\)/.exec(summary)?.[1] ?? -1);
+        const nonAsciiCount = Number(/(\d+) non-ASCII/.exec(summary)?.[1] ?? -1);
+        expect(collisionCount).toBeGreaterThanOrEqual(1);
+        expect(nonAsciiCount).toBeGreaterThanOrEqual(1);
       } finally {
         await ctx.deleteTestData(tenantA);
         await ctx.deleteTestData(tenantB);

@@ -363,3 +363,172 @@ Test: PROCESSING fixture safe for an unnamed reason (T7); containment test pinni
 ## Independently re-proved this round
 
 The testing expert re-ran every Round-2 red-proof rather than trusting the reports: N1's CAS tests genuinely reach `count === 0` (not an earlier pre-check); F-B reds both ways; the adapter runs the **real** `CLAIM_REFUSAL_REASON` / `AUDIT_PROVIDER_BY_ID` tables (dropping `"saml-jackson"` reds 4 tests). Four full integration runs, 95 files / 430 passed each, with the worker live and actively draining.
+
+## Round-3 — Resolution Status
+
+All 6 remaining Majors and every Minor fixed; no deferrals. CR-3, R3-M1 and
+R3-M2 were reported as "fix in flight" in the section above — **that report was
+wrong**: nothing had been applied. CR-3's fix *was* committed (in `58af27fc9`'s
+follow-up), M1 and M2 were not, and the partial work sat in two stashes that
+had been mixed together. Both were rewritten from the findings rather than
+resumed.
+
+### R3-M1 [Major, converged Func F3 + Sec S3-1] A malformed claim collapsed into "no claim", turning a deny into an allow
+
+- **Action**: `extractTenantClaimValue` returns
+  `{kind:"claim";value} | {kind:"absent"} | {kind:"malformed";display}`. **All
+  five null-producing causes were re-classified individually** — the omission
+  that produced the defect — and the table, with the reasoning for each, is in
+  the deviation log (D-27). Summary: absent = key missing / non-string
+  `undefined`/`null` / empty-or-whitespace / the `hd` provider gate; malformed =
+  a present non-string value, unsafe display characters, over-length. A
+  malformed read also stops the key walk, so a refusal at a higher-priority key
+  cannot silently promote a lower-priority one.
+- Both consumers now dispatch it: `ensureTenantMembershipForSignIn` denies with
+  `tenant_mismatch` **bound to the user's tenant** (so the emit does not
+  dead-letter), and the `signIn` callback's first-ever-sign-in branch denies
+  *before* the claim can become a pending claim — closing the bootstrap-tenant-
+  with-OWNER outcome, which was the damaging half.
+- The refused value reaches the audit row as an **escaped rendering**
+  (`beta.example<U+200B>`), never the raw value and never a stripped one: a
+  strip would print `beta.example`, a claim that resolves, next to the word
+  "refused".
+- **Red-proved on throwaway copies, real source never mutated**: a copy of
+  `tenant-claim.ts` with the three malformed arms returned to `ABSENT` fails 26
+  of 50 boundary cases; a copy of `auth.ts` with both dispatch branches removed
+  fails exactly the 3 new consumer tests and nothing else.
+- Modified: `src/lib/tenant/tenant-claim.ts`, `src/auth.ts`,
+  `src/lib/audit/auth-failure-mapping.ts`,
+  `src/lib/security/unsafe-display-chars.ts` (+ four test files).
+
+### R3-M2 [Major] `findFoldedExternalIdOwner`'s `LIMIT 1` had no `ORDER BY`
+- Action: `ORDER BY created_at ASC, id ASC`. A collision has two sides by
+  construction, and the id this query returns binds the AUTH_LOGIN_FAILURE row —
+  unordered, one lockout would be filed under a different tenant on different
+  runs and `unmapped`, which groups by `tenant_id`, would split it in two.
+  Oldest-first because of the colliding spellings the one that existed first is
+  likeliest to own the population being denied; `id` makes the order total.
+  Proved against real Postgres (five consecutive calls, both sides seeded with
+  explicit `created_at`, so the fixture distinguishes created_at ordering from
+  id ordering), and the clause itself pinned in the unit suite.
+
+### R3-M3 [Major] Both READMEs documented the removed `--tenant <slug>` form
+- Action: both now list `uuid | claim | external_id` and state why slug is
+  excluded (many-to-one derivation, pre-emptable by one squatted sign-in).
+  Recorded as D-31.
+
+### R3-M4 [Major] `deleteTestData`'s reorder traded an FK failure for a lock-order inversion
+- Action: bounded 4-attempt retry on `40P01` / `40001` / `23503`, each firing
+  announced on stderr. **No specific lock cycle is claimed** — it was not
+  reproduced, and the last two rounds' wrong diagnoses came from asserting
+  untraced mechanisms. See D-34 for the reasoning, the verification, and its
+  limit: six local runs with the worker live never fired the retry, so the
+  mechanism is proved directly in `helpers.test.ts` instead.
+
+### R3-M5 [Major] `undelivered_cnt` reported normal in-flight `PROCESSING` as degraded
+- Action: a PROCESSING row inside `AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS` — the
+  worker's own reap threshold, so the report cannot disagree with the component
+  that acts on it — counts as 0. It is still *reported*: the denial happened and
+  the operator needs the claim. The integration test now seeds a stale and a
+  fresh PROCESSING row and asserts both halves, which is what distinguishes
+  "excluded from the report" (wrong) from "reported, not degraded" (right).
+
+### R3-M6 [Major] `claim_collision` had no real-Postgres proof
+- Action: an integration test seeds two tenants whose raw `external_id`s differ
+  but fold together, then drives `findOrCreateTenantForClaim` with a **third**
+  spelling and asserts the refusal, the named owner, and that no tenant and no
+  claim row were created. This is the JS↔Postgres fold pair (JS
+  `normalizeTenantClaim` decides the lookup, `lower(btrim(x) COLLATE "C")`
+  decides the match), so only a real INSERT can adjudicate it — the round-1
+  M6/D3 class.
+
+### R3-M7 [Major] `findValuelessFlag` / `VALUE_FLAG_HINTS` were unexported and untested
+- Action: moved to `scripts/lib/tenant-domain-flags.ts` (no Prisma, no
+  `loadEnv`) with 19 unit tests in the **unit** suite. While proving them,
+  S3-5's `--days=30` bypass was closed properly: `--name=value` is now parsed,
+  and **unknown flags are refused** — which closes the class (`--dayss`,
+  `--Days`, a stray positional) rather than the one spelling. The rule the tests
+  pin: a flag the operator wrote either takes effect or stops the command.
+
+### R3-M8 [Major] The tenant sweep missed tenants created through production code
+- Action: `ctx.trackTenant(id)` registers an id obtained from
+  `findOrCreateTenantForClaim` with the same sweep, called at both such sites
+  **before** the assertions that can throw; the SAVEPOINT-retry test's
+  post-transaction assertions moved into a `try/finally`. Previously a red there
+  leaked two tenants *and their `UNIQUE(claim)` rows*, and the claim rows then
+  collided with the next run of that same test.
+
+### R3-M9 [Major] The M10 anti-vacuity guard introduced a new worker race
+- Action: the fixture is now structurally unclaimable — `nextRetryAt` an hour
+  ahead, which `claimBatch`'s `next_retry_at <= now()` excludes — so the row
+  stays PENDING and absent from `audit_logs` by construction. The status
+  assertion remains as a fixture check but can no longer be reddened by worker
+  timing. Detecting the race after the fact had turned one race (drained before
+  the query) into two (drained after it, reddening a run whose query saw the
+  right state).
+
+### Minors — all fixed
+- **S3-2** — accepted residual with its reasoning; per-`(tenant,claim)` dedupe
+  rejected **on correctness**: `unmapped`'s `count(*)` is how an operator tells
+  one confused user from a locked-out tenant (D-33).
+- **S3-3** — `toAuditProvider` resolved inherited `Object.prototype` members:
+  `toAuditProvider("constructor")` returned a *function* as the provider,
+  because `?? "unknown"` cannot fire on a truthy value. Fixed with
+  `hasOwnProperty`, and the new `auth-failure-mapping.test.ts` covers six
+  inherited names plus the whole `CLAIM_REFUSAL_REASON` table.
+- **S3-4 / F9** — the dead-lettering arms are now stated where they happen,
+  with why nothing can be bound to them, instead of a comment claiming the arm
+  is unreachable.
+- **S3-5** — closed as a class, see R3-M7.
+- **S3-6 / F8** — the shared-class header rewritten (both boundaries reject; the
+  escape is the third policy), and the "unused" global regex now has its real
+  consumer.
+- **F7** — see D-33.
+- **F11** — the fifth copy of the fold expression is pinned:
+  `EXTERNAL_ID_FOLD_SQL` plus a drift guard that counts exact occurrences in all
+  four files and separately fails any `lower(btrim(external_id))` without the
+  `C` collation — the failure that is invisible on an en_US database and appears
+  only on someone else's deployment. Guard sensitivity verified per file against
+  in-memory mutations.
+- **T7** — the PROCESSING fixture now states *why* it is race-free (claimBatch
+  selects PENDING), so a later edit that switches a status cannot re-arm the
+  race silently.
+- **T8** — the fold containment assertion imports the shared constant instead of
+  pinning the test's own hand-copied string against the source's.
+- **T9** — `UNSAFE_DISPLAY_CHAR_RANGES` is now the single definition: the regex
+  is built from it and the tests enumerate **all 86** members. The old table was
+  21 endpoint samples under a comment claiming one case per member — narrowing
+  U+202A-U+202E to U+202C-U+202E dropped two live bidi controls and stayed
+  green.
+- **T10** — `typeof message === "string"` (true of every message, including the
+  "0 collision(s), 0 non-ASCII" output the seeded rows exist to prevent) is
+  replaced by parsing the counts out of the summary line.
+- **T11** — `mockEmitAuthLoginFailure`'s implementation is reset in `beforeEach`.
+  `vi.clearAllMocks()` clears calls but not implementations, so a test body's
+  implementation — one that writes to its own closure variable — stayed live for
+  every later test in the file.
+- **T12** — the slug refusal asserts the exact message, so a missing `--by`, a
+  rejected `--domain` or an unset URL can no longer keep it green with the slug
+  path fully restored.
+- **A1** — recorded: six Round-2 contract changes are now in the deviation log
+  as D-26 … D-31, including D-26's explicit supersession of the plan's
+  "characters stripped" acceptance criterion.
+- **A2** — re-derived rather than assumed: of the seven `emitAuthLoginFailure`
+  call sites, three pass a `tenantId`, one passes a `userId` whose row exists
+  (so `resolveTenantId` finds the tenant), and the remaining three are failures
+  where **no** tenant is known — pre-`signIn` provider errors and the
+  first-ever-sign-in refusals. No caller drops a tenant it has. No gate was
+  added, because "always pass tenantId" is not true of the class.
+- **A3** — see D-32.
+
+### Verification
+- `npx tsc --noEmit` exit 0; `npx next build` exit 0.
+- Unit: **996 files / 13,640 passed**, 1 skipped.
+- The changed unit surface re-run under the **full `app-ci` env block** (D-25):
+  44 files / 530 passed.
+- Integration, with the outbox worker container **live** — the configuration
+  D-24 recorded as reliably red: six runs, five at **95 files / 431 passed**,
+  one failure in `webhook-delivery-durable.integration.test.ts`
+  (`R2c: concurrent failures increment fail_count atomically`), a file this PR
+  does not touch and a member of D-24's own class. No run failed in a file this
+  PR touches.

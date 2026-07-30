@@ -14,7 +14,7 @@ import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
 import {
   CLAIM_REFUSAL_REASON,
   toAuditProvider,
-  type ClaimRefusalKind,
+  type ClaimResolutionRefusalKind,
 } from "@/lib/audit/auth-failure-mapping";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
@@ -40,7 +40,7 @@ import logger from "@/lib/logger";
  * layer down. The message is unchanged so existing log greps still match.
  */
 export class TenantClaimUnusableError extends Error {
-  readonly kind: ClaimRefusalKind;
+  readonly kind: ClaimResolutionRefusalKind;
   /**
    * The tenant that already owns the claim — the revoked row's owner for
    * `claim_taken`, the folded `external_id` owner for `claim_collision`,
@@ -56,7 +56,7 @@ export class TenantClaimUnusableError extends Error {
    */
   readonly tenantId: string | null;
 
-  constructor(kind: ClaimRefusalKind, tenantId: string | null) {
+  constructor(kind: ClaimResolutionRefusalKind, tenantId: string | null) {
     super("TENANT_CLAIM_UNUSABLE");
     this.name = "TenantClaimUnusableError";
     this.kind = kind;
@@ -223,12 +223,25 @@ export function createCustomAdapter(): Adapter {
         if (pendingClaim) {
           const resolution = await findOrCreateTenantForClaim(pendingClaim, tx);
           if (resolution.kind !== "tenant") {
-            // Revoked claim row (D2) or storableClaimSchema reject (SC9).
-            // Either way the claim is not this deployment's to hand out, and
-            // the operator's remedy is in `tenant-domain`, not in a new
-            // tenant. Throwing aborts the withBypassRls tx, so no user, no
-            // tenant, and no membership row survives; the arm travels on the
-            // error so the catch below can audit it as itself.
+            // Revoked claim row (D2), folded external_id collision (F-A), or
+            // storableClaimSchema reject (SC9). In every case the claim is not
+            // this deployment's to hand out, and the operator's remedy is in
+            // `tenant-domain`, not in a new tenant. Throwing aborts the
+            // withBypassRls tx, so no user, no tenant, and no membership row
+            // survives; the arm travels on the error so the catch below can
+            // audit it as itself.
+            //
+            // Observability differs by arm, and the difference is inherent
+            // rather than an oversight (round-3 S3-4). `claim_taken` and
+            // `claim_collision` carry the owning tenant, so their emit binds
+            // and lands in audit_logs/audit_outbox. `claim_invalid` has no
+            // owning tenant by construction — an unstorable claim belongs to
+            // nobody — and a first-ever sign-in has no user row either, so
+            // resolveTenantId finds nothing and logAuditAsync DEAD-LETTERS it:
+            // the synchronous structured log line is the durable record. There
+            // is nothing to bind it to; stating that is the honest position,
+            // and inventing a binding would file the denial under a tenant
+            // that has nothing to do with it.
             throw new TenantClaimUnusableError(resolution.kind, resolution.tenantId);
           }
           tenant = { id: resolution.id };

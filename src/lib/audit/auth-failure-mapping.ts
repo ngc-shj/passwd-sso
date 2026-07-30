@@ -17,7 +17,19 @@ import type {
 } from "@/lib/audit/auth-failure";
 
 /** The refusal arms of `findOrCreateTenantForClaim` — everything but a tenant. */
-export type ClaimRefusalKind = Exclude<ClaimTenantResolution["kind"], "tenant">;
+export type ClaimResolutionRefusalKind = Exclude<ClaimTenantResolution["kind"], "tenant">;
+
+/**
+ * The refusal decided one layer earlier, at the ingest boundary: the IdP
+ * asserted a claim and `extractTenantClaimValue` refused the VALUE, so no
+ * resolution ever runs (round-3 M1). It belongs in the same table because the
+ * two sign-in refusal sites have to dispatch it exactly as they dispatch the
+ * resolution arms — the defect was that they dispatched it as "no claim".
+ */
+export type ClaimIngestRefusalKind = "claim_malformed";
+
+/** Every arm that can deny a sign-in over a claim, from either adjudicator. */
+export type ClaimRefusalKind = ClaimResolutionRefusalKind | ClaimIngestRefusalKind;
 
 /**
  * Deny reason per refusal arm of `findOrCreateTenantForClaim` (round-1 M2).
@@ -37,6 +49,13 @@ export type ClaimRefusalKind = Exclude<ClaimTenantResolution["kind"], "tenant">;
  *   claim_invalid — the claim fails storableClaimSchema (SC9). Nothing is
  *                   registrable, so "register the claim" is not the remedy;
  *                   tenant_mismatch, as row 8b always specified.
+ *   claim_malformed — the IdP's asserted VALUE was refused at ingest
+ *                   (round-3 M1). Same remedy class as claim_invalid — the
+ *                   value is unstorable, so `tenant-domain add` cannot help
+ *                   and surfacing it in `unmapped` would point the operator
+ *                   at a command that must refuse. The fix is at the IdP, and
+ *                   metadata.claim carries the escaped rendering that names
+ *                   it. tenant_mismatch.
  *
  * The `satisfies` below is what forces a new arm to be classified here rather
  * than defaulting to whatever an index lookup happens to return — it is how
@@ -46,6 +65,7 @@ export const CLAIM_REFUSAL_REASON = {
   claim_taken: "tenant_claim_unmapped",
   claim_collision: "tenant_claim_unmapped",
   claim_invalid: "tenant_mismatch",
+  claim_malformed: "tenant_mismatch",
 } as const satisfies Record<
   ClaimRefusalKind,
   Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">
@@ -68,8 +88,16 @@ export function toAuditProvider(
   provider: string | null | undefined,
 ): AuthProvider {
   if (!provider) return "unknown";
-  return (
-    AUDIT_PROVIDER_BY_ID[provider as keyof typeof AUDIT_PROVIDER_BY_ID] ??
-    "unknown"
-  );
+  // hasOwnProperty, not a bare index (round-3 S3-3). An object literal
+  // inherits from Object.prototype, so `AUDIT_PROVIDER_BY_ID["constructor"]`
+  // — and `toString`, `valueOf`, `__proto__` — resolve to inherited FUNCTIONS,
+  // which are truthy, so `?? "unknown"` never fires and the function returns
+  // something that is not an AuthProvider at all. That value goes straight
+  // into an audit row's `provider` field. The Auth.js provider id is
+  // attacker-influenceable at the callback boundary, so this is reachable
+  // input, not a theoretical one.
+  if (!Object.prototype.hasOwnProperty.call(AUDIT_PROVIDER_BY_ID, provider)) {
+    return "unknown";
+  }
+  return AUDIT_PROVIDER_BY_ID[provider as keyof typeof AUDIT_PROVIDER_BY_ID];
 }

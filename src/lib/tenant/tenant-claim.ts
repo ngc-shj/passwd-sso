@@ -1,6 +1,9 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
-import { UNSAFE_DISPLAY_CHARS_RE } from "@/lib/security/unsafe-display-chars";
+import {
+  UNSAFE_DISPLAY_CHARS_RE,
+  escapeUnsafeDisplayChars,
+} from "@/lib/security/unsafe-display-chars";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 import { MAX_TENANT_CLAIM_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 
@@ -54,15 +57,58 @@ export function slugifyTenant(input: string): string {
   return slug;
 }
 
-function sanitizeTenantClaimValue(value: unknown): string | null {
-  if (typeof value !== "string") return null;
+/**
+ * What one claim key on the profile yielded.
+ *
+ * Three arms rather than `string | null`, and the split is the whole point
+ * (round-3 M1). Round 2 changed this boundary from strip to reject — right for
+ * the matching key — but routed the refusal through the same `null` that an
+ * ABSENT attribute produces, and both consumers read that `null` as "the IdP
+ * asserted no claim", which is an ALLOW. So `beta.example` + U+200B, a
+ * spelling round 2 denied, silently became a sign-in into whatever tenant the
+ * user was already in, and on the first-ever-sign-in path a fresh bootstrap
+ * tenant with role OWNER — round-1 M1's overloaded `null` reappearing one
+ * layer up.
+ *
+ * The classification below is per-cause, not per-`return null`:
+ *
+ * | Cause                          | Arm       | Why |
+ * |--------------------------------|-----------|-----|
+ * | key absent / `undefined` / `null` | absent | nothing was asserted |
+ * | empty or whitespace-only string | absent    | an empty assertion is not an assertion — IdPs emit empty attributes for unset fields, and refusing would deny sign-ins that work today (NF2) for no gain, since the same actor can just omit the key |
+ * | value present, not a string     | malformed | the key the operator made authoritative WAS asserted and this deployment cannot read it; falling through to the next key would let a lower-priority, self-asserted attribute decide the tenant |
+ * | unsafe display characters       | malformed | round-2 F-D: the value must not be canonicalised onto a neighbouring claim, and must not be dropped either |
+ * | longer than MAX_TENANT_CLAIM_LENGTH | malformed | a claim that cannot be stored cannot be honoured |
+ */
+type ClaimKeyRead =
+  | { kind: "claim"; value: string }
+  | { kind: "absent" }
+  | { kind: "malformed"; display: string };
+
+const ABSENT: ClaimKeyRead = { kind: "absent" };
+
+function malformed(display: string): ClaimKeyRead {
+  // Escaped, never stripped, and capped at the same bound the audit metadata
+  // applies: this string exists so the denial is diagnosable — it reaches
+  // metadata.claim on the AUTH_LOGIN_FAILURE row and, through that, the CSV
+  // export and the operator terminal. It is a RENDERING and is never used as
+  // a resolution key.
+  return { kind: "malformed", display: escapeUnsafeDisplayChars(display, MAX_TENANT_CLAIM_LENGTH) };
+}
+
+function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
+  if (value === undefined || value === null) return ABSENT;
+  // The attribute carries something that is not a claim string. Reporting the
+  // type rather than the value: a non-string can be an object of arbitrary
+  // depth and content, and none of it belongs on an audit row.
+  if (typeof value !== "string") return malformed(`<${typeof value}>`);
 
   // Control, bidi and zero-width characters — see @/lib/security/
   // unsafe-display-chars for the members and for why the set is shared with
   // the delegation metadata boundary.
   //
-  // REJECT, do not strip (round-2 F-D). This function's return value is not a
-  // display copy: it becomes `tenantClaim`, which is the key
+  // REJECT, do not strip (round-2 F-D). This function's usable return value is
+  // not a display copy: it becomes `tenantClaim`, which is the key
   // resolveTenantByClaim / findOrCreateTenantForClaim match on and the value
   // stored verbatim as Tenant.externalId and Tenant.name. Stripping is what
   // would let `ac<U+00AD>me.example` — a value an operator reads as distinct
@@ -75,19 +121,12 @@ function sanitizeTenantClaimValue(value: unknown): string | null {
   // the shared definition. Note the direction of the dependency the old
   // comment here inverted: the ASCII CHECK does not make stripping harmless,
   // stripping is what lets a non-ASCII input satisfy the CHECK.
-  //
-  // Consequence, deliberate: an IdP value carrying one of these characters now
-  // yields no claim at all, so the sign-in proceeds on src/auth.ts's
-  // claim-less path (the existing behaviour for an IdP that sends no claim)
-  // rather than being folded onto a neighbouring tenant. Denying a
-  // cross-tenant placement is worth more than resolving a malformed claim.
-  if (UNSAFE_DISPLAY_CHARS_RE.test(value)) return null;
+  if (UNSAFE_DISPLAY_CHARS_RE.test(value)) return malformed(value);
 
   const cleaned = value.trim();
-  if (cleaned.length === 0 || cleaned.length > MAX_TENANT_CLAIM_LENGTH) {
-    return null;
-  }
-  return cleaned;
+  if (cleaned.length === 0) return ABSENT;
+  if (cleaned.length > MAX_TENANT_CLAIM_LENGTH) return malformed(cleaned);
+  return { kind: "claim", value: cleaned };
 }
 
 /**
@@ -108,30 +147,38 @@ function readClaimKey(
   key: string,
   account: Account | null | undefined,
   profile: Record<string, unknown>,
-): string | null {
+): ClaimKeyRead {
+  // `absent`, not `malformed`: the gate is a refusal to READ, not a judgement
+  // on a value. A SAML profile that happens to carry a field named `hd` has
+  // asserted nothing this deployment consults, and classifying it as malformed
+  // would deny every sign-in from such a profile.
   if (key.toLowerCase() === GOOGLE_HOSTED_DOMAIN_KEY && account?.provider !== "google") {
-    return null;
+    return ABSENT;
   }
   return sanitizeTenantClaimValue(profile[key]);
 }
 
+/** See ClaimKeyRead — the arms and the reason there are three of them. */
+export type TenantClaimExtraction = ClaimKeyRead;
+
 export function extractTenantClaimValue(
   account?: Account | null,
   profile?: Record<string, unknown> | null,
-): string | null {
-  if (!profile) return null;
+): TenantClaimExtraction {
+  if (!profile) return ABSENT;
 
   const keys = parseTenantClaimKeys();
   for (const key of keys) {
-    const cleaned = readClaimKey(key, account, profile);
-    if (cleaned) return cleaned;
+    const read = readClaimKey(key, account, profile);
+    // A malformed value STOPS the walk. Continuing would make the tenant
+    // depend on which higher-priority key happened to be unreadable — the
+    // same silent-promotion fail-open the three arms exist to close, just
+    // between keys instead of between callers.
+    if (read.kind !== "absent") return read;
   }
 
   // Google Workspace fallback: hosted domain claim (hd). Unchanged for the
   // default key list, which does not name it; an operator who does name it
   // reaches the same value earlier, through the loop, and nothing else.
-  const cleaned = readClaimKey(GOOGLE_HOSTED_DOMAIN_KEY, account, profile);
-  if (cleaned) return cleaned;
-
-  return null;
+  return readClaimKey(GOOGLE_HOSTED_DOMAIN_KEY, account, profile);
 }
