@@ -146,7 +146,15 @@ export async function emitAuthLoginFailure(args: {
     identifierHashScope,
   };
   if (args.claim != null) {
-    metadata.claim = args.claim.slice(0, MAX_TENANT_CLAIM_LENGTH);
+    // `.slice` cuts at a UTF-16 code-unit boundary, so an astral character
+    // straddling the cap leaves a LONE SURROGATE. Postgres rejects one in
+    // `jsonb` (22P02), and logAuditAsync swallows the failure into a
+    // dead-letter — the whole row is lost, silently. That is round-4 S1: it
+    // was reachable through the claim rendering this round removed, and it is
+    // guarded here as well because this is the shared boundary every caller
+    // crosses and nothing enforces the "already ≤ cap" precondition the safety
+    // of the bare slice depended on.
+    metadata.claim = args.claim.slice(0, MAX_TENANT_CLAIM_LENGTH).toWellFormed();
   }
 
   await logAuditAsync({

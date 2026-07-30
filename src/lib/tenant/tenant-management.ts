@@ -69,6 +69,31 @@ async function findFoldedExternalIdOwner(
 }
 
 /**
+ * Outcome of `resolveTenantByClaim`.
+ *
+ * Discriminated for the third time on this branch, and for the third time for
+ * the same reason (round-4 F1). `{ id } | null` collapsed "a revoked row owns
+ * this claim" and "nothing owns this claim" into one value. No consumer read
+ * that `null` as an ALLOW — the fail-open really was closed — but one consumer
+ * read it as "no owner exists" and therefore filed its denial under the USER's
+ * tenant while the same lockout, reached through the no-membership path, was
+ * filed under the CLAIM's owner. `tenant-domain unmapped` groups by
+ * `(tenant_id, claim)`, so one incident arrived as two groups, one of them
+ * naming a tenant the operator cannot act on — and the `count(*)` that D-33
+ * relies on to distinguish one confused user from a locked-out tenant was
+ * split between them.
+ *
+ * Rounds 1, 3 and 4 each produced a finding against a nullable return on this
+ * path. This is the last one.
+ */
+export type ClaimLookup =
+  | { kind: "tenant"; id: string }
+  /** A revoked `tenant_claims` row owns the claim (D2). The owner is carried. */
+  | { kind: "revoked"; tenantId: string }
+  /** No claim row and no `externalId` match — nobody owns this claim. */
+  | { kind: "unregistered" };
+
+/**
  * Resolve a raw IdP-supplied claim to its tenant.
  *
  * Release-1 semantics (D1 — expand-and-contract): when no `tenant_claims`
@@ -80,12 +105,14 @@ async function findFoldedExternalIdOwner(
  * permanently. SC10 (release 2) removes this fallback once no live code
  * reads or writes `externalId`.
  *
- * A revoked claim row (D2) returns `null` with NO fallback: the row still
- * occupies its slot in `UNIQUE(claim)` and needs an operator decision, not a
- * silent resurrection through `externalId`.
+ * A revoked claim row (D2) returns `{ kind: "revoked" }` with NO fallback: the
+ * row still occupies its slot in `UNIQUE(claim)` and needs an operator
+ * decision, not a silent resurrection through `externalId`. It carries the
+ * owning tenant, because the caller has to file its denial under the tenant
+ * whose claim this is (round-4 F1).
  *
- * Never writes (I5). Returns `null` rather than throwing when the claim
- * fails `storableClaimSchema` — an IdP may send anything. Ordering
+ * Never writes (I5). Returns `{ kind: "unregistered" }` rather than throwing
+ * when the claim fails `storableClaimSchema` — an IdP may send anything. Ordering
  * consequence: because the fallback is reached on the "no row" path, a claim
  * that fails `storableClaimSchema` (e.g. non-ASCII) still resolves through
  * `externalId` in release 1, exactly as it does today. That is deliberate
@@ -97,17 +124,20 @@ async function findFoldedExternalIdOwner(
 export async function resolveTenantByClaim(
   tenantClaim: string,
   db: TxOrPrisma = prisma,
-): Promise<{ id: string } | null> {
+): Promise<ClaimLookup> {
   const claim = normalizeTenantClaim(tenantClaim);
   const row = await findClaimRow(db, claim);
   if (row) {
-    return row.revokedAt === null ? { id: row.tenantId } : null;
+    return row.revokedAt === null
+      ? { kind: "tenant", id: row.tenantId }
+      : { kind: "revoked", tenantId: row.tenantId };
   }
 
-  return db.tenant.findUnique({
+  const byExternalId = await db.tenant.findUnique({
     where: { externalId: tenantClaim },
     select: { id: true },
   });
+  return byExternalId ? { kind: "tenant", id: byExternalId.id } : { kind: "unregistered" };
 }
 
 /**

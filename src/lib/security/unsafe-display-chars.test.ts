@@ -115,27 +115,39 @@ describe("unsafe display characters", () => {
       expect(escapeUnsafeDisplayChars(value)).toBe("a<U+200B>b<U+200B>c");
     });
 
-    it("caps the ESCAPED length, not the input length", () => {
-      // 10 escaped chars from 1 input char: a cap applied before escaping
-      // would return 8 characters here instead of 4.
-      expect(escapeUnsafeDisplayChars(`ab${String.fromCodePoint(0x200b)}cd`, 4)).toBe("ab");
+    it("is injective: a literal <U+202E> does not render as a real U+202E", () => {
+      // Round-4 F5/S2. `<`, `U`, `+`, `>` are all printable ASCII, so the
+      // literal spelling passes storableClaimSchema and the C1 CHECK and can
+      // be a real tenant_claims row — or an operator's `--by` label. Without
+      // escaping the introducer, the two render identically and the operator
+      // cannot tell which one is in the database.
+      const real = escapeUnsafeDisplayChars(`acme${String.fromCodePoint(0x202e)}.example`);
+      const literal = escapeUnsafeDisplayChars("acme<U+202E>.example");
+      expect(real).toBe("acme<U+202E>.example");
+      expect(literal).toBe("acme<U+003C>U+202E>.example");
+      expect(literal).not.toBe(real);
     });
 
-    it("never emits a half-written escape at the cap boundary", () => {
-      // "<U+200B>c" — cutting at 5 lands inside the escape. A partial `<U+2`
-      // is exactly what a reader would take for literal text, so it is
-      // dropped rather than shown.
-      const value = `${String.fromCodePoint(0x200b)}c`;
-      for (const cap of [1, 2, 3, 4, 5, 6, 7]) {
-        expect(escapeUnsafeDisplayChars(value, cap)).toBe("");
-      }
-      expect(escapeUnsafeDisplayChars(value, 8)).toBe("<U+200B>");
-      expect(escapeUnsafeDisplayChars(value, 9)).toBe("<U+200B>c");
+    it("escapes the introducer before the unsafe pass, so escapes are not re-escaped", () => {
+      // Ordering check: the `<` this function itself emits must not be fed
+      // back through the introducer pass, or one unsafe char would produce
+      // `<U+003C>U+200B>`.
+      expect(escapeUnsafeDisplayChars(String.fromCodePoint(0x200b))).toBe("<U+200B>");
+      expect(escapeUnsafeDisplayChars("<")).toBe("<U+003C>");
+      expect(escapeUnsafeDisplayChars("<<")).toBe("<U+003C><U+003C>");
     });
 
-    it("leaves a value at or under the cap untouched", () => {
-      expect(escapeUnsafeDisplayChars("alias.example", 13)).toBe("alias.example");
-      expect(escapeUnsafeDisplayChars("alias.example", 1024)).toBe("alias.example");
+    it("takes no length cap — the truncation that split surrogate pairs is gone", () => {
+      // Round-4 S1: the cap truncated at a UTF-16 code-unit boundary, so an
+      // astral character straddling it left a lone surrogate, which Postgres
+      // rejects in jsonb (22P02) and logAuditAsync swallows into a
+      // dead-letter — an actor could suppress their own denial's audit row.
+      // The signature is the guard: there is no second parameter to pass.
+      expect(escapeUnsafeDisplayChars.length).toBe(1);
+      const astral = "a".repeat(254) + "\u{1F600}" + "x";
+      const out = escapeUnsafeDisplayChars(astral);
+      expect(out).toBe(astral);
+      expect(out.isWellFormed()).toBe(true);
     });
   });
 });

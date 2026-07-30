@@ -75,6 +75,7 @@ import {
   UNSAFE_DISPLAY_CHARS_RE,
 } from "@/lib/security/unsafe-display-chars";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
+import { CLAIM_REFUSAL_REASON } from "@/lib/audit/auth-failure-mapping";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
@@ -294,10 +295,23 @@ type UnmappedRow = {
   // and counting it made a healthy queue read as degraded, which is worse than
   // silence: the message tells an operator their audit delivery is broken at
   // the moment they are diagnosing a lockout. The staleness boundary is
-  // AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS, the same threshold the worker's own
-  // reaper uses to declare a claim abandoned, so this report cannot disagree
-  // with the component that acts on it.
+  // AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS, the worker's own reap threshold —
+  // read from THIS process's environment, so the message names the value it
+  // applied (round-4 F6).
   undelivered_cnt: bigint | number;
+  /**
+   * `tenant_claim_unmapped` or `tenant_mismatch` — bucketed, not merged
+   * (round-4 F3).
+   *
+   * The two reasons have opposite remedies and merging them would send an
+   * operator to the wrong one. But reporting only the first left the round-3
+   * `claim_malformed` denial — an IdP that starts emitting a zero-width
+   * character locks out EVERY user of the deployment — completely invisible
+   * to this command, which would print "no unmapped-claim denials" while the
+   * tenant was down. A denial class this tool cannot see is the NF2-shaped
+   * invisibility the whole tool exists to end.
+   */
+  reason: string;
 };
 
 // `AUDIT_LOG_RETENTION_MIN` is the configurable retention FLOOR, not any
@@ -309,11 +323,26 @@ type UnmappedRow = {
 export const DEFAULT_UNMAPPED_WINDOW_DAYS = AUDIT_LOG_RETENTION_MIN;
 const MAX_UNMAPPED_WINDOW_DAYS = 3650;
 
+/**
+ * The reason whose remedy is `tenant-domain add`. Everything else this report
+ * groups is a claim-bearing denial the operator must fix somewhere ELSE, so
+ * the two are printed under separate headings rather than summed (round-4 F3).
+ */
+const UNMAPPED_REASON = CLAIM_REFUSAL_REASON.claim_taken;
+
 // The worker's own "this claim is abandoned" threshold, reused rather than
 // re-chosen (round-3 M5): reapStuckRows resets PROCESSING rows older than
 // AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS, so a row younger than that is one the
-// worker still considers its own. A second, independently-picked number here
-// would let this report and the reaper disagree about the same row.
+// worker still considers its own.
+//
+// It is the same CONSTANT, not necessarily the same VALUE (round-4 F6, which
+// corrected an overstatement here). `AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS` is
+// `envInt("OUTBOX_PROCESSING_TIMEOUT_MS", …)`, resolved from THIS process's
+// environment — and the documented way to run this tool is from a workstation
+// against a remote deployment, which will not have that deployment's value.
+// The rounding differs from the reaper's too. So the report prints the lease
+// it applied (see cmdUnmapped's message) rather than claiming agreement it
+// cannot guarantee.
 const PROCESSING_LEASE_SECONDS = Math.ceil(
   AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / MS_PER_SECOND,
 );
@@ -332,7 +361,13 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
     );
   }
   const undelivered = rows.reduce((sum, r) => sum + Number(r.undelivered_cnt), 0);
-  const base = `${rows.length} unmapped-claim denial group(s) in the last ${days} days.`;
+  const unmapped = rows.filter((r) => r.reason === UNMAPPED_REASON).length;
+  const refused = rows.length - unmapped;
+  // Both counts, always — a report that names only the registrable population
+  // reads as "nothing else is wrong" (round-4 F3).
+  const base =
+    `${unmapped} unmapped-claim denial group(s) and ${refused} refused-claim group(s) ` +
+    `in the last ${days} days.`;
   if (undelivered === 0) return base;
   // Round-2 F-B: the operator must see that outbox delivery itself is degraded,
   // because these rows are the ones that would have been INVISIBLE while the
@@ -340,8 +375,13 @@ export function formatUnmappedMessage(rows: UnmappedRow[], days: number): string
   // stopped/crashed-worker case the union exists to cover.
   return (
     `${base} ${undelivered} of the denial event(s) are stranded in audit_outbox (FAILED, or ` +
-    "PROCESSING past the worker's claim lease): the outbox worker's delivery is degraded, " +
-    "so those events will not reach audit_logs without operator action."
+    `PROCESSING with no progress for ${PROCESSING_LEASE_SECONDS}s): the outbox worker's delivery ` +
+    "is degraded, so those events will not reach audit_logs without operator action. " +
+    // Round-4 F6: the lease is read from THIS process's environment, so an
+    // operator running the tool from a workstation against a remote
+    // deployment may be applying a different threshold than that
+    // deployment's worker. Naming it is what lets them notice.
+    `(Lease read from this process's OUTBOX_PROCESSING_TIMEOUT_MS.)`
   );
 }
 
@@ -386,17 +426,26 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // processing_started_at is counted as stranded: the comparison is
         // NULL, so it falls through to 1, which is the safe direction for a
         // row whose lease start is unknown.
+        // BOTH claim-bearing denial reasons, bucketed by `reason` rather than
+        // filtered down to one (round-4 F3). `tenant_claim_unmapped` is the
+        // register-this-claim population; `tenant_mismatch` WITH a claim is
+        // the refused-at-ingest population, whose remedy is at the IdP. The
+        // command used to select only the first, so an IdP that started
+        // emitting a zero-width character denied every sign-in in the
+        // deployment while this report printed "no unmapped-claim denials".
         const rows = await tx.$queryRawUnsafe<UnmappedRow[]>(
-          `SELECT tenant_id::text AS tenant_id, claim, count(*)::int AS cnt,
+          `SELECT tenant_id::text AS tenant_id, claim, reason, count(*)::int AS cnt,
                   max(created_at) AS last_seen, sum(undelivered)::int AS undelivered_cnt
              FROM (
-               SELECT tenant_id, metadata->>'claim' AS claim, created_at, 0 AS undelivered
+               SELECT tenant_id, metadata->>'claim' AS claim,
+                      metadata->>'reason' AS reason, created_at, 0 AS undelivered
                  FROM audit_logs
                 WHERE action = 'AUTH_LOGIN_FAILURE'::"AuditAction"
-                  AND metadata->>'reason' = 'tenant_claim_unmapped'
+                  AND metadata->>'reason' IN ('tenant_claim_unmapped', 'tenant_mismatch')
                   AND created_at >= now() - make_interval(days => $1::int)
                UNION ALL
-               SELECT tenant_id, payload->'metadata'->>'claim' AS claim, created_at,
+               SELECT tenant_id, payload->'metadata'->>'claim' AS claim,
+                      payload->'metadata'->>'reason' AS reason, created_at,
                       CASE
                         WHEN status = 'PENDING'::"AuditOutboxStatus" THEN 0
                         WHEN status = 'PROCESSING'::"AuditOutboxStatus"
@@ -406,11 +455,11 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
                  FROM audit_outbox
                 WHERE status <> 'SENT'::"AuditOutboxStatus"
                   AND payload->>'action' = 'AUTH_LOGIN_FAILURE'
-                  AND payload->'metadata'->>'reason' = 'tenant_claim_unmapped'
+                  AND payload->'metadata'->>'reason' IN ('tenant_claim_unmapped', 'tenant_mismatch')
                   AND created_at >= now() - make_interval(days => $1::int)
              ) combined
             WHERE claim IS NOT NULL
-            GROUP BY tenant_id, claim
+            GROUP BY tenant_id, claim, reason
             ORDER BY last_seen DESC`,
           days,
           PROCESSING_LEASE_SECONDS,
@@ -422,13 +471,25 @@ export async function cmdUnmapped(args: { days?: number } = {}): Promise<CmdResu
         // landed can still carry U+202E. This is the report an operator reads
         // while deciding which claim to register, so a value that renders as
         // something other than what it is would be acted on.
-        for (const row of rows) {
-          const undelivered = Number(row.undelivered_cnt);
-          console.log(
-            `  tenant=${row.tenant_id}  claim="${escapeUnsafeDisplayChars(row.claim)}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
-              (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
-          );
-        }
+        const printGroup = (heading: string, group: UnmappedRow[]) => {
+          if (group.length === 0) return;
+          console.log(heading);
+          for (const row of group) {
+            const undelivered = Number(row.undelivered_cnt);
+            console.log(
+              `  tenant=${row.tenant_id}  claim="${escapeUnsafeDisplayChars(row.claim)}"  count=${Number(row.cnt)}  lastSeen=${new Date(row.last_seen).toISOString()}` +
+                (undelivered > 0 ? `  undelivered=${undelivered}` : ""),
+            );
+          }
+        };
+        printGroup(
+          "Unregistered claims — remedy: `tenant-domain add --tenant <ref> --domain <claim>`:",
+          rows.filter((r) => r.reason === UNMAPPED_REASON),
+        );
+        printGroup(
+          "Claims REFUSED at ingest — `add` cannot help; the remedy is at the IdP:",
+          rows.filter((r) => r.reason !== UNMAPPED_REASON),
+        );
 
         // S12: an empty result says so explicitly, with the window it
         // checked, rather than rendering as an indistinguishable empty list
@@ -858,8 +919,15 @@ export async function cmdAdd(args: {
           console.log(`Registered claim "${claim}" for tenant ${tenant.id}.`);
         }
         if (existing) {
+          // Escaped for the same reason as the preview above (round-4 F4 —
+          // the A3 sweep missed this one, 80 lines from the site it did fix).
+          // `args.by` is the operator's own input and has already been
+          // rejected if it carries an unsafe character, so it is printed as
+          // typed.
+          const registeredBySoFar =
+            existing.createdBy === null ? "-" : escapeUnsafeDisplayChars(existing.createdBy);
           console.log(
-            `createdBy stays "${existing.createdBy ?? "-"}" (${existing.createdAt.toISOString()}) — the row records who ` +
+            `createdBy stays "${registeredBySoFar}" (${existing.createdAt.toISOString()}) — the row records who ` +
               `FIRST registered this claim, not who last changed it. This change was made by "${args.by}"; that is ` +
               "recorded only here, so keep this output with the incident record.",
           );

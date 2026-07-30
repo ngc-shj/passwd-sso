@@ -126,22 +126,32 @@ export const RETRYABLE_CLEANUP_SQLSTATES = [
   "23503",
 ] as const;
 
+/**
+ * Reads the SQLSTATE from where Prisma actually puts it, rather than searching
+ * the whole error for the digits (round-4 T10).
+ *
+ * A substring match over `message + JSON.stringify(meta)` looked equivalent
+ * and is not: `meta` carries the failing query text and its bound parameters,
+ * so a tenant id, claim or slug that happens to contain `23503` would make an
+ * unrelated, permanent failure look transient — and the retry would then hide
+ * it behind four attempts and a warning. The pg driver adapter nests the code
+ * at `meta.driverAdapterError.cause.code`; other paths render it into the
+ * message in Prisma's own `Code: \`23503\`` form. Both are read positionally.
+ */
+function sqlStateOf(error: unknown): string | null {
+  const meta = (error as { meta?: Record<string, unknown> })?.meta;
+  const adapterError = meta?.driverAdapterError as { cause?: { code?: unknown } } | undefined;
+  const nested = adapterError?.cause?.code;
+  if (typeof nested === "string") return nested;
+  const flat = meta?.code;
+  if (typeof flat === "string") return flat;
+  const message = error instanceof Error ? error.message : String(error);
+  return /Code:\s*`([0-9A-Z]{5})`/.exec(message)?.[1] ?? null;
+}
+
 export function isRetryableCleanupConflict(error: unknown): boolean {
-  // Prisma surfaces a raw-SQL failure as P2010 and carries the SQLSTATE in
-  // `meta` (nested under `driverAdapterError.cause.code` for the pg driver
-  // adapter this repo uses), while some paths put it in the message. Search
-  // both rather than guessing which shape a given failure takes.
-  const parts = [error instanceof Error ? error.message : String(error)];
-  const meta = (error as { meta?: unknown })?.meta;
-  if (meta !== undefined) {
-    try {
-      parts.push(JSON.stringify(meta));
-    } catch {
-      parts.push(String(meta));
-    }
-  }
-  const text = parts.join(" ");
-  return RETRYABLE_CLEANUP_SQLSTATES.some((code) => text.includes(code));
+  const sqlState = sqlStateOf(error);
+  return sqlState !== null && (RETRYABLE_CLEANUP_SQLSTATES as readonly string[]).includes(sqlState);
 }
 
 export async function withCleanupConflictRetry<T>(fn: () => Promise<T>): Promise<T> {

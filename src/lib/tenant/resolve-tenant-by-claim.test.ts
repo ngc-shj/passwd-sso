@@ -37,20 +37,20 @@ describe("resolveTenantByClaim", () => {
 
     const result = await resolveTenantByClaim("alias.example");
 
-    expect(result).toEqual({ id: "tenant-1" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-1" });
     expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
       where: { claim: "alias.example" },
       select: { tenantId: true, revokedAt: true },
     });
   });
 
-  it("returns null for an unknown claim with no externalId match, asserting zero writes (I5)", async () => {
+  it("reports an unregistered claim with no externalId match, asserting zero writes (I5)", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.findUnique.mockResolvedValue(null);
 
     const result = await resolveTenantByClaim("unregistered.example");
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: "unregistered" });
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
     expect(mockPrisma.tenantClaim.create).not.toHaveBeenCalled();
     expect(mockPrisma.tenantClaim.update).not.toHaveBeenCalled();
@@ -64,7 +64,7 @@ describe("resolveTenantByClaim", () => {
 
     const result = await resolveTenantByClaim("Alias.Example");
 
-    expect(result).toEqual({ id: "tenant-2" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-2" });
     expect(mockPrisma.tenantClaim.findUnique).toHaveBeenCalledWith({
       where: { claim: "alias.example" },
       select: { tenantId: true, revokedAt: true },
@@ -79,7 +79,7 @@ describe("resolveTenantByClaim", () => {
 
     const result = await resolveTenantByClaim("acmecorp");
 
-    expect(result).toEqual({ id: "tenant-3" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-3" });
   });
 
   it("returns null, without throwing, for a claim that fails storableClaimSchema", async () => {
@@ -90,10 +90,10 @@ describe("resolveTenantByClaim", () => {
     // rejects; resolveTenantByClaim does not validate it explicitly — the
     // row simply never existed to be found (SC9), and the externalId
     // fallback (also not found here) leaves null.
-    await expect(resolveTenantByClaim("café.example")).resolves.toBeNull();
+    await expect(resolveTenantByClaim("café.example")).resolves.toEqual({ kind: "unregistered" });
   });
 
-  it("returns null for a revoked claim row and does NOT consult the externalId fallback", async () => {
+  it("reports a revoked claim row WITH its owner, and does NOT consult the externalId fallback", async () => {
     mockPrisma.tenantClaim.findUnique.mockResolvedValue({
       tenantId: "tenant-revoked-owner",
       revokedAt: new Date("2026-01-01T00:00:00Z"),
@@ -101,7 +101,13 @@ describe("resolveTenantByClaim", () => {
 
     const result = await resolveTenantByClaim("alias.example");
 
-    expect(result).toBeNull();
+    // Round-4 F1: `revoked` and `unregistered` were the same `null`, and the
+    // caller filed its denial under the USER's tenant for both — while the
+    // no-membership path filed the identical lockout under the CLAIM's owner.
+    // `tenant-domain unmapped` groups by (tenant_id, claim), so one incident
+    // arrived as two groups. Carrying the owner is what lets the dispatch
+    // agree with itself.
+    expect(result).toEqual({ kind: "revoked", tenantId: "tenant-revoked-owner" });
     expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();
   });
 
@@ -111,7 +117,7 @@ describe("resolveTenantByClaim", () => {
 
     const result = await resolveTenantByClaim("alias.example");
 
-    expect(result).toEqual({ id: "tenant-legacy" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy" });
     expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
       where: { externalId: "alias.example" },
       select: { id: true },
@@ -129,7 +135,7 @@ describe("resolveTenantByClaim", () => {
 
     const result = await resolveTenantByClaim("Alias.Example");
 
-    expect(result).toEqual({ id: "tenant-legacy-mixed" });
+    expect(result).toEqual({ kind: "tenant", id: "tenant-legacy-mixed" });
     expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith({
       where: { externalId: "Alias.Example" },
       select: { id: true },

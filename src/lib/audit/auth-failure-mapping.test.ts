@@ -1,15 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { CLAIM_REFUSAL_REASON, toAuditProvider } from "./auth-failure-mapping";
+import { AUDIT_PROVIDER_BY_ID, CLAIM_REFUSAL_REASON, toAuditProvider } from "./auth-failure-mapping";
 
 describe("toAuditProvider", () => {
-  it.each([
-    ["google", "google"],
-    ["nodemailer", "nodemailer"],
-    ["boxyhq-saml", "saml"],
-    ["saml-jackson", "saml"],
-    ["credentials", "credentials"],
-  ])("maps the %s provider id", (id, expected) => {
+  // Derived from the table, not hand-copied (round-4 T6): a provider id added
+  // to the source map joins this test by existing.
+  it.each(Object.entries(AUDIT_PROVIDER_BY_ID))("maps the %s provider id", (id, expected) => {
     expect(toAuditProvider(id)).toBe(expected);
+  });
+
+  it("covers the provider ids the deployment actually issues", () => {
+    // The derivation above cannot notice a member DELETED from the source
+    // map — it would simply stop testing it. `saml-jackson` is the id this
+    // deployment's Jackson container sends and `boxyhq-saml` the one Auth.js
+    // documents; dropping either silently downgrades every SAML denial to
+    // provider "unknown".
+    expect(Object.keys(AUDIT_PROVIDER_BY_ID).sort()).toEqual([
+      "boxyhq-saml",
+      "credentials",
+      "google",
+      "nodemailer",
+      "saml-jackson",
+    ]);
   });
 
   it.each([null, undefined, "", "passkey", "totally-unknown"])(
@@ -28,9 +39,7 @@ describe("toAuditProvider", () => {
   it.each(["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__", "__defineGetter__"])(
     "returns unknown for the inherited property name %s",
     (id) => {
-      const result = toAuditProvider(id);
-      expect(result).toBe("unknown");
-      expect(typeof result).toBe("string");
+      expect(toAuditProvider(id)).toBe("unknown");
     },
   );
 });
@@ -54,16 +63,4 @@ describe("CLAIM_REFUSAL_REASON", () => {
     });
   });
 
-  it("keeps the two remedy classes distinct", () => {
-    // The distinction is the whole reason the table exists (round-1 M2):
-    // collapsing them hid the revoked-claim lockout from the tool this PR
-    // ships to diagnose it.
-    const registrable = [CLAIM_REFUSAL_REASON.claim_taken, CLAIM_REFUSAL_REASON.claim_collision];
-    const unregistrable = [
-      CLAIM_REFUSAL_REASON.claim_invalid,
-      CLAIM_REFUSAL_REASON.claim_malformed,
-    ];
-    expect(new Set(registrable)).toEqual(new Set(["tenant_claim_unmapped"]));
-    expect(new Set(unregistrable)).toEqual(new Set(["tenant_mismatch"]));
-  });
 });

@@ -76,7 +76,11 @@ export const CLAIM_REFUSAL_REASON = {
 // mapping and a second spelling of it is a drift waiting to happen. Providers
 // absent here (including `passkey`, which signs in through its own route and
 // never reaches an Auth.js provider id) fall through to "unknown".
-const AUDIT_PROVIDER_BY_ID = {
+// Exported so its test derives the positive cases from the table instead of
+// hand-copying them (round-4 T6): a provider added here but not to the test's
+// own list was silently untested, which is the same per-sample-versus-derived
+// split T9 fixed for the unsafe-character ranges.
+export const AUDIT_PROVIDER_BY_ID = {
   google: "google",
   nodemailer: "nodemailer",
   "boxyhq-saml": "saml",

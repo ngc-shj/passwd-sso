@@ -532,3 +532,166 @@ resumed.
   (`R2c: concurrent failures increment fail_count atomically`), a file this PR
   does not touch and a member of D-24's own class. No run failed in a file this
   PR touches.
+
+---
+
+# Round 4 — findings and resolution
+
+Reviewed the uncommitted round-3 fix tree. **9 Majors (after convergence) and
+13 Minors — more Majors than round 3.**
+
+Two process notes on the input. The fixes were uncommitted, so
+`git diff main...HEAD` contained none of them and four new files appeared in no
+git diff at all; the experts were given a concatenated working-tree diff with
+those files inlined. And the Ollama seeds returned "No findings" for both
+functionality and security over a 3,384-line diff — treated as no signal, which
+was correct: the security expert's two Majors both came from *executing*
+adversarial probes rather than reading.
+
+**Almost every Major is against round 3's own fixes.** The R3-M1 remedy alone
+produced four of them, all downstream of one decision — rendering the refused
+claim into the audit row.
+
+## Convergence
+
+| # | Finding | Func | Sec | Test | Merged |
+|---|---|---|---|---|---|
+| M1 | Non-string claim classified `malformed` and denied: a lockout, and D-27's recorded cost was factually wrong | F2 Major | S6 Major | — | **Major** |
+| M2 | The escape is not injective — `<` is not itself escaped | F5 Minor | S2 Minor | — | **Minor** |
+| M3 | `createdBy` printed unescaped at `tenant-domain.ts:862`, contradicting D-32 | F4 Major | — | T4 (evidence) | **Major** |
+
+## Majors
+
+### S1 [Major, Security] The claim rendering was an audit-suppression primitive
+`escapeUnsafeDisplayChars`'s `maxLength` truncated at a UTF-16 code-unit
+boundary, splitting surrogate pairs. Every over-long claim went through that
+path, so the input was fully attacker-chosen: a lone surrogate makes the `jsonb`
+audit write fail with 22P02, and `logAuditAsync` swallows it into a dead-letter
+— **an actor could delete the audit record of their own denied sign-in**, from
+both `audit_logs` and `audit_outbox`, leaving `tenant-domain unmapped` blind.
+Verified independently by the orchestrator: the JS side (`isWellFormed() ===
+false`) and `psql` rejecting `{"claim":"a\ud83d"}::jsonb`. Same unguarded slice
+found at `src/lib/audit/auth-failure.ts` (R3 propagation).
+- **Fixed** by the user's chosen design: the refusal carries a printable-ASCII
+  **diagnosis** (`refused: contains U+200B`) instead of a rendering, and
+  `maxLength` is deleted outright — no caller needs it and the parameter WAS
+  the bug. The shared audit boundary's slice is `.toWellFormed()`-guarded.
+  See D-35.
+
+### F2 + S6 [Major, converged] Non-string claim denied every sign-in in a plausible deployment
+SAML attributes are multi-valued by specification and Jackson surfaces them as
+JSON arrays, so `organization: ["acme"]` — a shipped default key — went from
+resolving to denying. Round 3 conflated *stop the key walk* with *deny the
+sign-in*; only the first followed from its stated reason. D-27's cost paragraph
+was also wrong on its face (the claim-less path returns `ok: true` for existing
+users; no bootstrap tenant is created).
+- **Fixed**: the arm is `absent` and the walk continues. D-27 corrected in
+  place, with the two lockout scenarios named.
+
+### T2 [Major, Testing] The whitespace class was sampled at its one exceptional member
+`\t \n \r \v \f` are C0 controls, so they are in the unsafe class *and* are
+whitespace — and the unsafe test ran **before** the trim. `"acme.example\n"`,
+the ordinary shape of a pretty-printed SAML `<AttributeValue>`, was denied. The
+tests fixtured only U+0020 while their comments asserted the whole class: the
+same per-sample-vs-derived defect the same commit fixed for T9.
+- **Fixed**: an explicit **ASCII** trim runs first — not `.trim()`, which would
+  strip U+FEFF and reintroduce the F-D canonicalisation hazard. Whitespace the
+  ASCII trim leaves but `.trim()` would take is its own refusal arm. Tests
+  parameterised over all six members plus CRLF. See D-37.
+
+### F1 [Major, Functionality] `refusalTenantId` was applied at two of three refusal sites
+`resolveTenantByClaim`'s `null` collapsed "revoked row owned by A" and "nobody
+owns it", so rows 7/9b filed the denial under the USER's tenant while the
+no-membership path filed the same lockout under the CLAIM's owner —
+`unmapped` groups by `(tenant_id, claim)`, so one incident became two groups.
+**Third round running to produce a finding against a nullable return here.**
+- **Fixed** as a class closure, not an instance patch: `ClaimLookup`
+  (`tenant | revoked | unregistered`). The compiler enumerated every consumer.
+  See D-36.
+
+### F3 [Major, Functionality] The new lockout class was invisible to the tool built for lockouts
+`claim_malformed` maps to `tenant_mismatch` (correctly — nothing is
+registrable), and `unmapped` filtered on `tenant_claim_unmapped` alone. An IdP
+emitting a zero-width character denies **every** sign-in while `unmapped`
+prints "No unmapped-claim denials".
+- **Fixed**: both claim-bearing reasons are selected and printed under separate
+  headings, both counts always in the summary; both READMEs' runbooks gained
+  the third cause and its remedy (at the IdP, not in the CLI). See D-38.
+
+### F4 [Major, Functionality] The escape sweep missed a site inside the command it hardened
+`tenant-domain.ts:862` printed `existing.createdBy` raw, 80 lines below the
+site that escapes the same field — and D-32 claimed "every CLI print site".
+- **Fixed**, and covered by a test that asserts *no* printed line mentioning
+  the label carries the raw character, which is what catches one missed site
+  among several. D-32 corrected in place.
+
+### T1 [Major, Testing] One of round 3's new tests could not fail
+`denies a refused claim when the user has multiple active memberships` asserted
+only `ok === false`; the MULTI_TENANT throw exits before the malformed dispatch
+is reached, so it was a duplicate of row 3 and stayed green with both dispatch
+branches deleted. Round 3's own red-proof said "exactly the 3 new consumer
+tests" — there were four.
+- **Fixed**: the MULTI_TENANT exit now carries the diagnosis too (F8), which
+  makes the two exits distinguishable, and the test asserts the full result.
+
+### T3 [Major, Testing] The collision fixture discriminated the ordering by coin flip
+Both tenant ids come from `randomUUID()`, so `ORDER BY id ASC` passed ~50% of
+runs — and R3-M2's Resolution Status claimed the fixture distinguished the two
+orderings. The `id ASC` tie-break was untested entirely.
+- **Fixed**: the older `created_at` is assigned to whichever id sorts *larger*,
+  making `ORDER BY id ASC` deterministically red, plus a second test with two
+  tenants sharing a `created_at` for the tie-break.
+
+### T4 [Major, Testing] The `--by` guard and eight escape sites had no test on either side
+- **Fixed**: deny side (bidi label refused, no row written), allow side
+  (ordinary label stored), and a `console.log` spy asserting the escaped
+  rendering — the test that would have caught F4.
+
+### T5 [Major, Testing] The typed-fixture fix was applied to one of three mocks
+`refusal()` was added for `mockFindOrCreateTenantForClaim`;
+`mockExtractTenantClaimValue` — the mock the whole R3-M1 fix hangs on — kept
+hand-written literals.
+- **Fixed**: `extraction()` and `lookup()` added. This immediately earned its
+  place: it turned round 4's two type changes into compile errors in the test
+  file rather than runtime surprises.
+
+## Minors — all fixed
+S2/F5 (escape the introducer `<`, making the rendering injective — RS6);
+S3 (D-33 named a bound that does not hold; `withCallbackRateLimit` is the real
+one, and the victim-tenant admin surface is now recorded);
+S4 (**fourth** site of the overloaded-signal class: an absent
+`tenantClaimStorage` store dropped a valid claim into the bootstrap+OWNER path,
+and the old test pinned that fall-through as intended — now denies, D-40);
+S5 (duplicate flags silently last-wins on a destructive path — refused, D-39);
+F6 (the "cannot disagree with the reaper" claim was overstated: the lease is
+read from the CLI process's own env, so the report now prints the value it
+applied);
+F7 (`auth.config.ts`'s `hd` cast → type guard);
+F8 (the MULTI_TENANT exit dropped the diagnosis);
+T6 (`AUDIT_PROVIDER_BY_ID` exported and the positive cases derived from it; an
+unfalsifiable `typeof` assertion and a derivable block removed);
+T7 (an assertion that could never fail — an out-of-order range throws at
+`new RegExp` during import — removed; the "matches exactly" claim narrowed);
+T8 (the known-flag loop was a tautology over the tables the parser derives
+acceptance from; it now reads the CLI's actual flag reads);
+T9 (unscoped global `tenant.count()` on the shared dev DB scoped to the test's
+own token; cleanup moved into `try/finally`);
+T10 (nothing proved `deleteTestData` is *wrapped* — an R17 adoption gap — and
+the SQLSTATE classifier was a substring match over `message + meta`, where
+`meta` carries the query text and parameters; it now reads the code
+positionally and has a false-positive test);
+T11 (the `ORDER BY` source pin scoped to the function body);
+T12 (a fixture carrying a literal backslash-u sequence instead of the character
+it named — removed, since the extractor is mocked in that file).
+
+## Seed dispositions
+Functionality and Security: seed returned "No findings"; both experts recorded
+what they did instead. Testing: two seed Minors, **both rejected with evidence**
+— no fake timers exist anywhere in the file, and the `nextRetryAt` offset is an
+hour against a `next_retry_at <= now()` predicate.
+
+## Verification
+- `npx tsc --noEmit` exit 0; `npx next build` exit 0.
+- Unit: **997 files / 13,683 passed**, 1 skipped.
+- Integration, worker container live: **95 files / 437 passed**, 1 skipped,
+  4 todo — no failures this run.

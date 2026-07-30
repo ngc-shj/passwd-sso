@@ -311,7 +311,15 @@ See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and r
 
 ### IdP domain changed / tenant locked out
 
-Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in with `tenant_claim_unmapped` (claim not registered to any tenant) or `tenant_mismatch` (claim registered to a *different* tenant), visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
+Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **three** causes, and only the first two are fixed with this tool:
+
+| `metadata.reason` | `metadata.claim` | Cause | Remedy |
+|---|---|---|---|
+| `tenant_claim_unmapped` | the claim | not registered to any tenant | `tenant-domain add` |
+| `tenant_mismatch` | the claim | registered to a *different* tenant | investigate the user, or `add --from` to move the claim |
+| `tenant_mismatch` | `refused: …` | the IdP's asserted value was **refused at ingest** — a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; the `refused: …` text names the rule the value broke |
+
+`unmapped` reports the first and third under separate headings (the second only when its claim is recorded). Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
 
 ```bash
 # See which unregistered claims were denied recently (default window: 30 days)

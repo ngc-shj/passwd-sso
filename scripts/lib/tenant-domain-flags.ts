@@ -87,6 +87,23 @@ export function parseFlags(argv: string[]): FlagParseResult {
     const name = eq === -1 ? body : body.slice(0, eq);
     const inlineValue = eq === -1 ? undefined : body.slice(eq + 1);
 
+    // Round-4 S5. `Map.set` overwrites, so a repeated flag silently discarded
+    // the operator's first token: `remove --tenant A --tenant B` acts on B,
+    // and `add --from A --from B` reassigns away from a different owner than
+    // the one they named — on a path where `--yes` removes the visual check.
+    // That is the same "an instruction the operator believes was applied"
+    // failure the valueless guard exists for, so it belongs to the same rule,
+    // and the member set is derived from the parser's own state machine
+    // rather than from the spellings that happened to be reported.
+    if (flags.has(name)) {
+      return {
+        ok: false,
+        error:
+          `--${name} was given more than once. Refusing rather than taking the last one: ` +
+          "on a reassignment the discarded token names a different tenant.",
+      };
+    }
+
     if (isBooleanFlag(name)) {
       if (inlineValue !== undefined) {
         return { ok: false, error: `--${name} takes no value (got "${inlineValue}").` };

@@ -39,6 +39,23 @@ function runToken(): string {
   return randomBytes(4).toString("hex");
 }
 
+/**
+ * A row in `cmdUnmapped`'s shape. Round-4: `reason` became load-bearing (F3),
+ * and hand-written literals had already drifted from the query's own select
+ * list once — every field defaults here so a new column is added in one place.
+ */
+function unmappedRow(over: Partial<Parameters<typeof formatUnmappedMessage>[0][number]>) {
+  return {
+    tenant_id: randomUUID(),
+    claim: "alias.example",
+    reason: "tenant_claim_unmapped",
+    cnt: 1,
+    last_seen: new Date(),
+    undelivered_cnt: 0,
+    ...over,
+  };
+}
+
 const alwaysYes = async () => true;
 const alwaysNo = async () => false;
 
@@ -92,6 +109,80 @@ describe("tenant-domain CLI (C7)", () => {
       expect(row?.tenantId).toBe(tenantId);
       expect(row?.revokedAt).toBeNull();
       expect(row?.createdBy).toBe("test-op");
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    // Round-4 T4. The `--by` reject guard and the eight escaped print sites
+    // shipped with no test on either side — and the sweep that added them had
+    // already missed one of its own sites (F4), which is exactly what an
+    // untested guard hides.
+    it.skipIf(SKIP)("refuses a --by label carrying a bidi control, before writing anything", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      const result = await cmdAdd({
+        tenant: tenantId,
+        domain: claim,
+        by: `ops${String.fromCodePoint(0x202e)}admin`,
+        yes: true,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.code).not.toBe(0);
+      expect(result.message).toContain("--by contains a control, bidi or zero-width character");
+      // The mutation, not just the verdict (RT8): nothing was written.
+      expect(await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } })).toBeNull();
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it.skipIf(SKIP)("accepts an ordinary --by label (the allow side of the same guard)", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+
+      expect(result.ok).toBe(true);
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.createdBy).toBe(
+        "ops-oncall",
+      );
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it.skipIf(SKIP)("escapes a poisoned createdBy everywhere it prints it", async () => {
+      // Round-4 F4 + T4: `list` and `add`'s preview escape it; `add`'s
+      // post-write line did not. A row written before the `--by` guard landed
+      // — or by any other writer — can still carry U+202E, so the escape is
+      // what stands between the operator and a reversed-looking attribution.
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      const poisoned = `ops${String.fromCodePoint(0x202e)}admin`;
+      await ctx.su.prisma.tenantClaim.create({
+        data: { tenantId, claim, createdBy: poisoned, revokedAt: new Date() },
+      });
+
+      const lines: string[] = [];
+      const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(" "));
+      });
+      try {
+        await cmdList({ tenant: tenantId });
+        // The un-revoke path, which is where the missed site lives.
+        await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      } finally {
+        log.mockRestore();
+      }
+
+      const printed = lines.join("\n");
+      expect(printed).toContain("ops<U+202E>admin");
+      expect(printed).not.toContain(poisoned);
+      // Every line that mentions the label must be the escaped one — the
+      // assertion that catches a single missed site among several.
+      for (const line of lines.filter((l) => l.includes("admin"))) {
+        expect(line).not.toContain(String.fromCodePoint(0x202e));
+      }
 
       await ctx.deleteTestData(tenantId);
     });
@@ -925,7 +1016,12 @@ describe("tenant-domain CLI (C7)", () => {
           ).toBe(0);
 
           expect(result.message).toContain("stranded in audit_outbox");
-          expect(result.message).toContain("PROCESSING past the worker's claim lease");
+          // The lease seconds the report actually applied, named in the
+          // message (round-4 F6) rather than described in the abstract.
+          expect(result.message).toContain(
+            `PROCESSING with no progress for ${Math.ceil(AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000)}s`,
+          );
+          expect(result.message).toContain("OUTBOX_PROCESSING_TIMEOUT_MS");
         } finally {
           await ctx.su.prisma.$transaction(async (tx) => {
             await setBypassRlsGucs(tx);
@@ -950,30 +1046,53 @@ describe("tenant-domain CLI (C7)", () => {
     });
 
     it("formatUnmappedMessage summarises a non-empty result and names the requested window", () => {
-      const message = formatUnmappedMessage(
-        [{ tenant_id: randomUUID(), claim: "alias.example", cnt: 3, last_seen: new Date(), undelivered_cnt: 0 }],
-        90,
-      );
-      expect(message).toContain("1 unmapped-claim denial group(s) in the last 90 days");
+      const message = formatUnmappedMessage([unmappedRow({ cnt: 3 })], 90);
+      expect(message).toContain("1 unmapped-claim denial group(s)");
+      expect(message).toContain("in the last 90 days");
       expect(message).not.toContain("No unmapped-claim denials");
       // Nothing undelivered — the degraded-delivery sentence must not appear,
       // or it would read as a standing warning on every healthy report.
       expect(message).not.toContain("audit_outbox");
     });
 
-    it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
+    // Round-4 F3: both populations are counted, always. A message that names
+    // only the registrable one reads as "nothing else is wrong" — and the
+    // refused-at-ingest population is a TOTAL lockout, so that reading is
+    // exactly backwards.
+    it("formatUnmappedMessage counts refused-at-ingest denials separately from unmapped ones", () => {
       const message = formatUnmappedMessage(
         [
-          { tenant_id: randomUUID(), claim: "alias.example", cnt: 3, last_seen: new Date(), undelivered_cnt: 2 },
-          { tenant_id: randomUUID(), claim: "other.example", cnt: 1, last_seen: new Date(), undelivered_cnt: 1 },
+          unmappedRow({ claim: "alias.example" }),
+          unmappedRow({ claim: "refused: contains U+200B", reason: "tenant_mismatch" }),
+          unmappedRow({ claim: "refused: 300 characters (max 255)", reason: "tenant_mismatch" }),
         ],
         30,
       );
-      expect(message).toContain("2 unmapped-claim denial group(s) in the last 30 days");
+      expect(message).toContain("1 unmapped-claim denial group(s)");
+      expect(message).toContain("2 refused-claim group(s)");
+    });
+
+    it("formatUnmappedMessage says zero refused groups rather than omitting the count", () => {
+      const message = formatUnmappedMessage([unmappedRow({})], 30);
+      expect(message).toContain("0 refused-claim group(s)");
+    });
+
+    it("formatUnmappedMessage reports undelivered outbox events as degraded delivery", () => {
+      const message = formatUnmappedMessage(
+        [
+          unmappedRow({ claim: "alias.example", cnt: 3, undelivered_cnt: 2 }),
+          unmappedRow({ claim: "other.example", cnt: 1, undelivered_cnt: 1 }),
+        ],
+        30,
+      );
+      expect(message).toContain("2 unmapped-claim denial group(s)");
+      expect(message).toContain("in the last 30 days");
       // Summed across groups, not per-row: the operator is being told how
       // many denial events will never reach audit_logs on their own.
       expect(message).toContain("3 of the denial event(s)");
       expect(message).toContain("stranded in audit_outbox");
+      // Round-4 F6: the lease is this process's, and the message says so.
+      expect(message).toContain("OUTBOX_PROCESSING_TIMEOUT_MS");
     });
 
     it.skipIf(SKIP)("--days widens the query window and is reported in the message", async () => {

@@ -79,7 +79,9 @@ would have been a test written to match a fiction.
 for the CLI's `add`, but does not say what the *resolver* does when a revoked row
 exists and an `externalId` row also matches.
 
-**Implemented**: a revoked row returns `null` with **no** fallback.
+**Implemented**: a revoked row refuses with **no** fallback. (Round 4 changed
+the SHAPE of that refusal from `null` to `{ kind: "revoked"; tenantId }` — see
+D-36 — but not this decision: the fallback is still not consulted.)
 
 **Why**: the backfill wrote a claim row for every `external_id`, so a revoked
 claim will very often have a matching `externalId` row still present (release 1
@@ -669,11 +671,27 @@ A malformed read also **stops the key walk**, for the same reason: continuing
 would make the tenant depend on which higher-priority key happened to be
 unreadable.
 
-**Narrowing recorded with its cost**: a deployment whose IdP sends a non-string
-value under an early claim key, and a usable string under a later one, is now
-denied where it previously fell through. That deployment is unlikely to have
-been working — it would have been placing every user in their own bootstrap
-tenant — but the change is a denial and is named here rather than discovered.
+**Correction (round 4): the narrowing above was wrong, and so was the cost
+recorded for it.** Both the functionality and the security expert found it
+independently. The paragraph originally read *"That deployment is unlikely to
+have been working — it would have been placing every user in their own
+bootstrap tenant"*, which is **false for existing users**: the claim-less path
+returns `{ ok: true }` at `src/auth.ts`, so those users simply signed in.
+Bootstrap-tenant creation happens only on a first-ever sign-in.
+
+The reachable case is not exotic either. SAML attributes are multi-valued by
+specification and BoxyHQ Jackson surfaces them into the OIDC profile as JSON
+arrays, so a deployment whose `organization` or `company` — both in
+`DEFAULT_TENANT_CLAIM_KEYS` — arrives as `["acme"]` went from resolving
+correctly to denying every sign-in. With `AUTH_TENANT_CLAIM_KEYS="groups,hd"`
+it is worse: round 2 skipped the array-valued `groups` and resolved through
+`hd`; round 3 stopped the walk at `groups` and never read `hd` at all.
+
+The arm now classifies as **absent**, and the walk continues. Denying was
+conflating two decisions — *stop the key walk* and *deny the sign-in* — where
+only the first followed from the stated reason. It also bought nothing: an
+actor who can change an attribute's TYPE can equally remove the attribute, and
+omission reaches the same claim-less path.
 
 ## D-28 — `unmapped` reads every non-SENT outbox status, and counts only *stranded* ones
 
@@ -765,6 +783,13 @@ malformed-claim audit metadata goes through it (round-3 A3).
 that resolves and told it was refused. The escape is the only rendering that is
 both safe to print and honest about what arrived.
 
+**Correction (round-4 F4)**: "every CLI print site" was false when written —
+`cmdAdd`'s post-write line printed `existing.createdBy` unescaped, 80 lines
+below the site in the same function that escapes it. Fixed, and now covered by
+a test that spies on `console.log` and asserts that no printed line mentioning
+the label carries the raw character — the assertion that catches one missed
+site among several, which a per-site test would not.
+
 **Where it is applied, and why each**: `list` (claim + the unvalidated
 operator-supplied `createdBy`), `unmapped` (claim, read out of
 `audit_logs`/`audit_outbox`, neither CHECK-constrained, and rows predating this
@@ -791,6 +816,21 @@ Per-`(tenant, claim)` write-time dedupe was **rejected on correctness, not
 cost**: `unmapped` GROUPs BY exactly that pair and reports `count(*)`, which is
 how an operator tells one confused user from a whole tenant locked out.
 Collapsing duplicates would delete the number the report exists to show.
+
+**Two corrections from round-4 S3.** The bound this entry originally cited —
+"completed IdP authentications rather than unauthenticated requests" — does not
+hold: with a live IdP session, re-authorization is a non-interactive redirect
+chain, i.e. a scripted loop. The control that actually bounds it is
+`withCallbackRateLimit` in `src/app/api/auth/[...nextauth]/route.ts` (60/min per
+client IP, `failClosedOnRedisError: true`, `boundUnknownIp: true`), and an
+accepted-residual entry has to name the control it relies on rather than a
+bound that does not. The blast radius was also understated: these rows surface
+in the **victim tenant's** admin audit viewer and CSV export. Both sinks are
+safe (React escaping; `escapeCsvValue` + `CSV_FORMULA_TRIGGER_RE`), webhook
+egress is closed (`claim` is in `EXTERNAL_DELIVERY_METADATA_BLOCKLIST`, so plan
+C6 holds), and after D-35 the field carries a bounded ASCII diagnosis rather
+than attacker-chosen text — but it is still content another tenant's console
+displays.
 
 ## D-34 — `deleteTestData` retries a transient conflict instead of re-ordering again
 
@@ -819,3 +859,131 @@ itself **never fired** in those runs, so they are not evidence that it works;
 `src/__tests__/db-integration/helpers.test.ts` proves the mechanism directly
 against fabricated errors of both Prisma error shapes, including that it gives
 up after four attempts.
+
+---
+
+# Round-4 fix round
+
+Round 4 returned 9 Majors (after convergence) and 13 Minors — **more Majors
+than round 3**, and almost all of them against round 3's own fixes. The
+entries below are the contract changes; the corrections to D-27, D-32 and D-33
+are made in place, above.
+
+## D-35 — A claim refusal carries a DIAGNOSIS, not a rendering of the value
+
+**Round 3**: `{ kind: "malformed"; display }` carried an escaped rendering of
+the refused value, so an operator could see which claim their IdP had started
+mangling. **Round 4** (user-chosen among three options): `{ kind: "malformed";
+diagnosis }`, printable ASCII, describing the violation —
+`refused: contains U+200B`, `refused: 312 characters (max 255)`.
+
+**Why**: the rendering put an attacker-chosen string on the path
+`metadata.claim` → `logAuditAsync` → a `jsonb` write → the CSV export → the
+operator's terminal, and round-4 **S1** found the first consequence
+empirically. The rendering was truncated at `MAX_TENANT_CLAIM_LENGTH` with a
+UTF-16 `slice`, which splits a surrogate pair; Postgres rejects a lone
+surrogate in `jsonb` with 22P02; `logAuditAsync` swallows the failure into a
+dead-letter. So an actor could **suppress the audit record of their own denied
+sign-in** by padding the claim past the cap with an emoji at the boundary.
+Verified both halves directly — the JS output (`isWellFormed() === false`) and
+`psql` rejecting `{"claim":"a\ud83d"}::jsonb`.
+
+Four findings collapse into this one decision: S1 (suppression), S2/F5
+(non-injective escape), and the F4/T4 pair about the CLI print sites, which now
+matter only for values already in the database.
+
+**What is lost, and why it is acceptable**: the audit row no longer names the
+offending claim. The operator's remedy for this arm is at the IdP, so what they
+need is which RULE the value broke — and the value is unregistrable, so
+`tenant-domain add` could never have consumed it. Requirement F6 ("the audit
+record names the claim, so the operator knows what to register") is about the
+registrable population and is unaffected.
+
+**Consequences kept**: `escapeUnsafeDisplayChars` remains, for pre-existing
+database rows the ingest boundary never adjudicated. It lost its `maxLength`
+parameter entirely — no caller needs one, and the parameter WAS the surrogate
+bug — and it now escapes its own introducer (`<` → `<U+003C>`), so a literal
+`<U+202E>` typed into `--by` cannot render identically to a real U+202E
+(round-4 F5/S2, RS6). The same unguarded slice at
+`src/lib/audit/auth-failure.ts` is now `.toWellFormed()`-guarded: it is the
+shared boundary every caller crosses, and nothing enforced the "already ≤ cap"
+precondition its safety rested on.
+
+## D-36 — `resolveTenantByClaim` returns `ClaimLookup`
+
+**Before**: `{ id } | null`, where `null` meant "a revoked row owns this claim"
+OR "nothing owns it".
+
+**Implemented**: `{ kind: "tenant"; id } | { kind: "revoked"; tenantId } |
+{ kind: "unregistered" }`.
+
+**Why**: round-4 **F1**, and this is the THIRD round to produce a finding
+against a nullable return on this path (rounds 1, 3, 4). No consumer read this
+`null` as an allow — the fail-open was genuinely closed, and the security
+expert re-traced all four branches to confirm it — but one consumer read it as
+"no owner exists" and filed its denial under the USER's tenant, while the
+identical lockout reached through the no-membership path was filed under the
+CLAIM's owner. `tenant-domain unmapped` groups by `(tenant_id, claim)`, so one
+incident arrived as two groups, one naming a tenant the operator cannot act on,
+and the `count(*)` D-33 relies on was split between them.
+
+Recorded as a class closure, not an instance fix: this was the last
+un-discriminated adjudicator on the sign-in path, and the compiler enumerated
+every consumer the moment the type changed.
+
+## D-37 — Whitespace is trimmed before the unsafe-character test, with an ASCII trim
+
+**Round 3**: `UNSAFE_DISPLAY_CHARS_RE.test(value)` ran BEFORE `value.trim()`.
+`\t \n \r \v \f` are C0 controls and therefore members of the unsafe class, so
+`"acme.example\n"` — the ordinary shape of a pretty-printed SAML
+`<AttributeValue>` — was refused and the sign-in denied (round-4 **T2**).
+D-27's own table said whitespace-only was `absent`; that was true only for
+U+0020, and the test sampled exactly that member.
+
+**Implemented**: an explicit ASCII-whitespace trim (`[ \t\n\r\v\f]`) runs
+first. Deliberately NOT `.trim()`: JS trim also strips U+FEFF, which IS in the
+unsafe class, and stripping it would canonicalise a U+FEFF-prefixed claim onto
+its existing neighbour — the exact F-D hazard the reject policy exists to
+prevent, reintroduced by the fix for T2. Whitespace the ASCII trim leaves but
+`.trim()` would take (U+00A0 and friends) is its own refusal arm, because
+`normalizeTenantClaim` runs `.trim()` downstream and accepting it would mean
+the value matched on is not the value asserted.
+
+## D-38 — `unmapped` reports refused-at-ingest denials as a second bucket
+
+**Plan (C7)**: `unmapped` reports `tenant_claim_unmapped` denials.
+
+**Implemented**: it selects both claim-bearing reasons and prints them under
+separate headings — *"Unregistered claims — remedy: `tenant-domain add`"* and
+*"Claims REFUSED at ingest — `add` cannot help; the remedy is at the IdP"* —
+with both counts always in the summary line.
+
+**Why**: round-4 **F3**. `claim_malformed` maps to `tenant_mismatch` (correctly
+— nothing is registrable, so `add` is not the remedy), and `unmapped` filtered
+on `tenant_claim_unmapped` alone. An IdP that starts emitting a zero-width
+character therefore denies EVERY sign-in in the deployment while the tool built
+to diagnose lockouts prints *"No unmapped-claim denials in the last 30 days"*.
+A denial class this tool cannot see is the same NF2-shaped invisibility the
+tool exists to end. Both READMEs' runbooks now carry the third cause.
+
+## D-39 — `parseFlags` refuses a repeated flag
+
+Round-4 **S5**. `Map.set` overwrote, so `remove --tenant A --tenant B` acted on
+B and `add --from A --from B` reassigned away from a tenant the operator never
+named — on a destructive path where `--yes` removes the visual check. Same rule
+the module already stated ("a flag the operator wrote must either take effect
+or stop the command"); the member set now comes from the parser's own state
+machine rather than from the spellings that happened to be reported.
+
+## D-40 — The missing-store branch of the signIn callback denies
+
+Round-4 **S4**, the FOURTH site of the overloaded-signal class. `if (store &&
+extraction.kind === "claim")` conflated "this deployment could not propagate
+the claim" with "no claim was asserted", so a valid claim was dropped and
+`createUser` took the bootstrap path, granting OWNER of a fresh tenant with
+nothing denied and nothing audited — round-1 M1's outcome by a third route.
+
+Unreachable through the wired entry point (`tenantClaimStorage.run()` wraps
+both Auth.js handlers and there is no other caller), and recorded anyway
+because the previous test **pinned the fall-through as intended behaviour**,
+which is precisely how the next entry point would have inherited it.

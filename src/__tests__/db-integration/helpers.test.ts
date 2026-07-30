@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   RETRYABLE_CLEANUP_SQLSTATES,
   isRetryableCleanupConflict,
@@ -62,14 +64,6 @@ describe("isRetryableCleanupConflict", () => {
     expect(isRetryableCleanupConflict("not an error at all")).toBe(false);
     expect(isRetryableCleanupConflict(undefined)).toBe(false);
   });
-
-  it("survives a meta object that cannot be serialised", () => {
-    const err = new Error("boom");
-    const circular: Record<string, unknown> = {};
-    circular.self = circular;
-    Object.assign(err, { meta: circular });
-    expect(() => isRetryableCleanupConflict(err)).not.toThrow();
-  });
 });
 
 describe("withCleanupConflictRetry", () => {
@@ -107,6 +101,31 @@ describe("withCleanupConflictRetry", () => {
     expect(attempts).toBe(1);
   });
 
+  it("does not retry an unrelated error whose QUERY TEXT merely contains a SQLSTATE", () => {
+    // Round-4 T10(b). `meta` carries the failing query and its bound
+    // parameters, so a claim, slug or id containing "40001" would have made a
+    // permanent failure look transient under the old substring match — and the
+    // retry would then bury it behind four attempts and a warning.
+    const err = new Error("Raw query failed. Code: `23505`.");
+    Object.assign(err, {
+      code: "P2010",
+      meta: {
+        driverAdapterError: { cause: { code: "23505" } },
+        query: "DELETE FROM tenants WHERE external_id = $1",
+        params: ["40001.example"],
+      },
+    });
+    expect(isRetryableCleanupConflict(err)).toBe(false);
+  });
+
+  it("reads the SQLSTATE positionally, not by searching the error for digits", () => {
+    const err = new Error("Raw query failed. Code: `23503`.");
+    Object.assign(err, { code: "P2010", meta: { query: "…", params: ["23505"] } });
+    // 23503 from the message form is retryable; the 23505 sitting in `params`
+    // is data, not a code, and must not be consulted either way.
+    expect(isRetryableCleanupConflict(err)).toBe(true);
+  });
+
   it("gives up after a bounded number of attempts rather than looping", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     let attempts = 0;
@@ -121,5 +140,19 @@ describe("withCleanupConflictRetry", () => {
     // the retry from masking one.
     expect(attempts).toBe(4);
     expect(warn).toHaveBeenCalledTimes(4);
+  });
+
+  it("is actually adopted by deleteTestData, its only production caller", () => {
+    // Round-4 T10(a). Every case above proves the wrapper works; none proved
+    // anything USES it. Unwrapping the one call site left this whole file
+    // green while the flake it exists for came straight back — an R17
+    // adoption gap, and the adoption is the entire point of the change.
+    // Source-text, because the wrapper takes a thunk: no observable output of
+    // `deleteTestData` differs between wrapped and unwrapped on the happy
+    // path, and driving a real deadlock is not something a unit test can do.
+    const source = readFileSync(resolve(__dirname, "helpers.ts"), "utf8");
+    expect(source).toMatch(
+      /async function deleteTestData\([^)]*\)[^{]*\{\s*await withCleanupConflictRetry\(/,
+    );
   });
 });

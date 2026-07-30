@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   BOOLEAN_FLAGS,
   VALUE_FLAG_HINTS,
@@ -118,14 +120,45 @@ describe("tenant-domain flag parsing", () => {
     expect(findValuelessFlag(flags)).toBe("days");
   });
 
-  it("the known-flag set is exactly the value flags plus the boolean flags", () => {
-    // Anti-drift: a new flag added to the CLI's switch but not to these tables
-    // would be refused at parse time, so the failure is loud here rather than
-    // in an operator's terminal.
-    const known = [...Object.keys(VALUE_FLAG_HINTS), ...BOOLEAN_FLAGS];
-    expect(known).toEqual(["tenant", "domain", "by", "from", "days", "yes"]);
-    for (const name of known) {
-      expect(parseFlags([`--${name}`, "v"]).ok || parseFlags([`--${name}`]).ok).toBe(true);
-    }
+  it("the known-flag set is exactly the flags the CLI reads", () => {
+    // Round-4 T8. The loop this replaces asserted that every flag in these
+    // tables parses — a tautology, since `isValueFlag`/`isBooleanFlag` derive
+    // acceptance from the same tables. The real anti-drift property is against
+    // the CLI: a flag `tenant-domain.ts` reads but never declared here is
+    // refused at parse time, so the operator's instruction silently never
+    // reaches the command. Derived by reading the CLI's own flag reads.
+    const cli = readFileSync(resolve(__dirname, "../tenant-domain.ts"), "utf8");
+    const read = new Set<string>();
+    for (const m of cli.matchAll(/getStringFlag\(flags,\s*"([^"]+)"\)/g)) read.add(m[1]);
+    for (const m of cli.matchAll(/flags\.get\("([^"]+)"\)/g)) read.add(m[1]);
+
+    const declared = new Set<string>([...Object.keys(VALUE_FLAG_HINTS), ...BOOLEAN_FLAGS]);
+    expect([...read].sort().filter((f) => !declared.has(f))).toEqual([]);
+    // And the literal pin, so ADDING a flag to the tables is a deliberate edit
+    // rather than something that slips in with an unrelated change.
+    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "yes"]);
+    expect(read.size).toBeGreaterThan(0);
+  });
+
+  // Round-4 S5. `Map.set` overwrote, so a repeated flag silently discarded the
+  // operator's first token — and on `add --from A --from B` the discarded one
+  // names a different losing tenant, with `--yes` removing the visual check.
+  // Same rule as the valueless guard; the member set was derived from the
+  // parser's state machine rather than from the spellings that got reported.
+  it.each(["tenant", "domain", "by", "from", "days"])(
+    "refuses a repeated --%s instead of taking the last one",
+    (name) => {
+      const error = errorOf([`--${name}`, "a", `--${name}`, "b"]);
+      expect(error).toContain(`--${name} was given more than once`);
+    },
+  );
+
+  it("refuses a repeated --yes", () => {
+    expect(errorOf(["--yes", "--yes"])).toContain("--yes was given more than once");
+  });
+
+  it("refuses a repeat written in the other form", () => {
+    // `--days 1 --days=2` is the same instruction twice in two spellings.
+    expect(errorOf(["--days", "1", "--days=2"])).toContain("--days was given more than once");
   });
 });

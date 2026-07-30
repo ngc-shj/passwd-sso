@@ -1,9 +1,6 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
-import {
-  UNSAFE_DISPLAY_CHARS_RE,
-  escapeUnsafeDisplayChars,
-} from "@/lib/security/unsafe-display-chars";
+import { UNSAFE_DISPLAY_CHARS_RE } from "@/lib/security/unsafe-display-chars";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 import { MAX_TENANT_CLAIM_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 
@@ -70,38 +67,99 @@ export function slugifyTenant(input: string): string {
  * tenant with role OWNER — round-1 M1's overloaded `null` reappearing one
  * layer up.
  *
- * The classification below is per-cause, not per-`return null`:
+ * The classification is per-cause, not per-`return null`. Round 4 corrected two
+ * of the arms round 3 got wrong; the table below is the settled version:
  *
- * | Cause                          | Arm       | Why |
- * |--------------------------------|-----------|-----|
+ * | Cause | Arm | Why |
+ * |---|---|---|
  * | key absent / `undefined` / `null` | absent | nothing was asserted |
- * | empty or whitespace-only string | absent    | an empty assertion is not an assertion — IdPs emit empty attributes for unset fields, and refusing would deny sign-ins that work today (NF2) for no gain, since the same actor can just omit the key |
- * | value present, not a string     | malformed | the key the operator made authoritative WAS asserted and this deployment cannot read it; falling through to the next key would let a lower-priority, self-asserted attribute decide the tenant |
- * | unsafe display characters       | malformed | round-2 F-D: the value must not be canonicalised onto a neighbouring claim, and must not be dropped either |
- * | longer than MAX_TENANT_CLAIM_LENGTH | malformed | a claim that cannot be stored cannot be honoured |
+ * | value present, not a string | absent | round-4 F2/S6 — see below |
+ * | empty or ASCII-whitespace-only | absent | an empty assertion is not an assertion; IdPs emit empty attributes for unset fields, and refusing would deny sign-ins that work today (NF2) for no gain, since the same actor can just omit the key |
+ * | unsafe display characters | **malformed** | round-2 F-D: the value must not be canonicalised onto a neighbouring claim, and must not be dropped either |
+ * | edges JS `.trim()` would strip but ASCII trim does not (e.g. U+00A0) | **malformed** | `normalizeTenantClaim` trims with JS semantics downstream, so accepting these means the value MATCHED on is not the value asserted — the same canonicalisation hazard as the unsafe class |
+ * | longer than `MAX_TENANT_CLAIM_LENGTH` | **malformed** | a claim that cannot be stored cannot be honoured, and padding a losing claim past the cap must not convert its denial into the claim-less allow |
+ *
+ * **Non-string is `absent`, not `malformed` (round-4 F2 + S6, converged).**
+ * Round 3 denied it, reasoning that the operator made this key authoritative
+ * so falling through would let a lower-priority attribute decide the tenant.
+ * That conflated two decisions — *stop the key walk* and *deny the sign-in* —
+ * and only the first followed. SAML attributes are multi-valued by
+ * specification and BoxyHQ Jackson surfaces them into the OIDC profile as JSON
+ * arrays, so a deployment whose `organization` arrives as `["acme"]` — with
+ * `organization` in the shipped default key list — went from resolving
+ * correctly to denying EVERY sign-in. Nor does denying buy anything: an actor
+ * who can change the attribute's TYPE can equally remove the attribute, and
+ * omission reaches the same claim-less path, so the arm closes no hole that
+ * absence does not already open. A non-string is not a claim string; the key
+ * carries no claim and the walk continues, exactly as it did before round 3.
+ *
+ * **Whitespace is trimmed BEFORE the unsafe-character test (round-4 T2).**
+ * `\t \n \r \v \f` are C0 controls, so they are members of the unsafe class as
+ * well as `.trim()` whitespace. Testing first meant `"acme.example\n"` — the
+ * ordinary shape of a pretty-printed SAML `<AttributeValue>` — was refused and
+ * the sign-in denied. The trim is deliberately **ASCII-only** rather than JS
+ * `.trim()`: `.trim()` also strips U+FEFF, which IS in the unsafe class, and
+ * stripping it would silently canonicalise a U+FEFF-prefixed `acme.example` onto the
+ * existing `acme.example` tenant — the exact F-D hazard the reject policy
+ * exists to prevent. Whitespace the ASCII trim leaves but `.trim()` would take
+ * is therefore its own refusal arm rather than a silent strip.
  */
 type ClaimKeyRead =
   | { kind: "claim"; value: string }
   | { kind: "absent" }
-  | { kind: "malformed"; display: string };
+  | { kind: "malformed"; diagnosis: string };
 
 const ABSENT: ClaimKeyRead = { kind: "absent" };
 
-function malformed(display: string): ClaimKeyRead {
-  // Escaped, never stripped, and capped at the same bound the audit metadata
-  // applies: this string exists so the denial is diagnosable — it reaches
-  // metadata.claim on the AUTH_LOGIN_FAILURE row and, through that, the CSV
-  // export and the operator terminal. It is a RENDERING and is never used as
-  // a resolution key.
-  return { kind: "malformed", display: escapeUnsafeDisplayChars(display, MAX_TENANT_CLAIM_LENGTH) };
+/** ASCII whitespace only — see the note above on why not `.trim()`. */
+const ASCII_WHITESPACE_EDGES_RE = /^[ \t\n\r\v\f]+|[ \t\n\r\v\f]+$/g;
+
+/**
+ * A refusal carries a DIAGNOSIS of the value, never the value itself
+ * (round-4 S1/S2, user-chosen).
+ *
+ * Round 3 put an escaped rendering of the refused value here, so that an
+ * operator could see which claim their IdP had started mangling. That put an
+ * attacker-chosen string on a path — `metadata.claim` -> `logAuditAsync` -> a
+ * `jsonb` write -> the CSV export -> the operator's terminal — and the
+ * encoding hazards followed immediately: truncating the rendering at
+ * `MAX_TENANT_CLAIM_LENGTH` split a UTF-16 surrogate pair, Postgres rejects a
+ * lone surrogate in `jsonb` with 22P02, and `logAuditAsync` swallows the error
+ * into a dead-letter — so an actor could suppress the audit record of their
+ * own denial by padding the claim past the cap with an emoji at the boundary.
+ *
+ * The diagnosis is printable ASCII, bounded, and describes the violation
+ * rather than reproducing the value. It is strictly more actionable for the
+ * remedy that actually applies (fix the IdP), because the operator needs to
+ * know WHICH RULE the value broke, not what the value was — and the value is
+ * unregistrable, so `tenant-domain add` could not consume it anyway.
+ */
+function malformed(diagnosis: string): ClaimKeyRead {
+  return { kind: "malformed", diagnosis: `refused: ${diagnosis}` };
+}
+
+/** Distinct offending code points, sorted, at most three — enough to fix the IdP. */
+function describeUnsafeChars(value: string): string {
+  const seen = new Set<number>();
+  for (const char of value) {
+    const cp = char.codePointAt(0);
+    if (cp !== undefined && UNSAFE_DISPLAY_CHARS_RE.test(char)) seen.add(cp);
+  }
+  const listed = [...seen].sort((a, b) => a - b);
+  const shown = listed
+    .slice(0, 3)
+    .map((cp) => `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`)
+    .join(", ");
+  return `contains ${shown}${listed.length > 3 ? ` and ${listed.length - 3} more` : ""}`;
 }
 
 function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
   if (value === undefined || value === null) return ABSENT;
-  // The attribute carries something that is not a claim string. Reporting the
-  // type rather than the value: a non-string can be an object of arbitrary
-  // depth and content, and none of it belongs on an audit row.
-  if (typeof value !== "string") return malformed(`<${typeof value}>`);
+  // Not a claim string — the key carries no claim, so the walk continues.
+  if (typeof value !== "string") return ABSENT;
+
+  const cleaned = value.replace(ASCII_WHITESPACE_EDGES_RE, "");
+  if (cleaned.length === 0) return ABSENT;
 
   // Control, bidi and zero-width characters — see @/lib/security/
   // unsafe-display-chars for the members and for why the set is shared with
@@ -121,11 +179,19 @@ function sanitizeTenantClaimValue(value: unknown): ClaimKeyRead {
   // the shared definition. Note the direction of the dependency the old
   // comment here inverted: the ASCII CHECK does not make stripping harmless,
   // stripping is what lets a non-ASCII input satisfy the CHECK.
-  if (UNSAFE_DISPLAY_CHARS_RE.test(value)) return malformed(value);
+  if (UNSAFE_DISPLAY_CHARS_RE.test(cleaned)) return malformed(describeUnsafeChars(cleaned));
 
-  const cleaned = value.trim();
-  if (cleaned.length === 0) return ABSENT;
-  if (cleaned.length > MAX_TENANT_CLAIM_LENGTH) return malformed(cleaned);
+  // Whatever `.trim()` would still take off the ends, the ASCII trim did not —
+  // U+00A0 and friends. `normalizeTenantClaim` runs `.trim()` downstream, so
+  // letting these through means the value matched on is not the value
+  // asserted.
+  if (cleaned !== cleaned.trim()) {
+    return malformed("leading or trailing non-ASCII whitespace");
+  }
+
+  if (cleaned.length > MAX_TENANT_CLAIM_LENGTH) {
+    return malformed(`${cleaned.length} characters (max ${MAX_TENANT_CLAIM_LENGTH})`);
+  }
   return { kind: "claim", value: cleaned };
 }
 

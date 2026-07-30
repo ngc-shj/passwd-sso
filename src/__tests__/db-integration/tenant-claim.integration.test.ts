@@ -441,8 +441,8 @@ describe("tenant_claims (C1)", () => {
         // colliding tenant to ITSELF — neither resolves to the other.
         const resolvedMixedCase = await resolveTenantByClaim(mixedCase, ctx.su.prisma);
         const resolvedPaddedLower = await resolveTenantByClaim(paddedLower, ctx.su.prisma);
-        expect(resolvedMixedCase?.id).toBe(tenantMixedCase);
-        expect(resolvedPaddedLower?.id).toBe(tenantPaddedLower);
+        expect(resolvedMixedCase).toEqual({ kind: "tenant", id: tenantMixedCase });
+        expect(resolvedPaddedLower).toEqual({ kind: "tenant", id: tenantPaddedLower });
 
         const nonDomainRows = await ctx.su.prisma.tenantClaim.findMany({
           where: { tenantId: tenantNonDomain },
@@ -698,17 +698,20 @@ describe("findOrCreateTenantForClaim (C4)", () => {
       // Two tenants whose RAW external_ids differ but FOLD to the same claim.
       // Round-1 M3's backfill excludes both sides, so neither holds a claim
       // row and the UNIQUE(claim) slot is free — the round-2 F-A shape.
-      const older = await ctx.createTenant();
-      const newer = await ctx.createTenant();
+      // Round-4 T3. The two ids come from randomUUID(), so assigning
+      // created_at by insertion order distinguished `ORDER BY created_at` from
+      // `ORDER BY id` only about half the time — and for a NONDETERMINISM bug
+      // a fixture that is right half the time is on the wrong side of the
+      // line. Assign the OLDER created_at to whichever id sorts LARGER, and
+      // `ORDER BY id ASC` is deterministically wrong.
+      const [a, b] = [await ctx.createTenant(), await ctx.createTenant()];
+      const older = a > b ? a : b;
+      const newer = a > b ? b : a;
+      expect(older > newer).toBe(true);
       const foldedClaim = `${token}-alias.example`;
 
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        // created_at is set explicitly rather than relying on insertion order:
-        // the ORDER BY under test is on created_at, so the fixture has to make
-        // the intended winner unambiguous. `newer` is inserted with the EARLIER
-        // id lexicographically half the time, which is what makes this
-        // distinguish created_at ordering from id ordering.
         await tx.$executeRawUnsafe(
           `UPDATE tenants SET external_id = $2, created_at = now() - interval '2 days' WHERE id = $1::uuid`,
           older,
@@ -728,28 +731,76 @@ describe("findOrCreateTenantForClaim (C4)", () => {
       expect(normalizeTenantClaim(`${token}-Alias.Example`)).toBe(foldedClaim);
       expect(normalizeTenantClaim(` ${token}-ALIAS.EXAMPLE `)).toBe(foldedClaim);
 
-      const tenantsBefore = await ctx.su.prisma.tenant.count();
+      try {
+        // Repeated because the defect M2 fixes is NONDETERMINISM — but the
+        // deterministic fixture above is what actually pins it; the loop only
+        // guards against a plan that varies between identical calls.
+        for (let i = 0; i < 5; i++) {
+          const result = await withBypassRls(
+            ctx.su.prisma,
+            (tx) => findOrCreateTenantForClaim(`${token}-aLiAs.ExAmPlE`, tx),
+            BYPASS_PURPOSE.AUTH_FLOW,
+          );
+          expect(result).toEqual({ kind: "claim_collision", tenantId: older });
+        }
 
-      // Repeated, because the defect M2 fixes is NONDETERMINISM: one call
-      // proves nothing about which side an unordered LIMIT 1 would pick.
-      for (let i = 0; i < 5; i++) {
-        const result = await withBypassRls(
-          ctx.su.prisma,
-          (tx) => findOrCreateTenantForClaim(`${token}-aLiAs.ExAmPlE`, tx),
-          BYPASS_PURPOSE.AUTH_FLOW,
-        );
-        expect(result).toEqual({ kind: "claim_collision", tenantId: older });
+        // The refusal is the point: no tenant created for this claim, and the
+        // free UNIQUE(claim) slot is still free for the operator's explicit
+        // `tenant-domain add`. Round-4 T9: scoped to this test's own token —
+        // an unscoped global `tenant.count()` on the shared dev database is
+        // reddened by any concurrent insert from another working copy.
+        expect(
+          await ctx.su.prisma.tenant.count({ where: { externalId: { contains: token } } }),
+        ).toBe(2);
+        expect(
+          await ctx.su.prisma.tenantClaim.findMany({ where: { claim: foldedClaim } }),
+        ).toHaveLength(0);
+      } finally {
+        // Round-4 T9: the sibling test was restructured for exactly this in
+        // the previous round and this one was not.
+        await ctx.deleteTestData(older);
+        await ctx.deleteTestData(newer);
       }
-
-      // The refusal is the point: no tenant, and the free UNIQUE(claim) slot
-      // is still free for the operator's explicit `tenant-domain add`.
-      expect(await ctx.su.prisma.tenant.count()).toBe(tenantsBefore);
-      expect(
-        await ctx.su.prisma.tenantClaim.findMany({ where: { claim: foldedClaim } }),
-      ).toHaveLength(0);
-
-      await ctx.deleteTestData(older);
-      await ctx.deleteTestData(newer);
     },
   );
+
+  /**
+   * The `id ASC` tie-break, which the created_at fixture above cannot reach
+   * (round-4 T3): two tenants sharing a `created_at` to the microsecond is
+   * what the second sort key exists for, and without a case for it the clause
+   * could be deleted with everything still green.
+   */
+  it.skipIf(SKIP)("breaks a created_at tie on id, deterministically", async () => {
+    const token = runToken();
+    const [a, b] = [await ctx.createTenant(), await ctx.createTenant()];
+    const lowerId = a < b ? a : b;
+    const higherId = a < b ? b : a;
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      // Identical created_at, set in one statement so the two cannot drift.
+      await tx.$executeRawUnsafe(
+        `UPDATE tenants
+            SET external_id = CASE id WHEN $1::uuid THEN $3 ELSE $4 END,
+                created_at = timestamptz '2020-01-01 00:00:00+00'
+          WHERE id IN ($1::uuid, $2::uuid)`,
+        lowerId,
+        higherId,
+        `${token}-Tie.Example`,
+        ` ${token}-TIE.EXAMPLE `,
+      );
+    });
+
+    try {
+      const result = await withBypassRls(
+        ctx.su.prisma,
+        (tx) => findOrCreateTenantForClaim(`${token}-tIe.ExAmPlE`, tx),
+        BYPASS_PURPOSE.AUTH_FLOW,
+      );
+      expect(result).toEqual({ kind: "claim_collision", tenantId: lowerId });
+    } finally {
+      await ctx.deleteTestData(a);
+      await ctx.deleteTestData(b);
+    }
+  });
 });

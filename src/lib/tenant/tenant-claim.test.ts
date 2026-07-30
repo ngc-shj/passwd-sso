@@ -124,19 +124,12 @@ describe("tenant-claim", () => {
     expect(v).toEqual({ kind: "claim", value: exactValue });
   });
 
-  it("still trims surrounding whitespace from an otherwise clean value", () => {
-    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
-    const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "  alias.example  " });
-    expect(v).toEqual({ kind: "claim", value: "alias.example" });
-  });
-
   // ── Absent: nothing was asserted, so the sign-in proceeds claim-less ──────
   //
   // This arm is an ALLOW at both consumers, which is why the boundary between
-  // it and `malformed` is the whole subject of round-3 M1. A cause belongs
-  // here only when it is indistinguishable from the IdP omitting the
-  // attribute — otherwise the deployment would be honouring an assertion it
-  // silently failed to read.
+  // it and `malformed` is the whole subject of round-3 M1 and of round-4's
+  // corrections to it. A cause belongs here only when it is indistinguishable
+  // from the IdP omitting the attribute.
 
   it("reports an absent claim when no configured key is present on the profile", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
@@ -160,14 +153,68 @@ describe("tenant-claim", () => {
     });
   });
 
-  it("reports an absent claim for an empty or whitespace-only value", () => {
+  // Round-4 F2 + S6 (converged). Round 3 classified these `malformed` and
+  // DENIED. SAML attributes are multi-valued by specification and BoxyHQ
+  // Jackson surfaces them into the OIDC profile as JSON arrays, so a
+  // deployment whose `organization` — a shipped default key — arrives as
+  // `["acme"]` went from working to denying every sign-in. Denying also buys
+  // nothing an omission does not already give away.
+  it.each([
+    ["number", 42],
+    ["boolean", true],
+    ["object", { nested: "value" }],
+    ["array of one string", ["acme"]],
+    ["empty array", []],
+  ])("reports an absent claim for a non-string %s value", (_label, value) => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
-    // Deliberately NOT malformed. An empty assertion is not an assertion —
-    // IdPs emit empty attributes for unset fields, so denying here would lock
-    // out working deployments (NF2), and it buys nothing: an actor who can
-    // send "" can equally omit the key.
+    expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: value })).toEqual({
+      kind: "absent",
+    });
+  });
+
+  it("falls through a non-string key to a later key that carries a real claim", () => {
+    // The lockout F2/S6 named, as a test: `groups` arrives as an array and
+    // `hd` carries the real value. Round 3 stopped at `groups` and denied.
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "groups,hd");
+    const v = extractTenantClaimValue(GOOGLE_ACCOUNT, {
+      groups: ["engineering", "all"],
+      hd: "example.com",
+    });
+    expect(v).toEqual({ kind: "claim", value: "example.com" });
+  });
+
+  // Round-4 T2. `\t \n \r \v \f` are C0 controls, so they are members of the
+  // unsafe class as well as whitespace — and round 3 ran the unsafe test
+  // BEFORE the trim, so a pretty-printed SAML `<AttributeValue>` (the ordinary
+  // shape of SAML XML) was refused and the sign-in denied. Round 3's tests
+  // sampled the one member that behaved differently, U+0020, and its comment
+  // asserted the whole class. Parameterised now, per member.
+  const ASCII_WHITESPACE: ReadonlyArray<[string, string]> = [
+    ["space", " "],
+    ["tab", "\t"],
+    ["newline", "\n"],
+    ["carriage return", "\r"],
+    ["vertical tab", "\v"],
+    ["form feed", "\f"],
+    ["CRLF", "\r\n"],
+  ];
+
+  it.each(ASCII_WHITESPACE)("trims surrounding %s from an otherwise clean value", (_label, ws) => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: `${ws}alias.example${ws}` });
+    expect(v).toEqual({ kind: "claim", value: "alias.example" });
+  });
+
+  it.each(ASCII_WHITESPACE)("reports an absent claim for a value that is only %s", (_label, ws) => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    // An empty assertion is not an assertion — IdPs emit empty attributes for
+    // unset fields, so denying here would lock out working deployments (NF2).
+    expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: ws })).toEqual({ kind: "absent" });
+  });
+
+  it("reports an absent claim for an empty string", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "" })).toEqual({ kind: "absent" });
-    expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "   " })).toEqual({ kind: "absent" });
   });
 
   it("keeps walking the key list past an absent key", () => {
@@ -176,7 +223,7 @@ describe("tenant-claim", () => {
     expect(v).toEqual({ kind: "claim", value: "acme" });
   });
 
-  // ── Malformed: something WAS asserted and this deployment refuses it ──────
+  // ── Malformed: a string this deployment refuses ───────────────────────────
   //
   // Round-3 M1. Every case here used to return the same `null` as the absent
   // cases above, and both consumers read that as "no claim presented" — an
@@ -184,55 +231,48 @@ describe("tenant-claim", () => {
   // `tenant_mismatch` denial to a sign-in into the user's existing tenant,
   // and on the first-ever-sign-in path to a fresh bootstrap tenant with role
   // OWNER. The precondition is only control of the asserted attribute.
+  //
+  // The refusal carries a DIAGNOSIS, never the value (round-4 S1/S2): the
+  // value is what an actor controls, and rendering it into `metadata.claim`
+  // put attacker-chosen bytes on the path to a jsonb write, where a truncated
+  // surrogate pair silently killed the whole audit row.
 
   it("reports a malformed claim for values exceeding 255 characters", () => {
     const longValue = "x".repeat(256);
     const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: longValue });
-    // A claim that cannot be stored cannot be honoured; the rendering is
-    // capped at the same bound the audit metadata applies.
-    expect(v).toEqual({ kind: "malformed", display: "x".repeat(MAX_TENANT_CLAIM_LENGTH) });
+    expect(v).toEqual({
+      kind: "malformed",
+      diagnosis: `refused: 256 characters (max ${MAX_TENANT_CLAIM_LENGTH})`,
+    });
   });
 
-  it.each([
-    ["number", 42, "<number>"],
-    ["boolean", true, "<boolean>"],
-    ["object", { nested: "value" }, "<object>"],
-  ])(
-    "reports a malformed claim for a non-string %s value, naming the type and not the value",
-    (_label, value, display) => {
-      vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
-      // The operator made this key authoritative and the IdP asserted
-      // something under it. Reading it as "absent" would let a lower-priority,
-      // self-asserted key decide the tenant instead. The value itself never
-      // reaches the audit row — an object can carry anything.
-      expect(extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: value })).toEqual({
-        kind: "malformed",
-        display,
-      });
-    },
-  );
+  it("reports a malformed claim whose diagnosis never contains the refused value", () => {
+    // The property S1 turns on: nothing an actor chose reaches the audit row.
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    const secret = "a".repeat(300) + "\u{1F600}";
+    const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: secret });
+    if (v.kind !== "malformed") throw new Error(`expected malformed, got ${v.kind}`);
+    expect(v.diagnosis).not.toContain("aaa");
+    expect(v.diagnosis).not.toContain("\u{1F600}");
+    // Printable ASCII only, so it cannot carry a lone surrogate into jsonb.
+    expect(/^[\x20-\x7E]+$/.test(v.diagnosis)).toBe(true);
+    expect(v.diagnosis.isWellFormed()).toBe(true);
+  });
 
   it("reports a malformed claim for a NULL byte instead of stripping it (F-D)", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "acme\0corp" });
     // Stripping would have produced "acmecorp" — a value that selects, or
     // creates, the acmecorp tenant with no record of the character removed.
-    expect(v).toEqual({ kind: "malformed", display: "acme<U+0000>corp" });
+    expect(v).toEqual({ kind: "malformed", diagnosis: "refused: contains U+0000" });
   });
 
-  it("reports a malformed claim when the value is only NULL bytes", () => {
-    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
-    const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "\0\0\0" });
-    expect(v).toEqual({ kind: "malformed", display: "<U+0000><U+0000><U+0000>" });
-  });
-
-  it("reports a malformed claim for control characters (boundary)", () => {
+  it("reports a malformed claim for control characters, naming up to three", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
     const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "\0abc\x1f\x7f\x9fdef\0" });
-    // Stripping would have produced "abcdef" — see the F-D table below.
     expect(v).toEqual({
       kind: "malformed",
-      display: "<U+0000>abc<U+001F><U+007F><U+009F>def<U+0000>",
+      diagnosis: "refused: contains U+0000, U+001F, U+007F and 1 more",
     });
   });
 
@@ -246,8 +286,36 @@ describe("tenant-claim", () => {
     });
     expect(v).toEqual({
       kind: "malformed",
-      display: "alias<U+202E>example<U+200B>corp",
+      diagnosis: "refused: contains U+200B, U+202E",
     });
+  });
+
+  // Round-4 T2's other half: whitespace the ASCII trim leaves but `.trim()`
+  // would take. Accepting it would mean the value MATCHED on (after
+  // normalizeTenantClaim's `.trim()`) is not the value asserted — the same
+  // canonicalisation hazard as the unsafe class, which is why it refuses
+  // rather than silently stripping.
+  it.each([
+    ["U+00A0 NO-BREAK SPACE", "\u00A0"],
+    ["U+2003 EM SPACE", "\u2003"],
+    ["U+3000 IDEOGRAPHIC SPACE", "\u3000"],
+  ])("reports a malformed claim for a leading %s", (_label, ws) => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: `${ws}alias.example` });
+    expect(v).toEqual({
+      kind: "malformed",
+      diagnosis: "refused: leading or trailing non-ASCII whitespace",
+    });
+  });
+
+  it("refuses a U+FEFF-prefixed claim rather than trimming it onto its neighbour", () => {
+    vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    // U+FEFF is BOTH `.trim()` whitespace and a member of the unsafe class.
+    // A JS `.trim()` here would have produced `alias.example` and selected the
+    // existing tenant — the exact F-D hazard, reintroduced by the T2 fix if
+    // that fix had used `.trim()`.
+    const v = extractTenantClaimValue(SAML_ACCOUNT, { tenant_id: "\uFEFFalias.example" });
+    expect(v).toEqual({ kind: "malformed", diagnosis: "refused: contains U+FEFF" });
   });
 
   // Round-2 F-D: this function's usable output IS the matching key and the
@@ -256,47 +324,47 @@ describe("tenant-claim", () => {
   // because the hazard is per-character: a class that quietly lost one member
   // would still pass a single combined fixture through the remaining ones.
   it.each([
-    ["U+0000 NULL", 0x0000],
-    ["U+001F UNIT SEPARATOR", 0x001f],
-    ["U+007F DELETE", 0x007f],
-    ["U+009F APPLICATION PROGRAM COMMAND", 0x009f],
-    ["U+00AD SOFT HYPHEN", 0x00ad],
-    ["U+061C ARABIC LETTER MARK", 0x061c],
-    ["U+180E MONGOLIAN VOWEL SEPARATOR", 0x180e],
-    ["U+200B ZERO WIDTH SPACE", 0x200b],
-    ["U+200F RIGHT-TO-LEFT MARK", 0x200f],
-    ["U+2028 LINE SEPARATOR", 0x2028],
-    ["U+2029 PARAGRAPH SEPARATOR", 0x2029],
-    ["U+202E RIGHT-TO-LEFT OVERRIDE", 0x202e],
-    ["U+2060 WORD JOINER", 0x2060],
-    ["U+2066 LEFT-TO-RIGHT ISOLATE", 0x2066],
-    ["U+FEFF ZERO WIDTH NO-BREAK SPACE", 0xfeff],
+    ["U+0000", 0x0000],
+    ["U+001F", 0x001f],
+    ["U+007F", 0x007f],
+    ["U+009F", 0x009f],
+    ["U+00AD", 0x00ad],
+    ["U+061C", 0x061c],
+    ["U+180E", 0x180e],
+    ["U+200B", 0x200b],
+    ["U+200F", 0x200f],
+    ["U+2028", 0x2028],
+    ["U+2029", 0x2029],
+    ["U+202E", 0x202e],
+    ["U+2060", 0x2060],
+    ["U+2066", 0x2066],
+    ["U+FEFF", 0xfeff],
   ])("refuses a claim whose only difference from an existing one is %s", (label, cp) => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id");
+    // Interior, not at the edges: an edge C0 whitespace character is trimmed
+    // (T2) and an edge U+FEFF has its own case above. This is the
+    // canonicalisation hazard proper.
     const v = extractTenantClaimValue(SAML_ACCOUNT, {
       tenant_id: `alias${String.fromCodePoint(cp as number)}.example`,
     });
     // The stripping implementation returned "alias.example" for every row —
     // selecting the existing alias.example tenant with nothing recorded, and
     // invisible to `preflight`'s non-ASCII report because the character was
-    // gone before storage. The rendering names the character that made it a
-    // refusal, so the denial is diagnosable without being printable-unsafe.
-    expect(v).toEqual({
-      kind: "malformed",
-      display: `alias<${(label as string).split(" ")[0]}>.example`,
-    });
+    // gone before storage.
+    expect(v).toEqual({ kind: "malformed", diagnosis: `refused: contains ${label}` });
   });
 
   it("stops the key walk at the first malformed value", () => {
     vi.stubEnv("AUTH_TENANT_CLAIM_KEYS", "tenant_id,organization");
     // Falling through to `organization` would make the tenant depend on which
-    // higher-priority key happened to be unreadable — the same silent
-    // promotion the three arms exist to close, one level down.
+    // higher-priority key happened to be unreadable — a REFUSED value is an
+    // assertion this deployment will not honour, unlike a non-string, which
+    // carries no claim at all and does fall through.
     const v = extractTenantClaimValue(SAML_ACCOUNT, {
       tenant_id: "beta.example\u200B",
       organization: "acme",
     });
-    expect(v).toEqual({ kind: "malformed", display: "beta.example<U+200B>" });
+    expect(v).toEqual({ kind: "malformed", diagnosis: "refused: contains U+200B" });
   });
 
   it("does not reach the google hd fallback past a malformed configured key", () => {
@@ -305,12 +373,12 @@ describe("tenant-claim", () => {
       organization: "beta.example\u200B",
       hd: "example.com",
     });
-    expect(v).toEqual({ kind: "malformed", display: "beta.example<U+200B>" });
+    expect(v).toEqual({ kind: "malformed", diagnosis: "refused: contains U+200B" });
   });
 
   it("reports a malformed hd claim reached through the fallback", () => {
     const v = extractTenantClaimValue(GOOGLE_ACCOUNT, { hd: "exa\u00ADmple.com" });
-    expect(v).toEqual({ kind: "malformed", display: "exa<U+00AD>mple.com" });
+    expect(v).toEqual({ kind: "malformed", diagnosis: "refused: contains U+00AD" });
   });
 
   it("slugifies tenant strings", () => {

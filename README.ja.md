@@ -310,7 +310,15 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 
 ### IdP のドメインが変わった / テナントがロックアウトされた
 
-**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に `tenant_claim_unmapped`（どのテナントにも未登録のクレーム）または `tenant_mismatch`（別のテナントに登録済みのクレーム）で拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+**症状**: IdP が送出するテナントクレームが変わった場合（Google Workspace のドメイン変更、SAML 属性の変更など）、既存のテナントメンバーはサインイン時に拒否され、`audit_logs` に `AUTH_LOGIN_FAILURE` として記録されます。原因は **3 つ**あり、この CLI で直せるのは最初の 2 つだけです:
+
+| `metadata.reason` | `metadata.claim` | 原因 | 対処 |
+|---|---|---|---|
+| `tenant_claim_unmapped` | クレーム値 | どのテナントにも未登録 | `tenant-domain add` |
+| `tenant_mismatch` | クレーム値 | 別のテナントに登録済み | ユーザーを調査、または `add --from` でクレームを移動 |
+| `tenant_mismatch` | `refused: …` | IdP が送った値が**取り込み時点で拒否**された — 制御文字・双方向制御文字・ゼロ幅文字、255 文字超、またはストレージ層が往復できない空白 | **IdP 側を修正してください。** その値は `add` で登録できないため、この CLI では復旧できません。`refused: …` の文言が違反したルールを示します |
+
+`unmapped` は 1 番目と 3 番目を別の見出しで報告します（2 番目はクレームが記録されている場合のみ）。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
 
 ```bash
 # 最近拒否された未登録クレームを確認（既定の期間: 30 日）

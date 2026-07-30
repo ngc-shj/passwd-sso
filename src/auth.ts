@@ -101,7 +101,7 @@ export type SignInTenantResult =
  * capped at MAX_TENANT_CLAIM_LENGTH, and retention GC ages the rows out.
  */
 function refusalTenantId(
-  refusal: Exclude<ClaimTenantResolution, { kind: "tenant" }>,
+  refusal: { tenantId?: string | null },
   existingTenantId: string | null,
 ): string | null {
   return refusal.tenantId ?? existingTenantId;
@@ -126,6 +126,13 @@ export async function ensureTenantMembershipForSignIn(
     // single-tenancy (unchanged), the refusal to BIND its audit row —
     // emitAuthLoginFailure without a tenantId dead-letters (CR-3), which
     // would make the new denial invisible rather than merely unobserved.
+    // Carried into BOTH exits below. Round-4 F8/T1: the MULTI_TENANT exit used
+    // to drop it, so a multi-tenant user whose IdP was mangling the claim got
+    // a bare `tenant_mismatch` with no indication of why — and the two exits
+    // were indistinguishable in a test, which is how one of round 3's new
+    // tests came to assert a path it never took.
+    const diagnosis = extraction.kind === "malformed" ? extraction.diagnosis : null;
+
     let existingTenantId: string | null = null;
     try {
       existingTenantId = await resolveUserTenantId(userId);
@@ -134,21 +141,20 @@ export async function ensureTenantMembershipForSignIn(
         error instanceof Error &&
         error.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED"
       ) {
-        return { ok: false, reason: "tenant_mismatch", tenantId: null, claim: null };
+        return { ok: false, reason: "tenant_mismatch", tenantId: null, claim: diagnosis };
       }
       throw error;
     }
 
-    if (extraction.kind === "malformed") {
+    if (diagnosis !== null) {
       return {
         ok: false,
         reason: CLAIM_REFUSAL_REASON.claim_malformed,
         tenantId: existingTenantId,
-        // The escaped rendering, never the raw value — see ClaimKeyRead. It
-        // is what lets an operator see WHICH claim their IdP started
-        // mangling; the raw value is refused precisely because it must not be
-        // printed or matched.
-        claim: extraction.display,
+        // A description of the violation, never the value — see the note on
+        // `malformed()` in tenant-claim.ts. The operator's remedy is at the
+        // IdP, so what they need is which rule the value broke.
+        claim: diagnosis,
       };
     }
 
@@ -177,15 +183,21 @@ export async function ensureTenantMembershipForSignIn(
     // with no app.tenant_id set: tenantMember.findMany would return zero
     // rows and every deny below would silently become an allow — a
     // cross-tenant fail-open.
-    const claimTenant = await resolveTenantByClaim(tenantClaim, tx);
+    const lookup = await resolveTenantByClaim(tenantClaim, tx);
     const existingTenantId = await resolveUserTenantIdFromClient(prisma, userId);
+    // The claim's owner where the lookup knows one. `revoked` knows it and
+    // `unregistered` does not, which is the distinction round-4 F1 restored:
+    // both used to arrive as `null` and the refusal below filed itself under
+    // the wrong tenant for the first of them.
+    const claimOwnerId = lookup.kind === "revoked" ? lookup.tenantId : null;
 
     if (existingTenantId === null) {
       // Rows 4 / 8: no existing membership. Join the claimed tenant,
       // creating it first if this is the first sign-in to see this claim.
-      const target: ClaimTenantResolution = claimTenant
-        ? { kind: "tenant", id: claimTenant.id }
-        : await findOrCreateTenantForClaim(tenantClaim, tx);
+      const target: ClaimTenantResolution =
+        lookup.kind === "tenant"
+          ? { kind: "tenant", id: lookup.id }
+          : await findOrCreateTenantForClaim(tenantClaim, tx);
       if (target.kind !== "tenant") {
         // Row 8b: the claim is unusable, so there is no tenant to join. The
         // reason distinguishes the refusals (see CLAIM_REFUSAL_REASON) —
@@ -209,11 +221,11 @@ export async function ensureTenantMembershipForSignIn(
       return { ok: true };
     }
 
-    if (claimTenant && existingTenantId === claimTenant.id) {
+    if (lookup.kind === "tenant" && existingTenantId === lookup.id) {
       // Row 5: already a member of the claimed tenant.
       await tx.tenantMember.upsert({
-        where: { tenantId_userId: { tenantId: claimTenant.id, userId } },
-        create: { tenantId: claimTenant.id, userId, role: TENANT_ROLE.MEMBER },
+        where: { tenantId_userId: { tenantId: lookup.id, userId } },
+        create: { tenantId: lookup.id, userId, role: TENANT_ROLE.MEMBER },
         update: {},
       });
       return { ok: true };
@@ -231,17 +243,25 @@ export async function ensureTenantMembershipForSignIn(
     if (!isBootstrapTenant) {
       // Rows 7 / 9b — same shape (existing tenant, not bootstrap, not the
       // claimed tenant), different operator-facing reason:
-      //   - claimTenant resolved (row 7): this user belongs somewhere else,
+      //   - the claim resolved (row 7): this user belongs somewhere else,
       //     a tenant this deployment already knows -> tenant_mismatch.
-      //   - claimTenant did not resolve (row 9b, the reported production
-      //     bug): the IdP is sending a claim this deployment has not
-      //     registered -> tenant_claim_unmapped. Distinct because the
-      //     operator action differs (register the claim vs. investigate the
-      //     user).
+      //   - it did not (row 9b, the reported production bug): the IdP is
+      //     sending a claim this deployment has not registered ->
+      //     tenant_claim_unmapped. Distinct because the operator action
+      //     differs (register the claim vs. investigate the user).
+      //
+      // The TENANT the row is filed under differs too (round-4 F1). When a
+      // revoked row owns the claim, the operator's decision is about THAT
+      // tenant, and the no-membership path above already files it there via
+      // `claim_taken` — so filing it under the user's tenant here split one
+      // lockout across two `tenant-domain unmapped` groups. For row 7 and for
+      // a genuinely unregistered claim there is no other owner, and the
+      // user's tenant is both the only thing known and the right place to
+      // look.
       return {
         ok: false,
-        reason: claimTenant ? "tenant_mismatch" : "tenant_claim_unmapped",
-        tenantId: existingTenantId,
+        reason: lookup.kind === "tenant" ? "tenant_mismatch" : "tenant_claim_unmapped",
+        tenantId: refusalTenantId({ tenantId: claimOwnerId }, existingTenantId),
         claim: tenantClaim,
       };
     }
@@ -253,9 +273,10 @@ export async function ensureTenantMembershipForSignIn(
     // the claim is unresolved would regress the primary bootstrap->SSO
     // onboarding path (a magic-link user's first Google sign-in) into a hard
     // denial of the same NF2 shape as the bug this PR fixes.
-    const target: ClaimTenantResolution = claimTenant
-      ? { kind: "tenant", id: claimTenant.id }
-      : await findOrCreateTenantForClaim(tenantClaim, tx);
+    const target: ClaimTenantResolution =
+      lookup.kind === "tenant"
+        ? { kind: "tenant", id: lookup.id }
+        : await findOrCreateTenantForClaim(tenantClaim, tx);
     if (target.kind !== "tenant") {
       // Same refusal dispatch as row 8b, reached via the bootstrap branch.
       return {
@@ -520,12 +541,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             email: emailForAudit,
             provider: auditProvider,
             reason: CLAIM_REFUSAL_REASON.claim_malformed,
-            claim: extraction.display,
+            claim: extraction.diagnosis,
           });
           return false;
         }
+
+        // Round-4 S4 — the FOURTH site of the same class, and the one nobody
+        // had looked at. `store === undefined` means "this deployment could
+        // not propagate the claim", which is not "no claim was asserted": the
+        // old `if (store && …)` conflated them, so a perfectly valid claim was
+        // dropped and createUser took the bootstrap path, granting the user
+        // OWNER of a fresh tenant with nothing denied and nothing audited —
+        // round-1 M1's outcome reached through a third route. Unreachable
+        // today (tenantClaimStorage.run() wraps both Auth.js handlers, and
+        // there is no other entry point), and the previous test pinned the
+        // fall-through as intended behaviour, which is precisely how the next
+        // entry point would have inherited it.
         const store = tenantClaimStorage.getStore();
-        if (store && extraction.kind === "claim") {
+        if (extraction.kind === "claim") {
+          if (!store) {
+            await emitAuthLoginFailure({
+              email: emailForAudit,
+              provider: auditProvider,
+              reason: "provider_error",
+            });
+            return false;
+          }
           store.tenantClaim = extraction.value;
         }
         return true;

@@ -206,7 +206,12 @@ export default {
     // Validate domain claim against allowed Google Workspace domains
     async signIn({ account, profile }) {
       if (account?.provider === "google" && allowedGoogleDomains.length > 0) {
-        const hd = (profile as { hd?: string })?.hd?.toLowerCase();
+        // Type guard, not a cast (round-4 F7). A cast asserts a shape rather
+        // than checking it: a non-string `hd` makes `.toLowerCase()` throw
+        // inside the signIn callback instead of denying cleanly. Same class
+        // the tenant-claim ingest boundary now type-guards.
+        const rawHd = (profile as Record<string, unknown> | null | undefined)?.hd;
+        const hd = typeof rawHd === "string" ? rawHd.toLowerCase() : undefined;
         if (!hd || !allowedGoogleDomains.includes(hd)) {
           return false;
         }

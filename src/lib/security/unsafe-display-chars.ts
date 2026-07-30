@@ -60,27 +60,35 @@ export const UNSAFE_DISPLAY_CHARS_RE = new RegExp(UNSAFE_DISPLAY_CHARS_CLASS);
 export const UNSAFE_DISPLAY_CHARS_GLOBAL_RE = new RegExp(UNSAFE_DISPLAY_CHARS_CLASS, "g");
 
 /**
- * Render a value that must reach a human — an operator terminal, a CSV export,
- * an audit metadata field — with every unsafe character replaced by its
- * visible `<U+XXXX>` form.
+ * Render a value that must reach a human — an operator terminal, a CSV export
+ * — with every unsafe character replaced by its visible `<U+XXXX>` form.
  *
  * Escaping, not stripping, is the point. Stripping `ac<U+00AD>me.example`
- * prints `acme.example`, which is a *different* claim than the one that
- * arrived — the reader is shown a value that resolves and told it was refused.
- * The escape is the only rendering that is both safe to print and honest about
- * what was received.
+ * prints `acme.example`, which is a *different*, existing claim — the reader
+ * is shown a value that resolves and told it was refused.
  *
- * `maxLength` caps the ESCAPED result and never cuts an escape in half: a
- * trailing partial `<U+2` is dropped rather than shown, since a half-written
- * escape is exactly the kind of thing a reader would take for literal text.
+ * **The rendering is injective** (round-4 F5/S2): a literal ASCII `<` is
+ * escaped too, so `<U+202E>` typed by an operator into `--by`, or stored in a
+ * pre-existing `tenant_claims` row, cannot render identically to a real
+ * U+202E. Without that pass the function's own promise — "honest about what
+ * was received" — is false for exactly the values an adversary would choose,
+ * and this is RS6's escape-the-escape-character clause in its non-backslash
+ * form.
+ *
+ * There is deliberately NO length cap. Round 3 had one, and truncating at a
+ * UTF-16 code-unit boundary split surrogate pairs; the lone surrogate then
+ * made a `jsonb` audit write fail with 22P02 and be swallowed into a
+ * dead-letter, which handed an actor a way to suppress the audit record of
+ * their own denied sign-in (round-4 S1). Nothing needs the cap now — the audit
+ * path carries a bounded ASCII diagnosis instead of a rendered value — and the
+ * remaining callers all print to a terminal. Do not reintroduce one without a
+ * well-formedness guarantee.
  */
-export function escapeUnsafeDisplayChars(value: string, maxLength?: number): string {
-  const escaped = value.replace(
-    UNSAFE_DISPLAY_CHARS_GLOBAL_RE,
-    (c) => `<U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}>`,
-  );
-  if (maxLength === undefined || escaped.length <= maxLength) return escaped;
-  // `{0,4}`, not `{0,3}`: `<U+200B` — the whole escape but its closing `>` —
-  // is the longest partial and has four hex digits.
-  return escaped.slice(0, maxLength).replace(/<(U(\+[0-9A-F]{0,4})?)?$/, "");
+export function escapeUnsafeDisplayChars(value: string): string {
+  return value
+    .replace(/</g, "<U+003C>")
+    .replace(
+      UNSAFE_DISPLAY_CHARS_GLOBAL_RE,
+      (c) => `<U+${(c.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}>`,
+    );
 }

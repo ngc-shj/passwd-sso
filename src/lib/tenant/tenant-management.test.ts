@@ -317,11 +317,18 @@ describe("findOrCreateTenantForClaim", () => {
     // would split it into two groups. The behavioural proof is in
     // tenant-claim.integration.test.ts against real Postgres; this pins the
     // clause itself, which a mock cannot exercise.
-    const sql = readFileSync(
-      resolve(__dirname, "tenant-management.ts"),
-      "utf8",
-    );
-    expect(sql).toMatch(/ORDER BY created_at ASC, id ASC\s*\n\s*LIMIT 1/);
+    // Scoped to the function body (round-4 T11): unscoped, this passed if any
+    // other query in the file grew the same clause pair, and reddened on a
+    // reformat of an unrelated one.
+    const source = readFileSync(resolve(__dirname, "tenant-management.ts"), "utf8");
+    const start = source.indexOf("async function findFoldedExternalIdOwner");
+    expect(start).toBeGreaterThan(-1);
+    const body = source.slice(start, source.indexOf("\n}", start));
+    expect(body).toMatch(/ORDER BY created_at ASC, id ASC/);
+    expect(body).toMatch(/LIMIT 1/);
+    // The pair, in order: `LIMIT 1` before the `ORDER BY` would be a syntax
+    // error, but an ORDER BY that lost its LIMIT (or vice versa) would not.
+    expect(body.indexOf("ORDER BY")).toBeLessThan(body.indexOf("LIMIT 1"));
   });
 
   it("does not probe for a fold collision when the exact-match externalId fallback already resolved", async () => {
