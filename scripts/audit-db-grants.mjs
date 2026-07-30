@@ -299,22 +299,69 @@ async function readLiveGrants(client) {
 }
 
 /**
- * The declared must-never-be-granted set, as manifest keys.
+ * The declared must-never-be-granted set.
  *
- * Absent file = empty set rather than a hard failure: this tool is also run
- * against fresh databases and by the self-test with an overridden path, and a
- * missing PRESCRIPTIVE file is not the same failure as a missing snapshot.
+ * Returns the ENTRIES, not pre-rendered keys: a denied `UPDATE` on a table has
+ * to match a column-scoped grant too, and that cannot be expressed as one exact
+ * key. See `violatesDenied`.
+ *
+ * A MISSING file is a hard error. It used to return an empty set on the reasoning
+ * that the self-test overrides the path — but the self-test always writes a real
+ * file, and the case that actually occurs is the production image not shipping
+ * it, where "no policy" silently means "nothing is forbidden". That is the
+ * failure this file exists to prevent, so it fails closed.
  */
-function readDeniedKeys() {
-  if (!existsSync(deniedFile())) return [];
-  const parsed = JSON.parse(readFileSync(deniedFile(), "utf8"));
-  if (!Array.isArray(parsed.denied)) {
-    console.error(`DENIED_INVALID: ${deniedFile()} has no "denied" array.`);
+function readDeniedEntries() {
+  const file = deniedFile();
+  if (!existsSync(file)) {
+    console.error(
+      `DENIED_POLICY_MISSING: ${file}\n` +
+        "This file declares the privileges that must never be granted. Without it " +
+        "the prescriptive half of this audit is inert and `--write` would happily " +
+        "record an over-privileged database as the expected state. Ship it with " +
+        "the runtime image (see the Dockerfile COPY for scripts/checks/) or set " +
+        "DB_DENIED_PRIVILEGES.",
+    );
     process.exit(1);
   }
-  return parsed.denied.flatMap((d) =>
-    d.privileges.map((priv) => `TABLE:${d.role}\t${d.table}\t${priv}`),
-  );
+  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  if (!Array.isArray(parsed.denied)) {
+    console.error(`DENIED_INVALID: ${file} has no "denied" array.`);
+    process.exit(1);
+  }
+  return parsed.denied;
+}
+
+/**
+ * Every key in `keys` that a denied entry forbids.
+ *
+ * Table-level AND column-level, because PostgreSQL lets the two disagree:
+ *
+ *   GRANT UPDATE (metadata) ON audit_logs TO passwd_app;
+ *   has_table_privilege (…, 'UPDATE')                 -> false
+ *   has_column_privilege(…, 'metadata', 'UPDATE')     -> true
+ *
+ * Verified against the live database. An exact-key comparison against the
+ * `TABLE:` form alone therefore passes a role that can rewrite the one column an
+ * attacker cares about — `audit_logs.metadata` is where the claim, the reason and
+ * the identifier hash live. The manifest already carries `COLUMN:` keys for this
+ * exact reason (13 legitimate ones today), so the shape was available and simply
+ * not matched on.
+ */
+function violatesDenied(keys, denied) {
+  const out = [];
+  for (const d of denied) {
+    for (const priv of d.privileges) {
+      const table = `TABLE:${d.role}\t${d.table}\t${priv}`;
+      const columnPrefix = `COLUMN:${d.role}\t${d.table}.`;
+      const columnSuffix = `\t${priv}`;
+      for (const k of keys) {
+        if (k === table) out.push(k);
+        else if (k.startsWith(columnPrefix) && k.endsWith(columnSuffix)) out.push(k);
+      }
+    }
+  }
+  return [...new Set(out)];
 }
 
 function readManifest() {
@@ -388,14 +435,13 @@ async function main() {
     await client.end();
   }
 
-  const denied = readDeniedKeys();
-  const deniedSet = new Set(denied);
+  const denied = readDeniedEntries();
 
   if (write) {
     // A regeneration against a database where a declared control is not in
     // effect would record the breakage AS the expectation — which is how the
     // audit_logs REVOKE became invisible. Refuse instead.
-    const laundered = live.filter((k) => deniedSet.has(k));
+    const laundered = violatesDenied(live, denied);
     if (laundered.length > 0) {
       console.error("REFUSING to regenerate the manifest:\n");
       for (const k of laundered) {
@@ -422,13 +468,11 @@ async function main() {
   // absent from the manifest already shows up as UNEXPECTED_GRANT below; what
   // that check cannot see is a denied privilege the manifest SANCTIONS, which
   // is the state this whole file exists to make impossible.
-  for (const key of denied) {
-    if (liveSet.has(key)) {
-      findings.push(`DENIED_PRIVILEGE_HELD: ${key.replace(/\t/g, " ")}`);
-    }
-    if (expected.has(key)) {
-      findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
-    }
+  for (const key of violatesDenied(live, denied)) {
+    findings.push(`DENIED_PRIVILEGE_HELD: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of violatesDenied([...expected], denied)) {
+    findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
   for (const key of live) {
     if (!expected.has(key)) {

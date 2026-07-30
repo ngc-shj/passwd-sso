@@ -22,7 +22,11 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { Client } from "pg";
-import { convergeRole, applyDeniedPrivileges } from "../../../scripts/bootstrap-rds-roles.mjs";
+import {
+  convergeRole,
+  applyDeniedPrivileges,
+  loadDeniedPolicy,
+} from "../../../scripts/bootstrap-rds-roles.mjs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -326,6 +330,164 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
         await applyDeniedPrivileges(su);
         expect(await holds(su, "UPDATE")).toBe(false);
         expect(await holds(su, "SELECT")).toBe(true);
+      } finally {
+        await su.end();
+      }
+    });
+  });
+
+  /**
+   * T7 — the policy is validated BEFORE any database change, and a failure
+   * inside the privilege sequence rolls back rather than leaving the widening
+   * half committed.
+   *
+   * The defect: `main()` ran the blanket
+   * `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES ... TO passwd_app` and
+   * the deny REVOKEs as separate autocommit statements. An exception, a lost
+   * connection or a process kill between them commits only the grant, and the
+   * immutable audit tables stay writable until someone happens to re-run the
+   * script. "Convergent and re-runnable" describes the steady state, not the
+   * window.
+   *
+   * Scope, stated rather than implied: these cases do NOT drive `main()`'s full
+   * sequence. That sequence converges the real `passwd_*` roles, which this
+   * database's app and workers depend on — the same reason every case above uses
+   * throwaway probes. What is covered is the three properties the fix rests on:
+   * validation happens before the client is used, the helper THROWS instead of
+   * killing the process (a `process.exit` there would skip the caller's
+   * ROLLBACK), and GRANT/REVOKE really do roll back for these statements.
+   */
+  describe("T7: fail-closed policy load + transactional privilege changes", () => {
+    const PROBE_TABLE = "bootstrap_probe_tx_tbl";
+    let declDir: string;
+    let declFile: string;
+
+    beforeEach(() => {
+      declDir = mkdtempSync(join(tmpdir(), "denied-tx-"));
+      declFile = join(declDir, "denied.json");
+      vi.stubEnv("DB_DENIED_PRIVILEGES", declFile);
+    });
+
+    afterEach(async () => {
+      vi.unstubAllEnvs();
+      rmSync(declDir, { recursive: true, force: true });
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
+        await dropProbeRoles(su);
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("THROWS when the policy file is absent, instead of treating it as an empty policy", () => {
+      // The production shape of this bug: the Dockerfile shipped the scripts and
+      // the descriptive manifest but not the declaration, and both consumers
+      // read "absent" as "nothing is forbidden" — so the deploy runner would
+      // have applied the blanket grant with no revoke behind it.
+      //
+      // Distinct from "the table does not exist yet", which IS normal on a
+      // pre-migration run and is handled per entry by the to_regclass guard.
+      rmSync(declFile, { force: true });
+      expect(() => loadDeniedPolicy()).toThrow(/DENIED_POLICY_MISSING/);
+    });
+
+    it.each([
+      ["not an array", JSON.stringify({ denied: "nope" })],
+      ["malformed table", JSON.stringify({ denied: [{ role: "r", table: "a; DROP", privileges: ["UPDATE"] }] })],
+      ["malformed privilege", JSON.stringify({ denied: [{ role: "r", table: "public.t", privileges: ["DROP"] }] })],
+      ["no privileges", JSON.stringify({ denied: [{ role: "r", table: "public.t", privileges: [] }] })],
+    ])("THROWS on a %s policy, before any database change", (_label, body) => {
+      writeFileSync(declFile, body);
+      // Throwing, not `process.exit`: the helper runs inside the caller's
+      // transaction, and killing the process there skips the ROLLBACK — which
+      // commits the blanket grant without the revokes, i.e. exactly the state
+      // the transaction exists to prevent.
+      expect(() => loadDeniedPolicy()).toThrow(/DENIED_POLICY_INVALID/);
+    });
+
+    it("rolls the blanket grant back when the sequence fails after it", async () => {
+      writeFileSync(
+        declFile,
+        JSON.stringify({
+          denied: [
+            { role: PROBE, table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "test" },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`CREATE TABLE ${PROBE_TABLE} (id int)`);
+        await convergeRole(su, PROBE, "probe-pw-tx");
+        await su.query(`REVOKE ALL ON ${PROBE_TABLE} FROM ${PROBE}`);
+
+        const holdsUpdate = async () => {
+          const { rows } = await su.query(
+            "SELECT has_table_privilege($1, $2, 'UPDATE') AS granted",
+            [PROBE, `public.${PROBE_TABLE}`],
+          );
+          return rows[0].granted as boolean;
+        };
+        expect(await holdsUpdate()).toBe(false);
+
+        // main()'s shape: BEGIN -> blanket grant -> (failure) -> ROLLBACK.
+        await su.query("BEGIN");
+        try {
+          await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
+          // Anti-vacuity: the grant is real and visible INSIDE the transaction,
+          // so the assertion after the rollback is about the rollback and not
+          // about the grant never having happened.
+          expect(await (async () => {
+            const { rows } = await su.query(
+              "SELECT has_table_privilege($1, $2, 'UPDATE') AS granted",
+              [PROBE, `public.${PROBE_TABLE}`],
+            );
+            return rows[0].granted as boolean;
+          })()).toBe(true);
+          throw new Error("simulated failure between the grant and the deny revokes");
+        } catch (e) {
+          await su.query("ROLLBACK");
+          expect((e as Error).message).toMatch(/simulated failure/);
+        }
+
+        // The widening half must not have survived on its own.
+        expect(await holdsUpdate()).toBe(false);
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("applies the revoke and commits when the sequence completes", async () => {
+      // The allow side: the transaction must not be so defensive that the
+      // intended state never lands.
+      writeFileSync(
+        declFile,
+        JSON.stringify({
+          denied: [
+            { role: PROBE, table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "test" },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`CREATE TABLE ${PROBE_TABLE} (id int)`);
+        await convergeRole(su, PROBE, "probe-pw-tx");
+
+        await su.query("BEGIN");
+        await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
+        await applyDeniedPrivileges(su, loadDeniedPolicy());
+        await su.query("COMMIT");
+
+        const { rows } = await su.query(
+          `SELECT has_table_privilege($1, $2, 'UPDATE') AS upd,
+                  has_table_privilege($1, $2, 'SELECT') AS sel`,
+          [PROBE, `public.${PROBE_TABLE}`],
+        );
+        expect(rows[0].upd).toBe(false);
+        expect(rows[0].sel).toBe(true);
       } finally {
         await su.end();
       }

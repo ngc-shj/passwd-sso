@@ -41,6 +41,14 @@ const DECLARATION = JSON.parse(
   ),
 ) as { denied: DeniedEntry[] };
 
+/**
+ * The privileges PostgreSQL can scope to a column. `GRANT DELETE (col)` does not
+ * exist, and `has_column_privilege` raises `22023` for those types rather than
+ * returning false — so the column sweep below has to skip them rather than treat
+ * the error as a finding.
+ */
+const COLUMN_SCOPABLE = new Set(["SELECT", "INSERT", "UPDATE", "REFERENCES"]);
+
 const CASES = DECLARATION.denied.flatMap((d) =>
   d.privileges.map((priv) => [d.role, d.table, priv, d.reason] as const),
 );
@@ -65,7 +73,7 @@ describe("app-role denied privileges (live database)", () => {
   });
 
   it.skipIf(SKIP).each(CASES)(
-    "%s must NOT hold %s on %s",
+    "%s must NOT hold %s on %s — at table OR column level",
     async (role, table, privilege) => {
       const [row] = await ctx.su.prisma.$queryRawUnsafe<{ granted: boolean }[]>(
         `SELECT has_table_privilege($1, $2, $3) AS granted`,
@@ -74,6 +82,41 @@ describe("app-role denied privileges (live database)", () => {
         privilege,
       );
       expect(row.granted, `${role} holds ${privilege} on ${table}`).toBe(false);
+
+      // DELETE / TRUNCATE / TRIGGER cannot be column-scoped at all —
+      // `has_column_privilege(…, 'DELETE')` raises `22023 unrecognized privilege
+      // type`. For those the table-level assertion above is already complete.
+      if (!COLUMN_SCOPABLE.has(privilege)) return;
+
+      // Column level too. PostgreSQL lets the two disagree, verified against
+      // this database:
+      //   GRANT UPDATE (metadata) ON audit_logs TO passwd_app;
+      //   has_table_privilege (…, 'UPDATE')             -> false
+      //   has_column_privilege(…, 'metadata', 'UPDATE') -> true
+      // A table-level-only assertion therefore passes a role that can rewrite
+      // the one column that matters — `audit_logs.metadata` holds the claim, the
+      // reason and the identifier hash.
+      const columns = await ctx.su.prisma.$queryRawUnsafe<{ column_name: string }[]>(
+        `SELECT a.attname AS column_name
+           FROM pg_attribute a
+          WHERE a.attrelid = $1::regclass AND a.attnum > 0 AND NOT a.attisdropped`,
+        table,
+      );
+      expect(columns.length, `${table} has no columns — fixture is vacuous`).toBeGreaterThan(0);
+
+      const held = await ctx.su.prisma.$queryRawUnsafe<{ column_name: string }[]>(
+        `SELECT a.attname AS column_name
+           FROM pg_attribute a
+          WHERE a.attrelid = $1::regclass AND a.attnum > 0 AND NOT a.attisdropped
+            AND has_column_privilege($2, a.attrelid, a.attname, $3)`,
+        table,
+        role,
+        privilege,
+      );
+      expect(
+        held.map((c) => c.column_name),
+        `${role} holds ${privilege} on columns of ${table}`,
+      ).toEqual([]);
     },
   );
 

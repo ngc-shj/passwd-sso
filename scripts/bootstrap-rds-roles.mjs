@@ -111,21 +111,69 @@ function quoteIdent(name) {
  * Exported for the same reason `convergeRole` is: the integration test drives
  * the real function against a throwaway probe role and table.
  */
-export async function applyDeniedPrivileges(client) {
-  if (!existsSync(deniedFile())) return;
-  const parsed = JSON.parse(readFileSync(deniedFile(), "utf8"));
-  for (const d of parsed.denied ?? []) {
-    if (!SQL_IDENT_RE.test(d.table) || !SQL_IDENT_RE.test(d.role)) {
-      console.error(`ERROR: malformed table/role in ${deniedFile()}: ${d.role} / ${d.table}`);
-      process.exit(1);
+/**
+ * Read and FULLY VALIDATE the declaration before any database change.
+ *
+ * Separated from the apply step on purpose: a malformed policy discovered
+ * halfway through the privilege sequence would leave the blanket GRANT
+ * committed and the REVOKEs not applied — the exact state this control exists
+ * to prevent.
+ *
+ * A MISSING file is a hard error, not an empty policy. The two conditions are
+ * different and only one of them is normal:
+ *   - "the table does not exist yet" is normal on a pre-migration run, and is
+ *     handled per-entry by the `to_regclass` guard below;
+ *   - "the policy file is absent" means this process cannot know what must be
+ *     revoked, and silently converging to the blanket grant is precisely the
+ *     failure being fixed. The production image had exactly this shape until the
+ *     Dockerfile learned to copy the file.
+ */
+export function loadDeniedPolicy() {
+  const file = deniedFile();
+  if (!existsSync(file)) {
+    throw new Error(
+      `DENIED_POLICY_MISSING: ${file}\n` +
+        "This file declares the privileges that must never be granted. Without it " +
+        "this script would converge to its blanket GRANT and silently leave the " +
+        "immutable audit tables writable. Ship it with the runtime image (see the " +
+        "Dockerfile COPY for scripts/checks/) or set DB_DENIED_PRIVILEGES.",
+    );
+  }
+  const parsed = JSON.parse(readFileSync(file, "utf8"));
+  if (!Array.isArray(parsed.denied)) {
+    throw new Error(`DENIED_POLICY_INVALID: ${file} has no "denied" array.`);
+  }
+  for (const d of parsed.denied) {
+    // DDL takes neither bound parameters nor quoted identifiers, so these are
+    // interpolated — and therefore validated. Committed policy, not input: this
+    // is a loud-failure guard against a malformed edit.
+    if (!SQL_IDENT_RE.test(d.table ?? "") || !SQL_IDENT_RE.test(d.role ?? "")) {
+      throw new Error(`DENIED_POLICY_INVALID: malformed table/role in ${file}: ${d.role} / ${d.table}`);
     }
-    if (!d.privileges?.every((x) => SQL_PRIV_RE.test(x))) {
-      console.error(`ERROR: malformed privilege in ${deniedFile()} for ${d.table}`);
-      process.exit(1);
+    if (!Array.isArray(d.privileges) || d.privileges.length === 0) {
+      throw new Error(`DENIED_POLICY_INVALID: ${file} entry for ${d.table} lists no privileges`);
     }
+    if (!d.privileges.every((x) => SQL_PRIV_RE.test(x))) {
+      throw new Error(`DENIED_POLICY_INVALID: malformed privilege in ${file} for ${d.table}`);
+    }
+  }
+  return parsed.denied;
+}
+
+/**
+ * Re-apply the declared must-never-be-granted set.
+ *
+ * THROWS rather than calling `process.exit` — it runs inside the caller's
+ * transaction, and killing the process there skips the ROLLBACK, committing the
+ * blanket grant without the revokes.
+ */
+export async function applyDeniedPrivileges(client, denied = loadDeniedPolicy()) {
+  for (const d of denied) {
     const privs = d.privileges.join(", ");
     // to_regclass returns NULL for a table that does not exist, which is the
-    // normal state when this script runs before the first migration.
+    // normal state when this script runs before the first migration. Note this
+    // is per-ENTRY tolerance for a missing TABLE, never tolerance for a missing
+    // POLICY — see loadDeniedPolicy.
     await client.query(
       `DO $$ BEGIN
          IF to_regclass('${d.table}') IS NOT NULL
@@ -214,12 +262,30 @@ async function main() {
     }
   }
 
+  // Validated BEFORE the client is even built: a malformed or missing policy
+  // must stop the run while the database is still untouched.
+  const denied = loadDeniedPolicy();
+
   const client = new Client({ connectionString });
   await client.connect();
   try {
     for (const r of ROLES) {
       await convergeRole(client, r.name, process.env[r.pwEnv]);
     }
+
+    // ONE transaction for the whole privilege sequence.
+    //
+    // The blanket `GRANT ... ON ALL TABLES` and the deny REVOKEs that narrow it
+    // back are two ends of a single intended state. Run as autocommit
+    // statements, a crash, a lost connection or a thrown error between them
+    // commits only the widening half — leaving the immutable audit tables
+    // writable until someone happens to re-run this script. "Convergent and
+    // re-runnable" is not sufficient for a security control: it describes the
+    // steady state, not the window.
+    //
+    // Every statement below is transactional DDL in PostgreSQL (GRANT, REVOKE,
+    // ALTER DEFAULT PRIVILEGES), so the rollback is real.
+    await client.query("BEGIN");
     // Schema-level privileges — mirror 02-create-app-role.sql. Safe to re-run.
     await client.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
 
@@ -269,7 +335,7 @@ async function main() {
     //
     // Idempotent, and safe on a pre-migration run: REVOKE on a table that does
     // not exist yet is skipped by the to_regclass guard.
-    await applyDeniedPrivileges(client);
+    await applyDeniedPrivileges(client, denied);
 
     // Worker roles: SCHEMA-level and DEFAULT privileges only.
     //
@@ -303,7 +369,13 @@ async function main() {
       );
     }
 
+    await client.query("COMMIT");
     console.log("bootstrap-rds-roles: done");
+  } catch (e) {
+    // Nothing partial survives: without this, a failure after the blanket GRANT
+    // leaves the audit tables writable.
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
   } finally {
     await client.end();
   }
