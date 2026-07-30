@@ -143,6 +143,24 @@ Notable grant *narrowing* (not widening) applied via migration
 role can no longer issue an arbitrary `UPDATE`/`DELETE` against the immutable audit tables; it can
 only invoke the two closed-signature definer routines.
 
+**A migration is not sufficient to hold this control, and for a period it did not.**
+`scripts/bootstrap-rds-roles.mjs` converges role privileges with a table-blind
+`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app`. That statement
+re-grants exactly what the migration revoked, and the script is documented as convergent and
+re-runnable — so any convergence run performed after the migrations reopened it. It went unnoticed
+because `scripts/checks/db-grants-manifest.json` is *descriptive*: it is generated from a live
+database with `audit-db-grants.mjs --write`, so a regeneration against the reopened state recorded
+`passwd_app` holding `UPDATE`/`DELETE` as the expected set, and the grant audit reported OK.
+
+The control is therefore declared *prescriptively* in
+[`scripts/checks/app-role-denied-privileges.json`](../../scripts/checks/app-role-denied-privileges.json),
+which two consumers read: `bootstrap-rds-roles.mjs` re-applies the revokes after its blanket grant,
+and `audit-db-grants.mjs` fails on `DENIED_PRIVILEGE_HELD` (the database holds one) and on
+`DENIED_PRIVILEGE_IN_MANIFEST` (the descriptive manifest sanctions one), the latter also refusing
+`--write` so a broken database can no longer be laundered into the expected set.
+`src/__tests__/db-integration/app-role-denied-privileges.integration.test.ts` asserts the
+declaration against a live database, deriving its cases from the file.
+
 ### `passwd_outbox_worker` (audit outbox drain)
 
 Migration: `prisma/migrations/20260412100001_add_audit_outbox_worker_role/migration.sql`

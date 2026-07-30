@@ -170,6 +170,21 @@ jobs:
           ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
           EOF
 
+      # The GRANT above is table-blind and runs AFTER `prisma migrate deploy`, so
+      # it re-grants exactly what 20260522000200_audit_log_revoke_via_definer
+      # revoked on audit_logs / audit_chain_anchors (C13 / OWASP A04-2). Left
+      # alone, every integration run tested a database whose audit tables the app
+      # role can rewrite — and the assertions that would have caught it were the
+      # ones failing.
+      #
+      # Applied from the single declaration rather than spelled again here: a
+      # fourth copy of the policy is how the first one came to be undone. See
+      # scripts/checks/app-role-denied-privileges.json.
+      - name: Re-apply the must-never-be-granted policy (post-migration)
+        run: node scripts/bootstrap-rds-roles.mjs --denied-only
+        env:
+          MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+
       - name: Run integration tests
         env:
           # Explicit superuser URL: helpers.ts:23 prefers MIGRATION_DATABASE_URL

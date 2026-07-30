@@ -250,6 +250,19 @@ COPY --from=builder --chown=nextjs:nodejs /app/scripts/bootstrap-rds-roles.mjs .
 # connection, and only tasks in the ECS SG can reach RDS.
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/audit-db-grants.mjs ./scripts/audit-db-grants.mjs
 COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/db-grants-manifest.json ./scripts/checks/db-grants-manifest.json
+# The PRESCRIPTIVE half of the same audit — privileges that must never be held,
+# whatever the live database says. Both consumers above read it, and both now
+# fail closed without it: shipping the scripts and the descriptive manifest but
+# NOT this file left the control inert in the production image while every local
+# check stayed green. `scripts/checks/check-runtime-image-assets.mjs` derives the
+# required set from the scripts themselves — transitively through their local
+# imports — so a third data file cannot be forgotten the same way.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/checks/app-role-denied-privileges.json ./scripts/checks/app-role-denied-privileges.json
+# The loader/validator both scripts above import. A shared module is a runtime
+# asset exactly like the JSON — `check-mjs-imports.mjs` proves a specifier
+# resolves in the REPO, not in the image — so the same gate derives it from their
+# import statements.
+COPY --from=builder --chown=nextjs:nodejs /app/scripts/lib/denied-privileges.mjs ./scripts/lib/denied-privileges.mjs
 
 # Audit outbox worker (bundled by esbuild; pg + deps are external)
 COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js

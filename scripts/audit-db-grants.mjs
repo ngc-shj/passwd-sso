@@ -32,10 +32,17 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
+import { loadDeniedPolicy, deniedFile } from "./lib/denied-privileges.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const MANIFEST_FILE =
   process.env.DB_GRANTS_MANIFEST ?? `${REPO_ROOT}scripts/checks/db-grants-manifest.json`;
+
+// The PRESCRIPTIVE companion to the manifest above, loaded and validated by the
+// SAME module the bootstrap uses. The manifest is a SNAPSHOT of a live database
+// (`--write`), so it records whatever is there — including a control that has
+// been silently undone, which is exactly how the audit_logs/audit_chain_anchors
+// REVOKE from migration 20260522000200 came to be reported as expected.
 
 /** Roles whose ACLs are audited. Anything not listed here is out of scope. */
 const AUDITED_ROLES = [
@@ -282,6 +289,38 @@ async function readLiveGrants(client) {
   return [...new Set(keys)].sort();
 }
 
+/**
+ * Every key in `keys` that a denied entry forbids.
+ *
+ * Table-level AND column-level, because PostgreSQL lets the two disagree:
+ *
+ *   GRANT UPDATE (metadata) ON audit_logs TO passwd_app;
+ *   has_table_privilege (…, 'UPDATE')                 -> false
+ *   has_column_privilege(…, 'metadata', 'UPDATE')     -> true
+ *
+ * Verified against the live database. An exact-key comparison against the
+ * `TABLE:` form alone therefore passes a role that can rewrite the one column an
+ * attacker cares about — `audit_logs.metadata` is where the claim, the reason and
+ * the identifier hash live. The manifest already carries `COLUMN:` keys for this
+ * exact reason (13 legitimate ones today), so the shape was available and simply
+ * not matched on.
+ */
+function violatesDenied(keys, denied) {
+  const out = [];
+  for (const d of denied) {
+    for (const priv of d.privileges) {
+      const table = `TABLE:${d.role}\t${d.table}\t${priv}`;
+      const columnPrefix = `COLUMN:${d.role}\t${d.table}.`;
+      const columnSuffix = `\t${priv}`;
+      for (const k of keys) {
+        if (k === table) out.push(k);
+        else if (k.startsWith(columnPrefix) && k.endsWith(columnSuffix)) out.push(k);
+      }
+    }
+  }
+  return [...new Set(out)];
+}
+
 function readManifest() {
   if (!existsSync(MANIFEST_FILE)) {
     console.error(
@@ -353,7 +392,46 @@ async function main() {
     await client.end();
   }
 
+  const denied = loadDeniedPolicy();
+
+  // A policy entry naming a role this audit does not READ is inert: `readLiveGrants`
+  // only emits keys for AUDITED_ROLES, so `violatesDenied` would find nothing and
+  // the entry would look enforced while enforcing nothing. That is the same
+  // silently-ineffective-control shape this whole file exists to close, so it is
+  // a hard error rather than a shrug. Surfaced by writing the subprocess test:
+  // the first version used a throwaway role and the audit reported no finding.
+  const unaudited = [...new Set(denied.map((d) => d.role))].filter(
+    (r) => !AUDITED_ROLES.includes(r),
+  );
+  if (unaudited.length > 0) {
+    console.error(
+      `DENIED_POLICY_UNAUDITED_ROLE: ${unaudited.join(", ")}\n` +
+        `${deniedFile()} forbids privileges for role(s) this audit does not read. ` +
+        `Add them to AUDITED_ROLES in ${"scripts/audit-db-grants.mjs"}, or the ` +
+        "entry is enforced by the bootstrap alone and invisible here.",
+    );
+    process.exit(1);
+  }
+
   if (write) {
+    // A regeneration against a database where a declared control is not in
+    // effect would record the breakage AS the expectation — which is how the
+    // audit_logs REVOKE became invisible. Refuse instead.
+    const laundered = violatesDenied(live, denied);
+    if (laundered.length > 0) {
+      console.error("REFUSING to regenerate the manifest:\n");
+      for (const k of laundered) {
+        console.error(`  DENIED_PRIVILEGE_HELD: ${k.replace(/\t/g, " ")}`);
+      }
+      console.error(
+        `\nThese privileges are declared must-never-be-granted in` +
+          `\n${deniedFile()}, but the database holds them. Writing the manifest` +
+          `\nnow would record the loss of that control as the expected state.` +
+          `\nRepair the database first (see that file for the sanctioned` +
+          `\nmutation paths), then regenerate.\n`,
+      );
+      process.exit(1);
+    }
     writeManifest(live);
     return;
   }
@@ -362,6 +440,16 @@ async function main() {
   const liveSet = new Set(live);
 
   const findings = [];
+  // Checked FIRST and against both sides. A denied privilege that is merely
+  // absent from the manifest already shows up as UNEXPECTED_GRANT below; what
+  // that check cannot see is a denied privilege the manifest SANCTIONS, which
+  // is the state this whole file exists to make impossible.
+  for (const key of violatesDenied(live, denied)) {
+    findings.push(`DENIED_PRIVILEGE_HELD: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of violatesDenied([...expected], denied)) {
+    findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
+  }
   for (const key of live) {
     if (!expected.has(key)) {
       findings.push(`UNEXPECTED_GRANT: ${key.replace(/\t/g, " ")}`);
@@ -380,7 +468,13 @@ async function main() {
       `\nAn UNEXPECTED_GRANT means a role holds a privilege the manifest` +
         `\ndoes not sanction — revoke it, or if a migration granted it` +
         `\nintentionally, regenerate the manifest with --write and review the diff.` +
-        `\nA MISSING_GRANT usually means migrations have not been applied.\n`,
+        `\nA MISSING_GRANT usually means migrations have not been applied.` +
+        `\nA DENIED_PRIVILEGE_HELD means a declared control is NOT in effect on` +
+        `\nthis database; re-run scripts/bootstrap-rds-roles.mjs, which now` +
+        `\nre-applies these revokes, or issue the REVOKE directly.` +
+        `\nA DENIED_PRIVILEGE_IN_MANIFEST means the manifest sanctions something` +
+        `\n${deniedFile()} forbids — the manifest was regenerated against a broken` +
+        `\ndatabase. Repair the database, then regenerate.\n`,
     );
     process.exit(1);
   }

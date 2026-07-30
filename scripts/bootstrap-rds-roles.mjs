@@ -42,6 +42,17 @@
 
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
+// ONE loader/validator, shared with scripts/audit-db-grants.mjs. Two copies of
+// a security policy converge on the weaker one — which had already happened
+// here: this file validated every entry and the audit validated only that a
+// `denied` array existed.
+import { loadDeniedPolicy } from "./lib/denied-privileges.mjs";
+// Re-exported so the integration test drives the SAME loader the script uses,
+// rather than a second import path that could diverge from it.
+export { loadDeniedPolicy };
+
+// The prescriptive must-never-be-granted declaration, shared with
+// scripts/audit-db-grants.mjs. See applyDeniedPrivileges below.
 
 // Roles created here. Table-specific GRANTs for the worker roles are issued by
 // the Prisma migrations that create those tables (they carry IF NOT EXISTS role
@@ -77,6 +88,66 @@ const ROLE_ATTR_EXPECTATIONS = {
 // names read back from pg_roles, which are not part of our hardcoded allowlist.
 function quoteIdent(name) {
   return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Apply `scripts/checks/app-role-denied-privileges.json`.
+ *
+ * Kept as data rather than statements in this file so that the SAME declaration
+ * drives both this script and `scripts/audit-db-grants.mjs`'s
+ * DENIED_PRIVILEGE_HELD / DENIED_PRIVILEGE_IN_MANIFEST checks. Two copies of a
+ * security policy is how the first one came to be undone without anything
+ * noticing.
+ *
+ * Exported for the same reason `convergeRole` is: the integration test drives
+ * the real function against a throwaway probe role and table.
+ */
+/**
+ * Re-apply the declared must-never-be-granted set.
+ *
+ * THROWS rather than calling `process.exit` — it runs inside the caller's
+ * transaction, and killing the process there skips the ROLLBACK, committing the
+ * blanket grant without the revokes.
+ */
+export async function applyDeniedPrivileges(
+  client,
+  denied = loadDeniedPolicy(),
+  { requireTargets = false } = {},
+) {
+  for (const d of denied) {
+    const privs = d.privileges.join(", ");
+
+    const { rows } = await client.query(
+      `SELECT to_regclass($1) IS NOT NULL AS table_exists,
+              EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $2) AS role_exists`,
+      [d.table, d.role],
+    );
+    const { table_exists: tableExists, role_exists: roleExists } = rows[0];
+
+    if (!tableExists || !roleExists) {
+      // Tolerated in the FULL run, which is documented to happen before the
+      // first migration — the audit tables genuinely do not exist yet.
+      //
+      // Refused in `--denied-only`, which is post-migration by definition. There,
+      // a target that is missing means the POLICY is wrong (a mistyped table, a
+      // renamed role), and skipping it silently printed "policy applied" and
+      // exited 0 — a green CI step that revoked nothing. A mode whose entire job
+      // is to apply the policy must not succeed without applying it.
+      if (requireTargets) {
+        throw new Error(
+          `DENIED_POLICY_TARGET_MISSING: ${d.role} / ${d.table} — ` +
+            `${tableExists ? "role" : "table"} does not exist. This mode runs AFTER ` +
+            "the migrations, so a missing target is a policy error, not the " +
+            "pre-migration state. Nothing was applied; the transaction is rolled back.",
+        );
+      }
+      console.log(`  denied: SKIPPED (target absent) ${d.table} — pre-migration run`);
+      continue;
+    }
+
+    await client.query(`REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
+    console.log(`  denied: REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
+  }
 }
 
 /**
@@ -148,11 +219,52 @@ async function main() {
     console.error("ERROR: MIGRATION_DATABASE_URL is required (SUPERUSER connection).");
     process.exit(1);
   }
-  for (const r of ROLES) {
-    if (!process.env[r.pwEnv]) {
-      console.error(`ERROR: ${r.pwEnv} is required (password for ${r.name}).`);
-      process.exit(1);
+
+  // `--denied-only` applies the must-never-be-granted policy and nothing else.
+  //
+  // It exists because of an ORDERING property that is easy to get wrong: this
+  // script's full run happens BEFORE the first migration, where the audit tables
+  // do not exist yet and the `to_regclass` guard correctly skips them. Any
+  // pipeline that issues a blanket `GRANT ... ON ALL TABLES` AFTER the migrations
+  // therefore re-grants what migration 20260522000200 revoked, with nothing left
+  // to take it back.
+  //
+  // `.github/workflows/ci-integration.yml` did exactly that on every run — the
+  // third instance of this class after the RDS bootstrap itself. Rather than
+  // spell the policy a fourth time in YAML, that step now calls this mode, so
+  // there is still one source for what may never be granted.
+  const deniedOnly = process.argv.includes("--denied-only");
+
+  if (!deniedOnly) {
+    for (const r of ROLES) {
+      if (!process.env[r.pwEnv]) {
+        console.error(`ERROR: ${r.pwEnv} is required (password for ${r.name}).`);
+        process.exit(1);
+      }
     }
+  }
+
+  // Validated BEFORE the client is even built: a malformed or missing policy
+  // must stop the run while the database is still untouched.
+  const denied = loadDeniedPolicy();
+
+  if (deniedOnly) {
+    const client = new Client({ connectionString });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      // requireTargets: this mode is post-migration, so a missing target is a
+      // policy error rather than the pre-migration state.
+      await applyDeniedPrivileges(client, denied, { requireTargets: true });
+      await client.query("COMMIT");
+      console.log("bootstrap-rds-roles: denied-privilege policy applied");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
+    } finally {
+      await client.end();
+    }
+    return;
   }
 
   const client = new Client({ connectionString });
@@ -161,6 +273,20 @@ async function main() {
     for (const r of ROLES) {
       await convergeRole(client, r.name, process.env[r.pwEnv]);
     }
+
+    // ONE transaction for the whole privilege sequence.
+    //
+    // The blanket `GRANT ... ON ALL TABLES` and the deny REVOKEs that narrow it
+    // back are two ends of a single intended state. Run as autocommit
+    // statements, a crash, a lost connection or a thrown error between them
+    // commits only the widening half — leaving the immutable audit tables
+    // writable until someone happens to re-run this script. "Convergent and
+    // re-runnable" is not sufficient for a security control: it describes the
+    // steady state, not the window.
+    //
+    // Every statement below is transactional DDL in PostgreSQL (GRANT, REVOKE,
+    // ALTER DEFAULT PRIVILEGES), so the rollback is real.
+    await client.query("BEGIN");
     // Schema-level privileges — mirror 02-create-app-role.sql. Safe to re-run.
     await client.query("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
 
@@ -195,6 +321,23 @@ async function main() {
       "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app",
     );
 
+    // Re-apply the declared must-never-be-granted set, AFTER the blanket grant
+    // above and derived from a single prescriptive file rather than spelled
+    // here.
+    //
+    // The blanket `GRANT ... ON ALL TABLES` is table-blind, so on any run that
+    // happens AFTER the migrations it re-granted exactly what migration
+    // 20260522000200_audit_log_revoke_via_definer had revoked: UPDATE/DELETE on
+    // audit_logs and audit_chain_anchors. The comment on the worker block below
+    // shows the authors reasoned carefully about grants the migrations ADD; what
+    // was missed is that a migration can also install a NEGATIVE grant, and this
+    // script is documented as convergent and re-runnable — so every convergence
+    // run silently reopened an OWASP A04-2 control.
+    //
+    // Idempotent, and safe on a pre-migration run: REVOKE on a table that does
+    // not exist yet is skipped by the to_regclass guard.
+    await applyDeniedPrivileges(client, denied);
+
     // Worker roles: SCHEMA-level and DEFAULT privileges only.
     //
     // Scope note (do not over-read this as convergence): unlike passwd_app
@@ -227,7 +370,13 @@ async function main() {
       );
     }
 
+    await client.query("COMMIT");
     console.log("bootstrap-rds-roles: done");
+  } catch (e) {
+    // Nothing partial survives: without this, a failure after the blanket GRANT
+    // leaves the audit tables writable.
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
   } finally {
     await client.end();
   }

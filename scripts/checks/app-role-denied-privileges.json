@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "PRESCRIPTIVE declaration: privileges that must NEVER be held, whatever the",
+    "live database currently says. This is the complement of",
+    "db-grants-manifest.json, which is DESCRIPTIVE — that file is generated with",
+    "`audit-db-grants.mjs --write` from a live database, so it records whatever",
+    "is there, including a control that has been silently undone.",
+    "",
+    "Why this file exists. Migration 20260522000200_audit_log_revoke_via_definer",
+    "(C13 / OWASP A04-2) revokes UPDATE/DELETE on the immutable audit tables from",
+    "the application role and exposes the two sanctioned mutations as SECURITY",
+    "DEFINER routines (audit_log_tenant_migrate, audit_log_purge).",
+    "scripts/bootstrap-rds-roles.mjs then ran a table-blind",
+    "`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES ... TO passwd_app`, which",
+    "re-granted exactly what the migration had revoked — and because the script is",
+    "documented as convergent and re-runnable, every convergence run reopened it.",
+    "The descriptive manifest had been regenerated against that state, so the grant",
+    "audit reported OK and the loss was invisible.",
+    "",
+    "Two consumers, and BOTH are required for the control to hold:",
+    "  1. scripts/bootstrap-rds-roles.mjs re-applies these REVOKEs after its",
+    "     blanket grant, so convergence cannot leave them granted.",
+    "  2. scripts/audit-db-grants.mjs fails when a denied privilege is held live,",
+    "     AND when db-grants-manifest.json lists one — so `--write` against a",
+    "     broken database can no longer launder the breakage into the expected set.",
+    "",
+    "Adding an entry here is a policy decision. Removing one means deciding the",
+    "role may hold that privilege directly; say why in the PR."
+  ],
+  "denied": [
+    {
+      "role": "passwd_app",
+      "table": "public.audit_logs",
+      "privileges": ["UPDATE", "DELETE"],
+      "reason": "Immutable audit trail (C13 / OWASP A04-2). The two sanctioned mutations are the SECURITY DEFINER routines audit_log_tenant_migrate (tenant merge, src/auth.ts) and audit_log_purge (retention GC + /api/maintenance/purge-audit-logs). No production code path issues a direct UPDATE/DELETE."
+    },
+    {
+      "role": "passwd_app",
+      "table": "public.audit_chain_anchors",
+      "privileges": ["UPDATE", "DELETE"],
+      "reason": "The tamper-evidence anchors for the audit chain. An app role that can rewrite anchors can also re-anchor forged history, which removes the detection the HMAC chain exists to provide."
+    }
+  ]
+}

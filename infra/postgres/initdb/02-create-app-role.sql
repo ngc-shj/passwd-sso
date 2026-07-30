@@ -28,6 +28,14 @@ DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_app', current
 GRANT USAGE ON SCHEMA public TO passwd_app;
 
 -- Grant DML on all existing and future tables
+--
+-- Unlike scripts/bootstrap-rds-roles.mjs, this GRANT needs no matching
+-- deny-policy re-apply. Files under /docker-entrypoint-initdb.d run EXACTLY
+-- ONCE, against an empty data directory, before any migration — so there is no
+-- "convergence run after the migrations" in which this statement could re-grant
+-- what migration 20260522000200 revokes. The RDS bootstrap is documented as
+-- convergent and re-runnable, which is precisely why it needs the re-apply and
+-- this file does not. See scripts/checks/app-role-denied-privileges.json.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
 
