@@ -20,7 +20,7 @@
  * app and workers depend on.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { Client } from "pg";
 import { convergeRole, applyDeniedPrivileges } from "../../../scripts/bootstrap-rds-roles.mjs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -245,11 +245,14 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
     beforeEach(() => {
       declDir = mkdtempSync(join(tmpdir(), "denied-privs-"));
       declFile = join(declDir, "denied.json");
-      process.env.DB_DENIED_PRIVILEGES = declFile;
+      // vi.stubEnv, not a direct assignment: check-test-hygiene gate (c) forbids
+      // `process.env.X =` in a test file, and the integration setup wires no
+      // global unstub — so this file unstubs its own in afterEach.
+      vi.stubEnv("DB_DENIED_PRIVILEGES", declFile);
     });
 
     afterEach(async () => {
-      delete process.env.DB_DENIED_PRIVILEGES;
+      vi.unstubAllEnvs();
       rmSync(declDir, { recursive: true, force: true });
       const su = new Client({ connectionString: superuserUrl() });
       await su.connect();
