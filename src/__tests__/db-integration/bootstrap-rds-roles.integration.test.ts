@@ -566,6 +566,63 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
       }
     });
 
+    it.each([
+      ["a mistyped table", { role: PROBE, table: "public.no_such_table_at_all", privileges: ["UPDATE"], reason: "t" }],
+      ["a renamed role", { role: "no_such_role_at_all", table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "t" }],
+    ])("exits non-zero when the policy names %s", async (_label, entry) => {
+      // The FULL run tolerates an absent target — it is documented to happen
+      // before the first migration, where the audit tables do not exist yet.
+      // This mode is post-migration by definition, so an absent target means the
+      // POLICY is wrong, and skipping it printed "policy applied" and exited 0:
+      // a green CI step that revoked nothing.
+      writeFileSync(decl.file, JSON.stringify({ denied: [entry] }));
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`CREATE TABLE ${PROBE_TABLE} (id int)`);
+        await convergeRole(su, PROBE, "probe-pw-cli");
+      } finally {
+        await su.end();
+      }
+      const r = runDeniedOnly();
+      expect(r.status).not.toBe(0);
+      expect(`${r.stdout}${r.stderr}`).toContain("DENIED_POLICY_TARGET_MISSING");
+    });
+
+    it("rolls back an already-applied entry when a later one names a missing target", async () => {
+      // The transaction boundary, exercised rather than asserted: entry 1 is
+      // valid and IS revoked, entry 2 then throws. A partial apply would leave a
+      // policy half-enforced and the run reported as failed, which is the worst
+      // of both.
+      writeFileSync(
+        decl.file,
+        JSON.stringify({
+          denied: [
+            { role: PROBE, table: `public.${PROBE_TABLE}`, privileges: ["UPDATE"], reason: "t" },
+            { role: PROBE, table: "public.no_such_table_at_all", privileges: ["UPDATE"], reason: "t" },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await su.query(`CREATE TABLE ${PROBE_TABLE} (id int)`);
+        await convergeRole(su, PROBE, "probe-pw-cli");
+        await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
+        const table = `public.${PROBE_TABLE}`;
+        expect(await hasTablePrivilege(su, PROBE, table, "UPDATE")).toBe(true);
+
+        const r = runDeniedOnly();
+        expect(r.status).not.toBe(0);
+        // Entry 1's REVOKE really was issued — the log says so — and is gone
+        // again, which is what makes this a rollback rather than a no-op.
+        expect(r.stdout).toContain(`REVOKE UPDATE ON ${table}`);
+        expect(await hasTablePrivilege(su, PROBE, table, "UPDATE")).toBe(true);
+      } finally {
+        await su.end();
+      }
+    });
+
     it("exits non-zero on a missing policy rather than silently doing nothing", () => {
       // A CI step that quietly succeeds without applying anything is how the
       // control would go missing again, this time with a green pipeline.

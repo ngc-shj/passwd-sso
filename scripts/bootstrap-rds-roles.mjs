@@ -109,21 +109,43 @@ function quoteIdent(name) {
  * transaction, and killing the process there skips the ROLLBACK, committing the
  * blanket grant without the revokes.
  */
-export async function applyDeniedPrivileges(client, denied = loadDeniedPolicy()) {
+export async function applyDeniedPrivileges(
+  client,
+  denied = loadDeniedPolicy(),
+  { requireTargets = false } = {},
+) {
   for (const d of denied) {
     const privs = d.privileges.join(", ");
-    // to_regclass returns NULL for a table that does not exist, which is the
-    // normal state when this script runs before the first migration. Note this
-    // is per-ENTRY tolerance for a missing TABLE, never tolerance for a missing
-    // POLICY — see loadDeniedPolicy.
-    await client.query(
-      `DO $$ BEGIN
-         IF to_regclass('${d.table}') IS NOT NULL
-            AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${d.role}') THEN
-           REVOKE ${privs} ON ${d.table} FROM ${d.role};
-         END IF;
-       END $$`,
+
+    const { rows } = await client.query(
+      `SELECT to_regclass($1) IS NOT NULL AS table_exists,
+              EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $2) AS role_exists`,
+      [d.table, d.role],
     );
+    const { table_exists: tableExists, role_exists: roleExists } = rows[0];
+
+    if (!tableExists || !roleExists) {
+      // Tolerated in the FULL run, which is documented to happen before the
+      // first migration — the audit tables genuinely do not exist yet.
+      //
+      // Refused in `--denied-only`, which is post-migration by definition. There,
+      // a target that is missing means the POLICY is wrong (a mistyped table, a
+      // renamed role), and skipping it silently printed "policy applied" and
+      // exited 0 — a green CI step that revoked nothing. A mode whose entire job
+      // is to apply the policy must not succeed without applying it.
+      if (requireTargets) {
+        throw new Error(
+          `DENIED_POLICY_TARGET_MISSING: ${d.role} / ${d.table} — ` +
+            `${tableExists ? "role" : "table"} does not exist. This mode runs AFTER ` +
+            "the migrations, so a missing target is a policy error, not the " +
+            "pre-migration state. Nothing was applied; the transaction is rolled back.",
+        );
+      }
+      console.log(`  denied: SKIPPED (target absent) ${d.table} — pre-migration run`);
+      continue;
+    }
+
+    await client.query(`REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
     console.log(`  denied: REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
   }
 }
@@ -231,7 +253,9 @@ async function main() {
     await client.connect();
     try {
       await client.query("BEGIN");
-      await applyDeniedPrivileges(client, denied);
+      // requireTargets: this mode is post-migration, so a missing target is a
+      // policy error rather than the pre-migration state.
+      await applyDeniedPrivileges(client, denied, { requireTargets: true });
       await client.query("COMMIT");
       console.log("bootstrap-rds-roles: denied-privilege policy applied");
     } catch (e) {
