@@ -65,8 +65,30 @@
  * through an aliased delegate (`const d = tx.tenantClaim`); a call whose first
  * argument is not an object literal (`tenant.create(payload)`), which without a
  * Program cannot be followed; raw SQL assembled at run time; `.sql` files, which
- * this gate does not read; the test trees, excluded by `walkSourceFiles`; and
- * the `tenants → tenant_claims ON DELETE CASCADE` path.
+ * this gate does not read; and the test trees, excluded by `walkSourceFiles`.
+ *
+ * The `tenants → tenant_claims ON DELETE CASCADE` path is NO LONGER a gap this
+ * gate leaves open (20260731170000): a `BEFORE DELETE` trigger on
+ * `tenant_claims` now appends a `deregister` event for exactly that path. It
+ * stays a non-member of what THIS gate proves, though, and for the same
+ * reason as always — the write is a database trigger, not TS the AST can walk
+ * — so it is enforced by the migration's own DDL rather than by anything
+ * below.
+ *
+ * WHAT THIS GATE DOES NOT CLOSE, AND WHY THE PRIVILEGE LAYER HAS TO. Every
+ * predicate here answers "did the code that intends to write
+ * `tenant_claims` also emit an event" — it says nothing about a write that
+ * was never supposed to happen at all. A role holding UPDATE or DELETE on
+ * `tenant_claims` can rewrite or erase a row's routing directly, in a single
+ * raw statement with no `tenantClaim.*` call and no producer call anywhere
+ * near it — invisible to this gate by construction, the same way this gate
+ * cannot see a write issued from `psql`. Enumerating CODE writers, however
+ * completely, proves nothing about a writer that is not code the gate scans.
+ * That is why `passwd_app`'s privileges on `tenant_claims` are ALSO covered
+ * prescriptively in `scripts/checks/app-role-denied-privileges.json`
+ * (20260731170000 added UPDATE/DELETE there, alongside the pre-existing
+ * `tenant_claim_events` entries) — a control this gate does not subsume and
+ * cannot be asked to.
  *
  * Runs without a Program (in-memory project).
  *

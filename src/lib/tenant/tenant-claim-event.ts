@@ -1,29 +1,38 @@
 import type { TxOrPrisma } from "@/lib/prisma";
 
 /**
- * The four routing operations recorded in `tenant_claim_events` (SC11 / #743).
+ * The five routing operations recorded in `tenant_claim_events` (SC11 / #743).
  *
  * A const-object plus a derived union rather than a bare string union: the
  * repo's standing convention for an enumerated set of three or more literals,
  * and the shape `AUDIT_ACTION` / `TENANT_ROLE` already use.
  *
- * `tenant_claim_events_operation_check` in
- * `prisma/migrations/20260731100000_add_tenant_claim_events/migration.sql`
- * carries the same four values. The two are pinned against each other by a
- * drift test that reads `pg_get_constraintdef` from the LIVE catalogue — not
- * from the migration file, which is immutable once applied and therefore says
- * nothing about what the database currently enforces.
+ * `tenant_claim_events_operation_check`, widened to five values by
+ * `prisma/migrations/20260731170000_tenant_claim_events_hardening/migration.sql`
+ * (originally four, from `.../20260731100000_add_tenant_claim_events`),
+ * carries the same set. The two are pinned against each other by a drift test
+ * that reads `pg_get_constraintdef` from the LIVE catalogue — not from either
+ * migration file, both immutable once applied and therefore silent on what
+ * the database currently enforces.
  *
  * NOT a partition of outcomes. `tenant-domain add --from` against a revoked
  * row is simultaneously a reassignment and an un-revoke, and is recorded as
  * `reassign`. Revocation-state questions are answered from
  * `oldRevokedAt`/`newRevokedAt`, never by filtering on `operation`.
+ *
+ * `DEREGISTER` is the one value no application code ever names: it is written
+ * only by the `BEFORE DELETE` trigger `tenant_claims_record_deregister_event`
+ * (20260731170000), when a tenant deletion cascades away its `tenant_claims`
+ * rows. Exported here anyway — the const-object is this table's one
+ * authoritative operation set, TS producer or not, and the CHECK-drift test
+ * and the completeness gate both derive from it.
  */
 export const TENANT_CLAIM_EVENT_OPERATION = {
   REGISTER: "register",
   REVOKE: "revoke",
   UNREVOKE: "unrevoke",
   REASSIGN: "reassign",
+  DEREGISTER: "deregister",
 } as const;
 
 export type TenantClaimEventOperation =
@@ -31,6 +40,14 @@ export type TenantClaimEventOperation =
 
 /** The label the sign-in auto-registration path records as its actor. */
 export const SIGNIN_ACTOR_LABEL = "signin";
+
+/**
+ * The label the `tenant_claims` BEFORE DELETE trigger records for a
+ * `deregister` event (20260731170000). Exported so a test asserting a
+ * cascade-produced row's `actorLabel` reads it from here rather than
+ * hardcoding the SQL literal a second time.
+ */
+export const CASCADE_ACTOR_LABEL = "cascade";
 
 export type TenantClaimEventInput = {
   claim: string;

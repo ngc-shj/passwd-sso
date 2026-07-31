@@ -427,6 +427,9 @@ describe("check-tenant-claim-event-coverage", () => {
     // operation values; both only match because the gate read the real files.
     const r = runGuard();
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/relation field "claims", 4 operations/);
+    // 5, not 4: 20260731170000 added `deregister` to the const-object (the
+    // BEFORE DELETE trigger on tenant_claims writes it) — deriveOperations()
+    // reads the const-object itself, so this count moves whenever it does.
+    expect(r.stdout).toMatch(/relation field "claims", 5 operations/);
   });
 });

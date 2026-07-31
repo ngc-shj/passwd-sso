@@ -34,7 +34,11 @@ import {
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
 } from "../../../scripts/tenant-domain";
-import { TENANT_CLAIM_EVENT_OPERATION, SIGNIN_ACTOR_LABEL } from "@/lib/tenant/tenant-claim-event";
+import {
+  TENANT_CLAIM_EVENT_OPERATION,
+  SIGNIN_ACTOR_LABEL,
+  CASCADE_ACTOR_LABEL,
+} from "@/lib/tenant/tenant-claim-event";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -1403,10 +1407,26 @@ describe("tenant-domain CLI (C7)", () => {
 
           const result = await cmdHistory({ tenant: tenantId });
           expect(result.ok).toBe(true);
-          const rows = (result.rows ?? []) as { operation: string; newTenantId: string | null }[];
-          expect(rows).toHaveLength(1);
+          const rows = (result.rows ?? []) as {
+            operation: string;
+            newTenantId: string | null;
+            oldTenantId: string | null;
+            actorLabel: string;
+          }[];
+          // TWO rows, and the second is the point: deleting the tenant cascades
+          // its tenant_claims row away, and the BEFORE DELETE trigger records
+          // that as `deregister`. Before that trigger existed this claim simply
+          // stopped resolving with nothing to show for it — the gap the external
+          // review named. So this case now pins both halves at once: the history
+          // SURVIVES the tenant it names (the selector does not resolve through
+          // `tenants`), and the routing END is itself recorded.
+          expect(rows).toHaveLength(2);
           expect(rows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
           expect(rows[0].newTenantId).toBe(tenantId);
+          expect(rows[1].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.DEREGISTER);
+          expect(rows[1].oldTenantId).toBe(tenantId);
+          expect(rows[1].newTenantId).toBeNull();
+          expect(rows[1].actorLabel).toBe(CASCADE_ACTOR_LABEL);
         } finally {
           await ctx.deleteTestData(tenantId);
         }
@@ -1571,6 +1591,121 @@ describe("tenant-domain CLI (C7)", () => {
         await ctx.deleteTestData(tenantId);
       },
     );
+
+    // External review finding 4 (LOW): created_at is TIMESTAMPTZ(3), and
+    // consecutive clock_timestamp() reads have been observed identical at
+    // that resolution — same-millisecond writes have no defined order under
+    // it. `seq` (20260731170000, GENERATED ALWAYS AS IDENTITY) is what
+    // cmdHistory now orders by instead.
+    //
+    // A literal created_at collision cannot be forced deterministically —
+    // the BEFORE INSERT trigger always overwrites whatever timestamp a
+    // caller supplies (I2), and clock_timestamp() is real wall-clock time —
+    // so this does not assert the two rows' created_at values are equal
+    // (that would make the case flaky on a host whose clock resolution
+    // happens to be finer). What IS asserted, and what the fix actually
+    // guarantees regardless of whether the millisecond collides: a single
+    // multi-row INSERT statement — the closest reproducible proxy for "the
+    // same instant" — comes back from `history` in the literal VALUES order,
+    // driven by `seq`, never by a `created_at` tie-break that has no defined
+    // winner.
+    it.skipIf(SKIP)(
+      "two events inserted in the same statement come back in insertion order (seq, not created_at)",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const tenantB = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          await ctx.su.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+             VALUES
+               ($1::uuid, $4, 'register', NULL, $2::uuid, NULL, NULL, 'ordering-test-first'),
+               ($5::uuid, $4, 'register', NULL, $3::uuid, NULL, NULL, 'ordering-test-second')`,
+            randomUUID(),
+            tenantA,
+            tenantB,
+            claim,
+            randomUUID(),
+          );
+
+          const result = await cmdHistory({ domain: claim });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { actorLabel: string; seq: bigint; newTenantId: string | null }[];
+          expect(rows).toHaveLength(2);
+          expect(rows.map((r) => r.actorLabel)).toEqual([
+            "ordering-test-first",
+            "ordering-test-second",
+          ]);
+          expect(rows[0].newTenantId).toBe(tenantA);
+          expect(rows[1].newTenantId).toBe(tenantB);
+          // Anti-vacuity (RT4-shaped): the two seq values really are
+          // adjacent, i.e. this asserted an actual insertion-order pair, not
+          // two rows that happened to sort the way the fixture already
+          // wrote them.
+          expect(rows[1].seq - rows[0].seq).toBe(1n);
+        } finally {
+          await ctx.deleteTestData(tenantA);
+          await ctx.deleteTestData(tenantB);
+        }
+      },
+    );
+
+    // C6 / external review finding 3: the row cap and its continuation
+    // cursor. `rowCap` is the test seam cmdHistory exports for exactly this
+    // — red-proving the truncation path without inserting
+    // HISTORY_ROW_CAP+1 real rows on the shared dev database.
+    it.skipIf(SKIP)(
+      "a capped result prints the exact re-invocation, and --after continues from where it stopped",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          // Three genuine, distinct events on one claim/tenant pair —
+          // register, revoke, un-revoke — cheaper than inserting rows
+          // directly and exercising the real writers `cmdAdd`/`cmdRemove`
+          // use in production.
+          expect((await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-1", yes: true })).ok).toBe(true);
+          expect((await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-2", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-3", yes: true })).ok).toBe(true);
+
+          const allEvents = await cmdHistory({ domain: claim });
+          expect(allEvents.ok).toBe(true);
+          const allRows = (allEvents.rows ?? []) as { seq: bigint }[];
+          expect(allRows.length).toBeGreaterThanOrEqual(3);
+
+          const page1 = await cmdHistory({ domain: claim, rowCap: 2 });
+          expect(page1.ok).toBe(true);
+          const page1Rows = (page1.rows ?? []) as { seq: bigint }[];
+          expect(page1Rows).toHaveLength(2);
+          expect(page1.message).toContain("capped at 2");
+          expect(page1.message).toContain("re-invocation");
+
+          const cursor = page1Rows[1].seq.toString();
+          const page2 = await cmdHistory({ domain: claim, rowCap: 2, after: cursor });
+          expect(page2.ok).toBe(true);
+          const page2Rows = (page2.rows ?? []) as { seq: bigint }[];
+          // Every row on page 2 continues strictly after the cursor, and the
+          // two pages together are exactly the full result — the cursor
+          // neither drops nor repeats a row at the boundary.
+          for (const row of page2Rows) {
+            expect(row.seq > page1Rows[1].seq).toBe(true);
+          }
+          expect(page1Rows.length + page2Rows.length).toBe(allRows.length);
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)("a non-digit --after is refused before any query runs", async () => {
+      const result = await cmdHistory({ tenant: randomUUID(), after: "not-a-number" });
+      expect(result.ok).toBe(false);
+      expect(result.code).not.toBe(0);
+      expect(result.message).toContain("--after");
+    });
   });
 
   describe("list", () => {

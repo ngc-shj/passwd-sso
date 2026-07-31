@@ -41,6 +41,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
   TENANT_CLAIM_EVENT_OPERATION,
   SIGNIN_ACTOR_LABEL,
+  CASCADE_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
 import {
   PRIMARY_CLAIM,
@@ -273,14 +274,92 @@ describe("tenant_claims (C1)", () => {
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: tenantA, claim } });
 
-      await ctx.su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, tenantA);
-      });
+      try {
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, tenantA);
+        });
 
-      const remaining = await ctx.su.prisma.tenantClaim.findMany({ where: { claim } });
-      expect(remaining).toHaveLength(0);
+        const remaining = await ctx.su.prisma.tenantClaim.findMany({ where: { claim } });
+        expect(remaining).toHaveLength(0);
+      } finally {
+        // 20260731170000: the cascade above now leaves a `deregister` event
+        // (see the sibling describe block below) — deleteTestData purges it,
+        // and reorders its own DELETE-then-purge specifically so a second,
+        // redundant `DELETE FROM tenants` here (tenantA is already gone) is
+        // a safe no-op while the purge still reaches the event.
+        await ctx.deleteTestData(tenantA);
+      }
     });
+  });
+
+  describe("cascade on tenant delete appends a deregister event (C4 / external review finding 2)", () => {
+    it.skipIf(SKIP)(
+      "a BEFORE DELETE trigger on tenant_claims appends one deregister event per cascaded row, naming the deleted tenant",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({
+          data: { tenantId: tenantA, claim, createdBy: "ops-oncall" },
+        });
+
+        try {
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, tenantA);
+          });
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({
+            where: { claim, operation: TENANT_CLAIM_EVENT_OPERATION.DEREGISTER },
+          });
+          expect(events).toHaveLength(1);
+          const event = events[0];
+          // The population this operation writes, mirrored from C1's table:
+          // old_tenant_id = the deleted tenant, new_tenant_id = NULL,
+          // old_revoked_at = the claim row's own revokedAt (NULL here — it
+          // was never revoked), new_revoked_at = NULL, actor_label = the
+          // fixed 'cascade' string, never the row's own createdBy.
+          expect(event.oldTenantId).toBe(tenantA);
+          expect(event.newTenantId).toBeNull();
+          expect(event.oldRevokedAt).toBeNull();
+          expect(event.newRevokedAt).toBeNull();
+          expect(event.actorLabel).toBe(CASCADE_ACTOR_LABEL);
+          expect(event.actorLabel).not.toBe("ops-oncall");
+          // I2 still holds for a trigger-authored row: db_user/session_db_user
+          // are the executing principal, not anything this test named.
+          expect(event.dbUser.length).toBeGreaterThan(0);
+        } finally {
+          await ctx.deleteTestData(tenantA);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "a claim revoked before the cascade carries its revokedAt into old_revoked_at",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        const revokedAt = new Date();
+        await ctx.su.prisma.tenantClaim.create({
+          data: { tenantId: tenantA, claim, revokedAt },
+        });
+
+        try {
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, tenantA);
+          });
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({
+            where: { claim, operation: TENANT_CLAIM_EVENT_OPERATION.DEREGISTER },
+          });
+          expect(events).toHaveLength(1);
+          expect(events[0].oldRevokedAt?.getTime()).toBe(revokedAt.getTime());
+        } finally {
+          await ctx.deleteTestData(tenantA);
+        }
+      },
+    );
   });
 
   describe("RLS isolation (I3)", () => {
@@ -322,6 +401,112 @@ describe("tenant_claims (C1)", () => {
 
       await ctx.deleteTestData(tenantA);
       await ctx.deleteTestData(tenantB);
+    });
+  });
+
+  describe("privilege layer — passwd_app on tenant_claims (external review finding 1)", () => {
+    // Same shape as tenant-claim-events.integration.test.ts's "UPDATE/DELETE
+    // is refused with 42501" cases: precondition via has_table_privilege
+    // FIRST (VE4 — grant order differs dev vs CI, so asserting the refusal
+    // without it is green for the wrong reason in one of the two), then the
+    // actual statement, asserting the SQLSTATE positionally rather than a
+    // loose throw (a loose assertion also greens on 42P01 — the table not
+    // existing — the one state where the control genuinely does not exist).
+    it.skipIf(SKIP)("UPDATE is refused with 42501", async () => {
+      const [{ granted }] = await ctx.su.prisma.$queryRaw<{ granted: boolean }[]>`
+        SELECT has_table_privilege('passwd_app', 'public.tenant_claims', 'UPDATE') AS granted
+      `;
+      expect(granted, "precondition: passwd_app must not hold UPDATE").toBe(false);
+
+      // Raw pg error (not Prisma), so the SQLSTATE is on `.code` directly —
+      // `sqlStateOf` reads Prisma's nested shape and returns null here.
+      let caught: { code?: string } | undefined;
+      try {
+        // A FRESH connection, not one from the pool.
+        //
+        // `tenant_claims` carries FORCE ROW LEVEL SECURITY, and its policy's OR
+        // is not short-circuited, so `current_setting('app.tenant_id', true)::uuid`
+        // is folded at planning time. On a pooled connection that GUC is the
+        // EMPTY STRING (some earlier test set it), and ''::uuid raises 22P02
+        // BEFORE the ACL check — the privilege denial never surfaces. `RESET`
+        // does not help: it restores the session default, which for a custom GUC
+        // already touched in that session is '' rather than unset. Only a
+        // connection that has never had the GUC set leaves
+        // `current_setting(…, true)` NULL, where NULL::uuid is harmless and the
+        // 42501 we are asserting is what comes back. Measured at each step.
+        const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(
+            `UPDATE tenant_claims SET revoked_at = now() WHERE id = $1::uuid`,
+            [randomUUID()],
+          );
+          await client.query("ROLLBACK");
+        } catch (e) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw e;
+        } finally {
+          await client.end().catch(() => {});
+        }
+      } catch (e) {
+        caught = e as { code?: string };
+      }
+      expect(caught?.code).toBe("42501");
+    });
+
+    it.skipIf(SKIP)("DELETE is refused with 42501", async () => {
+      const [{ granted }] = await ctx.su.prisma.$queryRaw<{ granted: boolean }[]>`
+        SELECT has_table_privilege('passwd_app', 'public.tenant_claims', 'DELETE') AS granted
+      `;
+      expect(granted, "precondition: passwd_app must not hold DELETE").toBe(false);
+
+      // Raw pg error (not Prisma), so the SQLSTATE is on `.code` directly —
+      // `sqlStateOf` reads Prisma's nested shape and returns null here.
+      let caught: { code?: string } | undefined;
+      try {
+        // A FRESH connection, not one from the pool.
+        //
+        // `tenant_claims` carries FORCE ROW LEVEL SECURITY, and its policy's OR
+        // is not short-circuited, so `current_setting('app.tenant_id', true)::uuid`
+        // is folded at planning time. On a pooled connection that GUC is the
+        // EMPTY STRING (some earlier test set it), and ''::uuid raises 22P02
+        // BEFORE the ACL check — the privilege denial never surfaces. `RESET`
+        // does not help: it restores the session default, which for a custom GUC
+        // already touched in that session is '' rather than unset. Only a
+        // connection that has never had the GUC set leaves
+        // `current_setting(…, true)` NULL, where NULL::uuid is harmless and the
+        // 42501 we are asserting is what comes back. Measured at each step.
+        const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+        await client.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query(
+            `DELETE FROM tenant_claims WHERE id = $1::uuid`,
+            [randomUUID()],
+          );
+          await client.query("ROLLBACK");
+        } catch (e) {
+          await client.query("ROLLBACK").catch(() => {});
+          throw e;
+        } finally {
+          await client.end().catch(() => {});
+        }
+      } catch (e) {
+        caught = e as { code?: string };
+      }
+      expect(caught?.code).toBe("42501");
+    });
+
+    it.skipIf(SKIP)("SELECT and INSERT are still held — the revoke is scoped, not a blanket lockout", async () => {
+      const [{ selectGranted, insertGranted }] = await ctx.su.prisma.$queryRaw<
+        { selectGranted: boolean; insertGranted: boolean }[]
+      >`
+        SELECT has_table_privilege('passwd_app', 'public.tenant_claims', 'SELECT') AS "selectGranted",
+               has_table_privilege('passwd_app', 'public.tenant_claims', 'INSERT') AS "insertGranted"
+      `;
+      expect(selectGranted, "the sign-in path still needs to look up claims").toBe(true);
+      expect(insertGranted, "the sign-in path still needs to create claims").toBe(true);
     });
   });
 

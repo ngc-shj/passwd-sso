@@ -38,7 +38,7 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid>
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
 //
 // `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
 // claims (normalised the same way `add`/`remove` normalise `--domain`), or its
@@ -61,6 +61,15 @@
 // `--from` is `add`'s reassignment flag: it names the tenant that currently
 // owns the claim, and moves the claim off it. See cmdAdd for why it is a bare
 // UUID and why it does not require a prior `remove`.
+//
+// `history` also reports a `deregister` operation now: a tenant deletion
+// cascades away its `tenant_claims` rows, and a database trigger appends one
+// of these for each — `actor_label` is the fixed string `cascade`, naming the
+// mechanism rather than a person. `history` is capped at HISTORY_ROW_CAP rows
+// per call; a capped result prints the exact re-invocation (`--after <seq>`)
+// to fetch the next page, ordered by the row's monotonic `seq`, not by
+// `created_at` — the latter is millisecond-precision and cannot order two
+// events written in the same millisecond.
 
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
@@ -1283,9 +1292,53 @@ export async function cmdRemove(args: {
 
 // ─── history ─────────────────────────────────────────────────────
 
-export async function cmdHistory(args: { domain?: string; tenant?: string }): Promise<CmdResult> {
+// A named cap rather than an unbounded read (external review finding, C6 /
+// SC11): a claim or tenant with a long routing history — a squatted domain
+// bounced between tenants over months, say — must not turn one `history`
+// call into an unbounded table scan at incident time. Chosen well above any
+// history this deployment shape plausibly has (SC-A: one row per operator
+// mutation) so it is a backstop, not a paging scheme an operator hits in
+// normal use. When it IS hit, the tool prints the exact re-invocation to
+// continue (below) — silently truncating an incident-response read path is
+// worse than stopping and saying so.
+export const HISTORY_ROW_CAP = 500;
+
+export async function cmdHistory(args: {
+  domain?: string;
+  tenant?: string;
+  /** Continuation cursor: `seq` of the last row a previous, capped call printed. */
+  after?: string;
+  /**
+   * Test seam, never a CLI flag: overrides HISTORY_ROW_CAP so the truncation
+   * and continuation-message path can be red-proved without inserting
+   * HISTORY_ROW_CAP+1 real rows. Same shape as `migrationClientFactory` and
+   * `confirm` above — a real production default with an override only tests
+   * reach.
+   */
+  rowCap?: number;
+}): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
+  const rowCap = args.rowCap ?? HISTORY_ROW_CAP;
+
+  // Validated before the client is built, same convention as `unmapped`'s
+  // `--days`: `--after` is meant to be re-typed verbatim from this command's
+  // own previous output, so a non-digit value is almost certainly a copy
+  // mistake worth catching immediately rather than one `seq` comparison
+  // matching nothing.
+  let afterSeq: bigint | undefined;
+  if (args.after !== undefined) {
+    if (!/^\d+$/.test(args.after)) {
+      return {
+        ok: false,
+        code: 1,
+        message:
+          `Invalid --after "${escapeUnsafeDisplayChars(args.after)}": expected the seq cursor ` +
+          "printed by a capped history result (a non-negative integer).",
+      };
+    }
+    afterSeq = BigInt(args.after);
+  }
 
   // ONE predicate for both the guard and the selector choice. They used to
   // disagree — the guard tested truthiness, the choice tested definedness — so
@@ -1363,13 +1416,23 @@ export async function cmdHistory(args: { domain?: string; tenant?: string }): Pr
           }
         }
 
-        const rows = await tx.tenantClaimEvent.findMany({
-          where:
-            claim !== undefined
-              ? { claim }
-              : { OR: [{ oldTenantId: tenantId }, { newTenantId: tenantId }] },
-          orderBy: { createdAt: "asc" },
+        const selector =
+          claim !== undefined
+            ? { claim }
+            : { OR: [{ oldTenantId: tenantId }, { newTenantId: tenantId }] };
+        // seq (20260731170000), not createdAt: createdAt is millisecond-
+        // precision and same-millisecond writes have no defined order under
+        // it, so it can no longer be the read order or the pagination
+        // cursor — only the displayed time. Fetches one row past the cap so
+        // truncation is DETECTED rather than merely assumed whenever the
+        // result happens to be exactly rowCap long.
+        const fetched = await tx.tenantClaimEvent.findMany({
+          where: afterSeq !== undefined ? { AND: [selector, { seq: { gt: afterSeq } }] } : selector,
+          orderBy: { seq: "asc" },
+          take: rowCap + 1,
         });
+        const truncated = fetched.length > rowCap;
+        const rows = truncated ? fetched.slice(0, rowCap) : fetched;
 
         // Every free-text/echoed column is escaped, unconditionally — not
         // only the ones this PR's own writers can produce. A row can predate
@@ -1406,8 +1469,32 @@ export async function cmdHistory(args: { domain?: string; tenant?: string }): Pr
             // branch above), so it is echoed the same as any other operator
             // input even though UUID_RE already constrains its shape.
             : `tenant ${escapeUnsafeDisplayChars(tenantId ?? "")}`;
+
+        if (truncated) {
+          const lastSeq = rows[rows.length - 1].seq.toString();
+          const selectorFlag =
+            claim !== undefined
+              ? `--domain ${escapeUnsafeDisplayChars(claim)}`
+              : `--tenant ${escapeUnsafeDisplayChars(tenantId ?? "")}`;
+          // The exact re-invocation, not just "more rows exist" — an
+          // incident CLI that stops without saying how to continue is only
+          // marginally better than one that silently truncates.
+          console.log(
+            // operator-echo-exempt: `rowCap` is a number (HISTORY_ROW_CAP,
+            // or the test-only `rowCap` seam — never a CLI flag), not
+            // operator text, same as `unmapped`'s `days` above.
+            `Capped at ${rowCap} rows; more events exist for ${subject}. Continue with:\n` +
+              `  tenant-domain history ${selectorFlag} --after ${lastSeq}`,
+          );
+        }
+
         const message =
-          rows.length === 0 ? `No routing history for ${subject}.` : `${rows.length} event(s) listed.`;
+          rows.length === 0
+            ? `No routing history for ${subject}.`
+            : truncated
+              ? // operator-echo-exempt: `rowCap` is a number, not operator text.
+                `${rows.length} event(s) listed (capped at ${rowCap} — see the re-invocation printed above to continue).`
+              : `${rows.length} event(s) listed.`;
 
         return { ok: true, code: 0, rows, message };
       },
@@ -1429,7 +1516,7 @@ function printUsage(): void {
       "  tenant-domain preflight",
       "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
       "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
-      "  tenant-domain history --domain <claim> | --tenant <uuid>",
+      "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
       "",
       "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
@@ -1515,6 +1602,7 @@ async function main(): Promise<void> {
       result = await cmdHistory({
         domain: getStringFlag(flags, "domain"),
         tenant: getStringFlag(flags, "tenant"),
+        after: getStringFlag(flags, "after"),
       });
       break;
     }

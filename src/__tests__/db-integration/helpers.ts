@@ -523,15 +523,31 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM users WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // `tenants` LAST, then the tenant_claim_events purge — deliberately
+      // reordered from "purge, then delete tenants" (20260731170000). A
+      // `tenant_claims` row FKs to `tenants` with ON DELETE CASCADE, and a
+      // BEFORE DELETE trigger on `tenant_claims` (the same migration) now
+      // appends a `deregister` event for every row that cascade removes. A
+      // purge run BEFORE this DELETE cannot see that event — it does not
+      // exist yet — so it would leave a fresh, permanently undeletable row
+      // on the shared dev database every time this context's tenant carried
+      // a tenant_claims row. Purging AFTER catches it: the trigger's INSERT
+      // and the cascade DELETE are in the same statement, so by the time
+      // this DELETE returns the deregister row already exists, naming this
+      // tenantId, and the purge call below reaches it exactly as it reaches
+      // every other row naming this tenant.
+      await tx.$executeRawUnsafe(
+        `DELETE FROM tenants WHERE id = $1::uuid`,
+        tenantId,
+      );
       // tenant_claim_events (C1, SC11/#743) has no tenant_id column and no
       // FKs — it names a tenant only through old_tenant_id/new_tenant_id,
       // and a bare DELETE is blocked by the append-only trigger. The purge
       // routine is the one sanctioned escape (see the migration for why),
       // and I5's CHECK makes it total: every row names at least one tenant,
       // so purging both sides of every tenant this context ever creates
-      // reaches every row this suite could have written. Ordering relative
-      // to the rest of this transaction is free — the table has no FKs to
-      // anything above or below it.
+      // reaches every row this suite could have written, including the
+      // deregister row the DELETE above may just have produced.
       try {
         await tx.$executeRawUnsafe(
           `SELECT tenant_claim_events_purge_for_tenant($1::uuid)`,
@@ -553,10 +569,6 @@ export async function createTestContext(): Promise<TestContext> {
           { cause: e },
         );
       }
-      await tx.$executeRawUnsafe(
-        `DELETE FROM tenants WHERE id = $1::uuid`,
-        tenantId,
-      );
     }));
     // Only after the tx commits: a delete that threw leaves the tenant for
     // the cleanup() sweep. Ids this context never handed out (tenants a test

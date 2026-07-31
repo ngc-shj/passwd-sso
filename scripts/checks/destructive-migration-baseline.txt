@@ -66,3 +66,4 @@
 20260615000002_access_request_tenant_composite_fk  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260629000100_flip_mcp_refresh_token_family_created_at_not_null  # pre-existing baseline (SET NOT NULL); predates the expand-and-contract rule
 20260715000000_add_webhook_deliveries  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260731170000_tenant_claim_events_hardening  # the only DROP is CONSTRAINT tenant_claim_events_operation_check, replaced in the SAME transaction by a strict superset (register/revoke/unrevoke/reassign plus deregister), so nothing previously accepted becomes rejected

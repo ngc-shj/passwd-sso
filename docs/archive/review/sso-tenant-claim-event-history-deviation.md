@@ -318,3 +318,121 @@ throwaway LOGIN role carries `VALID UNTIL` (SEC-7), which is the bound that surv
 `finally` not running. `client_addr`'s absence from `history` output, and the owner
 recovery for rows an app-role compromise injects with unreachable tenant ids, are now
 stated in `audit-log-schema.md` (SEC-4, SEC-5).
+
+---
+
+# Post-merge hardening pass — external review, 2026-07-31
+
+Four findings against the merged design, closed in one migration,
+`prisma/migrations/20260731170000_tenant_claim_events_hardening/`, on branch
+`feat/tenant-claim-event-history`. The hard rule this pass added for itself: no
+existing, already-applied migration is edited — `20260729110000_add_tenant_claims`
+and `20260731100000_add_tenant_claim_events` are both untouched. Everything below is
+new DDL layered on top.
+
+## D-19 — passwd_app's UPDATE/DELETE on `tenant_claims` was never used and never revoked (HIGH)
+
+`20260729110000_add_tenant_claims` granted `SELECT, INSERT, UPDATE, DELETE` to
+`passwd_app` by following the convention every other new-table migration in this repo
+uses, without checking this table's actual write surface first. It has exactly one:
+`findOrCreateTenantForClaim`'s nested `claims: { create: … }`, plus the operator CLI's
+own privileged (non-`passwd_app`) connection. No code path issues `UPDATE` or `DELETE`
+as `passwd_app`.
+
+That is the exact shape `tenant_claim_events` exists to make survivable for the CLI's
+two writers (`add --from`, un-revoke) and did NOT make survivable here: a compromised
+app role could rewrite `tenant_id` or clear `revoked_at` directly, on the same table,
+with the same effect, leaving no history row at all — because the write never goes
+through `recordTenantClaimEvent` in the first place. C5's completeness gate cannot see
+this class by construction (its header now says so): it proves code that intends to
+write emits an event, and says nothing about a write that isn't code the gate scans.
+
+**Closed** with `REVOKE UPDATE, DELETE ON TABLE tenant_claims FROM passwd_app`, and by
+adding `tenant_claims` entries to `scripts/checks/app-role-denied-privileges.json` for
+all three non-owner roles (the same two-layer pattern `tenant_claim_events` already
+uses) — `SELECT`/`INSERT` stay granted, the sign-in path still needs both.
+
+## D-20 — the tenant-deletion cascade hole was believed to need an ambient GUC, and did not (MEDIUM)
+
+Round 4 of the original plan recorded, and this branch shipped with, a known gap: a
+tenant deletion cascades away its `tenant_claims` rows via `ON DELETE CASCADE`, with no
+`tenant_claim_events` row. The stated reason for deferring rather than closing it was
+that closing it meant writing from a trigger on `tenant_claims`, which "would read the
+actor label from an ambient GUC — the shape the escape-hatch decision just rejected."
+
+That reasoning does not hold once the actual write is specified: the trigger does not
+attribute the deletion to a person at all. `actor_label = 'cascade'` is a fixed string
+naming the mechanism, the same way `SIGNIN_ACTOR_LABEL = 'signin'` already names the
+sign-in auto-registration path rather than claiming to know who caused it. No GUC —
+ambient, escape, or otherwise — is read by this trigger; it only INSERTs into
+`tenant_claim_events`, and INSERT there needs no escape (the append-only triggers on
+that table fire on UPDATE/DELETE/TRUNCATE, never INSERT).
+
+**Closed** with a `BEFORE DELETE ON tenant_claims` trigger,
+`tenant_claims_record_deregister_event`, `SECURITY INVOKER`, `ENABLE ALWAYS` (matching
+the sibling triggers' `session_replication_role` reasoning). Population:
+`old_tenant_id` = the deleted tenant, `new_tenant_id` = NULL, `old_revoked_at` = the
+claim row's own `revoked_at`, `new_revoked_at` = NULL, `operation` = the new
+`deregister` value. The `tenant_claim_events_operation_check` CHECK constraint had to
+be dropped and re-added to admit it — baselined in
+`scripts/checks/destructive-migration-baseline.txt` with the reason the gate's own
+message asks for: the replacement is a strict superset of the four values it already
+accepted, applied in the same transaction, so nothing previously accepted becomes
+rejected.
+
+Test-infrastructure consequence, not obvious until it broke: `deleteTestData` in
+`src/__tests__/db-integration/helpers.ts` used to purge `tenant_claim_events` BEFORE
+`DELETE FROM tenants`, on the stated grounds that ordering was free (no FKs either
+direction). It is no longer free — the cascade this trigger watches now happens
+*during* that `DELETE FROM tenants`, so a purge that already ran cannot see the
+`deregister` row it produces, and every test tenant carrying a `tenant_claims` row
+would leak one permanently onto the shared dev database. Reordered: `DELETE FROM
+tenants` now runs first, the purge second, so it reaches whatever the cascade just
+wrote.
+
+## D-21 — `tenant_claim_events` was unindexed for its actual query shape, and unbounded (MEDIUM)
+
+The original migration indexed `claim` and `created_at` individually.
+`tenant-domain history` filters on `claim` OR on `(old_tenant_id OR new_tenant_id)`
+and then orders the result — neither single-column index supports that combination
+well. **Closed** with three composite indexes, `(claim, created_at, id)`,
+`(old_tenant_id, created_at, id)`, `(new_tenant_id, created_at, id)`; the original two
+single-column indexes are left in place rather than dropped (the migration says why —
+avoiding widening this migration's DROP surface for a storage saving on a table
+expected to stay small).
+
+`cmdHistory` also had no upper bound at all. **Closed** with a named constant,
+`HISTORY_ROW_CAP` (500), a `seq`-based keyset cursor (`--after <seq>`), and — the part
+an incident CLI cannot skip — the exact re-invocation printed when the cap is hit,
+rather than a bare "results truncated" notice. `cmdHistory` also gained a `rowCap` test
+seam (never a CLI flag) so the truncation path is red-provable without inserting 501
+real rows on the shared dev database.
+
+## D-22 — same-millisecond ordering was undefined (LOW)
+
+`created_at` is `TIMESTAMPTZ(3)`; 1000 consecutive `clock_timestamp()::timestamptz(3)`
+reads were observed identical. **Closed** with `seq BIGINT GENERATED ALWAYS AS
+IDENTITY` on `tenant_claim_events` (backfills existing rows), `@unique` in
+`prisma/schema.prisma` (Prisma requires `@id`/`@unique` on an `autoincrement()` field —
+this is how a `GENERATED ALWAYS AS IDENTITY` column round-trips through the schema for
+`check-migration-drift.mjs`). `cmdHistory` now orders and paginates by `seq`;
+`created_at` stays the displayed time and is never compared for ordering again.
+
+A literal same-millisecond collision cannot be forced deterministically in a test (the
+`BEFORE INSERT` trigger always overwrites a caller-supplied `created_at`, and
+`clock_timestamp()` is real wall-clock time) without asserting something that would be
+flaky on a host with finer clock resolution. The ordering test in
+`tenant-claim-cli.integration.test.ts` instead inserts two rows in one multi-row
+`INSERT` statement — the closest reproducible proxy for "the same instant" — and
+asserts `history` returns them in insertion (`seq`) order, which is true whether or not
+the millisecond actually collides; that is the property the fix guarantees.
+
+## Verification not run
+
+All four DDL changes above are unapplied on the shared dev database as of this pass:
+`npm run db:migrate` was deliberately NOT run (R-c — requires explicit user
+confirmation, obtained separately from writing the migration). `check-migration-drift`,
+`check-destructive-migration`, `check-migration-transaction`,
+`check-tenant-claim-event-coverage` and its self-test, `tsc --noEmit` and `eslint` were
+run and pass. The new `src/__tests__/db-integration/*` cases above are unexercised
+against a live database — they will run once the migration is applied.

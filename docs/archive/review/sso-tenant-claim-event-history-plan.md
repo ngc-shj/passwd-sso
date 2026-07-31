@@ -500,12 +500,22 @@ one a `tenantClaim.create` grep does not return:
   rows predating the registry, no prior state to record; the migration is the record.
 - `scripts/rls-cross-tenant-seed.sql`: CI fixture rows.
 - ~36 writers across the test trees.
-- the `tenants → tenant_claims ON DELETE CASCADE` path. Deleting a tenant does change
-  what its claims resolve to and leaves no event. Recorded as a known hole rather than
-  closed: closing it means writing events from a trigger on `tenant_claims`, which
-  would read the actor label from an ambient GUC — the shape the escape-hatch decision
-  just rejected. Tenant deletion is not one of the two operations this issue exists
-  for, and it is loud. If closed later, close it as one mechanism, not per site.
+
+**CLOSED, not deferred (20260731170000, external review finding 2).** The
+`tenants → tenant_claims ON DELETE CASCADE` path was recorded here as a known hole
+through revision 4: deleting a tenant changes what its claims resolve to and left no
+event, and closing it was believed to need writing from a trigger on `tenant_claims`
+that would read the actor label from an ambient GUC — the shape the escape-hatch
+decision (see "The escape hatch (VE2)" above) rejected for the purge routine. **That
+belief did not survive contact with the actual write**: the trigger does not need an
+actor identity at all. `actor_label = 'cascade'` is a fixed string naming the
+*mechanism*, exactly as `SIGNIN_ACTOR_LABEL = 'signin'` already names the sign-in
+auto-registration path rather than claiming to know who triggered it — no GUC, ambient
+or otherwise, is read. A `BEFORE DELETE` trigger on `tenant_claims` now appends one
+`deregister` event per cascaded row, `old_tenant_id` = the deleted tenant,
+`new_tenant_id` = NULL, carrying the row's own `revoked_at` into `old_revoked_at`. See
+the migration for the full population rule and the deviation log for the round this
+correction was made in.
 
 **Obligations**
 
@@ -682,7 +692,9 @@ gate does not read; the test trees, excluded by `ast-project.mjs`'s `walkSourceF
 which skips `__tests__` directories and `*.test.ts(x)` (**not**
 `check-raw-sql-usage.mjs`'s `EXCLUDE_RE`, which is a different set — equivalent here,
 but citing the wrong mechanism is how a later contributor "aligns" the two in the
-wrong direction); and the cascade path recorded in C4.
+wrong direction); and the cascade path (C4) — CLOSED as of 20260731170000, but by a
+database trigger, not by TS this gate's AST predicates walk, so it stays a non-member
+of what THIS gate proves even though the system as a whole no longer has the gap.
 
 **Acceptance criteria**
 
@@ -910,8 +922,9 @@ sweep re-raises for this table, or the warn path is asserted.
   registry the dashboard cannot manage either.
 - **SC-D — `#744` (SC10, release 2) stays blocked until this merges**, and is not
   started here. It is the issue's stated ordering constraint.
-- **SC-E — No event for reads**, and none for the `ON DELETE CASCADE` path (C4's
-  recorded negative, with its own reasoning).
+- **SC-E — No event for reads.** The `ON DELETE CASCADE` path this bullet also used to
+  name is no longer a deferral — see C4's "Recorded negatives" for the closure
+  (20260731170000).
 
 ### Risks
 

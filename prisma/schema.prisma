@@ -1816,6 +1816,12 @@ model TenantClaim {
 ///
 /// `dbUser` / `sessionDbUser` / `clientAddr` / `createdAt` are assigned by a
 /// BEFORE INSERT trigger and are NOT caller input; see the migration.
+///
+/// `seq` (20260731170000) is a GENERATED ALWAYS AS IDENTITY column: `createdAt`
+/// is millisecond-precision and same-millisecond writes have been observed
+/// with no defined order, so `seq` — not `createdAt` — is the ORDER BY and the
+/// pagination cursor `tenant-domain history` uses. `createdAt` stays the
+/// displayed time.
 model TenantClaimEvent {
   id            String    @id @default(uuid(4)) @db.Uuid
   claim         String    @db.VarChar(255)
@@ -1829,9 +1835,13 @@ model TenantClaimEvent {
   sessionDbUser String    @map("session_db_user") @db.VarChar(63)
   clientAddr    String?   @map("client_addr") @db.Inet
   createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  seq           BigInt    @unique @default(autoincrement())
 
   @@index([claim])
   @@index([createdAt])
+  @@index([claim, createdAt, id])
+  @@index([oldTenantId, createdAt, id])
+  @@index([newTenantId, createdAt, id])
   @@map("tenant_claim_events")
 }
 
