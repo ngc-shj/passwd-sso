@@ -118,3 +118,51 @@ All six Round 1 findings applied. Round 2 reviewed the fixes themselves.
 | S1 | Accepted as a documented limit | Argument re-verified rather than restated; recorded above |
 
 Verification: `npx vitest run` → 1004 files, 13891 passed, 1 skipped. `npx tsc --noEmit` clean. Gate green.
+
+---
+
+# Round 3
+
+## Changes from Previous Round
+
+All six Round 2 findings applied, including the Critical F3 fix at both of its sites.
+
+## Findings
+
+**Functionality: No findings. Testing: No findings.** Security carries one continuing item.
+
+- **S1 [Major, continuing — accepted]** The shell-safety gate matches by name and follows one hop, so an alias-of-an-alias, a function return, an array element, or a `const` holding `"cmd"` evades it. Unchanged by this round. Accepted as a documented limit rather than closed: no shipped code uses any of those shapes, full data-flow closure is disproportionate to the class, and the guarantee for the two real trap-emission sites comes from tests that execute the emitted line through `/bin/sh` against a socket path containing `'` and a space and assert a decoy file survives. The security expert was asked to challenge that argument this round rather than restate it, and confirmed it holds.
+  - Anti-Deferral: **Worst case** — a future CLI change introduces a trap emission through an untracked indirection shape with an unquoted interpolation, and CI stays green. **Likelihood** — low: there are three emission sites, all `const`-declared, and any new one lands in a file whose tests execute the emitted line. **Cost to fix** — a real intraprocedural closure over local assignments plus scope-aware binding resolution, i.e. the shape of `check-operator-echo-escaped.mjs`'s taint analysis; disproportionate for a three-site class, and revisit if a fourth emission shape appears.
+
+## Verification of the Round 2 fixes
+
+Each was mutation-proven on a throwaway worktree, never on the real tree:
+
+- **F3** — both halves reverted independently, leaving the other fixed. The regression test fails in **both** cases, so neither half can regress unnoticed. This mattered: the first attempt at the fix corrected only the gate trigger, and the bug stayed live because `needsCurrentState` carried the same omission and left `currentTenant` null.
+- **T3** — the `await` deleted again: three assertions across both route suites now fail, where none did before.
+- **T4/T5** — `wouldIpBeAllowed` reverted to its pre-Round-1 synchronous body: three of the four cases fail. The fourth (CGNAT-only, no pinned tailnet) legitimately holds under both implementations and is documented as pinning I5.3 rather than the fix.
+- **T6** — the new fixture run against the pre-`1c7dec678` gate: fails with the false positive's exit code; passes against the current gate.
+
+Two experts independently re-derived the lockout-relevant field set from `checkAccessRestriction`'s own input type (`TenantAccessPolicy` = `allowedCidrs`, `tailscaleEnabled`, `tailscaleTailnet`) rather than from the diff, and both found `lockoutRelevantFieldChanged` complete. A repo-wide grep for a third spelling of the same list found none.
+
+## R42 class closure
+
+Two member sets expanded under review and both are now closed by a mechanism rather than by a list:
+
+- **C3's shell-emission class** — expanded 8 → 9 → 10 across two plan-review rounds. Per the R42 escalation, the convergence artifact is a mutation-verified CI guard, not another round: `scripts/checks/check-cli-shell-safety.mjs`, red-proven per rule by `scripts/__tests__/check-cli-shell-safety.test.mjs` (18 cases, each rule with a red and a green fixture), wired into `scripts/pre-pr.sh` and therefore into the CI `static-checks` job. Red-proven mutations on record: an unquoted `spawn("cmd", ...)` (Rule A), a bare interpolation in a trap literal under both `console.log` and a `return` (Rule B), the composed-trap shape with only the outer wrap quoted (Rule B), and a second site referencing `verifyTailscalePeer` / `64:ff9b` / `/localapi/v0/whois` (Rule C). Residual limits stated at the function and recorded as S1.
+- **The lockout-relevant field set** — expanded 2 → 3, once. Closed by deriving it from the adjudicator's own input type and naming it once, so the two call sites can no longer drift.
+
+## Resolution Status — Round 3
+
+Nothing to resolve; S1 stands as recorded above with its Anti-Deferral entry.
+
+## Final verification
+
+- `bash ~/.claude/hooks/check-pre-pr.sh run` → 69 checks passed (Lint, Test, Build, Typecheck, CLI build+test, Extension build+test, and 50+ static gates)
+- `npx vitest run` → 1004 files, 13891 passed, 1 skipped
+- `npx tsc --noEmit` → clean
+- `node scripts/checks/check-cli-shell-safety.mjs` → exit 0
+
+## Termination
+
+Round 3 closes the loop: functionality and testing returned "No findings", and the one continuing security item is an accepted, documented limitation with an Anti-Deferral entry rather than an open defect. Both expanded classes are closed by mechanisms that have been shown able to fail.
