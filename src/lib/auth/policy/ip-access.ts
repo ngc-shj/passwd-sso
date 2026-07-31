@@ -94,9 +94,13 @@ function parseIpv6(ip: string): number[] | null {
     const groups = s.split(":");
     const bytes: number[] = [];
     for (const g of groups) {
-      if (g.length < 1 || g.length > 4) return null;
+      // The whole token must be hex. parseInt stops at the first character it
+      // cannot read and returns what it got, so `"1.2"` would parse as 0x1 and
+      // a syntactically invalid address would be coerced into a valid-looking
+      // 16 bytes — and every CIDR decision built on this parser would then be
+      // made about an address nobody sent.
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
       const val = parseInt(g, 16);
-      if (Number.isNaN(val) || val < 0 || val > 0xffff) return null;
       bytes.push((val >> 8) & 0xff, val & 0xff);
     }
     return bytes;

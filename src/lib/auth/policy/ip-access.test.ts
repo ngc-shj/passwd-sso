@@ -223,6 +223,17 @@ describe("isValidIpAddress", () => {
     expect(isValidIpAddress("2001:db8::1")).toBe(true);
   });
 
+  // The pre-filter regex and parseIpv6 have to agree on which spellings exist.
+  // While the filter rejected any dot, this returned false for an address the
+  // CIDR matchers accept — a validator disagreeing with the parser it guards.
+  it("accepts an IPv6 address written with a dotted-quad tail", () => {
+    expect(isValidIpAddress("64:ff9b::169.254.169.254")).toBe(true);
+  });
+
+  it("rejects a dotted fragment that is not a valid address", () => {
+    expect(isValidIpAddress("1.2:0:0:0:0:0:0:1")).toBe(false);
+  });
+
   it("rejects junk", () => {
     expect(isValidIpAddress("hello")).toBe(false);
     expect(isValidIpAddress("")).toBe(false);

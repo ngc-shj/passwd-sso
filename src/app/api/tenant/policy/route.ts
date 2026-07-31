@@ -808,7 +808,7 @@ async function handlePATCH(req: NextRequest) {
     };
     const clientIp = extractClientIp(req);
     const hasRestrictions = hypothetical.allowedCidrs.length > 0 || hypothetical.tailscaleEnabled;
-    if (hasRestrictions && (!clientIp || !wouldIpBeAllowed(clientIp, hypothetical))) {
+    if (hasRestrictions && (!clientIp || !(await wouldIpBeAllowed(clientIp, hypothetical)))) {
       const message = clientIp
         ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
         : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";

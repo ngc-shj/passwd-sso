@@ -138,8 +138,22 @@ export async function checkAccessRestriction(
   tenantId: string,
   clientIp: string | null,
 ): Promise<AccessCheckResult> {
-  const policy = await getTenantAccessPolicy(tenantId);
+  return evaluateAccessPolicy(await getTenantAccessPolicy(tenantId), clientIp);
+}
 
+/**
+ * Decide the tenant-access predicate for an already-resolved policy.
+ *
+ * Split out from checkAccessRestriction so the self-lockout preview
+ * (wouldIpBeAllowed) answers with the same logic that will run at request
+ * time, against a policy that has not been saved yet. Anything that predicts
+ * this verdict must call this, not re-implement it — a predictor that drifts
+ * from the adjudicator gives an admin a green light and then locks them out.
+ */
+async function evaluateAccessPolicy(
+  policy: TenantAccessPolicy,
+  clientIp: string | null,
+): Promise<AccessCheckResult> {
   // Fast path: no restrictions configured
   if (policy.allowedCidrs.length === 0 && !policy.tailscaleEnabled) {
     return { allowed: true };
@@ -228,23 +242,21 @@ export async function checkAccessRestrictionWithAudit(
 /**
  * Check if a client IP would be allowed under a hypothetical policy.
  * Used for self-lockout detection in the PATCH endpoint.
+ *
+ * Runs the real adjudicator against the unsaved policy rather than
+ * approximating it. The previous approximation returned true for any
+ * Tailscale-enabled policy on the grounds that a tailnet could not be
+ * verified synchronously; that was accurate only while browser sessions
+ * checked CGNAT membership alone. Now that a pinned tailnet is verified on
+ * every path, the same shortcut would clear exactly the save that locks the
+ * admin out — pinning a tailnet their own peer does not belong to.
  */
-export function wouldIpBeAllowed(
+export async function wouldIpBeAllowed(
   clientIp: string,
   policy: TenantAccessPolicy,
-): boolean {
-  if (policy.allowedCidrs.length === 0 && !policy.tailscaleEnabled) {
-    return true;
-  }
-  if (policy.allowedCidrs.length > 0 && isIpAllowed(clientIp, policy.allowedCidrs)) {
-    return true;
-  }
-  // For Tailscale, we can't verify synchronously in a hypothetical check.
-  // If Tailscale is enabled AND CIDRs don't match, assume the admin knows what they're doing.
-  if (policy.tailscaleEnabled) {
-    return true;
-  }
-  return false;
+): Promise<boolean> {
+  const result = await evaluateAccessPolicy(policy, clientIp);
+  return result.allowed;
 }
 
 // ─── Route handler wrapper ───────────────────────────────────

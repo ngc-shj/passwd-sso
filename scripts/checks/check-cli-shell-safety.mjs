@@ -252,53 +252,65 @@ function templateQuasiText(template) {
 }
 
 /**
- * Names of local bindings whose value is handed to shellQuote() somewhere in
- * this file. A string that gets quoted is, by construction, shell text — the
- * author is quoting it precisely so a shell will parse it as one word — so a
- * template literal that produces such a value must have its own interpolations
- * discharged even when its static text carries no NAME=/export/trap keyword.
- *
- * This is what the composed-trap shape needs:
+ * Trap bodies are parsed TWICE — once by the shell that reads the `trap`
+ * line, and again by the shell that runs the body when the trap fires. So a
+ * value composed into a trap body needs its own interpolations quoted even
+ * though the composed string is quoted as a whole:
  *
  *   const inner = `kill ${shellQuote(pid)}; rm -f ${shellQuote(sock)}`;
  *   console.log(`trap ${shellQuote(inner)} EXIT;`);
  *
- * `inner`'s own text matches none of the three keyword patterns, so without
- * this the gate inspects only the outer wrap and a regression that drops the
- * INNER quoting — at the two sites this gate exists to protect — stays green.
+ * `inner`'s own text carries no NAME=/export/trap keyword, so a keyword-only
+ * rule inspects the outer wrap, finds it discharged, and reports green while
+ * the values a shell will parse go unquoted.
  *
- * Matching is by name, not by resolved binding: a same-named variable in a
- * sibling scope makes the gate treat one more template as shell text, which
- * costs an author one shellQuote() call. The opposite error would be a silent
- * miss, so the imprecision is deliberately on the noisy side.
+ * The trigger is deliberately the TRAP context, not "flows into shellQuote"
+ * generally. Quoting a composed value once is the correct, idiomatic use of a
+ * quoting helper — `PATH=${shellQuote(`${dir}/${name}`)}` produces one correct
+ * word, and demanding inner quoting there would embed literal quote characters
+ * into the value and break it. Only the re-parsed case needs both levels.
+ *
+ * Known limit, stated rather than implied: this follows ONE hop — a template
+ * assigned to a name, that name passed to shellQuote inside a trap literal.
+ * Two hops (an alias of an alias, a function return, an array element) are not
+ * traced, and the matching is by name rather than by resolved binding. This
+ * rule is a tripwire for the shape the codebase actually uses; the guarantee
+ * that the shipped emissions are correct comes from the tests that fire the
+ * real trap line through a real shell, not from this rule alone.
  */
-function shellQuotedBindingNames(sourceFile) {
+function findTrapBodies(sourceFile) {
   const names = new Set();
-  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    if (!isShellQuoteCall(call)) continue;
-    for (const arg of call.getArguments()) {
-      if (Node.isIdentifier(arg)) names.add(arg.getText());
+  const inline = new Set();
+  for (const template of sourceFile.getDescendantsOfKind(SyntaxKind.TemplateExpression)) {
+    if (!SHELL_TRAP_RE.test(templateQuasiText(template))) continue;
+    for (const span of template.getTemplateSpans()) {
+      const expr = span.getExpression();
+      if (!Node.isCallExpression(expr) || !isShellQuoteCall(expr)) continue;
+      for (const arg of expr.getArguments()) {
+        if (Node.isIdentifier(arg)) names.add(arg.getText());
+        // `trap ${shellQuote(`kill ${pid}`)} EXIT` — the body is composed
+        // inline, so there is no binding to name; mark the literal itself.
+        if (Node.isTemplateExpression(arg)) inline.add(arg);
+      }
     }
   }
-  return names;
+  return { names, inline };
 }
 
-/** True when this template literal's value is what a shellQuote() call receives. */
-function flowsIntoShellQuote(template, quotedNames) {
+/** True when this template literal's value becomes a trap body. */
+function isTrapBody(template, trapBodies) {
+  if (trapBodies.inline.has(template)) return true;
   const parent = template.getParent();
-  if (Node.isCallExpression(parent) && isShellQuoteCall(parent)) return true;
-  if (Node.isVariableDeclaration(parent)) {
-    const name = parent.getNameNode();
-    return Node.isIdentifier(name) && quotedNames.has(name.getText());
-  }
-  return false;
+  if (!Node.isVariableDeclaration(parent)) return false;
+  const name = parent.getNameNode();
+  return Node.isIdentifier(name) && trapBodies.names.has(name.getText());
 }
 
 function checkRuleB(sourceFile) {
   const findings = [];
-  const quotedNames = shellQuotedBindingNames(sourceFile);
+  const trapBodies = findTrapBodies(sourceFile);
   for (const template of sourceFile.getDescendantsOfKind(SyntaxKind.TemplateExpression)) {
-    if (!isShellForm(templateQuasiText(template)) && !flowsIntoShellQuote(template, quotedNames)) continue;
+    if (!isShellForm(templateQuasiText(template)) && !isTrapBody(template, trapBodies)) continue;
     for (const span of template.getTemplateSpans()) {
       const expr = span.getExpression();
       if (isShellQuoteCall(expr)) continue;

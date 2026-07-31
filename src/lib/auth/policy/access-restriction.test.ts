@@ -213,21 +213,26 @@ describe("checkAccessRestriction — Tailscale tailnet verification (C5)", () =>
     expect(result).toEqual({ allowed: true });
   });
 
-  it("denies fail-closed when tailscaled is unreachable", async () => {
+  it("surfaces the same denial when verification fails for any reason, not only a mismatch", async () => {
+    // A socket error, a timeout and a genuine tailnet mismatch all reach this
+    // function as `verifyTailscalePeer` resolving false — the distinction is
+    // made and asserted inside tailscale-client.test.ts, not here. Named for
+    // what it actually pins so the suite does not read as covering two
+    // independently-verified failure modes when it covers one propagation.
     mockTenantFindUnique.mockResolvedValueOnce({
       allowedCidrs: [],
       tailscaleEnabled: true,
       tailscaleTailnet: "acme",
     });
     mockIsTailscaleIp.mockReturnValueOnce(true);
-    // verifyTailscalePeer already fails closed on socket errors/timeouts
-    // (asserted in tailscale-client.test.ts); the caller only ever sees its
-    // boolean result, which is what this asserts propagates to a denial.
     mockVerifyTailscalePeer.mockResolvedValueOnce(false);
 
     const result = await checkAccessRestriction("tenant-unreachable", "100.64.0.3");
 
-    expect(result.allowed).toBe(false);
+    expect(result).toEqual({
+      allowed: false,
+      reason: "Tailscale tailnet mismatch",
+    });
   });
 
   it("allows via allowedCidrs without calling verifyTailscalePeer (recovery path precedence)", async () => {
