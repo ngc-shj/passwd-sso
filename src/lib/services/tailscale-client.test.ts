@@ -37,6 +37,16 @@ describe("_extractTailnetFromFqdn", () => {
       "example.com",
     );
   });
+
+  it("folds extra leading hostname labels into the tailnet rather than crashing", () => {
+    // The front boundary is fixed at one label because Tailscale enforces
+    // single-label machine names. If that ever stopped holding, the extra
+    // label lands in the tailnet string and matches no configured policy —
+    // a denial, never a match against a shorter real tailnet name.
+    expect(_extractTailnetFromFqdn("a.b.my-tailnet.ts.net.")).toBe(
+      "b.my-tailnet",
+    );
+  });
 });
 
 describe("verifyTailscalePeer (TCP fallback path)", () => {

@@ -251,10 +251,54 @@ function templateQuasiText(template) {
   return parts.join("");
 }
 
+/**
+ * Names of local bindings whose value is handed to shellQuote() somewhere in
+ * this file. A string that gets quoted is, by construction, shell text — the
+ * author is quoting it precisely so a shell will parse it as one word — so a
+ * template literal that produces such a value must have its own interpolations
+ * discharged even when its static text carries no NAME=/export/trap keyword.
+ *
+ * This is what the composed-trap shape needs:
+ *
+ *   const inner = `kill ${shellQuote(pid)}; rm -f ${shellQuote(sock)}`;
+ *   console.log(`trap ${shellQuote(inner)} EXIT;`);
+ *
+ * `inner`'s own text matches none of the three keyword patterns, so without
+ * this the gate inspects only the outer wrap and a regression that drops the
+ * INNER quoting — at the two sites this gate exists to protect — stays green.
+ *
+ * Matching is by name, not by resolved binding: a same-named variable in a
+ * sibling scope makes the gate treat one more template as shell text, which
+ * costs an author one shellQuote() call. The opposite error would be a silent
+ * miss, so the imprecision is deliberately on the noisy side.
+ */
+function shellQuotedBindingNames(sourceFile) {
+  const names = new Set();
+  for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (!isShellQuoteCall(call)) continue;
+    for (const arg of call.getArguments()) {
+      if (Node.isIdentifier(arg)) names.add(arg.getText());
+    }
+  }
+  return names;
+}
+
+/** True when this template literal's value is what a shellQuote() call receives. */
+function flowsIntoShellQuote(template, quotedNames) {
+  const parent = template.getParent();
+  if (Node.isCallExpression(parent) && isShellQuoteCall(parent)) return true;
+  if (Node.isVariableDeclaration(parent)) {
+    const name = parent.getNameNode();
+    return Node.isIdentifier(name) && quotedNames.has(name.getText());
+  }
+  return false;
+}
+
 function checkRuleB(sourceFile) {
   const findings = [];
+  const quotedNames = shellQuotedBindingNames(sourceFile);
   for (const template of sourceFile.getDescendantsOfKind(SyntaxKind.TemplateExpression)) {
-    if (!isShellForm(templateQuasiText(template))) continue;
+    if (!isShellForm(templateQuasiText(template)) && !flowsIntoShellQuote(template, quotedNames)) continue;
     for (const span of template.getTemplateSpans()) {
       const expr = span.getExpression();
       if (isShellQuoteCall(expr)) continue;

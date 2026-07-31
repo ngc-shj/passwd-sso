@@ -408,7 +408,10 @@ export function isTailscaleIp(ip: string): boolean {
 }
 
 const IPV4_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
-const IPV6_SIMPLE_REGEX = /^[0-9a-fA-F:]+$/;
+// Dots are admitted because RFC 4291 §2.2 form 3 writes the low 32 bits as a
+// dotted quad; parseIpv6 is the actual validator, and rejecting the form here
+// would deny an address the CIDR matchers now accept.
+const IPV6_SIMPLE_REGEX = /^[0-9a-fA-F:.]+$/;
 
 /**
  * Validate that an IP string is a well-formed IPv4 or IPv6 address.

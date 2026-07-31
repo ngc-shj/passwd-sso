@@ -128,6 +128,40 @@ export function forkDaemon(childArgs: string[]) {
       expect(stderr).toContain("Rule B");
     });
 
+    it("FAILS on the composed-trap shape when only the outer wrap is quoted", () => {
+      // The shipped shape: the trap body is built first, then quoted whole.
+      // The inner literal's own text carries no NAME=/export/trap keyword, so
+      // a keyword-only rule inspects the outer wrap, finds it discharged, and
+      // reports green while the values a shell will parse go unquoted.
+      writeCli(
+        "commands/agent.ts",
+        `import { shellQuote } from "../lib/shell-quote.js";
+export function emit(pid: number, sock: string) {
+  const inner = \`kill \${pid} 2>/dev/null; rm -f \${sock}\`;
+  console.log(\`trap \${shellQuote(inner)} EXIT;\`);
+}
+`,
+      );
+      const { exitCode, stderr } = runGuard();
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Rule B");
+      expect(stderr).toContain("sock");
+    });
+
+    it("passes the composed-trap shape when the inner values are quoted too", () => {
+      writeCli(
+        "commands/agent.ts",
+        `import { shellQuote } from "../lib/shell-quote.js";
+export function emit(pid: number, sock: string) {
+  const inner = \`kill \${shellQuote(String(pid))} 2>/dev/null; rm -f \${shellQuote(sock)}\`;
+  console.log(\`trap \${shellQuote(inner)} EXIT;\`);
+}
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+
     it("passes when the trap interpolation is wrapped in shellQuote", () => {
       writeCli(
         "commands/agent.ts",

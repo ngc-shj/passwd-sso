@@ -49,3 +49,28 @@ Batch C switched the file from a typed `prisma` import to hoisted mock reference
 ## D6 — a comment in `ip-access.ts` was reworded to keep C6 Rule C green
 
 The D1 comment originally spelled a NAT64 example address literally. Rule C's `64:ff9b` clause is a plain-text tripwire over `src`, so it fired. The comment now names the NAT64 prefixes without spelling one — the gate stays maximally sensitive (no exemption marker was added for it), and nothing about the code changed. Recorded because "the gate fired and the source was edited" is exactly the shape that deserves an audit trail.
+
+## D7 — Phase 2-5 self-R-check findings, fixed in Phase 2
+
+The three-expert self-check against R1-R50 (+RS/RT) surfaced five issues. All were fixed before declaring Phase 2 complete rather than carried into Phase 3.
+
+**R42 (Major) — Rule B could not see through a legitimate discharge.** The gate classified a template literal as shell syntax by its own static text. The shipped trap composition builds the body first and quotes it whole:
+
+```
+const inner = `kill ${shellQuote(String(pid))} ...; rm -f ${shellQuote(sock)}`;
+console.log(`trap ${shellQuote(inner)} EXIT;`);
+```
+
+`inner`'s own text carries no `NAME=` / `export` / `trap` keyword, so Rule B inspected only the outer wrap, found it discharged, and reported green. A regression dropping the *inner* quoting — at the two sites this gate exists to protect — would have shipped with CI green, which contradicts I3.1's claim that Rule B defines the class.
+
+Fixed by treating a template literal whose value flows into `shellQuote()` as shell text by construction: a string being quoted *is* shell text, or there would be no reason to quote it. Binding resolution is by name rather than by scope, which can over-report in a sibling scope; that direction costs an author one `shellQuote()` call, while the opposite is a silent miss, so the imprecision is deliberate and documented at the function.
+
+Red-proven on a scratch fixture: the composed-trap shape with unquoted inner values exits 1; the same shape with them quoted exits 0. Both are now self-test cases, so the proof is repeatable rather than a one-time observation.
+
+**R3 (Minor) — `isValidIpAddress` disagreed with the parser it guards.** `IPV6_SIMPLE_REGEX` rejected any string containing a dot, so an address in the notation D1 taught `parseIpv6` to accept was rejected one function away. Fail-closed and unreachable from real socket-sourced IPs, but a direct contradiction inside the file D1 touched. The regex now admits dots and leaves validation to `parseIpv6`.
+
+**R29 (Minor) — RFC 6052 citation split across the wrong sections.** §2.1 reserves the Well-Known Prefix and fixes it at 96 bits; the "IPv4 occupies bits 96-127" statement is §2.2. The comment claimed §2.1 for both. Corrected to name what each section contributes.
+
+**R43 (Minor) — the widened parser had no committed test.** D1's change was verified through `isPrivateIp`'s consumers only; neither `ip-access` suite covered the general dotted-quad form. Added four cases to `src/lib/auth/policy/ip-access.test.ts`: the form matching its own prefix, not matching an unrelated one, agreeing with the hex spelling of the same address, and an over-long address whose tail would overflow 16 bytes.
+
+**RT9 (Minor) — twin asymmetry.** `src/__tests__/lib/tailscale-client.test.ts` pinned the multi-leading-label input (`a.b.my-tailnet.ts.net.`) while the co-located suite did not. Added to the co-located suite so the same regression vector is proven in both.

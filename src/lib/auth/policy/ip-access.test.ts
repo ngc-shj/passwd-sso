@@ -141,6 +141,28 @@ describe("isIpInCidr", () => {
   it("matches zero-padded hex-form IPv4-mapped IPv6 against an IPv4 CIDR", () => {
     expect(isIpInCidr("::ffff:7f00:0001", "127.0.0.0/8")).toBe(true);
   });
+
+  // RFC 4291 §2.2 form 3 is not only the ::ffff: spelling. Before the parser
+  // handled the general case, any other prefix written with a dotted-quad tail
+  // failed to parse and therefore matched NO CIDR at all — a silent miss for
+  // the SSRF blocklist and an unexplained deny for tenant allowlists.
+  it("matches a non-::ffff: address written with a dotted-quad tail", () => {
+    expect(isIpInCidr("64:ff9b::169.254.169.254", "64:ff9b::/96")).toBe(true);
+  });
+
+  it("does not let a dotted-quad tail match an unrelated IPv6 prefix", () => {
+    expect(isIpInCidr("64:ff9b::100.64.0.1", "fd7a:115c:a1e0::/48")).toBe(false);
+  });
+
+  it("agrees with the hex spelling of the same address", () => {
+    expect(isIpInCidr("::127.0.0.1", "::/96")).toBe(
+      isIpInCidr("::7f00:1", "::/96"),
+    );
+  });
+
+  it("rejects an over-long address whose dotted tail would overflow 16 bytes", () => {
+    expect(isIpInCidr("1:2:3:4:5:6:7:8:9.10.11.12", "::/0")).toBe(false);
+  });
 });
 
 describe("isIpAllowed", () => {

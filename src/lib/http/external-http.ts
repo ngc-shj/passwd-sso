@@ -92,13 +92,15 @@ export const BLOCKED_CIDR_REPRESENTATIVES: ReadonlyArray<{
   { cidr: "64:ff9b:1::/48", ipv6: "64:ff9b:1:c0a8:0:100::" },
 ];
 
-/** The only NAT64 prefix with an RFC-guaranteed embedding layout (RFC 6052 §2.1). */
+/** The only NAT64 prefix with an RFC-guaranteed embedding layout (RFC 6052 §2.1-2.2). */
 const NAT64_WELL_KNOWN_PREFIX = "64:ff9b::/96";
 
 /**
- * Extract the IPv4 address embedded in a well-known-prefix NAT64 address
- * (64:ff9b::/96 — RFC 6052 §2.1 fixes the layout: the IPv4 is the last 32
- * bits). Returns null for every other address, INCLUDING the RFC 8215
+ * Extract the IPv4 address embedded in a well-known-prefix NAT64 address.
+ * §2.1 fixes the Well-Known Prefix at 96 bits, so only one row of §2.2's
+ * embedding table can apply to it: the IPv4 sits in bits 96-127. Neither
+ * section alone carries the guarantee — the length comes from one and the
+ * layout from the other. Returns null for every other address, INCLUDING the RFC 8215
  * local-use prefix 64:ff9b:1::/48: that RFC's §5 forbids assuming an IPv4
  * is embedded there or where it would sit, so that prefix is handled by
  * BLOCKED_CIDRS membership instead and must never reach this decoder.
