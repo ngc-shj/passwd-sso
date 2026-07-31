@@ -162,6 +162,25 @@ export function emit(pid: number, sock: string) {
       expect(exitCode, stdout).toBe(0);
     });
 
+    it("does NOT demand inner quoting for a value composed and quoted once", () => {
+      // Quoting a composed value once is the correct idiom — the result is one
+      // shell word, and nesting shellQuote inside it would embed literal quote
+      // characters and break the value. Only a trap body is parsed twice.
+      // An earlier revision of this rule flagged both interpolations here and
+      // the "fix" it demanded produced unusable output; this pins that the
+      // rule stays quiet, since nothing else would catch its return.
+      writeCli(
+        "commands/agent.ts",
+        `import { shellQuote } from "../lib/shell-quote.js";
+export function emit(dir: string, name: string) {
+  console.log(\`PSSO_PATH=\${shellQuote(\`\${dir}/\${name}\`)}\`);
+}
+`,
+      );
+      const { exitCode, stdout } = runGuard();
+      expect(exitCode, stdout).toBe(0);
+    });
+
     it("passes when the trap interpolation is wrapped in shellQuote", () => {
       writeCli(
         "commands/agent.ts",

@@ -273,10 +273,12 @@ describe("wouldIpBeAllowed", () => {
         tailscaleTailnet: "my-tailnet",
       }),
     ).resolves.toBe(true);
+    // Asserting the call, not just the verdict: the old approximation also
+    // returned true here, by never asking at all.
+    expect(mockVerifyTailscalePeer).toHaveBeenCalledWith("100.64.0.1", "my-tailnet");
   });
 
   it("keeps CGNAT-only semantics when no tailnet is pinned", async () => {
-
     await expect(
       wouldIpBeAllowed("100.64.0.1", {
         allowedCidrs: ["192.168.1.0/24"],
@@ -285,6 +287,19 @@ describe("wouldIpBeAllowed", () => {
       }),
     ).resolves.toBe(true);
     expect(mockVerifyTailscalePeer).not.toHaveBeenCalled();
+  });
+
+  // The old approximation returned true for ANY Tailscale-enabled policy, so
+  // it cleared this save too — enabling Tailscale-only access from an address
+  // that is not on the tailnet at all, which locks the admin out immediately.
+  it("returns false for a non-CGNAT address under a Tailscale-only policy", async () => {
+    await expect(
+      wouldIpBeAllowed("203.0.113.5", {
+        allowedCidrs: [],
+        tailscaleEnabled: true,
+        tailscaleTailnet: null,
+      }),
+    ).resolves.toBe(false);
   });
 });
 

@@ -88,3 +88,33 @@ R1/R17, R3, R29 (all six new citations fetched and verified), R49, R50, RS1-RS3,
 
 ### Testing expert
 R1/R17, R19, R29, R42, R48, R49/R50, RT1, RT2, RT5, RT7, RT9, RT10 — Checked, no issue. R43 — Finding T1 (the sibling gap the Phase 2 fix left). All other items: no new issue this round.
+
+---
+
+# Round 2
+
+## Changes from Previous Round
+
+All six Round 1 findings applied. Round 2 reviewed the fixes themselves.
+
+## Findings
+
+- **F3 [Critical]** `src/app/api/tenant/policy/route.ts` — the self-lockout gate's trigger condition tested `allowedCidrs` and `tailscaleEnabled` but not `tailscaleTailnet`, so a PATCH carrying only that field skipped the check entirely. Reproduced against the real handler: `wouldIpBeAllowed` was never called and the save returned 200. This is the scenario Round 1's F1/S2 fix was written for, still open one layer up. Investigating the fix surfaced the same omission a second time in the same file: `needsCurrentState` gated the current-tenant read on the identical two-field list, so even with the trigger corrected the hypothetical policy was built from `?? []` / `?? false` and `hasRestrictions` evaluated false.
+- **T3 [Major]** (= F4) Both route-level suites mock `wouldIpBeAllowed` as returning a bare boolean while production now returns a Promise. Verified by deleting the `await` at `route.ts:811` on a throwaway worktree: all 97 tests still passed — the exact regression Round 1 fixed would ship silently.
+- **T4, T5 [Major]** Two of Round 1's new `wouldIpBeAllowed` cases pass unchanged against the pre-fix synchronous body, so they do not discharge the fix.
+- **T6 [Major]** (= F5) No fixture pins the shape Round 1's F2 identified as a false positive, so a future widening of Rule B's trigger would reintroduce it unnoticed.
+- **S1 [Major, continuing]** The gate's one-hop, name-based matching stands as a documented limit. The security expert was asked to challenge the argument that the real guarantee comes from the tests rather than the gate, and confirmed it: both CLI suites execute the emitted `trap` line through `/bin/sh` against a socket path containing `'` and a space and assert a decoy file survives — an adversarial proof for the two real sites, not a happy-path smoke test.
+- **[Adjacent, Minor]** `isTrapBody` recognizes `const x = <template>` but not a bare reassignment (`let x; x = ...`). Pre-existing shape, no live code uses it; recorded, not fixed.
+
+## Resolution Status — Round 2
+
+| ID | Disposition | Where applied |
+|----|-------------|---------------|
+| F3 | Fixed at both sites, and the duplication that caused it removed | `route.ts` now names the predicate once (`lockoutRelevantFieldChanged`) and both the current-state read and the self-lockout gate key off it. The two spellings had drifted apart in exactly the same way, which is why fixing only the one the finding named left the bug live. |
+| T3 / F4 | Fixed | Both mocks now resolve a Promise, so a dropped `await` changes the assertion's outcome |
+| T4 | Fixed | The allow case now asserts `verifyTailscalePeer` was called with the pinned tailnet — the old approximation returned true by never asking |
+| T5 | Fixed by adding a differentiating sibling | The CGNAT-only case pins I5.3 and legitimately holds under both implementations; a new case (non-CGNAT address under a Tailscale-only policy) fails against the old body, which cleared that save unconditionally |
+| T6 / F5 | Fixed | A green fixture pins `PSSO_PATH=${shellQuote(\`${dir}/${name}\`)}` as passing |
+| S1 | Accepted as a documented limit | Argument re-verified rather than restated; recorded above |
+
+Verification: `npx vitest run` → 1004 files, 13891 passed, 1 skipped. `npx tsc --noEmit` clean. Gate green.

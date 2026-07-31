@@ -19,7 +19,7 @@ const {
   mockLogAudit: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockInvalidateCache: vi.fn(),
-  mockWouldIpBeAllowed: vi.fn().mockReturnValue(true),
+  mockWouldIpBeAllowed: vi.fn().mockResolvedValue(true),
   mockExtractClientIp: vi.fn().mockReturnValue("192.168.1.100"),
   mockTeamPolicyFindMany: vi.fn().mockResolvedValue([]),
   mockTeamPolicyUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -179,7 +179,7 @@ describe("PATCH /api/tenant/policy", () => {
     mockTeamPolicyFindMany.mockResolvedValue([]);
     mockTeamPolicyUpdateMany.mockResolvedValue({ count: 0 });
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
-    mockWouldIpBeAllowed.mockReturnValue(true);
+    mockWouldIpBeAllowed.mockResolvedValue(true);
   });
 
   function mockUpdateReturn(overrides: Record<string, unknown> = {}) {
@@ -655,7 +655,7 @@ describe("PATCH /api/tenant/policy", () => {
       tailscaleEnabled: false,
       tailscaleTailnet: null,
     });
-    mockWouldIpBeAllowed.mockReturnValueOnce(false);
+    mockWouldIpBeAllowed.mockResolvedValueOnce(false);
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       body: { allowedCidrs: ["10.0.0.0/8"] },
@@ -663,6 +663,33 @@ describe("PATCH /api/tenant/policy", () => {
     const res = await PATCH(req);
     const { status, json } = await parseResponse(res);
 
+    expect(status).toBe(409);
+    expect(json.error).toBe("SELF_LOCKOUT");
+  });
+
+  // A tenant that already has Tailscale enabled can be locked out by a PATCH
+  // that changes nothing but the pinned tailnet — the field the gate's trigger
+  // condition originally left out, so the check was skipped entirely.
+  it("returns 409 when only tailscaleTailnet changes on an already-Tailscale tenant", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "old-tailnet",
+    });
+    mockWouldIpBeAllowed.mockResolvedValueOnce(false);
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { tailscaleTailnet: "new-tailnet" },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(mockWouldIpBeAllowed).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ tailscaleTailnet: "new-tailnet" }),
+    );
     expect(status).toBe(409);
     expect(json.error).toBe("SELF_LOCKOUT");
   });
