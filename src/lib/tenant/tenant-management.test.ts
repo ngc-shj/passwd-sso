@@ -129,7 +129,7 @@ describe("findOrCreateTenantForClaim", () => {
     // tagged template, so each call's first argument is the
     // TemplateStringsArray and [0] is its literal SQL.
     const sql = mockPrisma.$executeRaw.mock.calls.map((c) => c[0][0]);
-    expect(sql).toEqual([
+    expect(sql.slice(0, 3)).toEqual([
       "SAVEPOINT tenant_claim_create",
       "ROLLBACK TO SAVEPOINT tenant_claim_create",
       "RELEASE SAVEPOINT tenant_claim_create",
@@ -137,6 +137,18 @@ describe("findOrCreateTenantForClaim", () => {
     expect(mockPrisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
       mockPrisma.tenant.create.mock.invocationCallOrder[0],
     );
+
+    // The routing-history write (SC11 / #743) is the fourth statement, and its
+    // position is the contract, not an incidental ordering: it must come AFTER
+    // `RELEASE SAVEPOINT`. Both `tenant.create` calls above are mutually
+    // exclusive alternatives of ONE logical registration — the second runs only
+    // after the rollback undid the first — so an event written inside either arm
+    // would double-emit, or record a tenant that no longer exists. Asserted by
+    // position rather than by presence, because presence survives moving it into
+    // the try block, which is the regression this pins.
+    expect(sql).toHaveLength(4);
+    expect(sql[3]).toContain("INSERT INTO tenant_claim_events");
+    expect(mockPrisma.$executeRaw).toHaveBeenCalledTimes(4);
   });
 
   it("returns claim_invalid when the normalised claim fails storableClaimSchema, with no create (I5)", async () => {

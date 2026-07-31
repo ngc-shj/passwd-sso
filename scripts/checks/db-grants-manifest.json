@@ -273,6 +273,7 @@
     "TABLE:passwd_app\tpublic.teams\tINSERT",
     "TABLE:passwd_app\tpublic.teams\tSELECT",
     "TABLE:passwd_app\tpublic.teams\tUPDATE",
+    "TABLE:passwd_app\tpublic.tenant_claim_events\tINSERT",
     "TABLE:passwd_app\tpublic.tenant_claims\tDELETE",
     "TABLE:passwd_app\tpublic.tenant_claims\tINSERT",
     "TABLE:passwd_app\tpublic.tenant_claims\tSELECT",

@@ -36,8 +36,9 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <ref>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped [--days <n>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove --tenant <ref> --domain <domain> [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid>
 //
 // `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
 // claims (normalised the same way `add`/`remove` normalise `--domain`), or its
@@ -47,10 +48,15 @@
 // resolveTenantRef for why (round-2 F-F).
 //
 // `--by` is a self-asserted operator label (NOT authenticated attribution —
-// there is no application user identity on this connection, see SC8) stored
-// verbatim in TenantClaim.createdBy when a row is CREATED. It is deliberately
-// not written on the un-revoke or reassign paths, which preserve the original
-// registrant — see cmdAdd.
+// there is no application user identity on this connection, see SC8). It is
+// stored verbatim in TenantClaim.createdBy only when a row is CREATED —
+// deliberately not overwritten on the un-revoke or reassign paths, which
+// preserve the original registrant, see cmdAdd — but that is `createdBy`
+// specifically, not the flag. `--by` ALSO supplies `actor_label` on the
+// `tenant_claim_events` row every one of the four verbs (register / revoke /
+// unrevoke / reassign) appends in the same transaction (SC11 / #743), which
+// is why `remove` requires it too, not just `add`. See `tenant-domain
+// history` to read those rows back.
 //
 // `--from` is `add`'s reassignment flag: it names the tenant that currently
 // owns the claim, and moves the claim off it. See cmdAdd for why it is a bare
@@ -74,6 +80,10 @@ import {
   escapeUnsafeDisplayChars,
   UNSAFE_DISPLAY_CHARS_RE,
 } from "@/lib/security/unsafe-display-chars";
+import {
+  recordTenantClaimEvent,
+  TENANT_CLAIM_EVENT_OPERATION,
+} from "@/lib/tenant/tenant-claim-event";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
@@ -706,6 +716,54 @@ export async function cmdPreflight(): Promise<CmdResult> {
   }
 }
 
+// ─── shared: --by validation ────────────────────────────────────
+
+// Sized to `tenant_claim_events.actor_label VARCHAR(255)`
+// (prisma/migrations/20260731100000_add_tenant_claim_events) — the column
+// every one of the four verbs writes `--by` into as attribution.
+const ACTOR_LABEL_MAX_LENGTH = 255;
+
+// Shared by `add` and `remove` (C4/#743): `--by` supplies `actor_label` on
+// all four routing operations, not just the row `add` may create, so one
+// validator sits ahead of both rather than a second hand-maintained copy
+// drifting from the first (RT9 twin).
+function validateActorLabel(by: string): CmdResult | null {
+  if (!by || by.trim().length === 0) {
+    return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
+  }
+
+  // Refused here, before the client is even built, rather than left to the
+  // column's own bound: a value this long would otherwise raise a raw 22001
+  // mid-transaction, after the operator has already read the confirmation
+  // prompt and answered it.
+  if (by.length > ACTOR_LABEL_MAX_LENGTH) {
+    return {
+      ok: false,
+      code: 1,
+      message: `--by is too long (${by.length} characters; max ${ACTOR_LABEL_MAX_LENGTH}).`,
+    };
+  }
+
+  // `--by` is stored verbatim as this change's attribution — actor_label on
+  // the tenant_claim_events row it appends, and, on `add`'s create arm only,
+  // TenantClaim.createdBy — and read back by `history`. Neither column is
+  // CHECK-constrained. A label carrying a bidi override would misrepresent
+  // who made the change at exactly the moment someone is deciding whether to
+  // trust the row. Rejected rather than escaped on the way in, matching the
+  // claim ingest boundary: what is stored stays what was typed.
+  if (UNSAFE_DISPLAY_CHARS_RE.test(by)) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "--by contains a control, bidi or zero-width character. Use a plain label: " +
+        "it is stored as this change's attribution and read back by `history`.",
+    };
+  }
+
+  return null;
+}
+
 // ─── add ─────────────────────────────────────────────────────────
 
 const ROW_6_9A_WARNING = [
@@ -736,26 +794,8 @@ export async function cmdAdd(args: {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  if (!args.by || args.by.trim().length === 0) {
-    return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
-  }
-
-  // `--by` is stored verbatim in TenantClaim.createdBy, which no CHECK
-  // constrains, and it is read back by `list` and by the next operator's `add`
-  // preview — the audit trail the whole soft-delete design (S3-4) rests on.
-  // A label carrying a bidi override would misrepresent who registered a claim
-  // at exactly the moment someone is deciding whether to trust the row.
-  // Rejected rather than escaped on the way in, matching the claim ingest
-  // boundary: what is stored stays what was typed.
-  if (UNSAFE_DISPLAY_CHARS_RE.test(args.by)) {
-    return {
-      ok: false,
-      code: 1,
-      message:
-        "--by contains a control, bidi or zero-width character. Use a plain label: " +
-        "it is stored as the registration's attribution and read back by `list`.",
-    };
-  }
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
 
   // `--from` is the reassignment flag, and it takes a bare tenant UUID —
   // deliberately NOT the `<ref>` forms `--tenant` accepts. Reassignment is
@@ -944,15 +984,27 @@ export async function cmdAdd(args: {
               message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current owner.`,
             };
           }
+          // C4/#743: one event, in the same transaction, naming both sides —
+          // the losing tenant this row moved FROM and the gaining tenant it
+          // moved TO — so a reassignment is one incident, not two groups.
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.REASSIGN,
+            oldTenantId: existing.tenantId,
+            newTenantId: tenant.id,
+            oldRevokedAt: existing.revokedAt,
+            newRevokedAt: null,
+            actorLabel: args.by,
+          });
         } else if (existing) {
           // M2 / SC8: `createdBy` is NOT overwritten with `--by`. SC8 defers
           // application-level audit for claim registration on the premise
           // that "the row itself carries the timeline and the self-asserted
           // actor an incident needs" — overwriting it on the un-revoke path
           // erased exactly that, leaving no record of who first registered
-          // the claim. The un-revoker is recorded only in this command's
-          // printed output; recording it in the row needs a new column, and
-          // therefore a migration, which is out of scope here.
+          // the claim. The un-revoker is recorded separately, as actor_label
+          // on the tenant_claim_events row appended below (SC11 / #743) —
+          // TenantClaim itself still needs no new column for it.
           // Same total CAS as the reassignment above: the row was revoked when
           // it was read, and it is the revocation this write clears, so a
           // concurrent change to either field is a refusal rather than a
@@ -968,6 +1020,15 @@ export async function cmdAdd(args: {
               message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
             };
           }
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.UNREVOKE,
+            oldTenantId: tenant.id,
+            newTenantId: tenant.id,
+            oldRevokedAt: existing.revokedAt,
+            newRevokedAt: null,
+            actorLabel: args.by,
+          });
         } else {
           try {
             await tx.tenantClaim.create({ data: { tenantId: tenant.id, claim, createdBy: args.by } });
@@ -981,6 +1042,15 @@ export async function cmdAdd(args: {
             }
             throw e;
           }
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
+            oldTenantId: null,
+            newTenantId: tenant.id,
+            oldRevokedAt: null,
+            newRevokedAt: null,
+            actorLabel: args.by,
+          });
         }
 
         if (existing && isReassignment) {
@@ -1000,26 +1070,25 @@ export async function cmdAdd(args: {
             existing.createdBy === null ? "-" : escapeUnsafeDisplayChars(existing.createdBy);
           console.log(
             `createdBy stays "${registeredBySoFar}" (${existing.createdAt.toISOString()}) — the row records who ` +
-              `FIRST registered this claim, not who last changed it. This change was made by "${escapeUnsafeDisplayChars(args.by)}"; that is ` +
-              "recorded only here, so keep this output with the incident record.",
+              `FIRST registered this claim, not who last changed it. This change was made by "${escapeUnsafeDisplayChars(args.by)}"; ` +
+              `see "tenant-domain history --domain ${escapeUnsafeDisplayChars(claim)}" for the full record of who changed what, and when.`,
           );
-          // What this write DESTROYED, named explicitly (round-6, Codex — see
-          // plan SC11). SC8 defers application-level audit on the grounds that
-          // "the row itself carries the timeline"; that is true of
-          // register-then-revoke and false of both operations below, because
-          // each overwrites the state it changed. Until SC11's append-only
-          // history exists, this line is the only statement of what was lost,
-          // and it must name the values rather than allude to them.
-          const destroyed: string[] = [];
-          if (isReassignment) destroyed.push(`previous owner tenant ${existing.tenantId}`);
+          // What this write overwrites on THIS row, named explicitly (round-6,
+          // Codex — see plan SC11). SC8 defers application-level audit on the
+          // grounds that "the row itself carries the timeline"; that is true
+          // of register-then-revoke and false of both operations below,
+          // because each overwrites the state it changed. SC11's append-only
+          // `tenant_claim_events` table now records it (queryable with
+          // `tenant-domain history`), so this line names the values rather
+          // than claiming they are lost.
+          const overwritten: string[] = [];
+          if (isReassignment) overwritten.push(`previous owner tenant ${existing.tenantId}`);
           if (existing.revokedAt !== null) {
-            destroyed.push(`revokedAt ${existing.revokedAt.toISOString()}`);
+            overwritten.push(`revokedAt ${existing.revokedAt.toISOString()}`);
           }
-          if (destroyed.length > 0) {
+          if (overwritten.length > 0) {
             console.log(
-              `NOT RECOVERABLE from the row after this change: ${destroyed.join("; ")}. ` +
-                "The registry keeps no history of routing changes yet (plan SC11), so this " +
-                "output is the record — retain it.",
+              `Overwritten on this row (not lost — see history above): ${overwritten.join("; ")}.`,
             );
           }
         }
@@ -1045,11 +1114,21 @@ export async function cmdAdd(args: {
 export async function cmdRemove(args: {
   tenant: string;
   domain: string;
+  by: string;
   yes?: boolean;
   confirm?: ConfirmFn;
 }): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
+
+  // Validated here — before the client is constructed, next to the
+  // --domain check below — not inside withBypassRls's callback. "Before the
+  // CAS write" would be too weak: a refusal raised once the transaction is
+  // open happens AFTER the operator has read the warning and answered the
+  // confirmation prompt, which is the false-deny on an incident-response
+  // path C1 exists to avoid.
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
 
   // storableClaimSchema, NOT operatorDomainSchema (round-3 S3-13). The
   // operator-input guard belongs on the write that CREATES a row; applying
@@ -1122,9 +1201,14 @@ export async function cmdRemove(args: {
         // Soft delete (revokedAt), never DELETE — a claim's lifetime must
         // survive the incident response that discovers it (round-3 S3-4);
         // createdAt is one of the two timestamps C12's runbook needs.
+        //
+        // Hoisted rather than inlined into `data`: the event below must
+        // record the SAME instant that was written, not a second
+        // `new Date()` a few microseconds later.
+        const revokedAt = new Date();
         const result = await tx.tenantClaim.updateMany({
           where: { claim, tenantId: tenant.id, revokedAt: null },
-          data: { revokedAt: new Date() },
+          data: { revokedAt },
         });
         if (result.count === 0) {
           return {
@@ -1133,9 +1217,119 @@ export async function cmdRemove(args: {
             message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
           };
         }
+        await recordTenantClaimEvent(tx, {
+          claim,
+          operation: TENANT_CLAIM_EVENT_OPERATION.REVOKE,
+          oldTenantId: tenant.id,
+          newTenantId: tenant.id,
+          oldRevokedAt: null,
+          newRevokedAt: revokedAt,
+          actorLabel: args.by,
+        });
 
         console.log(`Revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
         return { ok: true, code: 0, tenantId: tenant.id, claim };
+      },
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// ─── history ─────────────────────────────────────────────────────
+
+export async function cmdHistory(args: { domain?: string; tenant?: string }): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+
+  if (!args.domain && !args.tenant) {
+    return {
+      ok: false,
+      code: 1,
+      message: "history requires --domain <claim> or --tenant <uuid>.",
+    };
+  }
+
+  // `--domain` wins over `--tenant` when both are given — it names a single
+  // claim exactly, which is strictly narrower than "every event naming this
+  // tenant". Normalised the same way `add`/`remove` read `--domain` back, but
+  // NOT schema-validated: this is a read, and a pre-existing row stored by
+  // some other means must still be findable by it.
+  const claim = args.domain !== undefined ? normalizeTenantClaim(args.domain) : undefined;
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        let tenantId: string | undefined;
+        if (claim === undefined) {
+          const ref = args.tenant as string; // guaranteed by the neither-given refusal above
+          // A bare UUID matches old_tenant_id/new_tenant_id DIRECTLY, never
+          // through resolveTenantRef: every arm of that helper reads a LIVE
+          // `tenants`/`tenant_claims` row, and all of them are dead in the one
+          // case this selector exists for — a tenant deleted after a claim
+          // was moved off it (F3). A non-UUID ref still resolves through it,
+          // same as `list`/`add`/`remove`.
+          if (UUID_RE.test(ref)) {
+            tenantId = ref;
+          } else {
+            const tenant = await resolveTenantRef(tx, ref);
+            if (!tenant) {
+              return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(ref)}` };
+            }
+            tenantId = tenant.id;
+          }
+        }
+
+        const rows = await tx.tenantClaimEvent.findMany({
+          where:
+            claim !== undefined
+              ? { claim }
+              : { OR: [{ oldTenantId: tenantId }, { newTenantId: tenantId }] },
+          orderBy: { createdAt: "asc" },
+        });
+
+        // Every free-text/echoed column is escaped, unconditionally — not
+        // only the ones this PR's own writers can produce. A row can predate
+        // this PR's ingest boundaries (a `db_user` naming a role dropped
+        // since, an `actor_label` from before validateActorLabel existed), and
+        // check-operator-echo-escaped.mjs structurally cannot see any of
+        // this: it taints process.argv and `cmd*` parameters, not values that
+        // came out of the database. `oldTenantId`/`newTenantId` are UUIDs, not
+        // free text, and left unescaped like `list`'s `tenantId` column.
+        //
+        // For EVERY row, not branched by `operation` — `operation` names the
+        // primary verb but is not a partition (C3), so a reader filtering on
+        // it for "did this touch tenant X" or "was this row revoked before"
+        // gets the wrong answer for a `reassign` row. Printing both tenants
+        // and both revocation values on every row, always, is what makes
+        // that question answerable without knowing the operation first.
+        for (const row of rows) {
+          console.log(
+            `${row.createdAt.toISOString()}\t${row.operation}\t` +
+              `claim=${escapeUnsafeDisplayChars(row.claim)}\t` +
+              `oldTenant=${row.oldTenantId ?? "-"}\tnewTenant=${row.newTenantId ?? "-"}\t` +
+              `oldRevokedAt=${row.oldRevokedAt ? row.oldRevokedAt.toISOString() : "-"}\t` +
+              `newRevokedAt=${row.newRevokedAt ? row.newRevokedAt.toISOString() : "-"}\t` +
+              `by=${escapeUnsafeDisplayChars(row.actorLabel)}\t` +
+              `dbUser=${escapeUnsafeDisplayChars(row.dbUser)}\t` +
+              `sessionDbUser=${escapeUnsafeDisplayChars(row.sessionDbUser)}`,
+          );
+        }
+
+        const subject =
+          claim !== undefined
+            ? `claim "${escapeUnsafeDisplayChars(claim)}"`
+            // `tenantId` can be the raw --tenant value verbatim (the UUID
+            // branch above), so it is echoed the same as any other operator
+            // input even though UUID_RE already constrains its shape.
+            : `tenant ${escapeUnsafeDisplayChars(tenantId ?? "")}`;
+        const message =
+          rows.length === 0 ? `No routing history for ${subject}.` : `${rows.length} event(s) listed.`;
+
+        return { ok: true, code: 0, rows, message };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     );
@@ -1150,11 +1344,12 @@ function printUsage(): void {
   console.error(
     [
       "Usage:",
-      "  tenant-domain list [--tenant <ref>]",
-      `  tenant-domain unmapped [--days <n>]            (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
+      "  tenant-domain list    [--tenant <ref>]",
+      `  tenant-domain unmapped [--days <n>]           (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
       "  tenant-domain preflight",
-      "  tenant-domain add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
-      "  tenant-domain remove --tenant <ref> --domain <domain> [--yes]",
+      "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
+      "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
+      "  tenant-domain history --domain <claim> | --tenant <uuid>",
       "",
       "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
@@ -1227,12 +1422,20 @@ async function main(): Promise<void> {
     case "remove": {
       const tenant = getStringFlag(flags, "tenant");
       const domain = getStringFlag(flags, "domain");
-      if (!tenant || !domain) {
+      const by = getStringFlag(flags, "by");
+      if (!tenant || !domain || !by) {
         printUsage();
         process.exitCode = 1;
         return;
       }
-      result = await cmdRemove({ tenant, domain, yes });
+      result = await cmdRemove({ tenant, domain, by, yes });
+      break;
+    }
+    case "history": {
+      result = await cmdHistory({
+        domain: getStringFlag(flags, "domain"),
+        tenant: getStringFlag(flags, "tenant"),
+      });
       break;
     }
     default:

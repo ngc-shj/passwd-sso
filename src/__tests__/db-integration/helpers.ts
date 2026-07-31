@@ -137,8 +137,12 @@ export const RETRYABLE_CLEANUP_SQLSTATES = [
  * it behind four attempts and a warning. The pg driver adapter nests the code
  * at `meta.driverAdapterError.cause.code`; other paths render it into the
  * message in Prisma's own `Code: \`23503\`` form. Both are read positionally.
+ *
+ * Exported for reuse: any test asserting a specific SQLSTATE from a Prisma
+ * call (not only this file's own retry classifier) should read it through
+ * here rather than growing a second positional parser.
  */
-function sqlStateOf(error: unknown): string | null {
+export function sqlStateOf(error: unknown): string | null {
   const meta = (error as { meta?: Record<string, unknown> })?.meta;
   const adapterError = meta?.driverAdapterError as { cause?: { code?: unknown } } | undefined;
   const nested = adapterError?.cause?.code;
@@ -223,6 +227,46 @@ export async function createTestContext(): Promise<TestContext> {
 
   // Verify connectivity
   await su.prisma.$executeRaw`SELECT 1`;
+
+  // Two preconditions for C1's tenant_claim_events purge routine (SC11 /
+  // #743's testing strategy), probed ONCE here rather than surfacing as a
+  // cryptic driver error out of every file's deleteTestData()/afterEach.
+  // Probed as CAPABILITIES, not titles: neither check asks "is this role
+  // the table owner" — an ownership predicate would fail every one of the
+  // ~95 integration files on a working configuration where
+  // MIGRATION_DATABASE_URL points at a superuser that is not the owner, and
+  // a probe sitting in front of the whole suite is exactly the kind that
+  // gets deleted rather than corrected.
+  //
+  // Order matters. "Not migrated" must be told apart from "not privileged"
+  // BEFORE the privilege probe: a checked-out-but-unmigrated branch raises
+  // 42883 (undefined_function), which is not in RETRYABLE_CLEANUP_SQLSTATES,
+  // out of every deleteTestData() call in every file — so the useful message
+  // ("run npm run db:migrate") has to win in that case, not a privilege
+  // error that is not the actual problem.
+  const [{ purgeRoutineExists }] = await su.prisma.$queryRaw<{ purgeRoutineExists: boolean }[]>`
+    SELECT to_regprocedure('public.tenant_claim_events_purge_for_tenant(uuid)') IS NOT NULL AS "purgeRoutineExists"
+  `;
+  if (!purgeRoutineExists) {
+    throw new Error(
+      "[db-integration] tenant_claim_events_purge_for_tenant does not exist on this database. " +
+        "Run `npm run db:migrate` to apply " +
+        "prisma/migrations/20260731100000_add_tenant_claim_events, then re-run the suite.",
+    );
+  }
+
+  const [{ purgeCapable }] = await su.prisma.$queryRaw<{ purgeCapable: boolean }[]>`
+    SELECT
+      has_function_privilege(current_user, 'public.tenant_claim_events_purge_for_tenant(uuid)', 'EXECUTE')
+      AND has_table_privilege(current_user, 'public.tenant_claim_events', 'DELETE') AS "purgeCapable"
+  `;
+  if (!purgeCapable) {
+    throw new Error(
+      "[db-integration] the role connected via MIGRATION_DATABASE_URL cannot EXECUTE " +
+        "tenant_claim_events_purge_for_tenant(uuid) or lacks DELETE on tenant_claim_events. " +
+        "Point MIGRATION_DATABASE_URL at a role with both (passwd_user in dev).",
+    );
+  }
 
   // Every id createTenant() hands out, minus the ones deleteTestData() has
   // already removed. A test that throws before its trailing cleanup line
@@ -396,6 +440,33 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM users WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // tenant_claim_events (C1, SC11/#743) has no tenant_id column and no
+      // FKs — it names a tenant only through old_tenant_id/new_tenant_id,
+      // and a bare DELETE is blocked by the append-only trigger. The purge
+      // routine is the one sanctioned escape (see the migration for why),
+      // and I5's CHECK makes it total: every row names at least one tenant,
+      // so purging both sides of every tenant this context ever creates
+      // reaches every row this suite could have written. Ordering relative
+      // to the rest of this transaction is free — the table has no FKs to
+      // anything above or below it.
+      try {
+        await tx.$executeRawUnsafe(
+          `SELECT tenant_claim_events_purge_for_tenant($1::uuid)`,
+          tenantId,
+        );
+      } catch (e) {
+        // Tagged distinctly from every other statement in this transaction
+        // (round: C1 testing strategy). Every other row here is an ordinary
+        // DELETE that a future FK fix can retry; a tenant_claim_events row
+        // left behind by a failed purge is UNDELETABLE by anything short of
+        // this same routine, so sweepOutstandingTenants() must not fold this
+        // into its best-effort "reported, not thrown" path below.
+        throw new Error(
+          `tenant_claim_events purge failed for tenant ${tenantId} (undeletable rows may remain): ` +
+            `${e instanceof Error ? e.message : String(e)}`,
+          { cause: e },
+        );
+      }
       await tx.$executeRawUnsafe(
         `DELETE FROM tenants WHERE id = $1::uuid`,
         tenantId,
@@ -428,6 +499,16 @@ export async function createTestContext(): Promise<TestContext> {
       try {
         await deleteTestData(tenantId);
       } catch (e) {
+        // A tenant_claim_events purge failure (tagged in deleteTestData) is
+        // not the same class as the FK-ordering failures this loop otherwise
+        // tolerates: every other swept row is deletable by a later retry,
+        // but a row this table's append-only triggers refuse to give up is
+        // undeletable by anything except the routine that just failed.
+        // Warning and moving on would leave it on the shared dev database
+        // with no further signal, so this one aborts the sweep instead.
+        if (e instanceof Error && e.message.startsWith("tenant_claim_events purge failed")) {
+          throw e;
+        }
         unresolved.push(`${tenantId} (${e instanceof Error ? e.message : String(e)})`);
       }
     }

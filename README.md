@@ -336,7 +336,7 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domai
 
 `unmapped`'s window is a *query* window, not this deployment's retention: it defaults to the configurable retention floor (30 days) and says so in its output. Widen it with `--days <n>` before concluding that nothing was denied.
 
-`list`, `preflight`, and `remove` are also available; run the command with no subcommand for the full usage banner.
+`list`, `preflight`, `remove`, and `history` are also available; run the command with no subcommand for the full usage banner. **Breaking change:** `remove` now requires `--by <operator-label>` too (`... remove --tenant <ref> --domain <claim> --by <operator-label>`) — a revocation, like a registration, now writes an attributed row to the routing history below, and an unattributed one would leave that record with no operator behind it.
 
 **`tenant_mismatch`: the claim is registered to the wrong tenant.** This is reachable with no operator action at all — a single sign-in presenting a mistyped or squatted claim registers it (`created_by = 'signin'`) against whatever tenant that sign-in created. `remove` will *not* free it: it soft-deletes the row (sets `revoked_at`) and leaves the owner unchanged, so a following `add` refuses again. Move the claim with `add --from`, naming the current owner:
 
@@ -348,9 +348,16 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
   --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
   --from <current-owner-uuid>
+
+# Reconstruct what happened to a claim's routing — every registration,
+# revocation and reassignment, each with its operator label and the Postgres
+# principal that executed it. --tenant matches even after the tenant row
+# itself is gone.
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --tenant <uuid>
 ```
 
-Before writing anything, `add --from` prints both tenants — id, name, slug and **active member count** — plus what the move costs the losing side, and asks for confirmation (`--yes` for non-interactive use). It refuses if `--from` is not the row's actual owner, and it does **not** require the row to be revoked first: a revoke-then-reassign sequence would open a window in which the claim resolves to nobody and *both* tenants' members are denied. The row's `created_by` is left untouched by the move — it records who first registered the claim, which is the evidence an incident needs. **The registry keeps no history of routing changes.** A move overwrites `tenant_id`, and re-registering a revoked claim clears `revoked_at`, so after either the row cannot tell you the previous owner, that it had been revoked, or who made the change. The command prints all three under `NOT RECOVERABLE from the row after this change`; that output is the only record, so retain it with the incident.
+Before writing anything, `add --from` prints both tenants — id, name, slug and **active member count** — plus what the move costs the losing side, and asks for confirmation (`--yes` for non-interactive use). It refuses if `--from` is not the row's actual owner, and it does **not** require the row to be revoked first: a revoke-then-reassign sequence would open a window in which the claim resolves to nobody and *both* tenants' members are denied. The row's `created_by` is left untouched by the move — it records who first registered the claim, which is the evidence an incident needs. A move overwrites `tenant_claims.tenant_id`, and re-registering a revoked claim clears `revoked_at`, so the `tenant_claims` row itself no longer shows the previous owner, that it had been revoked, or who changed it. That is no longer the only record: `add` and `remove` both append an attributed row to the `tenant_claim_events` table, and `tenant-domain history` reads it back.
 
 **If `GOOGLE_WORKSPACE_DOMAINS` is set** (recommended in [SECURITY.md](SECURITY.md)), registering the claim alone changes nothing. `src/auth.config.ts`'s `signIn` callback denies any Google sign-in whose `hd` is not in `GOOGLE_WORKSPACE_DOMAINS` *before* tenant-claim resolution runs at all, recorded as `reason: "provider_error"` — the denial never reaches the tenant-claim check, so `tenant-domain unmapped` shows nothing for it. Add the new domain to `GOOGLE_WORKSPACE_DOMAINS` too, and note which tenant it was added for: the variable is deployment-global while the claim registry is tenant-scoped, so without that note it silently accumulates every domain any tenant has ever renamed to. Remove the entry once no tenant depends on it. **Do not unset `GOOGLE_WORKSPACE_DOMAINS` to work around a lockout** — `allowDangerousEmailAccountLinking` is derived from `allowedGoogleDomains.length > 0`, so unsetting it flips that flag to `false` (*stricter*, not looser) and produces a second, different failure, `OAuthAccountNotLinked`, on top of the original denial.
 

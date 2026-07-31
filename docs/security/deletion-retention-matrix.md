@@ -37,7 +37,7 @@ Sourced from `src/workers/retention-gc-worker/registry.ts` (`RETENTION_REGISTRY`
 
 ## No automated purge (manual or cascade-only deletion)
 
-Every remaining Prisma model, i.e. models with no row in the registry above. These are deleted only via explicit application code (manual user/admin action) or as an `ON DELETE CASCADE` side effect of a parent-row deletion -- never by the retention-GC worker's own sweep.
+Every remaining Prisma model, i.e. models with no row in the registry above. What they share is the negative: the retention-GC worker's own sweep never touches them. How a row CAN be deleted varies -- explicit application code (manual user/admin action), an `ON DELETE CASCADE` side effect of a parent-row deletion, or, for an append-only table such as `tenant_claim_events`, neither of those: it has no foreign key and the application role holds no DELETE, so its only deletion path is a dedicated owner-only routine. Do not read membership here as "deleted with its parent".
 
 | Model | Table |
 | --- | --- |
@@ -69,6 +69,7 @@ Every remaining Prisma model, i.e. models with no row in the registry above. The
 | `TenantWebhook` | `tenant_webhooks` |
 | `ServiceAccount` | `service_accounts` |
 | `TenantClaim` | `tenant_claims` |
+| `TenantClaimEvent` | `tenant_claim_events` |
 | `WebAuthnCredential` | `webauthn_credentials` |
 | `DirectorySyncConfig` | `directory_sync_configs` |
 | `McpRefreshToken` | `mcp_refresh_tokens` |

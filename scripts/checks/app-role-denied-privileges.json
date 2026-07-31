@@ -39,6 +39,24 @@
       "table": "public.audit_chain_anchors",
       "privileges": ["UPDATE", "DELETE"],
       "reason": "The tamper-evidence anchors for the audit chain. An app role that can rewrite anchors can also re-anchor forged history, which removes the detection the HMAC chain exists to provide."
+    },
+    {
+      "role": "passwd_app",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "UPDATE", "DELETE", "TRUNCATE"],
+      "reason": "Append-only routing history (SC11 / #743). The only application path that touches this table is the sign-in auto-registration writer, which needs INSERT and nothing else — no SELECT, which is why the writer issues a raw INSERT with no RETURNING. Granting SELECT back would hand an application compromise the read side of every tenant's claim-routing history; granting UPDATE or DELETE would make the record editable by the one role an attacker actually reaches. A BEFORE UPDATE OR DELETE trigger also refuses, but it is defeated by the table owner and is not the bound: this ACL is."
+    },
+    {
+      "role": "passwd_outbox_worker",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "UPDATE", "DELETE", "TRUNCATE"],
+      "reason": "The outbox worker drains audit_outbox into audit_logs and has no business with claim routing. Listed prescriptively rather than left merely un-granted: absence alone is enforced only by the DESCRIPTIVE manifest, which `audit-db-grants.mjs --write` regenerates from whatever the database currently holds."
+    },
+    {
+      "role": "passwd_retention_gc_worker",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "UPDATE", "DELETE", "TRUNCATE"],
+      "reason": "This table exists to OUTLIVE retention, so the retention GC must never reach it. That makes 'let the GC clean this up too' the single most predictable future change against it — arriving as a migration granting DELETE plus a manifest regeneration, both of which the descriptive manifest alone would accept. Removing this entry is a decision to let recovery-path evidence expire; say why in the PR."
     }
   ]
 }

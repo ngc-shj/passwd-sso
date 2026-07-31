@@ -16,7 +16,9 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Prisma } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
 import {
   createTestContext,
   setBypassRlsGucs,
@@ -24,6 +26,7 @@ import {
   raceTwoClients,
   type TestContext,
   type PrismaWithPool,
+  sqlStateOf,
 } from "./helpers";
 import {
   findOrCreateTenantForClaim,
@@ -36,9 +39,14 @@ import {
 } from "@/lib/tenant/tenant-claim-registry";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
+  TENANT_CLAIM_EVENT_OPERATION,
+  SIGNIN_ACTOR_LABEL,
+} from "@/lib/tenant/tenant-claim-event";
+import {
   PRIMARY_CLAIM,
   ALIAS_CLAIM,
   NON_DOMAIN_CLAIM,
+  runToken,
 } from "@/__tests__/helpers/tenant-claim-fixtures";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -51,10 +59,6 @@ const MIGRATION_SQL_PATH = resolve(
 
 const SKIP = !process.env.DATABASE_URL;
 
-/** Per-run token so claim/external_id literals never collide across concurrent runs. */
-function runToken(): string {
-  return randomBytes(4).toString("hex");
-}
 
 /**
  * A CHECK violation surfaces through Prisma as P2010 with the underlying
@@ -69,17 +73,7 @@ function isCheckViolation(err: unknown): boolean {
   if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2010") {
     return false;
   }
-  const meta = err.meta;
-  if (!meta || typeof meta !== "object") return false;
-  if ("code" in meta && meta.code === "23514") return true;
-  const driverAdapterError = "driverAdapterError" in meta ? meta.driverAdapterError : undefined;
-  if (driverAdapterError && typeof driverAdapterError === "object" && "cause" in driverAdapterError) {
-    const cause = driverAdapterError.cause;
-    if (cause && typeof cause === "object" && "code" in cause && cause.code === "23514") {
-      return true;
-    }
-  }
-  return false;
+  return sqlStateOf(err) === "23514";
 }
 
 describe("tenant_claims (C1)", () => {
@@ -495,11 +489,15 @@ describe("tenant_claims (C1)", () => {
 describe("findOrCreateTenantForClaim (C4)", () => {
   let ctx: TestContext;
   let second: PrismaWithPool;
+  /** The live role name this connection authenticates as (VE5) — never a literal. */
+  let dbUser: string;
 
   beforeAll(async () => {
     if (SKIP) return;
     ctx = await createTestContext();
     second = createPrismaForRole("app");
+    const [row] = await ctx.su.prisma.$queryRaw<{ dbUser: string }[]>`SELECT current_user AS "dbUser"`;
+    dbUser = row.dbUser;
   });
 
   afterAll(async () => {
@@ -840,4 +838,305 @@ describe("findOrCreateTenantForClaim (C4)", () => {
       }
     },
   );
+
+  // C4 acceptance criteria: the two member-set writers that live in this
+  // module (register via the sign-in path — first-create and slug-retry
+  // create), the atomicity of the in-transaction write, NF1's negative, and
+  // the fail-closed direction (RT10).
+  describe("tenant_claim_events (C4)", () => {
+    it.skipIf(SKIP)(
+      "register (first-create, sign-in path): event matches C1's population table",
+      async () => {
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        const result = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(claim, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
+        ctx.trackTenant(result.id);
+
+        try {
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(1);
+          const event = events[0];
+          expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+          expect(event.oldTenantId).toBeNull();
+          expect(event.newTenantId).toBe(result.id);
+          expect(event.oldRevokedAt).toBeNull();
+          expect(event.newRevokedAt).toBeNull();
+          expect(event.actorLabel).toBe(SIGNIN_ACTOR_LABEL);
+          // VE5: never a literal — passwd_user locally, postgres in CI.
+          expect(event.dbUser).toBe(dbUser);
+        } finally {
+          await ctx.deleteTestData(result.id);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "register (slug-retry, sign-in path): event matches C1's population table — RT4: the retry is proven to have run (random-hex slug suffix) before exactly one event is asserted",
+      async () => {
+        const token = runToken();
+        // Same slug-collision shape as the SAVEPOINT retry proof above, but
+        // as two SEPARATE top-level calls (each its own transaction): claimA
+        // commits first with the plain slug, so claimB's own SAVEPOINT retry
+        // is forced by a REAL, already-committed tenants_slug_key collision
+        // rather than by interleaving within one shared transaction.
+        const claimA = `${token}.${ALIAS_CLAIM}`;
+        const claimB = `${token}-${ALIAS_CLAIM.replace(".", "-")}`;
+        expect(claimA).not.toBe(claimB);
+        expect(slugifyTenant(claimA)).toBe(slugifyTenant(claimB));
+        const plainSlug = slugifyTenant(claimB);
+
+        const resultA = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(claimA, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        if (resultA.kind !== "tenant") throw new Error(`claimA returned ${resultA.kind}`);
+        ctx.trackTenant(resultA.id);
+
+        const resultB = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(claimB, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        if (resultB.kind !== "tenant") throw new Error(`claimB returned ${resultB.kind}`);
+        ctx.trackTenant(resultB.id);
+
+        try {
+          // RT4 lower bound: without this, "exactly one event" below would
+          // also pass for an implementation that never enters the retry arm
+          // at all (e.g. one where the collision never actually occurred).
+          const tenantB = await ctx.su.prisma.tenant.findUniqueOrThrow({ where: { id: resultB.id } });
+          expect(tenantB.slug).not.toBe(plainSlug);
+          expect(tenantB.slug).toMatch(/-[0-9a-f]{8}$/);
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim: claimB } });
+          expect(events).toHaveLength(1);
+          const event = events[0];
+          expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+          expect(event.oldTenantId).toBeNull();
+          expect(event.newTenantId).toBe(resultB.id);
+          expect(event.oldRevokedAt).toBeNull();
+          expect(event.newRevokedAt).toBeNull();
+          expect(event.actorLabel).toBe(SIGNIN_ACTOR_LABEL);
+          expect(event.dbUser).toBe(dbUser);
+        } finally {
+          await ctx.deleteTestData(resultA.id);
+          await ctx.deleteTestData(resultB.id);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "NF1: a sign-in resolving an already-registered claim leaves the event count for that claim unchanged",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+        const before = await ctx.su.prisma.tenantClaimEvent.count({ where: { claim } });
+
+        const result = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(claim, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        expect(result).toEqual({ kind: "tenant", id: tenantId });
+
+        const after = await ctx.su.prisma.tenantClaimEvent.count({ where: { claim } });
+        expect(after).toBe(before);
+
+        await ctx.deleteTestData(tenantId);
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "atomicity, both directions: an abort issued AFTER the mutation and the event are both in the transaction rolls back both; an ordinary commit keeps both",
+      async () => {
+        const token = runToken();
+        const abortedClaim = `${token}-abort.${ALIAS_CLAIM}`;
+        const committedClaim = `${token}-commit.${ALIAS_CLAIM}`;
+
+        // Direction 1 — abort AFTER both writes are issued. Not a JS throw
+        // placed before either statement runs (which would make "neither
+        // row" trivially true and prove nothing about whether the event
+        // write is really inside the mutation's own transaction): the abort
+        // here is a real statement, issued only once findOrCreateTenantForClaim
+        // has already returned successfully — i.e. after the tenant/claim
+        // write AND the recordTenantClaimEvent INSERT have both been sent.
+        let caught: unknown;
+        try {
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            const result = await findOrCreateTenantForClaim(abortedClaim, tx);
+            if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
+            await tx.$executeRawUnsafe(`SELECT 1/0`);
+          });
+        } catch (e) {
+          caught = e;
+        }
+        expect(caught).toBeDefined();
+        expect(
+          await ctx.su.prisma.tenant.findMany({ where: { externalId: abortedClaim } }),
+        ).toHaveLength(0);
+        expect(
+          await ctx.su.prisma.tenantClaim.findMany({ where: { claim: abortedClaim } }),
+        ).toHaveLength(0);
+        expect(
+          await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim: abortedClaim } }),
+        ).toHaveLength(0);
+
+        // Direction 2 (paired happy path) — the SAME code, no forced abort:
+        // both the claim row and its event commit together.
+        const result = await withBypassRls(
+          ctx.su.prisma,
+          (tx) => findOrCreateTenantForClaim(committedClaim, tx),
+          BYPASS_PURPOSE.AUTH_FLOW,
+        );
+        if (result.kind !== "tenant") throw new Error(`unexpected ${result.kind}`);
+        ctx.trackTenant(result.id);
+        try {
+          expect(
+            await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: committedClaim } }),
+          ).not.toBeNull();
+          expect(
+            await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim: committedClaim } }),
+          ).toHaveLength(1);
+        } finally {
+          await ctx.deleteTestData(result.id);
+        }
+      },
+    );
+
+    // RT10's deny side is only meaningful against a role shaped like
+    // passwd_app: the harness's superuser connection bypasses ACL checks
+    // entirely (VE3/VE5), so it can only ever prove the allow side, and a
+    // freshly created role with NO grants at all fails on the first missing
+    // privilege (SELECT/INSERT on tenants/tenant_claims) — before the
+    // tenant_claim_events INSERT is ever reached — which would make "sign-in
+    // fails, no tenant row survives" true for a reason unrelated to this
+    // table. `TestRole` in helpers.ts is a closed union, so this
+    // legitimately builds its own pool/client rather than going through
+    // createPrismaForRole.
+    describe("fail-closed: a passwd_app-shaped role without INSERT on tenant_claim_events (RT10)", () => {
+      it.skipIf(SKIP)(
+        "allow arm succeeds with both rows present; deny arm fails 42501 naming tenant_claim_events, with no tenant row surviving",
+        async () => {
+          const roleName = `probe_tce_${randomBytes(4).toString("hex")}`;
+          const password = randomBytes(16).toString("hex");
+          const base = process.env.DATABASE_URL;
+          if (!base) throw new Error("DATABASE_URL is not set");
+
+          let pool: pg.Pool | undefined;
+          let probePrisma: PrismaClient | undefined;
+
+          try {
+            // Least-privilege role, matching passwd_app's shape (NOSUPERUSER,
+            // NOBYPASSRLS — RLS is satisfied via the app.bypass_rls GUC
+            // withBypassRls sets, the same convention passwd_app relies on).
+            // CREATE ROLE's PASSWORD clause is a grammar-level string literal,
+            // not an expression slot — it does not accept a bind parameter, so
+            // this interpolates directly. Safe here only because both the role
+            // name and the password are generated by this test from
+            // node:crypto randomBytes().toString("hex") — [0-9a-f] only,
+            // never operator or IdP input.
+            await ctx.su.prisma.$executeRawUnsafe(
+              `CREATE ROLE "${roleName}" LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
+            );
+            await ctx.su.prisma.$executeRawUnsafe(
+              `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO "${roleName}"', current_database()); END $$`,
+            );
+            await ctx.su.prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO "${roleName}"`);
+            // passwd_app's prerequisite privileges — everything the writer
+            // path needs before it ever reaches tenant_claim_events.
+            await ctx.su.prisma.$executeRawUnsafe(
+              `GRANT SELECT, INSERT, UPDATE, DELETE ON tenants, tenant_claims TO "${roleName}"`,
+            );
+
+            const url = new URL(base);
+            url.username = roleName;
+            url.password = password;
+            pool = new pg.Pool({
+              connectionString: url.toString(),
+              max: 2,
+              idleTimeoutMillis: 10_000,
+              statement_timeout: 30_000,
+            });
+            probePrisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+
+            const token = runToken();
+
+            // Allow arm — the grant set is self-proving: this reds if any
+            // prerequisite privilege above is missing, and it is the RT10
+            // allow side the criterion needs anyway.
+            await ctx.su.prisma.$executeRawUnsafe(
+              `GRANT INSERT ON tenant_claim_events TO "${roleName}"`,
+            );
+            const allowClaim = `${token}-allow.${ALIAS_CLAIM}`;
+            const allowResult = await withBypassRls(
+              probePrisma,
+              (tx) => findOrCreateTenantForClaim(allowClaim, tx),
+              BYPASS_PURPOSE.AUTH_FLOW,
+            );
+            if (allowResult.kind !== "tenant") {
+              throw new Error(`allow arm: unexpected ${allowResult.kind}`);
+            }
+            ctx.trackTenant(allowResult.id);
+            expect(
+              await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: allowClaim } }),
+            ).not.toBeNull();
+            expect(
+              await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim: allowClaim } }),
+            ).toHaveLength(1);
+
+            // Deny arm — same role, same connection, INSERT revoked.
+            await ctx.su.prisma.$executeRawUnsafe(
+              `REVOKE INSERT ON tenant_claim_events FROM "${roleName}"`,
+            );
+            const denyClaim = `${token}-deny.${ALIAS_CLAIM}`;
+            let caught: unknown;
+            try {
+              await withBypassRls(
+                probePrisma,
+                (tx) => findOrCreateTenantForClaim(denyClaim, tx),
+                BYPASS_PURPOSE.AUTH_FLOW,
+              );
+            } catch (e) {
+              caught = e;
+            }
+            expect(caught).toBeDefined();
+            expect(sqlStateOf(caught)).toBe("42501");
+            expect(caught instanceof Error ? caught.message : String(caught)).toContain(
+              "tenant_claim_events",
+            );
+            expect(
+              await ctx.su.prisma.tenant.findMany({ where: { externalId: denyClaim } }),
+            ).toHaveLength(0);
+            expect(
+              await ctx.su.prisma.tenantClaim.findMany({ where: { claim: denyClaim } }),
+            ).toHaveLength(0);
+          } finally {
+            if (probePrisma) await probePrisma.$disconnect();
+            if (pool) await pool.end();
+            // dropProbeRoles precedent (bootstrap-rds-roles.integration.test.ts):
+            // REVOKE ALL ON DATABASE -> DROP OWNED BY -> DROP ROLE, in one
+            // finally. A role still holding grants cannot be dropped, and a
+            // leaked pool keeps the forked vitest worker alive.
+            await ctx.su.prisma.$executeRawUnsafe(
+              `DO $$ BEGIN
+                 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN
+                   EXECUTE format('REVOKE ALL ON DATABASE %I FROM "${roleName}"', current_database());
+                   EXECUTE 'DROP OWNED BY "${roleName}"';
+                   EXECUTE 'DROP ROLE "${roleName}"';
+                 END IF;
+               END $$`,
+            );
+          }
+        },
+      );
+    });
+  });
 });

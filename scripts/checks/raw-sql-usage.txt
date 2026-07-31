@@ -83,6 +83,7 @@ src/lib/directory-sync/engine.ts # conditional status-transition UPDATE guarding
 src/lib/health.ts # liveness/readiness probes: SELECT 1 and audit outbox depth/age metrics
 src/lib/services/team-password-service.ts # row lock (FOR UPDATE) for atomic team entry blob snapshot+update
 src/lib/tenant-rls.ts # defines the RLS GUC helpers (set_config for app.tenant_id / app.bypass_rls / app.bypass_purpose)
+src/lib/tenant/tenant-claim-event.ts # append-only routing-history INSERT with no RETURNING (passwd_app holds INSERT but not SELECT)
 src/lib/tenant/tenant-management.ts # SAVEPOINT-protected slug-collision retry when creating a tenant + claim row
 src/lib/vault/key-version-guard.ts # row lock (FOR SHARE) reading users.key_version for the personal-vault stale-write guard
 src/lib/vault/rotate-key-server.ts # row lock (FOR UPDATE) on users for the pre-write rotation tuple-CAS (key_version/vault_setup_at/account_salt)

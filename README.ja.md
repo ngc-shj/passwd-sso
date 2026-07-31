@@ -335,7 +335,7 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add --tenant <ref> --domai
 
 `unmapped` が対象とするのは「問い合わせた期間」であり、このデプロイの保持期間ではありません。既定値は設定可能な保持期間の下限（30 日）で、出力にもその期間が明記されます。「何も拒否されていない」と判断する前に `--days <n>` で期間を広げてください。
 
-`list`・`preflight`・`remove` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。
+`list`・`preflight`・`remove`・`history` も利用できます。サブコマンドなしで実行すると使用方法が表示されます。**破壊的変更:** `remove` にも `--by <operator-label>` が必須になりました（`... remove --tenant <ref> --domain <claim> --by <operator-label>`）。登録と同様、revoke も後述の履歴に帰属情報付きの行を書き込むようになったためで、帰属のない revoke はその記録に実行者を残しません。
 
 **`tenant_mismatch`: クレームが誤ったテナントに登録されている場合**。この状態はオペレーターが何もしなくても発生します — 打ち間違えた、あるいは他者に先取りされたクレームを提示するサインインが 1 回あるだけで、そのサインインが作成したテナントに対してクレームが登録されます（`created_by = 'signin'`）。`remove` ではクレームは解放されません — 行を論理削除して `revoked_at` を設定するだけで所有テナントは変わらないため、続けて `add` を実行しても再び拒否されます。現在の所有テナントを明示する `add --from` でクレームを移動してください:
 
@@ -347,9 +347,15 @@ MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list --tenant <claim>
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add \
   --tenant <gaining-tenant-ref> --domain <claim> --by <operator-label> \
   --from <current-owner-uuid>
+
+# クレームの経路変更履歴を復元する — 登録・revoke・再割り当てのすべてを、
+# 操作者ラベルとそれを実行した Postgres プリンシパルとともに表示します。
+# --tenant はテナント行自体が消えていても一致します。
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim>
+MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --tenant <uuid>
 ```
 
-`add --from` は書き込みの前に、両テナントの id・name・slug・**アクティブメンバー数**と、移動によって失う側が被る影響を表示し、確認を求めます（非対話実行では `--yes`）。`--from` が実際の所有テナントと一致しない場合は拒否されます。また、対象行が事前に revoke されている必要は**ありません** — revoke してから再割り当てする手順では、クレームがどのテナントにも解決しない期間が生じ、両方のテナントのメンバーが拒否されてしまうためです。移動しても行の `created_by` は書き換えません — この値は「誰が最初にそのクレームを登録したか」というインシデント調査に必要な証跡です。**ただしレジストリは経路変更の履歴を保持しません。** 移動は `tenant_id` を上書きし、revoke 済みクレームの再登録は `revoked_at` を消すため、実行後の行からは以前の所有テナント・revoke されていた事実・変更の実行者のいずれも読み取れません。コマンドはこれらを `NOT RECOVERABLE from the row after this change` の行に出力します。この出力が唯一の記録なので、インシデント記録とともに保管してください。
+`add --from` は書き込みの前に、両テナントの id・name・slug・**アクティブメンバー数**と、移動によって失う側が被る影響を表示し、確認を求めます（非対話実行では `--yes`）。`--from` が実際の所有テナントと一致しない場合は拒否されます。また、対象行が事前に revoke されている必要は**ありません** — revoke してから再割り当てする手順では、クレームがどのテナントにも解決しない期間が生じ、両方のテナントのメンバーが拒否されてしまうためです。移動しても行の `created_by` は書き換えません — この値は「誰が最初にそのクレームを登録したか」というインシデント調査に必要な証跡です。移動は `tenant_claims.tenant_id` を上書きし、revoke 済みクレームの再登録は `revoked_at` を消すため、実行後の `tenant_claims` 行自体からは以前の所有テナント・revoke されていた事実・変更の実行者のいずれも読み取れません。ただしそれはもう唯一の記録ではありません — `add` と `remove` はどちらも `tenant_claim_events` テーブルに帰属情報付きの行を追記し、`tenant-domain history` でその内容を読み戻せます。
 
 **`GOOGLE_WORKSPACE_DOMAINS` を設定している場合**（[SECURITY.md](SECURITY.md) で推奨）、クレームを登録するだけでは復旧しません。`src/auth.config.ts` の `signIn` コールバックは、`hd` が `GOOGLE_WORKSPACE_DOMAINS` に含まれない Google サインインを、テナントクレームの解決より**前**に `reason: "provider_error"` として拒否します — この拒否はテナントクレームのチェックまで到達しないため、`tenant-domain unmapped` には何も表示されません。新しいドメインを `GOOGLE_WORKSPACE_DOMAINS` にも追加し、どのテナントのために追加したかを記録してください。この変数はデプロイ全体に効くグローバル設定である一方、クレームレジストリはテナント単位のスコープなので、記録がないと過去にどのテナントかがリネームしたすべてのドメインが静かに積み上がっていきます。そのテナントが不要になった時点で、追加したエントリを削除してください。**ロックアウト回避のために `GOOGLE_WORKSPACE_DOMAINS` を未設定に戻さないでください** — `allowDangerousEmailAccountLinking` は `allowedGoogleDomains.length > 0` から導出されるため、未設定に戻すとこのフラグは `false` になり（緩くなるのではなく**厳しくなり**）、元の拒否に加えて `OAuthAccountNotLinked` という別の失敗が発生します。
 

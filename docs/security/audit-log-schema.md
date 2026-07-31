@@ -143,6 +143,50 @@ signal an external SIEM would need to detect the same missing-pepper
 misconfiguration described above without needing access to the raw
 `identifierHash`.
 
+## `tenant_claim_events` is NOT an audit log
+
+Routing changes to a tenant's IdP claims — registration, revocation, un-revocation
+and reassignment — are recorded in a dedicated append-only table,
+`tenant_claim_events`, not in `audit_logs`. The distinction matters at incident
+time, so it is stated rather than left to be inferred from the table name.
+
+**Why it is separate.** `audit_logs` is retention-GC'd, and a routing record has
+to outlive retention: the question it answers ("who moved this claim off that
+tenant, and when?") is asked months later. It is also tenant-scoped, one row to
+one tenant, and a reassignment names **two** tenants in one row by design —
+splitting it would reproduce the "one incident, two groups" defect recorded as
+D-33 in `docs/archive/review/sso-tenant-domain-alias-deviation.md`.
+
+**Consequences, each of which someone will otherwise assume the other way:**
+
+- **No retention, no GC.** These rows are kept indefinitely. That is deliberate
+  (`SC-A`), not an oversight.
+- **They therefore retain, indefinitely, a client IP (`client_addr`, NULL when
+  the writer connected over a Unix socket) and two PostgreSQL principal names
+  (`db_user` = `current_user`, `session_db_user` = `session_user`).** This is the
+  privacy cost of the design and is recorded here as an explicit decision. The
+  principal names are what make the attribution more than self-asserted; the
+  operator label (`--by`) is the self-asserted half and is not a substitute.
+- **Not delivered to webhooks.** No delivery target reads this table, and the
+  application role cannot read it at all (`passwd_app` holds `INSERT` and nothing
+  else), so there is no egress path to blocklist. Contrast the `claim` field
+  above, which does travel through `AUTH_LOGIN_FAILURE` metadata and *is*
+  blocklisted.
+- **`operation` is not a partition of outcomes.** `tenant-domain add --from`
+  against a revoked row is simultaneously a reassignment and an un-revoke, and is
+  recorded as `reassign`. Answer revocation-state questions from
+  `old_revoked_at` / `new_revoked_at`, never by filtering `operation`.
+- **The one sanctioned deletion path deletes more than its argument names.**
+  `tenant_claim_events_purge_for_tenant(<tenant>)` removes every row naming that
+  tenant — including a `reassign` row that also names the *other* tenant, which
+  therefore loses that record too. That follows from the one-row-two-tenants
+  design, not from the routine's predicate. It is owner-only: neither the
+  application role nor either worker role can execute it or delete directly.
+
+Read it with `npm run tenant-domain -- history --domain <claim>` or
+`--tenant <uuid>`; the `--tenant` form takes a bare UUID and does **not** resolve
+through `tenants`, so it still answers for a tenant that has since been deleted.
+
 ## References
 
 - `src/lib/audit/auth-failure.ts` — `emitAuthLoginFailure`, `getIdentifierPepper`.
