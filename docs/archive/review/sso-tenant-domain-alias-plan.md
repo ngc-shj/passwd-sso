@@ -1761,16 +1761,36 @@ Every new guard gets a paired allow case, not only a deny case.
   deployment (2 of 264 tenants have an `external_id`, both ASCII), and C12's pre-flight
   query surfaces the affected rows **before** the upgrade rather than after.
 
-- **SC11 — Append-only history for claim routing changes.** Deferred **with an owner**,
-  and recorded because SC8's justification no longer covers it (see the correction
-  there). Raised in round 6 by Codex, independently of the three expert perspectives.
+- **SC11 — Append-only history for claim routing changes. DELIVERED** — issue #743,
+  branch `feat/tenant-claim-event-history`, contracts in
+  `docs/archive/review/sso-tenant-claim-event-history-plan.md`. The deferral text below
+  is kept as the record of *why* it was deferred and what it was deferred against; the
+  paragraphs describing what is missing are **no longer true** and are marked where they
+  become false. This entry is the only place the deferral was recorded, so leaving it
+  reading "deferred" is how the next reader re-derives the same gap.
 
-  **What is missing.** `add --from` and the un-revoke path each change which tenant an IdP
-  claim authenticates into, and each destroys the state it changed: the reassignment
-  overwrites `tenant_id`, the un-revoke nulls `revokedAt`. Afterwards the row cannot tell
-  an investigator who owned the claim before, when it was revoked, or who made either
-  change. The CLI prints all three, and printed terminal output is not a record — it is
-  not queryable, not retained, and not available to anyone who was not at the keyboard.
+  What shipped, against what this entry asked for: the `TenantClaimEvent`-shaped
+  append-only table, written in the same transaction as the mutation, by **all six**
+  writers — the four CLI verbs and, importantly, the two sign-in auto-registration
+  writers this entry does not mention, which a `tenantClaim.create` grep does not return
+  because they create the row through a nested relation write. Attribution is recorded in
+  three parts rather than two: `--by`, `current_user`, and `session_user` (the last
+  because `current_user` follows `SET ROLE` and a definer-rights context). `remove` gained
+  a required `--by`, which this entry did not anticipate — without it the revoke half of
+  the revoke/un-revoke pair recorded no human at all.
+
+  Originally: deferred **with an owner**, and recorded because SC8's justification no
+  longer covers it (see the correction there). Raised in round 6 by Codex, independently
+  of the three expert perspectives.
+
+  **What was missing** (no longer true — #743 closed it). `add --from` and the un-revoke
+  path each change which tenant an IdP claim authenticates into, and each destroys the
+  state it changed: the reassignment overwrites `tenant_id`, the un-revoke nulls
+  `revokedAt`. Afterwards the row could not tell an investigator who owned the claim
+  before, when it was revoked, or who made either change. The CLI printed all three, and
+  printed terminal output is not a record — it is not queryable, not retained, and not
+  available to anyone who was not at the keyboard. All of that is now in
+  `tenant_claim_events` and readable with `tenant-domain history`.
 
   **The correct control** is a `TenantClaimEvent`-shaped append-only table written in the
   SAME transaction as the mutation: operation, claim, old tenant, new tenant, prior

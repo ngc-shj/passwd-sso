@@ -38,6 +38,11 @@
 -- by interpolating user input.
 
 -- Re-grant DML to passwd_app (the verify step runs as passwd_app).
+--
+-- Table- and sequence-blind, so these re-open every passwd_app entry in
+-- scripts/checks/app-role-denied-privileges.json; see the same note in
+-- scripts/rls-smoke-seed.sql for why this job accepts that and what would have
+-- to change for it to stop being acceptable.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
 

@@ -21,6 +21,7 @@ import {
   PRIMARY_CLAIM,
   ALIAS_CLAIM,
   NON_DOMAIN_CLAIM,
+  runToken,
 } from "@/__tests__/helpers/tenant-claim-fixtures";
 import {
   cmdList,
@@ -28,16 +29,18 @@ import {
   cmdPreflight,
   cmdAdd,
   cmdRemove,
+  cmdHistory,
   formatUnmappedMessage,
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
 } from "../../../scripts/tenant-domain";
+import {
+  TENANT_CLAIM_EVENT_OPERATION,
+  SIGNIN_ACTOR_LABEL,
+  DEREGISTER_ACTOR_LABEL,
+} from "@/lib/tenant/tenant-claim-event";
 
 const SKIP = !process.env.DATABASE_URL;
-
-function runToken(): string {
-  return randomBytes(4).toString("hex");
-}
 
 /**
  * A row in `cmdUnmapped`'s shape. Round-4: `reason` became load-bearing (F3),
@@ -62,6 +65,16 @@ const alwaysNo = async () => false;
 
 describe("tenant-domain CLI (C7)", () => {
   let ctx: TestContext;
+
+  /**
+   * The live role name this connection authenticates as (VE5) — read fresh
+   * each call rather than cached, and never a literal: MIGRATION_DATABASE_URL
+   * names passwd_user locally and postgres in CI.
+   */
+  async function currentDbUser(): Promise<string> {
+    const [row] = await ctx.su.prisma.$queryRaw<{ dbUser: string }[]>`SELECT current_user AS "dbUser"`;
+    return row.dbUser;
+  }
 
   // The CLI reads MIGRATION_DATABASE_URL per call by design (C7), and the
   // integration harness's superuser role connects through the same variable
@@ -236,7 +249,7 @@ describe("tenant-domain CLI (C7)", () => {
       const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
       expect(added.ok).toBe(true);
 
-      const removed = await cmdRemove({ tenant: tenantId, domain: claim, yes: true });
+      const removed = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
       expect(removed.ok).toBe(true);
       const afterRemove = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(afterRemove?.revokedAt).not.toBeNull();
@@ -377,11 +390,16 @@ describe("tenant-domain CLI (C7)", () => {
      * `revokedAt`, so after the move the row cannot tell an investigator who
      * owned the claim before or that it had been revoked — which falsifies SC8's
      * "the row itself carries the timeline" for exactly the two verbs that change
-     * authentication routing. SC11 defers the append-only history; until it
-     * lands, this printed statement IS the record, so it has to name the values
-     * rather than allude to them.
+     * authentication routing. SC11 (this PR) closed that gap with the
+     * append-only `tenant_claim_events` table, so the destroyed state is no
+     * longer lost — it is queryable with `tenant-domain history`. The printed
+     * line changed accordingly (C6): it used to claim the terminal output was
+     * "NOT RECOVERABLE from the row after this change", which SC11 makes
+     * false, and a false "this is the only copy" instruction is the wrong
+     * remedy at incident time. It still has to name the destroyed values by
+     * value, not merely allude to them, and it now points at `history`.
      */
-    it.skipIf(SKIP)("names the state the move destroys, since nothing else records it", async () => {
+    it.skipIf(SKIP)("names the state the move destroys, and points at history instead of claiming it is the only record", async () => {
       const losingTenant = await ctx.createTenant();
       const gainingTenant = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
@@ -408,9 +426,16 @@ describe("tenant-domain CLI (C7)", () => {
       }
 
       const printed = lines.join("\n");
-      expect(printed).toContain("NOT RECOVERABLE from the row after this change");
-      // Both destroyed values, by value — a message that merely says "history is
-      // lost" is not a record of what was lost.
+      // C6: the old "NOT RECOVERABLE from the row after this change" wording
+      // is false once SC11's history table exists, and must not reappear.
+      expect(printed).not.toContain("NOT RECOVERABLE");
+      // The wording names WHERE the record is, not "above" — what is above is a
+      // command suggestion, not printed history (round-2 F4).
+      expect(printed).toContain("Overwritten on this row (not lost — recorded in tenant_claim_events");
+      expect(printed).toContain("tenant-domain history");
+      expect(printed).toContain("tenant-domain history --domain");
+      // Both destroyed values, by value — a message that merely says "see
+      // history" without naming them is not itself a record of what changed.
       expect(printed).toContain(`previous owner tenant ${losingTenant}`);
       expect(printed).toContain(`revokedAt ${revokedAt.toISOString()}`);
 
@@ -797,14 +822,17 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
-      const countBefore = await ctx.su.prisma.tenantClaim.count();
+      // QA-5 / VE1: scoped to this test's own tenant, never a GLOBAL count —
+      // the dev database is shared, and a concurrent run's own add/remove
+      // would move the unscoped count for a reason unrelated to this test.
+      const countBefore = await ctx.su.prisma.tenantClaim.count({ where: { tenantId } });
 
-      const result = await cmdRemove({ tenant: tenantId, domain: claim, yes: true });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(true);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(row?.revokedAt).not.toBeNull();
-      const countAfter = await ctx.su.prisma.tenantClaim.count();
+      const countAfter = await ctx.su.prisma.tenantClaim.count({ where: { tenantId } });
       expect(countAfter).toBe(countBefore);
 
       await ctx.deleteTestData(tenantId);
@@ -816,7 +844,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId: ownerTenant, claim, createdBy: "seed" } });
 
-      const result = await cmdRemove({ tenant: otherTenant, domain: claim, yes: true });
+      const result = await cmdRemove({ tenant: otherTenant, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
@@ -831,7 +859,7 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${ALIAS_CLAIM}`;
 
-      const result = await cmdRemove({ tenant: tenantId, domain: claim, yes: true });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       expect(result.code).not.toBe(0);
@@ -844,7 +872,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
 
-      const result = await cmdRemove({ tenant: randomUUID(), domain: claim, yes: true });
+      const result = await cmdRemove({ tenant: randomUUID(), domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(false);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
@@ -872,7 +900,7 @@ describe("tenant-domain CLI (C7)", () => {
         );
       });
 
-      const result = await cmdRemove({ tenant: tenantId, domain: claim, yes: true });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
       expect(result.ok).toBe(true);
 
       const session = await ctx.su.prisma.session.findUnique({ where: { sessionToken } });
@@ -891,13 +919,1038 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
 
-      const result = await cmdRemove({ tenant: tenantId, domain: claim, confirm: alwaysNo });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: alwaysNo });
 
       expect(result.ok).toBe(false);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(row?.revokedAt).toBeNull();
 
       await ctx.deleteTestData(tenantId);
+    });
+  });
+
+  // C4 acceptance criteria: one case per member-set row that lives in this
+  // CLI (register/revoke/unrevoke/reassign), the count===0 CAS and the
+  // already-revoked idempotent early return writing no event, and both
+  // halves of the `remove --by` guard (RT8/RT10).
+  describe("tenant_claim_events (C4)", () => {
+    it.skipIf(SKIP)("register (cmdAdd create arm): event matches C1's population table", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      expect(result.ok).toBe(true);
+
+      const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+      expect(event.oldTenantId).toBeNull();
+      expect(event.newTenantId).toBe(tenantId);
+      expect(event.oldRevokedAt).toBeNull();
+      expect(event.newRevokedAt).toBeNull();
+      expect(event.actorLabel).toBe("ops-oncall");
+      // VE5: never a literal — passwd_user locally, postgres in CI.
+      expect(event.dbUser).toBe(await currentDbUser());
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it.skipIf(SKIP)("revoke (cmdRemove): event matches C1's population table", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      expect(result.ok).toBe(true);
+
+      const claimRow = await ctx.su.prisma.tenantClaim.findUniqueOrThrow({ where: { claim } });
+      const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REVOKE);
+      expect(event.oldTenantId).toBe(tenantId);
+      expect(event.newTenantId).toBe(tenantId);
+      expect(event.oldRevokedAt).toBeNull();
+      expect(event.newRevokedAt?.getTime()).toBe(claimRow.revokedAt?.getTime());
+      expect(event.actorLabel).toBe("ops-oncall");
+      expect(event.dbUser).toBe(await currentDbUser());
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it.skipIf(SKIP)("unrevoke (cmdAdd un-revoke arm): event matches C1's population table", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      const revokedAt = new Date();
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed", revokedAt } });
+
+      const result = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      expect(result.ok).toBe(true);
+
+      const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+      expect(events).toHaveLength(1);
+      const event = events[0];
+      expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.UNREVOKE);
+      expect(event.oldTenantId).toBe(tenantId);
+      expect(event.newTenantId).toBe(tenantId);
+      expect(event.oldRevokedAt?.getTime()).toBe(revokedAt.getTime());
+      expect(event.newRevokedAt).toBeNull();
+      expect(event.actorLabel).toBe("ops-oncall");
+      expect(event.dbUser).toBe(await currentDbUser());
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it.skipIf(SKIP)(
+      "reassign (cmdAdd --from) from an ACTIVE row: one event naming both tenants (F2)",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+        const result = await cmdAdd({
+          tenant: gainingTenant,
+          domain: claim,
+          by: "ops-oncall",
+          from: losingTenant,
+          yes: true,
+        });
+        expect(result.ok).toBe(true);
+
+        const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+        expect(events).toHaveLength(1);
+        const event = events[0];
+        expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REASSIGN);
+        expect(event.oldTenantId).toBe(losingTenant);
+        expect(event.newTenantId).toBe(gainingTenant);
+        expect(event.oldRevokedAt).toBeNull();
+        expect(event.newRevokedAt).toBeNull();
+        expect(event.actorLabel).toBe("ops-oncall");
+        expect(event.dbUser).toBe(await currentDbUser());
+
+        await ctx.deleteTestData(losingTenant);
+        await ctx.deleteTestData(gainingTenant);
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "reassign (cmdAdd --from) against a REVOKED row: one reassign event, old_revoked_at non-NULL, new_revoked_at NULL",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        const revokedAt = new Date();
+        await ctx.su.prisma.tenantClaim.create({
+          data: { tenantId: losingTenant, claim, createdBy: "signin", revokedAt },
+        });
+
+        const result = await cmdAdd({
+          tenant: gainingTenant,
+          domain: claim,
+          by: "ops-oncall",
+          from: losingTenant,
+          yes: true,
+        });
+        expect(result.ok).toBe(true);
+
+        const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+        expect(events).toHaveLength(1);
+        const event = events[0];
+        expect(event.operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REASSIGN);
+        expect(event.oldTenantId).toBe(losingTenant);
+        expect(event.newTenantId).toBe(gainingTenant);
+        expect(event.oldRevokedAt).not.toBeNull();
+        expect(event.oldRevokedAt?.getTime()).toBe(revokedAt.getTime());
+        expect(event.newRevokedAt).toBeNull();
+
+        await ctx.deleteTestData(losingTenant);
+        await ctx.deleteTestData(gainingTenant);
+      },
+    );
+
+    it.skipIf(SKIP)("a CAS refusal (count === 0) writes no event", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const raceWinnerTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+      const confirmAfterConcurrentMove = async () => {
+        await ctx.su.prisma.tenantClaim.update({ where: { claim }, data: { tenantId: raceWinnerTenant } });
+        return true;
+      };
+
+      try {
+        const result = await cmdAdd({
+          tenant: gainingTenant,
+          domain: claim,
+          by: "ops-oncall",
+          from: losingTenant,
+          confirm: confirmAfterConcurrentMove,
+        });
+        expect(result.ok).toBe(false);
+        // Pins WHICH refusal ran: an earlier denial (e.g. --from not
+        // matching the owner) would also leave result.ok === false and
+        // write no event, making "no event" trivially true without the CAS
+        // arm ever firing. The three pre-existing CAS cases in this file
+        // pin the arm the same way.
+        expect(result.message).toContain("was modified concurrently by another process");
+
+        const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+        expect(events).toHaveLength(0);
+      } finally {
+        await ctx.deleteTestData(losingTenant);
+        await ctx.deleteTestData(gainingTenant);
+        await ctx.deleteTestData(raceWinnerTenant);
+      }
+    });
+
+    it.skipIf(SKIP)("remove's idempotent already-revoked early return writes no event", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      const revokedAt = new Date();
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed", revokedAt } });
+
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+      expect(result.ok).toBe(true);
+      expect(result.message).toBe("already revoked (idempotent)");
+
+      const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+      expect(events).toHaveLength(0);
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    describe("remove --by guard (RT8/RT10)", () => {
+      it.skipIf(SKIP)("allow side: remove --by ops succeeds and the event's actor_label is \"ops\"", async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+        const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops", yes: true });
+        expect(result.ok).toBe(true);
+
+        const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+        expect(events).toHaveLength(1);
+        expect(events[0].actorLabel).toBe("ops");
+
+        await ctx.deleteTestData(tenantId);
+      });
+
+      it.skipIf(SKIP)(
+        "deny side: an empty --by is refused, leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "", yes: true });
+          expect(result.ok).toBe(false);
+          expect(result.message).toContain("--by is required");
+
+          // The mutation, not just the verdict (RT8).
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          expect(row?.revokedAt).toBeNull();
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(0);
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      it.skipIf(SKIP)(
+        "deny side: a --by carrying a bidi control is refused, leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({
+            tenant: tenantId,
+            domain: claim,
+            by: `ops${String.fromCodePoint(0x202e)}admin`,
+            yes: true,
+          });
+          expect(result.ok).toBe(false);
+          expect(result.message).toContain("--by contains a control, bidi or zero-width character");
+
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          expect(row?.revokedAt).toBeNull();
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(0);
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      // RT10/RT7: the third axis of validateActorLabel (length) had no test
+      // on either side. The 255 case is deliberately the boundary-adjacent
+      // allow, not another distant allow like "ops" above — a mis-typed
+      // bound (e.g. `>=` instead of `>`) still admits "ops" but would wrongly
+      // deny the nearest legitimate input, and this validator sits on the
+      // lockout-recovery path where a false deny blocks remediation.
+      it.skipIf(SKIP)(
+        "deny side: a --by of 256 characters is refused, leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({
+            tenant: tenantId,
+            domain: claim,
+            by: "a".repeat(256),
+            yes: true,
+          });
+          expect(result.ok).toBe(false);
+          expect(result.message).toContain("--by is too long");
+
+          // The mutation, not just the verdict (RT8).
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          expect(row?.revokedAt).toBeNull();
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(0);
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      it.skipIf(SKIP)(
+        "allow side: a --by of exactly 255 characters (the boundary) succeeds",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+          const label = "a".repeat(255);
+
+          const result = await cmdRemove({ tenant: tenantId, domain: claim, by: label, yes: true });
+          expect(result.ok).toBe(true);
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(1);
+          expect(events[0].actorLabel).toBe(label);
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      // QA2-2: the remaining two axes of validateActorLabel — the reserved
+      // label and the printable-ASCII narrowing that makes it meaningful —
+      // had no test on either side, and both sit on the lockout-recovery
+      // path (RT10's escalation condition) where a false deny blocks
+      // remediation.
+      it.skipIf(SKIP)(
+        "deny side: --by equal to the reserved sign-in label, case/whitespace-insensitively, is refused, " +
+          "leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+
+          for (const label of ["signin", "SIGNIN", " signin "]) {
+            const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+            await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+            const result = await cmdRemove({ tenant: tenantId, domain: claim, by: label, yes: true });
+            expect(result.ok).toBe(false);
+            expect(result.message).toContain(`--by must not be "${SIGNIN_ACTOR_LABEL}"`);
+
+            const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+            expect(row?.revokedAt).toBeNull();
+            const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+            expect(events).toHaveLength(0);
+          }
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      // Boundary-adjacent allow: a label merely CONTAINING the reserved word
+      // must still succeed. This is the false-deny an over-eager `includes()`
+      // rewrite of the reserved-label check would introduce — without this
+      // case nothing pins the difference from an exact-match comparison.
+      it.skipIf(SKIP)(
+        "allow side: a --by merely containing the reserved word (\"ops-signin\") succeeds " +
+          "and the event's actor_label is \"ops-signin\"",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-signin", yes: true });
+          expect(result.ok).toBe(true);
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(1);
+          expect(events[0].actorLabel).toBe("ops-signin");
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      // The case that makes the reserved-label check above meaningful: a
+      // Cyrillic confusable of "signin" (U+0455 "ѕ") renders identically in
+      // `history` output but is refused earlier, by the printable-ASCII
+      // narrowing, before it ever reaches the reserved-label comparison.
+      it.skipIf(SKIP)(
+        "deny side: a --by containing a Cyrillic look-alike of \"signin\" is refused as non-ASCII, " +
+          "leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({
+            tenant: tenantId,
+            domain: claim,
+            by: `${String.fromCodePoint(0x0455)}ignin`,
+            yes: true,
+          });
+          expect(result.ok).toBe(false);
+          expect(result.message).toContain("--by must be printable ASCII");
+
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          expect(row?.revokedAt).toBeNull();
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(0);
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+    });
+  });
+
+  // C6 acceptance criteria: the operator read path.
+  describe("history (C6)", () => {
+    it.skipIf(SKIP)("a claim with no events prints an explicit empty state, not an empty list", async () => {
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      const result = await cmdHistory({ domain: claim });
+
+      expect(result.ok).toBe(true);
+      expect(result.rows).toHaveLength(0);
+      expect(result.message).toBe(`No routing history for claim "${claim}".`);
+    });
+
+    it.skipIf(SKIP)(
+      "after a reassignment: one row naming both tenants, surviving a direct DELETE FROM tenants of the losing side (F3)",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+        try {
+          const added = await cmdAdd({
+            tenant: gainingTenant,
+            domain: claim,
+            by: "ops-oncall",
+            from: losingTenant,
+            yes: true,
+          });
+          expect(added.ok).toBe(true);
+
+          const before = await cmdHistory({ domain: claim });
+          expect(before.ok).toBe(true);
+          const beforeRows = (before.rows ?? []) as {
+            operation: string;
+            oldTenantId: string | null;
+            newTenantId: string | null;
+          }[];
+          expect(beforeRows).toHaveLength(1);
+          expect(beforeRows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REASSIGN);
+          expect(beforeRows[0].oldTenantId).toBe(losingTenant);
+          expect(beforeRows[0].newTenantId).toBe(gainingTenant);
+
+          // F3 / C1: deleted DIRECTLY, never through ctx.deleteTestData — by
+          // the time cleanup runs it purges this claim's events first, which
+          // would assert F3's negation rather than its proof.
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, losingTenant);
+          });
+
+          const after = await cmdHistory({ domain: claim });
+          expect(after.ok).toBe(true);
+          const afterRows = (after.rows ?? []) as {
+            operation: string;
+            oldTenantId: string | null;
+            newTenantId: string | null;
+          }[];
+          expect(afterRows).toHaveLength(1);
+          expect(afterRows[0].oldTenantId).toBe(losingTenant);
+          expect(afterRows[0].newTenantId).toBe(gainingTenant);
+        } finally {
+          await ctx.deleteTestData(losingTenant);
+          await ctx.deleteTestData(gainingTenant);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "--tenant <uuid> for a tenant whose row no longer exists still returns its rows (the selector does not resolve through tenants)",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+          expect(added.ok).toBe(true);
+
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, tenantId);
+          });
+          // Sanity: the tenant row really is gone, so a selector that resolved
+          // through `tenants` (like `list`'s `--tenant`) would find nothing.
+          expect(await ctx.su.prisma.tenant.findUnique({ where: { id: tenantId } })).toBeNull();
+
+          const result = await cmdHistory({ tenant: tenantId });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as {
+            operation: string;
+            newTenantId: string | null;
+            oldTenantId: string | null;
+            actorLabel: string;
+          }[];
+          // TWO rows, and the second is the point: deleting the tenant cascades
+          // its tenant_claims row away, and the BEFORE DELETE trigger records
+          // that as `deregister`. Before that trigger existed this claim simply
+          // stopped resolving with nothing to show for it — the gap the external
+          // review named. So this case now pins both halves at once: the history
+          // SURVIVES the tenant it names (the selector does not resolve through
+          // `tenants`), and the routing END is itself recorded.
+          expect(rows).toHaveLength(2);
+          expect(rows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+          expect(rows[0].newTenantId).toBe(tenantId);
+          expect(rows[1].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.DEREGISTER);
+          expect(rows[1].oldTenantId).toBe(tenantId);
+          expect(rows[1].newTenantId).toBeNull();
+          expect(rows[1].actorLabel).toBe(DEREGISTER_ACTOR_LABEL);
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // QA-1: the case above only ever seeds a REGISTER row, whose
+    // old_tenant_id is NULL — so it cannot exercise the `{ oldTenantId }`
+    // half of cmdHistory's `OR: [{ oldTenantId }, { newTenantId }]`
+    // predicate. Deleting that disjunct would leave this whole suite green
+    // while falsifying user scenario 3: a tenant deleted after a claim was
+    // moved OFF it.
+    it.skipIf(SKIP)(
+      "--tenant <uuid> for the LOSING side of a reassignment also returns the row (the oldTenantId disjunct)",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+        try {
+          const added = await cmdAdd({
+            tenant: gainingTenant,
+            domain: claim,
+            by: "ops-oncall",
+            from: losingTenant,
+            yes: true,
+          });
+          expect(added.ok).toBe(true);
+
+          const result = await cmdHistory({ tenant: losingTenant });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as {
+            operation: string;
+            oldTenantId: string | null;
+            newTenantId: string | null;
+          }[];
+          expect(rows).toHaveLength(1);
+          expect(rows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REASSIGN);
+          expect(rows[0].oldTenantId).toBe(losingTenant);
+          expect(rows[0].newTenantId).toBe(gainingTenant);
+        } finally {
+          await ctx.deleteTestData(losingTenant);
+          await ctx.deleteTestData(gainingTenant);
+        }
+      },
+    );
+
+    // QA-11: cmdHistory's non-UUID --tenant branch (resolveTenantRef fallback)
+    // had no test at all — only the bare-UUID branch above was covered.
+    it.skipIf(SKIP)(
+      "a non-UUID --tenant falls back to resolveTenantRef and returns that tenant's history",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+          expect(added.ok).toBe(true);
+
+          // The claim string itself is a valid resolveTenantRef ref (the
+          // same non-UUID path list/add/remove use) — unlike the bare-UUID
+          // branch, which never calls resolveTenantRef at all (F3).
+          const result = await cmdHistory({ tenant: claim });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { operation: string; newTenantId: string | null }[];
+          expect(rows).toHaveLength(1);
+          expect(rows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+          expect(rows[0].newTenantId).toBe(tenantId);
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "a non-UUID --tenant that resolves to no tenant is refused with 'Tenant not found'",
+      async () => {
+        const ref = `no-such-tenant-${runToken()}`;
+        const result = await cmdHistory({ tenant: ref });
+        expect(result.ok).toBe(false);
+        expect(result.code).not.toBe(0);
+        expect(result.message).toBe(`Tenant not found: ${ref}`);
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "--domain and --tenant together are REFUSED, before either selector is applied",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const tenantB = await ctx.createTenant();
+        const claimA = `${runToken()}.${ALIAS_CLAIM}`;
+        const claimB = `${runToken()}.${PRIMARY_CLAIM}`;
+
+        try {
+          expect((await cmdAdd({ tenant: tenantA, domain: claimA, by: "ops-oncall", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ tenant: tenantB, domain: claimB, by: "ops-oncall", yes: true })).ok).toBe(true);
+
+          // Both selectors name something that EXISTS and each would return a
+          // different, non-empty answer — so a refusal here cannot be mistaken
+          // for "nothing matched", and the case still proves the refusal
+          // happens before either selector is applied.
+          const result = await cmdHistory({ domain: claimA, tenant: tenantB });
+          expect(result.ok).toBe(false);
+          expect(result.code).not.toBe(0);
+          expect(result.message).toContain("not both");
+          expect(result.rows ?? []).toHaveLength(0);
+        } finally {
+          await ctx.deleteTestData(tenantA);
+          await ctx.deleteTestData(tenantB);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)("refuses cleanly when neither --domain nor --tenant is given", async () => {
+      const result = await cmdHistory({});
+
+      expect(result.ok).toBe(false);
+      expect(result.code).not.toBe(0);
+      expect(result.message).toContain("--domain");
+      expect(result.message).toContain("--tenant");
+    });
+
+    it.skipIf(SKIP)(
+      "no printed history line carries a raw unsafe character when a stored actor_label contains one (sweeps every printed line, not one site)",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        const poisoned = `ops${String.fromCodePoint(0x202e)}admin`;
+
+        // Direct INSERT, not the CLI: validateActorLabel rejects an unsafe
+        // --by at ingest, so this seeds the shape only a row predating this
+        // PR's ingest boundary can carry.
+        await ctx.su.prisma.$executeRawUnsafe(
+          `INSERT INTO tenant_claim_events
+             (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+           VALUES ($1::uuid, $2, 'register', NULL, $3::uuid, NULL, NULL, $4)`,
+          randomUUID(),
+          claim,
+          tenantId,
+          poisoned,
+        );
+
+        const lines: string[] = [];
+        const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+          lines.push(args.map(String).join(" "));
+        });
+        try {
+          const result = await cmdHistory({ domain: claim });
+          expect(result.ok).toBe(true);
+        } finally {
+          log.mockRestore();
+        }
+
+        const printed = lines.join("\n");
+        expect(printed).toContain("ops<U+202E>admin");
+        // Swept over the WHOLE output, not one `includes()` check per known
+        // print site — the assertion this criterion exists for is the one
+        // that catches a missed site among several.
+        expect(printed).not.toContain(String.fromCodePoint(0x202e));
+
+        await ctx.deleteTestData(tenantId);
+      },
+    );
+
+    // External review finding 4 (LOW): created_at is TIMESTAMPTZ(3), and
+    // consecutive clock_timestamp() reads have been observed identical at
+    // that resolution — same-millisecond writes have no defined order under
+    // it. `seq` (20260731170000, GENERATED ALWAYS AS IDENTITY) is what
+    // cmdHistory now orders by instead.
+    //
+    // A literal created_at collision cannot be forced deterministically —
+    // the BEFORE INSERT trigger always overwrites whatever timestamp a
+    // caller supplies (I2), and clock_timestamp() is real wall-clock time —
+    // so this does not assert the two rows' created_at values are equal
+    // (that would make the case flaky on a host whose clock resolution
+    // happens to be finer). What IS asserted, and what the fix actually
+    // guarantees regardless of whether the millisecond collides: a single
+    // multi-row INSERT statement — the closest reproducible proxy for "the
+    // same instant" — comes back from `history` in the literal VALUES order,
+    // driven by `seq`, never by a `created_at` tie-break that has no defined
+    // winner.
+    it.skipIf(SKIP)(
+      "two events inserted in the same statement come back in insertion order (seq, not created_at)",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const tenantB = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          await ctx.su.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+             VALUES
+               ($1::uuid, $4, 'register', NULL, $2::uuid, NULL, NULL, 'ordering-test-first'),
+               ($5::uuid, $4, 'register', NULL, $3::uuid, NULL, NULL, 'ordering-test-second')`,
+            randomUUID(),
+            tenantA,
+            tenantB,
+            claim,
+            randomUUID(),
+          );
+
+          const result = await cmdHistory({ domain: claim });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { actorLabel: string; seq: bigint; newTenantId: string | null }[];
+          expect(rows).toHaveLength(2);
+          expect(rows.map((r) => r.actorLabel)).toEqual([
+            "ordering-test-first",
+            "ordering-test-second",
+          ]);
+          expect(rows[0].newTenantId).toBe(tenantA);
+          expect(rows[1].newTenantId).toBe(tenantB);
+          // Anti-vacuity (RT4-shaped): the two seq values really are
+          // adjacent, i.e. this asserted an actual insertion-order pair, not
+          // two rows that happened to sort the way the fixture already
+          // wrote them.
+          expect(rows[1].seq - rows[0].seq).toBe(1n);
+        } finally {
+          await ctx.deleteTestData(tenantA);
+          await ctx.deleteTestData(tenantB);
+        }
+      },
+    );
+
+    // C6 / external review finding 3: the row cap and its continuation
+    // cursor. `rowCap` is the test seam cmdHistory exports for exactly this
+    // — red-proving the truncation path without inserting
+    // HISTORY_ROW_CAP+1 real rows on the shared dev database.
+    it.skipIf(SKIP)(
+      "a capped result prints how to continue, and --after continues from where it stopped",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          // Three genuine, distinct events on one claim/tenant pair —
+          // register, revoke, un-revoke — cheaper than inserting rows
+          // directly and exercising the real writers `cmdAdd`/`cmdRemove`
+          // use in production.
+          expect((await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-1", yes: true })).ok).toBe(true);
+          expect((await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-2", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-3", yes: true })).ok).toBe(true);
+
+          const allEvents = await cmdHistory({ domain: claim });
+          expect(allEvents.ok).toBe(true);
+          const allRows = (allEvents.rows ?? []) as { seq: bigint }[];
+          expect(allRows.length).toBeGreaterThanOrEqual(3);
+
+          const page1 = await cmdHistory({ domain: claim, rowCap: 2 });
+          expect(page1.ok).toBe(true);
+          const page1Rows = (page1.rows ?? []) as { seq: bigint }[];
+          expect(page1Rows).toHaveLength(2);
+          expect(page1.message).toContain("capped at 2");
+          expect(page1.message).toContain("continuation hint");
+
+          const cursor = page1Rows[1].seq.toString();
+          const page2 = await cmdHistory({ domain: claim, rowCap: 2, after: cursor });
+          expect(page2.ok).toBe(true);
+          const page2Rows = (page2.rows ?? []) as { seq: bigint }[];
+          // Every row on page 2 continues strictly after the cursor, and the
+          // two pages together are exactly the full result — the cursor
+          // neither drops nor repeats a row at the boundary.
+          for (const row of page2Rows) {
+            expect(row.seq > page1Rows[1].seq).toBe(true);
+          }
+          expect(page1Rows.length + page2Rows.length).toBe(allRows.length);
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)("a non-digit --after is refused before any query runs", async () => {
+      const result = await cmdHistory({ tenant: randomUUID(), after: "not-a-number" });
+      expect(result.ok).toBe(false);
+      expect(result.code).not.toBe(0);
+      expect(result.message).toContain("--after");
+    });
+
+    // External review, second round (MEDIUM): the continuation hint used to be
+    // a ready-to-paste `tenant-domain history --domain <claim> --after <seq>`.
+    // A claim is printable ASCII by CHECK constraint — `;`, `$(…)` and
+    // backticks are all admissible — and `escapeUnsafeDisplayChars` neutralises
+    // terminal control sequences, not shell metacharacters. So the tool was
+    // building a command line out of attacker-influenceable text and offering
+    // it to an operator mid-incident.
+    it.skipIf(SKIP)(
+      "the continuation hint does not put the claim into command position",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        // Direct INSERT, not cmdAdd: operatorDomainSchema refuses this shape at
+        // ingest. The claim below is what the sign-in auto-registration path's
+        // looser storableClaimSchema, and the table's own CHECK, still admit —
+        // lowercase, trimmed, non-empty, printable ASCII.
+        const claim = `a;whoami$(id)\`id\`.example`;
+        const events = ["ops-1", "ops-2", "ops-3"];
+
+        try {
+          for (const label of events) {
+            await ctx.su.prisma.$executeRawUnsafe(
+              `INSERT INTO tenant_claim_events
+                 (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+               VALUES ($1::uuid, $2, 'register', NULL, $3::uuid, NULL, NULL, $4)`,
+              randomUUID(),
+              claim,
+              tenantId,
+              label,
+            );
+          }
+
+          const lines: string[] = [];
+          const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+            lines.push(args.map(String).join(" "));
+          });
+          let result;
+          try {
+            result = await cmdHistory({ domain: claim, rowCap: 2 });
+          } finally {
+            log.mockRestore();
+          }
+          expect(result.ok).toBe(true);
+
+          // Split on newlines: the truncation notice is one console.log
+          // carrying two lines, and the LINE is the unit an operator selects
+          // and copies. Asserting over the whole call would conflate the
+          // descriptive line (which names the claim, escaped, as every other
+          // display line does) with the copyable one.
+          //
+          // Anti-vacuity: the truncation path really ran, so the assertions
+          // below are about a hint that exists rather than about its absence.
+          const hint = lines.flatMap((l) => l.split("\n")).find((l) => l.includes("--after"));
+          expect(hint, "the capped result must print a continuation hint").toBeDefined();
+          expect(hint).toMatch(/--after \d+/);
+
+          // The claim does not appear in the hint at all — neither raw nor in
+          // the escaped display form. Substring checks on the metacharacters
+          // alone would pass a hint that carried the claim with the ONE
+          // character this fixture happens to use stripped.
+          expect(hint).not.toContain(claim);
+          expect(hint).not.toContain("whoami");
+          expect(hint).not.toContain("$(");
+          expect(hint).not.toContain(";");
+          expect(hint).not.toContain("--domain");
+          expect(hint).not.toContain("--tenant");
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // The tenant selector is two indexed queries merged in the CLI rather than
+    // one `OR` (20260731190000). The merge has to be exact, so the case that
+    // matters is a row naming the SAME tenant on both sides — it comes back
+    // from both queries and must appear once.
+    it.skipIf(SKIP)(
+      "--tenant merges the old-side and new-side queries without duplicating or dropping a row",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const otherTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          // both sides FIRST, then new-side only, then old-side only. The order
+          // is load-bearing, not cosmetic: with the both-sides row seeded
+          // second, a merge that had lost its de-duplication still produced two
+          // DISTINCT rows under `rowCap: 2` — the duplicate fell off the end of
+          // the cap — so the capped assertion below passed against exactly the
+          // defect it names. Seeded first, the duplicate lands inside the cap.
+          const seeds = [
+            ["both-sides", tenantId, tenantId],
+            ["new-side-only", null, tenantId],
+            ["old-side-only", tenantId, otherTenant],
+          ] as const;
+          for (const [label, oldTenant, newTenant] of seeds) {
+            await ctx.su.prisma.$executeRawUnsafe(
+              `INSERT INTO tenant_claim_events
+                 (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+               VALUES ($1::uuid, $2, 'reassign', $3::uuid, $4::uuid, NULL, NULL, $5)`,
+              randomUUID(),
+              claim,
+              oldTenant,
+              newTenant,
+              label,
+            );
+          }
+
+          const result = await cmdHistory({ tenant: tenantId });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { actorLabel: string; seq: bigint }[];
+          const mine = rows.filter((r) => seeds.some(([label]) => label === r.actorLabel));
+          expect(mine.map((r) => r.actorLabel)).toEqual([
+            "both-sides",
+            "new-side-only",
+            "old-side-only",
+          ]);
+          // Strictly increasing seq across the merged result, not merely the
+          // right set: the merge sorts rows that arrived from two separately
+          // ordered queries.
+          for (let i = 1; i < mine.length; i++) {
+            expect(mine[i].seq > mine[i - 1].seq).toBe(true);
+          }
+
+          // The cap applies to the MERGED result, not per side: a row that
+          // arrives from both queries must not consume two of the two slots.
+          const capped = await cmdHistory({ tenant: tenantId, rowCap: 2 });
+          expect(capped.ok).toBe(true);
+          const cappedRows = (capped.rows ?? []) as { seq: bigint }[];
+          expect(cappedRows).toHaveLength(2);
+          expect(new Set(cappedRows.map((r) => r.seq.toString())).size).toBe(2);
+          // Truncation is reported. `cmdHistory` returns no `truncated` field,
+          // so `message` is the ONLY channel it is observable through — without
+          // this, a per-side fetch that dropped the `+1` probe row returns the
+          // same two rows and says "2 event(s) listed", and an incident
+          // responder reads a truncated routing history as the whole of it.
+          expect(capped.message).toContain("capped at 2");
+        } finally {
+          await ctx.deleteTestData(tenantId);
+          await ctx.deleteTestData(otherTenant);
+        }
+      },
+    );
+
+    // `--after` is spread into BOTH per-side queries independently
+    // (20260731190000), which makes losing it from one of them the most
+    // natural way for a later refactor to break paging — and the domain
+    // selector's pagination case cannot see it, because that path issues one
+    // query. Symptom if the new-side filter were dropped: page 2 re-includes
+    // rows page 1 already returned, `lastSeq` can move BACKWARDS relative to
+    // the cursor the operator just used, and the documented continue-loop never
+    // terminates while the tail of the history stays unreachable.
+    it.skipIf(SKIP)("--tenant paginates with --after across both sides", async () => {
+      const tenantId = await ctx.createTenant();
+      const otherTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      try {
+        // Alternating sides, so any page that spans the boundary contains rows
+        // that came from different queries.
+        const seeds = [
+          ["p-old-1", tenantId, otherTenant],
+          ["p-new-1", otherTenant, tenantId],
+          ["p-both", tenantId, tenantId],
+          ["p-old-2", tenantId, otherTenant],
+          ["p-new-2", otherTenant, tenantId],
+        ] as const;
+        for (const [label, oldTenant, newTenant] of seeds) {
+          await ctx.su.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+             VALUES ($1::uuid, $2, 'reassign', $3::uuid, $4::uuid, NULL, NULL, $5)`,
+            randomUUID(),
+            claim,
+            oldTenant,
+            newTenant,
+            label,
+          );
+        }
+
+        const all = await cmdHistory({ tenant: tenantId });
+        expect(all.ok).toBe(true);
+        const allRows = (all.rows ?? []) as { seq: bigint }[];
+        expect(allRows).toHaveLength(seeds.length);
+
+        const page1 = await cmdHistory({ tenant: tenantId, rowCap: 2 });
+        const page1Rows = (page1.rows ?? []) as { seq: bigint }[];
+        expect(page1Rows).toHaveLength(2);
+        expect(page1.message).toContain("capped at 2");
+
+        const cursor = page1Rows[1].seq;
+        const page2Lines: string[] = [];
+        const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+          page2Lines.push(args.map(String).join(" "));
+        });
+        let page2;
+        try {
+          page2 = await cmdHistory({
+            tenant: tenantId,
+            rowCap: 2,
+            after: cursor.toString(),
+          });
+        } finally {
+          log.mockRestore();
+        }
+        const page2Rows = (page2.rows ?? []) as { seq: bigint }[];
+
+        // The hint on a page that ALREADY carries `--after` must not say
+        // "appended": `parseFlags` refuses a repeated flag outright, so an
+        // operator following that literally gets exit 1 and no rows, on the
+        // incident read path, from page 3 onwards. Asserted here because this
+        // is the only pagination case that reaches a second truncated page.
+        expect(page2.message).toContain("capped at 2");
+        const hint = page2Lines.flatMap((l) => l.split("\n")).find((l) => l.includes("--after"));
+        expect(hint, "a truncated page must print a continuation hint").toBeDefined();
+        expect(hint).toContain("in place of the --after already on it");
+        expect(hint).not.toContain("appended");
+        // Strictly after the cursor — the assertion that reds if either side
+        // lost the filter, because the unfiltered side would return its own
+        // first rows again, all of them at or below the cursor.
+        for (const row of page2Rows) {
+          expect(row.seq > cursor).toBe(true);
+        }
+
+        const page3 = await cmdHistory({
+          tenant: tenantId,
+          rowCap: 2,
+          after: page2Rows[page2Rows.length - 1].seq.toString(),
+        });
+        const page3Rows = (page3.rows ?? []) as { seq: bigint }[];
+
+        // The three pages partition the full result: no row dropped at a
+        // boundary, none returned twice.
+        const paged = [...page1Rows, ...page2Rows, ...page3Rows].map((r) => r.seq.toString());
+        expect(new Set(paged).size).toBe(paged.length);
+        expect(paged.sort()).toEqual(allRows.map((r) => r.seq.toString()).sort());
+
+        // The last page is not truncated — the boundary the `+1` probe row
+        // exists to get right, and the direction the capped cases above cannot
+        // check.
+        expect(page3.message).not.toContain("capped at");
+      } finally {
+        await ctx.deleteTestData(tenantId);
+        await ctx.deleteTestData(otherTenant);
+      }
     });
   });
 
@@ -1540,7 +2593,7 @@ describe("tenant-domain CLI (C7)", () => {
           cmdUnmapped(),
           cmdPreflight(),
           cmdAdd({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
-          cmdRemove({ tenant: "acmecorp", domain: `${runToken()}.example`, yes: true }),
+          cmdRemove({ tenant: "acmecorp", domain: `${runToken()}.example`, by: "test-op", yes: true }),
         ]);
         for (const result of results) {
           expect(result.ok).toBe(false);
@@ -1560,7 +2613,7 @@ describe("tenant-domain CLI (C7)", () => {
       const claim = `${runToken()}-${NON_DOMAIN_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "backfill" } });
 
-      const result = await cmdRemove({ tenant: tenantId, domain: claim, yes: true });
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(true);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });

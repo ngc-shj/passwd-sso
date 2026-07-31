@@ -56,6 +56,24 @@ function getConnectionString(role: TestRole): string {
   }
 }
 
+/**
+ * The connection string for the least-privilege APPLICATION role.
+ *
+ * Exported because a test that needs a FRESH connection — one whose session
+ * GUCs have never been set — cannot use `ctx.app.prisma`, which is pooled, and
+ * the obvious substitute is wrong: `process.env.DATABASE_URL` names the
+ * SUPERUSER in CI (`ci-integration.yml` sets it to `postgres`) and `passwd_app`
+ * locally. A privilege-denial case built on it therefore asserts nothing in CI,
+ * where the statement simply succeeds — which is exactly how two `42501` cases
+ * passed every local run and failed on the branch's first CI run.
+ *
+ * Use this, and assert the connected principal, for any case whose subject is
+ * an ACL rather than behaviour.
+ */
+export function appConnectionString(): string {
+  return getConnectionString("app");
+}
+
 // ─── Prisma client factory ──────────────────────────────────────
 
 export interface PrismaWithPool {
@@ -137,8 +155,12 @@ export const RETRYABLE_CLEANUP_SQLSTATES = [
  * it behind four attempts and a warning. The pg driver adapter nests the code
  * at `meta.driverAdapterError.cause.code`; other paths render it into the
  * message in Prisma's own `Code: \`23503\`` form. Both are read positionally.
+ *
+ * Exported for reuse: any test asserting a specific SQLSTATE from a Prisma
+ * call (not only this file's own retry classifier) should read it through
+ * here rather than growing a second positional parser.
  */
-function sqlStateOf(error: unknown): string | null {
+export function sqlStateOf(error: unknown): string | null {
   const meta = (error as { meta?: Record<string, unknown> })?.meta;
   const adapterError = meta?.driverAdapterError as { cause?: { code?: unknown } } | undefined;
   const nested = adapterError?.cause?.code;
@@ -147,6 +169,20 @@ function sqlStateOf(error: unknown): string | null {
   if (typeof flat === "string") return flat;
   const message = error instanceof Error ? error.message : String(error);
   return /Code:\s*`([0-9A-Z]{5})`/.exec(message)?.[1] ?? null;
+}
+
+/**
+ * Tags a `tenant_claim_events` purge failure inside `deleteTestData` (QA-3a).
+ * Keying the sweep's fatal/non-fatal split on this class, rather than on a
+ * message-prefix string, means rewording the message can never silently
+ * degrade the abort into warn-and-continue — the one outcome that would leave
+ * an undeletable row on the shared dev database unreported.
+ */
+export class TenantClaimEventsPurgeError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "TenantClaimEventsPurgeError";
+  }
 }
 
 export function isRetryableCleanupConflict(error: unknown): boolean {
@@ -179,6 +215,75 @@ export async function withCleanupConflictRetry<T>(fn: () => Promise<T>): Promise
     }
   }
   throw lastError;
+}
+
+/**
+ * The sweep loop `sweepOutstandingTenants` runs, factored out so the
+ * failure-handling mechanism (QA-3) can be driven directly with a fabricated
+ * `deleteTestData`, rather than relying on the real cross-process race that
+ * produces a genuine tenant_claim_events purge failure — which, like the
+ * deadlock round-3 M4's retry exists for, does not happen on demand.
+ *
+ * A `TenantClaimEventsPurgeError` is fatal (QA-3a: keyed on the class, not on
+ * message text) but does NOT abort the loop early (QA-3b): every other leaked
+ * tenant still gets its own sweep attempt and the accumulated report is still
+ * printed, so one purge failure cannot hide the other leaks it would
+ * otherwise cost the suite its only signal about. It is re-thrown only after
+ * the loop finishes.
+ */
+/**
+ * The shape `cleanup()` runs — sweep, then disconnect in `finally` regardless
+ * of whether the sweep threw (QA-3c). Factored out, same reasoning as
+ * `sweepLeakedTenants` above: `cleanup()`'s own sweep and disconnects need a
+ * live DB and real pools, which a sweep failure does not happen on demand
+ * against, so the try/finally MECHANISM is driven here with both arguments
+ * fabricated rather than against the real ones.
+ */
+export async function runCleanupSweep(
+  sweep: () => Promise<void>,
+  disconnectAll: () => Promise<void>,
+): Promise<void> {
+  try {
+    await sweep();
+  } finally {
+    await disconnectAll();
+  }
+}
+
+export async function sweepLeakedTenants(
+  leaked: readonly string[],
+  deleteTestData: (tenantId: string) => Promise<void>,
+): Promise<void> {
+  if (leaked.length === 0) return;
+  const unresolved: string[] = [];
+  const fatal: TenantClaimEventsPurgeError[] = [];
+  for (const tenantId of leaked) {
+    try {
+      await deleteTestData(tenantId);
+    } catch (e) {
+      if (e instanceof TenantClaimEventsPurgeError) {
+        fatal.push(e);
+        continue;
+      }
+      unresolved.push(`${tenantId} (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  console.warn(
+    `[db-integration] swept ${leaked.length - unresolved.length - fatal.length} leaked test tenant(s) left by a failed test.`,
+  );
+  if (unresolved.length > 0) {
+    console.warn(
+      `[db-integration] could NOT delete ${unresolved.length} test tenant(s) — they remain on the shared database:\n  ${unresolved.join("\n  ")}`,
+    );
+  }
+  if (fatal.length > 0) {
+    console.warn(
+      `[db-integration] ${fatal.length} tenant(s) left UNDELETABLE tenant_claim_events rows on the shared database (append-only — nothing but the purge routine can remove them):\n  ${fatal.map((e) => e.message).join("\n  ")}`,
+    );
+    throw fatal.length === 1
+      ? fatal[0]
+      : new AggregateError(fatal, `${fatal.length} tenant_claim_events purge failures during sweep`);
+  }
 }
 
 // ─── Test context ───────────────────────────────────────────────
@@ -223,6 +328,46 @@ export async function createTestContext(): Promise<TestContext> {
 
   // Verify connectivity
   await su.prisma.$executeRaw`SELECT 1`;
+
+  // Two preconditions for C1's tenant_claim_events purge routine (SC11 /
+  // #743's testing strategy), probed ONCE here rather than surfacing as a
+  // cryptic driver error out of every file's deleteTestData()/afterEach.
+  // Probed as CAPABILITIES, not titles: neither check asks "is this role
+  // the table owner" — an ownership predicate would fail every one of the
+  // ~95 integration files on a working configuration where
+  // MIGRATION_DATABASE_URL points at a superuser that is not the owner, and
+  // a probe sitting in front of the whole suite is exactly the kind that
+  // gets deleted rather than corrected.
+  //
+  // Order matters. "Not migrated" must be told apart from "not privileged"
+  // BEFORE the privilege probe: a checked-out-but-unmigrated branch raises
+  // 42883 (undefined_function), which is not in RETRYABLE_CLEANUP_SQLSTATES,
+  // out of every deleteTestData() call in every file — so the useful message
+  // ("run npm run db:migrate") has to win in that case, not a privilege
+  // error that is not the actual problem.
+  const [{ purgeRoutineExists }] = await su.prisma.$queryRaw<{ purgeRoutineExists: boolean }[]>`
+    SELECT to_regprocedure('public.tenant_claim_events_purge_for_tenant(uuid)') IS NOT NULL AS "purgeRoutineExists"
+  `;
+  if (!purgeRoutineExists) {
+    throw new Error(
+      "[db-integration] tenant_claim_events_purge_for_tenant does not exist on this database. " +
+        "Run `npm run db:migrate` to apply " +
+        "prisma/migrations/20260731100000_add_tenant_claim_events, then re-run the suite.",
+    );
+  }
+
+  const [{ purgeCapable }] = await su.prisma.$queryRaw<{ purgeCapable: boolean }[]>`
+    SELECT
+      has_function_privilege(current_user, 'public.tenant_claim_events_purge_for_tenant(uuid)', 'EXECUTE')
+      AND has_table_privilege(current_user, 'public.tenant_claim_events', 'DELETE') AS "purgeCapable"
+  `;
+  if (!purgeCapable) {
+    throw new Error(
+      "[db-integration] the role connected via MIGRATION_DATABASE_URL cannot EXECUTE " +
+        "tenant_claim_events_purge_for_tenant(uuid) or lacks DELETE on tenant_claim_events. " +
+        "Point MIGRATION_DATABASE_URL at a role with both (passwd_user in dev).",
+    );
+  }
 
   // Every id createTenant() hands out, minus the ones deleteTestData() has
   // already removed. A test that throws before its trailing cleanup line
@@ -396,10 +541,52 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM users WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // `tenants` LAST, then the tenant_claim_events purge — deliberately
+      // reordered from "purge, then delete tenants" (20260731170000). A
+      // `tenant_claims` row FKs to `tenants` with ON DELETE CASCADE, and a
+      // BEFORE DELETE trigger on `tenant_claims` (the same migration) now
+      // appends a `deregister` event for every row that cascade removes. A
+      // purge run BEFORE this DELETE cannot see that event — it does not
+      // exist yet — so it would leave a fresh, permanently undeletable row
+      // on the shared dev database every time this context's tenant carried
+      // a tenant_claims row. Purging AFTER catches it: the trigger's INSERT
+      // and the cascade DELETE are in the same statement, so by the time
+      // this DELETE returns the deregister row already exists, naming this
+      // tenantId, and the purge call below reaches it exactly as it reaches
+      // every other row naming this tenant.
       await tx.$executeRawUnsafe(
         `DELETE FROM tenants WHERE id = $1::uuid`,
         tenantId,
       );
+      // tenant_claim_events (C1, SC11/#743) has no tenant_id column and no
+      // FKs — it names a tenant only through old_tenant_id/new_tenant_id,
+      // and a bare DELETE is blocked by the append-only trigger. The purge
+      // routine is the one sanctioned escape (see the migration for why),
+      // and I5's CHECK makes it total: every row names at least one tenant,
+      // so purging both sides of every tenant this context ever creates
+      // reaches every row this suite could have written, including the
+      // deregister row the DELETE above may just have produced.
+      try {
+        await tx.$executeRawUnsafe(
+          `SELECT tenant_claim_events_purge_for_tenant($1::uuid)`,
+          tenantId,
+        );
+      } catch (e) {
+        // Tagged distinctly from every other statement in this transaction
+        // (round: C1 testing strategy). Every other row here is an ordinary
+        // DELETE that a future FK fix can retry; a tenant_claim_events row
+        // left behind by a failed purge is UNDELETABLE by anything short of
+        // this same routine, so sweepLeakedTenants() must not fold this
+        // into its best-effort "reported, not thrown" path below. Tagged by
+        // class (TenantClaimEventsPurgeError), not by message text — a
+        // reworded message must not silently degrade the sweep's abort into
+        // warn-and-continue (QA-3a).
+        throw new TenantClaimEventsPurgeError(
+          `tenant_claim_events purge failed for tenant ${tenantId} (undeletable rows may remain): ` +
+            `${e instanceof Error ? e.message : String(e)}`,
+          { cause: e },
+        );
+      }
     }));
     // Only after the tx commits: a delete that threw leaves the tenant for
     // the cleanup() sweep. Ids this context never handed out (tenants a test
@@ -419,36 +606,29 @@ export async function createTestContext(): Promise<TestContext> {
    * when a test already failed, and turning that into a second failure in
    * afterAll would bury the first. The ids are printed so a leak that the
    * sweep cannot resolve is still actionable.
+   *
+   * The one exception is `sweepLeakedTenants` below, for a
+   * TenantClaimEventsPurgeError.
    */
   async function sweepOutstandingTenants(): Promise<void> {
-    const leaked = [...outstandingTenantIds];
-    if (leaked.length === 0) return;
-    const unresolved: string[] = [];
-    for (const tenantId of leaked) {
-      try {
-        await deleteTestData(tenantId);
-      } catch (e) {
-        unresolved.push(`${tenantId} (${e instanceof Error ? e.message : String(e)})`);
-      }
-    }
-    console.warn(
-      `[db-integration] swept ${leaked.length - unresolved.length} leaked test tenant(s) left by a failed test.`,
-    );
-    if (unresolved.length > 0) {
-      console.warn(
-        `[db-integration] could NOT delete ${unresolved.length} test tenant(s) — they remain on the shared database:\n  ${unresolved.join("\n  ")}`,
-      );
-    }
+    await sweepLeakedTenants([...outstandingTenantIds], deleteTestData);
   }
 
-  async function cleanup(): Promise<void> {
-    await sweepOutstandingTenants();
+  // A sweep failure (TenantClaimEventsPurgeError, re-thrown after the loop
+  // finishes and the report is printed — see sweepLeakedTenants) must not
+  // skip disconnecting every pool: a leaked pg.Pool keeps the forked
+  // vitest worker process alive (QA-3c).
+  async function disconnectAll(): Promise<void> {
     await Promise.all([
       su.prisma.$disconnect().then(() => su.pool.end()),
       app.prisma.$disconnect().then(() => app.pool.end()),
       worker.prisma.$disconnect().then(() => worker.pool.end()),
       retentionWorker.prisma.$disconnect().then(() => retentionWorker.pool.end()),
     ]);
+  }
+
+  async function cleanup(): Promise<void> {
+    await runCleanupSweep(sweepOutstandingTenants, disconnectAll);
   }
 
   return {

@@ -66,3 +66,5 @@
 20260615000002_access_request_tenant_composite_fk  # pre-existing baseline (DROP); predates the expand-and-contract rule
 20260629000100_flip_mcp_refresh_token_family_created_at_not_null  # pre-existing baseline (SET NOT NULL); predates the expand-and-contract rule
 20260715000000_add_webhook_deliveries  # pre-existing baseline (DROP); predates the expand-and-contract rule
+20260731170000_tenant_claim_events_hardening  # the only DROP is CONSTRAINT tenant_claim_events_operation_check, replaced in the SAME transaction by a strict superset (register/revoke/unrevoke/reassign plus deregister), so nothing previously accepted becomes rejected
+20260731190000_tenant_claim_events_column_scoped_insert  # the only DROPs are three indexes 20260731170000 added on the same unmerged branch, ordered by created_at while the reader orders by seq, so the planner never used them; replaced in the SAME transaction by the (selector, seq) equivalents. No application code names an index, so no old code path can break on their absence

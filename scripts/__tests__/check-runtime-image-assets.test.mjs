@@ -154,6 +154,32 @@ describe("check-runtime-image-assets.mjs", () => {
     expect(stdout).toContain("1 distinct asset(s)");
   });
 
+  it("does NOT require a template span that is prose ending in a dot", () => {
+    // The false positive this narrowing exists for, in the shape that produced
+    // it: a message built as `` `… ${x}. ` + "The rest." `` leaves a TemplateTail
+    // whose literal text is exactly ". ", which resolves against the module's
+    // own directory to `scripts/lib/. ` — a required asset no COPY can satisfy.
+    // Reading literals instead of raw text keeps COMMENTS out; it does not keep
+    // out a span that merely begins with a dot.
+    writeRuntimeScripts({
+      audit:
+        'export function f(subject) {\n' +
+        '  throw new Error(`bad subject ${subject}. ` + "The subject must be schema-qualified.");\n' +
+        '}\n',
+      bootstrap: 'const P = "scripts/checks/policy.json";\nexport { P };\n',
+    });
+    write("Dockerfile", dockerfile([
+      "scripts/audit-db-grants.mjs",
+      "scripts/bootstrap-rds-roles.mjs",
+      "scripts/checks/policy.json",
+    ]));
+    const { exitCode, stdout } = runGuard();
+    expect(exitCode, stdout).toBe(0);
+    // The real asset next door is still derived — the narrowing drops the prose
+    // span, not the classifier.
+    expect(stdout).toContain("1 distinct asset(s)");
+  });
+
   it("follows local module imports TRANSITIVELY, resolving relative specifiers", () => {
     // Both halves of the real shape, and both were live gaps in the first
     // version of this gate:

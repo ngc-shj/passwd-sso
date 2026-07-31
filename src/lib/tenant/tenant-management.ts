@@ -6,6 +6,11 @@ import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import { normalizeTenantClaim, storableClaimSchema } from "@/lib/tenant/tenant-claim-registry";
 import { claimRefusal, type ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
+import {
+  recordTenantClaimEvent,
+  SIGNIN_ACTOR_LABEL,
+  TENANT_CLAIM_EVENT_OPERATION,
+} from "@/lib/tenant/tenant-claim-event";
 
 /**
  * The single `tenantClaim.findUnique` call site in the codebase — every
@@ -436,5 +441,35 @@ export async function findOrCreateTenantForClaim(
     });
   }
   await db.$executeRaw`RELEASE SAVEPOINT tenant_claim_create`;
+
+  // Routing history (SC11 / #743), in THIS transaction, so the event and the
+  // claim row it describes commit together or not at all.
+  //
+  // Placed after RELEASE SAVEPOINT and keyed on the surviving tenant id
+  // deliberately. Both `tenant.create` calls above are mutually exclusive
+  // alternatives of ONE logical registration — the second runs only after
+  // ROLLBACK TO SAVEPOINT has undone the first — so a write inside each arm
+  // would either double-emit or leave an event for a tenant that no longer
+  // exists. One call, after the retry has settled, is the only placement that
+  // is correct for both arms.
+  //
+  // This is the writer whose events an incident responder most needs and the
+  // one a `tenantClaim.create` grep does not return: the claim row is created
+  // through a NESTED relation write inside `tenant.create`, not through the
+  // `tenantClaim` delegate.
+  //
+  // Failure here aborts the sign-in. That direction is deliberate and is a
+  // stated availability cost: a broken tenant_claim_events table denies
+  // first-ever sign-ins rather than silently losing the evidence.
+  await recordTenantClaimEvent(db, {
+    claim,
+    operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
+    oldTenantId: null,
+    newTenantId: created.id,
+    oldRevokedAt: null,
+    newRevokedAt: null,
+    actorLabel: SIGNIN_ACTOR_LABEL,
+  });
+
   return { kind: "tenant", id: created.id };
 }

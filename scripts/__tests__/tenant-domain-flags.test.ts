@@ -190,8 +190,9 @@ describe("tenant-domain flag parsing", () => {
     const declared = new Set<string>([...Object.keys(VALUE_FLAG_HINTS), ...BOOLEAN_FLAGS]);
     expect([...read].sort().filter((f) => !declared.has(f))).toEqual([]);
     // And the literal pin, so ADDING a flag to the tables is a deliberate edit
-    // rather than something that slips in with an unrelated change.
-    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "yes"]);
+    // rather than something that slips in with an unrelated change. "after"
+    // (20260731170000) is `history`'s pagination cursor.
+    expect([...declared]).toEqual(["tenant", "domain", "by", "from", "days", "after", "yes"]);
     expect(read.size).toBeGreaterThan(0);
   });
 

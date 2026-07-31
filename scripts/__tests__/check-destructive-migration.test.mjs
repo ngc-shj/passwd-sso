@@ -68,6 +68,28 @@ afterEach(() => {
 });
 
 describe("check-destructive-migration gate", () => {
+  // `TRUNCATE` also names a trigger EVENT, and that form is the opposite of
+  // destructive — it is how a migration FORBIDS truncation. A bare token match
+  // read an append-only guard as the thing it guards against. The paired deny
+  // case (`TRUNCATE TABLE …` under T2) is what proves the narrowing did not
+  // open a hole; in PostgreSQL's grammar no truncation statement can follow
+  // BEFORE / AFTER / OR.
+  const triggerEventCases = [
+    ["BEFORE TRUNCATE", `CREATE TRIGGER g BEFORE TRUNCATE ON "t" FOR EACH STATEMENT EXECUTE FUNCTION f();`],
+    ["AFTER TRUNCATE", `CREATE TRIGGER g AFTER TRUNCATE ON "t" FOR EACH STATEMENT EXECUTE FUNCTION f();`],
+    ["OR TRUNCATE in an event list", `CREATE TRIGGER g BEFORE INSERT OR TRUNCATE ON "t" FOR EACH STATEMENT EXECUTE FUNCTION f();`],
+  ];
+
+  for (const [kind, sql] of triggerEventCases) {
+    it(`T1b: passes on ${kind} (a trigger event, not a truncation)`, () => {
+      addMigration("20260101000003_append_only_guard", sql);
+
+      const r = runGate();
+
+      expect(r.status).toBe(0);
+    });
+  }
+
   it("T1: passes on an additive-only migration", () => {
     addMigration(
       "20260101000000_add_column",

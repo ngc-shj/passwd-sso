@@ -206,6 +206,13 @@ const NON_DESTRUCTIVE_AFTER_DROP = new Set([
 ]);
 
 /**
+ * Tokens that can precede `TRUNCATE` only when it names a trigger EVENT —
+ * `BEFORE TRUNCATE`, `AFTER TRUNCATE`, `… OR TRUNCATE`. No truncation
+ * STATEMENT can follow any of them.
+ */
+const TRIGGER_EVENT_LEAD_IN = new Set(["BEFORE", "AFTER", "OR"]);
+
+/**
  * Destructive DDL, matched over the token stream against PostgreSQL's real
  * grammar (including optional keywords).
  */
@@ -213,7 +220,18 @@ const DESTRUCTIVE_MATCHERS = [
   // Every ALTER … RENAME form is destructive: RENAME [COLUMN] a TO b,
   // RENAME TO t2, RENAME CONSTRAINT c TO c2, ALTER TYPE … RENAME VALUE 'a' TO 'b'.
   ["RENAME", (t, i) => t[i] === "RENAME"],
-  ["TRUNCATE", (t, i) => t[i] === "TRUNCATE"],
+  // `TRUNCATE` is destructive as a STATEMENT, and is also the name of a trigger
+  // EVENT (`CREATE TRIGGER … BEFORE TRUNCATE`, `… AFTER INSERT OR TRUNCATE`).
+  // The event form is the opposite of destructive — it is how a migration
+  // FORBIDS truncation — so a bare token match reads an append-only guard as
+  // the thing it guards against. Narrowed by preceding token rather than by
+  // baselining the migration: a baseline entry would record "destructive but
+  // safe" about DDL that is not destructive at all.
+  //
+  // Fail-closed is preserved: in PostgreSQL's grammar a truncation statement is
+  // never preceded by BEFORE / AFTER / OR, so this exclusion cannot admit one.
+  // Same shape as NON_DESTRUCTIVE_AFTER_DROP above.
+  ["TRUNCATE", (t, i) => t[i] === "TRUNCATE" && !TRIGGER_EVENT_LEAD_IN.has(t[i - 1])],
   // Any DROP except the constraint-relaxing forms above. Covers DROP TABLE /
   // COLUMN / VIEW / CONSTRAINT / TYPE / SEQUENCE / INDEX / FUNCTION / TRIGGER /
   // POLICY / SCHEMA / EXTENSION, the implicit `ALTER TABLE t DROP col` form, and

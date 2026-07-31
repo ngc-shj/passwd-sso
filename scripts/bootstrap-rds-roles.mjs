@@ -46,7 +46,12 @@ import { pathToFileURL } from "node:url";
 // a security policy converge on the weaker one — which had already happened
 // here: this file validated every entry and the audit validated only that a
 // `denied` array existed.
-import { loadDeniedPolicy } from "./lib/denied-privileges.mjs";
+import {
+  loadDeniedPolicy,
+  subjectOf,
+  isSequenceEntry,
+  assertSubjectKind,
+} from "./lib/denied-privileges.mjs";
 // Re-exported so the integration test drives the SAME loader the script uses,
 // rather than a second import path that could diverge from it.
 export { loadDeniedPolicy };
@@ -116,13 +121,22 @@ export async function applyDeniedPrivileges(
 ) {
   for (const d of denied) {
     const privs = d.privileges.join(", ");
+    // `to_regclass` resolves sequences as well as tables, so one guard covers
+    // both entry kinds; the REVOKE below needs the `SEQUENCE` keyword because
+    // the bare form defaults to TABLE and errors on a sequence.
+    const subject = subjectOf(d);
+    const target = isSequenceEntry(d) ? `SEQUENCE ${subject}` : subject;
 
     const { rows } = await client.query(
       `SELECT to_regclass($1) IS NOT NULL AS table_exists,
+              (SELECT relkind FROM pg_class WHERE oid = to_regclass($1)) AS relkind,
               EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $2) AS role_exists`,
-      [d.table, d.role],
+      [subject, d.role],
     );
-    const { table_exists: tableExists, role_exists: roleExists } = rows[0];
+    const { table_exists: tableExists, relkind, role_exists: roleExists } = rows[0];
+    // Before the existence branch below, so a wrong-kind entry is a hard error
+    // rather than something the pre-migration skip can hide on a fresh database.
+    assertSubjectKind(d, relkind);
 
     if (!tableExists || !roleExists) {
       // Tolerated in the FULL run, which is documented to happen before the
@@ -135,18 +149,32 @@ export async function applyDeniedPrivileges(
       // is to apply the policy must not succeed without applying it.
       if (requireTargets) {
         throw new Error(
-          `DENIED_POLICY_TARGET_MISSING: ${d.role} / ${d.table} — ` +
-            `${tableExists ? "role" : "table"} does not exist. This mode runs AFTER ` +
+          `DENIED_POLICY_TARGET_MISSING: ${d.role} / ${subject} — ` +
+            `${tableExists ? "role" : "object"} does not exist. This mode runs AFTER ` +
             "the migrations, so a missing target is a policy error, not the " +
             "pre-migration state. Nothing was applied; the transaction is rolled back.",
         );
       }
-      console.log(`  denied: SKIPPED (target absent) ${d.table} — pre-migration run`);
+      console.log(`  denied: SKIPPED (target absent) ${subject} — pre-migration run`);
       continue;
     }
 
-    await client.query(`REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
-    console.log(`  denied: REVOKE ${privs} ON ${d.table} FROM ${d.role}`);
+    await client.query(`REVOKE ${privs} ON ${target} FROM ${d.role}`);
+    console.log(`  denied: REVOKE ${privs} ON ${target} FROM ${d.role}`);
+
+    // Re-grant the column-scoped exceptions, AFTER the revoke and never before
+    // it. Measured on a throwaway database: `REVOKE <priv> ON TABLE` erases the
+    // COLUMN-level grants of that privilege too (`pg_attribute.attacl` goes
+    // empty), so the revoke above undoes the migration's `GRANT INSERT (…)`
+    // every time this runs. Without this loop the convergence run that is
+    // supposed to RESTORE a control would instead leave `passwd_app` unable to
+    // append a routing event at all — and that writer is fail-closed, so the
+    // symptom is denied first-ever sign-ins rather than a missing history row.
+    for (const [priv, columns] of Object.entries(d.columnGrants ?? {})) {
+      const cols = columns.join(", ");
+      await client.query(`GRANT ${priv} (${cols}) ON ${subject} TO ${d.role}`);
+      console.log(`  denied: GRANT ${priv} (${cols}) ON ${subject} TO ${d.role}`);
+    }
   }
 }
 

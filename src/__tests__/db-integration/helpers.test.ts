@@ -5,6 +5,10 @@ import {
   RETRYABLE_CLEANUP_SQLSTATES,
   isRetryableCleanupConflict,
   withCleanupConflictRetry,
+  sweepLeakedTenants,
+  runCleanupSweep,
+  TenantClaimEventsPurgeError,
+  appConnectionString,
 } from "./helpers";
 
 /**
@@ -39,6 +43,31 @@ function adapterError(sqlstate: string): Error {
 function messageError(sqlstate: string): Error {
   return new Error(`Raw query failed. Code: \`${sqlstate}\`. Message: \`deadlock detected\``);
 }
+
+describe("appConnectionString", () => {
+  // The property the two `42501` cases on `tenant_claims` depend on, and the
+  // one whose absence made them pass locally and fail on CI: whatever role
+  // DATABASE_URL names, this resolves to the least-privilege APPLICATION role.
+  // CI sets DATABASE_URL to the superuser, so a case that builds its own
+  // connection from it asserts nothing there — the statement simply succeeds.
+  it("names passwd_app even when DATABASE_URL names a superuser", () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/passwd_test");
+    // `undefined` DELETES the variable; `""` would be used verbatim, because the
+    // helper falls back with `??` rather than on truthiness.
+    vi.stubEnv("APP_DATABASE_URL", undefined);
+    const url = new URL(appConnectionString());
+    expect(url.username).toBe("passwd_app");
+    // Host and database are carried over — only the credentials are replaced.
+    expect(url.host).toBe("localhost:5432");
+    expect(url.pathname).toBe("/passwd_test");
+  });
+
+  it("prefers an explicit APP_DATABASE_URL", () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/passwd_test");
+    vi.stubEnv("APP_DATABASE_URL", "postgresql://other_app:pw@db.example:6543/other");
+    expect(appConnectionString()).toBe("postgresql://other_app:pw@db.example:6543/other");
+  });
+});
 
 describe("isRetryableCleanupConflict", () => {
   it.each(RETRYABLE_CLEANUP_SQLSTATES)("recognises %s carried in meta", (sqlstate) => {
@@ -167,4 +196,134 @@ describe("withCleanupConflictRetry", () => {
       /async function deleteTestData\([^)]*\)[^{]*\{\s*await withCleanupConflictRetry\(/,
     );
   });
+});
+
+/**
+ * QA-3: `sweepLeakedTenants` (the loop `sweepOutstandingTenants` runs) had
+ * three defects — message-prefix keying, an early throw that abandoned the
+ * rest of the sweep and the report with it, and a `cleanup()` with no
+ * try/finally around the pool disconnects. A real tenant_claim_events purge
+ * failure is a cross-process race that, like round-3 M4's deadlock retry,
+ * does not happen on demand — so the mechanism is driven here with a
+ * fabricated `deleteTestData`, never against the real routine or database.
+ */
+describe("sweepLeakedTenants", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns without calling deleteTestData when nothing leaked", async () => {
+    const deleteTestData = vi.fn();
+    await sweepLeakedTenants([], deleteTestData);
+    expect(deleteTestData).not.toHaveBeenCalled();
+  });
+
+  it("sweeps every leaked tenant that deletes cleanly, without throwing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deleted: string[] = [];
+    const deleteTestData = vi.fn(async (id: string) => {
+      deleted.push(id);
+    });
+    await sweepLeakedTenants(["a", "b", "c"], deleteTestData);
+    expect(deleted).toEqual(["a", "b", "c"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("swept 3 leaked test tenant(s)"));
+  });
+
+  it(
+    "an ordinary (non-purge) failure is reported as unresolved and does not abort the sweep or throw",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempted: string[] = [];
+      const deleteTestData = vi.fn(async (id: string) => {
+        attempted.push(id);
+        if (id === "b") throw new Error("FK ordering conflict");
+      });
+      await expect(sweepLeakedTenants(["a", "b", "c"], deleteTestData)).resolves.toBeUndefined();
+      // Every leaked tenant was still attempted (QA-3b's property applies to
+      // the ordinary path too — one failure must not skip the rest).
+      expect(attempted).toEqual(["a", "b", "c"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could NOT delete 1 test tenant(s)"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("b (FK ordering conflict)"));
+    },
+  );
+
+  it(
+    "a TenantClaimEventsPurgeError does not abort the loop: every other leaked tenant is still attempted, the report is still printed, and the error is re-thrown only after the loop finishes (QA-3b)",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempted: string[] = [];
+      const deleteTestData = vi.fn(async (id: string) => {
+        attempted.push(id);
+        if (id === "a") throw new TenantClaimEventsPurgeError("tenant_claim_events purge failed for tenant a");
+      });
+      await expect(sweepLeakedTenants(["a", "b", "c"], deleteTestData)).rejects.toThrow(
+        TenantClaimEventsPurgeError,
+      );
+      // The whole point: "b" and "c" were still attempted after "a" failed —
+      // the old implementation threw immediately and never reached them.
+      expect(attempted).toEqual(["a", "b", "c"]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("UNDELETABLE tenant_claim_events rows"),
+      );
+    },
+  );
+
+  it(
+    "combines a fatal purge failure with an ordinary failure into one thrown AggregateError, and still names both in the printed report (QA-3b)",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const deleteTestData = vi.fn(async (id: string) => {
+        if (id === "a") throw new TenantClaimEventsPurgeError("tenant_claim_events purge failed for tenant a");
+        if (id === "b") throw new TenantClaimEventsPurgeError("tenant_claim_events purge failed for tenant b");
+      });
+      let caught: unknown;
+      try {
+        await sweepLeakedTenants(["a", "b"], deleteTestData);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(AggregateError);
+      expect((caught as AggregateError).errors).toHaveLength(2);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("purge failed for tenant a"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("purge failed for tenant b"));
+    },
+  );
+
+  it(
+    "keys the fatal path on the error CLASS, not on message text (QA-3a): a plain Error carrying the exact old wording is treated as an ordinary, non-fatal failure",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempted: string[] = [];
+      const deleteTestData = vi.fn(async (id: string) => {
+        attempted.push(id);
+        if (id === "a") {
+          // Same text the real purge failure used to carry, deliberately
+          // NOT a TenantClaimEventsPurgeError. Under the old string-prefix
+          // match this would have aborted the sweep; it must not.
+          throw new Error("tenant_claim_events purge failed for tenant a (undeletable rows may remain): x");
+        }
+      });
+      await expect(sweepLeakedTenants(["a", "b"], deleteTestData)).resolves.toBeUndefined();
+      expect(attempted).toEqual(["a", "b"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could NOT delete 1 test tenant(s)"));
+    },
+  );
+
+  it(
+    "cleanup() wraps the sweep in try/finally, so a sweep failure still disconnects every pool (QA-3c)",
+    async () => {
+      // Driving this through a real TestContext would need a live DB and a
+      // real purge failure — the cross-process race this whole mechanism
+      // exists for, which does not happen on demand. Driven instead through
+      // runCleanupSweep, the extracted try/finally mechanism cleanup() calls,
+      // with both the sweep and the disconnect fabricated at the boundary:
+      // no real pool or database is touched.
+      const disconnectAll = vi.fn(async () => {});
+      const sweep = vi.fn(async () => {
+        throw new Error("sweep failed");
+      });
+      await expect(runCleanupSweep(sweep, disconnectAll)).rejects.toThrow("sweep failed");
+      expect(disconnectAll).toHaveBeenCalledTimes(1);
+    },
+  );
 });

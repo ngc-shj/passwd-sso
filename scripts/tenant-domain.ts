@@ -36,8 +36,9 @@
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- list [--tenant <ref>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- unmapped [--days <n>]
 //   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- preflight
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
-//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove --tenant <ref> --domain <domain> [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- remove  --tenant <ref> --domain <domain> --by <label> [--yes]
+//   MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- history --domain <claim> | --tenant <uuid> [--after <seq>]
 //
 // `--tenant <ref>` accepts the tenant's UUID, one of its already-registered
 // claims (normalised the same way `add`/`remove` normalise `--domain`), or its
@@ -47,14 +48,31 @@
 // resolveTenantRef for why (round-2 F-F).
 //
 // `--by` is a self-asserted operator label (NOT authenticated attribution —
-// there is no application user identity on this connection, see SC8) stored
-// verbatim in TenantClaim.createdBy when a row is CREATED. It is deliberately
-// not written on the un-revoke or reassign paths, which preserve the original
-// registrant — see cmdAdd.
+// there is no application user identity on this connection, see SC8). It is
+// stored verbatim in TenantClaim.createdBy only when a row is CREATED —
+// deliberately not overwritten on the un-revoke or reassign paths, which
+// preserve the original registrant, see cmdAdd — but that is `createdBy`
+// specifically, not the flag. `--by` ALSO supplies `actor_label` on the
+// `tenant_claim_events` row every one of the four verbs (register / revoke /
+// unrevoke / reassign) appends in the same transaction (SC11 / #743), which
+// is why `remove` requires it too, not just `add`. See `tenant-domain
+// history` to read those rows back.
 //
 // `--from` is `add`'s reassignment flag: it names the tenant that currently
 // owns the claim, and moves the claim off it. See cmdAdd for why it is a bare
 // UUID and why it does not require a prior `remove`.
+//
+// `history` also reports a `deregister` operation now: deleting a row from
+// `tenant_claims` — directly, or by cascade from a tenant deletion — fires a
+// trigger that appends one of these. `actor_label` is the fixed string
+// `db-delete`, naming the mechanism rather than a person; who performed it is
+// in `db_user`/`session_db_user`. `history` is capped at HISTORY_ROW_CAP rows
+// per call; a capped result says to re-run the same command with
+// `--after <seq>` appended — it does NOT rebuild the command line, because a
+// claim is printable ASCII and would then be interpolated into something an
+// operator is invited to paste into a shell. Ordered by the row's monotonic
+// `seq`, not by `created_at` — the latter is millisecond-precision and cannot
+// order two events written in the same millisecond.
 
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
@@ -74,9 +92,15 @@ import {
   escapeUnsafeDisplayChars,
   UNSAFE_DISPLAY_CHARS_RE,
 } from "@/lib/security/unsafe-display-chars";
+import {
+  recordTenantClaimEvent,
+  SIGNIN_ACTOR_LABEL,
+  TENANT_CLAIM_EVENT_OPERATION,
+} from "@/lib/tenant/tenant-claim-event";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_SECOND } from "@/lib/constants/time";
-import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
+import {
+  asciiPrintable, AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
 import {
   parseFlags,
@@ -706,6 +730,95 @@ export async function cmdPreflight(): Promise<CmdResult> {
   }
 }
 
+// ─── shared: --by validation ────────────────────────────────────
+
+// Sized to `tenant_claim_events.actor_label VARCHAR(255)`
+// (prisma/migrations/20260731100000_add_tenant_claim_events) — the column
+// every one of the four verbs writes `--by` into as attribution.
+const ACTOR_LABEL_MAX_LENGTH = 255;
+
+// Shared by `add` and `remove` (C4/#743): `--by` supplies `actor_label` on
+// all four routing operations, not just the row `add` may create, so one
+// validator sits ahead of both rather than a second hand-maintained copy
+// drifting from the first (RT9 twin).
+function validateActorLabel(by: string): CmdResult | null {
+  if (!by || by.trim().length === 0) {
+    return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
+  }
+
+  // `signin` is the label the auto-registration path writes, and it is the one
+  // value a reader of `history` treats as engine-generated rather than typed by
+  // a person. Every other `--by` is self-asserted and says so; this one would
+  // borrow the credibility of the path that is not. Reserved at ingest — what
+  // is stored stays what was typed, so it cannot be fixed on the way out, and
+  // I1 makes the row uncorrectable afterwards. (`db_user` still distinguishes
+  // the two, but only for a reader who thinks to look.)
+  // CLASS: best-effort tripwire, not a boundary. Its two bypasses are named
+  // rather than left to be discovered — a direct writer does not pass through
+  // this function at all (the producer accepts any `actorLabel`, and the
+  // completeness gate has no predicate on it), and `--by` is self-asserted by
+  // construction. `db_user` is the real attribution. What this buys is that the
+  // ONE label a `history` reader treats as engine-written cannot be typed by a
+  // person at the sanctioned entry point.
+  if (by.trim().toLowerCase() === SIGNIN_ACTOR_LABEL) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `--by must not be "${SIGNIN_ACTOR_LABEL}": that label is reserved for the sign-in ` +
+        "auto-registration path, and a routing event carrying it would read as engine-written " +
+        "rather than operator-asserted. Use your own identifier.",
+    };
+  }
+
+  // Refused here, before the client is even built, rather than left to the
+  // column's own bound: a value this long would otherwise raise a raw 22001
+  // mid-transaction, after the operator has already read the confirmation
+  // prompt and answered it.
+  if (by.length > ACTOR_LABEL_MAX_LENGTH) {
+    return {
+      ok: false,
+      code: 1,
+      message: `--by is too long (${by.length} characters; max ${ACTOR_LABEL_MAX_LENGTH}).`,
+    };
+  }
+
+  // `--by` is stored verbatim as this change's attribution — actor_label on
+  // the tenant_claim_events row it appends, and, on `add`'s create arm only,
+  // TenantClaim.createdBy — and read back by `history`. Neither column is
+  // CHECK-constrained. A label carrying a bidi override would misrepresent
+  // who made the change at exactly the moment someone is deciding whether to
+  // trust the row. Rejected rather than escaped on the way in, matching the
+  // claim ingest boundary: what is stored stays what was typed.
+  if (UNSAFE_DISPLAY_CHARS_RE.test(by)) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "--by contains a control, bidi or zero-width character. Use a plain label: " +
+        "it is stored as this change's attribution and read back by `history`.",
+    };
+  }
+
+  // Printable ASCII. `actor_label` deliberately carries no CHECK (one
+  // adjudicator per predicate, R48), so without this the field is full Unicode
+  // and the reserved-label test below is defeated by a confusable — `ѕignin`
+  // (Cyrillic U+0455) renders identically in `history` output. An operator
+  // identifier needs nothing outside ASCII, so the narrowing costs nothing and
+  // closes the class here rather than growing a second adjudicator elsewhere.
+  if (!asciiPrintable.test(by)) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "--by must be printable ASCII. It is stored as this change's attribution and " +
+        "read back by `history`, where a look-alike character would misrepresent who acted.",
+    };
+  }
+
+  return null;
+}
+
 // ─── add ─────────────────────────────────────────────────────────
 
 const ROW_6_9A_WARNING = [
@@ -736,26 +849,8 @@ export async function cmdAdd(args: {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  if (!args.by || args.by.trim().length === 0) {
-    return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
-  }
-
-  // `--by` is stored verbatim in TenantClaim.createdBy, which no CHECK
-  // constrains, and it is read back by `list` and by the next operator's `add`
-  // preview — the audit trail the whole soft-delete design (S3-4) rests on.
-  // A label carrying a bidi override would misrepresent who registered a claim
-  // at exactly the moment someone is deciding whether to trust the row.
-  // Rejected rather than escaped on the way in, matching the claim ingest
-  // boundary: what is stored stays what was typed.
-  if (UNSAFE_DISPLAY_CHARS_RE.test(args.by)) {
-    return {
-      ok: false,
-      code: 1,
-      message:
-        "--by contains a control, bidi or zero-width character. Use a plain label: " +
-        "it is stored as the registration's attribution and read back by `list`.",
-    };
-  }
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
 
   // `--from` is the reassignment flag, and it takes a bare tenant UUID —
   // deliberately NOT the `<ref>` forms `--tenant` accepts. Reassignment is
@@ -944,15 +1039,27 @@ export async function cmdAdd(args: {
               message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current owner.`,
             };
           }
+          // C4/#743: one event, in the same transaction, naming both sides —
+          // the losing tenant this row moved FROM and the gaining tenant it
+          // moved TO — so a reassignment is one incident, not two groups.
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.REASSIGN,
+            oldTenantId: existing.tenantId,
+            newTenantId: tenant.id,
+            oldRevokedAt: existing.revokedAt,
+            newRevokedAt: null,
+            actorLabel: args.by,
+          });
         } else if (existing) {
           // M2 / SC8: `createdBy` is NOT overwritten with `--by`. SC8 defers
           // application-level audit for claim registration on the premise
           // that "the row itself carries the timeline and the self-asserted
           // actor an incident needs" — overwriting it on the un-revoke path
           // erased exactly that, leaving no record of who first registered
-          // the claim. The un-revoker is recorded only in this command's
-          // printed output; recording it in the row needs a new column, and
-          // therefore a migration, which is out of scope here.
+          // the claim. The un-revoker is recorded separately, as actor_label
+          // on the tenant_claim_events row appended below (SC11 / #743) —
+          // TenantClaim itself still needs no new column for it.
           // Same total CAS as the reassignment above: the row was revoked when
           // it was read, and it is the revocation this write clears, so a
           // concurrent change to either field is a refusal rather than a
@@ -968,6 +1075,15 @@ export async function cmdAdd(args: {
               message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
             };
           }
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.UNREVOKE,
+            oldTenantId: tenant.id,
+            newTenantId: tenant.id,
+            oldRevokedAt: existing.revokedAt,
+            newRevokedAt: null,
+            actorLabel: args.by,
+          });
         } else {
           try {
             await tx.tenantClaim.create({ data: { tenantId: tenant.id, claim, createdBy: args.by } });
@@ -981,6 +1097,15 @@ export async function cmdAdd(args: {
             }
             throw e;
           }
+          await recordTenantClaimEvent(tx, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
+            oldTenantId: null,
+            newTenantId: tenant.id,
+            oldRevokedAt: null,
+            newRevokedAt: null,
+            actorLabel: args.by,
+          });
         }
 
         if (existing && isReassignment) {
@@ -1000,26 +1125,26 @@ export async function cmdAdd(args: {
             existing.createdBy === null ? "-" : escapeUnsafeDisplayChars(existing.createdBy);
           console.log(
             `createdBy stays "${registeredBySoFar}" (${existing.createdAt.toISOString()}) — the row records who ` +
-              `FIRST registered this claim, not who last changed it. This change was made by "${escapeUnsafeDisplayChars(args.by)}"; that is ` +
-              "recorded only here, so keep this output with the incident record.",
+              `FIRST registered this claim, not who last changed it. This change was made by "${escapeUnsafeDisplayChars(args.by)}"; ` +
+              `see "tenant-domain history --domain ${escapeUnsafeDisplayChars(claim)}" for the full record of who changed what, and when.`,
           );
-          // What this write DESTROYED, named explicitly (round-6, Codex — see
-          // plan SC11). SC8 defers application-level audit on the grounds that
-          // "the row itself carries the timeline"; that is true of
-          // register-then-revoke and false of both operations below, because
-          // each overwrites the state it changed. Until SC11's append-only
-          // history exists, this line is the only statement of what was lost,
-          // and it must name the values rather than allude to them.
-          const destroyed: string[] = [];
-          if (isReassignment) destroyed.push(`previous owner tenant ${existing.tenantId}`);
+          // What this write overwrites on THIS row, named explicitly (round-6,
+          // Codex — see plan SC11). SC8 defers application-level audit on the
+          // grounds that "the row itself carries the timeline"; that is true
+          // of register-then-revoke and false of both operations below,
+          // because each overwrites the state it changed. SC11's append-only
+          // `tenant_claim_events` table now records it (queryable with
+          // `tenant-domain history`), so this line names the values rather
+          // than claiming they are lost.
+          const overwritten: string[] = [];
+          if (isReassignment) overwritten.push(`previous owner tenant ${existing.tenantId}`);
           if (existing.revokedAt !== null) {
-            destroyed.push(`revokedAt ${existing.revokedAt.toISOString()}`);
+            overwritten.push(`revokedAt ${existing.revokedAt.toISOString()}`);
           }
-          if (destroyed.length > 0) {
+          if (overwritten.length > 0) {
             console.log(
-              `NOT RECOVERABLE from the row after this change: ${destroyed.join("; ")}. ` +
-                "The registry keeps no history of routing changes yet (plan SC11), so this " +
-                "output is the record — retain it.",
+              `Overwritten on this row (not lost — recorded in tenant_claim_events; read it with the ` +
+                `"history" command shown above): ${overwritten.join("; ")}.`,
             );
           }
         }
@@ -1045,11 +1170,21 @@ export async function cmdAdd(args: {
 export async function cmdRemove(args: {
   tenant: string;
   domain: string;
+  by: string;
   yes?: boolean;
   confirm?: ConfirmFn;
 }): Promise<CmdResult> {
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
+
+  // Validated here — before the client is constructed, next to the
+  // --domain check below — not inside withBypassRls's callback. "Before the
+  // CAS write" would be too weak: a refusal raised once the transaction is
+  // open happens AFTER the operator has read the warning and answered the
+  // confirmation prompt, which is the false-deny on an incident-response
+  // path C1 exists to avoid.
+  const byError = validateActorLabel(args.by);
+  if (byError) return byError;
 
   // storableClaimSchema, NOT operatorDomainSchema (round-3 S3-13). The
   // operator-input guard belongs on the write that CREATES a row; applying
@@ -1122,9 +1257,14 @@ export async function cmdRemove(args: {
         // Soft delete (revokedAt), never DELETE — a claim's lifetime must
         // survive the incident response that discovers it (round-3 S3-4);
         // createdAt is one of the two timestamps C12's runbook needs.
+        //
+        // Hoisted rather than inlined into `data`: the event below must
+        // record the SAME instant that was written, not a second
+        // `new Date()` a few microseconds later.
+        const revokedAt = new Date();
         const result = await tx.tenantClaim.updateMany({
           where: { claim, tenantId: tenant.id, revokedAt: null },
-          data: { revokedAt: new Date() },
+          data: { revokedAt },
         });
         if (result.count === 0) {
           return {
@@ -1133,9 +1273,292 @@ export async function cmdRemove(args: {
             message: `Claim "${escapeUnsafeDisplayChars(claim)}" was modified concurrently by another process. Re-run "list" to see its current state.`,
           };
         }
+        await recordTenantClaimEvent(tx, {
+          claim,
+          operation: TENANT_CLAIM_EVENT_OPERATION.REVOKE,
+          oldTenantId: tenant.id,
+          newTenantId: tenant.id,
+          oldRevokedAt: null,
+          newRevokedAt: revokedAt,
+          actorLabel: args.by,
+        });
 
         console.log(`Revoked claim "${escapeUnsafeDisplayChars(claim)}" for tenant ${tenant.id}.`);
         return { ok: true, code: 0, tenantId: tenant.id, claim };
+      },
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+// ─── history ─────────────────────────────────────────────────────
+
+// A named cap rather than an unbounded read (external review finding, C6 /
+// SC11): a claim or tenant with a long routing history — a squatted domain
+// bounced between tenants over months, say — must not turn one `history`
+// call into an unbounded table scan at incident time. Chosen well above any
+// history this deployment shape plausibly has (SC-A: one row per operator
+// mutation) so it is a backstop, not a paging scheme an operator hits in
+// normal use. When it IS hit, the tool prints the exact re-invocation to
+// continue (below) — silently truncating an incident-response read path is
+// worse than stopping and saying so.
+export const HISTORY_ROW_CAP = 500;
+
+export async function cmdHistory(args: {
+  domain?: string;
+  tenant?: string;
+  /** Continuation cursor: `seq` of the last row a previous, capped call printed. */
+  after?: string;
+  /**
+   * Test seam, never a CLI flag: overrides HISTORY_ROW_CAP so the truncation
+   * and continuation-message path can be red-proved without inserting
+   * HISTORY_ROW_CAP+1 real rows. Same shape as `migrationClientFactory` and
+   * `confirm` above — a real production default with an override only tests
+   * reach.
+   */
+  rowCap?: number;
+}): Promise<CmdResult> {
+  const url = process.env.MIGRATION_DATABASE_URL;
+  if (!url) return missingUrlResult();
+  const rowCap = args.rowCap ?? HISTORY_ROW_CAP;
+
+  // Validated before the client is built, same convention as `unmapped`'s
+  // `--days`: `--after` is meant to be re-typed verbatim from this command's
+  // own previous output, so a non-digit value is almost certainly a copy
+  // mistake worth catching immediately rather than one `seq` comparison
+  // matching nothing.
+  let afterSeq: bigint | undefined;
+  if (args.after !== undefined) {
+    if (!/^\d+$/.test(args.after)) {
+      return {
+        ok: false,
+        code: 1,
+        message:
+          `Invalid --after "${escapeUnsafeDisplayChars(args.after)}": expected the seq cursor ` +
+          "printed by a capped history result (a non-negative integer).",
+      };
+    }
+    afterSeq = BigInt(args.after);
+  }
+
+  // ONE predicate for both the guard and the selector choice. They used to
+  // disagree — the guard tested truthiness, the choice tested definedness — so
+  // `history --tenant <uuid> --domain ""` passed the guard, took the claim
+  // branch with an empty claim, and reported an empty result for a question the
+  // operator did not ask. A flag the operator wrote must either take effect or
+  // stop the command; this module's own header says so.
+  // `!== undefined` alone is not enough: `parseFlags` refuses only the inline
+  // empty spelling (`--domain=`), so the space-separated `--domain ""` arrives
+  // as `""`. Under a truthiness guard that was refused; under a definedness
+  // guard it would take the claim branch and report "No routing history" with
+  // exit 0 — evidence of absence, with a success code, on the incident-response
+  // read path, from a runbook line whose variable happened to be unset. An
+  // empty selector is refused below rather than reclassified as absent.
+  const emptySelector =
+    (args.domain !== undefined && args.domain.trim() === "") ||
+    (args.tenant !== undefined && args.tenant.trim() === "");
+  if (emptySelector) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "history was given an empty --domain/--tenant value. Refusing rather than " +
+        "reporting an empty result: an empty selector cannot distinguish " +
+        '"nothing matched" from "the variable you passed was unset".',
+    };
+  }
+  const hasDomain = args.domain !== undefined;
+  const hasTenant = args.tenant !== undefined;
+  if (!hasDomain && !hasTenant) {
+    return {
+      ok: false,
+      code: 1,
+      message: "history requires --domain <claim> or --tenant <uuid>.",
+    };
+  }
+  if (hasDomain && hasTenant) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "history takes --domain <claim> OR --tenant <uuid>, not both. " +
+        "Re-run with the one you meant: --domain names a single claim, " +
+        "--tenant every event naming that tenant on either side.",
+    };
+  }
+
+  // Normalised the same way `add`/`remove` read `--domain` back, but
+  // NOT schema-validated: this is a read, and a pre-existing row stored by
+  // some other means must still be findable by it.
+  const claim = hasDomain ? normalizeTenantClaim(args.domain as string) : undefined;
+
+  const prisma = migrationClientFactory.create(url);
+  try {
+    return await withBypassRls(
+      prisma,
+      async (tx) => {
+        let tenantId: string | undefined;
+        if (claim === undefined) {
+          const ref = args.tenant as string; // guaranteed by the neither-given refusal above
+          // A bare UUID matches old_tenant_id/new_tenant_id DIRECTLY, never
+          // through resolveTenantRef: every arm of that helper reads a LIVE
+          // `tenants`/`tenant_claims` row, and all of them are dead in the one
+          // case this selector exists for — a tenant deleted after a claim
+          // was moved off it (F3). A non-UUID ref still resolves through it,
+          // same as `list`/`add`/`remove`.
+          if (UUID_RE.test(ref)) {
+            tenantId = ref;
+          } else {
+            const tenant = await resolveTenantRef(tx, ref);
+            if (!tenant) {
+              return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(ref)}` };
+            }
+            tenantId = tenant.id;
+          }
+        }
+
+        // seq (20260731170000), not createdAt: createdAt is millisecond-
+        // precision and same-millisecond writes have no defined order under
+        // it, so it can no longer be the read order or the pagination
+        // cursor — only the displayed time. Fetches one row past the cap so
+        // truncation is DETECTED rather than merely assumed whenever the
+        // result happens to be exactly rowCap long.
+        const take = rowCap + 1;
+        const afterFilter = afterSeq !== undefined ? { seq: { gt: afterSeq } } : {};
+        const page = { orderBy: { seq: "asc" }, take } as const;
+
+        // The tenant selector is TWO queries rather than one `OR`. Measured
+        // with EXPLAIN (ANALYZE) against 20260731190000's indexes: the `OR`
+        // does use them, as a BitmapOr — but a bitmap scan produces no
+        // ordering, so the plan is BitmapOr → Sort → Limit and the cap stops
+        // bounding the work. Every matching row is read and sorted however
+        // small the cap is. One equality per side walks (tenant, seq) in
+        // order, so the plan is Index Scan → Limit with no sort at all, and
+        // each side stops at the cap.
+        //
+        // Merging them is exact rather than approximate: the union's first
+        // `take` rows by seq are necessarily a subset of (first `take` of the
+        // old-tenant side) ∪ (first `take` of the new-tenant side), so
+        // sorting the two capped pages and re-cutting to `take` yields the
+        // same rows the single ordered query would have. `seq` is UNIQUE, so
+        // it also de-duplicates the rows that name the tenant on BOTH sides —
+        // every non-reassign event does.
+        const fetched =
+          claim !== undefined
+            ? await tx.tenantClaimEvent.findMany({ where: { claim, ...afterFilter }, ...page })
+            : await (async () => {
+                // Sequential, not Promise.all: these share one interactive
+                // transaction client, which Prisma does not support issuing
+                // concurrent queries on.
+                const asOld = await tx.tenantClaimEvent.findMany({
+                  where: { oldTenantId: tenantId, ...afterFilter },
+                  ...page,
+                });
+                const asNew = await tx.tenantClaimEvent.findMany({
+                  where: { newTenantId: tenantId, ...afterFilter },
+                  ...page,
+                });
+                const bySeq = new Map([...asOld, ...asNew].map((r) => [r.seq, r]));
+                return [...bySeq.values()]
+                  .sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0))
+                  .slice(0, take);
+              })();
+        const truncated = fetched.length > rowCap;
+        const rows = truncated ? fetched.slice(0, rowCap) : fetched;
+
+        // Every free-text/echoed column is escaped, unconditionally — not
+        // only the ones this PR's own writers can produce. A row can predate
+        // this PR's ingest boundaries (a `db_user` naming a role dropped
+        // since, an `actor_label` from before validateActorLabel existed), and
+        // check-operator-echo-escaped.mjs structurally cannot see any of
+        // this: it taints process.argv and `cmd*` parameters, not values that
+        // came out of the database. `oldTenantId`/`newTenantId` are UUIDs, not
+        // free text, and left unescaped like `list`'s `tenantId` column.
+        //
+        // For EVERY row, not branched by `operation` — `operation` names the
+        // primary verb but is not a partition (C3), so a reader filtering on
+        // it for "did this touch tenant X" or "was this row revoked before"
+        // gets the wrong answer for a `reassign` row. Printing both tenants
+        // and both revocation values on every row, always, is what makes
+        // that question answerable without knowing the operation first.
+        for (const row of rows) {
+          console.log(
+            `${row.createdAt.toISOString()}\t${row.operation}\t` +
+              `claim=${escapeUnsafeDisplayChars(row.claim)}\t` +
+              `oldTenant=${row.oldTenantId ?? "-"}\tnewTenant=${row.newTenantId ?? "-"}\t` +
+              `oldRevokedAt=${row.oldRevokedAt ? row.oldRevokedAt.toISOString() : "-"}\t` +
+              `newRevokedAt=${row.newRevokedAt ? row.newRevokedAt.toISOString() : "-"}\t` +
+              `by=${escapeUnsafeDisplayChars(row.actorLabel)}\t` +
+              `dbUser=${escapeUnsafeDisplayChars(row.dbUser)}\t` +
+              `sessionDbUser=${escapeUnsafeDisplayChars(row.sessionDbUser)}`,
+          );
+        }
+
+        const subject =
+          claim !== undefined
+            ? `claim "${escapeUnsafeDisplayChars(claim)}"`
+            // `tenantId` can be the raw --tenant value verbatim (the UUID
+            // branch above), so it is echoed the same as any other operator
+            // input even though UUID_RE already constrains its shape.
+            : `tenant ${escapeUnsafeDisplayChars(tenantId ?? "")}`;
+
+        if (truncated) {
+          const lastSeq = rows[rows.length - 1].seq.toString();
+          // How to continue, WITHOUT rebuilding the selector into the line.
+          //
+          // The earlier version printed a ready-to-paste
+          // `tenant-domain history --domain <claim> --after <seq>`. A claim is
+          // printable ASCII by CHECK constraint, which admits `;`, `$(…)` and
+          // backticks, and `escapeUnsafeDisplayChars` neutralises terminal
+          // control sequences — it is not a shell quoter and does not claim to
+          // be. So a claim registered by anyone who can reach the
+          // auto-registration path could put a command into a line an operator
+          // is being invited to paste into a shell, during an incident.
+          //
+          // Quoting it correctly would work and is not what this does: the
+          // operator already has the command they just ran, so naming the one
+          // flag to add carries the same information with nothing interpolated
+          // into command position at all. `lastSeq` is a BigInt read from the
+          // database, printed as digits.
+          //
+          // Two lines, and the split is the point rather than formatting: the
+          // second one is what an operator copies, and it carries nothing but
+          // a flag name and digits. `subject` names the claim and stays on the
+          // first line, escaped like every other display string this tool
+          // prints — describing what was truncated is not the same act as
+          // handing over something to run.
+          //
+          // "appended" only for the FIRST page. `parseFlags` refuses a repeated
+          // flag outright (round-4 S5: a flag the operator wrote must either
+          // take effect or stop the command), so from page 3 on, appending is
+          // an instruction that exits 1 with no rows — an incident read path
+          // telling the operator to do something it will then refuse. The old
+          // value is not echoed back: naming the flag to replace says the same
+          // thing without putting operator input in the line at all.
+          const continuation =
+            args.after === undefined
+              ? `with --after ${lastSeq} appended`
+              : `with --after ${lastSeq} in place of the --after already on it`;
+          console.log(
+            // operator-echo-exempt: `rowCap` is a number (HISTORY_ROW_CAP,
+            // or the test-only `rowCap` seam — never a CLI flag), not
+            // operator text, same as `unmapped`'s `days` above.
+            `Capped at ${rowCap} rows; more events exist for ${subject}.\n` +
+              `Continue by re-running the SAME command ${continuation}.`,
+          );
+        }
+
+        const message =
+          rows.length === 0
+            ? `No routing history for ${subject}.`
+            : truncated
+              ? // operator-echo-exempt: `rowCap` is a number, not operator text.
+                `${rows.length} event(s) listed (capped at ${rowCap} — see the continuation hint printed above).`
+              : `${rows.length} event(s) listed.`;
+
+        return { ok: true, code: 0, rows, message };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     );
@@ -1150,11 +1573,12 @@ function printUsage(): void {
   console.error(
     [
       "Usage:",
-      "  tenant-domain list [--tenant <ref>]",
-      `  tenant-domain unmapped [--days <n>]            (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
+      "  tenant-domain list    [--tenant <ref>]",
+      `  tenant-domain unmapped [--days <n>]           (default ${DEFAULT_UNMAPPED_WINDOW_DAYS})`,
       "  tenant-domain preflight",
-      "  tenant-domain add    --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
-      "  tenant-domain remove --tenant <ref> --domain <domain> [--yes]",
+      "  tenant-domain add     --tenant <ref> --domain <domain> --by <label> [--from <current-owner-uuid>] [--yes]",
+      "  tenant-domain remove  --tenant <ref> --domain <domain> --by <label> [--yes]",
+      "  tenant-domain history --domain <claim> | --tenant <uuid> [--after <seq>]",
       "",
       "<ref> is a tenant UUID, one of its registered claims, or its external id (not its slug).",
       "--from moves a claim off the tenant that currently owns it; it takes that tenant's",
@@ -1227,12 +1651,21 @@ async function main(): Promise<void> {
     case "remove": {
       const tenant = getStringFlag(flags, "tenant");
       const domain = getStringFlag(flags, "domain");
-      if (!tenant || !domain) {
+      const by = getStringFlag(flags, "by");
+      if (!tenant || !domain || !by) {
         printUsage();
         process.exitCode = 1;
         return;
       }
-      result = await cmdRemove({ tenant, domain, yes });
+      result = await cmdRemove({ tenant, domain, by, yes });
+      break;
+    }
+    case "history": {
+      result = await cmdHistory({
+        domain: getStringFlag(flags, "domain"),
+        tenant: getStringFlag(flags, "tenant"),
+        after: getStringFlag(flags, "after"),
+      });
       break;
     }
     default:

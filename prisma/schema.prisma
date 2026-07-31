@@ -1805,6 +1805,46 @@ model TenantClaim {
   @@map("tenant_claims")
 }
 
+/// Append-only history of tenant-claim routing changes (SC11 / #743).
+///
+/// Deliberately carries NO `tenant_id` and NO foreign keys. A reassignment
+/// names the losing AND the gaining tenant in ONE row, so the row cannot be
+/// attributed to a single tenant, and an `ON DELETE CASCADE` would destroy
+/// exactly the history being kept. The consequence — this table is outside
+/// the `scripts/rls-cross-tenant-tables.manifest` contract by construction —
+/// is stated in the migration.
+///
+/// `dbUser` / `sessionDbUser` / `clientAddr` / `createdAt` are assigned by a
+/// BEFORE INSERT trigger and are NOT caller input; see the migration.
+///
+/// `seq` (20260731170000) is a GENERATED ALWAYS AS IDENTITY column: `createdAt`
+/// is millisecond-precision and same-millisecond writes have been observed
+/// with no defined order, so `seq` — not `createdAt` — is the ORDER BY and the
+/// pagination cursor `tenant-domain history` uses. `createdAt` stays the
+/// displayed time.
+model TenantClaimEvent {
+  id            String    @id @default(uuid(4)) @db.Uuid
+  claim         String    @db.VarChar(255)
+  operation     String    @db.VarChar(16)
+  oldTenantId   String?   @map("old_tenant_id") @db.Uuid
+  newTenantId   String?   @map("new_tenant_id") @db.Uuid
+  oldRevokedAt  DateTime? @map("old_revoked_at") @db.Timestamptz(3)
+  newRevokedAt  DateTime? @map("new_revoked_at") @db.Timestamptz(3)
+  actorLabel    String    @map("actor_label") @db.VarChar(255)
+  dbUser        String    @map("db_user") @db.VarChar(63)
+  sessionDbUser String    @map("session_db_user") @db.VarChar(63)
+  clientAddr    String?   @map("client_addr") @db.Inet
+  createdAt     DateTime  @map("created_at") @db.Timestamptz(3)
+  seq           BigInt    @unique @default(autoincrement())
+
+  @@index([claim])
+  @@index([createdAt])
+  @@index([claim, seq])
+  @@index([oldTenantId, seq])
+  @@index([newTenantId, seq])
+  @@map("tenant_claim_events")
+}
+
 // ─── API Key Models ─────────────────────────────────────────
 
 model ApiKey {

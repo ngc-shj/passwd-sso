@@ -25,7 +25,22 @@
     "     broken database can no longer launder the breakage into the expected set.",
     "",
     "Adding an entry here is a policy decision. Removing one means deciding the",
-    "role may hold that privilege directly; say why in the PR."
+    "role may hold that privilege directly; say why in the PR.",
+    "",
+    "Entry shape. Every entry names a role, exactly one subject — `table` OR",
+    "`sequence` — a non-empty `privileges` array, and a `reason`. A table entry",
+    "may also carry `columnGrants`:",
+    "",
+    "    \"columnGrants\": { \"INSERT\": [\"claim\", \"operation\"] }",
+    "",
+    "which reads: this privilege is denied at TABLE level and held on exactly",
+    "these columns. Both consumers act on it — the bootstrap re-GRANTs the",
+    "columns after its REVOKE (measured: revoking a privilege at table level",
+    "erases the column-level grants of that same privilege, so the order is",
+    "load-bearing and the re-grant is not optional), and the audit treats those",
+    "columns as expected while still failing on any other column of that",
+    "privilege. A key must also appear in `privileges`; otherwise the map would",
+    "sit under a still-granted table privilege and enforce nothing."
   ],
   "denied": [
     {
@@ -39,6 +54,72 @@
       "table": "public.audit_chain_anchors",
       "privileges": ["UPDATE", "DELETE"],
       "reason": "The tamper-evidence anchors for the audit chain. An app role that can rewrite anchors can also re-anchor forged history, which removes the detection the HMAC chain exists to provide."
+    },
+    {
+      "role": "passwd_app",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "columnGrants": {
+        "INSERT": [
+          "id",
+          "claim",
+          "operation",
+          "old_tenant_id",
+          "new_tenant_id",
+          "old_revoked_at",
+          "new_revoked_at",
+          "actor_label"
+        ]
+      },
+      "reason": "Append-only routing history (SC11 / #743). The only application path that touches this table is the sign-in auto-registration writer, which needs INSERT and nothing else — no SELECT, which is why the writer issues a raw INSERT with no RETURNING. Granting SELECT back would hand an application compromise the read side of every tenant's claim-routing history; granting UPDATE or DELETE would make the record editable by the one role an attacker actually reaches. A BEFORE UPDATE OR DELETE trigger also refuses, but it is defeated by the table owner and is not the bound: this ACL is. INSERT is denied at TABLE level and re-granted on the eight columns the writers name (external review, 20260731190000): a table-level INSERT additionally permits `OVERRIDING SYSTEM VALUE` on the `seq` identity column — measured, not inferred — which lets the app role plant a maximal or negative `seq` and make every subsequent event collide with the UNIQUE constraint. The event writer is fail-closed, so that is a denial-of-service on first-ever sign-in and on every operator claim change. The same column list also removes the app role's ability to NAME `db_user`/`session_db_user`/`client_addr`/`created_at` at all, so the attribution columns are unforgeable at the ACL layer and not only by the BEFORE INSERT trigger that overwrites them. TRIGGER and REFERENCES complete the set: `CREATE TRIGGER` needs only the TRIGGER privilege plus EXECUTE on a function, and a BEFORE INSERT row trigger that returns NULL silently discards every append while the statement still reports success — a fail-closed writer would not notice, and neither would anything reading the table afterwards, because there is nothing to read."
+    },
+    {
+      "role": "passwd_app",
+      "sequence": "public.tenant_claim_events_seq_seq",
+      "privileges": ["USAGE", "SELECT", "UPDATE"],
+      "reason": "The identity sequence behind tenant_claim_events.seq. 20260731170000 revoked it and stated the revoke could not be declared here because this policy's subject was a table; that gap was the finding — bootstrap-rds-roles.mjs's `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app` is as blind to this object as its ON ALL TABLES sibling was to audit_logs, so every convergence run silently restored it. SELECT reads last_value, an event counter, for the one role deliberately denied SELECT on the table itself; USAGE and UPDATE let it advance or reset the counter. None of the three is needed: an INSERT into a GENERATED ALWAYS AS IDENTITY column succeeds with no privilege on the backing sequence at all (measured — this is where a serial/DEFAULT nextval column differs)."
+    },
+    {
+      "role": "passwd_outbox_worker",
+      "sequence": "public.tenant_claim_events_seq_seq",
+      "privileges": ["USAGE", "SELECT", "UPDATE"],
+      "reason": "Listed for the same reason as this worker's tenant_claim_events entry above: it has no business with claim routing, and absence alone is enforced only by the descriptive manifest, which `--write` regenerates from whatever the database currently holds."
+    },
+    {
+      "role": "passwd_retention_gc_worker",
+      "sequence": "public.tenant_claim_events_seq_seq",
+      "privileges": ["USAGE", "SELECT", "UPDATE"],
+      "reason": "Listed for the same reason as this worker's tenant_claim_events entry above: the table exists to OUTLIVE retention, so neither it nor the sequence that orders it may be reachable by the GC."
+    },
+    {
+      "role": "passwd_app",
+      "table": "public.tenant_claims",
+      "privileges": ["UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "External review finding (20260731170000_tenant_claim_events_hardening): no application code path issues UPDATE or DELETE against tenant_claims — the only writes are findOrCreateTenantForClaim's nested `claims: { create: … }` and the operator CLI's own privileged connection, neither of which runs as passwd_app. Re-granting either would let a compromised app role reassign or revoke a claim's routing directly, bypassing the tenant_claim_events row that operation is supposed to leave — the exact evidence-destroying shape SC11 exists to close for the CLI's own writers. SELECT and INSERT stay granted: the sign-in path still needs to look up and create claim rows. TRUNCATE, REFERENCES and TRIGGER were added by the second external-review round on a completeness derivation rather than case by case — deny every privilege the role does not need on the two routing tables. TRUNCATE is the one with teeth: it destroys every claim's routing AND fires no row-level trigger, so it would leave no deregister events at all."
+    },
+    {
+      "role": "passwd_outbox_worker",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "The outbox worker drains audit_outbox into audit_logs and has no business with claim routing. Listed prescriptively rather than left merely un-granted: absence alone is enforced only by the DESCRIPTIVE manifest, which `audit-db-grants.mjs --write` regenerates from whatever the database currently holds. INSERT is denied outright, with no columnGrants exception — unlike passwd_app this role has no writer to keep working, and a table-level INSERT here would carry the same `OVERRIDING SYSTEM VALUE` reach over `seq` that made it a finding there."
+    },
+    {
+      "role": "passwd_retention_gc_worker",
+      "table": "public.tenant_claim_events",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "This table exists to OUTLIVE retention, so the retention GC must never reach it. That makes 'let the GC clean this up too' the single most predictable future change against it — arriving as a migration granting DELETE plus a manifest regeneration, both of which the descriptive manifest alone would accept. Removing this entry is a decision to let recovery-path evidence expire; say why in the PR. INSERT is denied outright, with no columnGrants exception, for the same reason as the outbox worker above: no writer here needs it, and a table-level grant reaches `seq`."
+    },
+    {
+      "role": "passwd_outbox_worker",
+      "table": "public.tenant_claims",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "The outbox worker drains audit_outbox into audit_logs and has no business resolving or mutating tenant-claim routing. Listed prescriptively (20260731170000) rather than left merely un-granted, matching the same table's tenant_claim_events entry above: absence alone is enforced only by the descriptive manifest, which `--write` regenerates from whatever the database currently holds."
+    },
+    {
+      "role": "passwd_retention_gc_worker",
+      "table": "public.tenant_claims",
+      "privileges": ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"],
+      "reason": "The retention GC sweeps expired rows on tables that opt into it; tenant_claims is not one of them, and this table's routing correctness (which tenant a claim resolves to right now) must not be touched by a background sweep. Listed prescriptively (20260731170000) for the same reason as every other entry naming this role: absence alone is not provable from the descriptive manifest."
     }
   ]
 }
