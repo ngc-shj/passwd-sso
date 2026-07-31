@@ -23,6 +23,7 @@ import {
   createTestContext,
   setBypassRlsGucs,
   createPrismaForRole,
+  appConnectionString,
   raceTwoClients,
   type TestContext,
   type PrismaWithPool,
@@ -580,8 +581,22 @@ describe("tenant_claims (C1)", () => {
         // connection that has never had the GUC set leaves
         // `current_setting(…, true)` NULL, where NULL::uuid is harmless and the
         // 42501 we are asserting is what comes back. Measured at each step.
-        const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+        const client = new pg.Client({ connectionString: appConnectionString() });
         await client.connect();
+        // The connected principal, asserted before the statement it is meant to
+        // refuse. `process.env.DATABASE_URL` used to build this connection —
+        // which names the SUPERUSER in CI and `passwd_app` locally, so the
+        // statement below simply SUCCEEDED there and the case proved nothing.
+        // A superuser bypasses ACL checks entirely, so without this the
+        // `42501` assertion is only as good as the environment's URL.
+        const [principal] = (
+          await client.query(
+            `SELECT current_user AS who,
+                    (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS is_super`,
+          )
+        ).rows;
+        expect(principal.who, "this case must run as the application role").toBe("passwd_app");
+        expect(principal.is_super, "a superuser bypasses the ACL under test").toBe(false);
         try {
           await client.query("BEGIN");
           await client.query(
@@ -623,8 +638,22 @@ describe("tenant_claims (C1)", () => {
         // connection that has never had the GUC set leaves
         // `current_setting(…, true)` NULL, where NULL::uuid is harmless and the
         // 42501 we are asserting is what comes back. Measured at each step.
-        const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+        const client = new pg.Client({ connectionString: appConnectionString() });
         await client.connect();
+        // The connected principal, asserted before the statement it is meant to
+        // refuse. `process.env.DATABASE_URL` used to build this connection —
+        // which names the SUPERUSER in CI and `passwd_app` locally, so the
+        // statement below simply SUCCEEDED there and the case proved nothing.
+        // A superuser bypasses ACL checks entirely, so without this the
+        // `42501` assertion is only as good as the environment's URL.
+        const [principal] = (
+          await client.query(
+            `SELECT current_user AS who,
+                    (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS is_super`,
+          )
+        ).rows;
+        expect(principal.who, "this case must run as the application role").toBe("passwd_app");
+        expect(principal.is_super, "a superuser bypasses the ACL under test").toBe(false);
         try {
           await client.query("BEGIN");
           await client.query(

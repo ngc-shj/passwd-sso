@@ -56,6 +56,24 @@ function getConnectionString(role: TestRole): string {
   }
 }
 
+/**
+ * The connection string for the least-privilege APPLICATION role.
+ *
+ * Exported because a test that needs a FRESH connection — one whose session
+ * GUCs have never been set — cannot use `ctx.app.prisma`, which is pooled, and
+ * the obvious substitute is wrong: `process.env.DATABASE_URL` names the
+ * SUPERUSER in CI (`ci-integration.yml` sets it to `postgres`) and `passwd_app`
+ * locally. A privilege-denial case built on it therefore asserts nothing in CI,
+ * where the statement simply succeeds — which is exactly how two `42501` cases
+ * passed every local run and failed on the branch's first CI run.
+ *
+ * Use this, and assert the connected principal, for any case whose subject is
+ * an ACL rather than behaviour.
+ */
+export function appConnectionString(): string {
+  return getConnectionString("app");
+}
+
 // ─── Prisma client factory ──────────────────────────────────────
 
 export interface PrismaWithPool {

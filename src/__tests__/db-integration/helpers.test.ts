@@ -8,6 +8,7 @@ import {
   sweepLeakedTenants,
   runCleanupSweep,
   TenantClaimEventsPurgeError,
+  appConnectionString,
 } from "./helpers";
 
 /**
@@ -42,6 +43,31 @@ function adapterError(sqlstate: string): Error {
 function messageError(sqlstate: string): Error {
   return new Error(`Raw query failed. Code: \`${sqlstate}\`. Message: \`deadlock detected\``);
 }
+
+describe("appConnectionString", () => {
+  // The property the two `42501` cases on `tenant_claims` depend on, and the
+  // one whose absence made them pass locally and fail on CI: whatever role
+  // DATABASE_URL names, this resolves to the least-privilege APPLICATION role.
+  // CI sets DATABASE_URL to the superuser, so a case that builds its own
+  // connection from it asserts nothing there — the statement simply succeeds.
+  it("names passwd_app even when DATABASE_URL names a superuser", () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/passwd_test");
+    // `undefined` DELETES the variable; `""` would be used verbatim, because the
+    // helper falls back with `??` rather than on truthiness.
+    vi.stubEnv("APP_DATABASE_URL", undefined);
+    const url = new URL(appConnectionString());
+    expect(url.username).toBe("passwd_app");
+    // Host and database are carried over — only the credentials are replaced.
+    expect(url.host).toBe("localhost:5432");
+    expect(url.pathname).toBe("/passwd_test");
+  });
+
+  it("prefers an explicit APP_DATABASE_URL", () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/passwd_test");
+    vi.stubEnv("APP_DATABASE_URL", "postgresql://other_app:pw@db.example:6543/other");
+    expect(appConnectionString()).toBe("postgresql://other_app:pw@db.example:6543/other");
+  });
+});
 
 describe("isRetryableCleanupConflict", () => {
   it.each(RETRYABLE_CLEANUP_SQLSTATES)("recognises %s carried in meta", (sqlstate) => {
