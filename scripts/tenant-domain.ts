@@ -62,14 +62,17 @@
 // owns the claim, and moves the claim off it. See cmdAdd for why it is a bare
 // UUID and why it does not require a prior `remove`.
 //
-// `history` also reports a `deregister` operation now: a tenant deletion
-// cascades away its `tenant_claims` rows, and a database trigger appends one
-// of these for each — `actor_label` is the fixed string `cascade`, naming the
-// mechanism rather than a person. `history` is capped at HISTORY_ROW_CAP rows
-// per call; a capped result prints the exact re-invocation (`--after <seq>`)
-// to fetch the next page, ordered by the row's monotonic `seq`, not by
-// `created_at` — the latter is millisecond-precision and cannot order two
-// events written in the same millisecond.
+// `history` also reports a `deregister` operation now: deleting a row from
+// `tenant_claims` — directly, or by cascade from a tenant deletion — fires a
+// trigger that appends one of these. `actor_label` is the fixed string
+// `db-delete`, naming the mechanism rather than a person; who performed it is
+// in `db_user`/`session_db_user`. `history` is capped at HISTORY_ROW_CAP rows
+// per call; a capped result says to re-run the same command with
+// `--after <seq>` appended — it does NOT rebuild the command line, because a
+// claim is printable ASCII and would then be interpolated into something an
+// operator is invited to paste into a shell. Ordered by the row's monotonic
+// `seq`, not by `created_at` — the latter is millisecond-precision and cannot
+// order two events written in the same millisecond.
 
 import { loadEnv } from "@/lib/load-env";
 loadEnv();
@@ -1416,21 +1419,52 @@ export async function cmdHistory(args: {
           }
         }
 
-        const selector =
-          claim !== undefined
-            ? { claim }
-            : { OR: [{ oldTenantId: tenantId }, { newTenantId: tenantId }] };
         // seq (20260731170000), not createdAt: createdAt is millisecond-
         // precision and same-millisecond writes have no defined order under
         // it, so it can no longer be the read order or the pagination
         // cursor — only the displayed time. Fetches one row past the cap so
         // truncation is DETECTED rather than merely assumed whenever the
         // result happens to be exactly rowCap long.
-        const fetched = await tx.tenantClaimEvent.findMany({
-          where: afterSeq !== undefined ? { AND: [selector, { seq: { gt: afterSeq } }] } : selector,
-          orderBy: { seq: "asc" },
-          take: rowCap + 1,
-        });
+        const take = rowCap + 1;
+        const afterFilter = afterSeq !== undefined ? { seq: { gt: afterSeq } } : {};
+        const page = { orderBy: { seq: "asc" }, take } as const;
+
+        // The tenant selector is TWO queries rather than one `OR`. Measured
+        // with EXPLAIN (ANALYZE) against 20260731190000's indexes: the `OR`
+        // does use them, as a BitmapOr — but a bitmap scan produces no
+        // ordering, so the plan is BitmapOr → Sort → Limit and the cap stops
+        // bounding the work. Every matching row is read and sorted however
+        // small the cap is. One equality per side walks (tenant, seq) in
+        // order, so the plan is Index Scan → Limit with no sort at all, and
+        // each side stops at the cap.
+        //
+        // Merging them is exact rather than approximate: the union's first
+        // `take` rows by seq are necessarily a subset of (first `take` of the
+        // old-tenant side) ∪ (first `take` of the new-tenant side), so
+        // sorting the two capped pages and re-cutting to `take` yields the
+        // same rows the single ordered query would have. `seq` is UNIQUE, so
+        // it also de-duplicates the rows that name the tenant on BOTH sides —
+        // every non-reassign event does.
+        const fetched =
+          claim !== undefined
+            ? await tx.tenantClaimEvent.findMany({ where: { claim, ...afterFilter }, ...page })
+            : await (async () => {
+                // Sequential, not Promise.all: these share one interactive
+                // transaction client, which Prisma does not support issuing
+                // concurrent queries on.
+                const asOld = await tx.tenantClaimEvent.findMany({
+                  where: { oldTenantId: tenantId, ...afterFilter },
+                  ...page,
+                });
+                const asNew = await tx.tenantClaimEvent.findMany({
+                  where: { newTenantId: tenantId, ...afterFilter },
+                  ...page,
+                });
+                const bySeq = new Map([...asOld, ...asNew].map((r) => [r.seq, r]));
+                return [...bySeq.values()]
+                  .sort((a, b) => (a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0))
+                  .slice(0, take);
+              })();
         const truncated = fetched.length > rowCap;
         const rows = truncated ? fetched.slice(0, rowCap) : fetched;
 
@@ -1472,19 +1506,47 @@ export async function cmdHistory(args: {
 
         if (truncated) {
           const lastSeq = rows[rows.length - 1].seq.toString();
-          const selectorFlag =
-            claim !== undefined
-              ? `--domain ${escapeUnsafeDisplayChars(claim)}`
-              : `--tenant ${escapeUnsafeDisplayChars(tenantId ?? "")}`;
-          // The exact re-invocation, not just "more rows exist" — an
-          // incident CLI that stops without saying how to continue is only
-          // marginally better than one that silently truncates.
+          // How to continue, WITHOUT rebuilding the selector into the line.
+          //
+          // The earlier version printed a ready-to-paste
+          // `tenant-domain history --domain <claim> --after <seq>`. A claim is
+          // printable ASCII by CHECK constraint, which admits `;`, `$(…)` and
+          // backticks, and `escapeUnsafeDisplayChars` neutralises terminal
+          // control sequences — it is not a shell quoter and does not claim to
+          // be. So a claim registered by anyone who can reach the
+          // auto-registration path could put a command into a line an operator
+          // is being invited to paste into a shell, during an incident.
+          //
+          // Quoting it correctly would work and is not what this does: the
+          // operator already has the command they just ran, so naming the one
+          // flag to add carries the same information with nothing interpolated
+          // into command position at all. `lastSeq` is a BigInt read from the
+          // database, printed as digits.
+          //
+          // Two lines, and the split is the point rather than formatting: the
+          // second one is what an operator copies, and it carries nothing but
+          // a flag name and digits. `subject` names the claim and stays on the
+          // first line, escaped like every other display string this tool
+          // prints — describing what was truncated is not the same act as
+          // handing over something to run.
+          //
+          // "appended" only for the FIRST page. `parseFlags` refuses a repeated
+          // flag outright (round-4 S5: a flag the operator wrote must either
+          // take effect or stop the command), so from page 3 on, appending is
+          // an instruction that exits 1 with no rows — an incident read path
+          // telling the operator to do something it will then refuse. The old
+          // value is not echoed back: naming the flag to replace says the same
+          // thing without putting operator input in the line at all.
+          const continuation =
+            args.after === undefined
+              ? `with --after ${lastSeq} appended`
+              : `with --after ${lastSeq} in place of the --after already on it`;
           console.log(
             // operator-echo-exempt: `rowCap` is a number (HISTORY_ROW_CAP,
             // or the test-only `rowCap` seam — never a CLI flag), not
             // operator text, same as `unmapped`'s `days` above.
-            `Capped at ${rowCap} rows; more events exist for ${subject}. Continue with:\n` +
-              `  tenant-domain history ${selectorFlag} --after ${lastSeq}`,
+            `Capped at ${rowCap} rows; more events exist for ${subject}.\n` +
+              `Continue by re-running the SAME command ${continuation}.`,
           );
         }
 
@@ -1493,7 +1555,7 @@ export async function cmdHistory(args: {
             ? `No routing history for ${subject}.`
             : truncated
               ? // operator-echo-exempt: `rowCap` is a number, not operator text.
-                `${rows.length} event(s) listed (capped at ${rowCap} — see the re-invocation printed above to continue).`
+                `${rows.length} event(s) listed (capped at ${rowCap} — see the continuation hint printed above).`
               : `${rows.length} event(s) listed.`;
 
         return { ok: true, code: 0, rows, message };

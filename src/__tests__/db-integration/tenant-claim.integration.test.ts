@@ -38,10 +38,13 @@ import {
   storableClaimSchema,
 } from "@/lib/tenant/tenant-claim-registry";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+// The SAME loader the bootstrap and the audit use, so the probe role's grant
+// cannot drift from the declaration production converges to.
+import { loadDeniedPolicy } from "../../../scripts/lib/denied-privileges.mjs";
 import {
   TENANT_CLAIM_EVENT_OPERATION,
   SIGNIN_ACTOR_LABEL,
-  CASCADE_ACTOR_LABEL,
+  DEREGISTER_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
 import {
   PRIMARY_CLAIM,
@@ -49,6 +52,13 @@ import {
   NON_DOMAIN_CLAIM,
   runToken,
 } from "@/__tests__/helpers/tenant-claim-fixtures";
+
+/** The subset of a denied-policy entry the probe role's grant reads. */
+type DeniedPolicyEntry = {
+  role: string;
+  table?: string;
+  columnGrants?: Record<string, string[]>;
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
@@ -317,19 +327,155 @@ describe("tenant_claims (C1)", () => {
           // The population this operation writes, mirrored from C1's table:
           // old_tenant_id = the deleted tenant, new_tenant_id = NULL,
           // old_revoked_at = the claim row's own revokedAt (NULL here — it
-          // was never revoked), new_revoked_at = NULL, actor_label = the
-          // fixed 'cascade' string, never the row's own createdBy.
+          // was never revoked), new_revoked_at = NULL, actor_label =
+          // DEREGISTER_ACTOR_LABEL, never the row's own createdBy.
           expect(event.oldTenantId).toBe(tenantA);
           expect(event.newTenantId).toBeNull();
           expect(event.oldRevokedAt).toBeNull();
           expect(event.newRevokedAt).toBeNull();
-          expect(event.actorLabel).toBe(CASCADE_ACTOR_LABEL);
+          expect(event.actorLabel).toBe(DEREGISTER_ACTOR_LABEL);
           expect(event.actorLabel).not.toBe("ops-oncall");
           // I2 still holds for a trigger-authored row: db_user/session_db_user
           // are the executing principal, not anything this test named.
           expect(event.dbUser.length).toBeGreaterThan(0);
         } finally {
           await ctx.deleteTestData(tenantA);
+        }
+      },
+    );
+
+    // The DIRECT delete, which is the case 20260731190000's finding 3 is about:
+    // the trigger fires identically for a cascade and for a DBA deleting a
+    // `tenant_claims` row by hand, and cannot distinguish them — which is why
+    // the label stopped saying `cascade`. Only the cascade path was covered, so
+    // a future migration narrowing the trigger (a WHEN clause, or moving it
+    // onto `tenants`) would silently stop recording the DBA-initiated
+    // deregistration — the one an append-only routing history most exists for —
+    // with the suite still green.
+    it.skipIf(SKIP)(
+      "a DIRECT DELETE FROM tenant_claims records the same deregister event as a cascade",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: tenantA, claim } });
+
+        try {
+          await ctx.su.prisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            // The tenant row survives — nothing cascades. The only thing that
+            // can produce an event here is the BEFORE DELETE trigger on
+            // tenant_claims itself.
+            await tx.$executeRawUnsafe(`DELETE FROM tenant_claims WHERE claim = $1`, claim);
+          });
+
+          const stillThere = await ctx.su.prisma.tenant.findUnique({ where: { id: tenantA } });
+          expect(stillThere, "the tenant must survive — this is not a cascade").not.toBeNull();
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({
+            where: { claim, operation: TENANT_CLAIM_EVENT_OPERATION.DEREGISTER },
+          });
+          expect(events).toHaveLength(1);
+          expect(events[0].oldTenantId).toBe(tenantA);
+          expect(events[0].newTenantId).toBeNull();
+          // The same label as the cascade path, because the trigger genuinely
+          // cannot tell the two apart — that identity IS the finding's point,
+          // and asserting it here is what stops the label drifting back to a
+          // mechanism name only one of the two paths could justify.
+          expect(events[0].actorLabel).toBe(DEREGISTER_ACTOR_LABEL);
+        } finally {
+          await ctx.deleteTestData(tenantA);
+        }
+      },
+    );
+
+    // Attribution on a CASCADE-produced row, which is not what the rest of this
+    // table's rows behave like and is easy to read the wrong way round.
+    //
+    // Measured: PostgreSQL runs a referential action under the REFERENCED
+    // table's owner, so a trigger it fires sees `current_user` = owner —
+    // whoever issued the DELETE. `session_user` does not follow that switch.
+    // `passwd_app` holds DELETE on `tenants`, so this is the difference between
+    // attributing a tenant deletion to the application and to an operator, on
+    // the one table built to be believed later.
+    //
+    // Every other cascade case here deletes as `ctx.su.prisma`, where the owner
+    // and the caller are the same principal, so none of them can see it.
+    it.skipIf(SKIP)(
+      "a cascade records the OWNER in db_user and the real caller in session_db_user",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: tenantA, claim } });
+
+        const roleName = `probe_casc_${randomBytes(4).toString("hex")}`;
+        const password = randomBytes(16).toString("hex");
+        const validUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        const base = process.env.DATABASE_URL;
+        if (!base) throw new Error("DATABASE_URL is not set");
+        let pool: pg.Pool | undefined;
+        let probePrisma: PrismaClient | undefined;
+
+        try {
+          // Same generated-hex justification for the interpolation as the RT10
+          // probe role below, and the same VALID UNTIL bound for the case where
+          // the `finally` does not run.
+          await ctx.su.prisma.$executeRawUnsafe(
+            `CREATE ROLE "${roleName}" LOGIN PASSWORD '${password}' ` +
+              `VALID UNTIL '${validUntil}' ` +
+              `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
+          );
+          await ctx.su.prisma.$executeRawUnsafe(
+            `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO "${roleName}"', current_database()); END $$`,
+          );
+          await ctx.su.prisma.$executeRawUnsafe(`GRANT USAGE ON SCHEMA public TO "${roleName}"`);
+          // DELETE on `tenants` only — deliberately NOTHING on tenant_claims or
+          // tenant_claim_events. The cascade and the event INSERT both run in
+          // the owner's security context, so this proves the write happens
+          // without the caller holding any privilege on either table.
+          await ctx.su.prisma.$executeRawUnsafe(
+            `GRANT SELECT, DELETE ON tenants TO "${roleName}"`,
+          );
+
+          const url = new URL(base);
+          url.username = roleName;
+          url.password = password;
+          pool = new pg.Pool({ connectionString: url.toString(), max: 2 });
+          probePrisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+          // Through Prisma and `setBypassRlsGucs`, not raw pg with the GUCs
+          // spelled again here: a second copy of the bypass-GUC set is how the
+          // two drift, and this case is about attribution, not about RLS.
+          await probePrisma.$transaction(async (tx) => {
+            await setBypassRlsGucs(tx);
+            await tx.$executeRawUnsafe(`DELETE FROM tenants WHERE id = $1::uuid`, tenantA);
+          });
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({
+            where: { claim, operation: TENANT_CLAIM_EVENT_OPERATION.DEREGISTER },
+          });
+          expect(events).toHaveLength(1);
+          // The whole point, both halves. Read only db_user and this deletion
+          // looks like an operator action.
+          expect(events[0].sessionDbUser).toBe(roleName);
+          expect(events[0].dbUser).not.toBe(roleName);
+          // Not asserted against a literal role name: the owner is passwd_user
+          // locally and postgres in CI (VE5).
+          const [{ owner }] = await ctx.su.prisma.$queryRawUnsafe<{ owner: string }[]>(
+            `SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid = 'tenant_claims'::regclass`,
+          );
+          expect(events[0].dbUser).toBe(owner);
+        } finally {
+          if (probePrisma) await probePrisma.$disconnect();
+          if (pool) await pool.end();
+          await ctx.deleteTestData(tenantA);
+          await ctx.su.prisma.$executeRawUnsafe(
+            `DO $$ BEGIN
+               IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${roleName}') THEN
+                 EXECUTE format('REVOKE ALL ON DATABASE %I FROM "${roleName}"', current_database());
+                 EXECUTE 'DROP OWNED BY "${roleName}"';
+                 EXECUTE 'DROP ROLE "${roleName}"';
+               END IF;
+             END $$`,
+          );
         }
       },
     );
@@ -1269,8 +1415,26 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             // Allow arm — the grant set is self-proving: this reds if any
             // prerequisite privilege above is missing, and it is the RT10
             // allow side the criterion needs anyway.
+            //
+            // COLUMN-scoped, and the column list is READ FROM THE POLICY rather
+            // than spelled here. `GRANT INSERT ON tenant_claim_events` — the
+            // table-level form this used to issue — is strictly wider than what
+            // passwd_app holds since 20260731190000, so the allow arm was
+            // passing under a grant production does not have: it could not
+            // detect the writer naming a ninth column, or `seq`/`db_user`, which
+            // 42501s in production and denies a first-ever sign-in. This is the
+            // only place the SHIPPING writer (findOrCreateTenantForClaim →
+            // recordTenantClaimEvent) meets an ACL-enforcing role, so it is the
+            // only place that correspondence can be checked at all.
+            const insertColumns = (loadDeniedPolicy() as DeniedPolicyEntry[]).find(
+              (d) => d.role === "passwd_app" && d.table === "public.tenant_claim_events",
+            )?.columnGrants?.INSERT;
+            // Anti-vacuity: an absent declaration would make the GRANT below
+            // empty or malformed rather than silently wide.
+            expect(insertColumns, "the policy must declare passwd_app's INSERT columns").toBeDefined();
+            expect((insertColumns as string[]).length).toBeGreaterThan(0);
             await ctx.su.prisma.$executeRawUnsafe(
-              `GRANT INSERT ON tenant_claim_events TO "${roleName}"`,
+              `GRANT INSERT (${(insertColumns as string[]).join(", ")}) ON tenant_claim_events TO "${roleName}"`,
             );
             const allowClaim = `${token}-allow.${ALIAS_CLAIM}`;
             const allowResult = await withBypassRls(

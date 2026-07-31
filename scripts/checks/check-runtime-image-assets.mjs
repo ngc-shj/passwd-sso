@@ -77,6 +77,21 @@ function sourceFileFor(project, rel) {
 /** Repo-relative path of a specifier/literal that names a `scripts/**` asset. */
 function assetPathFrom(value, fromRel) {
   if (typeof value !== "string" || value.length === 0) return null;
+  // Whitespace means prose, not a path. Reading literals rather than raw text
+  // already keeps comments out; what it does not keep out is a template SPAN
+  // that happens to begin with a dot. `…${subject}. ` + "The subject must be…"
+  // yields a TemplateTail whose literal text is exactly `". "`, which the
+  // relative-resolution below turns into `scripts/lib/. ` — a required asset no
+  // Dockerfile can COPY, so the gate reds on an error message.
+  //
+  // Direction of the risk, stated because narrowing a fail-closed gate is
+  // normally the wrong move: this drops a candidate, so it could in principle
+  // hide a real asset whose FILENAME contains a space. No file under
+  // `scripts/checks/` or `scripts/lib/` has one, and a shell-quoting-hostile
+  // name there would be its own problem. The alternative — rewording every
+  // sentence that ends a template span with ". " — leaves the trap armed for
+  // the next person and costs a review round each time it fires.
+  if (/\s/.test(value)) return null;
   const candidate = value.startsWith(".")
     ? normalize(join(dirname(fromRel), value))
     : normalize(value);

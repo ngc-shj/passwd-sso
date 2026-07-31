@@ -504,6 +504,214 @@ describe("tenant_claim_events (C1)", () => {
       }
       expect(sqlStateOf(caught)).toBe("42501");
     });
+
+    // ─── The INSERT grant is COLUMN-scoped (20260731190000) ────────────────
+    //
+    // 20260731170000 asserted that GENERATED ALWAYS AS IDENTITY "cannot be
+    // overridden by application INSERT text at all". Measured against this
+    // database, a TABLE-level INSERT grant is enough for
+    // `OVERRIDING SYSTEM VALUE`; only a column-scoped grant that omits `seq`
+    // refuses it. These cases pin the column scoping itself, not the identity
+    // declaration, because the identity declaration was never what stopped it.
+    it.skipIf(SKIP)("the INSERT grant is column-scoped, not table-wide", async () => {
+      const [row] = await ctx.su.prisma.$queryRaw<
+        { table_level: boolean; on_claim: boolean; on_seq: boolean; on_db_user: boolean }[]
+      >`
+        SELECT has_table_privilege('passwd_app', 'public.tenant_claim_events', 'INSERT') AS table_level,
+               has_column_privilege('passwd_app', 'public.tenant_claim_events', 'claim', 'INSERT') AS on_claim,
+               has_column_privilege('passwd_app', 'public.tenant_claim_events', 'seq', 'INSERT') AS on_seq,
+               has_column_privilege('passwd_app', 'public.tenant_claim_events', 'db_user', 'INSERT') AS on_db_user
+      `;
+      // All four, not just the negative ones: a database where passwd_app holds
+      // INSERT on NO column at all also satisfies "not on seq", and that state
+      // is the sign-in writer broken rather than the control working.
+      expect(row.table_level, "passwd_app must not hold table-level INSERT").toBe(false);
+      expect(row.on_claim, "passwd_app must hold INSERT on the columns its writers name").toBe(true);
+      expect(row.on_seq, "passwd_app must not hold INSERT on seq").toBe(false);
+      expect(row.on_db_user, "passwd_app must not hold INSERT on db_user").toBe(false);
+    });
+
+    it.skipIf(SKIP)(
+      "an INSERT naming seq with OVERRIDING SYSTEM VALUE is refused with 42501, and writes nothing",
+      async () => {
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        const tenantId = await ctx.createTenant();
+        const id = randomUUID();
+
+        try {
+          let caught: unknown;
+          try {
+            await ctx.app.prisma.$executeRawUnsafe(
+              `INSERT INTO tenant_claim_events
+                 (id, seq, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+               OVERRIDING SYSTEM VALUE
+               VALUES ($1::uuid, 9223372036854775807, $2, 'register', NULL, $3::uuid, NULL, NULL, $4)`,
+              id,
+              claim,
+              tenantId,
+              "overriding-system-value-test",
+            );
+          } catch (e) {
+            caught = e;
+          }
+          // 42501, not merely "it threw": with the grant still table-wide this
+          // statement SUCCEEDS, and a plain throw assertion would also green on
+          // the 23505 a second run produces once the first one has planted the
+          // maximal seq.
+          expect(sqlStateOf(caught)).toBe("42501");
+
+          // The refusal is only worth anything if nothing was written. A
+          // planted bigint maximum makes every subsequent engine-assigned seq
+          // collide with the UNIQUE constraint, and the event writer is
+          // fail-closed — the visible symptom is denied sign-ins.
+          const planted = await ctx.su.prisma.$queryRawUnsafe<{ id: string }[]>(
+            `SELECT id FROM tenant_claim_events WHERE id = $1::uuid`,
+            id,
+          );
+          expect(planted).toHaveLength(0);
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "naming seq is refused with 42501 even when the value written is DEFAULT",
+      async () => {
+        // Measured: a column-scoped grant checks the columns a statement NAMES,
+        // and `DEFAULT` still names one. So the refusal does not depend on the
+        // attacker choosing the `OVERRIDING SYSTEM VALUE` spelling — every
+        // statement mentioning `seq` is refused, which is the property that
+        // makes the column list, rather than the identity declaration, the
+        // control.
+        //
+        // Not asserted with a literal value in place of DEFAULT: that spelling
+        // raises 428C9 (cannot insert a non-DEFAULT value into a GENERATED
+        // ALWAYS column) during parse analysis, BEFORE any privilege check, so
+        // a case built on it would be green on a database with the grant wide
+        // open.
+        let caught: unknown;
+        try {
+          await ctx.app.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label, seq)
+             VALUES ($1::uuid, $2, 'register', NULL, NULL, NULL, NULL, 'seq-default-test', DEFAULT)`,
+            randomUUID(),
+            `${runToken()}.${ALIAS_CLAIM}`,
+          );
+        } catch (e) {
+          caught = e;
+        }
+        expect(sqlStateOf(caught)).toBe("42501");
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "an INSERT naming db_user is refused with 42501 — the ACL, not only the trigger",
+      async () => {
+        // I2 already proves the BEFORE INSERT trigger overwrites a supplied
+        // db_user. This is the layer BELOW that: with the grant scoped to the
+        // eight columns the writers name, such a statement never reaches the
+        // trigger at all. It matters because a trigger can be dropped or
+        // disabled by the table owner, and the ACL cannot.
+        let caught: unknown;
+        try {
+          await ctx.app.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label, db_user)
+             VALUES ($1::uuid, $2, 'register', NULL, NULL, NULL, NULL, 'acl-forgery-test', 'forged')`,
+            randomUUID(),
+            `${runToken()}.${ALIAS_CLAIM}`,
+          );
+        } catch (e) {
+          caught = e;
+        }
+        expect(sqlStateOf(caught)).toBe("42501");
+      },
+    );
+  });
+
+  describe("the read path's indexes match the order it reads in (20260731190000)", () => {
+    it.skipIf(SKIP)("the three selector indexes are ordered by seq, not created_at", async () => {
+      // 20260731170000 added (selector, created_at, id) indexes in the same
+      // transaction that made `seq` the ORDER BY and the pagination cursor, so
+      // the planner had no usable ordering and `history` scanned and sorted.
+      // Nothing but this pins the replacement: the CLI returns identical ROWS
+      // either way, so every behavioural assertion in the suite is green
+      // against the wrong index set. What is lost is the bound — an
+      // incident-time read of a long history stops being capped work.
+      const rows = await ctx.su.prisma.$queryRawUnsafe<
+        { indexname: string; indexdef: string }[]
+      >(
+        `SELECT indexname, indexdef FROM pg_indexes
+          WHERE tablename = 'tenant_claim_events' ORDER BY indexname`,
+      );
+      const byName = new Map(rows.map((r) => [r.indexname, r.indexdef]));
+
+      for (const [name, column] of [
+        ["tenant_claim_events_claim_seq_idx", "claim"],
+        ["tenant_claim_events_old_tenant_id_seq_idx", "old_tenant_id"],
+        ["tenant_claim_events_new_tenant_id_seq_idx", "new_tenant_id"],
+      ] as const) {
+        const def = byName.get(name);
+        expect(def, `${name} must exist`).toBeDefined();
+        // The definition, not merely the name: an index renamed to this while
+        // ordered by created_at would satisfy a name-only check and reinstate
+        // exactly the plan this replaced.
+        expect(def).toContain(`(${column}, seq)`);
+      }
+
+      // And the superseded indexes are gone, so a migration that re-adds them
+      // has to face this assertion rather than quietly leaving both sets in
+      // place. Named exactly: a substring like "created_at_id" also matches
+      // `tenant_claim_events_created_at_idx`, the single-column index from
+      // 20260731100000 that 20260731170000 deliberately KEPT — asserting
+      // against that would demand the removal of an index this branch decided
+      // to leave alone.
+      for (const dropped of [
+        "tenant_claim_events_claim_created_at_id_idx",
+        "tenant_claim_events_old_tenant_id_created_at_id_idx",
+        "tenant_claim_events_new_tenant_id_created_at_id_idx",
+      ]) {
+        expect(byName.has(dropped), `${dropped} must stay dropped`).toBe(false);
+      }
+    });
+  });
+
+  describe("seq is positive (20260731190000)", () => {
+    it.skipIf(SKIP)("a non-positive seq is refused by the CHECK constraint", async () => {
+      // Written as the OWNER, which holds table-level INSERT and can therefore
+      // use OVERRIDING SYSTEM VALUE — precisely the reach the column-scoped
+      // grant removes from passwd_app. This constraint is what remains if a
+      // future migration ever hands that reach back: a zero or negative seq
+      // sorts before every real event and is unreachable by the `--after`
+      // cursor, which accepts non-negative integers only.
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      const tenantId = await ctx.createTenant();
+      try {
+        let caught: unknown;
+        try {
+          await ctx.su.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, seq, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+             OVERRIDING SYSTEM VALUE
+             VALUES ($1::uuid, 0, $2, 'register', NULL, $3::uuid, NULL, NULL, 'seq-check-test')`,
+            randomUUID(),
+            claim,
+            tenantId,
+          );
+        } catch (e) {
+          caught = e;
+        }
+        // 23514 check_violation specifically — a plain throw assertion greens
+        // on the 42501 this same statement raises for any role WITHOUT
+        // table-level INSERT, which would make the case pass without the
+        // constraint existing at all.
+        expect(sqlStateOf(caught)).toBe("23514");
+      } finally {
+        await ctx.deleteTestData(tenantId);
+      }
+    });
   });
 
   describe("I2 — principal columns are assigned by the engine, not the caller", () => {

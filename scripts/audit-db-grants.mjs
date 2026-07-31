@@ -32,7 +32,13 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { Client } from "pg";
 import { pathToFileURL } from "node:url";
-import { loadDeniedPolicy, deniedFile } from "./lib/denied-privileges.mjs";
+import {
+  loadDeniedPolicy,
+  deniedFile,
+  subjectOf,
+  isSequenceEntry,
+  assertSubjectKind,
+} from "./lib/denied-privileges.mjs";
 
 const REPO_ROOT = new URL("..", import.meta.url).pathname;
 const MANIFEST_FILE =
@@ -304,21 +310,93 @@ async function readLiveGrants(client) {
  * the identifier hash live. The manifest already carries `COLUMN:` keys for this
  * exact reason (13 legitimate ones today), so the shape was available and simply
  * not matched on.
+ *
+ * Two entry kinds beyond that plain table-level shape:
+ *
+ *   - `columnGrants` names the columns an entry SANCTIONS for one privilege.
+ *     Those `COLUMN:` keys are expected; every other column of that privilege
+ *     is still a finding, so the declaration narrows the denial rather than
+ *     suspending it. The opposite direction — a sanctioned column grant that
+ *     has gone MISSING — is `missingDeclaredColumnGrants` below, not this
+ *     function.
+ *   - a `sequence` entry matches `SEQUENCE:` keys. Sequences carry their own
+ *     ACL, so nothing about a table entry constrains them.
  */
 function violatesDenied(keys, denied) {
   const out = [];
   for (const d of denied) {
+    const subject = subjectOf(d);
     for (const priv of d.privileges) {
-      const table = `TABLE:${d.role}\t${d.table}\t${priv}`;
-      const columnPrefix = `COLUMN:${d.role}\t${d.table}.`;
+      if (isSequenceEntry(d)) {
+        // A sequence is a separate object with its own ACL, so a table entry
+        // says nothing about it. `bootstrap-rds-roles.mjs` grants
+        // `USAGE, SELECT ON ALL SEQUENCES`, which is as table-blind as its
+        // `ON ALL TABLES` sibling and re-granted what a migration had revoked
+        // for exactly the same reason.
+        const sequence = `SEQUENCE:${d.role}\t${subject}\t${priv}`;
+        for (const k of keys) if (k === sequence) out.push(k);
+        continue;
+      }
+      // Columns the entry SANCTIONS for this privilege. They are the point of
+      // the declaration, not an exemption from it: the privilege is denied at
+      // table level precisely so that it is held on these columns and no
+      // others, which is why a COLUMN key outside the set is still a finding.
+      const sanctioned = new Set(d.columnGrants?.[priv] ?? []);
+      const table = `TABLE:${d.role}\t${subject}\t${priv}`;
+      const columnPrefix = `COLUMN:${d.role}\t${subject}.`;
       const columnSuffix = `\t${priv}`;
       for (const k of keys) {
         if (k === table) out.push(k);
-        else if (k.startsWith(columnPrefix) && k.endsWith(columnSuffix)) out.push(k);
+        else if (k.startsWith(columnPrefix) && k.endsWith(columnSuffix)) {
+          const column = k.slice(columnPrefix.length, k.length - columnSuffix.length);
+          if (!sanctioned.has(column)) out.push(k);
+        }
       }
     }
   }
   return [...new Set(out)];
+}
+
+/**
+ * Declared column grants the database does NOT hold.
+ *
+ * The complement of `violatesDenied`, and it exists because the two directions
+ * are caught by different things. Surplus is over-privilege and is a finding
+ * everywhere. A `columnGrants` entry that has gone missing is the opposite —
+ * the writer it exists for cannot write, and since that writer is fail-closed
+ * the symptom is denied sign-ins. In COMPARE mode the manifest already reports
+ * it as `MISSING_GRANT`. In `--write` mode nothing did: `violatesDenied` only
+ * looks for surplus, so a regeneration against a database whose column grants
+ * had been erased would have recorded the erasure as the expectation — the same
+ * laundering `violatesDenied` blocks in the other direction, and the reason
+ * `--write` has a refusal gate at all.
+ *
+ * A table-level grant of the same privilege makes these keys absent too
+ * (`readLiveGrants` emits `COLUMN:` only where the table level does not already
+ * imply it). That state is separately a `DENIED_PRIVILEGE_HELD`, so both fire
+ * and neither is misleading.
+ *
+ * `existingSubjects` is required, not optional: the other two consumers of this
+ * declaration both treat an ABSENT subject as the pre-migration state and skip
+ * it (`assertSubjectKind` returns, `applyDeniedPrivileges` logs and continues).
+ * Without the same treatment here, a database where the table does not exist
+ * yet would be refused with advice — re-run the bootstrap — that cannot work,
+ * because the bootstrap skips the absent table too.
+ */
+function missingDeclaredColumnGrants(keys, denied, existingSubjects) {
+  const held = new Set(keys);
+  const out = [];
+  for (const d of denied) {
+    const subject = subjectOf(d);
+    if (!existingSubjects.has(subject)) continue;
+    for (const [priv, columns] of Object.entries(d.columnGrants ?? {})) {
+      for (const column of columns) {
+        const key = `COLUMN:${d.role}\t${subject}.${column}\t${priv}`;
+        if (!held.has(key)) out.push(key);
+      }
+    }
+  }
+  return out;
 }
 
 function readManifest() {
@@ -383,16 +461,38 @@ async function main() {
     process.exit(1);
   }
 
+  // Loaded and validated BEFORE the connection, so a malformed policy stops the
+  // run rather than being reported alongside live findings.
+  const denied = loadDeniedPolicy();
+
   const client = new Client({ connectionString });
   await client.connect();
   let live;
+  let subjectKinds;
   try {
     live = await readLiveGrants(client);
+    // The kind of each declared subject, so an entry that names a sequence as a
+    // table (or the reverse) is a hard error rather than an entry that quietly
+    // matches no key. `assertSubjectKind` holds the rule; this only fetches.
+    const { rows } = await client.query(
+      `SELECT s.subject, (SELECT relkind FROM pg_class WHERE oid = to_regclass(s.subject)) AS relkind
+         FROM unnest($1::text[]) AS s(subject)`,
+      [[...new Set(denied.map((d) => subjectOf(d)))]],
+    );
+    subjectKinds = new Map(rows.map((r) => [r.subject, r.relkind]));
   } finally {
     await client.end();
   }
 
-  const denied = loadDeniedPolicy();
+  for (const d of denied) {
+    assertSubjectKind(d, subjectKinds.get(subjectOf(d)) ?? null);
+  }
+  // A subject with no relkind does not exist. Same meaning the bootstrap gives
+  // it — the pre-migration state — so the required-column check below skips it
+  // rather than demanding a grant on a table nothing has created.
+  const existingSubjects = new Set(
+    [...subjectKinds.entries()].filter(([, kind]) => kind !== null).map(([subject]) => subject),
+  );
 
   // A policy entry naming a role this audit does not READ is inert: `readLiveGrants`
   // only emits keys for AUDITED_ROLES, so `violatesDenied` would find nothing and
@@ -418,17 +518,29 @@ async function main() {
     // effect would record the breakage AS the expectation — which is how the
     // audit_logs REVOKE became invisible. Refuse instead.
     const laundered = violatesDenied(live, denied);
-    if (laundered.length > 0) {
+    // Both directions, because a regeneration can launder either one. The
+    // second is the availability side: a database whose declared column grants
+    // have been erased is one where the fail-closed event writer cannot write,
+    // and recording that as the expectation makes the outage the baseline.
+    const erased = missingDeclaredColumnGrants(live, denied, existingSubjects);
+    if (laundered.length > 0 || erased.length > 0) {
       console.error("REFUSING to regenerate the manifest:\n");
       for (const k of laundered) {
         console.error(`  DENIED_PRIVILEGE_HELD: ${k.replace(/\t/g, " ")}`);
       }
+      for (const k of erased) {
+        console.error(`  DECLARED_COLUMN_GRANT_MISSING: ${k.replace(/\t/g, " ")}`);
+      }
       console.error(
-        `\nThese privileges are declared must-never-be-granted in` +
-          `\n${deniedFile()}, but the database holds them. Writing the manifest` +
-          `\nnow would record the loss of that control as the expected state.` +
-          `\nRepair the database first (see that file for the sanctioned` +
-          `\nmutation paths), then regenerate.\n`,
+        `\nThese privileges are declared in` +
+          `\n${deniedFile()}, and the database disagrees. Writing the manifest` +
+          `\nnow would record that disagreement as the expected state.` +
+          `\nA DENIED_PRIVILEGE_HELD means the database holds something the` +
+          `\ndeclaration forbids; repair it (see that file for the sanctioned` +
+          `\nmutation paths). A DECLARED_COLUMN_GRANT_MISSING means a column` +
+          `\ngrant the declaration REQUIRES is absent — re-run` +
+          `\nscripts/bootstrap-rds-roles.mjs, which re-grants them after its` +
+          `\nrevokes. Then regenerate.\n`,
       );
       process.exit(1);
     }
@@ -449,6 +561,18 @@ async function main() {
   }
   for (const key of violatesDenied([...expected], denied)) {
     findings.push(`DENIED_PRIVILEGE_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
+  }
+  // The REQUIRED direction, against both sides for the same reason the denied
+  // direction is. Live-only would be nearly covered by MISSING_GRANT below —
+  // but only while the manifest still lists the keys. A manifest that lost them
+  // too (hand-edited, or generated before this declaration existed) makes every
+  // other check pass on a database where the fail-closed event writer cannot
+  // append at all, which is denied first-ever sign-ins with a green audit.
+  for (const key of missingDeclaredColumnGrants(live, denied, existingSubjects)) {
+    findings.push(`DECLARED_COLUMN_GRANT_MISSING: ${key.replace(/\t/g, " ")}`);
+  }
+  for (const key of missingDeclaredColumnGrants([...expected], denied, existingSubjects)) {
+    findings.push(`DECLARED_COLUMN_GRANT_MISSING_IN_MANIFEST: ${key.replace(/\t/g, " ")}`);
   }
   for (const key of live) {
     if (!expected.has(key)) {

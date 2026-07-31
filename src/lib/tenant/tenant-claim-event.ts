@@ -22,8 +22,10 @@ import type { TxOrPrisma } from "@/lib/prisma";
  *
  * `DEREGISTER` is the one value no application code ever names: it is written
  * only by the `BEFORE DELETE` trigger `tenant_claims_record_deregister_event`
- * (20260731170000), when a tenant deletion cascades away its `tenant_claims`
- * rows. Exported here anyway — the const-object is this table's one
+ * (20260731170000), whenever a `tenant_claims` row is deleted — by cascade from
+ * a tenant deletion, or directly. The trigger cannot tell those apart, which is
+ * why the label it writes names the mechanism it CAN vouch for; see
+ * `DEREGISTER_ACTOR_LABEL`. Exported here anyway — the const-object is this table's one
  * authoritative operation set, TS producer or not, and the CHECK-drift test
  * and the completeness gate both derive from it.
  */
@@ -43,11 +45,27 @@ export const SIGNIN_ACTOR_LABEL = "signin";
 
 /**
  * The label the `tenant_claims` BEFORE DELETE trigger records for a
- * `deregister` event (20260731170000). Exported so a test asserting a
- * cascade-produced row's `actorLabel` reads it from here rather than
- * hardcoding the SQL literal a second time.
+ * `deregister` event. Exported so a test asserting such a row's `actorLabel`
+ * reads it from here rather than hardcoding the SQL literal a second time.
+ *
+ * `db-delete`, not the `cascade` 20260731170000 first wrote: that trigger fires
+ * identically for a cascade from `DELETE FROM tenants` and for a direct
+ * `DELETE FROM tenant_claims`, and nothing inside it can tell the two apart, so
+ * `cascade` asserted a mechanism the row could not vouch for. Renamed by
+ * 20260731190000; rows written before it keep saying `cascade`, because this
+ * table is append-only and rewriting history to match later wording is the
+ * thing it exists to prevent.
+ *
+ * Who performed the delete is answered by `sessionDbUser` — NOT by `dbUser`.
+ * Measured: when this trigger fires through the `ON DELETE CASCADE` from
+ * `tenants`, PostgreSQL runs the referential action under the referenced
+ * table's OWNER, so `current_user` (and therefore `dbUser`) is the owner
+ * whoever issued the `DELETE`. `session_user` does not follow that
+ * security-context switch. `passwd_app` holds `DELETE` on `tenants`, so this is
+ * the difference between attributing a tenant deletion to the application and
+ * to an operator. See docs/security/audit-log-schema.md.
  */
-export const CASCADE_ACTOR_LABEL = "cascade";
+export const DEREGISTER_ACTOR_LABEL = "db-delete";
 
 export type TenantClaimEventInput = {
   claim: string;
@@ -82,6 +100,16 @@ export type TenantClaimEventInput = {
  * at run time on the sign-in path and pass every mocked test. `createMany()`
  * would be privilege-compatible; it is excluded by the one-producer rule, not
  * by privilege.
+ *
+ * **The column list below is the grant.** Since 20260731190000 `passwd_app`
+ * holds INSERT on exactly these eight columns — not on the table — so naming a
+ * NINTH one here raises `42501` at run time, on the fail-closed sign-in path,
+ * while every mocked test stays green. Adding a column means editing
+ * `columnGrants.INSERT` in `scripts/checks/app-role-denied-privileges.json` and
+ * writing the matching `GRANT` in a migration; the two are pinned against each
+ * other by `app-role-denied-privileges.integration.test.ts` (live ACL equals the
+ * declaration) and by `tenant-claim.integration.test.ts`, whose probe role is
+ * granted the declaration's own column list before it drives this function.
  *
  * `db_user`, `session_db_user`, `client_addr` and `created_at` are deliberately
  * absent from this statement: a BEFORE INSERT trigger assigns them, discarding

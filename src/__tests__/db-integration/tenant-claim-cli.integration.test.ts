@@ -37,7 +37,7 @@ import {
 import {
   TENANT_CLAIM_EVENT_OPERATION,
   SIGNIN_ACTOR_LABEL,
-  CASCADE_ACTOR_LABEL,
+  DEREGISTER_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
 
 const SKIP = !process.env.DATABASE_URL;
@@ -1426,7 +1426,7 @@ describe("tenant-domain CLI (C7)", () => {
           expect(rows[1].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.DEREGISTER);
           expect(rows[1].oldTenantId).toBe(tenantId);
           expect(rows[1].newTenantId).toBeNull();
-          expect(rows[1].actorLabel).toBe(CASCADE_ACTOR_LABEL);
+          expect(rows[1].actorLabel).toBe(DEREGISTER_ACTOR_LABEL);
         } finally {
           await ctx.deleteTestData(tenantId);
         }
@@ -1657,7 +1657,7 @@ describe("tenant-domain CLI (C7)", () => {
     // — red-proving the truncation path without inserting
     // HISTORY_ROW_CAP+1 real rows on the shared dev database.
     it.skipIf(SKIP)(
-      "a capped result prints the exact re-invocation, and --after continues from where it stopped",
+      "a capped result prints how to continue, and --after continues from where it stopped",
       async () => {
         const tenantId = await ctx.createTenant();
         const claim = `${runToken()}.${ALIAS_CLAIM}`;
@@ -1681,7 +1681,7 @@ describe("tenant-domain CLI (C7)", () => {
           const page1Rows = (page1.rows ?? []) as { seq: bigint }[];
           expect(page1Rows).toHaveLength(2);
           expect(page1.message).toContain("capped at 2");
-          expect(page1.message).toContain("re-invocation");
+          expect(page1.message).toContain("continuation hint");
 
           const cursor = page1Rows[1].seq.toString();
           const page2 = await cmdHistory({ domain: claim, rowCap: 2, after: cursor });
@@ -1705,6 +1705,252 @@ describe("tenant-domain CLI (C7)", () => {
       expect(result.ok).toBe(false);
       expect(result.code).not.toBe(0);
       expect(result.message).toContain("--after");
+    });
+
+    // External review, second round (MEDIUM): the continuation hint used to be
+    // a ready-to-paste `tenant-domain history --domain <claim> --after <seq>`.
+    // A claim is printable ASCII by CHECK constraint — `;`, `$(…)` and
+    // backticks are all admissible — and `escapeUnsafeDisplayChars` neutralises
+    // terminal control sequences, not shell metacharacters. So the tool was
+    // building a command line out of attacker-influenceable text and offering
+    // it to an operator mid-incident.
+    it.skipIf(SKIP)(
+      "the continuation hint does not put the claim into command position",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        // Direct INSERT, not cmdAdd: operatorDomainSchema refuses this shape at
+        // ingest. The claim below is what the sign-in auto-registration path's
+        // looser storableClaimSchema, and the table's own CHECK, still admit —
+        // lowercase, trimmed, non-empty, printable ASCII.
+        const claim = `a;whoami$(id)\`id\`.example`;
+        const events = ["ops-1", "ops-2", "ops-3"];
+
+        try {
+          for (const label of events) {
+            await ctx.su.prisma.$executeRawUnsafe(
+              `INSERT INTO tenant_claim_events
+                 (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+               VALUES ($1::uuid, $2, 'register', NULL, $3::uuid, NULL, NULL, $4)`,
+              randomUUID(),
+              claim,
+              tenantId,
+              label,
+            );
+          }
+
+          const lines: string[] = [];
+          const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+            lines.push(args.map(String).join(" "));
+          });
+          let result;
+          try {
+            result = await cmdHistory({ domain: claim, rowCap: 2 });
+          } finally {
+            log.mockRestore();
+          }
+          expect(result.ok).toBe(true);
+
+          // Split on newlines: the truncation notice is one console.log
+          // carrying two lines, and the LINE is the unit an operator selects
+          // and copies. Asserting over the whole call would conflate the
+          // descriptive line (which names the claim, escaped, as every other
+          // display line does) with the copyable one.
+          //
+          // Anti-vacuity: the truncation path really ran, so the assertions
+          // below are about a hint that exists rather than about its absence.
+          const hint = lines.flatMap((l) => l.split("\n")).find((l) => l.includes("--after"));
+          expect(hint, "the capped result must print a continuation hint").toBeDefined();
+          expect(hint).toMatch(/--after \d+/);
+
+          // The claim does not appear in the hint at all — neither raw nor in
+          // the escaped display form. Substring checks on the metacharacters
+          // alone would pass a hint that carried the claim with the ONE
+          // character this fixture happens to use stripped.
+          expect(hint).not.toContain(claim);
+          expect(hint).not.toContain("whoami");
+          expect(hint).not.toContain("$(");
+          expect(hint).not.toContain(";");
+          expect(hint).not.toContain("--domain");
+          expect(hint).not.toContain("--tenant");
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // The tenant selector is two indexed queries merged in the CLI rather than
+    // one `OR` (20260731190000). The merge has to be exact, so the case that
+    // matters is a row naming the SAME tenant on both sides — it comes back
+    // from both queries and must appear once.
+    it.skipIf(SKIP)(
+      "--tenant merges the old-side and new-side queries without duplicating or dropping a row",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const otherTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          // both sides FIRST, then new-side only, then old-side only. The order
+          // is load-bearing, not cosmetic: with the both-sides row seeded
+          // second, a merge that had lost its de-duplication still produced two
+          // DISTINCT rows under `rowCap: 2` — the duplicate fell off the end of
+          // the cap — so the capped assertion below passed against exactly the
+          // defect it names. Seeded first, the duplicate lands inside the cap.
+          const seeds = [
+            ["both-sides", tenantId, tenantId],
+            ["new-side-only", null, tenantId],
+            ["old-side-only", tenantId, otherTenant],
+          ] as const;
+          for (const [label, oldTenant, newTenant] of seeds) {
+            await ctx.su.prisma.$executeRawUnsafe(
+              `INSERT INTO tenant_claim_events
+                 (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+               VALUES ($1::uuid, $2, 'reassign', $3::uuid, $4::uuid, NULL, NULL, $5)`,
+              randomUUID(),
+              claim,
+              oldTenant,
+              newTenant,
+              label,
+            );
+          }
+
+          const result = await cmdHistory({ tenant: tenantId });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { actorLabel: string; seq: bigint }[];
+          const mine = rows.filter((r) => seeds.some(([label]) => label === r.actorLabel));
+          expect(mine.map((r) => r.actorLabel)).toEqual([
+            "both-sides",
+            "new-side-only",
+            "old-side-only",
+          ]);
+          // Strictly increasing seq across the merged result, not merely the
+          // right set: the merge sorts rows that arrived from two separately
+          // ordered queries.
+          for (let i = 1; i < mine.length; i++) {
+            expect(mine[i].seq > mine[i - 1].seq).toBe(true);
+          }
+
+          // The cap applies to the MERGED result, not per side: a row that
+          // arrives from both queries must not consume two of the two slots.
+          const capped = await cmdHistory({ tenant: tenantId, rowCap: 2 });
+          expect(capped.ok).toBe(true);
+          const cappedRows = (capped.rows ?? []) as { seq: bigint }[];
+          expect(cappedRows).toHaveLength(2);
+          expect(new Set(cappedRows.map((r) => r.seq.toString())).size).toBe(2);
+          // Truncation is reported. `cmdHistory` returns no `truncated` field,
+          // so `message` is the ONLY channel it is observable through — without
+          // this, a per-side fetch that dropped the `+1` probe row returns the
+          // same two rows and says "2 event(s) listed", and an incident
+          // responder reads a truncated routing history as the whole of it.
+          expect(capped.message).toContain("capped at 2");
+        } finally {
+          await ctx.deleteTestData(tenantId);
+          await ctx.deleteTestData(otherTenant);
+        }
+      },
+    );
+
+    // `--after` is spread into BOTH per-side queries independently
+    // (20260731190000), which makes losing it from one of them the most
+    // natural way for a later refactor to break paging — and the domain
+    // selector's pagination case cannot see it, because that path issues one
+    // query. Symptom if the new-side filter were dropped: page 2 re-includes
+    // rows page 1 already returned, `lastSeq` can move BACKWARDS relative to
+    // the cursor the operator just used, and the documented continue-loop never
+    // terminates while the tail of the history stays unreachable.
+    it.skipIf(SKIP)("--tenant paginates with --after across both sides", async () => {
+      const tenantId = await ctx.createTenant();
+      const otherTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      try {
+        // Alternating sides, so any page that spans the boundary contains rows
+        // that came from different queries.
+        const seeds = [
+          ["p-old-1", tenantId, otherTenant],
+          ["p-new-1", otherTenant, tenantId],
+          ["p-both", tenantId, tenantId],
+          ["p-old-2", tenantId, otherTenant],
+          ["p-new-2", otherTenant, tenantId],
+        ] as const;
+        for (const [label, oldTenant, newTenant] of seeds) {
+          await ctx.su.prisma.$executeRawUnsafe(
+            `INSERT INTO tenant_claim_events
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label)
+             VALUES ($1::uuid, $2, 'reassign', $3::uuid, $4::uuid, NULL, NULL, $5)`,
+            randomUUID(),
+            claim,
+            oldTenant,
+            newTenant,
+            label,
+          );
+        }
+
+        const all = await cmdHistory({ tenant: tenantId });
+        expect(all.ok).toBe(true);
+        const allRows = (all.rows ?? []) as { seq: bigint }[];
+        expect(allRows).toHaveLength(seeds.length);
+
+        const page1 = await cmdHistory({ tenant: tenantId, rowCap: 2 });
+        const page1Rows = (page1.rows ?? []) as { seq: bigint }[];
+        expect(page1Rows).toHaveLength(2);
+        expect(page1.message).toContain("capped at 2");
+
+        const cursor = page1Rows[1].seq;
+        const page2Lines: string[] = [];
+        const log = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+          page2Lines.push(args.map(String).join(" "));
+        });
+        let page2;
+        try {
+          page2 = await cmdHistory({
+            tenant: tenantId,
+            rowCap: 2,
+            after: cursor.toString(),
+          });
+        } finally {
+          log.mockRestore();
+        }
+        const page2Rows = (page2.rows ?? []) as { seq: bigint }[];
+
+        // The hint on a page that ALREADY carries `--after` must not say
+        // "appended": `parseFlags` refuses a repeated flag outright, so an
+        // operator following that literally gets exit 1 and no rows, on the
+        // incident read path, from page 3 onwards. Asserted here because this
+        // is the only pagination case that reaches a second truncated page.
+        expect(page2.message).toContain("capped at 2");
+        const hint = page2Lines.flatMap((l) => l.split("\n")).find((l) => l.includes("--after"));
+        expect(hint, "a truncated page must print a continuation hint").toBeDefined();
+        expect(hint).toContain("in place of the --after already on it");
+        expect(hint).not.toContain("appended");
+        // Strictly after the cursor — the assertion that reds if either side
+        // lost the filter, because the unfiltered side would return its own
+        // first rows again, all of them at or below the cursor.
+        for (const row of page2Rows) {
+          expect(row.seq > cursor).toBe(true);
+        }
+
+        const page3 = await cmdHistory({
+          tenant: tenantId,
+          rowCap: 2,
+          after: page2Rows[page2Rows.length - 1].seq.toString(),
+        });
+        const page3Rows = (page3.rows ?? []) as { seq: bigint }[];
+
+        // The three pages partition the full result: no row dropped at a
+        // boundary, none returned twice.
+        const paged = [...page1Rows, ...page2Rows, ...page3Rows].map((r) => r.seq.toString());
+        expect(new Set(paged).size).toBe(paged.length);
+        expect(paged.sort()).toEqual(allRows.map((r) => r.seq.toString()).sort());
+
+        // The last page is not truncated — the boundary the `+1` probe row
+        // exists to get right, and the direction the capped cases above cannot
+        // check.
+        expect(page3.message).not.toContain("capped at");
+      } finally {
+        await ctx.deleteTestData(tenantId);
+        await ctx.deleteTestData(otherTenant);
+      }
     });
   });
 

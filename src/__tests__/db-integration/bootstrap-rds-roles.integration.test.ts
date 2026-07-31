@@ -376,6 +376,177 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
   });
 
   /**
+   * T6b — the two entry shapes added for `tenant_claim_events` (20260731190000):
+   * a column-scoped exception, and a sequence subject.
+   *
+   * The column case is not a variation on T6, it is the case T6's shape cannot
+   * express. Measured on a throwaway database: `REVOKE <priv> ON TABLE` erases
+   * the COLUMN-level grants of that privilege as well, so declaring
+   * "INSERT denied at table level" and expecting a migration's
+   * `GRANT INSERT (…)` to survive convergence is exactly wrong — the revoke
+   * takes the column grants with it, and the app role ends up unable to append
+   * a routing event at all. Since that writer is fail-closed, the symptom is
+   * denied sign-ins. This case pins the re-grant that makes the declaration
+   * converge to the intended state instead.
+   */
+  describe("T6b: column-scoped exceptions and sequence subjects", () => {
+    const PROBE_TABLE = "bootstrap_probe_colacl_tbl";
+    const decl = useDeniedPolicyFixture("denied-colacl-", PROBE_TABLE);
+    // An IDENTITY column, so its backing sequence is created and dropped with
+    // the table — the fixture's teardown drops the table only.
+    const PROBE_SEQUENCE = `public.${PROBE_TABLE}_seq_seq`;
+
+    async function setup(su: Client): Promise<void> {
+      await su.query(
+        `CREATE TABLE IF NOT EXISTS ${PROBE_TABLE} (
+           payload text,
+           attribution text,
+           seq bigint GENERATED ALWAYS AS IDENTITY
+         )`,
+      );
+      await convergeRole(su, PROBE, "probe-pw-colacl");
+      // The state the blanket GRANTs leave behind — both of them, because the
+      // sequence grant is a separate statement with the same table-blindness.
+      await su.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON ${PROBE_TABLE} TO ${PROBE}`);
+      await su.query(`GRANT USAGE, SELECT ON SEQUENCE ${PROBE_SEQUENCE} TO ${PROBE}`);
+    }
+
+    const columnHolds = async (su: Client, column: string, priv: string): Promise<boolean> => {
+      const { rows } = await su.query(
+        "SELECT has_column_privilege($1, $2, $3, $4) AS granted",
+        [PROBE, `public.${PROBE_TABLE}`, column, priv],
+      );
+      return rows[0].granted as boolean;
+    };
+    const sequenceHolds = async (su: Client, priv: string): Promise<boolean> => {
+      const { rows } = await su.query("SELECT has_sequence_privilege($1, $2, $3) AS granted", [
+        PROBE,
+        PROBE_SEQUENCE,
+        priv,
+      ]);
+      return rows[0].granted as boolean;
+    };
+
+    it("re-grants the declared columns after the revoke that erases them, and converges on a re-run", async () => {
+      writeFileSync(
+        decl.file,
+        JSON.stringify({
+          denied: [
+            {
+              role: PROBE,
+              table: `public.${PROBE_TABLE}`,
+              privileges: ["SELECT", "INSERT", "UPDATE", "DELETE"],
+              columnGrants: { INSERT: ["payload"] },
+              reason: "test",
+            },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await setup(su);
+        // Anti-vacuity, and the property that makes this whole entry shape
+        // necessary: with a TABLE-level INSERT the role reaches every column,
+        // including the identity one.
+        expect(await hasTablePrivilege(su, PROBE, `public.${PROBE_TABLE}`, "INSERT")).toBe(true);
+        expect(await columnHolds(su, "seq", "INSERT")).toBe(true);
+
+        // Twice, because a single run cannot distinguish "the re-grant works"
+        // from "the revoke happened not to erase anything yet". The second run
+        // starts from the state the first produced — which is where a
+        // re-grant-less implementation loses the column grant for good.
+        for (const pass of [1, 2]) {
+          await applyDeniedPrivileges(su);
+          expect(
+            await hasTablePrivilege(su, PROBE, `public.${PROBE_TABLE}`, "INSERT"),
+            `pass ${pass}: table-level INSERT must be revoked`,
+          ).toBe(false);
+          expect(await columnHolds(su, "payload", "INSERT"), `pass ${pass}: declared column`).toBe(
+            true,
+          );
+          expect(
+            await columnHolds(su, "seq", "INSERT"),
+            `pass ${pass}: identity column must stay out of reach`,
+          ).toBe(false);
+          expect(
+            await columnHolds(su, "attribution", "INSERT"),
+            `pass ${pass}: undeclared column`,
+          ).toBe(false);
+          // The other denied privileges are not resurrected column-wise by the
+          // re-grant.
+          expect(await columnHolds(su, "payload", "SELECT"), `pass ${pass}: SELECT`).toBe(false);
+        }
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("throws on an entry whose declared subject kind disagrees with the object", async () => {
+      // The bootstrap's own call site, which the audit's end-to-end case cannot
+      // cover. The check is placed ABOVE the existence branch deliberately:
+      // moved below it, a wrong-kind entry would go unreported on exactly the
+      // run the placement is for — the pre-migration FULL run, where the role
+      // may not exist yet and the entry is skipped.
+      writeFileSync(
+        decl.file,
+        JSON.stringify({
+          denied: [
+            {
+              role: PROBE,
+              table: PROBE_SEQUENCE, // a sequence declared as a table
+              privileges: ["SELECT"],
+              reason: "test",
+            },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await setup(su);
+        await expect(applyDeniedPrivileges(su)).rejects.toThrow(/DENIED_POLICY_SUBJECT_KIND/);
+      } finally {
+        await su.end();
+      }
+    });
+
+    it("revokes a declared sequence privilege, which no table entry can reach", async () => {
+      writeFileSync(
+        decl.file,
+        JSON.stringify({
+          denied: [
+            {
+              role: PROBE,
+              sequence: PROBE_SEQUENCE,
+              privileges: ["USAGE", "SELECT", "UPDATE"],
+              reason: "test",
+            },
+          ],
+        }),
+      );
+      const su = new Client({ connectionString: superuserUrl() });
+      await su.connect();
+      try {
+        await setup(su);
+        expect(await sequenceHolds(su, "USAGE")).toBe(true);
+        expect(await sequenceHolds(su, "SELECT")).toBe(true);
+
+        await applyDeniedPrivileges(su);
+
+        expect(await sequenceHolds(su, "USAGE")).toBe(false);
+        expect(await sequenceHolds(su, "SELECT")).toBe(false);
+        expect(await sequenceHolds(su, "UPDATE")).toBe(false);
+        // The table's own privileges are untouched — a sequence entry must not
+        // be a disguised table entry.
+        expect(await hasTablePrivilege(su, PROBE, `public.${PROBE_TABLE}`, "SELECT")).toBe(true);
+      } finally {
+        await su.end();
+      }
+    });
+  });
+
+  /**
    * T7 — the policy is validated BEFORE any database change, and a failure
    * inside the privilege sequence rolls back rather than leaving the widening
    * half committed.

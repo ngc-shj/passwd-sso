@@ -168,8 +168,8 @@ D-33 in `docs/archive/review/sso-tenant-domain-alias-deviation.md`.
   principal names are what make the attribution more than self-asserted; the
   operator label (`--by`) is the self-asserted half and is not a substitute.
 - **Not delivered to webhooks.** No delivery target reads this table, and the
-  application role cannot read it at all (`passwd_app` holds `INSERT` and nothing
-  else), so there is no egress path to blocklist. Contrast the `claim` field
+  application role cannot read it at all (`passwd_app` holds `INSERT` on eight
+  named columns and nothing else), so there is no egress path to blocklist. Contrast the `claim` field
   above, which does travel through `AUTH_LOGIN_FAILURE` metadata and *is*
   blocklisted.
 - **`operation` is not a partition of outcomes.** `tenant-domain add --from`
@@ -195,13 +195,49 @@ only for the operator CLI. Do not assume the CLI shows it.
 `passwd_app` holds `INSERT` and nothing else, which is the containment — but
 INSERT is not nothing. A compromised application can append rows with an
 attacker-chosen `claim`, `actor_label` and tenant UUIDs, and the `CHECK` only
-requires that *one* of the two tenant columns is non-NULL. Two consequences an
-incident responder needs, neither of which the table itself makes obvious:
+requires that *one* of the two tenant columns is non-NULL.
 
-- **`db_user` is how you separate them.** Rows the operator CLI wrote carry the
-  migration role; rows the application wrote carry `passwd_app`. `actor_label` is
+That INSERT is scoped to eight columns — `id`, `claim`, `operation`,
+`old_tenant_id`, `new_tenant_id`, `old_revoked_at`, `new_revoked_at`,
+`actor_label` — and the scoping is the security boundary, not tidiness. A
+statement naming any other column raises `42501` before it reaches the table,
+which closes two things a table-level grant leaves open, and both are worth
+knowing when reading rows written during a compromise:
+
+- **`seq` cannot be supplied.** With a table-level grant,
+  `OVERRIDING SYSTEM VALUE` sets the identity column directly (measured; the
+  `GENERATED ALWAYS` declaration alone does not prevent it). Because `seq` is
+  `UNIQUE`, one row planted at the top of the range makes every later
+  engine-assigned value collide — and the event writer is fail-closed, so that
+  is a denial of service on first-ever sign-in and on every operator claim
+  change, not a data-integrity nuisance.
+- **The attribution columns cannot be named.** `db_user`, `session_db_user`,
+  `client_addr` and `created_at` are assigned by a `BEFORE INSERT` trigger, and
+  are now also outside the grant. So they are unforgeable at the ACL layer, which
+  the trigger alone does not give you: the table owner can disable a trigger.
+
+Two consequences an incident responder needs, neither of which the table itself
+makes obvious:
+
+- **`db_user` is how you separate them — except on `deregister` rows, where it is
+  `session_db_user`.** Rows the operator CLI wrote carry the migration role; rows
+  the application wrote carry `passwd_app`. `actor_label` is
   self-asserted and proves nothing on its own — `signin` is reserved at the CLI's
   `--by` boundary, but a direct writer is not going through that boundary.
+
+  The exception is not a detail. A `deregister` row is written by the
+  `BEFORE DELETE` trigger on `tenant_claims`, and when that fires through the
+  `ON DELETE CASCADE` from `tenants`, PostgreSQL runs the referential action
+  under the **referenced table's owner** — so `current_user`, and therefore
+  `db_user`, is the owner no matter who issued the `DELETE`. Measured, both
+  ways, with the same role. `session_user` is unaffected by that security-context
+  switch, so `session_db_user` still names the actual caller.
+
+  Why it matters here specifically: `passwd_app` holds `DELETE` on `tenants`.
+  A compromised application that deletes a tenant destroys its `tenant_claims`
+  rows, and the `deregister` row recording that reads `db_user = <migration
+  role>` — i.e. it looks like an operator action to anyone applying the general
+  rule above. On a `deregister` row, read `session_db_user`.
 - **Rows naming a tenant that never existed are unreachable by the tenant-scoped
   purge routine.** `tenant_claim_events_purge_for_tenant(<tenant>)` is the
   sanctioned deletion path and it takes a real tenant id. Removing injected rows

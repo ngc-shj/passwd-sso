@@ -1839,9 +1839,9 @@ model TenantClaimEvent {
 
   @@index([claim])
   @@index([createdAt])
-  @@index([claim, createdAt, id])
-  @@index([oldTenantId, createdAt, id])
-  @@index([newTenantId, createdAt, id])
+  @@index([claim, seq])
+  @@index([oldTenantId, seq])
+  @@index([newTenantId, seq])
   @@map("tenant_claim_events")
 }
 

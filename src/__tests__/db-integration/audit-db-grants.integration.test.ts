@@ -338,6 +338,11 @@ describe("audit-db-grants (real DB)", () => {
     const PROBE_TABLE = "audit_denied_probe_tbl";
     let policyPath: string;
 
+    // An IDENTITY column, so the probe table brings its own sequence and both
+    // are dropped together. The sequence entry cases below need one, and a
+    // sequence created here is the same shape as `tenant_claim_events_seq_seq`.
+    const PROBE_SEQUENCE = `${PROBE_TABLE}_seq_seq`;
+
     const policy = (privileges: string[]) =>
       JSON.stringify({
         denied: [
@@ -345,13 +350,37 @@ describe("audit-db-grants (real DB)", () => {
         ],
       });
 
+    /** A table entry that denies `privileges` while sanctioning `columnGrants`. */
+    const columnPolicy = (privileges: string[], columnGrants: Record<string, string[]>) =>
+      JSON.stringify({
+        denied: [
+          {
+            role: PROBE,
+            table: `public.${PROBE_TABLE}`,
+            privileges,
+            columnGrants,
+            reason: "test",
+          },
+        ],
+      });
+
+    const sequencePolicy = (privileges: string[]) =>
+      JSON.stringify({
+        denied: [
+          { role: PROBE, sequence: `public.${PROBE_SEQUENCE}`, privileges, reason: "test" },
+        ],
+      });
+
     beforeEach(async () => {
       policyPath = join(tmpDir, "denied.json");
       await su.query(`DROP TABLE IF EXISTS ${PROBE_TABLE}`);
-      await su.query(`CREATE TABLE ${PROBE_TABLE} (id int, metadata jsonb)`);
+      await su.query(
+        `CREATE TABLE ${PROBE_TABLE} (id int, metadata jsonb, seq bigint GENERATED ALWAYS AS IDENTITY)`,
+      );
       // The default ACL grants the app role arwd on any new table, so start from
       // a known-empty state.
       await su.query(`REVOKE ALL ON ${PROBE_TABLE} FROM ${PROBE}`);
+      await su.query(`REVOKE ALL ON SEQUENCE ${PROBE_SEQUENCE} FROM ${PROBE}`);
     });
 
     afterEach(async () => {
@@ -418,6 +447,122 @@ describe("audit-db-grants (real DB)", () => {
       );
     });
 
+    // ─── columnGrants: the declaration NARROWS the denial ──────────────────
+    //
+    // `columnGrants` is the one shape that makes the gate report LESS, so it is
+    // the one that needs a failing-first proof in both directions. Without
+    // these, deleting the `sanctioned` filter from violatesDenied leaves the
+    // whole block green.
+    it("does not report a SANCTIONED column, and still reports another column of the same privilege", async () => {
+      writeFileSync(policyPath, columnPolicy(["INSERT"], { INSERT: ["id"] }));
+      await su.query(`GRANT INSERT (id) ON ${PROBE_TABLE} TO ${PROBE}`);
+
+      // Anti-vacuity: the sanctioned grant is really held, so "not reported"
+      // below is the filter doing its job rather than an absent privilege.
+      const [{ granted }] = (
+        await su.query(`SELECT has_column_privilege($1, $2, 'id', 'INSERT') AS granted`, [
+          PROBE,
+          `public.${PROBE_TABLE}`,
+        ])
+      ).rows;
+      expect(granted).toBe(true);
+
+      const sanctionedOnly = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(`${sanctionedOnly.stdout}${sanctionedOnly.stderr}`).not.toContain(
+        `DENIED_PRIVILEGE_HELD: COLUMN:${PROBE} public.${PROBE_TABLE}.id INSERT`,
+      );
+
+      // The narrowing must not become a suspension: another column of the SAME
+      // privilege is still a finding.
+      await su.query(`GRANT INSERT (metadata) ON ${PROBE_TABLE} TO ${PROBE}`);
+      const withSurplus = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(withSurplus.status).not.toBe(0);
+      expect(withSurplus.stderr).toContain(
+        `DENIED_PRIVILEGE_HELD: COLUMN:${PROBE} public.${PROBE_TABLE}.metadata INSERT`,
+      );
+      expect(withSurplus.stderr).not.toContain(
+        `DENIED_PRIVILEGE_HELD: COLUMN:${PROBE} public.${PROBE_TABLE}.id INSERT`,
+      );
+    });
+
+    it("reports a TABLE-level grant even when a column exception is declared", async () => {
+      // The column exception says "held on these columns"; it must not read as
+      // "held on the table". A table-level grant reaches every column,
+      // including the ones the exception deliberately omits.
+      writeFileSync(policyPath, columnPolicy(["INSERT"], { INSERT: ["id"] }));
+      await su.query(`GRANT INSERT ON ${PROBE_TABLE} TO ${PROBE}`);
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain(
+        `DENIED_PRIVILEGE_HELD: TABLE:${PROBE} public.${PROBE_TABLE} INSERT`,
+      );
+    });
+
+    // ─── sequence entries: an object class no table entry can reach ────────
+    it("reports DENIED_PRIVILEGE_HELD for a sequence privilege", async () => {
+      writeFileSync(policyPath, sequencePolicy(["USAGE", "SELECT", "UPDATE"]));
+      await su.query(`GRANT USAGE, SELECT ON SEQUENCE ${PROBE_SEQUENCE} TO ${PROBE}`);
+      // Granted explicitly rather than relying on the default ACL: the role
+      // that creates this table is passwd_user locally and postgres in CI, and
+      // only one of them owns the default privileges that would grant it.
+      const [{ granted }] = (
+        await su.query(`SELECT has_sequence_privilege($1, $2, 'SELECT') AS granted`, [
+          PROBE,
+          `public.${PROBE_SEQUENCE}`,
+        ])
+      ).rows;
+      expect(granted).toBe(true);
+
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain(
+        `DENIED_PRIVILEGE_HELD: SEQUENCE:${PROBE} public.${PROBE_SEQUENCE} SELECT`,
+      );
+      expect(r.stderr).toContain(
+        `DENIED_PRIVILEGE_HELD: SEQUENCE:${PROBE} public.${PROBE_SEQUENCE} USAGE`,
+      );
+    });
+
+    it("reports nothing for a sequence entry once the privilege is revoked (allow side)", async () => {
+      writeFileSync(policyPath, sequencePolicy(["USAGE", "SELECT", "UPDATE"]));
+      await su.query(`GRANT USAGE, SELECT ON SEQUENCE ${PROBE_SEQUENCE} TO ${PROBE}`);
+      await su.query(`REVOKE ALL ON SEQUENCE ${PROBE_SEQUENCE} FROM ${PROBE}`);
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      // Anchored positively FIRST. On its own, "no SEQUENCE finding" is also
+      // true of a run that died before `violatesDenied` was ever reached — an
+      // inverted subject-kind check, a policy-load error — so the assertion
+      // that matters is that the audit got as far as comparing at all. The
+      // status is deliberately NOT asserted to be 0: the probe table drifts
+      // from the manifest snapshot this suite took in `beforeAll`, so a
+      // non-zero exit here is expected and unrelated.
+      expect(`${r.stdout}${r.stderr}`).toMatch(/DB grant audit FAILED|db-grants: OK/);
+      expect(`${r.stdout}${r.stderr}`).not.toContain("DENIED_POLICY");
+      expect(`${r.stdout}${r.stderr}`).not.toContain("DENIED_PRIVILEGE_HELD: SEQUENCE:");
+    });
+
+    it("fails closed when an entry's declared subject kind disagrees with the object", async () => {
+      // The silent-inertness axis the role check does not cover: a `table`
+      // entry naming a sequence passes identifier validation, and its
+      // implicit-TABLE REVOKE even succeeds — while the audit emits SEQUENCE:
+      // keys for that object, so the entry can never match anything.
+      writeFileSync(
+        policyPath,
+        JSON.stringify({
+          denied: [
+            {
+              role: PROBE,
+              table: `public.${PROBE_SEQUENCE}`,
+              privileges: ["SELECT"],
+              reason: "test",
+            },
+          ],
+        }),
+      );
+      const r = runAudit(manifestPath, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(r.status).not.toBe(0);
+      expect(`${r.stdout}${r.stderr}`).toContain("DENIED_POLICY_SUBJECT_KIND");
+    });
+
     it("refuses --write while a denied privilege is held, and writes nothing", async () => {
       writeFileSync(policyPath, policy(["UPDATE"]));
       await su.query(`GRANT UPDATE ON ${PROBE_TABLE} TO ${PROBE}`);
@@ -431,6 +576,36 @@ describe("audit-db-grants (real DB)", () => {
       // The point: a regeneration must not record the loss of the control as the
       // expected state.
       expect(existsSync(target)).toBe(false);
+    });
+
+    it("refuses --write while a DECLARED column grant is missing, and writes nothing", async () => {
+      // The availability mirror of the case above, and the one the manifest
+      // comparison cannot cover: in compare mode an erased column grant shows
+      // up as MISSING_GRANT against the committed manifest, but a regeneration
+      // is what PRODUCES that manifest — so without this, `--write` against a
+      // database whose column grants had been revoked would record the erasure
+      // as the expectation. On tenant_claim_events that erasure is the
+      // fail-closed event writer unable to write at all.
+      writeFileSync(policyPath, columnPolicy(["INSERT"], { INSERT: ["id"] }));
+      // Deliberately NOT granted — beforeEach revokes everything.
+      const target = join(tmpDir, "would-be-erased.json");
+      rmSync(target, { force: true });
+
+      const r = runAuditWrite(target, { DB_DENIED_PRIVILEGES: policyPath });
+
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain(
+        `DECLARED_COLUMN_GRANT_MISSING: COLUMN:${PROBE} public.${PROBE_TABLE}.id INSERT`,
+      );
+      expect(existsSync(target)).toBe(false);
+
+      // Allow side, same policy and same run shape: once the declared grant is
+      // in place the regeneration proceeds. Without this the case above would
+      // also pass against a gate that refuses every --write.
+      await su.query(`GRANT INSERT (id) ON ${PROBE_TABLE} TO ${PROBE}`);
+      const ok = runAuditWrite(target, { DB_DENIED_PRIVILEGES: policyPath });
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(existsSync(target)).toBe(true);
     });
 
     it("passes and allows --write once the denied privilege is gone", async () => {

@@ -427,12 +427,373 @@ flaky on a host with finer clock resolution. The ordering test in
 asserts `history` returns them in insertion (`seq`) order, which is true whether or not
 the millisecond actually collides; that is the property the fix guarantees.
 
-## Verification not run
+## D-23 — the identity column's "cannot be overridden" claim was false, and the obvious remedy would have denied sign-ins (HIGH)
 
-All four DDL changes above are unapplied on the shared dev database as of this pass:
-`npm run db:migrate` was deliberately NOT run (R-c — requires explicit user
-confirmation, obtained separately from writing the migration). `check-migration-drift`,
-`check-destructive-migration`, `check-migration-transaction`,
-`check-tenant-claim-event-coverage` and its self-test, `tsc --noEmit` and `eslint` were
-run and pass. The new `src/__tests__/db-integration/*` cases above are unexercised
-against a live database — they will run once the migration is applied.
+`20260731170000` chose `GENERATED ALWAYS AS IDENTITY` over a `DEFAULT` and wrote that
+it "cannot be overridden by application INSERT text at all (it raises unless
+`OVERRIDING SYSTEM VALUE` is stated explicitly, which no writer in this codebase does
+or should)". The parenthesis states the exploit and then treats it as closed by
+convention. Measured on a throwaway database and role: with a TABLE-level `INSERT`
+grant — which `passwd_app` held — `OVERRIDING SYSTEM VALUE` succeeds, needing no
+privilege on the backing sequence. `seq` carries a `UNIQUE` constraint, so a planted
+maximal value makes every later engine-assigned value collide; the event writer is
+fail-closed, so the symptom is denied first-ever sign-ins and refused operator claim
+changes, not a missing history row.
+
+The remedy the finding proposed — scope the grant to columns, and register the
+table-level `INSERT` in `app-role-denied-privileges.json` so a convergence run cannot
+re-widen it — is **not sufficient on its own, and applying only that half would have
+been worse than the defect**. Measured before implementing: `REVOKE <priv> ON TABLE`
+erases the COLUMN-level grants of that privilege as well (`pg_attribute.attacl` goes
+empty). The declared re-REVOKE would therefore have taken the migration's
+`GRANT INSERT (…)` with it on every `bootstrap-rds-roles.mjs` run, leaving the sign-in
+writer with no `INSERT` at all — a permanent outage produced by the security control,
+converged into place and re-applied on every deploy.
+
+**Closed** in `20260731190000_tenant_claim_events_column_scoped_insert` plus a policy
+schema change, because the declaration had to be able to express the pair:
+
+- `app-role-denied-privileges.json` entries gained an optional `columnGrants` map —
+  "this privilege is denied at TABLE level and held on exactly these columns". A key
+  must also appear in `privileges`, or the map would sit under a still-granted table
+  privilege and enforce nothing. `applyDeniedPrivileges` re-GRANTs the columns
+  immediately after its REVOKE, in the same loop and the same transaction, so the two
+  cannot be separated by an edit that only reads one of them.
+- The same entries gained a `sequence` subject. `20260731170000` had revoked
+  `passwd_app`'s `USAGE, SELECT` on `tenant_claim_events_seq_seq` and recorded that the
+  revoke was "not expressible in `app-role-denied-privileges.json` — that policy's
+  subject is a table and its privilege set has no `USAGE`". That inexpressibility was
+  the whole finding: `bootstrap-rds-roles.mjs`'s
+  `GRANT USAGE, SELECT ON ALL SEQUENCES` is exactly as blind to that object as its
+  `ON ALL TABLES` sibling was to `audit_logs`, so every convergence run restored it and
+  the descriptive manifest recorded the restoration as expected.
+- `audit-db-grants.mjs` treats the declared columns as expected and every OTHER column
+  of that privilege as a finding, so the declaration narrows the denial rather than
+  suspending it. The opposite direction — a sanctioned column grant that has been
+  erased — surfaces as `MISSING_GRANT` against the manifest.
+
+Two properties came free and are worth stating because they are now load-bearing: the
+column list omits `db_user`/`session_db_user`/`client_addr`/`created_at`, so those are
+un-nameable and not merely overwritten by the `BEFORE INSERT` trigger (a trigger the
+table owner can disable; an ACL it cannot). And a `CHECK (seq > 0)` was added behind
+the ACL, because `seq` is also the `--after` cursor and a non-positive row would sort
+before every real event while being unreachable by any cursor the CLI can produce.
+
+Verified end to end on a throwaway database carrying a full replay of all 184
+migrations: with the table-wide grant the attack succeeds; after
+`bootstrap-rds-roles.mjs --denied-only` with the committed policy, the real writer's
+`INSERT` still succeeds and `OVERRIDING SYSTEM VALUE`, `INSERT … (…, seq) VALUES (…,
+DEFAULT)` and `INSERT … (…, db_user)` all raise `42501`. Also measured, and reflected
+in the integration test rather than assumed: naming `seq` with a literal value raises
+`428C9` during parse analysis, BEFORE any privilege check, so a case built on that
+spelling would pass against a wide-open grant.
+
+## D-24 — the replacement indexes were ordered by the column the reader had stopped using (MEDIUM)
+
+`20260731170000` closed D-21 by adding `(selector, created_at, id)` indexes in the same
+transaction in which it made `seq` the `ORDER BY` and the pagination cursor. A leading
+equality still matched, but there was no usable ordering, so the plan was a scan plus a
+sort. **Closed** by replacing the three with `(claim, seq)`,
+`(old_tenant_id, seq)`, `(new_tenant_id, seq)`. The three superseded indexes are
+DROPped and baselined in `destructive-migration-baseline.txt`: no application code
+names an index, so their absence cannot break an old code path, and they have never
+existed outside this unmerged branch — while each is write amplification on the
+fail-closed sign-in path.
+
+`cmdHistory`'s tenant selector became TWO queries merged in the CLI rather than one
+`OR`. Measured with `EXPLAIN (ANALYZE)` on 41k rows with a tenant naming 660 of them:
+the `OR` does use the new indexes, as a `BitmapOr` — but a bitmap scan is unordered, so
+the plan is `BitmapOr → Sort → Limit` and every matching row is read and sorted however
+small the cap is. One equality per side walks `(tenant, seq)` in order, giving
+`Index Scan → Limit` with no sort node. The merge is exact rather than approximate:
+the union's first `take` rows by `seq` are necessarily a subset of each side's own
+first `take`, and `seq` is `UNIQUE`, so it also de-duplicates the rows that name the
+tenant on both sides — which is every non-`reassign` event.
+
+## D-25 — the continuation hint built a shell command out of a claim (MEDIUM)
+
+A capped `history` result printed a ready-to-paste
+`tenant-domain history --domain <claim> --after <seq>`. A claim is printable ASCII by
+CHECK constraint, so `;`, `$(…)` and backticks are all admissible, and
+`escapeUnsafeDisplayChars` neutralises terminal control sequences — it is not a shell
+quoter and does not claim to be. Anyone who can reach the sign-in auto-registration
+path could therefore place a command into a line an operator is invited to paste into a
+shell, during an incident.
+
+**Closed** by not rebuilding the command at all, rather than by quoting it: the
+operator already has the command they just ran, so naming the one flag to add carries
+the same information with nothing interpolated into command position.
+`lastSeq` is a `BigInt` read from the database. The notice is deliberately two lines —
+the descriptive line names the claim, escaped, as every other display line does, and
+the copyable line carries a flag name and digits only. The test asserts on the LINE, not
+on the whole call, because the line is the unit an operator selects; the first version
+of that test failed against a single-line message and the split is what it drove out.
+
+## D-26 — `cascade` named a mechanism the trigger cannot observe (LOW)
+
+D-20's argument — that a fixed string naming a MECHANISM is not an attempt to attribute
+an act to a person — holds. The string it chose does not: a `BEFORE DELETE` trigger on
+`tenant_claims` fires identically for a cascade from `DELETE FROM tenants` and for a
+direct `DELETE FROM tenant_claims`, and nothing available inside it distinguishes them.
+On a direct delete the row asserted a cascade that never happened, on the one table
+whose purpose is to be believed later. **Closed** by relabelling to `db-delete`, which
+is what the trigger can vouch for; which delete, and by whom, is already answered by
+the `db_user`/`session_db_user` pair. `CASCADE_ACTOR_LABEL` is renamed
+`DEREGISTER_ACTOR_LABEL` accordingly. Rows written under the previous definition keep
+saying `cascade` and are NOT backfilled — the table is append-only, `UPDATE` raises,
+and rewriting recorded history to match a later opinion about its wording is the
+behaviour this table exists to prevent.
+
+## D-27 — the round's own self-check findings
+
+Three focused sub-agents ran the recurring-rule check against this round before it
+closed. Four fires, all acted on rather than deferred:
+
+- **RT7 (Major, found independently by all three).** `violatesDenied` gained two
+  branches — the `SEQUENCE:` match and the sanctioned-column filter — and
+  `audit-db-grants.integration.test.ts` was untouched, so deleting either branch left
+  the whole prescriptive block green. The bootstrap half of the same change had a
+  paired red-provable case (T6b) and the audit half, which is the CI-side gate, had
+  none. **Closed** with five cases: a sanctioned column is not reported while another
+  column of the same privilege still is (the narrowing must not become a suspension),
+  a table-level grant is still reported under a column exception, a sequence privilege
+  is reported, the same is silent once revoked, and a wrong-kind subject fails closed.
+- **RT5 (Critical).** No test covered *the shipping writer × the production grant
+  shape*. The one case that drives `findOrCreateTenantForClaim` under an ACL-enforcing
+  probe role granted TABLE-level `INSERT` — strictly wider than what `passwd_app` now
+  holds, and exactly the grant this round removed. A ninth column in
+  `recordTenantClaimEvent`, or `seq`/`db_user`, would have 42501'd in production while
+  both that test and the hand-copied statement in the ACL test stayed green — and the
+  writer is fail-closed, so the symptom is a denied first-ever sign-in. **Closed** by
+  granting the probe role a COLUMN-scoped `INSERT` whose column list is read from
+  `loadDeniedPolicy()`, so the fixture cannot drift from the declaration production
+  converges to, and the correspondence the migration asserts in prose is now gated.
+- **R3 (Major).** The audit already hard-errors on an entry naming a role it does not
+  read, because such an entry looks enforced and enforces nothing. This round added a
+  second axis on which that can happen — subject KIND — without extending the guard:
+  `"table": "public.foo_seq"` passes the identifier check, passes the existence guard,
+  and its implicit-TABLE `REVOKE` even succeeds, while the audit emits `SEQUENCE:` keys
+  for that object so the entry matches nothing. The mirror mistake fails loudly
+  (`REVOKE … ON SEQUENCE <table>` errors), so only this direction was silent.
+  **Closed** with `assertSubjectKind`, one rule consulted by both consumers against
+  `pg_class.relkind`.
+- **R49 (Minor).** A comment claimed the erased-column-grant direction was "caught by
+  the manifest comparison". True in compare mode; false in `--write`, which is the mode
+  the adjacent refusal gate exists for. **Closed** by making it true rather than by
+  weakening the sentence: `missingDeclaredColumnGrants` refuses a regeneration whose
+  database is missing a declared column grant, the availability mirror of the
+  over-privilege refusal beside it.
+
+**R42 (Major), re-derived rather than closed.** `scripts/rls-smoke-seed.sql` and
+`scripts/rls-cross-tenant-seed.sql` issue blanket `GRANT … ON ALL TABLES` /
+`ON ALL SEQUENCES` to `passwd_app` with no `--denied-only` behind them — deferred in
+round 1 as A1, on a cost justification that enumerated the members it re-opened. This
+round invalidated that enumeration by adding table-level `INSERT` on
+`tenant_claim_events` and three sequence entries, the second of which is precisely the
+object class the blanket sequence grant reaches and which had no policy expression
+until now.
+
+The deferral still stands on the merits, and the re-derivation is what makes that
+statement checkable: the member set is **every `passwd_app` entry in
+`app-role-denied-privileges.json`**, derived from the file rather than listed, so the
+next expansion cannot invalidate it the way this one did. Running `--denied-only`
+there is not a drop-in: that job creates only `passwd_app`, and the mode requires every
+declared target to exist — by design, since a mode whose job is to apply the policy
+must not report success without applying it. The three conditions that make the
+exposure acceptable are now written beside the grants themselves: the database is
+ephemeral, the job asserts nothing about the covered tables, and it never runs
+`--write`, so nothing is recorded as expected.
+
+## D-28 — Phase 3 review findings
+
+Three reviewers took the round after the self-check. One regression this round
+introduced, and a set of coverage gaps; all acted on.
+
+**The continuation hint told the operator to do something the parser refuses
+(Major, functionality).** The shell-quoting fix replaced a paste-ready command with
+"re-run the SAME command with `--after <seq>` appended" — correct from page 1 to page
+2, and wrong from page 3, because page 2's command already carries `--after` and round
+4's S5 made `parseFlags` refuse a repeated flag outright. Reproduced live: the
+instruction exits 1 with no rows. So the fix for an injection surface had introduced a
+dead end on the same incident read path. **Closed** by branching the wording on whether
+`--after` was already given ("in place of the --after already on it"), without echoing
+the old value back — naming the flag to replace says the same thing with no operator
+input in the line. The round's tests could not see it: they drive `cmdHistory()`
+directly and stopped at page 2. There is now a case that reaches a second truncated
+page and asserts the wording.
+
+**Coverage the round claimed and did not have (three Majors, testing).** Each was
+demonstrated by simulating a mutant against the same fixture, not argued:
+
+- `--tenant` truncation was pinned by nothing. `cmdHistory` returns no `truncated`
+  field, so `message` is the only channel; a per-side fetch that dropped the `+1` probe
+  row returned the same rows, said "2 event(s) listed", printed no hint, and every
+  assertion passed. An incident responder would read a truncated routing history as
+  the whole of it. Now asserted, along with the non-truncated boundary on the last
+  page.
+- `--after` was never exercised with `--tenant` at all — the selector whose cursor is
+  now spread into TWO independent queries, which is the single most natural place for a
+  later refactor to lose one. Dropping it from either side makes `lastSeq` move
+  backwards and the documented continue-loop never terminate. Now paged three deep,
+  asserting strict advance past the cursor and that the pages partition the full result.
+- the "cap applies to the MERGED result" assertion did not test its own comment: with
+  the both-sides row seeded second, a merge with de-duplication removed still produced
+  two distinct rows, because the duplicate fell off the end of the cap. Seeding it
+  first puts the duplicate inside the cap.
+
+**The index replacement was unpinned (Major, testing).** The CLI returns identical rows
+under either index set, so every behavioural assertion is green against the shape this
+round replaced — a later migration re-adding `created_at`-ordered indexes would revert
+the fix silently. Now asserted from `pg_indexes` against the index DEFINITIONS, not
+their names, plus the three superseded ones by exact name (a substring match would also
+have demanded the removal of `tenant_claim_events_created_at_idx`, which
+20260731170000 deliberately kept).
+
+**Not closed, recorded instead:** nothing asserts that the tenant selector issues TWO
+queries rather than one `OR`. Both return the same rows; only the plan differs, so
+pinning it needs a spy on the Prisma client through the `migrationClientFactory` seam.
+The index assertion above covers the other half of the same regression, the measured
+`EXPLAIN` output is in the migration and in cmdHistory's comment, and the cost of the
+spy is a fixture that breaks on any Prisma client shape change. Revisit if the plan
+regresses in practice.
+
+**Silent-inertness axes, completed (Minors, functionality).** `assertSubjectKind`
+closed the wrong-KIND axis; two more of the same shape were open. An UNQUALIFIED
+subject (`"tenant_claim_events"`) resolves through `search_path`, so the kind check
+passes and the bootstrap's REVOKE succeeds, while the audit's keys are always
+schema-qualified and the entry matches nothing — the subject regex now requires the
+dotted form (roles keep the bare one). And a REPEATED `(role, subject)` pair was
+merely redundant before `columnGrants` and is destructive after it: entries apply in
+file order, so a second entry without the re-grant erases the first one's, produced by
+the convergence run meant to restore it. Both are now loader errors with unit tests.
+
+**Audit-script minors (functionality).** `missingDeclaredColumnGrants` disagreed with
+the other two consumers about what an absent subject means — it would refuse a
+pre-migration `--write` with advice that cannot work, since the bootstrap skips the
+absent table too; it now takes the existing-subject set. It also read `d.table` inline
+rather than through `subjectOf`, the exact coupling that helper exists to prevent. And
+the required-column direction is now checked against the MANIFEST as well as live,
+mirroring the denied direction: live-only leaves a state where the keys are absent from
+both and every check passes on a database whose fail-closed writer cannot append.
+
+**Not changed: `DROP INDEX` without `IF EXISTS`.** Correct in the abstract — an
+out-of-band drop would leave `migrate deploy` failed. Declined because the migration is
+already applied, and editing an applied migration breaks its recorded checksum; the
+three indexes are created by `20260731170000` and dropped by `20260731190000`, both on
+this same unmerged branch, so any database that has the former also receives the
+latter.
+
+**Also corrected: two comments still asserted the framing D-26 retired** — the
+`TENANT_CLAIM_EVENT_OPERATION` docblock and a test comment both said the deregister row
+comes from a tenant-deletion cascade and carries `'cascade'`. And the DIRECT
+`DELETE FROM tenant_claims` path — the case that motivated the relabel — had no test at
+all, only the cascade. It has one now: the tenant survives, so the only thing that can
+produce the event is the trigger itself.
+
+## D-29 — a cascade attributes the deletion to the table OWNER, and the docs said to read the column that says so
+
+The security review's finding, reproduced independently on a throwaway database before
+acting on it. PostgreSQL runs a referential action under the REFERENCED table's owner,
+so a trigger fired by `ON DELETE CASCADE` sees `current_user` = owner. The same trigger,
+the same role, two paths:
+
+    direct DELETE FROM child   ->  current_user = probe_role,   session_user = probe_role
+    cascade from parent        ->  current_user = passwd_user,  session_user = probe_role
+
+`tenant_claim_events_set_principal` assigns `db_user := current_user`, so every
+cascade-produced `deregister` row records the migration/owner role no matter who issued
+the `DELETE FROM tenants`. `passwd_app` holds `DELETE` on `tenants`: a compromised
+application that deletes a tenant destroys its `tenant_claims` rows and leaves a trace
+that reads, to anyone applying the documented rule, as an operator action.
+
+This is D-26's own defect one level up — a recorded value asserting more than the
+mechanism can vouch for — and D-26's remedy leant on exactly the wrong half of the pair
+("who is already answered by `db_user`/`session_db_user`"). The information was never
+lost: `session_user` does not follow the security-context switch. **Closed** by naming
+the right column in `docs/security/audit-log-schema.md` and in `DEREGISTER_ACTOR_LABEL`,
+and by a case that deletes a tenant as an ACL-enforcing probe role and asserts BOTH
+columns — `session_db_user` is the probe role, `db_user` is the table owner, read from
+`pg_class` rather than compared to a literal (the owner is `passwd_user` locally and
+`postgres` in CI). Every pre-existing cascade case deletes as the superuser, where owner
+and caller are the same principal, so none of them could have seen it.
+
+That probe role is granted `DELETE` on `tenants` and NOTHING on `tenant_claims` or
+`tenant_claim_events`, which incidentally pins a second property: the cascade and the
+event INSERT both run in the owner's context, so the write happens without the caller
+holding any privilege on either table.
+
+## D-30 — the denied set on the routing tables, completed by derivation
+
+The security review noted `TRIGGER` and `REFERENCES` were outside the declaration. The
+one with teeth is `TRIGGER`: `CREATE TRIGGER` needs only that privilege plus `EXECUTE`
+on a function, and a `BEFORE INSERT ... FOR EACH ROW` trigger that returns `NULL`
+discards every append while the statement still reports success — a fail-closed writer
+does not notice, and there is nothing left to read afterwards.
+
+Rather than add the two named privileges, the set was re-derived: **on the two routing
+tables, deny every privilege the grant audit reads that the role does not need.** That
+gives all seven for `tenant_claim_events` (with `passwd_app`'s `INSERT` held on eight
+columns), all seven for both workers on `tenant_claims`, and five for `passwd_app`
+there — `SELECT`/`INSERT` stay, since the sign-in path looks up and creates claim rows.
+The derivation also picked up `TRUNCATE` on `tenant_claims`, which nobody had named: it
+destroys every claim's routing AND fires no row-level trigger, so it would leave no
+`deregister` events at all — evidence destruction, not merely a denial of service.
+
+None of the added privileges is held on the development database, so this is a
+tightening of the declaration rather than a repair.
+
+## D-31 — `check-runtime-image-assets` read an error message as a file path
+
+The final pre-PR run went red on a gate nothing in this round touched. The cause is
+worth recording because the shape recurs: the gate derives its required-asset set from
+string LITERALS rather than raw text, precisely so a path named in a comment is not
+counted — and D-3 records the sibling case, where forbidden-pattern greps fired on this
+PR's own explanatory comments. Literals are not enough. A message built as
+
+    `DENIED_POLICY_INVALID: … ${subject}. ` + "The subject must be schema-qualified…"
+
+leaves a `TemplateTail` whose literal text is exactly `". "`, which the gate's
+relative resolution turns into `scripts/lib/. ` — a required asset no `COPY` can
+satisfy, so the gate reds on prose.
+
+**Closed in the gate, not by rewording.** D-3 chose rewording because there the check
+was correct and the comment merely tripped it; here the derivation itself is wrong —
+`". "` is not a path reference under any reading, and the next person to end a template
+span with a full stop pays the same review round. `assetPathFrom` now drops any
+candidate containing whitespace, with the risk direction stated in place: it narrows a
+fail-closed gate, so it could in principle hide a real asset whose FILENAME contains a
+space — no file under `scripts/checks/` or `scripts/lib/` has one. A self-test case
+pins the shape, next to the existing comment-exclusion case; the red→green is the real
+tree, which failed before the change and reports
+`OK (2 script(s), 3 distinct asset(s))` after.
+
+## Verification
+
+The migration set (`20260731100000`, `20260731170000`, `20260731190000`) is applied to
+the shared development database, with explicit user confirmation for each application
+(R-c). Before that application, all 184 migrations were replayed from empty onto a
+throwaway database to prove the chain applies, and the D-23 convergence proof was run
+there rather than against shared roles.
+
+Run and passing: `bash scripts/pre-pr.sh` (68/68, which includes lint, the unit suite
+and the Next.js build), `npx tsc --noEmit`, and
+`node scripts/audit-db-grants.mjs` — run unpiped, so the exit status read is the
+gate's own and not a pipe tail's.
+
+`npm run test:integration` passes on every file this branch touches. The full-suite
+run reports one unrelated failure per run, in a different file each time, always one
+this branch does not modify (`webhook-delivery-durable`,
+`audit-outbox-worker-fanout`): the `audit-outbox-worker` container is running against
+the same development database and drains `audit_outbox` rows out from under tests that
+assert on them. Re-running the named file in isolation passes. This is the environment
+condition already recorded for this repository, not a regression — the discriminator
+used each time is (1) the file is absent from the branch diff, and (2) it is green when
+run alone.
+
+`scripts/checks/db-grants-manifest.json` was regenerated with
+`node scripts/audit-db-grants.mjs --write` after the migration. The diff is exactly the
+D-23 change and nothing else: `TABLE:passwd_app public.tenant_claim_events INSERT`
+removed, the eight `COLUMN:` keys added. The regeneration is only trustworthy because
+the prescriptive policy refuses to launder a denied privilege into the manifest — that
+check ran first and passed, which is what the first (failing) audit run above it
+demonstrated.

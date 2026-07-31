@@ -19,7 +19,18 @@
 --   psql -v ON_ERROR_STOP=1 "postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso" -f scripts/rls-smoke-verify.sql
 -- Prerequisites: passwd_app role must exist (see .github/workflows/ci.yml "Create app role" step)
 
--- Re-grant DML on tables created by migration
+-- Re-grant DML on tables created by migration.
+--
+-- These two statements are table- and sequence-BLIND, so they re-open EVERY
+-- entry in scripts/checks/app-role-denied-privileges.json for passwd_app — read
+-- that file for the current set rather than any list written here, which is how
+-- the previous note went stale. This job does not run
+-- `bootstrap-rds-roles.mjs --denied-only` behind them, because it creates only
+-- passwd_app and that mode requires every declared target to exist. Accepted:
+-- the database is ephemeral, the job asserts nothing about the tables those
+-- entries cover, and it never runs `audit-db-grants.mjs --write`, so nothing is
+-- recorded as expected. Do NOT copy this file's grants into a context where any
+-- of those three stops holding.
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
 
