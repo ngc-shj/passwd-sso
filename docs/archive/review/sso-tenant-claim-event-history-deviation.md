@@ -199,3 +199,107 @@ Corrected in the generator (the prose is generated, not hand-edited), keeping th
 invariant the section actually exists for — the retention-GC sweep never touches these
 tables — and replacing the false disjunction with the three real deletion paths, naming
 the owner-only routine as the third.
+
+---
+
+# Phase 3 review round 1
+
+Functionality: 2 Majors (both red-proved by the reviewer on a throwaway tree) + 2 Minors.
+Security: **no Critical, no Major**, 7 Minors — after attacking the two-layer claim,
+attribution forgery, injection, the fail-closed sign-in path and the GUC scoping.
+Testing: 6 Majors + 5 Minors.
+
+## D-13 — The gate's nested-write detector had a verb list; it now has none
+
+`nestsClaimWrite` matched only the creation verbs (`create|createMany|connectOrCreate`),
+so `claims: { connect: { id } }` inside `tenant.update` — which rewrites
+`tenant_claims.tenant_id`, i.e. a reassignment, i.e. the operation this table exists to
+record — registered no writer at all. Same for `updateMany`, `disconnect`, `set`,
+`delete`, `deleteMany`.
+
+Fixed by **removing** the verb list rather than extending it: the carriers consulted
+(`data:`, `create:`, `update:`) are write payloads by construction, so the relation field
+appearing under any of them is a write. `where:` / `select:` / `include:` are not
+consulted, which is what keeps a read from counting. A fail-closed gate cannot be one
+release behind its ORM's verb set, and D-9 had already widened the carrier list once
+while leaving the verbs — the second half of the same defect.
+
+## D-14 — Predicate (1) counts DISTINCT operations, not calls
+
+The shipped form compared call counts, which the reviewer red-proved green on: one arm
+emitting two events and another emitting none. The arms are mutually exclusive, so two
+events of one operation can never stand in for a second arm's.
+
+Now: distinct operations named by producer calls >= effective writers. This is the
+closest code-derivable form of the contract's per-`(function, operation)` set equality —
+the operation a given arm *can* produce is not derivable generically, but a function with
+N mutually exclusive writers must name N distinct operations. **Limit enumerated in the
+gate**: a function legitimately emitting N events of the SAME operation for N writers
+would false-deny; no such site exists, and the remedy would be to split the function
+rather than loosen this back to a count.
+
+## D-15 — The forbidden-pattern runner checked a file that is immutable after merge
+
+D-10 gave C1's patterns a runner, and the runner selected its subject with
+`CREATE TABLE tenant_claim_events` — which matches exactly one migration, the one nobody
+can change once merged. A later `ALTER TABLE … ADD CONSTRAINT … REFERENCES tenants` —
+**the single change that destroys this table's purpose**, since I4's authority is the
+*absence* of FKs — lives in a file the runner never opened. Same for a later
+`CREATE OR REPLACE FUNCTION … SECURITY DEFINER`.
+
+The subject set is now derived rather than anchored: any migration whose text names the
+table. The `CREATE TABLE` match survives only as the trigger for the "no subject" floor,
+so an empty result still exits 2. Red-proved with a second-migration fixture.
+
+This is R42 applied to a gate's *subject* set rather than to the code's member set — and
+it is the same accretion signature the rule warns about: the subject was chosen from the
+one file in front of me at the time.
+
+## D-16 — `TRUNCATE` was being fired at the real shared table in autocommit
+
+The no-truncate red-proof ran `TRUNCATE tenant_claim_events` as the owner, outside any
+transaction. The assertion is correct only while the trigger works — and the moment it
+does not, which is the *only* state the test exists to detect, the statement wipes every
+row of the routing history on the shared dev database, irreversibly, for every other
+working copy.
+
+Now inside `BEGIN … ROLLBACK` on one connection. `TRUNCATE` is transactional in
+PostgreSQL, so nothing about the assertion changes and the blast radius is zero. NF3's
+"never by mutating the shared dev database" applies to the statement a red-proof *fires*,
+not only to the setup around it — the trigger-drop proof honoured that rule and this one
+did not.
+
+## D-17 — SEC-2 (routine EXECUTE ACL) accepted, on a reason the round itself created
+
+The three new routines' EXECUTE ACL rests on migration `20260725140000`'s unscoped
+`ALTER DEFAULT PRIVILEGES … REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC`, whose binding is
+per-creating-role, and no *prescriptive* control covers function EXECUTE
+(`app-role-denied-privileges.json` is table-scoped; `audit-db-grants.mjs`'s `FUNCTION:`
+family is descriptive and launderable by `--write`).
+
+**Accepted rather than fixed, and the reason is D-15, not cost**: the exploit shape the
+finding names is a future `SECURITY DEFINER` conversion, and D-15's widened subject set
+now fails the gate on `SECURITY DEFINER` appearing in **any** migration that names this
+table — which is where such a conversion would have to live. With invoker rights and no
+`DELETE` for any non-owner role, an EXECUTE grant on its own confers nothing.
+**Worst case**: a future migration grants EXECUTE to an audited role, which produces a
+`FUNCTION:` line and an `UNEXPECTED_GRANT` at the next deploy-time audit. **Likelihood**:
+requires a deliberate grant nothing needs. **Cost to fix later**: extending the
+denied-privileges schema to function EXECUTE — a change to a shared security control read
+by two consumers and the runtime image, which is its own piece of work and does not
+belong in a claim-history PR.
+
+## D-18 — Minors folded in
+
+`--by` now reserves `signin` (SEC-6) — the one label a `history` reader treats as
+engine-written, rejected at ingest because storage keeps what was typed and I1 makes the
+row uncorrectable afterwards. The generated retention matrix says "only **sanctioned**
+deletion path" (SEC-3), matching `audit-log-schema.md` and the DDL rather than
+overstating what the trigger binds. `cmdHistory` refuses `--domain` and `--tenant`
+together and uses one predicate for the guard and the selector choice (F3) — previously
+`--domain ""` alongside a `--tenant` silently discarded the tenant. The post-write line
+no longer says "see history above" when what is above is a command suggestion (F4). The
+throwaway LOGIN role carries `VALID UNTIL` (SEC-7), which is the bound that survives its
+`finally` not running. `client_addr`'s absence from `history` output, and the owner
+recovery for rows an app-role compromise injects with unreachable tenant ids, are now
+stated in `audit-log-schema.md` (SEC-4, SEC-5).

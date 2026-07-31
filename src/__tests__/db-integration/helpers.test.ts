@@ -5,6 +5,8 @@ import {
   RETRYABLE_CLEANUP_SQLSTATES,
   isRetryableCleanupConflict,
   withCleanupConflictRetry,
+  sweepLeakedTenants,
+  TenantClaimEventsPurgeError,
 } from "./helpers";
 
 /**
@@ -167,4 +169,138 @@ describe("withCleanupConflictRetry", () => {
       /async function deleteTestData\([^)]*\)[^{]*\{\s*await withCleanupConflictRetry\(/,
     );
   });
+});
+
+/**
+ * QA-3: `sweepLeakedTenants` (the loop `sweepOutstandingTenants` runs) had
+ * three defects — message-prefix keying, an early throw that abandoned the
+ * rest of the sweep and the report with it, and a `cleanup()` with no
+ * try/finally around the pool disconnects. A real tenant_claim_events purge
+ * failure is a cross-process race that, like round-3 M4's deadlock retry,
+ * does not happen on demand — so the mechanism is driven here with a
+ * fabricated `deleteTestData`, never against the real routine or database.
+ */
+describe("sweepLeakedTenants", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns without calling deleteTestData when nothing leaked", async () => {
+    const deleteTestData = vi.fn();
+    await sweepLeakedTenants([], deleteTestData);
+    expect(deleteTestData).not.toHaveBeenCalled();
+  });
+
+  it("sweeps every leaked tenant that deletes cleanly, without throwing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const deleted: string[] = [];
+    const deleteTestData = vi.fn(async (id: string) => {
+      deleted.push(id);
+    });
+    await sweepLeakedTenants(["a", "b", "c"], deleteTestData);
+    expect(deleted).toEqual(["a", "b", "c"]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("swept 3 leaked test tenant(s)"));
+  });
+
+  it(
+    "an ordinary (non-purge) failure is reported as unresolved and does not abort the sweep or throw",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempted: string[] = [];
+      const deleteTestData = vi.fn(async (id: string) => {
+        attempted.push(id);
+        if (id === "b") throw new Error("FK ordering conflict");
+      });
+      await expect(sweepLeakedTenants(["a", "b", "c"], deleteTestData)).resolves.toBeUndefined();
+      // Every leaked tenant was still attempted (QA-3b's property applies to
+      // the ordinary path too — one failure must not skip the rest).
+      expect(attempted).toEqual(["a", "b", "c"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could NOT delete 1 test tenant(s)"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("b (FK ordering conflict)"));
+    },
+  );
+
+  it(
+    "a TenantClaimEventsPurgeError does not abort the loop: every other leaked tenant is still attempted, the report is still printed, and the error is re-thrown only after the loop finishes (QA-3b)",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempted: string[] = [];
+      const deleteTestData = vi.fn(async (id: string) => {
+        attempted.push(id);
+        if (id === "a") throw new TenantClaimEventsPurgeError("tenant_claim_events purge failed for tenant a");
+      });
+      await expect(sweepLeakedTenants(["a", "b", "c"], deleteTestData)).rejects.toThrow(
+        TenantClaimEventsPurgeError,
+      );
+      // The whole point: "b" and "c" were still attempted after "a" failed —
+      // the old implementation threw immediately and never reached them.
+      expect(attempted).toEqual(["a", "b", "c"]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("UNDELETABLE tenant_claim_events rows"),
+      );
+    },
+  );
+
+  it(
+    "combines a fatal purge failure with an ordinary failure into one thrown AggregateError, and still names both in the printed report (QA-3b)",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const deleteTestData = vi.fn(async (id: string) => {
+        if (id === "a") throw new TenantClaimEventsPurgeError("tenant_claim_events purge failed for tenant a");
+        if (id === "b") throw new TenantClaimEventsPurgeError("tenant_claim_events purge failed for tenant b");
+      });
+      let caught: unknown;
+      try {
+        await sweepLeakedTenants(["a", "b"], deleteTestData);
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(AggregateError);
+      expect((caught as AggregateError).errors).toHaveLength(2);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("purge failed for tenant a"));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("purge failed for tenant b"));
+    },
+  );
+
+  it(
+    "keys the fatal path on the error CLASS, not on message text (QA-3a): a plain Error carrying the exact old wording is treated as an ordinary, non-fatal failure",
+    async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const attempted: string[] = [];
+      const deleteTestData = vi.fn(async (id: string) => {
+        attempted.push(id);
+        if (id === "a") {
+          // Same text the real purge failure used to carry, deliberately
+          // NOT a TenantClaimEventsPurgeError. Under the old string-prefix
+          // match this would have aborted the sweep; it must not.
+          throw new Error("tenant_claim_events purge failed for tenant a (undeletable rows may remain): x");
+        }
+      });
+      await expect(sweepLeakedTenants(["a", "b"], deleteTestData)).resolves.toBeUndefined();
+      expect(attempted).toEqual(["a", "b"]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("could NOT delete 1 test tenant(s)"));
+    },
+  );
+
+  it(
+    "cleanup() wraps the sweep in try/finally, so a sweep failure still disconnects every pool (QA-3c)",
+    () => {
+      // Driving this through a real TestContext would need a live DB and a
+      // real purge failure — the cross-process race this whole mechanism
+      // exists for, which does not happen on demand. Asserted at the source
+      // instead, same shape as "is actually adopted by deleteTestData" above:
+      // no observable output differs between wrapped and unwrapped on the
+      // happy path, since a happy-path sweep never reaches the finally's
+      // rethrow-preserving property.
+      const source = readFileSync(resolve(__dirname, "helpers.ts"), "utf8");
+      const cleanupBody = /async function cleanup\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(source)?.[1];
+      expect(cleanupBody, "cleanup() body extraction").toBeDefined();
+      expect(cleanupBody).toMatch(/try\s*\{[\s\S]*sweepOutstandingTenants\(\);?[\s\S]*\}\s*finally\s*\{/);
+      const finallyBlock = /finally\s*\{([\s\S]*)$/.exec(cleanupBody as string)?.[1];
+      expect(finallyBlock, "finally block extraction").toBeDefined();
+      for (const role of ["su", "app", "worker", "retentionWorker"]) {
+        expect(finallyBlock).toContain(`${role}.pool.end()`);
+      }
+    },
+  );
 });

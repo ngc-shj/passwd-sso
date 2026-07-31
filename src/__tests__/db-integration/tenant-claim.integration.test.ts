@@ -1027,6 +1027,10 @@ describe("findOrCreateTenantForClaim (C4)", () => {
         async () => {
           const roleName = `probe_tce_${randomBytes(4).toString("hex")}`;
           const password = randomBytes(16).toString("hex");
+          // Absolute timestamp, computed here: VALID UNTIL takes a literal, not an
+          // interval expression. Generated locally, so interpolating it is the same
+          // justification as the role name and password above.
+          const validUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
           const base = process.env.DATABASE_URL;
           if (!base) throw new Error("DATABASE_URL is not set");
 
@@ -1044,7 +1048,15 @@ describe("findOrCreateTenantForClaim (C4)", () => {
             // node:crypto randomBytes().toString("hex") — [0-9a-f] only,
             // never operator or IdP input.
             await ctx.su.prisma.$executeRawUnsafe(
-              `CREATE ROLE "${roleName}" LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
+              // VALID UNTIL is the bound that survives the `finally` not running. This
+              // role must LOGIN (it drives the production writer), so unlike the
+              // repo's other probe roles it cannot be NOLOGIN — and a SIGKILL, a
+              // cancelled CI job or a crashed worker would otherwise leave a
+              // login-capable principal holding writes on `tenants`/`tenant_claims`
+              // on the SHARED dev database, with no expiry and outside AUDITED_ROLES.
+              `CREATE ROLE "${roleName}" LOGIN PASSWORD '${password}' ` +
+                `VALID UNTIL '${validUntil}' ` +
+                `NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION`,
             );
             await ctx.su.prisma.$executeRawUnsafe(
               `DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO "${roleName}"', current_database()); END $$`,

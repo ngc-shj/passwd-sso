@@ -815,14 +815,17 @@ describe("tenant-domain CLI (C7)", () => {
       const tenantId = await ctx.createTenant();
       const claim = `${runToken()}.${PRIMARY_CLAIM}`;
       await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
-      const countBefore = await ctx.su.prisma.tenantClaim.count();
+      // QA-5 / VE1: scoped to this test's own tenant, never a GLOBAL count —
+      // the dev database is shared, and a concurrent run's own add/remove
+      // would move the unscoped count for a reason unrelated to this test.
+      const countBefore = await ctx.su.prisma.tenantClaim.count({ where: { tenantId } });
 
       const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", yes: true });
 
       expect(result.ok).toBe(true);
       const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
       expect(row?.revokedAt).not.toBeNull();
-      const countAfter = await ctx.su.prisma.tenantClaim.count();
+      const countAfter = await ctx.su.prisma.tenantClaim.count({ where: { tenantId } });
       expect(countAfter).toBe(countBefore);
 
       await ctx.deleteTestData(tenantId);
@@ -1321,6 +1324,114 @@ describe("tenant-domain CLI (C7)", () => {
           expect(rows[0].newTenantId).toBe(tenantId);
         } finally {
           await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // QA-1: the case above only ever seeds a REGISTER row, whose
+    // old_tenant_id is NULL — so it cannot exercise the `{ oldTenantId }`
+    // half of cmdHistory's `OR: [{ oldTenantId }, { newTenantId }]`
+    // predicate. Deleting that disjunct would leave this whole suite green
+    // while falsifying user scenario 3: a tenant deleted after a claim was
+    // moved OFF it.
+    it.skipIf(SKIP)(
+      "--tenant <uuid> for the LOSING side of a reassignment also returns the row (the oldTenantId disjunct)",
+      async () => {
+        const losingTenant = await ctx.createTenant();
+        const gainingTenant = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+        await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+        try {
+          const added = await cmdAdd({
+            tenant: gainingTenant,
+            domain: claim,
+            by: "ops-oncall",
+            from: losingTenant,
+            yes: true,
+          });
+          expect(added.ok).toBe(true);
+
+          const result = await cmdHistory({ tenant: losingTenant });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as {
+            operation: string;
+            oldTenantId: string | null;
+            newTenantId: string | null;
+          }[];
+          expect(rows).toHaveLength(1);
+          expect(rows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REASSIGN);
+          expect(rows[0].oldTenantId).toBe(losingTenant);
+          expect(rows[0].newTenantId).toBe(gainingTenant);
+        } finally {
+          await ctx.deleteTestData(losingTenant);
+          await ctx.deleteTestData(gainingTenant);
+        }
+      },
+    );
+
+    // QA-11: cmdHistory's non-UUID --tenant branch (resolveTenantRef fallback)
+    // had no test at all — only the bare-UUID branch above was covered.
+    it.skipIf(SKIP)(
+      "a non-UUID --tenant falls back to resolveTenantRef and returns that tenant's history",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        try {
+          const added = await cmdAdd({ tenant: tenantId, domain: claim, by: "ops-oncall", yes: true });
+          expect(added.ok).toBe(true);
+
+          // The claim string itself is a valid resolveTenantRef ref (the
+          // same non-UUID path list/add/remove use) — unlike the bare-UUID
+          // branch, which never calls resolveTenantRef at all (F3).
+          const result = await cmdHistory({ tenant: claim });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { operation: string; newTenantId: string | null }[];
+          expect(rows).toHaveLength(1);
+          expect(rows[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REGISTER);
+          expect(rows[0].newTenantId).toBe(tenantId);
+        } finally {
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "a non-UUID --tenant that resolves to no tenant is refused with 'Tenant not found'",
+      async () => {
+        const ref = `no-such-tenant-${runToken()}`;
+        const result = await cmdHistory({ tenant: ref });
+        expect(result.ok).toBe(false);
+        expect(result.code).not.toBe(0);
+        expect(result.message).toBe(`Tenant not found: ${ref}`);
+      },
+    );
+
+    it.skipIf(SKIP)(
+      "--domain wins over --tenant when both are given (documented precedence)",
+      async () => {
+        const tenantA = await ctx.createTenant();
+        const tenantB = await ctx.createTenant();
+        const claimA = `${runToken()}.${ALIAS_CLAIM}`;
+        const claimB = `${runToken()}.${PRIMARY_CLAIM}`;
+
+        try {
+          expect((await cmdAdd({ tenant: tenantA, domain: claimA, by: "ops-oncall", yes: true })).ok).toBe(true);
+          expect((await cmdAdd({ tenant: tenantB, domain: claimB, by: "ops-oncall", yes: true })).ok).toBe(true);
+
+          // --tenant names tenantB, which has its OWN, different event.
+          // If --tenant won this precedence, tenantB's event (newTenantId
+          // === tenantB) would come back instead of claimA's.
+          const result = await cmdHistory({ domain: claimA, tenant: tenantB });
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as { claim: string; newTenantId: string | null }[];
+          expect(rows).toHaveLength(1);
+          expect(rows[0].claim).toBe(claimA);
+          expect(rows[0].newTenantId).toBe(tenantA);
+        } finally {
+          await ctx.deleteTestData(tenantA);
+          await ctx.deleteTestData(tenantB);
         }
       },
     );

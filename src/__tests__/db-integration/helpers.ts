@@ -153,6 +153,20 @@ export function sqlStateOf(error: unknown): string | null {
   return /Code:\s*`([0-9A-Z]{5})`/.exec(message)?.[1] ?? null;
 }
 
+/**
+ * Tags a `tenant_claim_events` purge failure inside `deleteTestData` (QA-3a).
+ * Keying the sweep's fatal/non-fatal split on this class, rather than on a
+ * message-prefix string, means rewording the message can never silently
+ * degrade the abort into warn-and-continue — the one outcome that would leave
+ * an undeletable row on the shared dev database unreported.
+ */
+export class TenantClaimEventsPurgeError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "TenantClaimEventsPurgeError";
+  }
+}
+
 export function isRetryableCleanupConflict(error: unknown): boolean {
   const sqlState = sqlStateOf(error);
   return sqlState !== null && (RETRYABLE_CLEANUP_SQLSTATES as readonly string[]).includes(sqlState);
@@ -183,6 +197,56 @@ export async function withCleanupConflictRetry<T>(fn: () => Promise<T>): Promise
     }
   }
   throw lastError;
+}
+
+/**
+ * The sweep loop `sweepOutstandingTenants` runs, factored out so the
+ * failure-handling mechanism (QA-3) can be driven directly with a fabricated
+ * `deleteTestData`, rather than relying on the real cross-process race that
+ * produces a genuine tenant_claim_events purge failure — which, like the
+ * deadlock round-3 M4's retry exists for, does not happen on demand.
+ *
+ * A `TenantClaimEventsPurgeError` is fatal (QA-3a: keyed on the class, not on
+ * message text) but does NOT abort the loop early (QA-3b): every other leaked
+ * tenant still gets its own sweep attempt and the accumulated report is still
+ * printed, so one purge failure cannot hide the other leaks it would
+ * otherwise cost the suite its only signal about. It is re-thrown only after
+ * the loop finishes.
+ */
+export async function sweepLeakedTenants(
+  leaked: readonly string[],
+  deleteTestData: (tenantId: string) => Promise<void>,
+): Promise<void> {
+  if (leaked.length === 0) return;
+  const unresolved: string[] = [];
+  const fatal: TenantClaimEventsPurgeError[] = [];
+  for (const tenantId of leaked) {
+    try {
+      await deleteTestData(tenantId);
+    } catch (e) {
+      if (e instanceof TenantClaimEventsPurgeError) {
+        fatal.push(e);
+        continue;
+      }
+      unresolved.push(`${tenantId} (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  console.warn(
+    `[db-integration] swept ${leaked.length - unresolved.length - fatal.length} leaked test tenant(s) left by a failed test.`,
+  );
+  if (unresolved.length > 0) {
+    console.warn(
+      `[db-integration] could NOT delete ${unresolved.length} test tenant(s) — they remain on the shared database:\n  ${unresolved.join("\n  ")}`,
+    );
+  }
+  if (fatal.length > 0) {
+    console.warn(
+      `[db-integration] ${fatal.length} tenant(s) left UNDELETABLE tenant_claim_events rows on the shared database (append-only — nothing but the purge routine can remove them):\n  ${fatal.map((e) => e.message).join("\n  ")}`,
+    );
+    throw fatal.length === 1
+      ? fatal[0]
+      : new AggregateError(fatal, `${fatal.length} tenant_claim_events purge failures during sweep`);
+  }
 }
 
 // ─── Test context ───────────────────────────────────────────────
@@ -459,9 +523,12 @@ export async function createTestContext(): Promise<TestContext> {
         // (round: C1 testing strategy). Every other row here is an ordinary
         // DELETE that a future FK fix can retry; a tenant_claim_events row
         // left behind by a failed purge is UNDELETABLE by anything short of
-        // this same routine, so sweepOutstandingTenants() must not fold this
-        // into its best-effort "reported, not thrown" path below.
-        throw new Error(
+        // this same routine, so sweepLeakedTenants() must not fold this
+        // into its best-effort "reported, not thrown" path below. Tagged by
+        // class (TenantClaimEventsPurgeError), not by message text — a
+        // reworded message must not silently degrade the sweep's abort into
+        // warn-and-continue (QA-3a).
+        throw new TenantClaimEventsPurgeError(
           `tenant_claim_events purge failed for tenant ${tenantId} (undeletable rows may remain): ` +
             `${e instanceof Error ? e.message : String(e)}`,
           { cause: e },
@@ -490,46 +557,29 @@ export async function createTestContext(): Promise<TestContext> {
    * when a test already failed, and turning that into a second failure in
    * afterAll would bury the first. The ids are printed so a leak that the
    * sweep cannot resolve is still actionable.
+   *
+   * The one exception is `sweepLeakedTenants` below, for a
+   * TenantClaimEventsPurgeError.
    */
   async function sweepOutstandingTenants(): Promise<void> {
-    const leaked = [...outstandingTenantIds];
-    if (leaked.length === 0) return;
-    const unresolved: string[] = [];
-    for (const tenantId of leaked) {
-      try {
-        await deleteTestData(tenantId);
-      } catch (e) {
-        // A tenant_claim_events purge failure (tagged in deleteTestData) is
-        // not the same class as the FK-ordering failures this loop otherwise
-        // tolerates: every other swept row is deletable by a later retry,
-        // but a row this table's append-only triggers refuse to give up is
-        // undeletable by anything except the routine that just failed.
-        // Warning and moving on would leave it on the shared dev database
-        // with no further signal, so this one aborts the sweep instead.
-        if (e instanceof Error && e.message.startsWith("tenant_claim_events purge failed")) {
-          throw e;
-        }
-        unresolved.push(`${tenantId} (${e instanceof Error ? e.message : String(e)})`);
-      }
-    }
-    console.warn(
-      `[db-integration] swept ${leaked.length - unresolved.length} leaked test tenant(s) left by a failed test.`,
-    );
-    if (unresolved.length > 0) {
-      console.warn(
-        `[db-integration] could NOT delete ${unresolved.length} test tenant(s) — they remain on the shared database:\n  ${unresolved.join("\n  ")}`,
-      );
-    }
+    await sweepLeakedTenants([...outstandingTenantIds], deleteTestData);
   }
 
   async function cleanup(): Promise<void> {
-    await sweepOutstandingTenants();
-    await Promise.all([
-      su.prisma.$disconnect().then(() => su.pool.end()),
-      app.prisma.$disconnect().then(() => app.pool.end()),
-      worker.prisma.$disconnect().then(() => worker.pool.end()),
-      retentionWorker.prisma.$disconnect().then(() => retentionWorker.pool.end()),
-    ]);
+    // A sweep failure (TenantClaimEventsPurgeError, re-thrown after the loop
+    // finishes and the report is printed — see sweepLeakedTenants) must not
+    // skip disconnecting every pool: a leaked pg.Pool keeps the forked
+    // vitest worker process alive (QA-3c).
+    try {
+      await sweepOutstandingTenants();
+    } finally {
+      await Promise.all([
+        su.prisma.$disconnect().then(() => su.pool.end()),
+        app.prisma.$disconnect().then(() => app.pool.end()),
+        worker.prisma.$disconnect().then(() => worker.pool.end()),
+        retentionWorker.prisma.$disconnect().then(() => retentionWorker.pool.end()),
+      ]);
+    }
   }
 
   return {

@@ -82,6 +82,7 @@ import {
 } from "@/lib/security/unsafe-display-chars";
 import {
   recordTenantClaimEvent,
+  SIGNIN_ACTOR_LABEL,
   TENANT_CLAIM_EVENT_OPERATION,
 } from "@/lib/tenant/tenant-claim-event";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
@@ -732,6 +733,24 @@ function validateActorLabel(by: string): CmdResult | null {
     return { ok: false, code: 1, message: "--by is required (a self-asserted operator label)." };
   }
 
+  // `signin` is the label the auto-registration path writes, and it is the one
+  // value a reader of `history` treats as engine-generated rather than typed by
+  // a person. Every other `--by` is self-asserted and says so; this one would
+  // borrow the credibility of the path that is not. Reserved at ingest — what
+  // is stored stays what was typed, so it cannot be fixed on the way out, and
+  // I1 makes the row uncorrectable afterwards. (`db_user` still distinguishes
+  // the two, but only for a reader who thinks to look.)
+  if (by.trim().toLowerCase() === SIGNIN_ACTOR_LABEL) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        `--by must not be "${SIGNIN_ACTOR_LABEL}": that label is reserved for the sign-in ` +
+        "auto-registration path, and a routing event carrying it would read as engine-written " +
+        "rather than operator-asserted. Use your own identifier.",
+    };
+  }
+
   // Refused here, before the client is even built, rather than left to the
   // column's own bound: a value this long would otherwise raise a raw 22001
   // mid-transaction, after the operator has already read the confirmation
@@ -1088,7 +1107,8 @@ export async function cmdAdd(args: {
           }
           if (overwritten.length > 0) {
             console.log(
-              `Overwritten on this row (not lost — see history above): ${overwritten.join("; ")}.`,
+              `Overwritten on this row (not lost — recorded in tenant_claim_events; read it with the ` +
+                `"history" command shown above): ${overwritten.join("; ")}.`,
             );
           }
         }
@@ -1243,11 +1263,29 @@ export async function cmdHistory(args: { domain?: string; tenant?: string }): Pr
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) return missingUrlResult();
 
-  if (!args.domain && !args.tenant) {
+  // ONE predicate for both the guard and the selector choice. They used to
+  // disagree — the guard tested truthiness, the choice tested definedness — so
+  // `history --tenant <uuid> --domain ""` passed the guard, took the claim
+  // branch with an empty claim, and reported an empty result for a question the
+  // operator did not ask. A flag the operator wrote must either take effect or
+  // stop the command; this module's own header says so.
+  const hasDomain = args.domain !== undefined;
+  const hasTenant = args.tenant !== undefined;
+  if (!hasDomain && !hasTenant) {
     return {
       ok: false,
       code: 1,
       message: "history requires --domain <claim> or --tenant <uuid>.",
+    };
+  }
+  if (hasDomain && hasTenant) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "history takes --domain <claim> OR --tenant <uuid>, not both. " +
+        "Re-run with the one you meant: --domain names a single claim, " +
+        "--tenant every event naming that tenant on either side.",
     };
   }
 
@@ -1256,7 +1294,7 @@ export async function cmdHistory(args: { domain?: string; tenant?: string }): Pr
   // tenant". Normalised the same way `add`/`remove` read `--domain` back, but
   // NOT schema-validated: this is a read, and a pre-existing row stored by
   // some other means must still be findable by it.
-  const claim = args.domain !== undefined ? normalizeTenantClaim(args.domain) : undefined;
+  const claim = hasDomain ? normalizeTenantClaim(args.domain as string) : undefined;
 
   const prisma = migrationClientFactory.create(url);
   try {

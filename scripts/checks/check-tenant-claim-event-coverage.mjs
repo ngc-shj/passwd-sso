@@ -18,8 +18,12 @@
  *
  * THREE PREDICATES, because one is not enough:
  *
- *   (1) Per enclosing function, `recordTenantClaimEvent` calls >= EFFECTIVE
- *       writer statements. Two shapes force this and a weaker form fails one:
+ *   (1) Per enclosing function, the number of DISTINCT operations named by
+ *       `recordTenantClaimEvent` calls >= the number of EFFECTIVE writer
+ *       statements. Distinct, not a raw call count: mutually exclusive arms
+ *       cannot stand in for each other, so one arm emitting twice must not
+ *       satisfy a second arm that emits nothing. Two shapes force the rest of
+ *       the predicate, and a weaker form fails one:
  *         - `cmdAdd`'s three writers share ONE withBypassRls callback, so a
  *           tree-wide "every operation appears somewhere" existence check is
  *           blind — with its create arm unemitted, `register` still appears via
@@ -207,6 +211,7 @@ function checkMigrationForbiddenPatterns() {
     fail("cannot read prisma/migrations — C1's forbidden patterns have no subject");
   }
   const found = [];
+  const creators = [];
   for (const name of entries) {
     let sql;
     try {
@@ -214,7 +219,17 @@ function checkMigrationForbiddenPatterns() {
     } catch {
       continue;
     }
-    if (!/CREATE TABLE\s+"?tenant_claim_events"?/.test(sql)) continue;
+    // SUBJECT SET, derived rather than anchored on one file. Matching only the
+    // CREATING migration would check a file that is immutable after merge and
+    // miss every later one — and the change that destroys this table's whole
+    // purpose is a LATER `ALTER TABLE … ADD CONSTRAINT … REFERENCES tenants`,
+    // which re-arms the cascade I4 exists to escape. Same for a
+    // `CREATE OR REPLACE FUNCTION … SECURITY DEFINER`. So: any migration that
+    // NAMES the table is in scope.
+    if (!/tenant_claim_events/.test(sql)) continue;
+    // The floor below still keys on the creating migration: a subject set that
+    // is merely non-empty does not prove the gate found the table's own DDL.
+    if (/CREATE TABLE\s+"?tenant_claim_events"?/.test(sql)) creators.push(name);
     found.push(name);
     for (const [re, reason] of MIGRATION_FORBIDDEN) {
       if (re.test(sql)) {
@@ -224,7 +239,7 @@ function checkMigrationForbiddenPatterns() {
       }
     }
   }
-  if (found.length === 0) {
+  if (creators.length === 0) {
     fail(
       "no migration creates tenant_claim_events — C1's forbidden patterns were checked " +
         "against nothing. Finding no subject is not the same answer as finding no violation.",
@@ -252,7 +267,23 @@ function delegateCall(call) {
  */
 const NESTED_WRITE_CARRIERS = ["data", "create", "update"];
 
-/** Does this `tenant.<write>(...)` argument nest a claim-row write? */
+/**
+ * Does this `tenant.<write>(...)` argument nest a claim-row write?
+ *
+ * NO VERB LIST, deliberately. An earlier form matched only the creation verbs
+ * (`create|createMany|connectOrCreate`), which left every other Prisma nested
+ * write silently unregistered — and `claims: { connect: { id } }` inside
+ * `tenant.update` IS a reassignment: it rewrites `tenant_claims.tenant_id`,
+ * the exact operation this table exists to record. `updateMany`, `disconnect`,
+ * `set`, `delete` and `deleteMany` are the same story. Enumerating verbs means
+ * re-enumerating them whenever Prisma grows one, and a fail-closed gate cannot
+ * be one release behind its ORM.
+ *
+ * The carriers below are WRITE payloads (`data:` for create/update,
+ * `create:`/`update:` for upsert), so the relation field appearing under any of
+ * them is a write by construction — `where:`, `select:` and `include:` are not
+ * consulted, which is what keeps a read from being counted.
+ */
 function nestsClaimWrite(call) {
   const arg = call.getArguments()[0];
   if (!arg || !arg.isKind(SyntaxKind.ObjectLiteralExpression)) return false;
@@ -262,8 +293,7 @@ function nestsClaimWrite(call) {
     const rel = payload
       .getDescendantsOfKind(SyntaxKind.PropertyAssignment)
       .find((p) => p.getName() === RELATION_FIELD);
-    if (!rel) continue;
-    if (/\b(create|createMany|connectOrCreate)\b/.test(rel.getText())) return true;
+    if (rel) return true;
   }
   return false;
 }
@@ -322,7 +352,7 @@ for (const { rel, sf } of sourceFilesFrom(project, SEARCH_DIRS, SCAN_ROOT)) {
   const perFn = new Map();
   const bump = (fn, key) => {
     const k = fn ?? sf;
-    if (!perFn.has(k)) perFn.set(k, { writers: 0, producers: 0, line: 0 });
+    if (!perFn.has(k)) perFn.set(k, { writers: 0, producers: 0, ops: new Set(), line: 0 });
     const e = perFn.get(k);
     e[key] += 1;
     return e;
@@ -369,6 +399,9 @@ for (const { rel, sf } of sourceFilesFrom(project, SEARCH_DIRS, SCAN_ROOT)) {
       const named = arg?.getDescendantsOfKind(SyntaxKind.PropertyAssignment)
         .find((p) => p.getName() === "operation");
       const lit = named?.getInitializer();
+      if (lit?.isKind(SyntaxKind.StringLiteral)) e.ops.add(lit.getLiteralValue());
+      else if (named) e.ops.add(named.getInitializer()?.getText() ?? `?${e.producers}`);
+      else e.ops.add(`?${e.producers}`);
       if (lit?.isKind(SyntaxKind.StringLiteral) && !OPERATIONS.has(lit.getLiteralValue())) {
         violations.push(
           `${rel}:${call.getStartLineNumber()}: operation "${lit.getLiteralValue()}" is not a member of ` +
@@ -400,10 +433,25 @@ for (const { rel, sf } of sourceFilesFrom(project, SEARCH_DIRS, SCAN_ROOT)) {
         `${rel}:${e.line}: writes tenant_claims but calls no ${PRODUCER_FN}() — ` +
           `every routing change must append its history row in the same transaction.`,
       );
-    } else if (e.producers < e.writers) {
+    } else if (e.ops.size < e.writers) {
+      // DISTINCT operations, not a raw call count. A count is satisfied by one
+      // arm emitting twice while another emits nothing — the arms are mutually
+      // exclusive, so two events of one operation can never stand in for a
+      // second arm's. This is the closest code-derivable form of the contract's
+      // per-(function, operation) set equality: the operation an arm produces
+      // cannot be derived generically, but a function with N mutually exclusive
+      // writers must name N distinct operations.
+      //
+      // LIMIT, enumerated rather than discovered: a function that legitimately
+      // emits N events of the SAME operation for N writers would false-deny.
+      // No such site exists — the four CLI arms carry four distinct operations
+      // and the retry pair collapses to one effective writer — and the remedy
+      // if one appears is to split the function, not to loosen this back to a
+      // count.
       violations.push(
-        `${rel}:${e.line}: ${e.writers} tenant_claims writer(s) but only ${e.producers} ` +
-          `${PRODUCER_FN}() call(s) in the same function — one of the arms emits no event.`,
+        `${rel}:${e.line}: ${e.writers} tenant_claims writer(s) but only ` +
+          `${e.ops.size} distinct operation(s) recorded (${[...e.ops].join(", ") || "none"}) ` +
+          `in the same function — an arm emits no event, or two arms record the same one.`,
       );
     }
   }

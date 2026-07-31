@@ -138,6 +138,35 @@ describe("check-tenant-claim-event-coverage", () => {
     expect(r.stderr).toMatch(/scripts\/upsert\.ts:2: writes tenant_claims but calls no/);
   });
 
+  it("fails a nested relation write that is not a creation verb (connect = reassignment)", () => {
+    // `claims: { connect: { id } }` inside tenant.update rewrites
+    // tenant_claims.tenant_id — a reassignment, i.e. exactly what this table
+    // exists to record. A creation-verb list registered no writer at all here.
+    write(
+      "scripts/nested-connect.ts",
+      `export async function move(tx, id, claimId) {\n` +
+        `  await tx.tenant.update({ where: { id }, data: { claims: { connect: { id: claimId } } } });\n}\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/scripts\/nested-connect\.ts:2: writes tenant_claims but calls no/);
+  });
+
+  it("fails when one arm emits twice and another emits nothing (distinct operations, not a count)", () => {
+    // The counterexample a raw call count passes: two writers, two producer
+    // calls, but both name the same operation — the arms are mutually
+    // exclusive, so the second arm is recorded nowhere.
+    write(
+      "scripts/dup-op.ts",
+      `export async function add(tx, claim, t) {\n` +
+        `  if (a) {\n    ${DELEGATE_WRITE}\n    ${EVENT("reassign")}\n    ${EVENT("reassign")}\n` +
+        `  } else if (b) {\n    ${DELEGATE_WRITE}\n  }\n}\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/only 1 distinct operation\(s\) recorded \(reassign\)/);
+  });
+
   it("fails two writer arms sharing one function when only one event is emitted", () => {
     write(
       "scripts/two-arms.ts",
@@ -147,7 +176,7 @@ describe("check-tenant-claim-event-coverage", () => {
     );
     const r = runGuard();
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toMatch(/2 tenant_claims writer\(s\) but only 1 recordTenantClaimEvent/);
+    expect(r.stderr).toMatch(/2 tenant_claims writer\(s\) but only 1 distinct operation/);
   });
 
   it("fails an unemitted writer even when the SAME operation is emitted in another file", () => {
@@ -263,7 +292,21 @@ describe("check-tenant-claim-event-coverage", () => {
     );
     const r = runGuard();
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toMatch(/forbidden pattern/);
+    expect(r.stderr).toMatch(/forbidden pattern .*REFERENCES/);
+  });
+
+  it("fails a LATER migration that re-arms the cascade — not only the creating one", () => {
+    // The creating migration is immutable after merge, so a subject set anchored
+    // on it checks a file nobody can change and misses the one change that
+    // destroys this table's purpose: a later ALTER TABLE adding the FK.
+    write(
+      "prisma/migrations/20260202000000_later_change/migration.sql",
+      `ALTER TABLE "tenant_claim_events" ADD CONSTRAINT fk\n` +
+        `  FOREIGN KEY (old_tenant_id) REFERENCES "tenants"("id") ON DELETE CASCADE;\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/20260202000000_later_change.*forbidden pattern .*REFERENCES/s);
   });
 
   it("exits 2 when no migration creates the table — no subject is not a clean bill", () => {

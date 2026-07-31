@@ -315,8 +315,9 @@ export function renderDeletionRetentionMatrix(
       "application code (manual user/admin action), an `ON DELETE CASCADE` " +
       "side effect of a parent-row deletion, or, for an append-only table " +
       "such as `tenant_claim_events`, neither of those: it has no foreign key " +
-      "and the application role holds no DELETE, so its only deletion path is " +
-      "a dedicated owner-only routine. Do not read membership here as " +
+      "and the application role holds no DELETE, so its only SANCTIONED " +
+      "deletion path is a dedicated owner-only routine (the owner has others, " +
+      "enumerated where the control class is stated). Do not read membership here as " +
       "\"deleted with its parent\".",
   );
   lines.push("");

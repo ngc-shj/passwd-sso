@@ -28,6 +28,9 @@ import { createTestContext, type TestContext } from "./helpers";
 // same file — which is the "one policy, two implementations" shape the shared
 // module exists to remove.
 import { loadDeniedPolicy } from "../../../scripts/lib/denied-privileges.mjs";
+// The SAME roster audit-db-grants.mjs audits, not a second hand-picked list
+// (C2's "named lists, not literals inline in the assertion").
+import { AUDITED_ROLES } from "../../../scripts/audit-db-grants.mjs";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -52,6 +55,13 @@ const CASES = DECLARATION.denied.flatMap((d) =>
   d.privileges.map((priv) => [d.role, d.table, priv, d.reason] as const),
 );
 
+// C2's fixed shape for this table: all three audited roles, all four denied
+// privileges. Named here — not spelled inline inside the assertion below —
+// so the containment check in "C2 — tenant_claim_events containment" reads
+// from ONE place, same as CASES itself.
+const TENANT_CLAIM_EVENTS_TABLE = "public.tenant_claim_events";
+const TENANT_CLAIM_EVENTS_DENIED_PRIVILEGES = ["SELECT", "UPDATE", "DELETE", "TRUNCATE"];
+
 describe("app-role denied privileges (live database)", () => {
   let ctx: TestContext;
 
@@ -69,6 +79,30 @@ describe("app-role denied privileges (live database)", () => {
     // while the suite stayed green — the same shape as the manifest recording
     // the breakage as expected.
     expect(CASES.length).toBeGreaterThan(0);
+  });
+
+  // C2's acceptance criterion, never implemented (QA-2): "assert containment,
+  // not a count: for each of the three role names and each of the four
+  // privilege names ... the triple (role, "public.tenant_claim_events", priv)
+  // is a member of the derived case set." `CASES.length > 0` above is an
+  // anti-vacuity floor, not this — it is satisfied by ANY non-empty policy,
+  // including one missing every tenant_claim_events entry. A count of
+  // CASES.length would also be the wrong shape even if it targeted this
+  // table: it reds on a policy TIGHTENING (adding a fifth privilege) and
+  // greens on a net-zero WEAKENING (swapping SELECT for REFERENCES) —
+  // containment does neither.
+  it("CASES contains (role, public.tenant_claim_events, privilege) for every audited role × every denied privilege (C2 containment)", () => {
+    for (const role of AUDITED_ROLES) {
+      for (const privilege of TENANT_CLAIM_EVENTS_DENIED_PRIVILEGES) {
+        const isMember = CASES.some(
+          ([r, table, priv]) => r === role && table === TENANT_CLAIM_EVENTS_TABLE && priv === privilege,
+        );
+        expect(
+          isMember,
+          `(${role}, ${TENANT_CLAIM_EVENTS_TABLE}, ${privilege}) must be a member of the derived case set`,
+        ).toBe(true);
+      }
+    }
   });
 
   it.skipIf(SKIP).each(CASES)(

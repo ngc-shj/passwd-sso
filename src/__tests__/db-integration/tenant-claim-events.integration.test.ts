@@ -9,7 +9,7 @@
  * database (Testing strategy, C1 row). A mocked `$executeRaw` would prove the
  * call was made, not that the trigger fired.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
@@ -27,6 +27,7 @@ import {
   PRIMARY_CLAIM,
 } from "@/__tests__/helpers/tenant-claim-fixtures";
 import { TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
+import { cmdHistory } from "../../../scripts/tenant-domain";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..", "..");
@@ -215,13 +216,30 @@ describe("tenant_claim_events (C1)", () => {
       });
 
       try {
-        let caught: unknown;
+        // Inside BEGIN … ROLLBACK on one physical connection, NOT autocommit.
+        // The assertion is correct only while the no-truncate trigger works —
+        // and the moment it does not, which is the ONLY state this test exists
+        // to detect, an autocommit TRUNCATE wipes every row of the routing
+        // history on the SHARED dev database (VE1), irreversibly, for every
+        // other working copy. NF3's "never by mutating the shared dev database"
+        // applies to the statement a red-proof fires, not only to the setup
+        // around it. TRUNCATE is transactional in PostgreSQL, so wrapping it
+        // changes nothing about what is asserted and takes the blast radius to
+        // zero.
+        const client = await ctx.su.pool.connect();
+        let caught: { code?: string } | undefined;
         try {
-          await ctx.su.prisma.$executeRawUnsafe(`TRUNCATE tenant_claim_events`);
-        } catch (e) {
-          caught = e;
+          await client.query("BEGIN");
+          try {
+            await client.query(`TRUNCATE tenant_claim_events`);
+          } catch (e) {
+            caught = e as { code?: string };
+          }
+          await client.query("ROLLBACK");
+        } finally {
+          client.release();
         }
-        expect(sqlStateOf(caught)).toBe("23001");
+        expect(caught?.code).toBe("23001");
 
         const remaining = await ctx.su.prisma.$queryRawUnsafe<{ id: string }[]>(
           `SELECT id FROM tenant_claim_events WHERE id = $1::uuid`,
@@ -319,6 +337,22 @@ describe("tenant_claim_events (C1)", () => {
   });
 
   describe("purge routine scope (RT4 lower bound)", () => {
+    // cmdHistory reads MIGRATION_DATABASE_URL directly (it builds its own
+    // client via migrationClientFactory, not through this file's `ctx.su`),
+    // same as tenant-claim-cli.integration.test.ts's own beforeEach/afterEach
+    // — re-stubbed per test, never assigned with `process.env.X =`
+    // (check-test-hygiene gate (c)), and unstubbed after so it cannot leak
+    // into a test declared later in this file.
+    beforeEach(() => {
+      if (SKIP) return;
+      if (!process.env.MIGRATION_DATABASE_URL) {
+        vi.stubEnv("MIGRATION_DATABASE_URL", process.env.DATABASE_URL as string);
+      }
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
     it.skipIf(SKIP)(
       "purging one side of a reassign row removes it for both named tenants, and leaves an unrelated row untouched",
       async () => {
@@ -344,24 +378,28 @@ describe("tenant_claim_events (C1)", () => {
         });
 
         try {
-          const findFor = (tenantId: string) =>
-            ctx.su.prisma.$queryRawUnsafe<{ id: string }[]>(
-              `SELECT id FROM tenant_claim_events WHERE old_tenant_id = $1::uuid OR new_tenant_id = $1::uuid`,
-              tenantId,
-            );
+          // QA-1: routed through cmdHistory — the PRODUCTION selector — for
+          // both named sides, rather than a test-local hand-written twin of
+          // its `OR: [{ oldTenantId }, { newTenantId }]` predicate. This is
+          // the shape the plan places this case in (C6's "history" cases).
+          const historyIdsFor = async (tenantId: string): Promise<string[]> => {
+            const result = await cmdHistory({ tenant: tenantId });
+            expect(result.ok).toBe(true);
+            return ((result.rows ?? []) as { id: string }[]).map((r) => r.id);
+          };
 
           // Pre-purge lower bound (RT4): without this, the post-purge
           // negatives below would be equally satisfied by a routine that
           // deleted nothing and a selector that matched nothing.
-          expect((await findFor(tenantA)).map((r) => r.id)).toContain(reassignId);
-          expect((await findFor(tenantB)).map((r) => r.id)).toContain(reassignId);
+          expect(await historyIdsFor(tenantA)).toContain(reassignId);
+          expect(await historyIdsFor(tenantB)).toContain(reassignId);
 
           await purgeForTenant(ctx.su.prisma, tenantA);
 
           // Both negatives: F2's "one row names two tenants" means any
           // deletion path deletes it for both — the documented blast radius.
-          expect((await findFor(tenantA)).map((r) => r.id)).not.toContain(reassignId);
-          expect((await findFor(tenantB)).map((r) => r.id)).not.toContain(reassignId);
+          expect(await historyIdsFor(tenantA)).not.toContain(reassignId);
+          expect(await historyIdsFor(tenantB)).not.toContain(reassignId);
 
           const unrelatedStill = await ctx.su.prisma.$queryRawUnsafe<{ id: string }[]>(
             `SELECT id FROM tenant_claim_events WHERE id = $1::uuid`,
@@ -384,6 +422,10 @@ describe("tenant_claim_events (C1)", () => {
       const id = randomUUID();
 
       try {
+        // QA-8: `.resolves.not.toThrow()` is a no-op matcher in Vitest — a
+        // resolved value is not a function, so `.not.toThrow()` never
+        // inspects it. `.resolves.toBeDefined()` is the assertion this line
+        // was meant to make: the call resolved (did not reject) at all.
         await expect(
           ctx.app.prisma.$executeRawUnsafe(
             `INSERT INTO tenant_claim_events
@@ -394,7 +436,7 @@ describe("tenant_claim_events (C1)", () => {
             tenantId,
             "app-insert-test",
           ),
-        ).resolves.not.toThrow();
+        ).resolves.toBeDefined();
 
         const stored = await ctx.su.prisma.$queryRawUnsafe<{ id: string }[]>(
           `SELECT id FROM tenant_claim_events WHERE id = $1::uuid`,
@@ -466,7 +508,7 @@ describe("tenant_claim_events (C1)", () => {
 
   describe("I2 — principal columns are assigned by the engine, not the caller", () => {
     it.skipIf(SKIP)(
-      "an INSERT naming db_user/session_db_user explicitly is overwritten with current_user/session_user, read on the same connection",
+      "an INSERT naming db_user/session_db_user/created_at/client_addr explicitly is overwritten with the engine's own values, read on the same connection",
       async () => {
         const claim = `${runToken()}.${ALIAS_CLAIM}`;
         const tenantId = await ctx.createTenant();
@@ -477,37 +519,66 @@ describe("tenant_claim_events (C1)", () => {
         // below never compares against a literal role name either.
         const forgedDbUser = `not-a-real-role-${runToken()}`;
         const forgedSessionDbUser = `also-not-a-real-role-${runToken()}`;
+        // QA-6 / D-2: created_at moved out of a column DEFAULT into the
+        // trigger precisely because a DEFAULT is overridable by an INSERT
+        // that names the column — the same forgeability closed for db_user.
+        // A distant-past value, not an edge case that could coincidentally
+        // land close to "now".
+        const forgedCreatedAt = new Date("2000-01-01T00:00:00.000Z");
+        // TEST-NET-3 (RFC 5737) — guaranteed not to be this connection's real
+        // client address.
+        const forgedClientAddr = "203.0.113.99";
 
         let storedDbUser: string | undefined;
         let storedSessionDbUser: string | undefined;
+        let storedCreatedAt: Date | undefined;
+        let storedClientAddr: string | null | undefined;
         let liveCurrentUser: string | undefined;
         let liveSessionUser: string | undefined;
+        let liveClockTimestamp: Date | undefined;
+        let liveClientAddr: string | null | undefined;
 
         await ctx.su.prisma.$transaction(async (tx) => {
           await tx.$executeRawUnsafe(
             `INSERT INTO tenant_claim_events
-               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label, db_user, session_db_user)
-             VALUES ($1::uuid, $2, 'register', NULL, $3::uuid, NULL, NULL, $4, $5, $6)`,
+               (id, claim, operation, old_tenant_id, new_tenant_id, old_revoked_at, new_revoked_at, actor_label, db_user, session_db_user, created_at, client_addr)
+             VALUES ($1::uuid, $2, 'register', NULL, $3::uuid, NULL, NULL, $4, $5, $6, $7::timestamptz, $8::inet)`,
             id,
             claim,
             tenantId,
             "i2-forgery-test",
             forgedDbUser,
             forgedSessionDbUser,
+            forgedCreatedAt,
+            forgedClientAddr,
           );
           const [row] = await tx.$queryRawUnsafe<
-            { db_user: string; session_db_user: string }[]
+            {
+              db_user: string;
+              session_db_user: string;
+              created_at: Date;
+              client_addr: string | null;
+            }[]
           >(
-            `SELECT db_user, session_db_user FROM tenant_claim_events WHERE id = $1::uuid`,
+            `SELECT db_user, session_db_user, created_at, client_addr::text AS client_addr
+               FROM tenant_claim_events WHERE id = $1::uuid`,
             id,
           );
           storedDbUser = row.db_user;
           storedSessionDbUser = row.session_db_user;
+          storedCreatedAt = row.created_at;
+          storedClientAddr = row.client_addr;
+          // Read on the SAME connection/transaction — never a literal
+          // (VE5's rule extends to the timestamp and the address too).
           const [principal] = await tx.$queryRawUnsafe<
-            { current_user: string; session_user: string }[]
-          >(`SELECT current_user, session_user`);
+            { current_user: string; session_user: string; now: Date; client_addr: string | null }[]
+          >(
+            `SELECT current_user, session_user, clock_timestamp() AS now, inet_client_addr()::text AS client_addr`,
+          );
           liveCurrentUser = principal.current_user;
           liveSessionUser = principal.session_user;
+          liveClockTimestamp = principal.now;
+          liveClientAddr = principal.client_addr;
         });
 
         try {
@@ -515,6 +586,25 @@ describe("tenant_claim_events (C1)", () => {
           expect(storedSessionDbUser).not.toBe(forgedSessionDbUser);
           expect(storedDbUser).toBe(liveCurrentUser);
           expect(storedSessionDbUser).toBe(liveSessionUser);
+
+          // created_at: replaced, and within a few seconds of a
+          // clock_timestamp() read on the same connection — never asserted
+          // against a literal.
+          expect(storedCreatedAt).toBeDefined();
+          expect(liveClockTimestamp).toBeDefined();
+          expect((storedCreatedAt as Date).getTime()).not.toBe(forgedCreatedAt.getTime());
+          const deltaMs = Math.abs(
+            (storedCreatedAt as Date).getTime() - (liveClockTimestamp as Date).getTime(),
+          );
+          expect(deltaMs).toBeLessThan(5000);
+
+          // client_addr: replaced with inet_client_addr(), read the same
+          // way. May legitimately be NULL on both sides (a Unix-domain
+          // socket connection) — that is a correct equality, not a vacuous
+          // pass: a forged value that survived the trigger would make this
+          // assertion a strict inequality instead.
+          expect(storedClientAddr).not.toBe(forgedClientAddr);
+          expect(storedClientAddr).toBe(liveClientAddr);
         } finally {
           await ctx.deleteTestData(tenantId);
         }
@@ -852,21 +942,28 @@ describe("tenant_claim_events CHECK constraints reject bad rows (RT7)", () => {
 
       let caught: unknown;
       try {
-        await insertEventRow(ctx.su.prisma, {
-          claim,
-          // Must fit VARCHAR(16) so the CHECK is what rejects it, not a
-          // separate "value too long" error (22001) for the column itself.
-          operation: "bogus",
-          oldTenantId: null,
-          newTenantId: fakeTenant,
-          actorLabel: "operation-check-test",
-        });
-      } catch (e) {
-        caught = e;
+        try {
+          await insertEventRow(ctx.su.prisma, {
+            claim,
+            // Must fit VARCHAR(16) so the CHECK is what rejects it, not a
+            // separate "value too long" error (22001) for the column itself.
+            operation: "bogus",
+            oldTenantId: null,
+            newTenantId: fakeTenant,
+            actorLabel: "operation-check-test",
+          });
+        } catch (e) {
+          caught = e;
+        }
+        expect(sqlStateOf(caught)).toBe("23514");
+      } finally {
+        // QA-7: in a finally — if the CHECK regressed and the insert
+        // instead succeeded, the expect above would throw and this purge
+        // would never run. fakeTenant is a random UUID no other cleanup
+        // path can reach, so a row left behind here is permanently stuck on
+        // the shared dev database.
+        await purgeForTenant(ctx.su.prisma, fakeTenant);
       }
-      expect(sqlStateOf(caught)).toBe("23514");
-
-      await purgeForTenant(ctx.su.prisma, fakeTenant);
     },
   );
 
@@ -879,19 +976,22 @@ describe("tenant_claim_events CHECK constraints reject bad rows (RT7)", () => {
 
       let caught: unknown;
       try {
-        await insertEventRow(ctx.su.prisma, {
-          claim,
-          operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
-          oldTenantId: null,
-          newTenantId: fakeTenant,
-          actorLabel: "claim-normalized-check-test",
-        });
-      } catch (e) {
-        caught = e;
+        try {
+          await insertEventRow(ctx.su.prisma, {
+            claim,
+            operation: TENANT_CLAIM_EVENT_OPERATION.REGISTER,
+            oldTenantId: null,
+            newTenantId: fakeTenant,
+            actorLabel: "claim-normalized-check-test",
+          });
+        } catch (e) {
+          caught = e;
+        }
+        expect(sqlStateOf(caught)).toBe("23514");
+      } finally {
+        // QA-7: same reasoning as the operation-check case above.
+        await purgeForTenant(ctx.su.prisma, fakeTenant);
       }
-      expect(sqlStateOf(caught)).toBe("23514");
-
-      await purgeForTenant(ctx.su.prisma, fakeTenant);
     },
   );
 

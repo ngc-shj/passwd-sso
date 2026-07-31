@@ -186,6 +186,30 @@ D-33 in `docs/archive/review/sso-tenant-domain-alias-deviation.md`.
 Read it with `npm run tenant-domain -- history --domain <claim>` or
 `--tenant <uuid>`; the `--tenant` form takes a bare UUID and does **not** resolve
 through `tenants`, so it still answers for a tenant that has since been deleted.
+`client_addr` is **not** printed by `history` — it is recorded for out-of-band
+forensics and is the app container's own address on the sign-in path, informative
+only for the operator CLI. Do not assume the CLI shows it.
+
+### Reading it after an application compromise
+
+`passwd_app` holds `INSERT` and nothing else, which is the containment — but
+INSERT is not nothing. A compromised application can append rows with an
+attacker-chosen `claim`, `actor_label` and tenant UUIDs, and the `CHECK` only
+requires that *one* of the two tenant columns is non-NULL. Two consequences an
+incident responder needs, neither of which the table itself makes obvious:
+
+- **`db_user` is how you separate them.** Rows the operator CLI wrote carry the
+  migration role; rows the application wrote carry `passwd_app`. `actor_label` is
+  self-asserted and proves nothing on its own — `signin` is reserved at the CLI's
+  `--by` boundary, but a direct writer is not going through that boundary.
+- **Rows naming a tenant that never existed are unreachable by the tenant-scoped
+  purge routine.** `tenant_claim_events_purge_for_tenant(<tenant>)` is the
+  sanctioned deletion path and it takes a real tenant id. Removing injected rows
+  is an **owner** operation and uses the enumerated owner capability rather than a
+  tool: `SET app.allow_claim_event_purge = 'on'` in the same transaction as a
+  `DELETE` scoped to the rows in question. That is deliberately not wrapped in a
+  command — it is unbounded deletion, and it should require someone who knows
+  exactly what they are removing.
 
 ## References
 
