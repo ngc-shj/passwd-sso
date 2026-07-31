@@ -203,8 +203,8 @@ ALTER TABLE "tenant_claim_events" ENABLE ALWAYS TRIGGER trg_tenant_claim_events_
 -- bootstrap change, or by an initdb script rather than by a migration — is
 -- closed by a control that lives elsewhere and is easy to miss:
 -- scripts/rls-cross-tenant-verify.sql's [E-RLS-SECDEF] ASSERT reads
--- pg_proc.prosecdef from the LIVE catalogue and fails on any SECURITY DEFINER
--- routine in `public` outside a two-name allowlist. It runs in CI and in
+-- pg_proc.prosecdef from the LIVE catalogue and fails on any such
+-- definer-rights routine in `public` outside a two-name allowlist. It runs in CI and in
 -- pre-pr. Cited here because adding this routine to that allowlist would
 -- silently remove the closure — that edit is a decision about THIS table.
 --

@@ -325,6 +325,35 @@ describe("check-tenant-claim-event-coverage", () => {
     expect(r.exitCode).toBe(0);
   });
 
+  it("still catches a later FK when the file also contains a `--` inside a string literal", () => {
+    // The three shapes below are why the comment strip is used for SUBJECT
+    // SELECTION ONLY and never feeds the matchers: a quote-unaware strip eats
+    // real SQL, and its failure direction is FALSE-ALLOW — the same direction
+    // that got per-statement splitting withdrawn one round earlier.
+    write(
+      "prisma/migrations/20260202000000_later_change/migration.sql",
+      `ALTER TABLE "tenant_claim_events" ADD COLUMN note TEXT DEFAULT 'usage: a -- b';\n` +
+        `ALTER TABLE "tenant_claim_events" ADD CONSTRAINT fk\n` +
+        `  FOREIGN KEY (old_tenant_id) REFERENCES "tenants"("id");\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/forbidden pattern .*REFERENCES/);
+  });
+
+  it("still catches a later FK when a line comment contains an unclosed block-comment opener", () => {
+    write(
+      "prisma/migrations/20260202000000_later_change/migration.sql",
+      `-- TODO: revisit the /* old approach here\n` +
+        `ALTER TABLE "tenant_claim_events" ADD CONSTRAINT fk\n` +
+        `  FOREIGN KEY (old_tenant_id) REFERENCES "tenants"("id");\n` +
+        `/* an ordinary block comment later in the file */\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toMatch(/forbidden pattern .*REFERENCES/);
+  });
+
   it("exits 2 when no migration creates the table — no subject is not a clean bill", () => {
     // Migrations directory present, but nothing in it creates the table — the
     // shape a renamed or dropped migration produces.

@@ -204,9 +204,73 @@ const MIGRATION_FORBIDDEN = [
   ],
 ];
 
-/** Line and block comments removed, so prose cannot enrol or accuse a file. */
-function stripSqlComments(sql) {
-  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+/**
+ * Blank out SQL comments, preserving every other byte (and therefore every
+ * offset) by replacing comment characters with spaces.
+ *
+ * A single pass with real string state, because the two-regex shortcut is
+ * fail-OPEN in both directions and was shipped and caught: `--` inside a string
+ * literal ate the rest of a real line, and `/*` inside a line comment ate
+ * through to the next closer anywhere in the file — which removed a genuine
+ * `ALTER TABLE tenant_claim_events … REFERENCES "tenants"` AND de-enrolled the
+ * file from the subject set entirely. The sibling gate's docstring names that
+ * exact shortcut as wrong.
+ *
+ * This is NOT the repo's `tokenize()`: that one is correct about state but
+ * collapses quoted identifiers to `<IDENT>`, destroying the very text these
+ * patterns match on. Blanking keeps the text and borrows only the state
+ * machine.
+ *
+ * Handles: '...' with '' escapes, "..." identifiers, $tag$...$tag$ bodies,
+ * -- to end of line, and NESTED block comments (PostgreSQL nests them).
+ */
+function blankSqlComments(sql) {
+  const out = sql.split("");
+  let i = 0;
+  const blank = (from, to) => {
+    for (let k = from; k < to; k += 1) if (out[k] !== "\n") out[k] = " ";
+  };
+  while (i < sql.length) {
+    const two = sql.slice(i, i + 2);
+    if (sql[i] === "'" || sql[i] === '"') {
+      const q = sql[i];
+      i += 1;
+      while (i < sql.length) {
+        if (sql[i] === q && sql[i + 1] === q) { i += 2; continue; }
+        if (sql[i] === q) { i += 1; break; }
+        i += 1;
+      }
+      continue;
+    }
+    const dollar = /^\$[A-Za-z_\u0080-\uffff0-9]*\$/.exec(sql.slice(i));
+    if (dollar) {
+      const tag = dollar[0];
+      const close = sql.indexOf(tag, i + tag.length);
+      i = close === -1 ? sql.length : close + tag.length;
+      continue;
+    }
+    if (two === "--") {
+      const eol = sql.indexOf("\n", i);
+      const stop = eol === -1 ? sql.length : eol;
+      blank(i, stop);
+      i = stop;
+      continue;
+    }
+    if (two === "/*") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < sql.length && depth > 0) {
+        if (sql.slice(j, j + 2) === "/*") { depth += 1; j += 2; continue; }
+        if (sql.slice(j, j + 2) === "*/") { depth -= 1; j += 2; continue; }
+        j += 1;
+      }
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    i += 1;
+  }
+  return out.join("");
 }
 
 function checkMigrationForbiddenPatterns() {
@@ -242,11 +306,13 @@ function checkMigrationForbiddenPatterns() {
     // tenant_claim_events…") enrols as a subject, and the pattern then matches
     // an unrelated FK elsewhere in the same file — a correct migration blocked
     // with a message telling the author to remove a key that must stay.
-    const code = stripSqlComments(sql);
-    if (!/tenant_claim_events/.test(code)) continue;
+    // SUBJECT: comment-stripped, so prose about this table cannot enrol an
+    // unrelated migration and have its unrelated FK read as an accusation.
+    const subjectText = blankSqlComments(sql);
+    if (!/tenant_claim_events/.test(subjectText)) continue;
     // The floor below still keys on the creating migration: a subject set that
     // is merely non-empty does not prove the gate found the table's own DDL.
-    if (/CREATE TABLE\s+"?tenant_claim_events"?/.test(code)) creators.push(name);
+    if (/CREATE TABLE\s+"?tenant_claim_events"?/.test(subjectText)) creators.push(name);
 
     // Patterns run over the whole (comment-stripped) file, NOT per statement.
     //
@@ -265,8 +331,17 @@ function checkMigrationForbiddenPatterns() {
     // remedy is to split the migration — which is the right shape anyway. The
     // reported false-positive (a file whose ONLY mention was a comment) is
     // closed by the strip above.
+    // PATTERNS: raw text. See the strip's own comment for why its output must
+    // not reach here.
+    //
+    // CONSTRAINT this places on future migrations, stated because it is real
+    // and because D-3 records the same pain for the creating one: a migration
+    // that genuinely touches `tenant_claim_events` must not spell
+    // `REFERENCES tenant…`, the bypass GUC, or `SECURITY DEFINER` in a comment
+    // — not even to explain why they are absent. That set is small, the
+    // failure is loud, and the alternative is a fail-open matcher.
     for (const [re, reason] of MIGRATION_FORBIDDEN) {
-      if (re.test(code)) {
+      if (re.test(sql)) {
         violations.push(
           `prisma/migrations/${name}/migration.sql: forbidden pattern ${re} — ${reason}.`,
         );
