@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
+import { shellQuote } from "../../lib/shell-quote.js";
 
 vi.mock("../../lib/secrets-config.js", () => ({
   loadSecretsConfig: vi.fn(),
@@ -117,5 +119,36 @@ describe("envCommand", () => {
     expect(vi.mocked(output.error)).toHaveBeenCalledWith(
       expect.stringContaining("Vault is not unlocked"),
     );
+  });
+});
+
+// C3 — the shared quoting helper (promoted verbatim from this file's former
+// private `shellEscape`, I3.3). The shell is the oracle: this asserts a
+// round-trip through a real /bin/sh, not an expected quoting spelling.
+describe("shellQuote (promoted from env.ts, C3)", () => {
+  const ADVERSARIAL_VALUES = [
+    "a b",
+    "a'b",
+    'a"b',
+    "$(id)",
+    "`id`",
+    "a;rm -rf /",
+    "a\nb",
+    "a&b",
+    "~/x",
+    "!x",
+    "",
+  ];
+
+  it.each(ADVERSARIAL_VALUES)("round-trips %j through a real shell", (value) => {
+    const quoted = shellQuote(value);
+    const out = execFileSync("/bin/sh", ["-c", `printf '%s' ${quoted}`], {
+      encoding: "utf-8",
+    });
+    expect(out).toBe(value);
+  });
+
+  it("leaves a value in the safe charset unquoted", () => {
+    expect(shellQuote("/tmp/eval.sock")).toBe("/tmp/eval.sock");
   });
 });

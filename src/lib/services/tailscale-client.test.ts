@@ -29,6 +29,14 @@ describe("_extractTailnetFromFqdn", () => {
   it("returns null when there are too few segments", () => {
     expect(_extractTailnetFromFqdn("ts.net")).toBeNull();
   });
+
+  it("extracts a dotted, domain-verified tailnet name in full", () => {
+    // A domain-verified Tailscale org's tailnet name is its domain, so it
+    // must not be truncated to the single label before "ts.net".
+    expect(_extractTailnetFromFqdn("laptop.example.com.ts.net.")).toBe(
+      "example.com",
+    );
+  });
 });
 
 describe("verifyTailscalePeer (TCP fallback path)", () => {
@@ -135,6 +143,20 @@ describe("verifyTailscalePeer (TCP fallback path)", () => {
   it("returns false when the network call rejects", async () => {
     fetchSpy.mockRejectedValue(new Error("network down"));
     const result = await verifyTailscalePeer("100.64.0.10", "my-tailnet");
+    expect(result).toBe(false);
+  });
+
+  it("does not let a dotted tailnet's last label satisfy an unrelated policy", async () => {
+    // Regression guard for the old parts[length-3] truncation: a policy of
+    // "com" must not match a peer whose real tailnet is "example.com".
+    fetchSpy.mockResolvedValue(
+      new Response(
+        JSON.stringify({ Node: { Name: "host.example.com.ts.net." } }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const result = await verifyTailscalePeer("100.64.0.13", "com");
     expect(result).toBe(false);
   });
 

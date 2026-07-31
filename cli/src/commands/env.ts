@@ -15,6 +15,7 @@ import { getToken } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
+import { shellQuote } from "../lib/shell-quote.js";
 import * as output from "../lib/output.js";
 
 interface EnvOptions {
@@ -115,19 +116,14 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
       break;
     case "dotenv":
       for (const [k, v] of Object.entries(result)) {
-        console.log(`${k}=${shellEscape(v)}`);
+        console.log(`${k}=${shellQuote(v)}`);
       }
       break;
     case "shell":
     default:
       for (const [k, v] of Object.entries(result)) {
-        console.log(`export ${k}=${shellEscape(v)}`);
+        console.log(`export ${k}=${shellQuote(v)}`);
       }
       break;
   }
-}
-
-function shellEscape(s: string): string {
-  if (/^[a-zA-Z0-9._\-/:@]+$/.test(s)) return s;
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }

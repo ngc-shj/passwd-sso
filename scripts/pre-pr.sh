@@ -339,6 +339,7 @@ queue_step "Static: migration-drift" node scripts/checks/check-migration-drift.m
 queue_step "Static: destructive-migration" node scripts/checks/check-destructive-migration.mjs
 queue_step "Static: migration-transaction" node scripts/checks/check-migration-transaction.mjs
 queue_step "Static: raw-sql-usage" node scripts/checks/check-raw-sql-usage.mjs
+queue_step "Static: cli-shell-safety" node scripts/checks/check-cli-shell-safety.mjs
 queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
 queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
 queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs

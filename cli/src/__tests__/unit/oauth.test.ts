@@ -4,6 +4,7 @@ import {
   computeS256Challenge,
   startCallbackServer,
   validateServerUrl,
+  browserLaunchCommand,
 } from "../../lib/oauth.js";
 
 describe("PKCE", () => {
@@ -138,6 +139,79 @@ describe("validateServerUrl", () => {
   it("rejects invalid URLs", () => {
     expect(() => validateServerUrl("not-a-url")).toThrow("Invalid");
   });
+
+  // I2.4 — accepted set, unchanged from the pre-C2 acceptance criteria plus
+  // a bare host and a multi-segment path.
+  it.each([
+    "https://h",
+    "https://h/base",
+    "https://h/base/v2",
+    "http://localhost:3001",
+  ])("accepts %s", (url) => {
+    expect(() => validateServerUrl(url)).not.toThrow();
+  });
+
+  // I2.1/I2.2/I2.4 — narrower than the WHATWG URL parser: each of these is a
+  // URL the parser itself accepts, so the rejection must come from C2's own
+  // checks rather than from `new URL()` throwing.
+  it.each([
+    "https://evil@real.example",
+    "https://h/?x=1",
+    "https://h/#f",
+    "https://a&calc",
+    "https://h/a,b",
+    "https://h/a&b",
+  ])("rejects %s", (url) => {
+    expect(() => validateServerUrl(url)).toThrow();
+  });
+
+  it("rejects userinfo with a message naming username/password (parsed.username, not a raw-string @ scan)", () => {
+    expect(() => validateServerUrl("https://evil@real.example")).toThrow(
+      /username or password/,
+    );
+  });
+});
+
+describe("browserLaunchCommand", () => {
+  const PLAIN_URL = "https://vault.example.com/api/mcp/authorize?client_id=abc&scope=x";
+  const METACHAR_URL = "https://example.com/cb?arg=a&b|c<d>e^f!g";
+
+  it("win32: returns rundll32.exe with the URL as one intact argv element", () => {
+    expect(browserLaunchCommand(PLAIN_URL, "win32")).toEqual({
+      cmd: "rundll32.exe",
+      args: ["url.dll,FileProtocolHandler", PLAIN_URL],
+    });
+  });
+
+  it("darwin: returns open with the URL as one intact argv element", () => {
+    expect(browserLaunchCommand(PLAIN_URL, "darwin")).toEqual({
+      cmd: "open",
+      args: [PLAIN_URL],
+    });
+  });
+
+  it("linux: returns xdg-open with the URL as one intact argv element", () => {
+    expect(browserLaunchCommand(PLAIN_URL, "linux")).toEqual({
+      cmd: "xdg-open",
+      args: [PLAIN_URL],
+    });
+  });
+
+  for (const platform of ["win32", "darwin", "linux"] as const) {
+    it(`${platform}: metacharacters (&|<>^%!) pass through as one argv element, not re-parsed`, () => {
+      const launch = browserLaunchCommand(METACHAR_URL, platform);
+      expect(launch).not.toBeNull();
+      expect(launch?.args.at(-1)).toBe(METACHAR_URL);
+    });
+
+    it(`${platform}: returns null for a file:// URL`, () => {
+      expect(browserLaunchCommand("file:///etc/passwd", platform)).toBeNull();
+    });
+
+    it(`${platform}: returns null for an unparseable URL`, () => {
+      expect(browserLaunchCommand("not-a-url", platform)).toBeNull();
+    });
+  }
 });
 
 describe("registerClient", () => {

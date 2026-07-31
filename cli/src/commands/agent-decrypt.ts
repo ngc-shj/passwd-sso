@@ -17,6 +17,7 @@ import { decryptData, hexEncode } from "../lib/crypto.js";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "../lib/crypto-aad.js";
 import { getEncryptionKey, getUserId, getSecretKeyBytes, setEncryptionKey } from "../lib/vault-state.js";
 import { readPassphrase, unlockWithPassphrase } from "./unlock.js";
+import { shellQuote } from "../lib/shell-quote.js";
 import * as output from "../lib/output.js";
 import { AGENT_CHILD_TIMEOUT_MS } from "../lib/time.js";
 
@@ -345,9 +346,14 @@ async function forkDaemon(socketPath: string): Promise<void> {
 
   // Wait briefly for child to acknowledge, then output eval commands
   child.on("message", () => {
-    console.log(`PSSO_AGENT_SOCK='${socketPath}'; export PSSO_AGENT_SOCK;`);
-    console.log(`PSSO_AGENT_PID='${child.pid}'; export PSSO_AGENT_PID;`);
-    console.log(`trap 'kill ${child.pid} 2>/dev/null; rm -f ${socketPath}' EXIT;`);
+    console.log(`PSSO_AGENT_SOCK=${shellQuote(socketPath)}; export PSSO_AGENT_SOCK;`);
+    console.log(`PSSO_AGENT_PID=${shellQuote(String(child.pid))}; export PSSO_AGENT_PID;`);
+    // Quoted twice, deliberately: once for the path inside the composed
+    // inner command, and once for the whole trap body — the body is parsed
+    // by two shells (the one running `eval`, and the one that runs it when
+    // the trap fires), each of which must read the path as one word.
+    const inner = `kill ${shellQuote(String(child.pid))} 2>/dev/null; rm -f ${shellQuote(socketPath)}`;
+    console.log(`trap ${shellQuote(inner)} EXIT;`);
 
     child.unref();
     child.disconnect();
@@ -403,6 +409,17 @@ function runDaemonChild(): Promise<void> {
 }
 
 /**
+ * Foreground-mode copy-paste hint lines for setting PSSO_AGENT_SOCK by hand.
+ * Pure — extracted because the caller (`server.listen`'s callback, followed
+ * by a keep-alive promise that never resolves) is otherwise unreachable from
+ * a test that awaits the command (mirrors C1's split of browserLaunchCommand
+ * from openBrowser).
+ */
+export function foregroundHintLines(socketPath: string): [string] {
+  return [`  export PSSO_AGENT_SOCK=${shellQuote(socketPath)}`];
+}
+
+/**
  * Start the agent in foreground mode (used by both direct and daemon child).
  */
 async function startForegroundAgent(socketPath: string): Promise<void> {
@@ -416,7 +433,7 @@ async function startForegroundAgent(socketPath: string): Promise<void> {
     output.success("Decrypt agent started.");
     output.info(`Socket: ${socketPath}`);
     output.info("In another terminal, run:");
-    console.log(`  export PSSO_AGENT_SOCK='${socketPath}'`);
+    console.log(foregroundHintLines(socketPath)[0]);
     output.info("Press Ctrl+C to stop the agent.");
   });
 

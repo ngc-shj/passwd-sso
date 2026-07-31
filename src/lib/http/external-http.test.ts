@@ -48,6 +48,7 @@ import {
   BLOCKED_CIDRS,
   BLOCKED_CIDR_REPRESENTATIVES,
   isPrivateIp,
+  extractNat64Ipv4,
   resolveAndValidateIps,
   validateAndFetch,
   validateAndFetchBuffered,
@@ -100,6 +101,82 @@ describe("isPrivateIp — public IPs", () => {
 
   it("93.184.216.34 (example.com) is not private", () => {
     expect(isPrivateIp("93.184.216.34")).toBe(false);
+  });
+});
+
+// ─── NAT64 / IPv6 transition addresses (C4) ────────────────────────
+
+describe("isPrivateIp — NAT64 well-known prefix (64:ff9b::/96)", () => {
+  it("embedded metadata IPv4 is rejected", () => {
+    expect(isPrivateIp("64:ff9b::169.254.169.254")).toBe(true);
+  });
+
+  it("embedded RFC 1918 IPv4 is rejected", () => {
+    expect(isPrivateIp("64:ff9b::10.0.0.1")).toBe(true);
+  });
+
+  it("embedded PUBLIC IPv4 is allowed — the case that distinguishes decoding from a blunt prefix block", () => {
+    expect(isPrivateIp("64:ff9b::93.184.216.34")).toBe(false);
+  });
+});
+
+describe("isPrivateIp — RFC 8215 local-use NAT64 prefix (64:ff9b:1::/48)", () => {
+  it("is blocked by prefix membership (RFC 6052 /48 decode would be private 192.168.0.1)", () => {
+    expect(isPrivateIp("64:ff9b:1:c0a8:0:100::")).toBe(true);
+  });
+
+  it("is ALSO blocked when its RFC 6052 /48 decode would be public — proves membership, not decoding, blocks this prefix", () => {
+    // 64:ff9b:1:5db8:d8:2200:: decodes under RFC 6052's /48 row to
+    // 93.184.216.34 (public). It must still be rejected: RFC 8215 §5
+    // forbids assuming an IPv4 is embedded here at all, so the whole
+    // /48 is denied outright rather than decoded.
+    expect(isPrivateIp("64:ff9b:1:5db8:d8:2200::")).toBe(true);
+  });
+});
+
+describe("isPrivateIp — other IPv6 transition ranges", () => {
+  it("2001::1 (Teredo, RFC 4380) is private", () => {
+    expect(isPrivateIp("2001::1")).toBe(true);
+  });
+
+  it("2002:7f00:1:: (6to4, RFC 3056) is private", () => {
+    expect(isPrivateIp("2002:7f00:1::")).toBe(true);
+  });
+
+  it("::127.0.0.1 (IPv4-compatible, RFC 4291 §2.5.5.1, deprecated) is private", () => {
+    expect(isPrivateIp("::127.0.0.1")).toBe(true);
+  });
+
+  it("100::1 (RFC 6666 discard-only) is private", () => {
+    expect(isPrivateIp("100::1")).toBe(true);
+  });
+});
+
+describe("extractNat64Ipv4", () => {
+  it("decodes the embedded IPv4 from a well-known-prefix NAT64 address", () => {
+    expect(extractNat64Ipv4("64:ff9b::169.254.169.254")).toBe("169.254.169.254");
+    expect(extractNat64Ipv4("64:ff9b::93.184.216.34")).toBe("93.184.216.34");
+  });
+
+  it("decodes the pure-hex form the same way", () => {
+    expect(extractNat64Ipv4("64:ff9b::a9fe:a9fe")).toBe("169.254.169.254");
+  });
+
+  it("returns null for the RFC 8215 local-use prefix — must never reach the decoder", () => {
+    expect(extractNat64Ipv4("64:ff9b:1:c0a8:0:100::")).toBeNull();
+    expect(extractNat64Ipv4("64:ff9b:1:5db8:d8:2200::")).toBeNull();
+  });
+
+  it("returns null for an ordinary public IPv6 address outside 64:ff9b::/96", () => {
+    expect(extractNat64Ipv4("2001:4860:4860::8888")).toBeNull();
+  });
+
+  it("returns null for an IPv4 literal", () => {
+    expect(extractNat64Ipv4("93.184.216.34")).toBeNull();
+  });
+
+  it("returns null for a malformed address", () => {
+    expect(extractNat64Ipv4("not-an-ip")).toBeNull();
   });
 });
 
@@ -255,6 +332,14 @@ describe("resolveAndValidateIps", () => {
     mockResolve6.mockResolvedValue(["::ffff:7f00:0001"]);
     await expect(
       resolveAndValidateIps("https://evil.example.com/path"),
+    ).rejects.toThrow("private IP");
+  });
+
+  it("hostname whose AAAA is a NAT64 address embedding metadata IPv4 throws (C4/F3)", async () => {
+    mockResolve4.mockResolvedValue([]);
+    mockResolve6.mockResolvedValue(["64:ff9b::169.254.169.254"]);
+    await expect(
+      resolveAndValidateIps("https://nat64.evil.com/path"),
     ).rejects.toThrow("private IP");
   });
 

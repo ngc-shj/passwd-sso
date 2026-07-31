@@ -62,17 +62,28 @@ function parseIpv4(ip: string): number[] | null {
  * Parse an IPv6 address into 16 bytes.
  * Handles :: expansion and IPv4-mapped addresses.
  * Returns null if invalid.
+ *
+ * Exported for the SSRF blocklist's NAT64 decoder, which needs the byte form
+ * to read an embedded IPv4 by position rather than by string shape.
  */
+export function parseIpv6Bytes(ip: string): number[] | null {
+  return parseIpv6(ip);
+}
+
 function parseIpv6(ip: string): number[] | null {
-  // Handle IPv4-mapped IPv6
-  const v4MappedMatch = ip.match(
-    /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i,
-  );
-  if (v4MappedMatch) {
-    const v4 = parseIpv4(v4MappedMatch[1]);
+  // RFC 4291 §2.2 form 3: the low 32 bits may be written as a dotted quad.
+  // That is not only the ::ffff: form — the NAT64 prefixes and `::127.0.0.1`
+  // are the same notation, and treating ::ffff: as a special case left every
+  // other prefix unparseable, so an address carrying a blocked IPv4 silently
+  // matched no CIDR at all. Rewrite the tail into the two hex groups it
+  // denotes and let the ordinary parser take it from there.
+  const lastColon = ip.lastIndexOf(":");
+  if (lastColon !== -1 && ip.slice(lastColon + 1).includes(".")) {
+    const v4 = parseIpv4(ip.slice(lastColon + 1));
     if (!v4) return null;
-    // Represent as IPv4-mapped IPv6: 10 zero bytes + 0xff 0xff + 4 IPv4 bytes
-    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, ...v4];
+    const hi = ((v4[0] << 8) | v4[1]).toString(16);
+    const lo = ((v4[2] << 8) | v4[3]).toString(16);
+    return parseIpv6(`${ip.slice(0, lastColon + 1)}${hi}:${lo}`);
   }
 
   const halves = ip.split("::");

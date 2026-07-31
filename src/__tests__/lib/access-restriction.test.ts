@@ -78,11 +78,14 @@ describe("checkAccessRestriction", () => {
     expect((result as { reason: string }).reason).toContain("IP not in allowed CIDRs");
   });
 
-  it("allows access when Tailscale enabled and IP is in CGNAT range", async () => {
+  it("allows access when Tailscale enabled (no pinned tailnet) and IP is in CGNAT range", async () => {
+    // C5: with no tailscaleTailnet pinned, CGNAT-range membership alone is
+    // still sufficient (I5.3) — a tenant with a pinned tailnet is covered
+    // separately below, since it also requires a WhoIs match.
     mockTenantFindUnique.mockResolvedValue({
       allowedCidrs: [],
       tailscaleEnabled: true,
-      tailscaleTailnet: "my-tailnet",
+      tailscaleTailnet: null,
     });
 
     const result = await checkAccessRestriction("tenant1", "100.64.0.1");
@@ -93,11 +96,40 @@ describe("checkAccessRestriction", () => {
     mockTenantFindUnique.mockResolvedValue({
       allowedCidrs: [],
       tailscaleEnabled: true,
-      tailscaleTailnet: "my-tailnet",
+      tailscaleTailnet: null,
     });
     // Serve sets XFF with CGNAT IP; extractClientIp resolves it as clientIp
     const result = await checkAccessRestriction("tenant1", "100.64.0.1");
     expect(result.allowed).toBe(true);
+  });
+
+  it("allows a pinned-tailnet policy when WhoIs confirms the tailnet match", async () => {
+    // C5: a pinned tailscaleTailnet requires the WhoIs verdict in addition
+    // to CGNAT-range membership — this is the case the two tests above no
+    // longer cover once a tailnet is pinned.
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+    mockVerifyTailscalePeer.mockResolvedValue(true);
+
+    const result = await checkAccessRestriction("tenant1", "100.64.0.1");
+    expect(result.allowed).toBe(true);
+    expect(mockVerifyTailscalePeer).toHaveBeenCalledWith("100.64.0.1", "my-tailnet");
+  });
+
+  it("denies a pinned-tailnet policy on a WhoIs mismatch even from a CGNAT IP", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+    mockVerifyTailscalePeer.mockResolvedValue(false);
+
+    const result = await checkAccessRestriction("tenant1", "100.64.0.1");
+    expect(result.allowed).toBe(false);
+    expect((result as { reason: string }).reason).toBe("Tailscale tailnet mismatch");
   });
 
   it("denies when clientIp is loopback and Tailscale enabled (no CGNAT)", async () => {
@@ -303,6 +335,10 @@ describe("checkAccessRestrictionWithAudit", () => {
   });
 });
 
+// C5: enforceAccessRestriction no longer runs its own WhoIs block — it
+// inherits the tailnet verdict from checkAccessRestriction. These tests
+// exercise the full enforceAccessRestriction call chain and pin the
+// consumer-facing contract (403 + audited reason), not a local block.
 describe("enforceAccessRestriction — WhoIs tailnet verification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
