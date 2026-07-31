@@ -449,3 +449,52 @@ Full-suite obligations before any commit: `npx vitest run`, `npx next build`, `b
 4. **Tenant on Tailscale, peer from another tailnet** — a browser on a different tailnet with a CGNAT source IP loads `/ja/dashboard`. Previously: 200. After C5: 403, with `ACCESS_DENIED` audited as `Tailscale tailnet mismatch`.
 5. **Operator locked out** — `tailscaled` is unreachable from the app container after a deploy. The operator adds their office CIDR to `allowedCidrs` through a path that does not depend on Tailscale, and regains access; the CIDR branch is evaluated first.
 6. **Webhook to a NAT64-only destination** — a tenant webhook targets a public host whose only route is NAT64. Delivery still succeeds (FR3). The same tenant pointing a webhook at `64:ff9b::169.254.169.254` is refused before the connection is made.
+
+## Implementation Checklist
+
+Derived in Phase 2 Step 2-1. Every entry was produced by a command re-run at implementation time, not copied from the contracts.
+
+### Files to modify
+
+| File | Contract | Change |
+|------|----------|--------|
+| `cli/src/lib/shell-quote.ts` *(new)* | C3 | `shellQuote` promoted verbatim from `env.ts:130` |
+| `cli/src/commands/env.ts` | C3 | delete the private copy, import the shared one (I3.3) |
+| `cli/src/lib/oauth.ts` | C1, C2 | `browserLaunchCommand` extracted; `openBrowser` delegates; `validateServerUrl` gains I2.4 |
+| `cli/src/commands/agent.ts` | C3, I3.4 | `:187` hint block → pure function; `:243-245` quoted |
+| `cli/src/commands/agent-decrypt.ts` | C3, I3.4 | `:419` hint block → pure function; `:348-350` quoted |
+| `cli/src/commands/run.ts` | C6 Rule A | stale `execFile` header comment corrected to `spawn` |
+| `src/lib/http/external-http.ts` | C4 | `BLOCKED_CIDRS` extended, `extractNat64Ipv4` added, `isPrivateIp` checks the embedded IPv4 |
+| `src/lib/services/tailscale-client.ts` | C8 | `extractTailnetFromFqdn` multi-label |
+| `src/lib/auth/policy/access-restriction.ts` | C5 | WhoIs folded into `checkAccessRestriction`; duplicate removed from `enforceAccessRestriction`; reason constants |
+| `messages/{en,ja}/TenantAdmin.json` | C7 | `tailscaleEnabledHelp`, `tailscaleTailnetHelp` |
+| `README.md`, `README.ja.md` | C7 | line 63 |
+| `scripts/checks/check-cli-shell-safety.mjs` *(new)* | C6 | Rules A/B over `cli/src`, Rule C over `src` |
+| `scripts/pre-pr.sh` | C6 | `queue_step "Static: cli-shell-safety"` in the static batch |
+
+### Test files (R19 — all trees enumerated, not just the obvious one)
+
+`cli/src/__tests__/unit/{oauth,agent,agent-decrypt,env}.test.ts`; `src/lib/http/external-http.test.ts`; `src/lib/auth/policy/access-restriction.test.ts`; `src/__tests__/lib/access-restriction.test.ts`; **both** `src/lib/services/tailscale-client.test.ts` and `src/__tests__/lib/tailscale-client.test.ts` (T9 — parallel suites over the same `_extractTailnetFromFqdn` alias); new `scripts/__tests__/check-cli-shell-safety.test.mjs`; new translation-copy assertion (C7).
+
+Explicitly **not** extended: `src/lib/proxy/{page,api}-route.test.ts` (T2 — they mock the module C5 changes).
+
+### Shared utilities to reuse (R1/R17 — no reimplementation)
+
+- `shellEscape` at `cli/src/commands/env.ts:130` — promote, do not rewrite.
+- `isIpInCidr` at `src/lib/auth/policy/ip-access.ts:216` — already handles arbitrary IPv6 prefixes; C4 adds CIDR strings, not a new matcher.
+- `BLOCKED_CIDR_REPRESENTATIVES` — `external-http.test.ts:67-68` already asserts lockstep with `BLOCKED_CIDRS`; every new CIDR needs a representative or that test fails.
+- `verifyTailscalePeer` — already imported by `access-restriction.ts`; C5 moves the call, it does not add a client.
+- `MS_PER_SECOND` / `MS_PER_MINUTE` from `src/lib/constants/time` — for any new duration.
+- Gate scaffolding: `scripts/checks/check-operator-echo-escaped.mjs` (ts-morph 28, no Program) and its self-test `scripts/__tests__/check-operator-echo-escaped.test.mjs`.
+
+### CI gate parity (Step 2-1 item 7)
+
+`extract-ci-checks.sh` yields 13 gates: `lint`, `typecheck`, `check:bypass-rls`, `check:crypto-domains`, `check:env-docs`, `check:migration-drift`, `check:team-auth-rls`, three `licenses:check:*:strict`, `check-state-mutation-centralization.sh`, `check-tls-fixture-expiry.sh`, `refactor-phase-verify.mjs`. All are queued by `scripts/pre-pr.sh`, which the `static-checks` CI job runs as `PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh` — **no parity gap, nothing to defer**.
+
+One gate fires on *new files specifically* and is the reason C6's self-test is not optional: `check-gate-selftest-coverage.sh` (`pre-pr.sh:342`) requires `scripts/__tests__/check-cli-shell-safety.test.mjs` to exist the moment `check-cli-shell-safety.mjs` is added.
+
+### Duplicate-implementation scan (Step 2-1 item 2)
+
+- Two suites cover `_extractTailnetFromFqdn` (T9) — both updated.
+- Two suites cover access restriction (`src/lib/auth/policy/access-restriction.test.ts`, `src/__tests__/lib/access-restriction.test.ts`) — both updated.
+- No `.js`/`.ts` twin exists for any file in this diff (the extension's twin problem does not reach `cli/` or `src/lib/`).
