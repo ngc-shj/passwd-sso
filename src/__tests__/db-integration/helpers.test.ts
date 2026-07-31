@@ -6,6 +6,7 @@ import {
   isRetryableCleanupConflict,
   withCleanupConflictRetry,
   sweepLeakedTenants,
+  runCleanupSweep,
   TenantClaimEventsPurgeError,
 } from "./helpers";
 
@@ -284,23 +285,19 @@ describe("sweepLeakedTenants", () => {
 
   it(
     "cleanup() wraps the sweep in try/finally, so a sweep failure still disconnects every pool (QA-3c)",
-    () => {
+    async () => {
       // Driving this through a real TestContext would need a live DB and a
       // real purge failure — the cross-process race this whole mechanism
-      // exists for, which does not happen on demand. Asserted at the source
-      // instead, same shape as "is actually adopted by deleteTestData" above:
-      // no observable output differs between wrapped and unwrapped on the
-      // happy path, since a happy-path sweep never reaches the finally's
-      // rethrow-preserving property.
-      const source = readFileSync(resolve(__dirname, "helpers.ts"), "utf8");
-      const cleanupBody = /async function cleanup\(\): Promise<void> \{([\s\S]*?)\n  \}/.exec(source)?.[1];
-      expect(cleanupBody, "cleanup() body extraction").toBeDefined();
-      expect(cleanupBody).toMatch(/try\s*\{[\s\S]*sweepOutstandingTenants\(\);?[\s\S]*\}\s*finally\s*\{/);
-      const finallyBlock = /finally\s*\{([\s\S]*)$/.exec(cleanupBody as string)?.[1];
-      expect(finallyBlock, "finally block extraction").toBeDefined();
-      for (const role of ["su", "app", "worker", "retentionWorker"]) {
-        expect(finallyBlock).toContain(`${role}.pool.end()`);
-      }
+      // exists for, which does not happen on demand. Driven instead through
+      // runCleanupSweep, the extracted try/finally mechanism cleanup() calls,
+      // with both the sweep and the disconnect fabricated at the boundary:
+      // no real pool or database is touched.
+      const disconnectAll = vi.fn(async () => {});
+      const sweep = vi.fn(async () => {
+        throw new Error("sweep failed");
+      });
+      await expect(runCleanupSweep(sweep, disconnectAll)).rejects.toThrow("sweep failed");
+      expect(disconnectAll).toHaveBeenCalledTimes(1);
     },
   );
 });

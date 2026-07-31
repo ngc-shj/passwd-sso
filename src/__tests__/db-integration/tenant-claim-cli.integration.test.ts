@@ -34,7 +34,7 @@ import {
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
 } from "../../../scripts/tenant-domain";
-import { TENANT_CLAIM_EVENT_OPERATION } from "@/lib/tenant/tenant-claim-event";
+import { TENANT_CLAIM_EVENT_OPERATION, SIGNIN_ACTOR_LABEL } from "@/lib/tenant/tenant-claim-event";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -425,7 +425,10 @@ describe("tenant-domain CLI (C7)", () => {
       // C6: the old "NOT RECOVERABLE from the row after this change" wording
       // is false once SC11's history table exists, and must not reappear.
       expect(printed).not.toContain("NOT RECOVERABLE");
-      expect(printed).toContain("Overwritten on this row (not lost — see history above)");
+      // The wording names WHERE the record is, not "above" — what is above is a
+      // command suggestion, not printed history (round-2 F4).
+      expect(printed).toContain("Overwritten on this row (not lost — recorded in tenant_claim_events");
+      expect(printed).toContain("tenant-domain history");
       expect(printed).toContain("tenant-domain history --domain");
       // Both destroyed values, by value — a message that merely says "see
       // history" without naming them is not itself a record of what changed.
@@ -1228,6 +1231,88 @@ describe("tenant-domain CLI (C7)", () => {
           await ctx.deleteTestData(tenantId);
         },
       );
+
+      // QA2-2: the remaining two axes of validateActorLabel — the reserved
+      // label and the printable-ASCII narrowing that makes it meaningful —
+      // had no test on either side, and both sit on the lockout-recovery
+      // path (RT10's escalation condition) where a false deny blocks
+      // remediation.
+      it.skipIf(SKIP)(
+        "deny side: --by equal to the reserved sign-in label, case/whitespace-insensitively, is refused, " +
+          "leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+
+          for (const label of ["signin", "SIGNIN", " signin "]) {
+            const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+            await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+            const result = await cmdRemove({ tenant: tenantId, domain: claim, by: label, yes: true });
+            expect(result.ok).toBe(false);
+            expect(result.message).toContain(`--by must not be "${SIGNIN_ACTOR_LABEL}"`);
+
+            const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+            expect(row?.revokedAt).toBeNull();
+            const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+            expect(events).toHaveLength(0);
+          }
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      // Boundary-adjacent allow: a label merely CONTAINING the reserved word
+      // must still succeed. This is the false-deny an over-eager `includes()`
+      // rewrite of the reserved-label check would introduce — without this
+      // case nothing pins the difference from an exact-match comparison.
+      it.skipIf(SKIP)(
+        "allow side: a --by merely containing the reserved word (\"ops-signin\") succeeds " +
+          "and the event's actor_label is \"ops-signin\"",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "ops-signin", yes: true });
+          expect(result.ok).toBe(true);
+
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(1);
+          expect(events[0].actorLabel).toBe("ops-signin");
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
+
+      // The case that makes the reserved-label check above meaningful: a
+      // Cyrillic confusable of "signin" (U+0455 "ѕ") renders identically in
+      // `history` output but is refused earlier, by the printable-ASCII
+      // narrowing, before it ever reaches the reserved-label comparison.
+      it.skipIf(SKIP)(
+        "deny side: a --by containing a Cyrillic look-alike of \"signin\" is refused as non-ASCII, " +
+          "leaving the claim row unchanged and writing no event",
+        async () => {
+          const tenantId = await ctx.createTenant();
+          const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+          await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+          const result = await cmdRemove({
+            tenant: tenantId,
+            domain: claim,
+            by: `${String.fromCodePoint(0x0455)}ignin`,
+            yes: true,
+          });
+          expect(result.ok).toBe(false);
+          expect(result.message).toContain("--by must be printable ASCII");
+
+          const row = await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } });
+          expect(row?.revokedAt).toBeNull();
+          const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+          expect(events).toHaveLength(0);
+
+          await ctx.deleteTestData(tenantId);
+        },
+      );
     });
   });
 
@@ -1409,7 +1494,7 @@ describe("tenant-domain CLI (C7)", () => {
     );
 
     it.skipIf(SKIP)(
-      "--domain wins over --tenant when both are given (documented precedence)",
+      "--domain and --tenant together are REFUSED, before either selector is applied",
       async () => {
         const tenantA = await ctx.createTenant();
         const tenantB = await ctx.createTenant();
@@ -1420,15 +1505,15 @@ describe("tenant-domain CLI (C7)", () => {
           expect((await cmdAdd({ tenant: tenantA, domain: claimA, by: "ops-oncall", yes: true })).ok).toBe(true);
           expect((await cmdAdd({ tenant: tenantB, domain: claimB, by: "ops-oncall", yes: true })).ok).toBe(true);
 
-          // --tenant names tenantB, which has its OWN, different event.
-          // If --tenant won this precedence, tenantB's event (newTenantId
-          // === tenantB) would come back instead of claimA's.
+          // Both selectors name something that EXISTS and each would return a
+          // different, non-empty answer — so a refusal here cannot be mistaken
+          // for "nothing matched", and the case still proves the refusal
+          // happens before either selector is applied.
           const result = await cmdHistory({ domain: claimA, tenant: tenantB });
-          expect(result.ok).toBe(true);
-          const rows = (result.rows ?? []) as { claim: string; newTenantId: string | null }[];
-          expect(rows).toHaveLength(1);
-          expect(rows[0].claim).toBe(claimA);
-          expect(rows[0].newTenantId).toBe(tenantA);
+          expect(result.ok).toBe(false);
+          expect(result.code).not.toBe(0);
+          expect(result.message).toContain("not both");
+          expect(result.rows ?? []).toHaveLength(0);
         } finally {
           await ctx.deleteTestData(tenantA);
           await ctx.deleteTestData(tenantB);

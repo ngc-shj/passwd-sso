@@ -87,7 +87,8 @@ import {
 } from "@/lib/tenant/tenant-claim-event";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_SECOND } from "@/lib/constants/time";
-import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
+import {
+  asciiPrintable, AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
 import {
   parseFlags,
@@ -740,6 +741,13 @@ function validateActorLabel(by: string): CmdResult | null {
   // is stored stays what was typed, so it cannot be fixed on the way out, and
   // I1 makes the row uncorrectable afterwards. (`db_user` still distinguishes
   // the two, but only for a reader who thinks to look.)
+  // CLASS: best-effort tripwire, not a boundary. Its two bypasses are named
+  // rather than left to be discovered — a direct writer does not pass through
+  // this function at all (the producer accepts any `actorLabel`, and the
+  // completeness gate has no predicate on it), and `--by` is self-asserted by
+  // construction. `db_user` is the real attribution. What this buys is that the
+  // ONE label a `history` reader treats as engine-written cannot be typed by a
+  // person at the sanctioned entry point.
   if (by.trim().toLowerCase() === SIGNIN_ACTOR_LABEL) {
     return {
       ok: false,
@@ -777,6 +785,22 @@ function validateActorLabel(by: string): CmdResult | null {
       message:
         "--by contains a control, bidi or zero-width character. Use a plain label: " +
         "it is stored as this change's attribution and read back by `history`.",
+    };
+  }
+
+  // Printable ASCII. `actor_label` deliberately carries no CHECK (one
+  // adjudicator per predicate, R48), so without this the field is full Unicode
+  // and the reserved-label test below is defeated by a confusable — `ѕignin`
+  // (Cyrillic U+0455) renders identically in `history` output. An operator
+  // identifier needs nothing outside ASCII, so the narrowing costs nothing and
+  // closes the class here rather than growing a second adjudicator elsewhere.
+  if (!asciiPrintable.test(by)) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "--by must be printable ASCII. It is stored as this change's attribution and " +
+        "read back by `history`, where a look-alike character would misrepresent who acted.",
     };
   }
 
@@ -1269,6 +1293,26 @@ export async function cmdHistory(args: { domain?: string; tenant?: string }): Pr
   // branch with an empty claim, and reported an empty result for a question the
   // operator did not ask. A flag the operator wrote must either take effect or
   // stop the command; this module's own header says so.
+  // `!== undefined` alone is not enough: `parseFlags` refuses only the inline
+  // empty spelling (`--domain=`), so the space-separated `--domain ""` arrives
+  // as `""`. Under a truthiness guard that was refused; under a definedness
+  // guard it would take the claim branch and report "No routing history" with
+  // exit 0 — evidence of absence, with a success code, on the incident-response
+  // read path, from a runbook line whose variable happened to be unset. An
+  // empty selector is refused below rather than reclassified as absent.
+  const emptySelector =
+    (args.domain !== undefined && args.domain.trim() === "") ||
+    (args.tenant !== undefined && args.tenant.trim() === "");
+  if (emptySelector) {
+    return {
+      ok: false,
+      code: 1,
+      message:
+        "history was given an empty --domain/--tenant value. Refusing rather than " +
+        "reporting an empty result: an empty selector cannot distinguish " +
+        '"nothing matched" from "the variable you passed was unset".',
+    };
+  }
   const hasDomain = args.domain !== undefined;
   const hasTenant = args.tenant !== undefined;
   if (!hasDomain && !hasTenant) {
@@ -1289,9 +1333,7 @@ export async function cmdHistory(args: { domain?: string; tenant?: string }): Pr
     };
   }
 
-  // `--domain` wins over `--tenant` when both are given — it names a single
-  // claim exactly, which is strictly narrower than "every event naming this
-  // tenant". Normalised the same way `add`/`remove` read `--domain` back, but
+  // Normalised the same way `add`/`remove` read `--domain` back, but
   // NOT schema-validated: this is a read, and a pre-existing row stored by
   // some other means must still be findable by it.
   const claim = hasDomain ? normalizeTenantClaim(args.domain as string) : undefined;

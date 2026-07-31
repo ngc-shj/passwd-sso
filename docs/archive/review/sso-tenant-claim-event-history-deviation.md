@@ -143,7 +143,9 @@ override pointing at any tree containing one compliant writer — which is exact
 this gate's own self-test fixture is — yields a non-zero file count, a non-zero writer
 count, zero violations and a green OK, while the shipping tree is never read. Added,
 with a self-test case on each side (refuses under `CI=true` without the acknowledgement;
-allows with it), plus a check that CI's real shape (no override) is unaffected.
+allows with it). Both arms of the guard's condition are covered; no case in that file
+runs the gate without a scan-root override, so CI's real shape (no override) remains
+unexercised by this self-test.
 
 ## D-9 — `tenant.upsert` was a blind spot in a control declared fail-closed
 
@@ -277,7 +279,20 @@ per-creating-role, and no *prescriptive* control covers function EXECUTE
 (`app-role-denied-privileges.json` is table-scoped; `audit-db-grants.mjs`'s `FUNCTION:`
 family is descriptive and launderable by `--write`).
 
-**Accepted rather than fixed, and the reason is D-15, not cost**: the exploit shape the
+**Correction after round 2 (security R2-3): the acceptance stands, but it was
+priced against the wrong control.** The out-of-migration case — a definer
+conversion or a grant applied by hand, by a bootstrap change, or by an initdb
+script — is outside a gate that reads migration *files*. What actually closes it
+is `scripts/rls-cross-tenant-verify.sql`'s `[E-RLS-SECDEF]` ASSERT: it reads
+`pg_proc.prosecdef` from the **live catalogue**, fails on any `SECURITY DEFINER`
+routine in `public` outside a two-name allowlist, and is wired into both CI
+(`ci.yml`) and `pre-pr.sh`. Verified by reading it rather than by citing it from
+memory. The three new routines are `prosecdef = false` and pass it today. It is
+now cited in the migration itself, because the natural move when someone does
+convert the routine — adding it to that allowlist — would remove the real
+closure without anyone knowing it was load-bearing here.
+
+**Accepted rather than fixed, and the reason is the gates, not cost**: the exploit shape the
 finding names is a future `SECURITY DEFINER` conversion, and D-15's widened subject set
 now fails the gate on `SECURITY DEFINER` appearing in **any** migration that names this
 table — which is where such a conversion would have to live. With invoker rights and no

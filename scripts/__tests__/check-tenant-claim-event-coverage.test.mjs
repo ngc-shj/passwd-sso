@@ -306,7 +306,23 @@ describe("check-tenant-claim-event-coverage", () => {
     );
     const r = runGuard();
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toMatch(/20260202000000_later_change.*forbidden pattern .*REFERENCES/s);
+    expect(r.stderr).toMatch(/20260202000000_later_change\/migration\.sql: forbidden pattern .*REFERENCES/);
+  });
+
+  it("passes a migration whose ONLY mention of the table is a comment", () => {
+    // Comments are stripped before the subject match, so prose about this table
+    // cannot enrol an unrelated migration and then have an unrelated FK read as
+    // an accusation against it. D-3 records that the first drafts of the real
+    // migration failed this gate on comments explaining why those very things
+    // are absent; the widened subject set would have multiplied that.
+    write(
+      "prisma/migrations/20260303000000_unrelated/migration.sql",
+      `-- deliberately NOT modelled on tenant_claim_events, which is append-only\n` +
+        `ALTER TABLE "tenant_notes" ADD CONSTRAINT fk\n` +
+        `  FOREIGN KEY (tenant_id) REFERENCES "tenants"("id") ON DELETE CASCADE;\n`,
+    );
+    const r = runGuard();
+    expect(r.exitCode).toBe(0);
   });
 
   it("exits 2 when no migration creates the table — no subject is not a clean bill", () => {

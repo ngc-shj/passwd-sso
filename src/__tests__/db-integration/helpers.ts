@@ -213,6 +213,25 @@ export async function withCleanupConflictRetry<T>(fn: () => Promise<T>): Promise
  * otherwise cost the suite its only signal about. It is re-thrown only after
  * the loop finishes.
  */
+/**
+ * The shape `cleanup()` runs — sweep, then disconnect in `finally` regardless
+ * of whether the sweep threw (QA-3c). Factored out, same reasoning as
+ * `sweepLeakedTenants` above: `cleanup()`'s own sweep and disconnects need a
+ * live DB and real pools, which a sweep failure does not happen on demand
+ * against, so the try/finally MECHANISM is driven here with both arguments
+ * fabricated rather than against the real ones.
+ */
+export async function runCleanupSweep(
+  sweep: () => Promise<void>,
+  disconnectAll: () => Promise<void>,
+): Promise<void> {
+  try {
+    await sweep();
+  } finally {
+    await disconnectAll();
+  }
+}
+
 export async function sweepLeakedTenants(
   leaked: readonly string[],
   deleteTestData: (tenantId: string) => Promise<void>,
@@ -565,21 +584,21 @@ export async function createTestContext(): Promise<TestContext> {
     await sweepLeakedTenants([...outstandingTenantIds], deleteTestData);
   }
 
+  // A sweep failure (TenantClaimEventsPurgeError, re-thrown after the loop
+  // finishes and the report is printed — see sweepLeakedTenants) must not
+  // skip disconnecting every pool: a leaked pg.Pool keeps the forked
+  // vitest worker process alive (QA-3c).
+  async function disconnectAll(): Promise<void> {
+    await Promise.all([
+      su.prisma.$disconnect().then(() => su.pool.end()),
+      app.prisma.$disconnect().then(() => app.pool.end()),
+      worker.prisma.$disconnect().then(() => worker.pool.end()),
+      retentionWorker.prisma.$disconnect().then(() => retentionWorker.pool.end()),
+    ]);
+  }
+
   async function cleanup(): Promise<void> {
-    // A sweep failure (TenantClaimEventsPurgeError, re-thrown after the loop
-    // finishes and the report is printed — see sweepLeakedTenants) must not
-    // skip disconnecting every pool: a leaked pg.Pool keeps the forked
-    // vitest worker process alive (QA-3c).
-    try {
-      await sweepOutstandingTenants();
-    } finally {
-      await Promise.all([
-        su.prisma.$disconnect().then(() => su.pool.end()),
-        app.prisma.$disconnect().then(() => app.pool.end()),
-        worker.prisma.$disconnect().then(() => worker.pool.end()),
-        retentionWorker.prisma.$disconnect().then(() => retentionWorker.pool.end()),
-      ]);
-    }
+    await runCleanupSweep(sweepOutstandingTenants, disconnectAll);
   }
 
   return {

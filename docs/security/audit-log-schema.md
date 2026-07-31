@@ -206,9 +206,22 @@ incident responder needs, neither of which the table itself makes obvious:
   purge routine.** `tenant_claim_events_purge_for_tenant(<tenant>)` is the
   sanctioned deletion path and it takes a real tenant id. Removing injected rows
   is an **owner** operation and uses the enumerated owner capability rather than a
-  tool: `SET app.allow_claim_event_purge = 'on'` in the same transaction as a
-  `DELETE` scoped to the rows in question. That is deliberately not wrapped in a
-  command — it is unbounded deletion, and it should require someone who knows
+  tool:
+
+  ```sql
+  BEGIN;
+  SET LOCAL app.allow_claim_event_purge = 'on';
+  DELETE FROM tenant_claim_events WHERE ...;  -- scope this to the injected rows
+  COMMIT;
+  ```
+
+  **`SET LOCAL`, not `SET`.** A plain `SET` is session-scoped, so it would leave
+  the append-only DELETE trigger disarmed for the rest of the `psql` session —
+  every later `DELETE` in that session silently succeeds, including one aimed at
+  the wrong rows. That is the same leak the purge routine's function-level `SET`
+  exists to prevent, and this path is the one where the operator already holds
+  `DELETE` and is working under incident pressure. Deliberately not wrapped in a
+  command: it is unbounded deletion, and it should require someone who knows
   exactly what they are removing.
 
 ## References

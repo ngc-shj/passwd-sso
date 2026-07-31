@@ -61,6 +61,13 @@
  * this gate asserts a non-zero analysed-file count and a non-zero writer count
  * before it is allowed to print OK.
  *
+ * ENUMERATED NON-MEMBERS, recorded rather than discovered: a writer reached
+ * through an aliased delegate (`const d = tx.tenantClaim`); a call whose first
+ * argument is not an object literal (`tenant.create(payload)`), which without a
+ * Program cannot be followed; raw SQL assembled at run time; `.sql` files, which
+ * this gate does not read; the test trees, excluded by `walkSourceFiles`; and
+ * the `tenants → tenant_claims ON DELETE CASCADE` path.
+ *
  * Runs without a Program (in-memory project).
  *
  * Exit: 0 ok · 1 coverage violation · 2 the gate could not run (empty scan,
@@ -197,6 +204,11 @@ const MIGRATION_FORBIDDEN = [
   ],
 ];
 
+/** Line and block comments removed, so prose cannot enrol or accuse a file. */
+function stripSqlComments(sql) {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+}
+
 function checkMigrationForbiddenPatterns() {
   // SUBJECT, not derived identifier — so it follows the scan root. The two
   // derived identifiers (the relation field, the operation set) stay pinned to
@@ -210,7 +222,6 @@ function checkMigrationForbiddenPatterns() {
   } catch {
     fail("cannot read prisma/migrations — C1's forbidden patterns have no subject");
   }
-  const found = [];
   const creators = [];
   for (const name of entries) {
     let sql;
@@ -226,13 +237,36 @@ function checkMigrationForbiddenPatterns() {
     // which re-arms the cascade I4 exists to escape. Same for a
     // `CREATE OR REPLACE FUNCTION … SECURITY DEFINER`. So: any migration that
     // NAMES the table is in scope.
-    if (!/tenant_claim_events/.test(sql)) continue;
+    // Comments are stripped before ANY matching. Otherwise a migration whose
+    // only mention of this table is prose ("intentionally NOT modelled on
+    // tenant_claim_events…") enrols as a subject, and the pattern then matches
+    // an unrelated FK elsewhere in the same file — a correct migration blocked
+    // with a message telling the author to remove a key that must stay.
+    const code = stripSqlComments(sql);
+    if (!/tenant_claim_events/.test(code)) continue;
     // The floor below still keys on the creating migration: a subject set that
     // is merely non-empty does not prove the gate found the table's own DDL.
-    if (/CREATE TABLE\s+"?tenant_claim_events"?/.test(sql)) creators.push(name);
-    found.push(name);
+    if (/CREATE TABLE\s+"?tenant_claim_events"?/.test(code)) creators.push(name);
+
+    // Patterns run over the whole (comment-stripped) file, NOT per statement.
+    //
+    // Per-statement scoping was tried and withdrawn: splitting on `;` is wrong
+    // for plpgsql, whose dollar-quoted bodies contain their own semicolons, and
+    // the repo's own SQL lexer cannot substitute — it collapses quoted
+    // identifiers to `<IDENT>`, which is exactly the text these patterns match
+    // on. A mis-split fails in the FALSE-ALLOW direction (a real
+    // `REFERENCES "tenants"` on this table read as two fragments and missed),
+    // and that is the one direction a fail-closed gate must not take. Whole-file
+    // matching fails the other way.
+    //
+    // RESIDUAL, enumerated rather than discovered: a migration that genuinely
+    // touches this table AND separately adds an unrelated FK to `tenants` in
+    // the same file reds. It is loud, the message names the file, and the
+    // remedy is to split the migration — which is the right shape anyway. The
+    // reported false-positive (a file whose ONLY mention was a comment) is
+    // closed by the strip above.
     for (const [re, reason] of MIGRATION_FORBIDDEN) {
-      if (re.test(sql)) {
+      if (re.test(code)) {
         violations.push(
           `prisma/migrations/${name}/migration.sql: forbidden pattern ${re} — ${reason}.`,
         );
@@ -289,11 +323,18 @@ function nestsClaimWrite(call) {
   if (!arg || !arg.isKind(SyntaxKind.ObjectLiteralExpression)) return false;
   for (const carrier of NESTED_WRITE_CARRIERS) {
     const payload = arg.getProperty(carrier);
-    if (!payload) continue;
-    const rel = payload
-      .getDescendantsOfKind(SyntaxKind.PropertyAssignment)
-      .find((p) => p.getName() === RELATION_FIELD);
-    if (rel) return true;
+    if (!payload || !payload.isKind(SyntaxKind.PropertyAssignment)) continue;
+    const value = payload.getInitializer();
+    if (!value || !value.isKind(SyntaxKind.ObjectLiteralExpression)) continue;
+    // DIRECT property, not any descendant. Dropping the verb list also dropped
+    // the only thing bounding the match's depth, so a scalar/JSON payload key
+    // that happens to be called `claims` — `data: { metadata: { claims: … } }`
+    // — registered as a claim writer. That false-deny is worse than it sounds:
+    // the first remedy a contributor reaches for is to satisfy the gate by
+    // emitting a routing event, i.e. writing a FABRICATED row into a table the
+    // append-only trigger makes uncorrectable. A relation write is always a
+    // direct child of the payload.
+    if (value.getProperty(RELATION_FIELD)) return true;
   }
   return false;
 }
@@ -400,8 +441,13 @@ for (const { rel, sf } of sourceFilesFrom(project, SEARCH_DIRS, SCAN_ROOT)) {
         .find((p) => p.getName() === "operation");
       const lit = named?.getInitializer();
       if (lit?.isKind(SyntaxKind.StringLiteral)) e.ops.add(lit.getLiteralValue());
-      else if (named) e.ops.add(named.getInitializer()?.getText() ?? `?${e.producers}`);
-      else e.ops.add(`?${e.producers}`);
+      // ONE synthetic key for every non-static operation, not one per call.
+      // A per-call key made N unreadable producers count as N distinct
+      // operations, silently degrading this predicate back to the call count it
+      // replaced — a fail-open direction, so it collapses to a single key and
+      // the strictness is preserved.
+      else if (named) e.ops.add(named.getInitializer()?.getText() ?? "<unreadable>");
+      else e.ops.add("<unreadable>");
       if (lit?.isKind(SyntaxKind.StringLiteral) && !OPERATIONS.has(lit.getLiteralValue())) {
         violations.push(
           `${rel}:${call.getStartLineNumber()}: operation "${lit.getLiteralValue()}" is not a member of ` +

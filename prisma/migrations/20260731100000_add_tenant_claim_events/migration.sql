@@ -199,6 +199,15 @@ ALTER TABLE "tenant_claim_events" ENABLE ALWAYS TRIGGER trg_tenant_claim_events_
 -- "owner-only from birth": that absolute is what a future reader would lean on
 -- to justify a DEFINER conversion or a GRANT EXECUTE.
 --
+-- The out-of-migration case — a definer conversion applied by hand, by a
+-- bootstrap change, or by an initdb script rather than by a migration — is
+-- closed by a control that lives elsewhere and is easy to miss:
+-- scripts/rls-cross-tenant-verify.sql's [E-RLS-SECDEF] ASSERT reads
+-- pg_proc.prosecdef from the LIVE catalogue and fails on any SECURITY DEFINER
+-- routine in `public` outside a two-name allowlist. It runs in CI and in
+-- pre-pr. Cited here because adding this routine to that allowlist would
+-- silently remove the closure — that edit is a decision about THIS table.
+--
 -- Either way the BOUND is the table ACL, not this routine's own: with invoker
 -- rights a caller still needs DELETE on the table, which passwd_app and both
 -- worker roles are prescriptively denied. Definer rights would remove exactly

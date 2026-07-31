@@ -92,6 +92,14 @@ describe("app-role denied privileges (live database)", () => {
   // greens on a net-zero WEAKENING (swapping SELECT for REFERENCES) —
   // containment does neither.
   it("CASES contains (role, public.tenant_claim_events, privilege) for every audited role × every denied privilege (C2 containment)", () => {
+    // Anti-vacuity floor. The universe is derived from the artifact under audit,
+    // so a shrunken roster would execute zero assertions and pass green — and
+    // dropping a role from AUDITED_ROLES both stops the auditor checking it and
+    // stops this case requiring its policy entry. Membership, not a length:
+    // a swap must red too.
+    expect(AUDITED_ROLES).toContain("passwd_app");
+    expect(AUDITED_ROLES).toContain("passwd_outbox_worker");
+    expect(AUDITED_ROLES).toContain("passwd_retention_gc_worker");
     for (const role of AUDITED_ROLES) {
       for (const privilege of TENANT_CLAIM_EVENTS_DENIED_PRIVILEGES) {
         const isMember = CASES.some(
