@@ -90,7 +90,7 @@ export function splitOverrideKey(key) {
  * (verified, npm 11.17.0). Silently skipping it here would inherit that
  * order-dependence, so it is reported.
  */
-export function collectScopes(overrides, scopePath = "overrides", into = []) {
+export function collectScopes(overrides, scopePath = "overrides", into = [], depth = 0) {
   const byPackage = new Map();
   const unparseable = [];
 
@@ -98,7 +98,7 @@ export function collectScopes(overrides, scopePath = "overrides", into = []) {
     // "." addresses the parent package itself, not a dependency of it.
     if (key === ".") continue;
     if (value !== null && typeof value === "object") {
-      collectScopes(value, `${scopePath} > ${key}`, into);
+      collectScopes(value, `${scopePath} > ${key}`, into, depth + 1);
     }
     const { name, range } = splitOverrideKey(key);
     if (!semver.validRange(range)) {
@@ -109,8 +109,19 @@ export function collectScopes(overrides, scopePath = "overrides", into = []) {
     byPackage.get(name).push({ key, range });
   }
 
-  into.push({ scopePath, byPackage, unparseable });
+  // `depth` is carried explicitly rather than inferred from position: the walk
+  // recurses inside the loop and pushes the current scope after it, so the array
+  // is post-order and `into[0]` is the FIRST NESTED scope whenever one exists.
+  // An earlier revision took `into[0]` as the top level and therefore skipped the
+  // whole top-level edge check on any manifest with a nested override —
+  // `extension/package.json` has one.
+  into.push({ scopePath, byPackage, unparseable, depth });
   return into;
+}
+
+/** The one scope npm applies to every edge in the tree. */
+export function topLevelScope(scopes) {
+  return scopes.find((s) => s.depth === 0);
 }
 
 /** Keys for one package whose ranges intersect each other (hazard 1). */
@@ -123,6 +134,18 @@ export function findOverlappingKeys(overrides, scopePath = "overrides") {
       );
     }
     for (const [name, entries] of scope.byPackage) {
+      // A nested scope governs only edges beneath its parent, and the lockfile
+      // does not record which scope produced a given edge — so the edge check
+      // below cannot cover it. Two selectors for one package inside a nested
+      // scope are therefore undecidable here, and undecidable means red.
+      if (scope.depth > 0 && entries.length > 1) {
+        violations.push(
+          `${scope.scopePath}: ${name} has ${entries.length} selectors (${entries
+            .map((e) => `'${e.key}'`)
+            .join(", ")}) inside a nested scope — a dependency range spanning two of them would resolve by key order, and nested scopes cannot be edge-checked against the lockfile. Use one selector per package here`,
+        );
+        continue;
+      }
       for (let i = 0; i < entries.length; i++) {
         for (let j = i + 1; j < entries.length; j++) {
           if (semver.intersects(entries[i].range, entries[j].range)) {
@@ -147,14 +170,32 @@ export function findOverlappingKeys(overrides, scopePath = "overrides") {
  * scope produced a given edge, so pairing them would be guesswork.
  */
 export function findAmbiguousEdges(overrides, lockfilePackages, label = "package-lock.json") {
-  const [topScope] = collectScopes(overrides);
+  const topScope = topLevelScope(collectScopes(overrides));
   const violations = [];
+  if (!topScope) return violations;
 
   for (const [path, meta] of Object.entries(lockfilePackages ?? {})) {
     for (const field of DEPENDENCY_FIELDS) {
       for (const [dep, requested] of Object.entries(meta?.[field] ?? {})) {
         const keys = topScope.byPackage.get(dep);
-        if (!keys || keys.length < 2 || !semver.validRange(requested)) continue;
+        if (!keys || keys.length < 2) continue;
+
+        // A spec semver cannot compare is not evidence of safety. npm reduces
+        // `npm:pkg@>=1 <3` to the range `>=1 <3` and applies the overrides to it
+        // order-dependently (verified, npm 11.17.0) — semver.validRange returns
+        // null for the same string. Rather than reimplement npm's spec parser,
+        // an undecidable spec on a package that has more than one key is
+        // reported. Today that is zero noise: of 4374 edges across the three
+        // lockfiles exactly one is non-semver, and its package has no overrides.
+        // If a real alias edge ever lands on a multi-key package, parsing it with
+        // `npm-package-arg` is the upgrade path.
+        if (!semver.validRange(requested)) {
+          violations.push(
+            `${label}: '${path || "<root>"}' asks for ${dep}@'${requested}', which semver cannot compare, while ${dep} has ${keys.length} override keys — cannot prove npm resolves it independently of key order`,
+          );
+          continue;
+        }
+
         const reached = keys.filter((k) => semver.intersects(k.range, requested));
         if (reached.length > 1) {
           violations.push(

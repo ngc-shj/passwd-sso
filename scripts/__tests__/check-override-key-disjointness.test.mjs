@@ -12,10 +12,12 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  collectScopes,
   discoverManifests,
   findAmbiguousEdges,
   findOverlappingKeys,
   splitOverrideKey,
+  topLevelScope,
 } from "../checks/check-override-key-disjointness.mjs";
 
 describe("splitOverrideKey", () => {
@@ -166,6 +168,67 @@ describe("findAmbiguousEdges", () => {
         "node_modules/wide-parent": { dependencies: { "brace-expansion": ">=1 <3" } },
       }),
     ).toEqual([]);
+  });
+
+  it("still checks the top-level scope when a nested override is present", () => {
+    // collectScopes is post-order, so the array's first element is the nested
+    // scope. An earlier revision took element 0 as the top level and skipped
+    // this check entirely on any manifest with a nested override — which
+    // extension/package.json has.
+    const violations = findAmbiguousEdges(
+      { parent: { child: "1.0.0" }, ...disjointKeys },
+      { "node_modules/wide-parent": { dependencies: { "brace-expansion": ">=1 <3" } } },
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("straddles");
+  });
+
+  it("reports an edge spec semver cannot compare when the package has several keys", () => {
+    // npm reduces `npm:pkg@>=1 <3` to the range and applies the overrides to it
+    // order-dependently; semver.validRange returns null for the same string, so
+    // treating it as safe would be a false negative.
+    const violations = findAmbiguousEdges(disjointKeys, {
+      "node_modules/aliased": {
+        dependencies: { "brace-expansion": "npm:brace-expansion@>=1 <3" },
+      },
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("cannot compare");
+  });
+
+  it("does not report an incomparable spec when only one key exists", () => {
+    // One key cannot be order-dependent, so this must not become noise —
+    // the repo's single non-semver edge (`tailwindcss`) is this shape.
+    expect(
+      findAmbiguousEdges({ "brace-expansion@1": "1.1.17" }, {
+        "node_modules/aliased": {
+          dependencies: { "brace-expansion": "npm:brace-expansion@>=1 <3" },
+        },
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("scope depth", () => {
+  it("labels the top-level scope by depth, not by position in the walk", () => {
+    const scopes = collectScopes({ parent: { child: "1.0.0" }, "pkg@1": "1.0.0" });
+    expect(scopes[0].scopePath).toBe("overrides > parent"); // post-order: nested first
+    expect(topLevelScope(scopes).scopePath).toBe("overrides");
+    expect(topLevelScope(scopes).depth).toBe(0);
+  });
+
+  it("rejects two selectors for one package inside a nested scope", () => {
+    // A nested scope governs only edges under its parent, and the lockfile does
+    // not record which scope produced an edge — so it cannot be edge-checked.
+    // Undecidable means red.
+    const violations = findOverlappingKeys({ parent: { "pkg@1": "1.0.0", "pkg@2": "2.0.0" } });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("nested scope");
+  });
+
+  it("accepts a single selector inside a nested scope", () => {
+    // extension/package.json's actual shape.
+    expect(findOverlappingKeys({ "@crxjs/vite-plugin": { rollup: "^2.80.0" } })).toEqual([]);
   });
 });
 

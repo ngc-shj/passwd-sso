@@ -409,3 +409,80 @@ badsel     exit=1    "pkg" then "pkg@latest" — the silently-ignored case
 
 Suite grew 15 → **25 cases**; the three new hazards are pinned there, not only in this
 transcript.
+
+## D13 — Second external review round: two false negatives in the edge check
+
+Both confirmed, both re-derived here before acceptance.
+
+### 1. `topScope` was the first *nested* scope, not the top level — **CONFIRMED**
+
+`collectScopes` recurses inside its loop and pushes the current scope **after** it, so the
+array is post-order. `const [topScope] = collectScopes(...)` therefore takes the first
+nested scope whenever one exists, and the top-level edge check was skipped entirely.
+Reproduced:
+
+```
+overrides { parent: { child }, pkg@1, pkg@2 }   edge: pkg ">=1 <3"
+  collectScopes -> [0] "overrides > parent"   [1] "overrides"
+  findAmbiguousEdges -> []                          (wrong)
+  same overrides minus the nested key -> 1 violation (right)
+```
+
+`extension/package.json` carries a nested override (`@crxjs/vite-plugin`), so its
+top-level block was in exactly this state. No live exposure — its top level has no package
+with two keys — but the gate was bypassable.
+
+**Fixed**: scopes carry an explicit `depth`; `topLevelScope()` selects `depth === 0`.
+Position in the array is no longer load-bearing.
+
+**Nested scopes**: the reviewer also noted a nested scope can carry the same straddling
+hazard. The lockfile does not record which override scope produced a given edge, so a
+nested scope cannot be edge-checked — pairing them would be guesswork. Took the reviewer's
+second option: **two selectors for one package inside a nested scope are rejected
+outright**. Undecidable means red. `extension`'s single-selector nested scope is unaffected.
+
+### 2. Non-semver dependency specs were treated as safe — **CONFIRMED**
+
+`semver.validRange("npm:brace-expansion@>=1 <3")` is `null`, so the edge was skipped. npm
+reduces the same string to the range and applies overrides to it order-dependently.
+Reproduced with a packed parent declaring the alias:
+
+| overrides key order | resolved |
+|---|---|
+| `@1` then `@2` | **1.1.17** |
+| `@2` then `@1` | **2.1.3** |
+
+The lockfile records the edge verbatim as `"npm:brace-expansion@>=1 <3"`.
+
+**Fixed**: an edge spec semver cannot compare is reported when its package has ≥2 override
+keys.
+
+**Departure from the recommendation, stated plainly.** The review recommends parsing with
+`npm-package-arg` and fail-closing only the residue. I fail-closed the whole non-semver
+class and did **not** add the dependency. Measured basis: of **4374** dependency edges
+across the three lockfiles, exactly **one** is non-semver
+(`@tailwindcss/typography` → `tailwindcss: ">=3.0.0 || >=4.0.0 || insiders"`), and that
+package has no override keys — so fail-closed costs zero false positives today, while
+`npm-package-arg` would add 3 packages (`npm-package-arg`, `hosted-git-info`, `proc-log`)
+to a password manager's tree to remove noise that does not exist. The cost of my choice is
+real and belongs on the record: a *benign* alias edge landing on a multi-key package would
+red the gate and need a human. If that happens, `npm-package-arg` is the upgrade path and
+this entry is the argument for taking it.
+
+**Alias name semantics, measured** (this decided the lookup key): npm matches the override
+against the **dependency key name**, not the alias target. `"my-be": "npm:brace-expansion@…"`
+with overrides on `brace-expansion@1`/`@2` has **no effect**; overrides on `my-be@1`/`@2`
+fail loudly with a registry 404 in both key orders. The existing lookup by dependency key
+is correct, and cross-name aliases are not a silent hazard.
+
+### Red-proof of the revised checks
+
+```
+RED    top-level edge check behind a nested scope
+RED    alias edge on a 2-key package
+RED    nested scope with 2 selectors for one package
+green  alias edge with only ONE key          (no false positive)
+green  nested scope with one selector        (extension's actual shape)
+```
+
+Suite 25 → **31 cases**.
