@@ -645,7 +645,11 @@ fi
 
 # Manual-test artifact gate (R35 Tier-1) — fails if admin-IA changes ship
 # without an accompanying docs/archive/review/*-manual-test.md.
-branch_changed_files=$(git diff --name-only main...HEAD 2>/dev/null || true)
+# Test files under admin/ are excluded from the trigger: they ship no UI, so a
+# test-only edit has no IA to manually verify, and demanding an artifact for one
+# only teaches people to write an empty artifact. A change to the page itself
+# still trips the gate whether or not its test changed alongside it.
+branch_changed_files=$(git diff --name-only main...HEAD 2>/dev/null | grep -vE '\.test\.(ts|tsx)$' || true)
 branch_added_files=$(git diff --name-only --diff-filter=A main...HEAD 2>/dev/null || true)
 if grep -q '^src/app/\[locale\]/admin/' <<<"$branch_changed_files"; then
   if ! grep -q '^docs/archive/review/.*-manual-test\.md$' <<<"$branch_added_files"; then

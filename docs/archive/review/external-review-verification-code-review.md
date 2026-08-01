@@ -441,7 +441,104 @@ tests, Playwright E2E, iOS tests, load tests. The external review states the sam
 
 ## Resolution Status
 
-**No fixes applied this round — verification only, per the user's instruction.**
+All findings fixed on branch `fix/audit-chain-failopen-and-mcp-token-revocation`
+(one branch, one PR), except F4 — see the Anti-Deferral entry at the end.
+
+### SEC-1 [Critical] Verifier reports ok:true having verified nothing
+- Action: coverage compared against `toSeq` unconditionally (`incomplete`), replacing the
+  row-cap-gated shortfall test; missing anchor is benign only when no chained row survives.
+  New reasons `RANGE_INCOMPLETE` / `ANCHOR_MISSING`; `reason` added to the audit metadata.
+  Taxonomy decision (owner): single `RANGE_INCOMPLETE` now, `PURGED` carved out later when
+  the `purged_up_to_seq` watermark lands.
+- Modified: `src/app/api/maintenance/audit-chain-verify/route.ts:151-192, 356-397`
+- Red-proved: reverting both halves on a throwaway copy reddens the three SEC-1 tests.
+
+### SEC-2 / T1 [Critical] Chain walk verified only by a drifted hand-copy
+- Action: `walkChain()` deleted; the integration suite now imports and drives the real `GET`
+  handler. Assertions re-baselined to production values (`totalVerified: 2`, not the copy's 5).
+  Two fail-closed cases added. The route header no longer claims the suite as evidence.
+- Modified: `src/__tests__/db-integration/audit-chain-verify-endpoint.integration.test.ts`
+- Verified: 7/7 against the real DB; request logs confirm the handler ran.
+
+### SEC-3 [Major] delegation/check filtered on a non-existent Prisma field
+- Action: `tokenId` → `id`, and the conditional annotated as
+  `Prisma.McpAccessTokenWhereInput` so the excess-property check applies.
+- Modified: `src/app/api/vault/delegation/check/route.ts:13, 125-136`
+- Red-proved: restoring `tokenId` fails `tsc` (TS2322), which gates CI through the build.
+
+### SEC-4 / T5 [Major] Sibling-family revocation unscoped by owner
+- Action: `userId, tenantId` added to the sibling `updateMany`.
+- Modified: `src/app/api/user/mcp-tokens/[id]/route.ts:75-84`
+
+### T2 [Major] mcp-tokens/[id] at 0% coverage
+- Action: new 14-case suite asserting the exact `where` of every cascade step, the 404
+  no-write path, empty-family/empty-session legs, per-session audit rows, eviction ordering.
+- Modified: `src/app/api/user/mcp-tokens/[id]/route.test.ts` (new)
+- Coverage: 0/0 → 100% lines / 93.75% branches.
+
+### T3 [Major] audit-chain-verify tests stopped at the perimeter
+- Action: 11 cases over the walk, the four-way reason ladder, both fail-closed paths, the
+  seed-guard allow leg (RT10), the `to`-param branch, and the audit verdict — fixtures built
+  with the production hash primitives.
+- Modified: `src/app/api/maintenance/audit-chain-verify/route.test.ts`
+- Coverage: 49.47/32.39 → 99.02% lines / 92.1% branches.
+
+### SEC-5, SEC-6, SEC-7 [Minor]
+- SEC-5: delegation sessions revoked across the whole revoked-token set, not just `id`.
+- SEC-6: Redis eviction moved outside the `withBypassRls` callback, matching its own comment.
+- SEC-7: rate limiter added (`rl:mcp_revoke:<userId>`, max 10), matching `sessions/[id]`.
+- Modified: `src/app/api/user/mcp-tokens/[id]/route.ts`
+- Red-proved: reverting SEC-4/5/6 individually reddens exactly its own test, nothing else.
+
+### F2 [Minor] Worker signal handlers never detached
+- Action: handlers held and `process.off`'d in `stop()` and the post-loop path;
+  `src/lib/prisma.ts` drops a superseded pool's registration; the `setMaxListeners(30)`
+  workaround in `prisma.test.ts` removed so the warning stays a real signal.
+- Verified: full suite emits zero `MaxListenersExceededWarning`.
+
+### F3 [Minor] Three byte-identical AUTOFILL cases
+- Action: collapsed into one case list reading the echoed `type` off the message.
+- Modified: `extension/src/background/index.ts:2401-2429`
+- Verified: extension `tsc` clean, 940/940 tests pass.
+
+### T7 [Minor] Nested `vi.mock()` scheduled to become an error
+- Action: mocks moved to module scope in both helpers; 31 call sites became side-effect
+  imports.
+- Verified: full suite emits zero `vi.mock` warnings.
+
+### T6 [Minor] Flaky under coverage instrumentation
+- Action: explicit 60s timeout on the MUST_EXCLUDE loop (global floor left at 10s).
+- Verified: full `vitest run --coverage` passes 13,939 tests, no timeout.
+
+### T4 [Minor] Coverage floors too low; no statements key
+- Action: 75/65/75 global; the two routes above enrolled in the per-file map at 80/70.
+- Red-proved: setting the two per-file entries to 99.9 names both files in the failure,
+  confirming the path keys match rather than silently not applying.
+
+### User-raised: three standing ESLint warnings
+- Action: all three fixed; `npm run lint` now runs `--max-warnings 0`.
+- Note: the suspicion that the rate-limit assertions were inert did not hold — both handles
+  were reached at runtime through an alias / the factory's recorded result. The real problem
+  was the absence of a threshold, which is what this change fixes.
+- Red-proved: one introduced warning fails the gate.
+
+### F1 [Minor → downgraded] Stale `/tmp` snapshot
+- Action: none in-repo. `/tmp/passwd-sso-tracked.JOoAuC` is real and stale, but the causal
+  claim did not reproduce in an independent full run and no producer exists in this
+  repository's tooling. Recorded rather than acted on.
+
+### F4 [Minor] `handleMessage` is ~880 lines / 27 cases — DEFERRED
+- **Anti-Deferral.** Worst case: continued drift risk in the extension background switch —
+  a future change applied to one autofill-shaped case and not its neighbours. No current
+  defect: the only one traceable to the file's size was F3, which is fixed.
+  Likelihood: low — the trio that actually duplicated is now collapsed, and the remaining
+  cases are heterogeneous rather than copy-paste siblings.
+  Cost to fix: moderate — a behaviour-preserving move of 27 case bodies into sibling modules,
+  large diff, non-zero regression risk in a browser-extension surface that has no ESLint of
+  its own and whose only net is the 940-test suite.
+  Decision (user, this session): keep it out of this PR. Folding a large mechanical
+  refactor into a branch that is otherwise fail-closed security fixes lowers the odds a
+  reviewer sees the risky lines. Tracked here for a follow-up branch.
 
 Every finding above is repo-wide and unrelated to the current branch
 (`fix/harden-cli-tailnet-ssrf`, whose diff is CLI tailnet SSRF hardening). Per the project's
