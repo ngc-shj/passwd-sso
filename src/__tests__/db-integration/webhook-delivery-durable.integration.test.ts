@@ -1142,8 +1142,12 @@ describe("webhook delivery — durable pipeline (real DB + real delivery core)",
     for (const id of deliveryIds) await parkDeliveryRow(ctx, id, 3600);
     for (const id of deliveryIds) await unparkDeliveryRow(ctx, id);
 
+    // Claims across all tenants, so an exact count is not ours to assert —
+    // another test's leftover PENDING row would inflate it. That our three were
+    // claimed and ran together is what `maxInFlight` and the SENT statuses
+    // below establish.
     const claimed = await processWebhookDeliveryBatch(ctx.worker.prisma, 50);
-    expect(claimed).toBe(3);
+    expect(claimed).toBeGreaterThanOrEqual(3);
 
     // The core assertion: at least 2 requests were in flight simultaneously.
     // WEBHOOK_DELIVERY_CONCURRENCY=4 > 3, so all three overlap; a serial

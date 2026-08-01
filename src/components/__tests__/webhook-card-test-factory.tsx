@@ -122,185 +122,188 @@ function getDialogSubmitButton(textIncludes: string): HTMLElement {
 //       the base component does not use it.
 // ---------------------------------------------------------------------------
 
-export function setupWebhookCardMocks() {
-  // NOTE: sonner and @/lib/url-helpers are intentionally NOT mocked here.
-  // Each test file mocks them with vi.hoisted() values so assertions on
-  // mockFetch / mockToast work correctly. Registering them here would
-  // replace the hoisted fn references and break those assertions.
+// Registered at module scope rather than from inside an exported function.
+// vi.mock() nested in a function body is not hoisted, which Vitest warns about
+// and will reject outright in a future major -- and the mocks have to be in
+// place before the components under test are imported anyway.
+// NOTE: sonner and @/lib/url-helpers are intentionally NOT mocked here.
+// Each test file mocks them with vi.hoisted() values so assertions on
+// mockFetch / mockToast work correctly. Registering them here would
+// replace the hoisted fn references and break those assertions.
 
-  vi.mock("@/lib/format/format-datetime", () => ({
-    formatDateTime: (date: string) => date,
-  }));
+vi.mock("@/lib/format/format-datetime", () => ({
+  formatDateTime: (date: string) => date,
+}));
 
-  vi.mock("@/components/passwords/shared/copy-button", () => ({
-    CopyButton: ({ getValue }: { getValue: () => string }) => (
-      <button data-testid="copy-button" data-value={getValue()}>
-        Copy
-      </button>
-    ),
-  }));
+vi.mock("@/components/passwords/shared/copy-button", () => ({
+  CopyButton: ({ getValue }: { getValue: () => string }) => (
+    <button data-testid="copy-button" data-value={getValue()}>
+      Copy
+    </button>
+  ),
+}));
 
-  vi.mock("@/components/ui/card", () => ({
-    Card: ({
-      children,
-      className,
-    }: {
-      children: ReactNode;
-      className?: string;
-    }) => (
-      <div data-testid="card" className={className}>
-        {children}
-      </div>
-    ),
-    CardContent: ({
-      children,
-      className,
-    }: {
-      children: ReactNode;
-      className?: string;
-    }) => (
-      <div data-testid="card-content" className={className}>
-        {children}
-      </div>
-    ),
-  }));
+vi.mock("@/components/ui/card", () => ({
+  Card: ({
+    children,
+    className,
+  }: {
+    children: ReactNode;
+    className?: string;
+  }) => (
+    <div data-testid="card" className={className}>
+      {children}
+    </div>
+  ),
+  CardContent: ({
+    children,
+    className,
+  }: {
+    children: ReactNode;
+    className?: string;
+  }) => (
+    <div data-testid="card-content" className={className}>
+      {children}
+    </div>
+  ),
+}));
 
-  vi.mock("@/components/settings/account/section-card-header", () => ({
-    SectionCardHeader: ({ title, description, action }: { title: string; description: string; action?: ReactNode }) => (
-      <div data-testid="section-card-header"><span>{title}</span><span>{description}</span>{action}</div>
-    ),
-  }));
+vi.mock("@/components/settings/account/section-card-header", () => ({
+  SectionCardHeader: ({ title, description, action }: { title: string; description: string; action?: ReactNode }) => (
+    <div data-testid="section-card-header"><span>{title}</span><span>{description}</span>{action}</div>
+  ),
+}));
 
-  vi.mock("@/components/ui/separator", () => ({
-    Separator: () => <hr />,
-  }));
+vi.mock("@/components/ui/separator", () => ({
+  Separator: () => <hr />,
+}));
 
-  vi.mock("@/components/ui/input", () => ({
-    Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-      <input {...props} />
-    ),
-  }));
+vi.mock("@/components/ui/input", () => ({
+  Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => (
+    <input {...props} />
+  ),
+}));
 
-  vi.mock("@/components/ui/label", () => ({
-    Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
-  }));
+vi.mock("@/components/ui/label", () => ({
+  Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
+}));
 
-  vi.mock("@/components/ui/badge", () => ({
-    Badge: ({
-      children,
-      variant,
-    }: {
-      children: ReactNode;
-      variant?: string;
-    }) => (
-      <span data-testid="badge" data-variant={variant}>
-        {children}
-      </span>
-    ),
-  }));
+vi.mock("@/components/ui/badge", () => ({
+  Badge: ({
+    children,
+    variant,
+  }: {
+    children: ReactNode;
+    variant?: string;
+  }) => (
+    <span data-testid="badge" data-variant={variant}>
+      {children}
+    </span>
+  ),
+}));
 
-  vi.mock("@/components/ui/checkbox", () => ({
-    Checkbox: ({
-      checked,
-      onCheckedChange,
-    }: {
-      checked?: boolean;
-      onCheckedChange?: (v: boolean) => void;
-    }) => (
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onCheckedChange?.(e.target.checked)}
-        data-testid="checkbox"
-      />
-    ),
-  }));
+vi.mock("@/components/ui/checkbox", () => ({
+  Checkbox: ({
+    checked,
+    onCheckedChange,
+  }: {
+    checked?: boolean;
+    onCheckedChange?: (v: boolean) => void;
+  }) => (
+    <input
+      type="checkbox"
+      checked={checked}
+      onChange={(e) => onCheckedChange?.(e.target.checked)}
+      data-testid="checkbox"
+    />
+  ),
+}));
 
-  // Smart Collapsible mock that respects the controlled `open` prop.
-  // Required so InactiveItemsSection (which wraps Collapsible and passes
-  // `open` explicitly) hides its children when closed; render-through
-  // stubs would let inactive-toggle tests pass vacuously even when the
-  // helper's collapse logic is broken (per C5 of unify-settings-page-layout
-  // plan / review F-10).
-  vi.mock("@/components/ui/collapsible", async () => {
-    const { mockCollapsibleSmart } = await import(
-      "@/components/__tests__/mocks/collapsible-smart-mock"
-    );
-    return mockCollapsibleSmart();
-  });
+// Smart Collapsible mock that respects the controlled `open` prop.
+// Required so InactiveItemsSection (which wraps Collapsible and passes
+// `open` explicitly) hides its children when closed; render-through
+// stubs would let inactive-toggle tests pass vacuously even when the
+// helper's collapse logic is broken (per C5 of unify-settings-page-layout
+// plan / review F-10).
+vi.mock("@/components/ui/collapsible", async () => {
+  const { mockCollapsibleSmart } = await import(
+    "@/components/__tests__/mocks/collapsible-smart-mock"
+  );
+  return mockCollapsibleSmart();
+});
 
-  // NOTE: This Dialog mock unconditionally renders its children regardless of
-  // the `open` prop, mirroring the AlertDialog mock below. Individual test
-  // files (`base-webhook-card.test.tsx`, `audit-delivery-target-card.test.tsx`)
-  // gate on `open ?` instead — be aware of the divergence when porting tests
-  // between the factory and those files.
-  vi.mock("@/components/ui/dialog", () => ({
-    Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-    DialogTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-    DialogContent: ({ children }: { children: ReactNode }) => (
-      <div data-testid="dialog-content">{children}</div>
-    ),
-    DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-    DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
-    DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
-    DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-    DialogClose: ({ children }: { children: ReactNode }) => <>{children}</>,
-  }));
+// NOTE: This Dialog mock unconditionally renders its children regardless of
+// the `open` prop, mirroring the AlertDialog mock below. Individual test
+// files (`base-webhook-card.test.tsx`, `audit-delivery-target-card.test.tsx`)
+// gate on `open ?` instead — be aware of the divergence when porting tests
+// between the factory and those files.
+vi.mock("@/components/ui/dialog", () => ({
+  Dialog: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DialogTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DialogContent: ({ children }: { children: ReactNode }) => (
+    <div data-testid="dialog-content">{children}</div>
+  ),
+  DialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  DialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
+  DialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DialogClose: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
 
-  vi.mock("@/components/ui/alert-dialog", () => ({
-    AlertDialog: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    AlertDialogTrigger: ({
-      children,
-    }: {
-      children: ReactNode;
-      asChild?: boolean;
-    }) => <div data-testid="alert-trigger">{children}</div>,
-    AlertDialogContent: ({ children }: { children: ReactNode }) => (
-      <div data-testid="alert-content">{children}</div>
-    ),
-    AlertDialogHeader: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    AlertDialogTitle: ({ children }: { children: ReactNode }) => (
-      <h2>{children}</h2>
-    ),
-    AlertDialogDescription: ({ children }: { children: ReactNode }) => (
-      <p>{children}</p>
-    ),
-    AlertDialogFooter: ({ children }: { children: ReactNode }) => (
-      <div>{children}</div>
-    ),
-    AlertDialogCancel: ({ children }: { children: ReactNode }) => (
-      <button>{children}</button>
-    ),
-    AlertDialogAction: ({
-      children,
-      onClick,
-    }: {
-      children: ReactNode;
-      onClick?: () => void;
-    }) => (
-      <button data-testid="alert-action" onClick={onClick}>
-        {children}
-      </button>
-    ),
-  }));
+vi.mock("@/components/ui/alert-dialog", () => ({
+  AlertDialog: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  AlertDialogTrigger: ({
+    children,
+  }: {
+    children: ReactNode;
+    asChild?: boolean;
+  }) => <div data-testid="alert-trigger">{children}</div>,
+  AlertDialogContent: ({ children }: { children: ReactNode }) => (
+    <div data-testid="alert-content">{children}</div>
+  ),
+  AlertDialogHeader: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  AlertDialogTitle: ({ children }: { children: ReactNode }) => (
+    <h2>{children}</h2>
+  ),
+  AlertDialogDescription: ({ children }: { children: ReactNode }) => (
+    <p>{children}</p>
+  ),
+  AlertDialogFooter: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
+  AlertDialogCancel: ({ children }: { children: ReactNode }) => (
+    <button>{children}</button>
+  ),
+  AlertDialogAction: ({
+    children,
+    onClick,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+  }) => (
+    <button data-testid="alert-action" onClick={onClick}>
+      {children}
+    </button>
+  ),
+}));
 
-  vi.mock("@/components/ui/button", () => ({
-    Button: ({
-      children,
-      onClick,
-      disabled,
-      ...rest
-    }: React.ComponentProps<"button">) => (
-      <button onClick={onClick} disabled={disabled} {...rest}>
-        {children}
-      </button>
-    ),
-  }));
-}
+vi.mock("@/components/ui/button", () => ({
+  Button: ({
+    children,
+    onClick,
+    disabled,
+    ...rest
+  }: React.ComponentProps<"button">) => (
+    <button onClick={onClick} disabled={disabled} {...rest}>
+      {children}
+    </button>
+  ),
+}));
+
 
 // ---------------------------------------------------------------------------
 // Shared test suite factory

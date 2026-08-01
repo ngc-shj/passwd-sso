@@ -126,8 +126,9 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
 
     const stuckOutboxId = await insertStuckAboutToDie();
 
-    const reaped = await reapStuckRows(ctx.su.prisma);
-    expect(reaped).toBeGreaterThanOrEqual(1);
+    // Global sweep, so the count is not this tenant's to assert; the row state
+    // below is. (The >= 1 form this replaces was already a concession to that.)
+    await reapStuckRows(ctx.su.prisma);
 
     const stuckRow = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -282,6 +283,110 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
 
     expect(result.walkedThrough).toBe(2);
     expect(result.ok).toBe(true);
+    // The worker walks the whole chain, so it is the caller that can compare
+    // the head against the anchor — the check a partial range cannot make.
+    expect(result.anchorChecked).toBe(true);
+  });
+
+  // The periodic worker is the monitoring path: if it answers "healthy" after
+  // rows are deleted, an operator learns nothing from it precisely when there
+  // is something to learn. These pin the two shapes that used to pass.
+
+  it("reports RANGE_INCOMPLETE, not healthy, when every chained row is deleted", async () => {
+    const row = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, row, makePayload());
+    expect(await getAnchorChainSeq()).toBe(1);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_logs WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL`,
+        tenantId,
+      );
+    });
+
+    const result = await ctx.worker.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return verifyTenantChain(tenantId, {
+        prisma: tx as unknown as PrismaClient,
+        logger: { error: () => {}, info: () => {} },
+      });
+    });
+
+    // Walking zero rows finds nothing wrong; only comparing coverage against
+    // the anchor's chain_seq catches it.
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("RANGE_INCOMPLETE");
+    expect(result.totalVerified).toBe(0);
+  });
+
+  it("ignores rows appended past the anchor instead of calling a healthy chain tampered", async () => {
+    // The worker reads the anchor, then reads rows. On a tenant still writing
+    // audit events, a row can land between those two reads. Walking it would
+    // end on a hash newer than the head the anchor recorded and report
+    // ANCHOR_HASH_MISMATCH for a chain that is entirely intact — a false alarm
+    // on the monitoring path, which is how a real alarm later gets ignored.
+    const row = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, row, makePayload());
+    const anchorSeq = await getAnchorChainSeq();
+    expect(anchorSeq).toBe(1);
+
+    // Deliver a second genuine row, then rewind the anchor to seq 1 so the DB
+    // holds exactly the state the race produces: a valid chain whose newest row
+    // sits above the anchor the verifier just read.
+    const second = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, second, makePayload());
+    expect(await getAnchorChainSeq()).toBe(2);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `UPDATE audit_chain_anchors
+            SET chain_seq = 1,
+                prev_hash = (SELECT event_hash FROM audit_logs
+                              WHERE tenant_id = $1::uuid AND chain_seq = 1)
+          WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
+
+    const result = await ctx.worker.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return verifyTenantChain(tenantId, {
+        prisma: tx as unknown as PrismaClient,
+        logger: { error: () => {}, info: () => {} },
+      });
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeUndefined();
+    // Only the rows the anchor attests to were walked.
+    expect(result.totalVerified).toBe(1);
+    expect(result.anchorChecked).toBe(true);
+  });
+
+  it("reports ANCHOR_MISSING when the anchor is deleted but rows survive", async () => {
+    const row = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, row, makePayload());
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_chain_anchors WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
+
+    const result = await ctx.worker.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return verifyTenantChain(tenantId, {
+        prisma: tx as unknown as PrismaClient,
+        logger: { error: () => {}, info: () => {} },
+      });
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("ANCHOR_MISSING");
   });
 });
 
@@ -383,38 +488,43 @@ describe("sibling reapers — reaper-driven dead-letter audit (F3)", () => {
 
   it("reapStuckDeliveries emits AUDIT_DELIVERY_DEAD_LETTER only for rows that hit FAILED", async () => {
     const dying = await insertStuckDelivery(true); // attempt 7 → +1 = 8 = max → FAILED
-    await insertStuckDelivery(false); // attempt 1 → +1 = 2 → PENDING, no audit
+    const surviving = await insertStuckDelivery(false); // attempt 1 → +1 = 2 → PENDING, no audit
 
-    const reaped = await reapStuckDeliveries(ctx.su.prisma);
-    expect(reaped).toBe(2);
+    // The reaper sweeps every tenant and returns a global count; another test's
+    // leftover eligible row would make an exact number wrong. Assert where MY
+    // two rows landed instead — which is what the test is actually about.
+    await reapStuckDeliveries(ctx.su.prisma);
 
     const status = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ status: string }[]>(
-        `SELECT status::text FROM audit_deliveries WHERE id = $1::uuid`,
-        dying,
+      return tx.$queryRawUnsafe<{ id: string; status: string }[]>(
+        `SELECT id::text, status::text FROM audit_deliveries WHERE id = ANY($1::uuid[])`,
+        [dying, surviving],
       );
     });
-    expect(status[0]?.status).toBe("FAILED");
+    const byId = new Map(status.map((r) => [r.id, r.status]));
+    expect(byId.get(dying)).toBe("FAILED");
+    expect(byId.get(surviving)).toBe("PENDING");
     // Exactly one dead-letter audit — for the FAILED row, not the PENDING one.
     expect(await auditCount(AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER)).toBe(1);
   });
 
   it("reapStuckWebhookDeliveries emits AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER only for rows that hit FAILED", async () => {
     const dying = await insertStuckWebhookDelivery(true);
-    await insertStuckWebhookDelivery(false);
+    const surviving = await insertStuckWebhookDelivery(false);
 
-    const reaped = await reapStuckWebhookDeliveries(ctx.su.prisma);
-    expect(reaped).toBe(2);
+    await reapStuckWebhookDeliveries(ctx.su.prisma);
 
     const status = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ status: string }[]>(
-        `SELECT status::text FROM webhook_deliveries WHERE id = $1::uuid`,
-        dying,
+      return tx.$queryRawUnsafe<{ id: string; status: string }[]>(
+        `SELECT id::text, status::text FROM webhook_deliveries WHERE id = ANY($1::uuid[])`,
+        [dying, surviving],
       );
     });
-    expect(status[0]?.status).toBe("FAILED");
+    const byId = new Map(status.map((r) => [r.id, r.status]));
+    expect(byId.get(dying)).toBe("FAILED");
+    expect(byId.get(surviving)).toBe("PENDING");
     expect(await auditCount(AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER)).toBe(1);
   });
 

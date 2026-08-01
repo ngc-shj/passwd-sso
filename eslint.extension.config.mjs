@@ -50,7 +50,7 @@ const CONSOLE_REFERENCE_SELECTORS = [
   },
 ];
 
-export default [
+const config = [
   {
     // Every executable extension is listed. A file whose extension is absent here
     // does NOT fail closed uniformly: .mjs/.cjs are matched by ESLint's implicit
@@ -97,3 +97,5 @@ export default [
     },
   },
 ];
+
+export default config;

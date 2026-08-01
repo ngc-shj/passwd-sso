@@ -37,8 +37,7 @@ vi.mock("@/lib/format/format-datetime", () => ({
   formatRelativeTime: (d: string) => d,
 }));
 
-import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
-setupPasskeyReauthDialogMocks();
+import "@/__tests__/helpers/passkey-reauth-mocks";
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,

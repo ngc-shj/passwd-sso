@@ -73,9 +73,13 @@ describe("check-cosign-kms-uri gate — cosign absent", () => {
     // searching and finds the real binary further along PATH.
     const minimalBin = mkdtempSync(resolve(tmpdir(), "no-cosign-"));
     for (const tool of ["bash", "grep", "sed", "timeout", "dirname", "pwd", "head", "cat"]) {
-      const found = spawnSync("command", ["-v", tool], {
+      // `command -v` is a shell builtin, so a shell is required — but passing
+      // an args array alongside a `shell` option concatenates them unescaped
+      // and trips Node's DEP0190, the same warning the cosign probe above
+      // already avoids. Invoke bash directly with -c instead; `tool` comes
+      // from the literal list on the line above, not from input.
+      const found = spawnSync("/bin/bash", ["-c", `command -v ${tool}`], {
         encoding: "utf8",
-        shell: "/bin/bash",
       }).stdout?.trim();
       if (found) {
         try {

@@ -2006,6 +2006,12 @@ export function createWorker(config: WorkerConfig) {
     shutdownResolve?.();
   }
 
+  // Held so the handlers can be detached again. `process.once` only removes
+  // itself when the signal actually fires, which never happens under test — so
+  // without this every worker instance leaves two listeners behind and a suite
+  // that starts a handful trips Node's 10-listener warning.
+  let detachShutdown: (() => void) | null = null;
+
   function registerShutdown(): void {
     const stop = (signal: string) => {
       if (!running) return;
@@ -2014,8 +2020,15 @@ export function createWorker(config: WorkerConfig) {
       getLogger().info({ signal }, "worker.shutdown_signal");
       sleepResolve?.();
     };
-    process.once("SIGTERM", () => stop("SIGTERM"));
-    process.once("SIGINT", () => stop("SIGINT"));
+    const onSigterm = () => stop("SIGTERM");
+    const onSigint = () => stop("SIGINT");
+    process.once("SIGTERM", onSigterm);
+    process.once("SIGINT", onSigint);
+    detachShutdown = () => {
+      process.off("SIGTERM", onSigterm);
+      process.off("SIGINT", onSigint);
+      detachShutdown = null;
+    };
   }
 
   return {
@@ -2038,8 +2051,12 @@ export function createWorker(config: WorkerConfig) {
         // Connection check — if this fails the loop will handle it
       }
 
-      await loop();
-      await shutdownPromise;
+      try {
+        await loop();
+        await shutdownPromise;
+      } finally {
+        detachShutdown?.();
+      }
 
       try {
         await workerPrisma.$disconnect();
@@ -2054,6 +2071,7 @@ export function createWorker(config: WorkerConfig) {
 
     stop(): void {
       running = false;
+      detachShutdown?.();
     },
   };
 }

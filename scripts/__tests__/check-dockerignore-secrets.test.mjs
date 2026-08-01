@@ -342,7 +342,13 @@ describe("check-dockerignore-secrets", () => {
         rmSync(imageRoot, { recursive: true, force: true });
       }
     }
-  });
+    // One guard subprocess per MUST_EXCLUDE entry, so the runtime scales with
+    // that array — ~2.3s uninstrumented today. Under `vitest run --coverage`
+    // (what CI runs) the same loop passes the 10s global testTimeout and reds
+    // the build on whatever PR happens to be in flight. Raised here rather than
+    // globally: the global floor is what keeps a genuinely hung test from
+    // sitting for half a minute.
+  }, 60_000);
 
   // Dir-classes must catch the WHOLE subtree, not just the representative leaf.
   // Plant an ARBITRARY, non-representative filename deep inside each DIR_CLASSES

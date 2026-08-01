@@ -10,6 +10,7 @@
  */
 
 import { type NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { authOrToken, hasUserId } from "@/lib/auth/session/auth-or-token";
@@ -117,15 +118,25 @@ export async function GET(request: NextRequest) {
   const { prisma } = await import("@/lib/prisma");
   const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
 
+  // When auth is an MCP token, bind the lookup to the calling token's row —
+  // defense-in-depth on top of the clientId equality check above.
+  // `authResult.tokenId` IS the McpAccessToken id (see auth-or-token.ts).
+  //
+  // Annotated rather than spread inline: a conditional spread is not subject to
+  // the excess-property check, so a key the model does not have compiles
+  // cleanly and only surfaces as a runtime PrismaClientValidationError. This
+  // shipped once as `tokenId` — a field McpAccessToken has never had — which
+  // meant the binding described here never ran and the handler threw for every
+  // MCP-token caller. With the annotation, the same mistake fails to compile.
+  const tokenBinding: Prisma.McpAccessTokenWhereInput =
+    authResult.type === "mcp_token" ? { id: authResult.tokenId } : {};
+
   const session = await withBypassRls(prisma, (tx) =>
     tx.delegationSession.findFirst({
       where: {
         userId,
         mcpAccessToken: {
-          // When auth is MCP token, also bind the lookup to the calling
-          // token's tokenId — defense-in-depth on top of the clientId
-          // equality check above.
-          ...(authResult.type === "mcp_token" ? { tokenId: authResult.tokenId } : {}),
+          ...tokenBinding,
           mcpClient: { clientId },
         },
         revokedAt: null,

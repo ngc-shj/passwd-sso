@@ -10,7 +10,7 @@
     "dev": "next dev --turbopack --experimental-https",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "lint:extension": "node scripts/checks/lint-extension.mjs",
     "typecheck": "tsc --noEmit",
     "check:team-auth-rls": "node scripts/checks/check-team-auth-rls.mjs",

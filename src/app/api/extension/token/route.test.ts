@@ -15,7 +15,6 @@ const {
   mockEnforceAccessRestriction,
   mockLogAudit,
   mockExtractClientIp,
-  mockRateLimiterCheck,
   mockCreateRateLimiter,
   mockWarn,
   mockVerifyDpop,
@@ -112,9 +111,12 @@ import { POST, DELETE } from "./route";
 // executes) so `assertRedisFailClosed`'s factory-attribution check still has
 // the original call/result to inspect after clearAllMocks runs.
 const legacyDeprecatedLimiterFactorySnapshot = snapshotFactory(mockCreateRateLimiter);
-const legacyDeprecatedLimiter = mockCreateRateLimiter.mock.results[0]!.value as {
-  check: typeof mockRateLimiterCheck;
-};
+// Typed off the factory itself rather than off a separately-destructured mock
+// handle: the handle would then exist only to be read in a `typeof` position,
+// which reads as an unused binding and tells no one that the two are the same
+// object.
+const legacyDeprecatedLimiter = mockCreateRateLimiter.mock.results[0]!
+  .value as ReturnType<typeof mockCreateRateLimiter>;
 
 // ─── POST ────────────────────────────────────────────────────
 

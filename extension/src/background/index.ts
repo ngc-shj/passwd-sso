@@ -2398,53 +2398,15 @@ async function handleMessage(
       return;
     }
 
-    case EXT_MSG.AUTOFILL: {
-      try {
-        const result = await performAutofillForEntry(
-          message.entryId,
-          message.tabId,
-          undefined,
-          message.teamId,
-        );
-        sendResponse({
-          type: EXT_MSG.AUTOFILL,
-          ok: result.ok,
-          error: result.error,
-        });
-      } catch (err) {
-        sendResponse({
-          type: EXT_MSG.AUTOFILL,
-          ok: false,
-          error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
-        });
-      }
-      return;
-    }
-
-    case EXT_MSG.AUTOFILL_CREDIT_CARD: {
-      try {
-        const result = await performAutofillForEntry(
-          message.entryId,
-          message.tabId,
-          undefined,
-          message.teamId,
-        );
-        sendResponse({
-          type: EXT_MSG.AUTOFILL_CREDIT_CARD,
-          ok: result.ok,
-          error: result.error,
-        });
-      } catch (err) {
-        sendResponse({
-          type: EXT_MSG.AUTOFILL_CREDIT_CARD,
-          ok: false,
-          error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
-        });
-      }
-      return;
-    }
-
+    // One handler for all three: the payloads are identical and
+    // performAutofillForEntry already dispatches on the entry's own type, so
+    // the only thing that differed between these cases was the echoed
+    // response `type`. Same shape as the sibling GET_*_MATCHES_FOR_URL trio
+    // behind resolveInlineMatches.
+    case EXT_MSG.AUTOFILL:
+    case EXT_MSG.AUTOFILL_CREDIT_CARD:
     case EXT_MSG.AUTOFILL_IDENTITY: {
+      const responseType = message.type;
       try {
         const result = await performAutofillForEntry(
           message.entryId,
@@ -2453,13 +2415,13 @@ async function handleMessage(
           message.teamId,
         );
         sendResponse({
-          type: EXT_MSG.AUTOFILL_IDENTITY,
+          type: responseType,
           ok: result.ok,
           error: result.error,
         });
       } catch (err) {
         sendResponse({
-          type: EXT_MSG.AUTOFILL_IDENTITY,
+          type: responseType,
           ok: false,
           error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });

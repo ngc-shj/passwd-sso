@@ -43,6 +43,8 @@ export default defineConfig({
         "src/lib/audit/audit.ts",
         "src/lib/audit/audit-outbox.ts",
         "src/lib/audit/audit-query.ts",
+        "src/lib/audit/audit-chain.ts",
+        "src/lib/audit/audit-chain-verify.ts",
         "src/proxy.ts",
         "src/components/**/*.{ts,tsx}",
         "src/app/global-error.tsx",
@@ -58,15 +60,29 @@ export default defineConfig({
         "src/components/**/*.test.{ts,tsx}",
       ],
       thresholds: {
-        lines: 60,
-        // T8: a branch floor so negative/denied paths (authz rejection,
-        // expired-grant, revoked-token) can't silently erode. Global floor is
-        // intentionally conservative; the security-critical files hold a higher
-        // branch bar.
-        branches: 50,
+        // T8: floors exist so negative/denied paths (authz rejection,
+        // expired-grant, revoked-token) can't silently erode. They are a
+        // ratchet, not a target — set a couple of points under the measured
+        // value and the next unrelated PR to nudge coverage down reds the
+        // build instead of the PR that created the gap. Measured at the time
+        // of writing: 84% lines / 74% branches / 83% statements.
+        lines: 75,
+        branches: 65,
+        // Without this, statement-level erosion is ungated: v8 counts
+        // statements and lines separately and they do diverge.
+        statements: 75,
         "src/lib/auth/session/auth-or-token.ts": { lines: 80, branches: 70 },
         "src/lib/crypto/crypto-server.ts": { lines: 80, branches: 70 },
         "src/lib/crypto/crypto-team.ts": { lines: 80, branches: 70 },
+        // Enrolled once their tests landed in this branch. Both hold
+        // fail-closed security decisions, which is exactly the kind of code a
+        // global floor is too coarse to protect.
+        "src/app/api/maintenance/audit-chain-verify/route.ts": { lines: 80, branches: 70 },
+        // The single adjudicator for chain integrity — a pure function with no
+        // I/O to excuse a gap, and the one place a deleted test would go
+        // unnoticed under the global floor alone.
+        "src/lib/audit/audit-chain-verify.ts": { lines: 90, branches: 85 },
+        "src/app/api/user/mcp-tokens/[id]/route.ts": { lines: 80, branches: 70 },
       },
     },
     isolate: true,

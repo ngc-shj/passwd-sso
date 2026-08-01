@@ -46,6 +46,30 @@ npm run worker:retention-gc    # Run the retention GC worker (requires RETENTION
 npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 
+**Integration tests and the outbox worker cannot share a database.** These tests
+drive worker functions (`processWebhookDeliveryBatch`, the outbox drain, the
+reapers) against real rows, and those claims are `FOR UPDATE SKIP LOCKED` over
+the whole table — not tenant-scoped — while the retention sweep deletes delivery
+rows outright. A live worker on the same database therefore competes for the rows
+a test just inserted and wins some of the time, producing a ~50% flake that
+surfaces as an unrelated assertion failure. `npm run docker:up` starts
+`audit-outbox-worker` against the dev database, so the normal local state is the
+racing one. `src/__tests__/db-integration/setup.ts` detects this by
+`application_name` in `pg_stat_activity` and refuses to run, naming each
+detected worker and how to stop that one. Both compose workers touch these
+tables, so stop both:
+
+```bash
+docker compose stop audit-outbox-worker retention-gc-worker
+npm run test:integration
+docker compose start audit-outbox-worker retention-gc-worker
+```
+
+The audit-anchor-publisher has no compose service; if you started one by hand,
+stop that process.
+
+CI runs no worker container alongside the integration job, so the check is silent there.
+
 Docker (dev): `npm run docker:up` (wraps `docker compose -f docker-compose.yml -f docker-compose.override.yml up`). Stop with `npm run docker:down`.
 
 Notes on env files:

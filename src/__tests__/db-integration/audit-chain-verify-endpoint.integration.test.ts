@@ -1,11 +1,20 @@
 /**
- * Tests the audit chain verification logic with real DB data.
- * Exercises valid chain, tampered chain, and empty chain scenarios.
- * Uses the same hash computation as the verify endpoint.
+ * Drives GET /api/maintenance/audit-chain-verify end-to-end against real DB
+ * rows: valid chain, tampered chain, empty chain, timestamp violation, and the
+ * post-purge characterization.
+ *
+ * This file used to re-implement the endpoint's walk in a local `walkChain()`
+ * and assert against that. The copy drifted — it had no bail-on-first-tamper,
+ * so it counted rows the endpoint never verifies, and it carried none of the
+ * endpoint's `truncated` / `reason` / `walkedThrough` outputs. A test named for
+ * the endpoint that cannot fail when the endpoint changes is worse than no
+ * test, so the walk is now the production one and the assertions below are its
+ * real values.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { NextRequest } from "next/server";
 import {
   createTestContext,
   setBypassRlsGucs,
@@ -19,7 +28,8 @@ import {
 import { deliverRowWithChain } from "@/workers/audit-outbox-worker";
 import type { AuditOutboxRow, AuditOutboxPayload } from "@/workers/audit-outbox-worker";
 
-// Mirrors the verify endpoint's row type
+// Row shape returned by the fetch helper below (diagnostics only — the
+// endpoint reads its own rows straight from the DB).
 interface ChainRow {
   id: string;
   created_at: Date;
@@ -29,76 +39,60 @@ interface ChainRow {
   metadata: unknown;
 }
 
-// Mirrors the verify endpoint's walk logic
-function walkChain(
-  rows: ChainRow[],
-  seedPrevHash: Buffer,
-): {
+// Set per test in beforeEach; the auth mocks below close over these so the
+// operator always resolves to the tenant the fixtures were built in.
+let currentTenantId = "";
+let currentUserId = "";
+const OPERATOR_TOKEN_ID = "integration-op-token";
+
+const { mockLogAudit } = vi.hoisted(() => ({ mockLogAudit: vi.fn() }));
+
+vi.mock("@/lib/auth/tokens/admin-token", () => ({
+  verifyAdminToken: vi.fn(async () => ({
+    ok: true,
+    auth: {
+      subjectUserId: currentUserId,
+      tenantId: currentTenantId,
+      tokenId: OPERATOR_TOKEN_ID,
+      scopes: ["maintenance"],
+    },
+  })),
+}));
+vi.mock("@/lib/auth/access/maintenance-auth", () => ({
+  requireMaintenanceOperator: vi.fn(async () => ({
+    ok: true,
+    operator: { tenantId: currentTenantId, role: "ADMIN" },
+  })),
+}));
+// The route's limiter is fail-closed on a missing Redis, which would 503 before
+// the walk ever runs. The limiter contract for this route (exact tenant-scoped
+// key + the 503 envelope) is pinned in route.test.ts; the subject here is the
+// walk over real rows.
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: () => ({
+    check: async () => ({ allowed: true }),
+    clear: () => {},
+  }),
+}));
+// Kept out of the DB so a verify call cannot enqueue an audit row that the next
+// assertion in the same tenant would then have to account for.
+vi.mock("@/lib/audit/audit", async (importOriginal) => ({
+  ...((await importOriginal()) as Record<string, unknown>),
+  logAuditAsync: mockLogAudit,
+}));
+
+import { GET } from "@/app/api/maintenance/audit-chain-verify/route";
+
+interface VerifyBody {
   ok: boolean;
-  totalVerified: number;
+  reason?: string;
+  truncated: boolean;
+  walkedThrough: number;
+  verifiedUpToSeq?: number;
   firstTamperedSeq: number | null;
   firstGapAfterSeq: number | null;
   firstTimestampViolationSeq: number | null;
-} {
-  let prevHash = seedPrevHash;
-  let prevSeq: number | null = null;
-  let prevCreatedAt: Date | null = null;
-  let totalVerified = 0;
-  let firstTamperedSeq: number | null = null;
-  let firstGapAfterSeq: number | null = null;
-  let firstTimestampViolationSeq: number | null = null;
-
-  for (const row of rows) {
-    const seq = Number(row.chain_seq);
-
-    // Gap detection
-    if (prevSeq !== null && firstGapAfterSeq === null && seq !== prevSeq + 1) {
-      firstGapAfterSeq = prevSeq;
-    }
-
-    // Timestamp monotonicity
-    if (
-      prevCreatedAt !== null &&
-      row.created_at < prevCreatedAt &&
-      firstTimestampViolationSeq === null
-    ) {
-      firstTimestampViolationSeq = seq;
-    }
-
-    // Hash verification
-    if (firstTamperedSeq === null) {
-      const payload =
-        row.metadata != null && typeof row.metadata === "object"
-          ? (row.metadata as Record<string, unknown>)
-          : {};
-
-      const chainInput = buildChainInput({
-        id: row.id,
-        createdAt: row.created_at,
-        chainSeq: BigInt(row.chain_seq),
-        prevHash,
-        payload,
-      });
-      const canonicalBytes = computeCanonicalBytes(chainInput);
-      const computedHash = computeEventHash(prevHash, canonicalBytes);
-
-      if (!computedHash.equals(Buffer.from(row.event_hash))) {
-        firstTamperedSeq = seq;
-      }
-    }
-
-    prevHash = Buffer.from(row.event_hash);
-    prevSeq = seq;
-    prevCreatedAt = row.created_at;
-    totalVerified++;
-  }
-
-  const ok =
-    firstTamperedSeq === null &&
-    firstGapAfterSeq === null &&
-    firstTimestampViolationSeq === null;
-
-  return { ok, totalVerified, firstTamperedSeq, firstGapAfterSeq, firstTimestampViolationSeq };
+  totalVerified: number;
 }
 
 describe("audit-chain verify endpoint logic", () => {
@@ -115,8 +109,11 @@ describe("audit-chain verify endpoint logic", () => {
   });
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     tenantId = await ctx.createTenant();
     userId = await ctx.createUser(tenantId);
+    currentTenantId = tenantId;
+    currentUserId = userId;
 
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -225,19 +222,39 @@ describe("audit-chain verify endpoint logic", () => {
     });
   }
 
+  /** Drive the real handler for the current tenant. */
+  async function verifyChain(params: Record<string, string> = {}): Promise<VerifyBody> {
+    const url = new URL("http://localhost/api/maintenance/audit-chain-verify");
+    url.searchParams.set("tenantId", tenantId);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+    const res = await GET(
+      new NextRequest(url, {
+        method: "GET",
+        headers: { authorization: "Bearer op_integration", "x-forwarded-for": "10.0.0.1" },
+      }),
+    );
+    expect(res.status).toBe(200);
+    return (await res.json()) as VerifyBody;
+  }
+
   it("valid chain returns ok: true with correct totalVerified", async () => {
     await insertChainedRows(5);
-    const rows = await fetchChainRows();
-    const result = walkChain(rows, Buffer.from([0x00]));
 
-    expect(result.ok).toBe(true);
-    expect(result.totalVerified).toBe(5);
-    expect(result.firstTamperedSeq).toBeNull();
-    expect(result.firstGapAfterSeq).toBeNull();
-    expect(result.firstTimestampViolationSeq).toBeNull();
+    const body = await verifyChain();
+
+    expect(body.ok).toBe(true);
+    expect(body.reason).toBeUndefined();
+    expect(body.totalVerified).toBe(5);
+    expect(body.walkedThrough).toBe(5);
+    expect(body.verifiedUpToSeq).toBe(5);
+    expect(body.firstTamperedSeq).toBeNull();
+    expect(body.firstGapAfterSeq).toBeNull();
+    expect(body.firstTimestampViolationSeq).toBeNull();
   });
 
-  it("tampered chain returns ok: false with firstTamperedSeq", async () => {
+  it("tampered chain bails at the tampered row and reports TAMPER_DETECTED", async () => {
     const ids = await insertChainedRows(5);
 
     // Tamper with row 3's metadata
@@ -249,16 +266,21 @@ describe("audit-chain verify endpoint logic", () => {
       );
     });
 
-    const rows = await fetchChainRows();
-    const result = walkChain(rows, Buffer.from([0x00]));
+    const body = await verifyChain();
 
-    expect(result.ok).toBe(false);
-    expect(result.firstTamperedSeq).toBe(3);
-    // totalVerified still counts all rows walked
-    expect(result.totalVerified).toBe(5);
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("TAMPER_DETECTED");
+    expect(body.firstTamperedSeq).toBe(3);
+    // C15 (OWASP A08-2): the walk stops at seq 3, so only rows 1-2 are
+    // verified. Rows 4-5 are NOT counted — past a tamper the chain re-seeds
+    // from a hash the attacker controls, and reporting them as verified is
+    // exactly the false assurance the bail exists to prevent.
+    expect(body.totalVerified).toBe(2);
+    expect(body.walkedThrough).toBe(2);
+    expect(body.verifiedUpToSeq).toBe(2);
   });
 
-  it("empty chain (no anchor) returns ok: true, totalVerified: 0", async () => {
+  it("empty chain (no anchor, no rows) returns ok: true, totalVerified: 0", async () => {
     // Do not insert any chain rows or anchor
     const anchors = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -267,17 +289,52 @@ describe("audit-chain verify endpoint logic", () => {
         tenantId,
       );
     });
-
-    // No anchor → verify endpoint returns { ok: true, totalVerified: 0 }
     expect(anchors).toHaveLength(0);
 
-    // Simulate the endpoint's early return for no anchor
-    const rows = await fetchChainRows();
-    expect(rows).toHaveLength(0);
+    const body = await verifyChain();
 
-    const result = walkChain(rows, Buffer.from([0x00]));
-    expect(result.ok).toBe(true);
-    expect(result.totalVerified).toBe(0);
+    expect(body.ok).toBe(true);
+    expect(body.totalVerified).toBe(0);
+  });
+
+  it("anchor present with every chained row purged fails closed as RANGE_INCOMPLETE", async () => {
+    await insertChainedRows(3);
+
+    // Delete every chained row but leave the anchor claiming chain_seq = 3.
+    // No gap survives BETWEEN returned rows (there are none), so only the
+    // coverage comparison can catch this.
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_logs WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL`,
+        tenantId,
+      );
+    });
+
+    const body = await verifyChain();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("RANGE_INCOMPLETE");
+    expect(body.totalVerified).toBe(0);
+    expect(body.firstTamperedSeq).toBeNull();
+  });
+
+  it("chained rows surviving without their anchor fail closed as ANCHOR_MISSING", async () => {
+    await insertChainedRows(3);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_chain_anchors WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
+
+    const body = await verifyChain();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("ANCHOR_MISSING");
+    expect(body.totalVerified).toBe(0);
   });
 
   it("detects timestamp violation when created_at goes backwards", async () => {
@@ -359,14 +416,14 @@ describe("audit-chain verify endpoint logic", () => {
       );
     });
 
-    const rows = await fetchChainRows();
-    const result = walkChain(rows, Buffer.from([0x00]));
+    const body = await verifyChain();
 
     // Hashes are still valid (timestamp is part of canonical data, but chain links correctly)
-    expect(result.firstTamperedSeq).toBeNull();
+    expect(body.firstTamperedSeq).toBeNull();
     // But timestamp violation is detected
-    expect(result.firstTimestampViolationSeq).toBe(3);
-    expect(result.ok).toBe(false);
+    expect(body.firstTimestampViolationSeq).toBe(3);
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("TIMESTAMP_VIOLATION");
   });
 
   // T5 (A1 diagnostic): characterization test pinning the CURRENT semantics of
@@ -445,7 +502,7 @@ describe("audit-chain verify endpoint logic", () => {
     // Sanity: full chain (seq 1..5) verifies cleanly before any purge.
     const rowsBeforePurge = await fetchChainRows();
     expect(rowsBeforePurge).toHaveLength(5);
-    const beforePurge = walkChain(rowsBeforePurge, Buffer.from([0x00]));
+    const beforePurge = await verifyChain();
     expect(beforePurge.ok).toBe(true);
     expect(beforePurge.totalVerified).toBe(5);
 
@@ -477,8 +534,13 @@ describe("audit-chain verify endpoint logic", () => {
     // This is the A1 finding: default fromSeq=1 after a purge does not
     // gracefully report "verified from the retained start" — it misinterprets
     // the retained range against the wrong seed.
-    const result = walkChain(rowsAfterPurge, Buffer.from([0x00]));
-    expect(result.firstTamperedSeq).toBe(4);
-    expect(result.ok).toBe(false);
+    const body = await verifyChain();
+    expect(body.firstTamperedSeq).toBe(4);
+    expect(body.ok).toBe(false);
+    // Tamper outranks the coverage shortfall in the reason ladder: the bail at
+    // seq 4 is also why the walk never reaches toSeq, but the misleading signal
+    // an operator sees is the false tamper — which is the point of A1.
+    expect(body.reason).toBe("TAMPER_DETECTED");
+    expect(body.totalVerified).toBe(0);
   });
 });

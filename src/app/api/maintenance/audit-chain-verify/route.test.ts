@@ -57,6 +57,14 @@ vi.mock("@/lib/auth/access/maintenance-auth", () => ({
 
 import { GET } from "./route";
 import { OPERATOR_TOKEN_PREFIX } from "@/lib/constants/auth/operator-token";
+// The real chain primitives — deliberately NOT mocked, so fixtures below carry
+// genuine event hashes and the walk is exercised end-to-end rather than against
+// a re-implementation of it.
+import {
+  buildChainInput,
+  computeCanonicalBytes,
+  computeEventHash,
+} from "@/lib/audit/audit-chain";
 
 // Module-scope snapshot: route.ts's `rateLimiter = createRateLimiter(...)` runs
 // at import time above, before any beforeEach's vi.clearAllMocks() can wipe it.
@@ -243,5 +251,313 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("AUDIT_CHAIN_SEED_NOT_FOUND");
+  });
+
+  // ─── Chain walk ───────────────────────────────────────────
+  //
+  // Everything below drives the real walk in route.ts. Fixtures are built with
+  // the production hash primitives (imported above, unmocked), so a change to
+  // buildChainInput / computeEventHash that the route did not follow shows up
+  // here as a tamper rather than as a silently-still-green test.
+
+  const GENESIS = Buffer.from([0x00]);
+  const BASE_TIME = new Date("2026-01-01T00:00:00.000Z");
+
+  interface ChainFixtureRow {
+    id: string;
+    created_at: Date;
+    chain_seq: string;
+    event_hash: Uint8Array;
+    chain_prev_hash: Uint8Array;
+    metadata: Record<string, unknown>;
+  }
+
+  /**
+   * Build a genuinely-chained run of rows. `seqs` drives both chain_seq and the
+   * per-row timestamp, so a non-contiguous list produces a real gap and a
+   * decreasing list produces a real timestamp violation.
+   */
+  /** Head hash of the most recent buildChain() run, for the anchor fixture. */
+  let lastChainHead: Buffer = GENESIS;
+
+  function buildChain(
+    seqs: number[],
+    opts: { createdAtFor?: (seq: number, index: number) => Date } = {},
+  ): ChainFixtureRow[] {
+    let prevHash: Buffer = GENESIS;
+    const built = seqs.map((seq, index) => {
+      const createdAt =
+        opts.createdAtFor?.(seq, index) ?? new Date(BASE_TIME.getTime() + index * 1000);
+      const id = `00000000-0000-4000-8000-${String(seq).padStart(12, "0")}`;
+      const metadata = { action: "TEST_EVENT", seq };
+      const eventHash = computeEventHash(
+        prevHash,
+        computeCanonicalBytes(
+          buildChainInput({
+            id,
+            createdAt,
+            chainSeq: BigInt(seq),
+            prevHash,
+            payload: metadata,
+          }),
+        ),
+      );
+      const row: ChainFixtureRow = {
+        id,
+        created_at: createdAt,
+        chain_seq: String(seq),
+        event_hash: eventHash,
+        chain_prev_hash: prevHash,
+        metadata,
+      };
+      prevHash = eventHash;
+      return row;
+    });
+    lastChainHead = prevHash;
+    return built;
+  }
+
+  /** Corrupt a stored hash so it cannot match what the walk recomputes. */
+  function tamper(hash: Uint8Array): Buffer {
+    const corrupted = Buffer.from(hash);
+    corrupted[0] ^= 0xff;
+    return corrupted;
+  }
+
+  /**
+   * Wire the anchor lookup then the chain-row query (no from/to params).
+   * The anchor carries the head hash of the rows just built, so the route's
+   * head comparison runs for real — passing an anchor without prev_hash would
+   * silently skip it and make every assertion below weaker than it looks.
+   */
+  function mockWalk(
+    anchorSeq: number,
+    rows: ChainFixtureRow[],
+    anchorPrevHash: Uint8Array = lastChainHead,
+  ) {
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ chain_seq: String(anchorSeq), prev_hash: anchorPrevHash }])
+      .mockResolvedValueOnce(rows);
+  }
+
+  async function walk(params: Record<string, string> = {}) {
+    const res = await GET(createRequest({ tenantId: TENANT_ID, ...params }, VALID_OP_TOKEN));
+    return { res, body: await res.json() };
+  }
+
+  // Nested so the authenticated default stays scoped to the walk tests — a
+  // describe-level beforeEach here would run after the outer one and override
+  // the unauthenticated default the 401 tests rely on.
+  describe("with a valid operator token", () => {
+    beforeEach(() => {
+      mockVerifyAdminToken.mockResolvedValue({ ok: true, auth: VALID_AUTH });
+    });
+
+  it("reports ok for a fully-covered valid chain", async () => {
+    mockWalk(3, buildChain([1, 2, 3]));
+
+    const { res, body } = await walk();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.reason).toBeUndefined();
+    expect(body.totalVerified).toBe(3);
+    expect(body.walkedThrough).toBe(3);
+    expect(body.verifiedUpToSeq).toBe(3);
+    expect(body.truncated).toBe(false);
+  });
+
+  it("bails at the first tampered row and does not count it as verified", async () => {
+    const rows = buildChain([1, 2, 3]);
+    // Flip a byte in row 2's stored hash — row 1 still verifies, row 2 does not,
+    // and row 3 must NOT be counted (C15/OWASP A08-2: continuing past a tamper
+    // re-seeds from a hash the attacker controls). XOR rather than assignment:
+    // overwriting with a constant is a no-op when the byte already holds it.
+    rows[1].event_hash = tamper(rows[1].event_hash);
+    mockWalk(3, rows);
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("TAMPER_DETECTED");
+    expect(body.firstTamperedSeq).toBe(2);
+    expect(body.totalVerified).toBe(1);
+    expect(body.walkedThrough).toBe(1);
+  });
+
+  it("reports GAP_DETECTED when chain_seq skips a value", async () => {
+    // buildChain hashes each row against its real predecessor, so the run is
+    // internally valid — the only defect is the missing seq 2.
+    mockWalk(3, buildChain([1, 3]));
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("GAP_DETECTED");
+    expect(body.firstGapAfterSeq).toBe(1);
+    expect(body.firstTamperedSeq).toBeNull();
+  });
+
+  it("reports TIMESTAMP_VIOLATION when created_at moves backwards", async () => {
+    mockWalk(
+      3,
+      buildChain([1, 2, 3], {
+        // seq 3 lands before seq 2
+        createdAtFor: (seq) =>
+          new Date(BASE_TIME.getTime() + (seq === 3 ? 0 : seq * 1000)),
+      }),
+    );
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("TIMESTAMP_VIOLATION");
+    expect(body.firstTimestampViolationSeq).toBe(3);
+    expect(body.firstTamperedSeq).toBeNull();
+  });
+
+  it("rejects a chain rewritten end-to-end that no longer ends on the anchor head", async () => {
+    // Every row re-hashed from genesis: per-row checks, gaps, and back-pointers
+    // all agree, because the forged chain is consistent with itself. The
+    // anchor's recorded head is the one value the rewrite could not move by
+    // editing audit_logs, so it is the only thing that says no.
+    const forged = buildChain([1, 2, 3]);
+    mockWalk(3, forged, Buffer.alloc(32, 0xcc));
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("ANCHOR_HASH_MISMATCH");
+    expect(body.firstTamperedSeq).toBeNull();
+    expect(body.firstGapAfterSeq).toBeNull();
+    expect(body.firstBrokenLinkSeq).toBeNull();
+    expect(body.anchorChecked).toBe(true);
+  });
+
+  it("does not compare the anchor head when the range is narrowed", async () => {
+    // A from/to walk ends somewhere other than the chain head by design, so
+    // comparing there would fail every partial verification.
+    const full = buildChain([1, 2, 3]);
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ chain_seq: "3", prev_hash: Buffer.alloc(32, 0xcc) }])
+      .mockResolvedValueOnce([{ chain_seq: "2" }]) // toRows → toSeq = 2
+      .mockResolvedValueOnce(full.slice(0, 2));
+
+    const { body } = await walk({ to: "2026-06-01T00:00:00Z" });
+
+    expect(body.ok).toBe(true);
+    expect(body.anchorChecked).toBe(false);
+  });
+
+  // ─── Fail-closed coverage (SEC-1) ─────────────────────────
+
+  it("fails closed with RANGE_INCOMPLETE when rows above the walk are missing", async () => {
+    // The anchor says the chain reached seq 5, but only 1..2 survive — rows
+    // deleted at the head leave no gap BETWEEN the returned rows, so every
+    // per-row check passes and only the coverage comparison catches it.
+    mockWalk(5, buildChain([1, 2]));
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("RANGE_INCOMPLETE");
+    expect(body.truncated).toBe(false);
+    expect(body.firstTamperedSeq).toBeNull();
+    expect(body.firstGapAfterSeq).toBeNull();
+    expect(body.verifiedUpToSeq).toBe(2);
+  });
+
+  it("fails closed with RANGE_INCOMPLETE when every chained row is gone but the anchor remains", async () => {
+    mockWalk(5, []);
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("RANGE_INCOMPLETE");
+    expect(body.totalVerified).toBe(0);
+  });
+
+  it("fails closed with ANCHOR_MISSING when the anchor is gone but chained rows survive", async () => {
+    // 1) anchor lookup → empty, 2) chained-row count → non-zero
+    mockQueryRawUnsafe.mockResolvedValueOnce([]).mockResolvedValueOnce([{ count: 7n }]);
+
+    const { res, body } = await walk();
+
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("ANCHOR_MISSING");
+    expect(body.totalVerified).toBe(0);
+    // A vanished anchor is a security event, not a quiet 200
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit.mock.calls[0][0].metadata).toMatchObject({
+      ok: false,
+      reason: "ANCHOR_MISSING",
+    });
+  });
+
+  it("stays ok when the anchor is absent and no chained row exists", async () => {
+    // Distinguishes "never anchored" from ANCHOR_MISSING above — the count is
+    // what separates them, so a regression dropping it fails here.
+    mockQueryRawUnsafe.mockResolvedValueOnce([]).mockResolvedValueOnce([{ count: 0n }]);
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(true);
+    expect(body.totalVerified).toBe(0);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  // ─── Seed lookup: the allow half (RT10) ───────────────────
+
+  it("seeds a partial walk from the preceding row's hash and verifies from there", async () => {
+    // The deny half (seed row missing → 400) is covered above; this pins the
+    // success leg, which re-seeds prevHash instead of starting from genesis.
+    const full = buildChain([1, 2, 3]);
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ chain_seq: "3", prev_hash: lastChainHead }]) // anchor
+      .mockResolvedValueOnce([{ chain_seq: "2" }]) // fromRows → fromSeq = 2
+      .mockResolvedValueOnce([{ event_hash: full[0].event_hash }]) // seed = seq 1's hash
+      .mockResolvedValueOnce(full.slice(1)); // rows 2..3
+
+    const { body } = await walk({ from: "2026-01-01T00:00:00Z" });
+
+    expect(body.ok).toBe(true);
+    expect(body.totalVerified).toBe(2);
+    expect(body.verifiedUpToSeq).toBe(3);
+  });
+
+  it("narrows the upper bound to the `to` parameter", async () => {
+    const full = buildChain([1, 2, 3]);
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ chain_seq: "3", prev_hash: lastChainHead }]) // anchor
+      .mockResolvedValueOnce([{ chain_seq: "2" }]) // toRows → toSeq = min(3, 2) = 2
+      .mockResolvedValueOnce(full.slice(0, 2)); // rows 1..2
+
+    const { body } = await walk({ to: "2026-06-01T00:00:00Z" });
+
+    // Covered up to the narrowed bound, so this is ok despite seq 3 existing
+    expect(body.ok).toBe(true);
+    expect(body.reason).toBeUndefined();
+    expect(body.totalVerified).toBe(2);
+  });
+
+  // ─── Audit on the walked path ─────────────────────────────
+
+  it("emits one audit entry carrying the verdict for a walked chain", async () => {
+    const rows = buildChain([1, 2, 3]);
+    rows[2].event_hash = tamper(rows[2].event_hash);
+    mockWalk(3, rows);
+
+    await walk();
+
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit.mock.calls[0][0].metadata).toMatchObject({
+      ok: false,
+      reason: "TAMPER_DETECTED",
+      totalVerified: 2,
+      firstTamperedSeq: 3,
+      targetTenantId: TENANT_ID,
+    });
+  });
   });
 });

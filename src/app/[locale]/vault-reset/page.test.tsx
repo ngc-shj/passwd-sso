@@ -28,8 +28,7 @@ vi.mock("@/i18n/navigation", () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }));
 
-import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
-setupPasskeyReauthDialogMocks();
+import "@/__tests__/helpers/passkey-reauth-mocks";
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,

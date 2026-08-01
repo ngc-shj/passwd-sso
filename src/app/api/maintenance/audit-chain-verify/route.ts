@@ -12,8 +12,14 @@
  * See docs/security/audit-chain-threat-model.md#retention-purge-interaction:
  * after a retention purge of the earliest chained rows, the default
  * (fromSeq=1) walk below re-seeds from genesis and reports a FALSE TAMPER at
- * the first retained row — this is verified real behavior (T5 characterization
- * test), not a hypothetical edge case.
+ * the first retained row.
+ *
+ * The opposite direction — a walk that covers less than the range it was asked
+ * to verify reporting ok:true — is closed here: `incomplete` compares how far
+ * the walk actually got against toSeq unconditionally, and a missing anchor is
+ * only benign when no chained row survives. Purge-aware verification (telling
+ * a legitimate retention purge apart from row deletion) needs the deferred
+ * purged_up_to_seq watermark; until it lands, both answer RANGE_INCOMPLETE.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -31,10 +37,10 @@ import { errorResponse, unauthorized, forbidden } from "@/lib/http/api-response"
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseQuery } from "@/lib/http/parse-body";
 import {
-  buildChainInput,
-  computeCanonicalBytes,
-  computeEventHash,
-} from "@/lib/audit/audit-chain";
+  verifyChainRows,
+  GENESIS_PREV_HASH,
+  CHAIN_VERIFY_REASON,
+} from "@/lib/audit/audit-chain-verify";
 import { MS_PER_DAY } from "@/lib/constants/time";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
@@ -97,6 +103,10 @@ function toChainRow(raw: ChainRowRaw): ChainRow {
 
 interface AnchorRow {
   chain_seq: string;
+  // The chain head as recorded when the last row was appended. This is the one
+  // value an attacker who rewrites every row and re-hashes the chain from
+  // genesis does not get to move by editing audit_logs alone.
+  prev_hash: Uint8Array;
 }
 
 interface SeqBoundRow {
@@ -142,17 +152,59 @@ async function handleGET(req: NextRequest) {
     prisma,
     async (tx) =>
       tx.$queryRawUnsafe<AnchorRow[]>(
-        `SELECT chain_seq FROM audit_chain_anchors WHERE tenant_id = $1`,
+        `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
         tenantId,
       ),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
   );
 
   if (!anchors.length) {
+    // No anchor is only benign when the tenant has no chained rows at all.
+    // An anchor that vanished while chained rows survive is indistinguishable
+    // from "never anchored" on the anchor read alone, and answering ok:true
+    // there would report VALID having verified nothing.
+    const chainedRows = await withBypassRls(
+      prisma,
+      async (tx) =>
+        tx.$queryRawUnsafe<{ count: bigint }[]>(
+          `SELECT COUNT(*) AS count
+           FROM audit_logs
+           WHERE tenant_id = $1
+             AND chain_seq IS NOT NULL`,
+          tenantId,
+        ),
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+    if (Number(chainedRows[0]?.count ?? 0) > 0) {
+      await logAuditAsync({
+        ...tenantAuditBase(req, auth.subjectUserId, membership.tenantId),
+        actorType: ACTOR_TYPE.HUMAN,
+        action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
+        metadata: {
+          tokenSubjectUserId: auth.subjectUserId,
+          tokenId: auth.tokenId,
+          targetTenantId: tenantId,
+          ok: false,
+          reason: CHAIN_VERIFY_REASON.ANCHOR_MISSING,
+          totalVerified: 0,
+        },
+      });
+      return NextResponse.json({
+        ok: false,
+        reason: "ANCHOR_MISSING",
+        truncated: false,
+        walkedThrough: 0,
+        firstTamperedSeq: null,
+        firstGapAfterSeq: null,
+        firstTimestampViolationSeq: null,
+        totalVerified: 0,
+      });
+    }
     return NextResponse.json({ ok: true, totalVerified: 0 });
   }
 
   const anchorSeq = Number(anchors[0].chain_seq);
+  const anchorPrevHash = anchors[0].prev_hash;
 
   // Determine the from_seq boundary
   let fromSeq = 1;
@@ -201,7 +253,7 @@ async function handleGET(req: NextRequest) {
   }
 
   // Load the prevHash seed for partial walks (fromSeq > 1 needs the hash from seq - 1)
-  let seedPrevHash: Buffer = Buffer.from([0x00]);
+  let seedPrevHash: Buffer = GENESIS_PREV_HASH;
   if (fromSeq > 1) {
     const seedRows = await withBypassRls(
       prisma,
@@ -221,15 +273,6 @@ async function handleGET(req: NextRequest) {
     }
     seedPrevHash = Buffer.from(seedRows[0].event_hash);
   }
-
-  // Walk the chain
-  let totalVerified = 0;
-  let firstTamperedSeq: number | null = null;
-  let firstGapAfterSeq: number | null = null;
-  let firstTimestampViolationSeq: number | null = null;
-  let prevHash = seedPrevHash;
-  let prevSeq: number | null = null;
-  let prevCreatedAt: Date | null = null;
 
   const rows = await withBypassRls(
     prisma,
@@ -252,76 +295,33 @@ async function handleGET(req: NextRequest) {
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
   );
 
-  // C15 (OWASP A08-2): bail at first tamper. Continuing the walk after
-  // tamper using the stored (tampered) hash produces meaningless
-  // verification results for subsequent rows — the operator should treat
-  // them as unverified. walkedThrough captures the count of rows verified
-  // BEFORE bailing; rows beyond that point are not re-hashed.
-  let walkedThrough = 0;
-  for (const row of rows) {
-    const seq = Number(row.chain_seq);
+  // The walk lives in @/lib/audit/audit-chain-verify so the periodic worker
+  // reaches the same verdict from the same code. One predicate with two
+  // implementations gets decided by whichever one you happen to ask.
+  const {
+    ok,
+    reason,
+    totalVerified,
+    walkedThrough,
+    verifiedUpToSeq,
+    truncated,
+    anchorChecked,
+    firstTamperedSeq,
+    firstGapAfterSeq,
+    firstTimestampViolationSeq,
+    firstBrokenLinkSeq,
+  } = verifyChainRows({
+    rows,
+    seedPrevHash,
+    fromSeq,
+    toSeq,
+    anchorPrevHash,
+    // The anchor's head hash attests to seq 1..anchorSeq, so only a walk
+    // spanning exactly that range is expected to end on it.
+    anchorComparable: fromSeq === 1 && toSeq === anchorSeq,
+    rowCap: MAX_ROWS_PER_REQUEST,
+  });
 
-    // Check for gaps in chain_seq (informational only, doesn't bail)
-    if (prevSeq !== null && firstGapAfterSeq === null) {
-      if (seq !== prevSeq + 1) {
-        firstGapAfterSeq = prevSeq;
-      }
-    }
-
-    if (prevCreatedAt !== null && row.created_at < prevCreatedAt && firstTimestampViolationSeq === null) {
-      firstTimestampViolationSeq = seq;
-    }
-
-    // Re-compute the event hash and compare with stored event_hash
-    const payload =
-      row.metadata != null && typeof row.metadata === "object"
-        ? (row.metadata as Record<string, unknown>)
-        : {};
-
-    const chainInput = buildChainInput({
-      id: row.id,
-      createdAt: row.created_at,
-      chainSeq: BigInt(row.chain_seq),
-      prevHash,
-      payload,
-    });
-    const canonicalBytes = computeCanonicalBytes(chainInput);
-    const computedHash = computeEventHash(prevHash, canonicalBytes);
-
-    if (!computedHash.equals(row.event_hash)) {
-      firstTamperedSeq = seq;
-      // Bail — subsequent rows are unverified.
-      break;
-    }
-
-    prevHash = row.event_hash;
-    prevSeq = seq;
-    prevCreatedAt = row.created_at;
-    totalVerified++;
-    walkedThrough++;
-  }
-
-  // Detect truncation: query hit MAX_ROWS_PER_REQUEST before covering full range
-  const truncated = rows.length >= MAX_ROWS_PER_REQUEST && (prevSeq === null || prevSeq < toSeq);
-  const verifiedUpToSeq = prevSeq !== null ? prevSeq : undefined;
-
-  const integrityOk = firstTamperedSeq === null && firstGapAfterSeq === null && firstTimestampViolationSeq === null;
-  // Fail-closed: truncated verification is never reported as ok
-  const ok = integrityOk && !truncated;
-
-  // Machine-readable failure reason
-  let reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined;
-  if (!ok) {
-    if (truncated && integrityOk) {
-      reason = "TRUNCATED";
-    } else if (firstTamperedSeq !== null) {
-      reason = "TAMPER_DETECTED";
-    } else if (firstGapAfterSeq !== null) {
-      reason = "GAP_DETECTED";
-    } else if (firstTimestampViolationSeq !== null) {
-      reason = "TIMESTAMP_VIOLATION";
-    }
-  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, auth.subjectUserId, membership.tenantId),
@@ -332,12 +332,15 @@ async function handleGET(req: NextRequest) {
       tokenId: auth.tokenId,
       targetTenantId: tenantId,
       ok,
+      reason,
       totalVerified,
       truncated,
       verifiedUpToSeq,
       firstTamperedSeq,
       firstGapAfterSeq,
       firstTimestampViolationSeq,
+      firstBrokenLinkSeq,
+      anchorChecked,
     },
   });
 
@@ -350,6 +353,11 @@ async function handleGET(req: NextRequest) {
     firstTamperedSeq,
     firstGapAfterSeq,
     firstTimestampViolationSeq,
+    firstBrokenLinkSeq,
+    // Tells an operator whether the head-hash comparison actually ran: a
+    // partial range cannot end on the anchor, so a green result from one says
+    // less than a green result from a full walk.
+    anchorChecked,
     totalVerified,
   });
 }

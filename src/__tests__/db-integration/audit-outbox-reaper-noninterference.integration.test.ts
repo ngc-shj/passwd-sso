@@ -84,9 +84,11 @@ describe("audit-outbox reaper non-interference with in-flight rows", () => {
       );
     });
 
-    // Only the stuck row should have been reaped
-    expect(reaped).toHaveLength(1);
-    expect(reaped[0].id).toBe(stuckRowId);
+    // The sweep is not tenant-scoped, so another test's stuck row can appear in
+    // this set. What matters is which of THIS test's two rows it took.
+    const reapedIds = reaped.map((r) => r.id);
+    expect(reapedIds).toContain(stuckRowId);
+    expect(reapedIds).not.toContain(freshRowId);
 
     // Verify Row A is still PROCESSING
     const freshRow = await ctx.su.prisma.$transaction(async (tx) => {

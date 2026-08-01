@@ -1,13 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  afterEach,
-} from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mocks ──────────────────────────────────────────────────
 
@@ -71,18 +62,13 @@ function clearSingletonCache() {
 
 // ─── Tests ──────────────────────────────────────────────────
 
-// Prevent MaxListenersExceededWarning from repeated process.once() calls across tests
-const originalMaxListeners = process.getMaxListeners();
-beforeAll(() => process.setMaxListeners(30));
-afterAll(() => process.setMaxListeners(originalMaxListeners));
-
 describe("prisma pool configuration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
     clearSingletonCache();
     resetEnv();
-    process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+    vi.stubEnv("DATABASE_URL", "postgresql://test:test@localhost:5432/test");
   });
 
   afterEach(() => {
@@ -106,11 +92,11 @@ describe("prisma pool configuration", () => {
   });
 
   it("uses custom env values for pool config", async () => {
-    process.env.DB_POOL_MAX = "50";
-    process.env.DB_POOL_CONNECTION_TIMEOUT_MS = "10000";
-    process.env.DB_POOL_IDLE_TIMEOUT_MS = "60000";
-    process.env.DB_POOL_MAX_LIFETIME_SECONDS = "3600";
-    process.env.DB_POOL_STATEMENT_TIMEOUT_MS = "15000";
+    vi.stubEnv("DB_POOL_MAX", "50");
+    vi.stubEnv("DB_POOL_CONNECTION_TIMEOUT_MS", "10000");
+    vi.stubEnv("DB_POOL_IDLE_TIMEOUT_MS", "60000");
+    vi.stubEnv("DB_POOL_MAX_LIFETIME_SECONDS", "3600");
+    vi.stubEnv("DB_POOL_STATEMENT_TIMEOUT_MS", "15000");
 
     await import("@/lib/prisma");
 
@@ -161,7 +147,7 @@ describe("prisma shutdown", () => {
     vi.resetModules();
     clearSingletonCache();
     resetEnv();
-    process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+    vi.stubEnv("DATABASE_URL", "postgresql://test:test@localhost:5432/test");
     process.removeAllListeners("SIGTERM");
     process.removeAllListeners("SIGINT");
   });
@@ -221,7 +207,7 @@ describe("envInt", () => {
     vi.resetModules();
     clearSingletonCache();
     resetEnv();
-    process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
+    vi.stubEnv("DATABASE_URL", "postgresql://test:test@localhost:5432/test");
   });
 
   afterEach(() => {
@@ -234,19 +220,19 @@ describe("envInt", () => {
   });
 
   it("returns default when env var is empty string", async () => {
-    process.env.TEST_ENVINT = "";
+    vi.stubEnv("TEST_ENVINT", "");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42)).toBe(42);
   });
 
   it("parses valid integer", async () => {
-    process.env.TEST_ENVINT = "100";
+    vi.stubEnv("TEST_ENVINT", "100");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toBe(100);
   });
 
   it("falls back on non-numeric value in dev/test", async () => {
-    process.env.TEST_ENVINT = "abc";
+    vi.stubEnv("TEST_ENVINT", "abc");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toBe(42);
     expect(mockWarn).toHaveBeenCalledWith(
@@ -256,28 +242,28 @@ describe("envInt", () => {
   });
 
   it("falls back on partial number like '20ms' in dev/test", async () => {
-    process.env.TEST_ENVINT = "20ms";
+    vi.stubEnv("TEST_ENVINT", "20ms");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toBe(42);
     expect(mockWarn).toHaveBeenCalled();
   });
 
   it("falls back on negative value below min in dev/test", async () => {
-    process.env.TEST_ENVINT = "-1";
+    vi.stubEnv("TEST_ENVINT", "-1");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toBe(42);
     expect(mockWarn).toHaveBeenCalled();
   });
 
   it("falls back on value above max in dev/test", async () => {
-    process.env.TEST_ENVINT = "999";
+    vi.stubEnv("TEST_ENVINT", "999");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toBe(42);
     expect(mockWarn).toHaveBeenCalled();
   });
 
   it("throws on invalid value in production", async () => {
-    process.env.TEST_ENVINT = "abc";
+    vi.stubEnv("TEST_ENVINT", "abc");
     (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     const { envInt } = await import("@/lib/prisma");
     expect(() => envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toThrow(
@@ -286,7 +272,7 @@ describe("envInt", () => {
   });
 
   it("throws on out-of-range value in production", async () => {
-    process.env.TEST_ENVINT = "999";
+    vi.stubEnv("TEST_ENVINT", "999");
     (process.env as Record<string, string | undefined>).NODE_ENV = "production";
     const { envInt } = await import("@/lib/prisma");
     expect(() => envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toThrow(
@@ -295,7 +281,7 @@ describe("envInt", () => {
   });
 
   it("falls back on float value in dev/test", async () => {
-    process.env.TEST_ENVINT = "3.14";
+    vi.stubEnv("TEST_ENVINT", "3.14");
     const { envInt } = await import("@/lib/prisma");
     expect(envInt("TEST_ENVINT", 42, { min: 0, max: 200 })).toBe(42);
     expect(mockWarn).toHaveBeenCalled();
