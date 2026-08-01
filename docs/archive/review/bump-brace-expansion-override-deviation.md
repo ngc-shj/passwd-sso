@@ -273,3 +273,44 @@ RED    scratch copy + injected
 a `scripts/checks/` entry wired into `pre-pr` is the durable form and is the natural
 follow-up, but adding a gate is a repo-policy change of the same kind SC5 defers to the
 maintainer — surfaced rather than bundled.
+
+## D10 — The expanded class is closed by a wired, mutation-verified gate
+
+D9 recorded three rounds of the same defect and the mechanism change that ended it
+(delegate the predicate to `semver` instead of hand-translating selectors). D9 also noted
+the snippet was documentation, not a gate. Per the triangulate termination rule for a
+class whose member-set expanded ≥2× — and at the maintainer's direction — it is now a
+gate.
+
+**Added**: `scripts/checks/check-override-key-disjointness.mjs`, wired into
+`scripts/pre-pr.sh` as `Static: override-key-disjointness`. It walks every `overrides`
+block in the repo — root, `cli/`, `extension/`, including nested parent scopes — and
+fails when two keys for the same package select intersecting ranges.
+
+**`semver` promoted to an explicit devDependency** (`^7.8.5`, one lockfile line). It was
+already in the tree, but only as a transitive hoist, with 6.3.1 also present under other
+parents. A gate that depends on which version happens to hoist to the top is the same
+"verifier whose input was never derived" mistake in a different costume.
+
+**Red-proven** (RT7). Exit status read with nothing between the command and `$?` —
+the first attempt at this table piped through `tr` and read the pipe's status instead,
+which is the third instance of that shape in this PR's history and is why the runbook now
+says to strip filters before reading a gate's verdict:
+
+| fixture | result | exit |
+|---|---|---|
+| the repo's own three `overrides` blocks | passed | **0** |
+| `brace-expansion@1` + `brace-expansion@<=1.1.17` (inclusive-bound overlap) | OVERLAP | **1** |
+| `js-yaml` + `js-yaml@>=3.0.0 <3.15.0` (whole-package key beside a ranged one) | OVERLAP | **1** |
+| `rollup@1` + `rollup@>=0.5.0 <2.0.0` nested under `@crxjs/vite-plugin` | OVERLAP | **1** |
+| `pkg@latest` (a selector npm itself rejects) | passed, no throw | **0** |
+
+**Committed self-test**: `scripts/__tests__/check-override-key-disjointness.test.mjs`,
+15 cases. They pin the shapes that each escaped a review round before being caught by
+hand — inclusive upper bound, bare-major selector, whole-package key, hyphen range,
+tilde, exact pin — plus scoped-package key splitting, nested-scope isolation, and the
+repo's own blocks. The red-proof lives in the suite rather than only in a transcript.
+
+**Runbook de-duplicated**: Step 4 carried an inline copy of the check. Two
+implementations of one predicate drift, so the inline snippet is gone and Step 4 points
+at the gate.
