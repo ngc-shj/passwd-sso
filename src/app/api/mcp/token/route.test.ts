@@ -14,7 +14,6 @@ const {
   mockHashToken,
   mockTokenLimiterCheck,
   mockIpLimiterCheck,
-  mockRateLimiterCheck,
   mockCreateRateLimiter,
   mockLogAudit,
   mockMcpRefreshTokenFindUnique,
@@ -31,7 +30,7 @@ const {
   // distinguish which limiter a test is driving, so the factory is a
   // RECORDING vi.fn with a mockReturnValueOnce chain in route-creation
   // order: first call -> token limiter, second call -> ip limiter.
-  // mockRateLimiterCheck is kept as an alias to mockTokenLimiterCheck so
+  // mockTokenLimiterCheck is kept as an alias to mockTokenLimiterCheck so
   // every PRE-EXISTING test in this file (which only ever exercises the
   // client-scoped token limiter — createRequest() sets no client IP, so
   // the `if (ip)` gate is never entered) continues to compile/pass
@@ -52,7 +51,6 @@ const {
     mockHashToken: vi.fn((token: string) => `hashed:${token}`),
     mockTokenLimiterCheck,
     mockIpLimiterCheck,
-    mockRateLimiterCheck: mockTokenLimiterCheck,
     mockCreateRateLimiter: vi
       .fn()
       .mockReturnValueOnce({ check: mockTokenLimiterCheck, clear: vi.fn() })
@@ -156,7 +154,7 @@ const TENANT_ID = "44444444-4444-4444-4444-444444444444";
 describe("POST /api/mcp/token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockTokenLimiterCheck.mockResolvedValue({ allowed: true });
     mockIpLimiterCheck.mockResolvedValue({ allowed: true });
     // Default: withBypassRls passes the prisma object with mcpRefreshToken mock
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => {
@@ -289,7 +287,7 @@ describe("POST /api/mcp/token", () => {
     // check is skipped here because the test request carries no client IP, so
     // the limiter must not fire at all — the client-scoped
     // `mcp:token:<client_id>` key is never built from the oversized value.)
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -305,7 +303,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockResolveCodeTenantId).not.toHaveBeenCalled();
     expect(mockHashToken).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
@@ -329,7 +327,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -348,7 +346,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -367,7 +365,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -388,7 +386,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -404,7 +402,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockHashToken).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
@@ -426,7 +424,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
 
@@ -516,7 +514,7 @@ describe("POST /api/mcp/token", () => {
   });
 
   it("returns 429 when rate limit is exceeded", async () => {
-    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
+    mockTokenLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
 
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
       body: VALID_BODY,
@@ -757,7 +755,7 @@ describe("POST /api/mcp/token", () => {
   });
 
   it("refresh_token: returns 429 when IP rate limit is exceeded", async () => {
-    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
+    mockTokenLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
 
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
       body: VALID_REFRESH_BODY,
@@ -850,7 +848,7 @@ describe("POST /api/mcp/token", () => {
     // check is skipped here because the test request carries no client IP, so
     // the limiter must not fire at all — the client-scoped
     // `mcp:token:<client_id>` key is never built from the oversized value.)
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
@@ -920,7 +918,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
@@ -937,7 +935,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockResolveRefreshTokenGate).not.toHaveBeenCalled();
     expect(mockHashToken).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
@@ -958,7 +956,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
@@ -975,7 +973,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockHashToken).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
@@ -996,7 +994,7 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    expect(mockRateLimiterCheck).not.toHaveBeenCalled();
+    expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
