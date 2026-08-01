@@ -37,17 +37,25 @@ if (!process.env.DATABASE_URL && process.env.MIGRATION_DATABASE_URL) {
  * Naming only the outbox worker would leave someone who tripped the check on
  * the retention GC following an instruction that does not apply to them.
  */
-const WORKERS: ReadonlyArray<{ applicationName: string; stop: string }> = [
+const WORKERS: ReadonlyArray<{
+  applicationName: string;
+  stop: string;
+  /** Undefined when there is nothing to restart with a command. */
+  restart?: string;
+}> = [
   {
     applicationName: "passwd-sso-outbox-worker",
     stop: "docker compose stop audit-outbox-worker",
+    restart: "docker compose start audit-outbox-worker",
   },
   {
     applicationName: "passwd-sso-retention-gc-worker",
     stop: "docker compose stop retention-gc-worker",
+    restart: "docker compose start retention-gc-worker",
   },
   {
-    // No compose service — run directly, so there is no container to stop.
+    // No compose service — run directly, so there is no container to stop and
+    // no `docker compose start` to hand back.
     applicationName: "passwd-sso-audit-anchor-publisher",
     stop: "stop the audit-anchor-publisher process you started",
   },
@@ -73,23 +81,27 @@ try {
     [WORKERS.map((w) => w.applicationName)],
   );
   if (rows.length > 0) {
-    const detected = rows.map((r) => {
-      const worker = WORKERS.find((w) => w.applicationName === r.application_name);
-      return {
-        name: r.application_name,
-        count: r.count,
-        stop: worker?.stop ?? "stop that worker",
-      };
-    });
+    const detected = rows.map((r) => ({
+      row: r,
+      worker: WORKERS.find((w) => w.applicationName === r.application_name),
+    }));
+    const restarts = detected
+      .map((d) => d.worker?.restart)
+      .filter((cmd): cmd is string => Boolean(cmd));
     throw new Error(
       [
         `Refusing to run integration tests: a background worker is connected to the same database.`,
         ``,
-        ...detected.map((d) => `  ${d.name} (${d.count} connection(s)) — ${d.stop}`),
+        ...detected.map(
+          ({ row, worker }) =>
+            `  ${row.application_name} (${row.count} connection(s)) — ${worker?.stop ?? "stop that worker"}`,
+        ),
         ``,
         `These tests claim and mutate the same outbox / delivery rows the worker drains,`,
         `so results would be non-deterministic. Stop the worker(s) above, then re-run.`,
-        `Restart afterwards with the matching \`docker compose start …\`.`,
+        // Only offered for workers that actually have a restart command, so
+        // nobody is told to `docker compose start` something with no service.
+        ...(restarts.length > 0 ? [``, `Restart afterwards with:`, ...restarts.map((c) => `  ${c}`)] : []),
       ].join("\n"),
     );
   }
