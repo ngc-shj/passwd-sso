@@ -48,11 +48,13 @@ function parseIpv4(ip: string): number[] | null {
   if (parts.length !== 4) return null;
   const octets: number[] = [];
   for (const part of parts) {
-    if (part.length === 0) return null;
+    // Decimal digits only, no leading zeros. `Number()` accepts far more than
+    // an octet spelling — `Number("1e2")` is 100, so `::ffff:1e2.64.0.1` used
+    // to normalize into the Tailscale CGNAT range and be classified as a
+    // Tailscale peer, while net.isIP rejects the string outright.
+    if (!/^(0|[1-9]\d{0,2})$/.test(part)) return null;
     const n = Number(part);
-    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
-    // Reject leading zeros (e.g., "01", "001")
-    if (part.length > 1 && part[0] === "0") return null;
+    if (n > 255) return null;
     octets.push(n);
   }
   return octets;
@@ -116,8 +118,11 @@ function parseIpv6(ip: string): number[] | null {
   const right = parseGroups(halves[1]);
   if (!left || !right) return null;
 
+  // `::` must compress at least one group (RFC 4291 §2.2), so a form that
+  // already spells all 16 bytes is invalid — `1:2:3:4:5:6:7:8::` is not an
+  // address, and accepting it made this parser disagree with net.isIP.
   const totalBytes = left.length + right.length;
-  if (totalBytes > 16) return null;
+  if (totalBytes >= 16) return null;
 
   const padding = 16 - totalBytes;
   return [...left, ...new Array<number>(padding).fill(0), ...right];

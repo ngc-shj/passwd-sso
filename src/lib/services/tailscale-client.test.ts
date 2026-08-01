@@ -90,6 +90,35 @@ describe("verifyTailscalePeer (TCP fallback path)", () => {
     expect(result).toBe(true);
   });
 
+  // The answer is only about the peer we asked about if `addr` still denotes
+  // that address. Appending ":0" to an unbracketed IPv6 literal produces a
+  // different, equally valid address, so the verdict would describe some other
+  // peer — and after the session-path change that is a denial for every IPv6
+  // Tailscale user. Asserted by reading `addr` back off the real request URL.
+  it.each([
+    ["100.64.0.5", "100.64.0.5"],
+    ["fd7a:115c:a1e0::1234", "fd7a:115c:a1e0::1234"],
+  ])("asks WhoIs about %s itself, not a neighbouring address", async (ip, expected) => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ Node: { Name: `host1.my-tailnet.ts.net.` } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await verifyTailscalePeer(ip, "my-tailnet");
+
+    const requestedUrl = new URL(String(fetchSpy.mock.calls[0][0]));
+    const addr = requestedUrl.searchParams.get("addr") ?? "";
+    // Let a parser that implements the ip:port rule decide, rather than
+    // splitting on the last colon by hand — that hand-split silently undoes
+    // the very defect under test, since stripping ":0" off the unbracketed
+    // form hands back the original string.
+    const parsed = new URL(`http://${addr}`);
+    expect(parsed.hostname.replace(/^\[|\]$/g, "")).toBe(expected);
+    expect(parsed.port).toBe("0");
+  });
+
   it("returns false when the WhoIs FQDN tailnet does not match", async () => {
     fetchSpy.mockResolvedValue(
       new Response(

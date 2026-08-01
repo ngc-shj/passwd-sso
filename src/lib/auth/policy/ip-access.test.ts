@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { isIP } from "node:net";
 import {
   normalizeIp,
   rateLimitKeyFromIp,
@@ -237,6 +238,36 @@ describe("isValidIpAddress", () => {
   it("rejects junk", () => {
     expect(isValidIpAddress("hello")).toBe(false);
     expect(isValidIpAddress("")).toBe(false);
+  });
+
+  // net.isIP is the authority on what an address IS; this parser only decides
+  // which CIDR one falls in. Where the two disagree, a string nobody can route
+  // gets classified anyway — `::ffff:1e2.64.0.1` normalized into the Tailscale
+  // CGNAT range because Number("1e2") is 100. Asserted as a property so a
+  // future spelling cannot reopen the gap one case at a time.
+  it.each([
+    "1.2.3.4",
+    "255.255.255.255",
+    "2001:db8::1",
+    "::1",
+    "::ffff:127.0.0.1",
+    "64:ff9b::169.254.169.254",
+    "fd7a:115c:a1e0::1234",
+    "1:2:3:4:5:6:7:8",
+    // Forms net.isIP rejects
+    "1:2:3:4:5:6:7:8::",
+    "::ffff:1e2.0.0.1",
+    "::ffff:1e2.64.0.1",
+    "::ffff:0x7f.0.0.1",
+    "1.2:0:0:0:0:0:0:1",
+    "01.2.3.4",
+    "1.2.3.4.5",
+    "256.1.1.1",
+    "1.2.3",
+    "hello",
+    "",
+  ])("agrees with net.isIP on %j", (candidate) => {
+    expect(isValidIpAddress(candidate)).toBe(isIP(candidate) !== 0);
   });
 });
 

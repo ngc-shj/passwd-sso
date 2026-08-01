@@ -84,7 +84,13 @@ function extractTailnetFromFqdn(fqdn: string): string | null {
  * Call tailscaled WhoIs API via Unix socket or TCP fallback.
  */
 async function callWhoIs(ip: string): Promise<WhoIsResponse> {
-  const path = `/localapi/v0/whois?addr=${encodeURIComponent(ip)}:0`;
+  // LocalAPI parses `addr` as an ip:port pair, and an IPv6 address has to be
+  // bracketed for that to mean the address we passed. Appending ":0" bare
+  // turns `fd7a:115c:a1e0::1234` into `fd7a:115c:a1e0::1234:0` — a different,
+  // equally valid address — so the WhoIs answer describes some other peer, or
+  // no peer at all. On IPv4 the unbracketed form is correct and unchanged.
+  const addr = ip.includes(":") ? `[${ip}]:0` : `${ip}:0`;
+  const path = `/localapi/v0/whois?addr=${encodeURIComponent(addr)}`;
 
   const tcpBase = process.env.TAILSCALE_API_BASE ?? "";
   const socketPath = process.env.TAILSCALE_SOCKET ?? DEFAULT_TAILSCALE_SOCKET;
