@@ -90,7 +90,25 @@ diff. At the time of the run, the branch's only commit touched
 therefore saw no app paths, skipped the four web steps, and the 61 passing steps were
 all static gates.
 
-Evidence: `grep -cE '▸ (Lint|Test|Build|Typecheck)$'` over the run log → **0**.
+**Evidence — and a correction to the evidence originally cited here.** This entry first
+cited `grep -cE '▸ (Lint|Test|Build|Typecheck)$'` over the run log returning **0**. That
+command is itself a can't-fail check: `scripts/pre-pr.sh` colorizes every step label
+unconditionally, so the raw bytes are `\x1b[1m▸ Lint\x1b[0m` and the reset escape sits
+between the label and the newline. A `$`-anchored pattern therefore **never** matches,
+whether the step ran or not — Phase 3's Testing review re-ran the identical command
+against a log where the four steps demonstrably *did* run and still got 0. Citing it as
+proof of a skip was an R50 instance inside the entry written to correct an R50 instance.
+
+The evidence that actually holds:
+
+1. Strip the escapes first — `sed 's/\x1b\[[0-9;]*m//g' <log> | grep -cE '▸ (Lint|Typecheck|Test|Build)$'` — which returns 4 on a run where they executed.
+2. The pass count moved **61 → 69** once the implementation was committed, matching the
+   +8 web-step delta already recorded in `project_pre_pr_web_filter_reads_committed_diff`
+   from an earlier observation of this same behavior.
+3. Neither of those is what closes the gap. The four checks were run **directly**, exit
+   status read from the command itself with no pipe in between — see D7 for the
+   transcript. A pass count is not coverage, and that applies to 69 exactly as it applied
+   to 61.
 
 **Why this matters here specifically**: T8 was not an incidental check. The plan chose
 it because ESLint's own dependency chain (`eslint → minimatch → brace-expansion`) is a
@@ -139,3 +157,60 @@ anchored on the words that carry the false claim rather than on nouns common to 
 and its correction. Re-verified: no match in the working tree. A forbidden pattern that
 fires on its own fix is worse than no pattern, because it trains the reader to wave the
 check through.
+
+## D7 — Verification transcript (satisfies C3's acceptance criterion)
+
+C3's acceptance reads: *"the commands run and their output is recorded in the deviation
+log."* Phase 3's Testing review found that criterion unmet — the log recorded the
+*decision* to run the audits manually (D4) but never their output, so the PR's central
+security claim (I7) had no evidence in the committed record. Recorded here.
+
+**Audit scopes** — each exit status read from the command itself, no pipe between the
+command and `$?` (R44):
+
+```
+npm audit                                  exit=0 :: found 0 vulnerabilities
+npm audit --omit=dev --audit-level=high    exit=0 :: found 0 vulnerabilities
+cli: npm audit                             exit=0 :: found 0 vulnerabilities
+extension: npm audit                       exit=0 :: found 0 vulnerabilities
+```
+
+I7 (full scope clean) and I8 (production scope not regressed) both hold. I8 was green
+before the change too — it is a regression guard, and I7 is the check that proves the
+fix.
+
+**Mandatory checks** — run directly rather than inferred from `pre-pr`'s pass count
+(D5). Output redirected to files; exit status read immediately:
+
+```
+npx eslint .        exit=0   (0 bytes of output)
+npx tsc --noEmit    exit=0   (0 bytes of output)
+npx vitest run      exit=0   Test Files 1006 passed (1006)
+                             Tests 13955 passed | 1 skipped (13956)
+npx next build      exit=0   ✓ Compiled successfully in 8.6s
+                             ✓ Generating static pages (243/243)
+```
+
+Note on a first attempt at this transcript: piping all four through a single filter
+produced `eslint_exit=2` and a build summary reading "1 routes … Errors: 1". Both were
+artifacts of this environment's output-compressing command proxy mangling the streams,
+not real failures — re-running with plain file redirection gave exit 0 and zero output
+for eslint, and the full 243-route build above. Recorded because a compressed exit code
+is exactly the R44 shape, arriving from the tooling rather than from a pipeline the
+author wrote.
+
+**Licenses** (T7): `npm run licenses:check:strict` → `PASSED (strict) — allowlisted=15,
+unreviewed=0, expired=0`; `:ext:strict` and `:cli:strict` → `PASSED (strict)`.
+
+**`pre-pr`**: 69 passed after committing (61 before, when the web filter had nothing
+committed to see). Recorded as context, not as evidence — see D5 item 3.
+
+## D8 — Phase 3 Round 1 findings, all applied
+
+| finding | severity | disposition |
+|---|---|---|
+| Functionality | — | **No findings** |
+| Security F1 — the runbook's disjointness check is unsound for inclusive upper bounds | Major | **Fixed.** `<=X` and `>=X <Y` overlap at exactly X, and the stated check (`lower >= previous upper`) reads `X >= X` as disjoint; the shared version then resolves by JSON key order. Step 4 now requires half-open exclusive-upper ranges, states that the check is only valid for that form, and shows the counterexample. This is a verifier whose own input space was never derived — the check was correct for the keys this PR ships and wrong for the shape a future responder could write. |
+| Security F2 — the runbook presents `npm run pre-pr` as covering lint/test/build with no commit-first caveat | Major | **Fixed.** Step 3 now states that `detect_web_changes()` reads the committed diff, that the four steps are silently skipped otherwise, and gives the ANSI-stripped grep to confirm they ran. This is the same defect class as the audit claim C5 was written to fix, left standing for the adjacent claim — and D5 is the proof it bites, since this PR's own Phase 2 fell into it. |
+| Testing F1 — D5's cited evidence grep can never match | Major | **Fixed.** See the corrected evidence block in D5. |
+| Testing F2 — C3's acceptance (audit output recorded) unmet | Major | **Fixed.** See D7. |
