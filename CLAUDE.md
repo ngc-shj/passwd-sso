@@ -55,14 +55,18 @@ a test just inserted and wins some of the time, producing a ~50% flake that
 surfaces as an unrelated assertion failure. `npm run docker:up` starts
 `audit-outbox-worker` against the dev database, so the normal local state is the
 racing one. `src/__tests__/db-integration/setup.ts` detects this by
-`application_name` in `pg_stat_activity` and refuses to run; stop the worker
-first:
+`application_name` in `pg_stat_activity` and refuses to run, naming each
+detected worker and how to stop that one. Both compose workers touch these
+tables, so stop both:
 
 ```bash
-docker compose stop audit-outbox-worker
+docker compose stop audit-outbox-worker retention-gc-worker
 npm run test:integration
-docker compose start audit-outbox-worker
+docker compose start audit-outbox-worker retention-gc-worker
 ```
+
+The audit-anchor-publisher has no compose service; if you started one by hand,
+stop that process.
 
 CI runs no worker container alongside the integration job, so the check is silent there.
 

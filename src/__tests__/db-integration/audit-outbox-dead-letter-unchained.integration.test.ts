@@ -319,6 +319,51 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
     expect(result.totalVerified).toBe(0);
   });
 
+  it("ignores rows appended past the anchor instead of calling a healthy chain tampered", async () => {
+    // The worker reads the anchor, then reads rows. On a tenant still writing
+    // audit events, a row can land between those two reads. Walking it would
+    // end on a hash newer than the head the anchor recorded and report
+    // ANCHOR_HASH_MISMATCH for a chain that is entirely intact — a false alarm
+    // on the monitoring path, which is how a real alarm later gets ignored.
+    const row = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, row, makePayload());
+    const anchorSeq = await getAnchorChainSeq();
+    expect(anchorSeq).toBe(1);
+
+    // Deliver a second genuine row, then rewind the anchor to seq 1 so the DB
+    // holds exactly the state the race produces: a valid chain whose newest row
+    // sits above the anchor the verifier just read.
+    const second = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, second, makePayload());
+    expect(await getAnchorChainSeq()).toBe(2);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `UPDATE audit_chain_anchors
+            SET chain_seq = 1,
+                prev_hash = (SELECT event_hash FROM audit_logs
+                              WHERE tenant_id = $1::uuid AND chain_seq = 1)
+          WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
+
+    const result = await ctx.worker.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return verifyTenantChain(tenantId, {
+        prisma: tx as unknown as PrismaClient,
+        logger: { error: () => {}, info: () => {} },
+      });
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.reason).toBeUndefined();
+    // Only the rows the anchor attests to were walked.
+    expect(result.totalVerified).toBe(1);
+    expect(result.anchorChecked).toBe(true);
+  });
+
   it("reports ANCHOR_MISSING when the anchor is deleted but rows survive", async () => {
     const row = await insertAndClaim(makePayload());
     await deliverRowWithChain(ctx.su.prisma, row, makePayload());

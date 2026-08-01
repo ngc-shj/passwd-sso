@@ -114,15 +114,24 @@ export async function verifyTenantChain(
 
   const anchorSeq = Number(anchors[0].chain_seq);
 
+  // Bounded by the anchor's seq, matching the endpoint's query. The anchor is
+  // read first, so on a tenant still writing audit rows the walk would
+  // otherwise pick up rows appended after it — ending on a hash later than the
+  // head the anchor recorded, and reporting ANCHOR_HASH_MISMATCH for a
+  // perfectly healthy chain. On the monitoring path that is a page in the
+  // middle of the night for nothing, and worse, it trains the reader to
+  // discount the alert that matters.
   const rows = await deps.prisma.$queryRawUnsafe<ChainRowRaw[]>(
     `SELECT id, tenant_id, created_at,
             chain_seq, event_hash, chain_prev_hash, metadata
      FROM audit_logs
      WHERE tenant_id = $1
        AND chain_seq IS NOT NULL
+       AND chain_seq <= $2
      ORDER BY chain_seq ASC
-     LIMIT $2`,
+     LIMIT $3`,
     tenantId,
+    BigInt(anchorSeq),
     MAX_ROWS_PER_TENANT,
   );
 

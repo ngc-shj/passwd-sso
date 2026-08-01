@@ -43,6 +43,8 @@ export default defineConfig({
         "src/lib/audit/audit.ts",
         "src/lib/audit/audit-outbox.ts",
         "src/lib/audit/audit-query.ts",
+        "src/lib/audit/audit-chain.ts",
+        "src/lib/audit/audit-chain-verify.ts",
         "src/proxy.ts",
         "src/components/**/*.{ts,tsx}",
         "src/app/global-error.tsx",
@@ -76,6 +78,10 @@ export default defineConfig({
         // fail-closed security decisions, which is exactly the kind of code a
         // global floor is too coarse to protect.
         "src/app/api/maintenance/audit-chain-verify/route.ts": { lines: 80, branches: 70 },
+        // The single adjudicator for chain integrity — a pure function with no
+        // I/O to excuse a gap, and the one place a deleted test would go
+        // unnoticed under the global floor alone.
+        "src/lib/audit/audit-chain-verify.ts": { lines: 90, branches: 85 },
         "src/app/api/user/mcp-tokens/[id]/route.ts": { lines: 80, branches: 70 },
       },
     },

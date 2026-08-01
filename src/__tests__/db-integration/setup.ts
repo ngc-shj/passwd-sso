@@ -32,10 +32,25 @@ if (!process.env.DATABASE_URL && process.env.MIGRATION_DATABASE_URL) {
  * A ~50% flake that blames an unrelated assertion is worse than a refusal: it
  * teaches people to re-run until green. Fail fast and name the fix instead.
  */
-const WORKER_APPLICATION_NAMES = [
-  "passwd-sso-outbox-worker",
-  "passwd-sso-retention-gc-worker",
-  "passwd-sso-audit-anchor-publisher",
+/**
+ * Each worker's pool application_name, mapped to how you actually stop it.
+ * Naming only the outbox worker would leave someone who tripped the check on
+ * the retention GC following an instruction that does not apply to them.
+ */
+const WORKERS: ReadonlyArray<{ applicationName: string; stop: string }> = [
+  {
+    applicationName: "passwd-sso-outbox-worker",
+    stop: "docker compose stop audit-outbox-worker",
+  },
+  {
+    applicationName: "passwd-sso-retention-gc-worker",
+    stop: "docker compose stop retention-gc-worker",
+  },
+  {
+    // No compose service — run directly, so there is no container to stop.
+    applicationName: "passwd-sso-audit-anchor-publisher",
+    stop: "stop the audit-anchor-publisher process you started",
+  },
 ];
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -55,23 +70,26 @@ try {
       WHERE datname = current_database()
         AND application_name = ANY($1::text[])
       GROUP BY application_name`,
-    [WORKER_APPLICATION_NAMES],
+    [WORKERS.map((w) => w.applicationName)],
   );
   if (rows.length > 0) {
-    const detail = rows
-      .map((r) => `${r.application_name} (${r.count} connection(s))`)
-      .join(", ");
+    const detected = rows.map((r) => {
+      const worker = WORKERS.find((w) => w.applicationName === r.application_name);
+      return {
+        name: r.application_name,
+        count: r.count,
+        stop: worker?.stop ?? "stop that worker",
+      };
+    });
     throw new Error(
       [
         `Refusing to run integration tests: a background worker is connected to the same database.`,
-        `  Detected: ${detail}`,
+        ``,
+        ...detected.map((d) => `  ${d.name} (${d.count} connection(s)) — ${d.stop}`),
         ``,
         `These tests claim and mutate the same outbox / delivery rows the worker drains,`,
-        `so results would be non-deterministic. Stop the worker, then re-run:`,
-        ``,
-        `  docker compose stop audit-outbox-worker`,
-        ``,
-        `Restart it afterwards with \`docker compose start audit-outbox-worker\`.`,
+        `so results would be non-deterministic. Stop the worker(s) above, then re-run.`,
+        `Restart afterwards with the matching \`docker compose start …\`.`,
       ].join("\n"),
     );
   }
