@@ -193,6 +193,49 @@ describe("GET /api/vault/delegation/check", () => {
     expect(mockPrismaDelegationSession.findFirst).not.toHaveBeenCalled();
   });
 
+  it("binds the lookup to the calling MCP token's own row", async () => {
+    // The clientId equality guard above stops a token probing another client;
+    // this binding is the layer under it, restricting the lookup to sessions
+    // created against THIS access-token row. It shipped once keyed on a field
+    // McpAccessToken does not have, which made the query throw instead of
+    // filtering — so assert the shape, not just that a query happened.
+    mockAuthOrToken.mockResolvedValue({
+      type: "mcp_token",
+      userId: "user-1",
+      tenantId: "tenant-1",
+      tokenId: "tok-1",
+      mcpClientId: VALID_CLIENT_ID,
+      scopes: ["delegation:check"],
+    });
+    mockPrismaDelegationSession.findFirst.mockResolvedValue(null);
+
+    await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+
+    expect(mockPrismaDelegationSession.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          userId: "user-1",
+          mcpAccessToken: {
+            id: "tok-1",
+            mcpClient: { clientId: VALID_CLIENT_ID },
+          },
+        }),
+      }),
+    );
+  });
+
+  it("does not constrain the token row when authenticated by session cookie", async () => {
+    // Session callers have no access-token row to bind to; the binding must be
+    // absent rather than present-and-undefined (which Prisma reads as "match
+    // rows whose id IS NULL" for some inputs and is not the intent here).
+    mockPrismaDelegationSession.findFirst.mockResolvedValue(null);
+
+    await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+
+    const where = mockPrismaDelegationSession.findFirst.mock.calls[0][0].where;
+    expect(where.mcpAccessToken).toEqual({ mcpClient: { clientId: VALID_CLIENT_ID } });
+  });
+
   it("returns 429 when rate limited", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
     const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
