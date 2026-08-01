@@ -626,3 +626,29 @@ The audit checks (T1-T3) and the license check (T7) are **not** part of pre-pr
 | C4 | No Trivy/Dockerfile second-surface change required (re-derived from the full band list) | locked |
 | C5 | `dependency-cve-response.md` corrected (Step 3 false claim, Step 4 overlap hazard + three moves) | locked |
 | C6 | `js-yaml` override covers every band of its current advisories (Class C, closes the defect class) | locked |
+| C7 | Override-key disjointness enforced by a wired, mutation-verified gate rather than by prose | locked |
+
+**C7 was added during Phase 3**, not at plan time. Three review rounds each falsified the
+prose rule this plan asked for, and the triangulate convergence rule for a class whose
+member-set expands ≥2× makes a mutation-verified gate the closure artifact rather than an
+optional follow-up. Added at the maintainer's direction.
+
+- **Change**: `scripts/checks/check-override-key-disjointness.mjs`, wired into
+  `scripts/pre-pr.sh`; `semver` promoted to an explicit devDependency; 15-case self-test.
+- **Invariants**: I17 — within one `overrides` scope, no two keys for the same package
+  select intersecting ranges, across the root, `cli/` and `extension/` manifests and
+  inside nested parent scopes. I18 — the predicate is delegated to `semver.intersects`,
+  never reimplemented; a hand-written selector-to-interval table is a second range parser
+  and is forbidden. I19 — the gate is proven able to go red, and that proof lives in the
+  committed suite, not in a transcript.
+- **Control class** (R49): **fail-closed verification gate**. It exits non-zero on an
+  overlap and cannot pass without deciding. Bypassable only by editing the gate or
+  removing its `queue_step` line. Adjudication authority: `semver`, the library npm
+  resolves with.
+- **Forbidden pattern**: `selector form.*interval` in the runbook — reason: the
+  hand-written table is the defect this gate replaces; reintroducing it recreates the
+  second parser.
+- **Acceptance**: green on the repo's three `overrides` blocks; red on each of an
+  inclusive-bound overlap, a whole-package key beside a ranged one, and a nested-scope
+  overlap; `queue_step "Static: override-key-disjointness"` present in
+  `scripts/pre-pr.sh`. Recorded in deviation-log D10.

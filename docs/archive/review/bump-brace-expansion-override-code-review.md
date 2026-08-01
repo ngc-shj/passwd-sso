@@ -245,3 +245,143 @@ a cost-justification with a named owner in the plan or the deviation log.
 `T12` re-run after the Round-1 edits: (a) `runs the same.*npm audit` → 0, (b)
 `Full pre-PR parity check` → 0, (c) `lower bound` → 3 matches, (d) `npm audit` in
 `pre-pr.sh` → 0. Corrected forbidden pattern `pre-pr.*(runs the same|parity)` → no match.
+
+---
+
+# Code Review round 2
+
+Date: 2026-08-01 · Reviewed: `git diff c3a35369f..HEAD` (commit `9d5aa7337`)
+
+## Changes from Previous Round
+
+Round 1's four Major findings were fixed: runbook Step 4 gained a bound-form rule, Step 3
+gained the commit-first caveat, D5's evidence block was corrected, and D7 recorded the
+verification transcript.
+
+## Findings — two Major, both convergent
+
+`convergent: functionality+security` on both. Severity floor Major per "Perspective
+Convergence as a Severity Signal"; both lanes reached them independently.
+
+### R2-F1 [Major, continuing] — "the form every key in this file already uses" is false
+
+Round 1's fix mandated `>=<floor> <<ceiling>` and asserted every key already used it.
+`package.json` ships `brace-expansion@1` and `@2` — bare-major selectors — and the
+runbook's own worked example two sentences earlier uses one. Beyond the false claim, the
+mandate was the wrong *shape* of rule: it left no procedure for shorthand selectors,
+`||` alternations, or the whole-package unbounded form, all of which npm accepts and all
+of which the disjointness check would then be applied to blind.
+
+**Assessment: ACCEPTED.** The syntax mandate was replaced with a translation procedure —
+a table mapping each selector form to its half-open interval, then a disjointness check
+over intervals rather than over selector text.
+
+### R2-F2 [Major, continuing] — Step 3's commit-first rule never reached Step 2's command block
+
+Step 3 said "commit first"; Step 2's fenced block — the part a responder types — still ran
+`npm run pre-pr` straight after `npm install`, with the commit mentioned only in prose
+*after* the block. Executed top-to-bottom it reproduces exactly the failure D5 records.
+
+**Assessment: ACCEPTED.** `git add` + `git commit` moved inside Step 2's block, ahead of
+`npm run pre-pr`, with the reason stated immediately after.
+
+### Testing lane — Round 1 fixes confirmed resolved
+
+The corrected ANSI-stripped grep was verified **bidirectionally falsifiable** against
+three real logs: `0` on the run where the steps were skipped, `4` on both runs where they
+executed. Every figure in D7's transcript re-ran and reproduced. One Minor: D7 attributed
+two distinct anomalies to one cause without demonstrating the mechanism — **ACCEPTED**,
+rewritten to record the anomaly as undiagnosed.
+
+---
+
+# Code Review round 3
+
+Date: 2026-08-01 · Reviewed: `git diff 9d5aa7337..HEAD` (commit `0bc8dd32e`)
+
+## Changes from Previous Round
+
+Round 2's two Major findings were fixed: the interval-translation table replaced the
+syntax mandate, and the commit moved into Step 2's command block.
+
+## Findings
+
+### R3-F1 [Major, continuing] — the interval table repeats the class one layer down
+
+Both lanes converged again. The Functionality lane found the `>X` row breaks the table's
+own algorithm — `pkg@<=1.1.16` and `pkg@>1.1.16` are genuinely disjoint, but the row
+displays `(1.1.16, ∞)` and the stated `floor >= previous ceiling` comparison then reports
+an overlap. The Security lane ran one npm invocation against a scratch project and found
+six accepted selector forms with no row at all: `*`, `""`, exact pins, hyphen ranges,
+`~`, and prerelease-tagged bounds — plus `$ref` values on the override's right-hand side,
+which the procedure assumes are literal versions.
+
+**Assessment: ACCEPTED — and treated as a mechanism failure, not a missing row.**
+
+Three rounds, three enumerations, three falsifications by a case outside the enumeration.
+That accretion is the signal that the class was derived from the wrong primitive. The
+primitive is not "which spellings a selector can take" — it is npm's range parser, and
+every hand-written table is a second parser standing in for it (R47). The table was
+deleted and the predicate handed to `semver.intersects`, the library npm resolves with.
+Verified against every form the review found missing, and against both counterexamples
+earlier rounds turned on — including `<=1.1.16` vs `>1.1.16`, which the table got
+backwards and the interpreter gets right.
+
+### R3-F2 / R3-F3 [Minor] — missing selector forms, and "floor" used for two different things
+
+Both dissolved with the table: there are no rows left to omit, and with the interval
+vocabulary gone, "floor" again means only the override's forced version.
+
+## Termination
+
+The class's member-set expanded three times, so per the triangulate convergence rule for
+an expanded class, "no findings" is not a sufficient stop condition — the closure artifact
+is a **mutation-verified guard wired into the authoritative gate**. At the maintainer's
+direction that guard now exists:
+
+`R42 class "override key disjointness": member-set expanded 3× — closed by
+mutation-verified gate scripts/checks/check-override-key-disjointness.mjs (red-proven:
+injecting brace-expansion@<=1.1.17 beside brace-expansion@1 makes it exit 1; also proven
+red on a whole-package key beside a ranged one, and on a nested-scope overlap), wired in
+scripts/pre-pr.sh as "Static: override-key-disjointness", with a 15-case committed
+self-test at scripts/__tests__/check-override-key-disjointness.test.mjs.`
+
+See deviation-log D9 and D10.
+
+## Resolution Status — rounds 2 and 3
+
+### R2-F1 / R3-F1 [Major] Disjointness guidance falsified three times
+- Action: guidance replaced by a gate. `semver.intersects` adjudicates; the hand-written
+  table is gone; `semver` promoted from transitive hoist to explicit devDependency so the
+  gate does not depend on which copy hoists.
+- Modified: `docs/security/dependency-cve-response.md` (Step 4),
+  `scripts/checks/check-override-key-disjointness.mjs` (new),
+  `scripts/__tests__/check-override-key-disjointness.test.mjs` (new),
+  `scripts/pre-pr.sh`, `package.json`, `package-lock.json`
+- Alternatives searched: adding the missing rows (rejected — that is "more cases" when
+  three rounds have shown the mechanism is wrong); leaving it as documentation (rejected
+  by the convergence rule for a ≥2×-expanded class, and by the maintainer).
+
+### R2-F2 [Major] Commit-first rule absent from the command block
+- Action: `git add` / `git commit` moved inside Step 2's fenced block ahead of `pre-pr`.
+- Modified: `docs/security/dependency-cve-response.md` (Step 2)
+
+### Round-2 Testing [Minor] D7 attributed an undiagnosed anomaly
+- Action: rewritten to name both candidate mechanisms and record the cause as not
+  established, since the likelier one (an ordinary pipe swallowing the exit status) is the
+  one the next reader can act on.
+- Modified: `docs/archive/review/bump-brace-expansion-override-deviation.md` (D7)
+
+## Final verification
+
+| check | result |
+|---|---|
+| `npm audit` (full scope) | exit 0 — found 0 vulnerabilities |
+| `npm audit --omit=dev --audit-level=high` | exit 0 — found 0 vulnerabilities |
+| `cli` / `extension` audits | exit 0 each |
+| `npx eslint .` | exit 0, no output |
+| `npx tsc --noEmit` | exit 0, no output |
+| `npx vitest run` | exit 0 — **1007 files, 13970 passed, 1 skipped** (was 1006 / 13955; +15 from the new gate's self-test) |
+| `npx next build` | exit 0 — compiled successfully, 243/243 static pages |
+| `licenses:check:strict` / `:ext:` / `:cli:` | PASSED (strict) |
+| `scripts/pre-pr.sh` | all checks passed, with the four web steps confirmed present by an ANSI-stripped step-label count — not by the pass count |
