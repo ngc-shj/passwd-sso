@@ -1,32 +1,70 @@
 #!/usr/bin/env node
 /**
- * CI guard: within one `overrides` scope, no two keys for the same package may
- * select overlapping version ranges.
+ * CI guard: an `overrides` block must decide which override applies to a given
+ * dependency edge without depending on JSON key order.
  *
- * npm resolves overlapping override keys by **silent first-match in JSON key
- * order** — no warning, no error, and the winner flips if someone reorders the
- * block. A CVE fix written as a second key beside a stale one therefore resolves
- * to the vulnerable version while looking correct:
+ * npm matches an override key `pkg@<range>` against the **range the depending
+ * package asks for**, not against a resolved version, and takes the first key
+ * whose range intersects that request — in JSON key order, silently. Two things
+ * therefore break order-independence, and the guard checks both:
  *
- *   {"brace-expansion@1": "1.1.16", "brace-expansion@>=1.0.0 <1.1.17": "^1.1.17"}
- *     -> resolves 1.1.16, the vulnerable version. Exit 0. No diagnostic.
+ *   1. Two keys for the same package whose ranges intersect. Ambiguous for any
+ *      edge that reaches them.
+ *   2. Two keys that are disjoint from each other, but which a single edge's
+ *      requested range straddles. Demonstrated (npm 11.17.0): with
+ *      `{"brace-expansion@1": "1.1.17", "brace-expansion@2": "2.1.3"}` — disjoint
+ *      keys — a parent asking for `>=1 <3` resolves 1.1.17 in that key order and
+ *      2.1.3 reversed. Checking the keys against each other alone misses this,
+ *      which is what an earlier revision of this guard did.
  *
- * This guard exists because three successive review rounds falsified a
- * hand-written "selector form -> version interval" table in
- * docs/security/dependency-cve-response.md: each round added the form the
- * previous one missed (inclusive upper bounds, bare-major selectors, then `*`,
- * hyphen ranges, `~`, exact pins, prerelease bounds). A table is a second range
- * parser standing in for npm's, and it disagrees on whichever spelling nobody
- * enumerated. So the predicate is delegated to `semver` — the library npm
- * resolves with — rather than reimplemented.
+ * A CVE fix written beside a stale key can therefore resolve to the vulnerable
+ * version while looking correct, with exit 0 and no diagnostic from npm.
  *
- * Reads package.json files only. No network, no @prisma/client, no ts-morph —
- * safe in the generate-free static-checks job.
+ * The predicate is delegated to `semver` — the library npm resolves with —
+ * rather than reimplemented. Three review rounds of
+ * docs/security/dependency-cve-response.md each shipped a hand-written
+ * "selector form -> version interval" table and each was falsified by a form the
+ * previous round had not enumerated. A table is a second range parser standing in
+ * for npm's; do not reintroduce one.
+ *
+ * Reads package.json / package-lock.json only. No network, no @prisma/client, no
+ * ts-morph — safe in the generate-free static-checks job.
  */
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import semver from "semver";
 
-const DEFAULT_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
+/** Used only when `git ls-files` is unavailable (e.g. a source tarball). */
+const FALLBACK_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
+
+const DEPENDENCY_FIELDS = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
+
+/**
+ * Every tracked package.json, so a workspace added later is covered without
+ * anyone remembering to extend a list here. `git ls-files` excludes
+ * node_modules by construction. Falls back to the known set outside a git
+ * checkout; returning an empty set would make the guard vacuously green, so
+ * that case falls back rather than passing.
+ */
+export function discoverManifests() {
+  try {
+    const tracked = execFileSync("git", ["ls-files", "-z", "package.json", "*/package.json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split("\0")
+      .filter(Boolean);
+    if (tracked.length > 0) return tracked;
+  } catch {
+    // not a git checkout, or git is absent
+  }
+  return FALLBACK_MANIFESTS;
+}
 
 /**
  * Split an overrides key into package name and selector.
@@ -41,34 +79,88 @@ export function splitOverrideKey(key) {
 }
 
 /**
- * Every intersecting key pair within a single overrides object.
+ * Group one overrides object's keys by package name.
+ * Nested overrides (`{"parent": {"child": "1.2.3"}}`) are a separate scope — the
+ * same package under two different parents cannot collide — so each object is
+ * walked on its own and reported under its own `scopePath`.
  *
- * Nested overrides (`{"parent": {"child": "1.2.3"}}`) are a separate scope —
- * the same package under two different parents cannot collide — so each object
- * is walked on its own. `scopePath` names the scope in the violation message.
+ * A selector semver cannot parse is NOT skipped. npm errors on such a key only
+ * when it actually evaluates it: `{"pkg@latest": "x"}` fails the install, but
+ * `{"pkg": "y", "pkg@latest": "x"}` exits 0 with the bad key silently ignored
+ * (verified, npm 11.17.0). Silently skipping it here would inherit that
+ * order-dependence, so it is reported.
  */
-export function findOverlappingKeys(overrides, scopePath = "overrides") {
-  const violations = [];
+export function collectScopes(overrides, scopePath = "overrides", into = []) {
   const byPackage = new Map();
+  const unparseable = [];
 
   for (const [key, value] of Object.entries(overrides ?? {})) {
     // "." addresses the parent package itself, not a dependency of it.
     if (key === ".") continue;
     if (value !== null && typeof value === "object") {
-      violations.push(...findOverlappingKeys(value, `${scopePath} > ${key}`));
+      collectScopes(value, `${scopePath} > ${key}`, into);
     }
     const { name, range } = splitOverrideKey(key);
-    if (!semver.validRange(range)) continue; // e.g. `pkg@latest` — npm rejects it loudly
+    if (!semver.validRange(range)) {
+      unparseable.push({ key, range });
+      continue;
+    }
     if (!byPackage.has(name)) byPackage.set(name, []);
     byPackage.get(name).push({ key, range });
   }
 
-  for (const [name, entries] of byPackage) {
-    for (let i = 0; i < entries.length; i++) {
-      for (let j = i + 1; j < entries.length; j++) {
-        if (semver.intersects(entries[i].range, entries[j].range)) {
+  into.push({ scopePath, byPackage, unparseable });
+  return into;
+}
+
+/** Keys for one package whose ranges intersect each other (hazard 1). */
+export function findOverlappingKeys(overrides, scopePath = "overrides") {
+  const violations = [];
+  for (const scope of collectScopes(overrides, scopePath)) {
+    for (const { key, range } of scope.unparseable) {
+      violations.push(
+        `${scope.scopePath}: '${key}' has a selector semver cannot parse ('${range}') — npm ignores such a key silently when an earlier key already matched, so its effect depends on key order`,
+      );
+    }
+    for (const [name, entries] of scope.byPackage) {
+      for (let i = 0; i < entries.length; i++) {
+        for (let j = i + 1; j < entries.length; j++) {
+          if (semver.intersects(entries[i].range, entries[j].range)) {
+            violations.push(
+              `${scope.scopePath}: '${entries[i].key}' and '${entries[j].key}' both select versions of ${name} — npm picks by key order, silently`,
+            );
+          }
+        }
+      }
+    }
+  }
+  return violations;
+}
+
+/**
+ * Dependency edges whose requested range reaches more than one override key
+ * (hazard 2). `lockfilePackages` is a lockfile's `packages` map; each entry's
+ * dependency fields hold the range that package asks for.
+ *
+ * Only the top-level overrides scope is considered: npm applies a nested scope
+ * to edges under its parent, and the lockfile does not record which override
+ * scope produced a given edge, so pairing them would be guesswork.
+ */
+export function findAmbiguousEdges(overrides, lockfilePackages, label = "package-lock.json") {
+  const [topScope] = collectScopes(overrides);
+  const violations = [];
+
+  for (const [path, meta] of Object.entries(lockfilePackages ?? {})) {
+    for (const field of DEPENDENCY_FIELDS) {
+      for (const [dep, requested] of Object.entries(meta?.[field] ?? {})) {
+        const keys = topScope.byPackage.get(dep);
+        if (!keys || keys.length < 2 || !semver.validRange(requested)) continue;
+        const reached = keys.filter((k) => semver.intersects(k.range, requested));
+        if (reached.length > 1) {
           violations.push(
-            `${scopePath}: '${entries[i].key}' and '${entries[j].key}' both select versions of ${name} — npm picks by key order, silently`,
+            `${label}: '${path || "<root>"}' asks for ${dep}@'${requested}', which reaches ${reached
+              .map((k) => `'${k.key}'`)
+              .join(" and ")} — the keys do not overlap each other, but this edge straddles them, so npm picks by key order`,
           );
         }
       }
@@ -77,28 +169,50 @@ export function findOverlappingKeys(overrides, scopePath = "overrides") {
   return violations;
 }
 
-function main(manifests = DEFAULT_MANIFESTS) {
+function lockfileFor(manifestPath) {
+  return manifestPath.replace(/package\.json$/, "package-lock.json");
+}
+
+function main(manifests = discoverManifests()) {
   const violations = [];
-  for (const path of manifests) {
+
+  for (const manifestPath of manifests) {
     let pkg;
     try {
-      pkg = JSON.parse(readFileSync(path, "utf8"));
+      pkg = JSON.parse(readFileSync(manifestPath, "utf8"));
     } catch (err) {
       if (err.code === "ENOENT") continue;
       throw err;
     }
-    violations.push(...findOverlappingKeys(pkg.overrides, `${path} overrides`));
+    if (!pkg.overrides) continue;
+
+    violations.push(...findOverlappingKeys(pkg.overrides, `${manifestPath} overrides`));
+
+    const lockPath = lockfileFor(manifestPath);
+    let lock;
+    try {
+      lock = JSON.parse(readFileSync(lockPath, "utf8"));
+    } catch (err) {
+      if (err.code !== "ENOENT") throw err;
+      // An overrides block with no lockfile cannot be checked for hazard 2.
+      // Report rather than pass: a green here would claim a guarantee not verified.
+      violations.push(
+        `${manifestPath} declares overrides but ${lockPath} is missing — cannot verify that no dependency edge straddles two keys`,
+      );
+      continue;
+    }
+    violations.push(...findAmbiguousEdges(pkg.overrides, lock.packages, lockPath));
   }
 
   if (violations.length > 0) {
     console.error("override key disjointness guard failed:");
     for (const v of violations) console.error(`  - ${v}`);
     console.error(
-      "\nSee docs/security/dependency-cve-response.md Step 4 — merge the overlapping keys, or narrow one so the ranges do not intersect.",
+      "\nSee docs/security/dependency-cve-response.md Step 4 — merge the overlapping keys, or narrow one so no dependency range reaches both.",
     );
     process.exit(1);
   }
-  console.log("override key disjointness guard passed.");
+  console.log(`override key disjointness guard passed (${manifests.length} manifest(s)).`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -635,12 +635,23 @@ optional follow-up. Added at the maintainer's direction.
 
 - **Change**: `scripts/checks/check-override-key-disjointness.mjs`, wired into
   `scripts/pre-pr.sh`; `semver` promoted to an explicit devDependency; 15-case self-test.
-- **Invariants**: I17 — within one `overrides` scope, no two keys for the same package
-  select intersecting ranges, across the root, `cli/` and `extension/` manifests and
-  inside nested parent scopes. I18 — the predicate is delegated to `semver.intersects`,
-  never reimplemented; a hand-written selector-to-interval table is a second range parser
-  and is forbidden. I19 — the gate is proven able to go red, and that proof lives in the
-  committed suite, not in a transcript.
+- **Invariants**:
+  - I17 — **no dependency edge reaches more than one override key for its package.**
+    Stated this way after an external security review falsified the first version
+    ("no two keys select intersecting ranges"). npm matches a key against the range the
+    depending package *asks for*, so `@1` and `@2` — disjoint — are still ambiguous for a
+    parent requesting `>=1 <3`, which resolves 1.1.17 or 2.1.3 purely by key order.
+    Key-vs-key disjointness is a necessary condition, not the invariant.
+  - I18 — the predicate is delegated to `semver`, never reimplemented; a hand-written
+    selector-to-interval table is a second range parser and is forbidden.
+  - I19 — the gate is proven able to go red, and that proof lives in the committed suite,
+    not in a transcript.
+  - I20 — the gate **fails closed** on inputs it cannot decide: a selector `semver` cannot
+    parse, and an `overrides` block whose lockfile is absent. Neither may report green,
+    because npm itself only rejects an unparseable selector when it reaches that key —
+    behind an earlier match it is silently ignored.
+  - I21 — the manifest set is **discovered** (`git ls-files`), not enumerated in the
+    source, so a workspace added later is covered without anyone remembering this file.
 - **Control class** (R49): **fail-closed verification gate**. It exits non-zero on an
   overlap and cannot pass without deciding. Bypassable only by editing the gate or
   removing its `queue_step` line. Adjudication authority: `semver`, the library npm

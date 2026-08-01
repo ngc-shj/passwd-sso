@@ -1,15 +1,19 @@
 /**
  * RT7 self-test for check-override-key-disjointness.mjs.
  *
- * The guard exists because npm resolves overlapping `overrides` keys by silent
- * first-match in JSON key order, so a CVE fix added beside a stale key can
- * resolve to the vulnerable version with exit 0 and no diagnostic. These cases
- * are the shapes that reached a review round before being caught by hand —
- * each one must make the guard go red.
+ * npm matches an override key against the range a depending package *asks for*
+ * and takes the first key that intersects it, in JSON key order, silently. Two
+ * shapes break order-independence and both must make the guard go red:
+ * overlapping keys, and disjoint keys straddled by one dependency edge.
+ *
+ * Every case here is a shape that reached a review round before being caught by
+ * hand.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import {
+  discoverManifests,
+  findAmbiguousEdges,
   findOverlappingKeys,
   splitOverrideKey,
 } from "../checks/check-override-key-disjointness.mjs";
@@ -97,9 +101,13 @@ describe("findOverlappingKeys", () => {
     ).toEqual([]);
   });
 
-  it("skips a selector npm itself rejects rather than throwing", () => {
-    // `latest` is not a valid range; npm fails loudly on it, so the guard stays quiet.
-    expect(() => findOverlappingKeys({ "pkg@latest": "1.0.0", "pkg@1": "^1.2.3" })).not.toThrow();
+  it("reports a selector semver cannot parse instead of skipping it", () => {
+    // npm errors on `pkg@latest` only when it evaluates the key: `{"pkg@latest": x}`
+    // fails the install, but `{"pkg": y, "pkg@latest": x}` exits 0 and ignores it.
+    // Skipping it here would inherit that order-dependence.
+    const violations = findOverlappingKeys({ "pkg": "1.0.0", "pkg@latest": "1.0.0" });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("cannot parse");
   });
 
   it("ignores the '.' key, which addresses the parent package rather than a dependency", () => {
@@ -107,12 +115,93 @@ describe("findOverlappingKeys", () => {
   });
 });
 
+describe("findAmbiguousEdges", () => {
+  // The hazard an earlier revision of this guard missed entirely: the keys are
+  // disjoint from each other, so the pairwise check passes, but one dependency
+  // edge asks for a range that reaches both. Verified against npm 11.17.0:
+  // a parent requesting `>=1 <3` resolves 1.1.17 with @1 first, 2.1.3 reversed.
+  const disjointKeys = { "brace-expansion@1": "1.1.17", "brace-expansion@2": "2.1.3" };
+
+  it("flags an edge whose requested range straddles two non-overlapping keys", () => {
+    const violations = findAmbiguousEdges(disjointKeys, {
+      "node_modules/wide-parent": { dependencies: { "brace-expansion": ">=1 <3" } },
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain("wide-parent");
+    expect(violations[0]).toContain("straddles");
+  });
+
+  it("passes when every edge reaches exactly one key", () => {
+    expect(
+      findAmbiguousEdges(disjointKeys, {
+        "node_modules/minimatch": { dependencies: { "brace-expansion": "^1.1.7" } },
+        "node_modules/other/node_modules/minimatch": {
+          dependencies: { "brace-expansion": "^2.0.2" },
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it("passes when an edge reaches no key at all", () => {
+    expect(
+      findAmbiguousEdges(disjointKeys, {
+        "node_modules/minimatch": { dependencies: { "brace-expansion": "^5.0.8" } },
+      }),
+    ).toEqual([]);
+  });
+
+  it("checks every dependency field, not just `dependencies`", () => {
+    expect(
+      findAmbiguousEdges(disjointKeys, {
+        "node_modules/a": { devDependencies: { "brace-expansion": ">=1 <3" } },
+        "node_modules/b": { peerDependencies: { "brace-expansion": ">=1 <3" } },
+        "node_modules/c": { optionalDependencies: { "brace-expansion": ">=1 <3" } },
+      }),
+    ).toHaveLength(3);
+  });
+
+  it("stays quiet when only one key exists for the package, since order cannot matter", () => {
+    expect(
+      findAmbiguousEdges({ "brace-expansion@1": "1.1.17" }, {
+        "node_modules/wide-parent": { dependencies: { "brace-expansion": ">=1 <3" } },
+      }),
+    ).toEqual([]);
+  });
+});
+
+describe("discoverManifests", () => {
+  it("finds every tracked package.json rather than a hardcoded list", () => {
+    const found = discoverManifests();
+    expect(found).toContain("package.json");
+    expect(found).toContain("cli/package.json");
+    expect(found).toContain("extension/package.json");
+    // node_modules manifests must not leak in — git ls-files excludes them.
+    expect(found.some((p) => p.includes("node_modules"))).toBe(false);
+  });
+});
+
 describe("the repository's own overrides blocks", () => {
-  it.each(["package.json", "cli/package.json", "extension/package.json"])(
-    "%s has no overlapping override keys",
-    (path) => {
-      const { overrides } = JSON.parse(readFileSync(path, "utf8"));
-      expect(findOverlappingKeys(overrides, path)).toEqual([]);
-    },
-  );
+  const manifests = discoverManifests().filter((p) => {
+    try {
+      return Boolean(JSON.parse(readFileSync(p, "utf8")).overrides);
+    } catch {
+      return false;
+    }
+  });
+
+  it("has at least one manifest with overrides, so the cases below are not vacuous", () => {
+    expect(manifests.length).toBeGreaterThan(0);
+  });
+
+  it.each(manifests)("%s has no overlapping override keys", (path) => {
+    const { overrides } = JSON.parse(readFileSync(path, "utf8"));
+    expect(findOverlappingKeys(overrides, path)).toEqual([]);
+  });
+
+  it.each(manifests)("%s has no dependency edge straddling two keys", (path) => {
+    const { overrides } = JSON.parse(readFileSync(path, "utf8"));
+    const lockPath = path.replace(/package\.json$/, "package-lock.json");
+    const { packages } = JSON.parse(readFileSync(lockPath, "utf8"));
+    expect(findAmbiguousEdges(overrides, packages, lockPath)).toEqual([]);
+  });
 });

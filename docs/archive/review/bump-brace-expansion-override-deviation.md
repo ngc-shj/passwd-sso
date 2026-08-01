@@ -333,3 +333,79 @@ The general lesson, since it cost two rounds: a forbidden pattern is a verifier,
 verifier that fires on the fix is not a weak check but an actively harmful one — it
 teaches the reader that the check's output is noise. Before declaring one, run it against
 the corrected file, not only against the defective one.
+
+## D12 — External security review: the gate's guarantee was narrower than its claim
+
+A security review of `main...HEAD` raised three findings against the gate added in D10.
+Each was re-derived here before being accepted or rejected.
+
+### 1. Disjoint keys are still order-dependent — **CONFIRMED, and it broke the gate's premise**
+
+npm matches an override key against **the range the depending package asks for**, not
+against a resolved version, and takes the first key whose range intersects that request.
+So two keys can be disjoint from each other and still be reached by a single edge.
+Reproduced against npm 11.17.0 with a packed parent declaring `brace-expansion: ">=1 <3"`:
+
+| overrides key order | resolved |
+|---|---|
+| baseline, no overrides | 2.1.4 |
+| `brace-expansion@1` then `@2` | **1.1.17** |
+| `brace-expansion@2` then `@1` | **2.1.3** |
+
+The keys share no version. The gate said "disjoint". npm still picked by key order.
+
+This is the same defect I spent three review rounds on, one level up: the verifier's input
+space was derived from the *keys* while ignoring its other input, the *dependency ranges*
+— `project_verifier_input_member_set` in my own notes, unheeded again.
+
+**No live exposure.** Every edge in this repo reaches exactly one key, re-derived from the
+lockfile: `^1.1.7`→`@1`, `^2.0.2`→`@2`, `^5.0.5`→`@>=3.0.0 <5.0.8`, `^5.0.8`→none,
+`^4.1.0`→`js-yaml@>=4.0.0 <4.3.0`, `^4.3.0`→none. The reviewer's own check agrees.
+
+**Fixed**: `findAmbiguousEdges` walks every dependency edge in the matching lockfile
+(`dependencies`, `devDependencies`, `optionalDependencies`, `peerDependencies`) and fails
+when one edge's requested range reaches ≥2 keys for that package.
+
+### 2. `pkg@latest` is accepted by npm — **NOT CONFIRMED as stated; the underlying point holds**
+
+The review states npm 11.17.0 builds `pkg@latest` as a valid tag selector. It does not —
+it fails the install with `Invalid comparator: latest`, exit 1. Measured:
+
+| overrides | exit | result |
+|---|---|---|
+| `{"pkg@latest": …}` | **1** | `Invalid comparator: latest` |
+| `{"pkg@latest": …, "pkg": …}` | **1** | same |
+| `{"pkg": …, "pkg@latest": …}` | **0** | resolves 1.1.18; the bad key is never evaluated |
+
+So the selector-kind claim is wrong, but the third row vindicates the recommendation: my
+`continue` on an unparseable selector rested on "npm rejects it loudly", and npm only
+rejects it when it *reaches* that key. Behind an earlier matching key it is silently
+ignored — order-dependence again.
+
+**Fixed**: unparseable selectors are reported rather than skipped (fail-closed). An
+`overrides` block whose lockfile is missing is likewise reported rather than passed, since
+a green there would claim a guarantee that was never checked.
+
+### 3. Hardcoded manifest list — **CONFIRMED, no live impact**
+
+`git ls-files` returns exactly the three manifests that were hardcoded, so nothing is
+being missed today. The fragility is real: a fourth workspace would be silently
+unguarded.
+
+**Fixed**: manifests are discovered via `git ls-files package.json '*/package.json'`, with
+the previous list kept only as a fallback for a non-git checkout — an empty discovery
+falls back rather than passing vacuously.
+
+### Red-proof of the revised gate
+
+CLI level, exit status read with nothing between the command and `$?`:
+
+```
+clean      exit=0    disjoint keys, every edge reaching exactly one
+straddle   exit=1    disjoint keys + an edge asking >=1 <3
+nolock     exit=1    overrides declared, no lockfile to check against
+badsel     exit=1    "pkg" then "pkg@latest" — the silently-ignored case
+```
+
+Suite grew 15 → **25 cases**; the three new hazards are pinned there, not only in this
+transcript.
