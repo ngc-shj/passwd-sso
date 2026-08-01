@@ -314,3 +314,22 @@ repo's own blocks. The red-proof lives in the suite rather than only in a transc
 **Runbook de-duplicated**: Step 4 carried an inline copy of the check. Two
 implementations of one predicate drift, so the inline snippet is gone and Step 4 points
 at the gate.
+
+## D11 — Two negation-blind forbidden patterns, both caught by running them
+
+C5's forbidden pattern `npm run pre-pr.*npm audit` matched the sentence that *fixes* the
+false claim ("`npm run pre-pr` does NOT run `npm audit`"). C7's first draft,
+`selector form.*interval`, matched the sentence explaining why the interval table was
+*removed*. Both patterns fire on their own remedy, because both anchor on nouns that
+appear in the claim and in its correction, with only a negation between them.
+
+C5's was repaired by anchoring on the words that carry the false claim
+(`pre-pr.*(runs the same|parity)`). C7's is withdrawn: a grep cannot reliably separate a
+selector-to-interval table from prose about one, and I18 does not need it — the gate is
+the enforcement, and replacing a working gate with a table is a visible diff, not a silent
+one.
+
+The general lesson, since it cost two rounds: a forbidden pattern is a verifier, and a
+verifier that fires on the fix is not a weak check but an actively harmful one — it
+teaches the reader that the check's output is noise. Before declaring one, run it against
+the corrected file, not only against the defective one.

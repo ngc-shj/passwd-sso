@@ -645,9 +645,14 @@ optional follow-up. Added at the maintainer's direction.
   overlap and cannot pass without deciding. Bypassable only by editing the gate or
   removing its `queue_step` line. Adjudication authority: `semver`, the library npm
   resolves with.
-- **Forbidden pattern**: `selector form.*interval` in the runbook — reason: the
-  hand-written table is the defect this gate replaces; reintroducing it recreates the
-  second parser.
+- **Forbidden patterns**: none that a grep can express. The first draft of this contract
+  declared `selector form.*interval`, which immediately matched the runbook sentence
+  *explaining why the table was removed* — the second negation-blind forbidden pattern in
+  this PR, after C5's `npm run pre-pr.*npm audit` matched its own correction. A pattern
+  that cannot distinguish a thing from a description of its absence is worse than none: it
+  trains the reader to wave the check through. I18 is therefore enforced by the gate's
+  existence (a table would have to *replace* a working gate to do harm, which is a visible
+  diff) and by the runbook's own "Do not reintroduce one", not by a grep.
 - **Acceptance**: green on the repo's three `overrides` blocks; red on each of an
   inclusive-bound overlap, a whole-package key beside a ranged one, and a nested-scope
   overlap; `queue_step "Static: override-key-disjointness"` present in
