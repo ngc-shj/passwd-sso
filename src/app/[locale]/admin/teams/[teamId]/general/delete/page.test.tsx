@@ -43,8 +43,7 @@ vi.mock("@/i18n/navigation", () => ({
   useRouter: () => ({ push: mockPush }),
 }));
 
-import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
-setupPasskeyReauthDialogMocks();
+import "@/__tests__/helpers/passkey-reauth-mocks";
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,

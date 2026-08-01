@@ -35,8 +35,7 @@ vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
 }));
 
-import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
-setupPasskeyReauthDialogMocks();
+import "@/__tests__/helpers/passkey-reauth-mocks";
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,
@@ -47,14 +46,12 @@ vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
 }));
 
 import {
-  setupWebhookCardMocks,
   createWebhookCardTests,
   setupFetchWebhooks,
   createSampleWebhooks,
 } from "../../__tests__/webhook-card-test-factory";
 
 // Register shared UI component mocks
-setupWebhookCardMocks();
 
 import { TeamWebhookCard } from "./team-webhook-card";
 

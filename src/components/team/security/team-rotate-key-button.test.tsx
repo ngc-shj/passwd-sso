@@ -106,8 +106,7 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
-import { setupPasskeyReauthDialogMocks } from "@/__tests__/helpers/passkey-reauth-mocks";
-setupPasskeyReauthDialogMocks();
+import "@/__tests__/helpers/passkey-reauth-mocks";
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
   canUsePasskeyRecovery: mockCanUsePasskeyRecovery,

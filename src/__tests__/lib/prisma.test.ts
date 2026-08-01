@@ -1,13 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeAll,
-  afterAll,
-  beforeEach,
-  afterEach,
-} from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── Mocks ──────────────────────────────────────────────────
 
@@ -70,11 +61,6 @@ function clearSingletonCache() {
 }
 
 // ─── Tests ──────────────────────────────────────────────────
-
-// Prevent MaxListenersExceededWarning from repeated process.once() calls across tests
-const originalMaxListeners = process.getMaxListeners();
-beforeAll(() => process.setMaxListeners(30));
-afterAll(() => process.setMaxListeners(originalMaxListeners));
 
 describe("prisma pool configuration", () => {
   beforeEach(() => {

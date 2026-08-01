@@ -105,6 +105,14 @@ function createPool(): pg.Pool {
 
 // ─── Graceful shutdown ───────────────────────────────────────
 
+// Detaches the hooks of whichever pool this module registered last. A new pool
+// supersedes the old one, so keeping the old one's hooks attached only adds
+// listeners for a pool nothing will use again — and because `process.once`
+// self-removes solely when the signal fires, they otherwise accumulate for the
+// life of the process. Production builds one pool, so this is about repeated
+// factory calls (tests, hot reload) rather than a live-traffic leak.
+let detachPreviousShutdown: (() => void) | null = null;
+
 function registerShutdown(pool: pg.Pool): void {
   let closing = false;
   const shutdown = async () => {
@@ -119,8 +127,13 @@ function registerShutdown(pool: pg.Pool): void {
       log.error({ err }, "pool.shutdown.error");
     }
   };
+  detachPreviousShutdown?.();
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
+  detachPreviousShutdown = () => {
+    process.off("SIGTERM", shutdown);
+    process.off("SIGINT", shutdown);
+  };
 }
 
 // ─── PrismaClient factory ────────────────────────────────────
