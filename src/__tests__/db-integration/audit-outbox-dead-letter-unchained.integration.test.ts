@@ -282,6 +282,65 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
 
     expect(result.walkedThrough).toBe(2);
     expect(result.ok).toBe(true);
+    // The worker walks the whole chain, so it is the caller that can compare
+    // the head against the anchor — the check a partial range cannot make.
+    expect(result.anchorChecked).toBe(true);
+  });
+
+  // The periodic worker is the monitoring path: if it answers "healthy" after
+  // rows are deleted, an operator learns nothing from it precisely when there
+  // is something to learn. These pin the two shapes that used to pass.
+
+  it("reports RANGE_INCOMPLETE, not healthy, when every chained row is deleted", async () => {
+    const row = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, row, makePayload());
+    expect(await getAnchorChainSeq()).toBe(1);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_logs WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL`,
+        tenantId,
+      );
+    });
+
+    const result = await ctx.worker.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return verifyTenantChain(tenantId, {
+        prisma: tx as unknown as PrismaClient,
+        logger: { error: () => {}, info: () => {} },
+      });
+    });
+
+    // Walking zero rows finds nothing wrong; only comparing coverage against
+    // the anchor's chain_seq catches it.
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("RANGE_INCOMPLETE");
+    expect(result.totalVerified).toBe(0);
+  });
+
+  it("reports ANCHOR_MISSING when the anchor is deleted but rows survive", async () => {
+    const row = await insertAndClaim(makePayload());
+    await deliverRowWithChain(ctx.su.prisma, row, makePayload());
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `DELETE FROM audit_chain_anchors WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
+    });
+
+    const result = await ctx.worker.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return verifyTenantChain(tenantId, {
+        prisma: tx as unknown as PrismaClient,
+        logger: { error: () => {}, info: () => {} },
+      });
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("ANCHOR_MISSING");
   });
 });
 

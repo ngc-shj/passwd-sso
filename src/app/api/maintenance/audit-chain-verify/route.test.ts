@@ -277,12 +277,15 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
    * per-row timestamp, so a non-contiguous list produces a real gap and a
    * decreasing list produces a real timestamp violation.
    */
+  /** Head hash of the most recent buildChain() run, for the anchor fixture. */
+  let lastChainHead: Buffer = GENESIS;
+
   function buildChain(
     seqs: number[],
     opts: { createdAtFor?: (seq: number, index: number) => Date } = {},
   ): ChainFixtureRow[] {
     let prevHash: Buffer = GENESIS;
-    return seqs.map((seq, index) => {
+    const built = seqs.map((seq, index) => {
       const createdAt =
         opts.createdAtFor?.(seq, index) ?? new Date(BASE_TIME.getTime() + index * 1000);
       const id = `00000000-0000-4000-8000-${String(seq).padStart(12, "0")}`;
@@ -310,6 +313,8 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
       prevHash = eventHash;
       return row;
     });
+    lastChainHead = prevHash;
+    return built;
   }
 
   /** Corrupt a stored hash so it cannot match what the walk recomputes. */
@@ -319,10 +324,19 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
     return corrupted;
   }
 
-  /** Wire the anchor lookup then the chain-row query (no from/to params). */
-  function mockWalk(anchorSeq: number, rows: ChainFixtureRow[]) {
+  /**
+   * Wire the anchor lookup then the chain-row query (no from/to params).
+   * The anchor carries the head hash of the rows just built, so the route's
+   * head comparison runs for real — passing an anchor without prev_hash would
+   * silently skip it and make every assertion below weaker than it looks.
+   */
+  function mockWalk(
+    anchorSeq: number,
+    rows: ChainFixtureRow[],
+    anchorPrevHash: Uint8Array = lastChainHead,
+  ) {
     mockQueryRawUnsafe
-      .mockResolvedValueOnce([{ chain_seq: String(anchorSeq) }])
+      .mockResolvedValueOnce([{ chain_seq: String(anchorSeq), prev_hash: anchorPrevHash }])
       .mockResolvedValueOnce(rows);
   }
 
@@ -402,6 +416,39 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
     expect(body.firstTamperedSeq).toBeNull();
   });
 
+  it("rejects a chain rewritten end-to-end that no longer ends on the anchor head", async () => {
+    // Every row re-hashed from genesis: per-row checks, gaps, and back-pointers
+    // all agree, because the forged chain is consistent with itself. The
+    // anchor's recorded head is the one value the rewrite could not move by
+    // editing audit_logs, so it is the only thing that says no.
+    const forged = buildChain([1, 2, 3]);
+    mockWalk(3, forged, Buffer.alloc(32, 0xcc));
+
+    const { body } = await walk();
+
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("ANCHOR_HASH_MISMATCH");
+    expect(body.firstTamperedSeq).toBeNull();
+    expect(body.firstGapAfterSeq).toBeNull();
+    expect(body.firstBrokenLinkSeq).toBeNull();
+    expect(body.anchorChecked).toBe(true);
+  });
+
+  it("does not compare the anchor head when the range is narrowed", async () => {
+    // A from/to walk ends somewhere other than the chain head by design, so
+    // comparing there would fail every partial verification.
+    const full = buildChain([1, 2, 3]);
+    mockQueryRawUnsafe
+      .mockResolvedValueOnce([{ chain_seq: "3", prev_hash: Buffer.alloc(32, 0xcc) }])
+      .mockResolvedValueOnce([{ chain_seq: "2" }]) // toRows → toSeq = 2
+      .mockResolvedValueOnce(full.slice(0, 2));
+
+    const { body } = await walk({ to: "2026-06-01T00:00:00Z" });
+
+    expect(body.ok).toBe(true);
+    expect(body.anchorChecked).toBe(false);
+  });
+
   // ─── Fail-closed coverage (SEC-1) ─────────────────────────
 
   it("fails closed with RANGE_INCOMPLETE when rows above the walk are missing", async () => {
@@ -467,7 +514,7 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
     // success leg, which re-seeds prevHash instead of starting from genesis.
     const full = buildChain([1, 2, 3]);
     mockQueryRawUnsafe
-      .mockResolvedValueOnce([{ chain_seq: "3" }]) // anchor
+      .mockResolvedValueOnce([{ chain_seq: "3", prev_hash: lastChainHead }]) // anchor
       .mockResolvedValueOnce([{ chain_seq: "2" }]) // fromRows → fromSeq = 2
       .mockResolvedValueOnce([{ event_hash: full[0].event_hash }]) // seed = seq 1's hash
       .mockResolvedValueOnce(full.slice(1)); // rows 2..3
@@ -482,7 +529,7 @@ describe("GET /api/maintenance/audit-chain-verify", () => {
   it("narrows the upper bound to the `to` parameter", async () => {
     const full = buildChain([1, 2, 3]);
     mockQueryRawUnsafe
-      .mockResolvedValueOnce([{ chain_seq: "3" }]) // anchor
+      .mockResolvedValueOnce([{ chain_seq: "3", prev_hash: lastChainHead }]) // anchor
       .mockResolvedValueOnce([{ chain_seq: "2" }]) // toRows → toSeq = min(3, 2) = 2
       .mockResolvedValueOnce(full.slice(0, 2)); // rows 1..2
 

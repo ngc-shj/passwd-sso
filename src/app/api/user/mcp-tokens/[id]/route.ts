@@ -62,13 +62,19 @@ async function handleDELETE(
 
       const familyIds = [...new Set(refreshTokens.map((rt) => rt.familyId))];
       if (familyIds.length > 0) {
+        // Owner-scoped for the same reason the access-token sweep below is:
+        // familyId is server-minted and cannot span principals today, so the
+        // predicate is what keeps an issuance bug or a corrupted family from
+        // reaching another tenant's rows. Every write in this transaction runs
+        // with RLS off, so the predicate is the only boundary left.
+        const familyScope = { familyId: { in: familyIds }, userId, tenantId };
         await tx.mcpRefreshToken.updateMany({
-          where: { familyId: { in: familyIds }, revokedAt: null },
+          where: { ...familyScope, revokedAt: null },
           data: { revokedAt: now },
         });
 
         const relatedRefresh = await tx.mcpRefreshToken.findMany({
-          where: { familyId: { in: familyIds } },
+          where: familyScope,
           select: { accessTokenId: true },
         });
         const relatedIds = [...new Set(relatedRefresh.map((r) => r.accessTokenId))];
@@ -87,12 +93,12 @@ async function handleDELETE(
       }
 
       const sessions = await tx.delegationSession.findMany({
-        where: { mcpTokenId: { in: revokedTokenIds }, userId, revokedAt: null },
+        where: { mcpTokenId: { in: revokedTokenIds }, userId, tenantId, revokedAt: null },
         select: { id: true },
       });
       if (sessions.length > 0) {
         await tx.delegationSession.updateMany({
-          where: { mcpTokenId: { in: revokedTokenIds }, userId, revokedAt: null },
+          where: { mcpTokenId: { in: revokedTokenIds }, userId, tenantId, revokedAt: null },
           data: { revokedAt: now },
         });
       }

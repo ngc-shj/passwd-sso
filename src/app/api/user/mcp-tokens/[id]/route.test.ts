@@ -226,7 +226,12 @@ describe("DELETE /api/user/mcp-tokens/[id]", () => {
     // Families deduplicated
     expect(mockMcpRefreshTokenUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { familyId: { in: ["fam-1", "fam-2"] }, revokedAt: null },
+        where: {
+          familyId: { in: ["fam-1", "fam-2"] },
+          userId: USER_ID,
+          tenantId: TENANT_ID,
+          revokedAt: null,
+        },
       }),
     );
     // The sibling sweep is the one write whose reach is decided by data rather
@@ -258,6 +263,7 @@ describe("DELETE /api/user/mcp-tokens/[id]", () => {
     const expectedScope = {
       mcpTokenId: { in: [TOKEN_ID, "token-old"] },
       userId: USER_ID,
+      tenantId: TENANT_ID,
       revokedAt: null,
     };
     expect(mockDelegationSessionFindMany).toHaveBeenCalledWith(

@@ -23,10 +23,11 @@ import { Pool } from "pg";
 import { config } from "dotenv";
 import { resolve } from "node:path";
 import {
-  buildChainInput,
-  computeCanonicalBytes,
-  computeEventHash,
-} from "@/lib/audit/audit-chain";
+  verifyChainRows,
+  GENESIS_PREV_HASH,
+  CHAIN_VERIFY_REASON,
+  type ChainVerifyReason,
+} from "@/lib/audit/audit-chain-verify";
 import { MS_PER_HOUR, MS_PER_DAY } from "@/lib/constants/time";
 
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -45,9 +46,14 @@ const MAX_ROWS_PER_TENANT = Number(
 export interface VerifyResult {
   tenantId: string;
   ok: boolean;
+  reason?: ChainVerifyReason;
   totalVerified: number;
   walkedThrough: number;
   firstTamperedSeq: number | null;
+  firstGapAfterSeq: number | null;
+  firstTimestampViolationSeq: number | null;
+  firstBrokenLinkSeq: number | null;
+  anchorChecked: boolean;
 }
 
 interface ChainRowRaw {
@@ -60,6 +66,11 @@ interface ChainRowRaw {
   metadata: unknown;
 }
 
+interface AnchorRow {
+  chain_seq: string;
+  prev_hash: Uint8Array;
+}
+
 export interface VerifyDeps {
   prisma: PrismaClient;
   logger: { error: (...args: unknown[]) => void; info: (...args: unknown[]) => void };
@@ -69,6 +80,40 @@ export async function verifyTenantChain(
   tenantId: string,
   deps: VerifyDeps,
 ): Promise<VerifyResult> {
+  // The anchor is read first and for the same reason the endpoint reads it:
+  // without it, a tenant whose rows were all deleted walks zero rows, finds
+  // nothing wrong, and reports healthy — which is precisely the state periodic
+  // monitoring exists to notice.
+  const anchors = await deps.prisma.$queryRawUnsafe<AnchorRow[]>(
+    `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
+    tenantId,
+  );
+
+  if (anchors.length === 0) {
+    const counted = await deps.prisma.$queryRawUnsafe<{ count: bigint }[]>(
+      `SELECT COUNT(*) AS count
+       FROM audit_logs
+       WHERE tenant_id = $1
+         AND chain_seq IS NOT NULL`,
+      tenantId,
+    );
+    const chainedRows = Number(counted[0]?.count ?? 0);
+    return {
+      tenantId,
+      ok: chainedRows === 0,
+      reason: chainedRows === 0 ? undefined : CHAIN_VERIFY_REASON.ANCHOR_MISSING,
+      totalVerified: 0,
+      walkedThrough: 0,
+      firstTamperedSeq: null,
+      firstGapAfterSeq: null,
+      firstTimestampViolationSeq: null,
+      firstBrokenLinkSeq: null,
+      anchorChecked: false,
+    };
+  }
+
+  const anchorSeq = Number(anchors[0].chain_seq);
+
   const rows = await deps.prisma.$queryRawUnsafe<ChainRowRaw[]>(
     `SELECT id, tenant_id, created_at,
             chain_seq, event_hash, chain_prev_hash, metadata
@@ -81,42 +126,29 @@ export async function verifyTenantChain(
     MAX_ROWS_PER_TENANT,
   );
 
-  let prevHash: Buffer = Buffer.from([0x00]);
-  let totalVerified = 0;
-  let walkedThrough = 0;
-  let firstTamperedSeq: number | null = null;
-
-  for (const row of rows) {
-    const payload =
-      row.metadata != null && typeof row.metadata === "object"
-        ? (row.metadata as Record<string, unknown>)
-        : {};
-    const chainInput = buildChainInput({
-      id: row.id,
-      createdAt: row.created_at,
-      chainSeq: row.chain_seq,
-      prevHash,
-      payload,
-    });
-    const computed = computeEventHash(
-      prevHash,
-      computeCanonicalBytes(chainInput),
-    );
-    if (!computed.equals(Buffer.from(row.event_hash))) {
-      firstTamperedSeq = Number(row.chain_seq);
-      break;
-    }
-    prevHash = Buffer.from(row.event_hash);
-    totalVerified++;
-    walkedThrough++;
-  }
+  const outcome = verifyChainRows({
+    rows,
+    seedPrevHash: GENESIS_PREV_HASH,
+    fromSeq: 1,
+    toSeq: anchorSeq,
+    anchorPrevHash: anchors[0].prev_hash,
+    // The worker always walks the whole chain, so the head hash is always
+    // comparable — this is the only caller that can catch a full rewrite.
+    anchorComparable: true,
+    rowCap: MAX_ROWS_PER_TENANT,
+  });
 
   return {
     tenantId,
-    ok: firstTamperedSeq === null,
-    totalVerified,
-    walkedThrough,
-    firstTamperedSeq,
+    ok: outcome.ok,
+    reason: outcome.reason,
+    totalVerified: outcome.totalVerified,
+    walkedThrough: outcome.walkedThrough,
+    firstTamperedSeq: outcome.firstTamperedSeq,
+    firstGapAfterSeq: outcome.firstGapAfterSeq,
+    firstTimestampViolationSeq: outcome.firstTimestampViolationSeq,
+    firstBrokenLinkSeq: outcome.firstBrokenLinkSeq,
+    anchorChecked: outcome.anchorChecked,
   };
 }
 
@@ -149,11 +181,19 @@ async function runTick(
           (state.lastAlertAt !== null &&
             now - state.lastAlertAt >= HYSTERESIS_REALERT_MS);
         if (shouldAlert) {
+          // reason carries the discriminator: with only firstTamperedSeq an
+          // ANCHOR_MISSING or RANGE_INCOMPLETE failure logs a null seq and
+          // reads like noise, which is the opposite of what a chain alert is
+          // for. anchorChecked says whether the head-hash comparison ran.
           logger.error(
-            "audit-chain-verify-worker: CHAIN_VERIFY_FAILED tenant=%s firstTamperedSeq=%d walkedThrough=%d",
+            "audit-chain-verify-worker: CHAIN_VERIFY_FAILED tenant=%s reason=%s firstTamperedSeq=%s firstGapAfterSeq=%s firstBrokenLinkSeq=%s walkedThrough=%d anchorChecked=%s",
             tenantId,
+            result.reason ?? "UNKNOWN",
             result.firstTamperedSeq,
+            result.firstGapAfterSeq,
+            result.firstBrokenLinkSeq,
             result.walkedThrough,
+            result.anchorChecked,
           );
           state.lastAlertAt = now;
         }
