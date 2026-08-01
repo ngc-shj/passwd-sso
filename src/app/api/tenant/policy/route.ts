@@ -636,6 +636,15 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
+  // The fields a save can lock the admin out with, named once. Both the
+  // current-state read below and the self-lockout gate further down key off
+  // this — they were spelled out separately, each omitting tailscaleTailnet,
+  // so a PATCH carrying only that field skipped the check from both ends.
+  const lockoutRelevantFieldChanged =
+    allowedCidrs !== undefined ||
+    tailscaleEnabled !== undefined ||
+    tailscaleTailnet !== undefined;
+
   // Single DB read that covers all three validation needs:
   //   1. tailscale: check existing tailscaleTailnet when tailscaleEnabled=true without a new value
   //   2. cross-field: lockout thresholds/durations, password expiry, requirePasskey set-once
@@ -660,7 +669,7 @@ async function handlePATCH(req: NextRequest) {
     vaultAutoLockMinutes !== undefined ||
     sessionIdleTimeoutMinutes !== undefined ||
     extensionTokenIdleTimeoutMinutes !== undefined ||
-    ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
+    (lockoutRelevantFieldChanged && !confirmLockout);
 
   const currentTenant = needsCurrentState
     ? await withBypassRls(prisma, async (tx) =>
@@ -800,7 +809,7 @@ async function handlePATCH(req: NextRequest) {
   if (confirmLockout !== undefined && typeof confirmLockout !== "boolean") {
     return validationError();
   }
-  if ((newAllowedCidrs !== undefined || newTailscaleEnabled !== undefined) && !confirmLockout) {
+  if (lockoutRelevantFieldChanged && !confirmLockout) {
     const hypothetical = {
       allowedCidrs: newAllowedCidrs ?? currentTenant?.allowedCidrs ?? [],
       tailscaleEnabled: newTailscaleEnabled ?? currentTenant?.tailscaleEnabled ?? false,
@@ -808,7 +817,7 @@ async function handlePATCH(req: NextRequest) {
     };
     const clientIp = extractClientIp(req);
     const hasRestrictions = hypothetical.allowedCidrs.length > 0 || hypothetical.tailscaleEnabled;
-    if (hasRestrictions && (!clientIp || !wouldIpBeAllowed(clientIp, hypothetical))) {
+    if (hasRestrictions && (!clientIp || !(await wouldIpBeAllowed(clientIp, hypothetical)))) {
       const message = clientIp
         ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
         : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";

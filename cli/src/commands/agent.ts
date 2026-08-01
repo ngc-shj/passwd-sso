@@ -33,6 +33,7 @@ import { startAgent, stopAgent, setAgentDeps } from "../lib/ssh-agent-socket.js"
 import { authorizeSign } from "../lib/ssh-sign-authorizer.js";
 import { confirmSign } from "../lib/ssh-confirm.js";
 import { decryptAgentCommand } from "./agent-decrypt.js";
+import { shellQuote } from "../lib/shell-quote.js";
 import * as output from "../lib/output.js";
 import { AGENT_CHILD_TIMEOUT_MS, VAULT_LOCK_POLL_INTERVAL_MS } from "../lib/time.js";
 import { CLI_API_PATH } from "../lib/api-paths.js";
@@ -145,6 +146,19 @@ async function loadSshKeys(): Promise<number> {
   return loadedCount;
 }
 
+/**
+ * Foreground-mode copy-paste hint lines for setting SSH_AUTH_SOCK by hand.
+ * Pure — extracted so the shell-quoted socket path is assertable without
+ * the surrounding process staying alive forever (mirrors C1's split of
+ * browserLaunchCommand from openBrowser).
+ */
+export function foregroundHintLines(socketPath: string): [string, string] {
+  return [
+    `  export SSH_AUTH_SOCK=${shellQuote(socketPath)}`,
+    `  eval $(passwd-sso agent --eval)`,
+  ];
+}
+
 export async function agentCommand(opts: AgentOptions): Promise<void> {
   if (opts.decrypt) {
     return decryptAgentCommand({ eval: opts.eval });
@@ -181,12 +195,13 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
   setAgentDeps({ authorizeSign, confirmSign });
   const socketPath = startAgent();
 
+  const [exportHint, evalHint] = foregroundHintLines(socketPath);
   output.success(`SSH agent started with ${loadedCount} key(s).`);
   output.info(`Socket: ${socketPath}`);
   output.info("Set SSH_AUTH_SOCK:");
-  console.log(`  export SSH_AUTH_SOCK=${socketPath}`);
+  console.log(exportHint);
   output.info("Or use:");
-  console.log(`  eval $(passwd-sso agent --eval)`);
+  console.log(evalHint);
   output.info("Press Ctrl+C to stop the agent.");
 
   // Handle vault lock → clear keys
@@ -240,9 +255,14 @@ async function forkDaemon(): Promise<void> {
 
   // Child reports the socket path once it is serving keys.
   child.on("message", (msg: { socketPath: string }) => {
-    console.log(`SSH_AUTH_SOCK='${msg.socketPath}'; export SSH_AUTH_SOCK;`);
-    console.log(`SSH_AGENT_PID='${child.pid}'; export SSH_AGENT_PID;`);
-    console.log(`trap 'kill ${child.pid} 2>/dev/null; rm -f ${msg.socketPath}' EXIT;`);
+    console.log(`SSH_AUTH_SOCK=${shellQuote(msg.socketPath)}; export SSH_AUTH_SOCK;`);
+    console.log(`SSH_AGENT_PID=${shellQuote(String(child.pid))}; export SSH_AGENT_PID;`);
+    // Quoted twice, deliberately: once for the path inside the composed
+    // inner command, and once for the whole trap body — the body is parsed
+    // by two shells (the one running `eval`, and the one that runs it when
+    // the trap fires), each of which must read the path as one word.
+    const inner = `kill ${shellQuote(String(child.pid))} 2>/dev/null; rm -f ${shellQuote(msg.socketPath)}`;
+    console.log(`trap ${shellQuote(inner)} EXIT;`);
 
     child.unref();
     child.disconnect();

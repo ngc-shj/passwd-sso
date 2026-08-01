@@ -116,6 +116,12 @@ export type AccessCheckResult =
   | { allowed: true }
   | { allowed: false; reason: string };
 
+// Denial reasons are named constants (not repeated literals) because after
+// C5 each is written from one place (checkAccessRestriction) and asserted
+// from several test/audit consumers.
+const REASON_TAILNET_MISMATCH = "Tailscale tailnet mismatch";
+const REASON_TAILSCALE_VERIFICATION_FAILED = "Tailscale verification failed";
+
 // ─── Main check function ─────────────────────────────────────
 
 /**
@@ -132,8 +138,22 @@ export async function checkAccessRestriction(
   tenantId: string,
   clientIp: string | null,
 ): Promise<AccessCheckResult> {
-  const policy = await getTenantAccessPolicy(tenantId);
+  return evaluateAccessPolicy(await getTenantAccessPolicy(tenantId), clientIp);
+}
 
+/**
+ * Decide the tenant-access predicate for an already-resolved policy.
+ *
+ * Split out from checkAccessRestriction so the self-lockout preview
+ * (wouldIpBeAllowed) answers with the same logic that will run at request
+ * time, against a policy that has not been saved yet. Anything that predicts
+ * this verdict must call this, not re-implement it — a predictor that drifts
+ * from the adjudicator gives an admin a green light and then locks them out.
+ */
+async function evaluateAccessPolicy(
+  policy: TenantAccessPolicy,
+  clientIp: string | null,
+): Promise<AccessCheckResult> {
   // Fast path: no restrictions configured
   if (policy.allowedCidrs.length === 0 && !policy.tailscaleEnabled) {
     return { allowed: true };
@@ -155,25 +175,23 @@ export async function checkAccessRestriction(
   // extractClientIp resolves via rightmost-untrusted).
   //
   // CGNAT is exclusively used by Tailscale and unreachable from the public
-  // internet. This check runs in Edge runtime where tailscaled WhoIs (Unix
-  // socket) is unavailable.
+  // internet. The proxy (src/proxy.ts) executes in the Node.js runtime, not
+  // Edge — its bundle traces `pg` and `.prisma/client`, and the middleware
+  // manifest is empty — so tailscaled's Unix-socket WhoIs API is reachable
+  // from every caller of this function, including the browser session paths.
   //
-  // SECURITY BOUNDARY (intentional): this Edge path grants access on
-  // CGNAT-range membership alone — it does NOT verify the peer belongs to the
-  // tenant's specific tailnet. Exact-tailnet verification (verifyTailscalePeer
-  // WhoIs) requires the tailscaled Unix socket and therefore only runs in the
-  // Node.js runtime via enforceAccessRestriction (token/Bearer route handlers).
-  // Consequence: for cookie/session browser flows (dashboard pages + session-
-  // authenticated API routes) that pass through the proxy, per-tenant tailnet
-  // ISOLATION is bounded to "any Tailscale peer in the CGNAT range", not "a
-  // peer in tenantId's tailnet". A host on a different tailnet whose source IP
-  // is CGNAT would pass. This is acceptable because (a) reaching this branch at
-  // all requires a CGNAT source IP, which the fail-closed IP-extraction
-  // posture (TRUST_PROXY_HEADERS unset → spoofed XFF ignored → null IP → deny)
-  // prevents an off-tailnet attacker from forging, and (b) Tailscale ACLs are
-  // the operator's primary isolation control. Tenants that need strict per-
-  // tailnet browser isolation must additionally scope allowedCidrs.
+  // This is the single adjudicator for the tenant access predicate: when a
+  // tailnet is pinned, CGNAT membership alone is not sufficient — the peer
+  // must also verify via WhoIs as belonging to that exact tailnet, so a host
+  // on a different tailnet whose source IP happens to be CGNAT is denied.
+  // Without a pinned tailnet, CGNAT-range membership remains the tenant's
+  // chosen (weaker) policy — an explicit operator choice, not a gap.
   if (policy.tailscaleEnabled && isTailscaleIp(clientIp)) {
+    if (policy.tailscaleTailnet) {
+      const verified = await verifyTailscalePeer(clientIp, policy.tailscaleTailnet);
+      if (verified) return { allowed: true };
+      return { allowed: false, reason: REASON_TAILNET_MISMATCH };
+    }
     return { allowed: true };
   }
 
@@ -183,7 +201,7 @@ export async function checkAccessRestriction(
     reasons.push("IP not in allowed CIDRs");
   }
   if (policy.tailscaleEnabled) {
-    reasons.push("Tailscale verification failed");
+    reasons.push(REASON_TAILSCALE_VERIFICATION_FAILED);
   }
 
   return { allowed: false, reason: reasons.join("; ") };
@@ -224,23 +242,21 @@ export async function checkAccessRestrictionWithAudit(
 /**
  * Check if a client IP would be allowed under a hypothetical policy.
  * Used for self-lockout detection in the PATCH endpoint.
+ *
+ * Runs the real adjudicator against the unsaved policy rather than
+ * approximating it. The previous approximation returned true for any
+ * Tailscale-enabled policy on the grounds that a tailnet could not be
+ * verified synchronously; that was accurate only while browser sessions
+ * checked CGNAT membership alone. Now that a pinned tailnet is verified on
+ * every path, the same shortcut would clear exactly the save that locks the
+ * admin out — pinning a tailnet their own peer does not belong to.
  */
-export function wouldIpBeAllowed(
+export async function wouldIpBeAllowed(
   clientIp: string,
   policy: TenantAccessPolicy,
-): boolean {
-  if (policy.allowedCidrs.length === 0 && !policy.tailscaleEnabled) {
-    return true;
-  }
-  if (policy.allowedCidrs.length > 0 && isIpAllowed(clientIp, policy.allowedCidrs)) {
-    return true;
-  }
-  // For Tailscale, we can't verify synchronously in a hypothetical check.
-  // If Tailscale is enabled AND CIDRs don't match, assume the admin knows what they're doing.
-  if (policy.tailscaleEnabled) {
-    return true;
-  }
-  return false;
+): Promise<boolean> {
+  const result = await evaluateAccessPolicy(policy, clientIp);
+  return result.allowed;
 }
 
 // ─── Route handler wrapper ───────────────────────────────────
@@ -290,27 +306,6 @@ export async function enforceAccessRestriction(
       metadata: { clientIp, reason: result.reason },
     });
     return errorResponse(API_ERROR.ACCESS_DENIED);
-  }
-
-  // Additional Tailscale tailnet verification via WhoIs (Node.js runtime only).
-  // checkAccessRestriction (Edge-compatible) allows any CGNAT IP. Here we verify
-  // the exact tailnet to prevent access from a different Tailscale account.
-  const policy = await getTenantAccessPolicy(tenantId);
-  if (policy.tailscaleEnabled && policy.tailscaleTailnet && clientIp && isTailscaleIp(clientIp)) {
-    const verified = await verifyTailscalePeer(clientIp, policy.tailscaleTailnet);
-    if (!verified) {
-      await logAuditAsync({
-        action: AUDIT_ACTION.ACCESS_DENIED,
-        scope: AUDIT_SCOPE.TENANT,
-        userId,
-        ...(actorType ? { actorType } : {}),
-        tenantId,
-        ip: clientIp,
-        userAgent: req.headers.get("user-agent"),
-        metadata: { clientIp, reason: "Tailscale tailnet mismatch" },
-      });
-      return errorResponse(API_ERROR.ACCESS_DENIED);
-    }
   }
 
   return null;

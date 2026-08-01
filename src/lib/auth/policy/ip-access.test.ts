@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { isIP } from "node:net";
 import {
   normalizeIp,
   rateLimitKeyFromIp,
@@ -141,6 +142,28 @@ describe("isIpInCidr", () => {
   it("matches zero-padded hex-form IPv4-mapped IPv6 against an IPv4 CIDR", () => {
     expect(isIpInCidr("::ffff:7f00:0001", "127.0.0.0/8")).toBe(true);
   });
+
+  // RFC 4291 §2.2 form 3 is not only the ::ffff: spelling. Before the parser
+  // handled the general case, any other prefix written with a dotted-quad tail
+  // failed to parse and therefore matched NO CIDR at all — a silent miss for
+  // the SSRF blocklist and an unexplained deny for tenant allowlists.
+  it("matches a non-::ffff: address written with a dotted-quad tail", () => {
+    expect(isIpInCidr("64:ff9b::169.254.169.254", "64:ff9b::/96")).toBe(true);
+  });
+
+  it("does not let a dotted-quad tail match an unrelated IPv6 prefix", () => {
+    expect(isIpInCidr("64:ff9b::100.64.0.1", "fd7a:115c:a1e0::/48")).toBe(false);
+  });
+
+  it("agrees with the hex spelling of the same address", () => {
+    expect(isIpInCidr("::127.0.0.1", "::/96")).toBe(
+      isIpInCidr("::7f00:1", "::/96"),
+    );
+  });
+
+  it("rejects an over-long address whose dotted tail would overflow 16 bytes", () => {
+    expect(isIpInCidr("1:2:3:4:5:6:7:8:9.10.11.12", "::/0")).toBe(false);
+  });
 });
 
 describe("isIpAllowed", () => {
@@ -201,9 +224,50 @@ describe("isValidIpAddress", () => {
     expect(isValidIpAddress("2001:db8::1")).toBe(true);
   });
 
+  // The pre-filter regex and parseIpv6 have to agree on which spellings exist.
+  // While the filter rejected any dot, this returned false for an address the
+  // CIDR matchers accept — a validator disagreeing with the parser it guards.
+  it("accepts an IPv6 address written with a dotted-quad tail", () => {
+    expect(isValidIpAddress("64:ff9b::169.254.169.254")).toBe(true);
+  });
+
+  it("rejects a dotted fragment that is not a valid address", () => {
+    expect(isValidIpAddress("1.2:0:0:0:0:0:0:1")).toBe(false);
+  });
+
   it("rejects junk", () => {
     expect(isValidIpAddress("hello")).toBe(false);
     expect(isValidIpAddress("")).toBe(false);
+  });
+
+  // net.isIP is the authority on what an address IS; this parser only decides
+  // which CIDR one falls in. Where the two disagree, a string nobody can route
+  // gets classified anyway — `::ffff:1e2.64.0.1` normalized into the Tailscale
+  // CGNAT range because Number("1e2") is 100. Asserted as a property so a
+  // future spelling cannot reopen the gap one case at a time.
+  it.each([
+    "1.2.3.4",
+    "255.255.255.255",
+    "2001:db8::1",
+    "::1",
+    "::ffff:127.0.0.1",
+    "64:ff9b::169.254.169.254",
+    "fd7a:115c:a1e0::1234",
+    "1:2:3:4:5:6:7:8",
+    // Forms net.isIP rejects
+    "1:2:3:4:5:6:7:8::",
+    "::ffff:1e2.0.0.1",
+    "::ffff:1e2.64.0.1",
+    "::ffff:0x7f.0.0.1",
+    "1.2:0:0:0:0:0:0:1",
+    "01.2.3.4",
+    "1.2.3.4.5",
+    "256.1.1.1",
+    "1.2.3",
+    "hello",
+    "",
+  ])("agrees with net.isIP on %j", (candidate) => {
+    expect(isValidIpAddress(candidate)).toBe(isIP(candidate) !== 0);
   });
 });
 

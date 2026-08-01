@@ -32,10 +32,22 @@ describe("_extractTailnetFromFqdn", () => {
     expect(_extractTailnetFromFqdn("myhost.example.com")).toBeNull();
   });
 
-  it("handles multi-segment hostname", () => {
-    expect(
-      _extractTailnetFromFqdn("a.b.my-tailnet.ts.net."),
-    ).toBe("my-tailnet");
+  it("extracts a dotted, domain-verified tailnet name in full", () => {
+    // A domain-verified Tailscale org's tailnet name is its domain, so it
+    // must not be truncated to the single label before "ts.net".
+    expect(_extractTailnetFromFqdn("laptop.example.com.ts.net.")).toBe(
+      "example.com",
+    );
+  });
+
+  it("folds extra leading hostname labels into the tailnet (fails closed, not a crash)", () => {
+    // Tailscale machine names are single-label, so the leading boundary is
+    // fixed at exactly one label. A two-label node name folds its second
+    // label into the extracted tailnet, which denies (no configured
+    // tailnet matches the garbled value) rather than misparsing silently.
+    expect(_extractTailnetFromFqdn("a.b.my-tailnet.ts.net.")).toBe(
+      "b.my-tailnet",
+    );
   });
 });
 
@@ -144,6 +156,22 @@ describe("verifyTailscalePeer", () => {
 
     const result = await verifyTailscalePeer("100.64.0.1", "My-Tailnet");
     expect(result).toBe(true);
+  });
+
+  it("does not let a dotted tailnet's last label satisfy an unrelated policy", async () => {
+    // Regression guard for the old parts[length-3] truncation: a policy of
+    // "com" must not match a peer whose real tailnet is "example.com".
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          Node: { Name: "myhost.example.com.ts.net." },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await verifyTailscalePeer("100.64.0.1", "com");
+    expect(result).toBe(false);
   });
 });
 

@@ -61,19 +61,21 @@ interface WhoIsResponse {
  * Extract the tailnet name from a Tailscale node FQDN.
  *
  * Node.Name is typically "hostname.tailnet-name.ts.net." (with trailing dot).
- * The tailnet name is the second-to-last segment before "ts.net.".
+ * A domain-verified tailnet's name is itself a domain (e.g. "example.com"),
+ * so the tailnet is everything between the leading node label and the
+ * trailing "ts.net" — not just the single label before it.
  */
 function extractTailnetFromFqdn(fqdn: string): string | null {
   // Strip trailing dot and lowercase
   const normalized = fqdn.replace(/\.$/, "").toLowerCase();
   const parts = normalized.split(".");
 
-  // Expected: hostname.tailnet-name.ts.net → ["hostname", "tailnet-name", "ts", "net"]
+  // Expected: hostname.tailnet-name(.more-labels).ts.net → [..., "ts", "net"]
   if (parts.length < 4) return null;
   if (parts[parts.length - 1] !== "net" || parts[parts.length - 2] !== "ts")
     return null;
 
-  return parts[parts.length - 3];
+  return parts.slice(1, -2).join(".");
 }
 
 // ─── Local API call ──────────────────────────────────────────
@@ -82,7 +84,13 @@ function extractTailnetFromFqdn(fqdn: string): string | null {
  * Call tailscaled WhoIs API via Unix socket or TCP fallback.
  */
 async function callWhoIs(ip: string): Promise<WhoIsResponse> {
-  const path = `/localapi/v0/whois?addr=${encodeURIComponent(ip)}:0`;
+  // LocalAPI parses `addr` as an ip:port pair, and an IPv6 address has to be
+  // bracketed for that to mean the address we passed. Appending ":0" bare
+  // turns `fd7a:115c:a1e0::1234` into `fd7a:115c:a1e0::1234:0` — a different,
+  // equally valid address — so the WhoIs answer describes some other peer, or
+  // no peer at all. On IPv4 the unbracketed form is correct and unchanged.
+  const addr = ip.includes(":") ? `[${ip}]:0` : `${ip}:0`;
+  const path = `/localapi/v0/whois?addr=${encodeURIComponent(addr)}`;
 
   const tcpBase = process.env.TAILSCALE_API_BASE ?? "";
   const socketPath = process.env.TAILSCALE_SOCKET ?? DEFAULT_TAILSCALE_SOCKET;

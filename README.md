@@ -60,7 +60,8 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Vault Reset** — Last-resort full deletion with explicit confirmation
 - **Key Rotation** — Rotate encryption key with passphrase verification
 - **Travel Mode** — Hide sensitive entries when crossing borders; remote disable restores access
-- **Network Access Restriction** — CIDR allowlist and Tailscale integration per tenant
+- **Network Access Restriction** — Per-tenant CIDR allowlist, checked first and independent of Tailscale (the lockout recovery path); optional Tailscale integration additionally verifies the exact tailnet via WhoIs when a tailnet name is pinned, otherwise any peer in the Tailscale CGNAT range is allowed
+- **Outbound SSRF Protection** — Blocks private/loopback/link-local/CGNAT/metadata destinations and standardized IPv6 transition tunnels (Teredo, 6to4, IPv4-compatible, RFC 6666 discard-only) on every fetch to a tenant- or user-influenced host, including the well-known NAT64 prefix (`64:ff9b::/96`), whose embedded IPv4 is decoded and re-checked. Operator-assigned NAT64 prefixes (RFC 7050 discovery) are not recognizable from the address alone and are therefore not covered — deployments relying on one should also enforce an egress firewall
 - **Audit Logs & Webhooks** — Personal/team/tenant logs with filters, CSV/JSONL download, webhook delivery
 - **Durable Audit Outbox** — Audit events emit a synchronous structured log, then enqueue to an `audit_outbox` table drained by a background worker (dedup + dead-letter). The in-transaction enqueue path (`enqueueAuditInTx`) is atomic with the business write; the common route path is best-effort post-commit, with the structured log as the safety net
 - **Audit Log Forwarding** — Structured JSON output via Fluent Bit sidecar for external collection

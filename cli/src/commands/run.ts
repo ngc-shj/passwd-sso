@@ -1,7 +1,7 @@
 /**
  * `passwd-sso run` — Inject vault secrets into a command's environment.
  *
- * Uses child_process.execFile (NOT shell) for security.
+ * Uses child_process.spawn (NOT shell) for security.
  * Blocks certain dangerous env var names from being overwritten.
  */
 

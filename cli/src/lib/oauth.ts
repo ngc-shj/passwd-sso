@@ -332,6 +332,32 @@ export async function revokeTokenRequest(
 
 // ─── Browser launcher ─────────────────────────────────────────────────────────
 
+export type BrowserLaunch = { cmd: string; args: string[] };
+
+/**
+ * Pure: decide the argv vector for opening `url` on `platform`. No command
+ * interpreter parses the result — `rundll32 url.dll,FileProtocolHandler` is
+ * the shell-free way to hand a URL to the Windows default handler, unlike
+ * `cmd /c start` which re-parses `&` as a command separator (F1).
+ */
+export function browserLaunchCommand(url: string, platform: NodeJS.Platform): BrowserLaunch | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+
+  if (platform === "darwin") {
+    return { cmd: "open", args: [url] };
+  }
+  if (platform === "win32") {
+    return { cmd: "rundll32.exe", args: ["url.dll,FileProtocolHandler", url] };
+  }
+  return { cmd: "xdg-open", args: [url] };
+}
+
 /**
  * Attempt to open the URL in the system browser.
  * Returns false when running in a headless environment (no display server).
@@ -347,22 +373,11 @@ export function openBrowser(url: string): boolean {
     if (!hasDisplay) return false;
   }
 
-  let cmd: string;
-  let args: string[];
-
-  if (platform === "darwin") {
-    cmd = "open";
-    args = [url];
-  } else if (platform === "win32") {
-    cmd = "cmd";
-    args = ["/c", "start", "", url];
-  } else {
-    cmd = "xdg-open";
-    args = [url];
-  }
+  const launch = browserLaunchCommand(url, platform);
+  if (!launch) return false;
 
   try {
-    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    spawn(launch.cmd, launch.args, { detached: true, stdio: "ignore" }).unref();
     return true;
   } catch {
     return false;
@@ -371,7 +386,14 @@ export function openBrowser(url: string): boolean {
 
 // ─── URL validation ───────────────────────────────────────────────────────────
 
-/** Reject non-HTTPS URLs except for loopback development. */
+// Narrower than the WHATWG URL parser: `new URL()` tolerates raw `&`/`,` in
+// the host and path, and the composed authorization URL is built by string
+// concatenation (`${serverUrl}${MCP_AUTHORIZE_ENDPOINT}`), so anything the
+// parser lets through here is carried into it verbatim (I2.4).
+const SERVER_HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i;
+const SERVER_PATHNAME_RE = /^(\/[A-Za-z0-9._~-]+)*\/?$/;
+
+/** Reject non-HTTPS URLs except for loopback development, and narrow what a server URL may otherwise be. */
 export function validateServerUrl(url: string): void {
   let parsed: URL;
   try {
@@ -394,6 +416,26 @@ export function validateServerUrl(url: string): void {
         "Server URL must use HTTPS (http is only allowed for localhost/127.0.0.1/::1)",
       );
     }
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new Error("Server URL must not contain a username or password");
+  }
+
+  if (parsed.search || parsed.hash) {
+    throw new Error("Server URL must not contain a query string or fragment");
+  }
+
+  // A hostname beginning with "[" is a syntactically valid IPv6 literal —
+  // that is the only form the URL host parser produces for it, and `new
+  // URL()` would already have thrown otherwise — so no further pattern
+  // matching is needed for that branch.
+  if (!parsed.hostname.startsWith("[") && !SERVER_HOSTNAME_RE.test(parsed.hostname)) {
+    throw new Error(`Server URL has an invalid hostname: ${parsed.hostname}`);
+  }
+
+  if (!SERVER_PATHNAME_RE.test(parsed.pathname)) {
+    throw new Error(`Server URL has an invalid path: ${parsed.pathname}`);
   }
 }
 

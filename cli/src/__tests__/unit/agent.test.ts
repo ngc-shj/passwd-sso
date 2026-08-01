@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ChildProcess } from "node:child_process";
+import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // --- Mocks ---
 vi.mock("node:child_process", () => ({
@@ -79,7 +82,7 @@ const { decryptData } = await import("../../lib/crypto.js");
 const { loadKey } = await import("../../lib/ssh-key-agent.js");
 const output = await import("../../lib/output.js");
 
-const { agentCommand } = await import("../../commands/agent.js");
+const { agentCommand, foregroundHintLines } = await import("../../commands/agent.js");
 
 describe("agentCommand", () => {
   let stdoutOutput: string;
@@ -268,11 +271,112 @@ describe("agentCommand", () => {
     expect(() => handlers["message"]({ socketPath: "/tmp/eval.sock" })).toThrow(
       "process.exit(0)",
     );
-    expect(stdoutOutput).toContain("SSH_AUTH_SOCK='/tmp/eval.sock'");
-    expect(stdoutOutput).toContain("SSH_AGENT_PID='4242'");
+    // shellQuote leaves a "safe" value (letters/digits/./-//:@ only) unquoted —
+    // this path and this PID both fall in that safe charset.
+    expect(stdoutOutput).toContain("SSH_AUTH_SOCK=/tmp/eval.sock;");
+    expect(stdoutOutput).toContain("SSH_AGENT_PID=4242;");
     expect(fakeChild.unref).toHaveBeenCalled();
     expect(fakeChild.disconnect).toHaveBeenCalled();
     expect(exitCode).toBe(0);
+  });
+
+  describe("shell quoting of the eval-mode output (C3)", () => {
+    it("foregroundHintLines quotes an awkward socket path so it round-trips through a real shell", async () => {
+      const { execFileSync } = await vi.importActual<typeof import("node:child_process")>(
+        "node:child_process",
+      );
+      const socketPath = "/tmp/a'b c.sock";
+      const [exportLine] = foregroundHintLines(socketPath);
+
+      const out = execFileSync(
+        "/bin/sh",
+        ["-c", `${exportLine}; printf '%s' "$SSH_AUTH_SOCK"`],
+        { encoding: "utf-8" },
+      );
+      expect(out).toBe(socketPath);
+    });
+
+    it("eval-mode output for a socket path with a space and a single quote is eval-able and sets $SSH_AUTH_SOCK exactly", async () => {
+      vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+      vi.mocked(getSecretKeyBytes).mockReturnValue(new Uint8Array([1, 2, 3]));
+      vi.mocked(getUserId).mockReturnValue("user-1");
+
+      const handlers: Record<string, (arg?: unknown) => void> = {};
+      const fakeChild = {
+        pid: 4242,
+        send: vi.fn(),
+        on: vi.fn((event: string, cb: (arg?: unknown) => void) => {
+          handlers[event] = cb;
+        }),
+        unref: vi.fn(),
+        disconnect: vi.fn(),
+        kill: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(fakeChild as unknown as ChildProcess);
+
+      await agentCommand({ eval: true });
+
+      const socketPath = "/tmp/a'b c.sock";
+      expect(() => handlers["message"]({ socketPath })).toThrow("process.exit(0)");
+
+      // stdoutOutput already ends in a newline after the trap line — no
+      // separator is added, or a leading `;` after that newline would be a
+      // syntax error.
+      const emitted = stdoutOutput;
+      const { execFileSync } = await vi.importActual<typeof import("node:child_process")>(
+        "node:child_process",
+      );
+      const out = execFileSync("/bin/sh", ["-c", `${emitted}printf '%s' "$SSH_AUTH_SOCK"`], {
+        encoding: "utf-8",
+      });
+      expect(out).toBe(socketPath);
+    });
+
+    it("firing the emitted trap removes exactly the reported socket and leaves a decoy file intact", async () => {
+      vi.mocked(autoUnlockIfNeeded).mockResolvedValue(true);
+      vi.mocked(getSecretKeyBytes).mockReturnValue(new Uint8Array([1, 2, 3]));
+      vi.mocked(getUserId).mockReturnValue("user-1");
+
+      const handlers: Record<string, (arg?: unknown) => void> = {};
+      const fakeChild = {
+        pid: 4242,
+        send: vi.fn(),
+        on: vi.fn((event: string, cb: (arg?: unknown) => void) => {
+          handlers[event] = cb;
+        }),
+        unref: vi.fn(),
+        disconnect: vi.fn(),
+        kill: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(fakeChild as unknown as ChildProcess);
+
+      await agentCommand({ eval: true });
+
+      const dir = mkdtempSync(join(tmpdir(), "psso-trap-test-"));
+      const socketPath = join(dir, "a'b c.sock");
+      const decoyPath = join(dir, "decoy.txt");
+      writeFileSync(socketPath, "");
+      writeFileSync(decoyPath, "keep me");
+
+      try {
+        expect(() => handlers["message"]({ socketPath })).toThrow("process.exit(0)");
+
+        const trapLine = stdoutOutput.split("\n").find((line) => line.startsWith("trap "));
+        expect(trapLine).toBeDefined();
+
+        const { execFileSync } = await vi.importActual<typeof import("node:child_process")>(
+          "node:child_process",
+        );
+        // The trap line already ends with a `;` — appending `exit` fires it,
+        // exactly as `sh -c "<trap line>; exit"` per C3's acceptance criteria.
+        execFileSync("/bin/sh", ["-c", `${trapLine} exit`], { encoding: "utf-8" });
+
+        expect(existsSync(socketPath)).toBe(false);
+        expect(existsSync(decoyPath)).toBe(true);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("routes to the daemon child when _PSSO_SSH_DAEMON is set (registers IPC handler)", () => {

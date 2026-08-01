@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { ChildProcess } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // --- Mocks ---
 vi.mock("../../commands/unlock.js", () => ({
@@ -61,7 +64,12 @@ const { readPassphrase, unlockWithPassphrase } = await import(
   "../../commands/unlock.js"
 );
 const { assertLoggedIn } = await import("../../lib/api-client.js");
-const { decryptAgentCommand } = await import("../../commands/agent-decrypt.js");
+const { getSecretKeyBytes, getUserId } = await import("../../lib/vault-state.js");
+const { hexEncode } = await import("../../lib/crypto.js");
+const { spawn } = await import("node:child_process");
+const { decryptAgentCommand, foregroundHintLines } = await import(
+  "../../commands/agent-decrypt.js"
+);
 
 describe("decryptAgentCommand", () => {
   let stderrOutput: string;
@@ -163,6 +171,132 @@ describe("decryptAgentCommand", () => {
 
     await expect(decryptAgentCommand({})).rejects.toThrow("process.exit(1)");
     expect(exitCode).toBe(1);
+  });
+
+  describe("shell quoting of the eval-mode output (C3)", () => {
+    it("foregroundHintLines quotes an awkward socket path so it round-trips through a real shell", async () => {
+      const { execFileSync } = await vi.importActual<typeof import("node:child_process")>(
+        "node:child_process",
+      );
+      const socketPath = "/tmp/a'b c.sock";
+      const [exportLine] = foregroundHintLines(socketPath);
+
+      const out = execFileSync(
+        "/bin/sh",
+        ["-c", `${exportLine}; printf '%s' "$PSSO_AGENT_SOCK"`],
+        { encoding: "utf-8" },
+      );
+      expect(out).toBe(socketPath);
+    });
+
+    it("daemon-mode eval output for a socket path with a space and a single quote is eval-able and sets $PSSO_AGENT_SOCK exactly", async () => {
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+      // XDG_RUNTIME_DIR flows straight into the socket path forkDaemon emits —
+      // the awkward characters land there without a separate injection point.
+      vi.stubEnv("XDG_RUNTIME_DIR", "/tmp/a'b c");
+
+      vi.mocked(readPassphrase).mockResolvedValue("correct-pass");
+      vi.mocked(unlockWithPassphrase).mockResolvedValue(true);
+      vi.mocked(getSecretKeyBytes).mockReturnValue(new Uint8Array([1, 2, 3]));
+      vi.mocked(getUserId).mockReturnValue("user-1");
+      vi.mocked(hexEncode).mockReturnValue("deadbeef");
+
+      const handlers: Record<string, (arg?: unknown) => void> = {};
+      const fakeChild = {
+        pid: 4242,
+        send: vi.fn(),
+        on: vi.fn((event: string, cb: (arg?: unknown) => void) => {
+          handlers[event] = cb;
+        }),
+        unref: vi.fn(),
+        disconnect: vi.fn(),
+        kill: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(fakeChild as unknown as ChildProcess);
+
+      let stdout = "";
+      const logSpy = vi.spyOn(console, "log").mockImplementation((msg?: unknown) => {
+        stdout += String(msg) + "\n";
+      });
+
+      try {
+        await decryptAgentCommand({ eval: true });
+
+        const socketPath = join("/tmp/a'b c", "passwd-sso", "decrypt.sock");
+        expect(() => handlers["message"]()).toThrow("process.exit(0)");
+
+        const { execFileSync } = await vi.importActual<typeof import("node:child_process")>(
+          "node:child_process",
+        );
+        const out = execFileSync("/bin/sh", ["-c", `${stdout}printf '%s' "$PSSO_AGENT_SOCK"`], {
+          encoding: "utf-8",
+        });
+        expect(out).toBe(socketPath);
+      } finally {
+        logSpy.mockRestore();
+      }
+    });
+
+    it("firing the emitted trap removes exactly the reported socket and leaves a decoy file intact", async () => {
+      const realFs = await vi.importActual<typeof import("node:fs")>("node:fs");
+
+      Object.defineProperty(process, "platform", { value: "linux", configurable: true });
+      Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+
+      const dir = realFs.mkdtempSync(join(tmpdir(), "psso-decrypt-trap-"));
+      const xdgDir = join(dir, "a'b c");
+      realFs.mkdirSync(join(xdgDir, "passwd-sso"), { recursive: true });
+      vi.stubEnv("XDG_RUNTIME_DIR", xdgDir);
+
+      const socketPath = join(xdgDir, "passwd-sso", "decrypt.sock");
+      const decoyPath = join(xdgDir, "passwd-sso", "decoy.txt");
+      realFs.writeFileSync(socketPath, "");
+      realFs.writeFileSync(decoyPath, "keep me");
+
+      vi.mocked(readPassphrase).mockResolvedValue("correct-pass");
+      vi.mocked(unlockWithPassphrase).mockResolvedValue(true);
+      vi.mocked(getSecretKeyBytes).mockReturnValue(new Uint8Array([1, 2, 3]));
+      vi.mocked(getUserId).mockReturnValue("user-1");
+      vi.mocked(hexEncode).mockReturnValue("deadbeef");
+
+      const handlers: Record<string, (arg?: unknown) => void> = {};
+      const fakeChild = {
+        pid: 4242,
+        send: vi.fn(),
+        on: vi.fn((event: string, cb: (arg?: unknown) => void) => {
+          handlers[event] = cb;
+        }),
+        unref: vi.fn(),
+        disconnect: vi.fn(),
+        kill: vi.fn(),
+      };
+      vi.mocked(spawn).mockReturnValue(fakeChild as unknown as ChildProcess);
+
+      let stdout = "";
+      const logSpy = vi.spyOn(console, "log").mockImplementation((msg?: unknown) => {
+        stdout += String(msg) + "\n";
+      });
+
+      try {
+        await decryptAgentCommand({ eval: true });
+        expect(() => handlers["message"]()).toThrow("process.exit(0)");
+
+        const trapLine = stdout.split("\n").find((line) => line.startsWith("trap "));
+        expect(trapLine).toBeDefined();
+
+        const { execFileSync } = await vi.importActual<typeof import("node:child_process")>(
+          "node:child_process",
+        );
+        execFileSync("/bin/sh", ["-c", `${trapLine} exit`], { encoding: "utf-8" });
+
+        expect(realFs.existsSync(socketPath)).toBe(false);
+        expect(realFs.existsSync(decoyPath)).toBe(true);
+      } finally {
+        logSpy.mockRestore();
+        realFs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
   });
 
   // Keep this the LAST test in this describe: an unconsumed mockImplementationOnce

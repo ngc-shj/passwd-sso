@@ -48,11 +48,13 @@ function parseIpv4(ip: string): number[] | null {
   if (parts.length !== 4) return null;
   const octets: number[] = [];
   for (const part of parts) {
-    if (part.length === 0) return null;
+    // Decimal digits only, no leading zeros. `Number()` accepts far more than
+    // an octet spelling — `Number("1e2")` is 100, so `::ffff:1e2.64.0.1` used
+    // to normalize into the Tailscale CGNAT range and be classified as a
+    // Tailscale peer, while net.isIP rejects the string outright.
+    if (!/^(0|[1-9]\d{0,2})$/.test(part)) return null;
     const n = Number(part);
-    if (!Number.isInteger(n) || n < 0 || n > 255) return null;
-    // Reject leading zeros (e.g., "01", "001")
-    if (part.length > 1 && part[0] === "0") return null;
+    if (n > 255) return null;
     octets.push(n);
   }
   return octets;
@@ -62,17 +64,28 @@ function parseIpv4(ip: string): number[] | null {
  * Parse an IPv6 address into 16 bytes.
  * Handles :: expansion and IPv4-mapped addresses.
  * Returns null if invalid.
+ *
+ * Exported for the SSRF blocklist's NAT64 decoder, which needs the byte form
+ * to read an embedded IPv4 by position rather than by string shape.
  */
+export function parseIpv6Bytes(ip: string): number[] | null {
+  return parseIpv6(ip);
+}
+
 function parseIpv6(ip: string): number[] | null {
-  // Handle IPv4-mapped IPv6
-  const v4MappedMatch = ip.match(
-    /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i,
-  );
-  if (v4MappedMatch) {
-    const v4 = parseIpv4(v4MappedMatch[1]);
+  // RFC 4291 §2.2 form 3: the low 32 bits may be written as a dotted quad.
+  // That is not only the ::ffff: form — the NAT64 prefixes and `::127.0.0.1`
+  // are the same notation, and treating ::ffff: as a special case left every
+  // other prefix unparseable, so an address carrying a blocked IPv4 silently
+  // matched no CIDR at all. Rewrite the tail into the two hex groups it
+  // denotes and let the ordinary parser take it from there.
+  const lastColon = ip.lastIndexOf(":");
+  if (lastColon !== -1 && ip.slice(lastColon + 1).includes(".")) {
+    const v4 = parseIpv4(ip.slice(lastColon + 1));
     if (!v4) return null;
-    // Represent as IPv4-mapped IPv6: 10 zero bytes + 0xff 0xff + 4 IPv4 bytes
-    return [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, ...v4];
+    const hi = ((v4[0] << 8) | v4[1]).toString(16);
+    const lo = ((v4[2] << 8) | v4[3]).toString(16);
+    return parseIpv6(`${ip.slice(0, lastColon + 1)}${hi}:${lo}`);
   }
 
   const halves = ip.split("::");
@@ -83,9 +96,13 @@ function parseIpv6(ip: string): number[] | null {
     const groups = s.split(":");
     const bytes: number[] = [];
     for (const g of groups) {
-      if (g.length < 1 || g.length > 4) return null;
+      // The whole token must be hex. parseInt stops at the first character it
+      // cannot read and returns what it got, so `"1.2"` would parse as 0x1 and
+      // a syntactically invalid address would be coerced into a valid-looking
+      // 16 bytes — and every CIDR decision built on this parser would then be
+      // made about an address nobody sent.
+      if (!/^[0-9a-fA-F]{1,4}$/.test(g)) return null;
       const val = parseInt(g, 16);
-      if (Number.isNaN(val) || val < 0 || val > 0xffff) return null;
       bytes.push((val >> 8) & 0xff, val & 0xff);
     }
     return bytes;
@@ -101,8 +118,11 @@ function parseIpv6(ip: string): number[] | null {
   const right = parseGroups(halves[1]);
   if (!left || !right) return null;
 
+  // `::` must compress at least one group (RFC 4291 §2.2), so a form that
+  // already spells all 16 bytes is invalid — `1:2:3:4:5:6:7:8::` is not an
+  // address, and accepting it made this parser disagree with net.isIP.
   const totalBytes = left.length + right.length;
-  if (totalBytes > 16) return null;
+  if (totalBytes >= 16) return null;
 
   const padding = 16 - totalBytes;
   return [...left, ...new Array<number>(padding).fill(0), ...right];
@@ -397,7 +417,10 @@ export function isTailscaleIp(ip: string): boolean {
 }
 
 const IPV4_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
-const IPV6_SIMPLE_REGEX = /^[0-9a-fA-F:]+$/;
+// Dots are admitted because RFC 4291 §2.2 form 3 writes the low 32 bits as a
+// dotted quad; parseIpv6 is the actual validator, and rejecting the form here
+// would deny an address the CIDR matchers now accept.
+const IPV6_SIMPLE_REGEX = /^[0-9a-fA-F:.]+$/;
 
 /**
  * Validate that an IP string is a well-formed IPv4 or IPv6 address.

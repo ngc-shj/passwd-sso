@@ -12,7 +12,7 @@
 import { resolve4, resolve6 } from "node:dns/promises";
 import { isIP as netIsIP } from "node:net";
 import { Agent as UndiciAgent } from "undici";
-import { isIpInCidr } from "@/lib/auth/policy/ip-access";
+import { isIpInCidr, parseIpv6Bytes } from "@/lib/auth/policy/ip-access";
 import { readStreamWithCap } from "@/lib/http/parse-body";
 import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
@@ -46,6 +46,16 @@ export const BLOCKED_CIDRS = [
   "fe80::/10",          // link-local
   "fc00::/7",           // unique local (ULA)
   "::ffff:0:0/96",      // IPv4-mapped IPv6 (prevents bypass via ::ffff:127.0.0.1)
+  // IPv6 transition / tunneling ranges that carry or tunnel an IPv4 address
+  // (F3): blocked outright, except the NAT64 well-known prefix below, whose
+  // embedded IPv4 is decoded instead — see extractNat64Ipv4.
+  "2001::/32",          // RFC 4380 Teredo — tunnel endpoint, embedded IPv4 is obfuscated
+  "2002::/16",          // RFC 3056 6to4
+  "::/96",              // RFC 4291 §2.5.5.1 IPv4-compatible (deprecated)
+  "100::/64",           // RFC 6666 discard-only
+  "64:ff9b:1::/48",     // RFC 8215 local-use NAT64 — §5 forbids assuming an
+                        // embedded IPv4 exists or where it sits, so this
+                        // prefix is blocked by membership, never decoded
 ] as const;
 
 /**
@@ -75,14 +85,45 @@ export const BLOCKED_CIDR_REPRESENTATIVES: ReadonlyArray<{
   { cidr: "fe80::/10", ipv6: "fe80::1" },
   { cidr: "fc00::/7", ipv6: "fd00::1" },
   { cidr: "::ffff:0:0/96", ipv6: "::ffff:127.0.0.1" },
+  { cidr: "2001::/32", ipv6: "2001::1" },
+  { cidr: "2002::/16", ipv6: "2002:7f00:1::" },
+  { cidr: "::/96", ipv6: "::127.0.0.1" },
+  { cidr: "100::/64", ipv6: "100::1" },
+  { cidr: "64:ff9b:1::/48", ipv6: "64:ff9b:1:c0a8:0:100::" },
 ];
+
+/** The only NAT64 prefix with an RFC-guaranteed embedding layout (RFC 6052 §2.1-2.2). */
+const NAT64_WELL_KNOWN_PREFIX = "64:ff9b::/96";
+
+/**
+ * Extract the IPv4 address embedded in a well-known-prefix NAT64 address.
+ * §2.1 fixes the Well-Known Prefix at 96 bits, so only one row of §2.2's
+ * embedding table can apply to it: the IPv4 sits in bits 96-127. Neither
+ * section alone carries the guarantee — the length comes from one and the
+ * layout from the other. Returns null for every other address, INCLUDING the RFC 8215
+ * local-use prefix 64:ff9b:1::/48: that RFC's §5 forbids assuming an IPv4
+ * is embedded there or where it would sit, so that prefix is handled by
+ * BLOCKED_CIDRS membership instead and must never reach this decoder.
+ */
+export function extractNat64Ipv4(ip: string): string | null {
+  if (!isIpInCidr(ip, NAT64_WELL_KNOWN_PREFIX)) return null;
+
+  const bytes = parseIpv6Bytes(ip);
+  if (!bytes) return null;
+
+  return bytes.slice(12, 16).join(".");
+}
 
 /**
  * Check if an IP address belongs to a private/reserved range
- * using the existing CIDR matcher from ip-access.ts.
+ * using the existing CIDR matcher from ip-access.ts. Also rejects an address
+ * that carries a blocked IPv4 via the NAT64 well-known prefix (F3 / I4.2).
  */
 export function isPrivateIp(ip: string): boolean {
-  return BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr));
+  if (BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr))) return true;
+
+  const embeddedIpv4 = extractNat64Ipv4(ip);
+  return embeddedIpv4 !== null && isPrivateIp(embeddedIpv4);
 }
 
 /** Per-call DNS resolution deadline (see withDnsTimeout). */

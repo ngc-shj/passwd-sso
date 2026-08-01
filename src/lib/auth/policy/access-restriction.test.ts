@@ -3,18 +3,28 @@ import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 
 // T3.4: checkAccessRestrictionWithAudit uses ANONYMOUS_ACTOR_ID when userId is null
 
-const { mockLogAudit } = vi.hoisted(() => ({ mockLogAudit: vi.fn() }));
+// Mocks are hoisted references (not a typed `prisma` import) so a test can
+// resolve a partial policy shape without fighting the full Prisma Tenant type.
+const {
+  mockLogAudit,
+  mockTenantFindUnique,
+  mockVerifyTailscalePeer,
+  mockIsTailscaleIp,
+  mockIsIpAllowed,
+} = vi.hoisted(() => ({
+  mockLogAudit: vi.fn(),
+  mockTenantFindUnique: vi.fn().mockResolvedValue({
+    allowedCidrs: ["192.168.0.0/24"], // restrictive — will block 1.2.3.4
+    tailscaleEnabled: false,
+    tailscaleTailnet: null,
+  }),
+  mockVerifyTailscalePeer: vi.fn().mockResolvedValue(false),
+  mockIsTailscaleIp: vi.fn().mockReturnValue(false),
+  mockIsIpAllowed: vi.fn().mockReturnValue(false), // IP not in allowlist
+}));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    tenant: {
-      findUnique: vi.fn().mockResolvedValue({
-        allowedCidrs: ["192.168.0.0/24"], // restrictive — will block 1.2.3.4
-        tailscaleEnabled: false,
-        tailscaleTailnet: null,
-      }),
-    },
-  },
+  prisma: { tenant: { findUnique: mockTenantFindUnique } },
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
@@ -23,13 +33,13 @@ vi.mock("@/lib/tenant-rls", () => ({
 }));
 
 vi.mock("@/lib/auth/policy/ip-access", () => ({
-  isIpAllowed: vi.fn().mockReturnValue(false), // IP not in allowlist
-  isTailscaleIp: vi.fn().mockReturnValue(false),
+  isIpAllowed: mockIsIpAllowed,
+  isTailscaleIp: mockIsTailscaleIp,
   extractClientIp: vi.fn().mockReturnValue("1.2.3.4"),
 }));
 
 vi.mock("@/lib/services/tailscale-client", () => ({
-  verifyTailscalePeer: vi.fn().mockResolvedValue(false),
+  verifyTailscalePeer: mockVerifyTailscalePeer,
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -41,6 +51,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import {
+  checkAccessRestriction,
   checkAccessRestrictionWithAudit,
   _clearPolicyCache,
   _policyCache,
@@ -148,5 +159,107 @@ describe("policyCache eviction — TTL sweep before FIFO", () => {
     expect(_policyCache.has("tenant-0")).toBe(false);
     expect(_policyCache.has("tenant-new")).toBe(true);
     expect(_policyCache.size).toBe(_POLICY_CACHE_MAX_SIZE);
+  });
+});
+
+// C5: the WhoIs tailnet check now lives in checkAccessRestriction itself
+// (not just enforceAccessRestriction), so every caller — including browser
+// session paths — inherits it. verifyTailscalePeer is mocked one level below
+// the function under test, so these tests can observe whether it was called.
+describe("checkAccessRestriction — Tailscale tailnet verification (C5)", () => {
+  beforeEach(() => {
+    _clearPolicyCache();
+    mockLogAudit.mockReset();
+  });
+
+  it("denies on a WhoIs tailnet mismatch, auditing the mismatch reason", async () => {
+    mockTenantFindUnique.mockResolvedValueOnce({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "acme",
+    });
+    mockIsTailscaleIp.mockReturnValueOnce(true);
+    mockVerifyTailscalePeer.mockResolvedValueOnce(false);
+
+    const req = new NextRequest("http://localhost/api/test");
+    const result = await checkAccessRestrictionWithAudit(
+      "tenant-mismatch",
+      "100.64.0.1",
+      "user-1",
+      req,
+    );
+
+    expect(result).toEqual({ allowed: false, reason: "Tailscale tailnet mismatch" });
+    expect(mockVerifyTailscalePeer).toHaveBeenCalledWith("100.64.0.1", "acme");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "tenant-mismatch",
+        metadata: expect.objectContaining({ reason: "Tailscale tailnet mismatch" }),
+      }),
+    );
+  });
+
+  it("allows when the WhoIs tailnet matches the policy", async () => {
+    mockTenantFindUnique.mockResolvedValueOnce({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "acme",
+    });
+    mockIsTailscaleIp.mockReturnValueOnce(true);
+    mockVerifyTailscalePeer.mockResolvedValueOnce(true);
+
+    const result = await checkAccessRestriction("tenant-match", "100.64.0.2");
+
+    expect(result).toEqual({ allowed: true });
+  });
+
+  it("surfaces the same denial when verification fails for any reason, not only a mismatch", async () => {
+    // A socket error, a timeout and a genuine tailnet mismatch all reach this
+    // function as `verifyTailscalePeer` resolving false — the distinction is
+    // made and asserted inside tailscale-client.test.ts, not here. Named for
+    // what it actually pins so the suite does not read as covering two
+    // independently-verified failure modes when it covers one propagation.
+    mockTenantFindUnique.mockResolvedValueOnce({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "acme",
+    });
+    mockIsTailscaleIp.mockReturnValueOnce(true);
+    mockVerifyTailscalePeer.mockResolvedValueOnce(false);
+
+    const result = await checkAccessRestriction("tenant-unreachable", "100.64.0.3");
+
+    expect(result).toEqual({
+      allowed: false,
+      reason: "Tailscale tailnet mismatch",
+    });
+  });
+
+  it("allows via allowedCidrs without calling verifyTailscalePeer (recovery path precedence)", async () => {
+    mockTenantFindUnique.mockResolvedValueOnce({
+      allowedCidrs: ["10.0.0.0/24"],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "acme",
+    });
+    mockIsIpAllowed.mockReturnValueOnce(true);
+
+    const result = await checkAccessRestriction("tenant-cidr-precedence", "10.0.0.5");
+
+    expect(result).toEqual({ allowed: true });
+    expect(mockVerifyTailscalePeer).not.toHaveBeenCalled();
+  });
+
+  it("keeps CGNAT-only behaviour when tailscaleEnabled is set without a pinned tailnet", async () => {
+    mockTenantFindUnique.mockResolvedValueOnce({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: null,
+    });
+    mockIsTailscaleIp.mockReturnValueOnce(true);
+
+    const result = await checkAccessRestriction("tenant-no-tailnet", "100.64.0.6");
+
+    expect(result).toEqual({ allowed: true });
+    expect(mockVerifyTailscalePeer).not.toHaveBeenCalled();
   });
 });

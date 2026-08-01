@@ -43,7 +43,7 @@ const {
       .fn<(tokens: ReadonlyArray<string>) => Promise<{ total: number; failed: number }>>()
       .mockImplementation(async (tokens) => ({ total: tokens.length, failed: 0 })),
     mockExtractClientIp: vi.fn(() => "127.0.0.1"),
-    mockWouldIpBeAllowed: vi.fn(() => true),
+    mockWouldIpBeAllowed: vi.fn(async () => true),
     mockRequireRecentSession: vi.fn().mockResolvedValue(null),
     TenantAuthError: _TenantAuthError,
   };
@@ -338,7 +338,7 @@ describe("PATCH /api/tenant/policy", () => {
   });
 
   it("returns 409 when PATCH would lock out the requester", async () => {
-    mockWouldIpBeAllowed.mockReturnValue(false);
+    mockWouldIpBeAllowed.mockResolvedValue(false);
 
     const req = createRequest("PATCH", ROUTE_URL, {
       body: { allowedCidrs: ["10.0.0.0/8"] },
@@ -350,7 +350,7 @@ describe("PATCH /api/tenant/policy", () => {
   });
 
   it("allows PATCH with confirmLockout when it would lock out", async () => {
-    mockWouldIpBeAllowed.mockReturnValue(false);
+    mockWouldIpBeAllowed.mockResolvedValue(false);
     mockPrismaTenantUpdate.mockResolvedValue({ ...BASE_POLICY, allowedCidrs: ["10.0.0.0/8"] });
 
     const req = createRequest("PATCH", ROUTE_URL, {
