@@ -416,7 +416,14 @@ requirement does not apply.
 - **Control class** (R49): **detection or audit only** — documentation. It shapes what a
   human does; it enforces nothing. Explicitly *not* a substitute for SC5's absent gate.
 - **Forbidden patterns**:
-  - `pattern: npm run pre-pr.*npm audit` — reason: the false-equivalence claim must not survive in any form.
+  - `pattern: pre-pr.*(runs the same|parity)` — reason: the false-equivalence claim must
+    not survive in any form. **Negation-awareness matters**: an earlier revision used
+    `npm run pre-pr.*npm audit`, which matched the *corrected* sentence
+    ("`npm run pre-pr` does NOT run `npm audit`") because it is blind to the negation
+    between the two tokens. A forbidden pattern that fires on its own fix is worse than
+    none — it trains the reader to wave the check through. Anchor on the words that
+    carry the false claim (`runs the same`, `parity`), not on the two nouns that appear
+    in both the claim and its correction.
 - **Acceptance**: `grep -n 'npm audit' scripts/pre-pr.sh` returns nothing **and** the
   runbook no longer asserts otherwise; the Step 4 bullet names the disjointness
   condition.
