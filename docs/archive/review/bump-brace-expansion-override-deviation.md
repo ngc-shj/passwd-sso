@@ -219,3 +219,57 @@ committed to see). Recorded as context, not as evidence — see D5 item 3.
 | Security F2 — the runbook presents `npm run pre-pr` as covering lint/test/build with no commit-first caveat | Major | **Fixed.** Step 3 now states that `detect_web_changes()` reads the committed diff, that the four steps are silently skipped otherwise, and gives the ANSI-stripped grep to confirm they ran. This is the same defect class as the audit claim C5 was written to fix, left standing for the adjacent claim — and D5 is the proof it bites, since this PR's own Phase 2 fell into it. |
 | Testing F1 — D5's cited evidence grep can never match | Major | **Fixed.** See the corrected evidence block in D5. |
 | Testing F2 — C3's acceptance (audit output recorded) unmet | Major | **Fixed.** See D7. |
+
+## D9 — Three rounds of the same defect class, closed by changing the mechanism rather than adding cases
+
+Phase 3 rounds 1-3 each found the same shape, always in guidance I had just written, never
+in the shipped override keys:
+
+| round | what I wrote | how it was falsified |
+|---|---|---|
+| 1 | disjointness check: "sort keys by lower bound; each lower bound `>=` the previous upper bound" | unsound for inclusive upper bounds — `pkg@<=X` and `pkg@>=X <Y` pass the check while both selecting X |
+| 2 | "write every range as `>=floor <ceiling`, the form every key in this file already uses" | false — `brace-expansion@1` / `@2` are bare-major selectors, as is the file's own worked example |
+| 3 | a table translating each selector form to a half-open interval, "every npm selector form has one" | the `>X` row broke the stated algorithm, and one npm invocation found six accepted forms with no row: `*`, `""`, exact pins, hyphen ranges, `~`, prerelease-tagged bounds, and `$ref` values |
+
+Each fix enumerated more cases and each was falsified by a case outside the enumeration.
+That is the accretion signature: a member-set that grows every round is evidence the class
+was never derived from the right primitive. The primitive here is not "which spellings can
+a selector have" — it is **npm's own range parser**, and every hand-written table is a
+second parser standing in for it, guaranteed to disagree on the spelling nobody thought of
+(R47: surface-form adjudication where an interpreter defines the meaning).
+
+**Mechanism change**: the table is gone. Step 4 now hands the predicate to `semver`, which
+is already in the tree and is the same library npm resolves with:
+
+```
+semver.intersects(rangeA, rangeB)
+```
+
+The runbook carries a runnable snippet that walks the `overrides` block, groups keys by
+package, and reports every intersecting pair. Verified against every form the round-3
+review found missing, plus the two counterexamples earlier rounds turned on:
+
+```
+disjoint  "1"              "2"                    disjoint  "<=1.1.16"       ">1.1.16"
+disjoint  "1"              ">=3.0.0 <5.0.8"       OVERLAP   "<=1.1.17"       ">=1.1.17 <2.0.0"
+OVERLAP   "*"              ">=3.0.0 <5.0.8"       OVERLAP   "1.0.0 - 2.0.0"  ">=2.0.0 <3.0.0"
+OVERLAP   "~1.1.7"         "1"                    OVERLAP   "1.1.9"          "1"
+```
+
+Note the second row of the right column: `<=1.1.16` vs `>1.1.16` is genuinely disjoint, and
+round 3's Functionality lane showed my interval table would have reported it as
+overlapping. The interpreter gets both directions right; the table got neither reliably.
+
+**Red-proven** (RT7), on a throwaway copy under the scratchpad — the real `package.json`
+was never mutated:
+
+```
+GREEN  real package.json          → "override keys are pairwise disjoint"   exit 0
+RED    scratch copy + injected
+       "brace-expansion@<=1.1.17" → OVERLAP brace-expansion: "1" and "<=1.1.17"   exit 1
+```
+
+**Not wired into CI.** The snippet is documentation a responder runs, not a gate. Making it
+a `scripts/checks/` entry wired into `pre-pr` is the durable form and is the natural
+follow-up, but adding a gate is a repo-policy change of the same kind SC5 defers to the
+maintainer — surfaced rather than bundled.
