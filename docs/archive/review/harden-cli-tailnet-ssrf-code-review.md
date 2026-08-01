@@ -166,3 +166,52 @@ Nothing to resolve; S1 stands as recorded above with its Anti-Deferral entry.
 ## Termination
 
 Round 3 closes the loop: functionality and testing returned "No findings", and the one continuing security item is an accepted, documented limitation with an Anti-Deferral entry rather than an open defect. Both expanded classes are closed by mechanisms that have been shown able to fail.
+
+---
+
+# Round 4 — external review
+
+## Changes from Previous Round
+
+Two findings raised by a reviewer outside the three-expert loop, both in files this branch had already modified. Both reproduced before any code was touched.
+
+## Findings
+
+- **S5 [Medium → treated as Major] WhoIs is asked about a different address on IPv6.** `callWhoIs` built `addr=${ip}:0`, which denotes an ip:port pair only for IPv4. `fd7a:115c:a1e0::1234` becomes `fd7a:115c:a1e0::1234:0` — a different, equally valid IPv6 address — so the verdict describes some other peer, or none. Reproduced: `new URL("http://x/localapi/v0/whois?addr=" + encodeURIComponent(ip) + ":0").searchParams.get("addr")` returns the shifted address, and `net.isIP` confirms both strings are valid and distinct.
+
+  **This is the second member of a class this branch already closed once.** C8 fixed `extractTailnetFromFqdn` because it mis-read the tailnet *name*, and the whole argument for making C8 a prerequisite of C5 was that a verifier defect which merely broke token paths becomes a tenant-wide browser lockout once every session runs the check. The IPv6 `addr` encoding is the same defect shape on the *address* input, and the R42 derivation that produced C8 stopped at one member. The class is "inputs `verifyTailscalePeer` mis-handles, whose blast radius C5 multiplies", and its members are the two arguments the function takes.
+
+- **S6 [Low → treated as Major for one configuration] The shared parser accepts strings that are not addresses.** `parseIpv4` converted each octet with `Number()`, which reads `"1e2"` as 100, and the `::` branch accepted a form that already spells all 16 bytes. Reproduced against the real exports:
+
+  | input | `isValidIpAddress` | `net.isIP` | `normalizeIp` | `isTailscaleIp` |
+  |---|---|---|---|---|
+  | `1:2:3:4:5:6:7:8::` | true | 0 | unchanged | false |
+  | `::ffff:1e2.0.0.1` | true | 0 | `100.0.0.1` | false |
+  | `::ffff:1e2.64.0.1` | true | 0 | `100.64.0.1` | **true** |
+
+  The last row is why this is not merely a classification nit: a string Node rejects as an address is classified as a Tailscale CGNAT peer, and for a tenant with `tailscaleEnabled` and no pinned tailnet that is an **allow**. Preconditions are the same as Round 1's S3 — a deployment where `X-Forwarded-For` text reaches the parser (`TRUST_PROXY_HEADERS=true`, or a proxy chain that passes the client value through).
+
+## Resolution Status — Round 4
+
+### S5 — WhoIs address encoding
+- Action: `addr` is now `[ip]:0` for IPv6 and `ip:0` for IPv4. The bracketed form is the canonical `ParseAddrPort` text, so this fixes IPv6 without changing the IPv4 path that demonstrably works today — preferable to switching to a bare IP, which would have rested on an untested claim about what the LocalAPI accepts.
+- Modified: `src/lib/services/tailscale-client.ts`, `src/lib/services/tailscale-client.test.ts`.
+
+### S6 — parser laxity
+- Action: an octet must match `^(0|[1-9]\d{0,2})$` (this subsumes the old leading-zero check), and `::` must compress at least one group (`totalBytes >= 16` now rejects). Agreement with `net.isIP` is asserted as a property over a table of 19 spellings rather than case by case, so the next spelling cannot reopen the gap one input at a time.
+- Modified: `src/lib/auth/policy/ip-access.ts`, `src/lib/auth/policy/ip-access.test.ts`.
+
+### A vacuous test, caught by red-proving rather than by review
+
+The first version of the WhoIs test extracted the address by splitting `addr` on its last colon. That extraction *undoes the defect*: stripping `:0` off the unbracketed form hands back the original string, so the test passed against the reverted code. It was rewritten to hand the value to `new URL()`, which implements the ip:port rule and throws on the unbracketed form.
+
+Recorded because the process detail is the point: the test was written, run green, and only the deliberate revert exposed it. Every fix in this round was red-proven on a throwaway worktree before being accepted — the parser strictness (5 property cases fail), the `::` check (1 case fails), and the WhoIs encoding (the IPv6 case fails) — and the real tree was never mutated.
+
+## Final verification
+
+- `bash ~/.claude/hooks/check-pre-pr.sh run` → exit 0, 69 checks passed (status read unpiped; the first attempt read it through a pipe, which reports the pipe tail's status — R44)
+- `npx vitest run src/lib/auth/policy/ src/lib/services/ src/__tests__/lib/ src/lib/http/` → 37 files, 839 tests
+
+## What this round says about the earlier rounds
+
+Three internal rounds returned "No findings" and an external reviewer then found two real defects in the same files. Neither was in a blind spot the process disclaims — both are in code this branch edited, and one is a second member of a class the branch had explicitly derived. The honest reading is that R42 member-set derivation was applied to the *call sites* of `verifyTailscalePeer` and to the tailnet-name input, but never to the function's own parameter list; and that the parser was hardened twice (Round 1 S3, Round 4 S6) by fixing the reported spelling rather than by pinning the parser against an authority until this round.
