@@ -75,8 +75,11 @@ describe("audit-outbox reaper resets stuck PROCESSING rows (T3 real reapStuckRow
   it("reaps a stuck PROCESSING row back to PENDING with incremented attempt_count", async () => {
     const outboxId = await insertStuckRow({ attemptCount: 2, maxAttempts: 8 });
 
-    const reaped = await reapStuckRows(ctx.su.prisma);
-    expect(reaped).toBe(1);
+    // The reaper sweeps every tenant and returns a global count, so asserting
+    // an exact number here fails whenever another test in the same run left an
+    // eligible row behind. What this test means is "my row was reaped", which
+    // the per-row state below says precisely.
+    await reapStuckRows(ctx.su.prisma);
 
     const row = await getOutboxRow(outboxId);
     expect(row.status).toBe("PENDING");
@@ -110,8 +113,7 @@ describe("audit-outbox reaper resets stuck PROCESSING rows (T3 real reapStuckRow
   it("transitions stuck row to FAILED and writes AUDIT_OUTBOX_DEAD_LETTER when attempt_count reaches max_attempts", async () => {
     const outboxId = await insertStuckRow({ attemptCount: 7, maxAttempts: 8 });
 
-    const reaped = await reapStuckRows(ctx.su.prisma);
-    expect(reaped).toBe(1);
+    await reapStuckRows(ctx.su.prisma);
 
     const row = await getOutboxRow(outboxId);
     expect(row.status).toBe("FAILED");
@@ -148,10 +150,13 @@ describe("audit-outbox reaper resets stuck PROCESSING rows (T3 real reapStuckRow
       );
     });
 
-    const reaped = await reapStuckRows(ctx.su.prisma);
-    expect(reaped).toBe(0);
+    // Not "the reaper found nothing" — another tenant's row may well be
+    // eligible — but "it did not touch mine".
+    await reapStuckRows(ctx.su.prisma);
 
     const row = await getOutboxRow(freshId);
     expect(row.status).toBe("PROCESSING");
+    expect(row.attempt_count).toBe(0);
+    expect(row.processing_started_at).not.toBeNull();
   });
 });

@@ -126,8 +126,9 @@ describe("audit-outbox dead-letter — unchained invariant (C6/M-f)", () => {
 
     const stuckOutboxId = await insertStuckAboutToDie();
 
-    const reaped = await reapStuckRows(ctx.su.prisma);
-    expect(reaped).toBeGreaterThanOrEqual(1);
+    // Global sweep, so the count is not this tenant's to assert; the row state
+    // below is. (The >= 1 form this replaces was already a concession to that.)
+    await reapStuckRows(ctx.su.prisma);
 
     const stuckRow = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -487,38 +488,43 @@ describe("sibling reapers — reaper-driven dead-letter audit (F3)", () => {
 
   it("reapStuckDeliveries emits AUDIT_DELIVERY_DEAD_LETTER only for rows that hit FAILED", async () => {
     const dying = await insertStuckDelivery(true); // attempt 7 → +1 = 8 = max → FAILED
-    await insertStuckDelivery(false); // attempt 1 → +1 = 2 → PENDING, no audit
+    const surviving = await insertStuckDelivery(false); // attempt 1 → +1 = 2 → PENDING, no audit
 
-    const reaped = await reapStuckDeliveries(ctx.su.prisma);
-    expect(reaped).toBe(2);
+    // The reaper sweeps every tenant and returns a global count; another test's
+    // leftover eligible row would make an exact number wrong. Assert where MY
+    // two rows landed instead — which is what the test is actually about.
+    await reapStuckDeliveries(ctx.su.prisma);
 
     const status = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ status: string }[]>(
-        `SELECT status::text FROM audit_deliveries WHERE id = $1::uuid`,
-        dying,
+      return tx.$queryRawUnsafe<{ id: string; status: string }[]>(
+        `SELECT id::text, status::text FROM audit_deliveries WHERE id = ANY($1::uuid[])`,
+        [dying, surviving],
       );
     });
-    expect(status[0]?.status).toBe("FAILED");
+    const byId = new Map(status.map((r) => [r.id, r.status]));
+    expect(byId.get(dying)).toBe("FAILED");
+    expect(byId.get(surviving)).toBe("PENDING");
     // Exactly one dead-letter audit — for the FAILED row, not the PENDING one.
     expect(await auditCount(AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER)).toBe(1);
   });
 
   it("reapStuckWebhookDeliveries emits AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER only for rows that hit FAILED", async () => {
     const dying = await insertStuckWebhookDelivery(true);
-    await insertStuckWebhookDelivery(false);
+    const surviving = await insertStuckWebhookDelivery(false);
 
-    const reaped = await reapStuckWebhookDeliveries(ctx.su.prisma);
-    expect(reaped).toBe(2);
+    await reapStuckWebhookDeliveries(ctx.su.prisma);
 
     const status = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ status: string }[]>(
-        `SELECT status::text FROM webhook_deliveries WHERE id = $1::uuid`,
-        dying,
+      return tx.$queryRawUnsafe<{ id: string; status: string }[]>(
+        `SELECT id::text, status::text FROM webhook_deliveries WHERE id = ANY($1::uuid[])`,
+        [dying, surviving],
       );
     });
-    expect(status[0]?.status).toBe("FAILED");
+    const byId = new Map(status.map((r) => [r.id, r.status]));
+    expect(byId.get(dying)).toBe("FAILED");
+    expect(byId.get(surviving)).toBe("PENDING");
     expect(await auditCount(AUDIT_ACTION.AUDIT_WEBHOOK_DELIVERY_DEAD_LETTER)).toBe(1);
   });
 

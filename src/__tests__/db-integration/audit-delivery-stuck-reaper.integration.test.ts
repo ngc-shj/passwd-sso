@@ -136,8 +136,9 @@ describe("audit-delivery stuck reaper (T3 real reapStuckDeliveries)", () => {
       stuck: true,
     });
 
-    const reapedCount = await reapStuckDeliveries(ctx.su.prisma);
-    expect(reapedCount).toBeGreaterThanOrEqual(1);
+    // Global sweep — the count spans every tenant, so it says nothing about
+    // this test's row. The per-row assertions below do.
+    await reapStuckDeliveries(ctx.su.prisma);
 
     const row = await getDelivery(deliveryId);
     expect(row.status).toBe("PENDING");
