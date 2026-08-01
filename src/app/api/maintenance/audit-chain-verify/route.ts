@@ -12,8 +12,14 @@
  * See docs/security/audit-chain-threat-model.md#retention-purge-interaction:
  * after a retention purge of the earliest chained rows, the default
  * (fromSeq=1) walk below re-seeds from genesis and reports a FALSE TAMPER at
- * the first retained row — this is verified real behavior (T5 characterization
- * test), not a hypothetical edge case.
+ * the first retained row.
+ *
+ * The opposite direction — a walk that covers less than the range it was asked
+ * to verify reporting ok:true — is closed here: `incomplete` compares how far
+ * the walk actually got against toSeq unconditionally, and a missing anchor is
+ * only benign when no chained row survives. Purge-aware verification (telling
+ * a legitimate retention purge apart from row deletion) needs the deferred
+ * purged_up_to_seq watermark; until it lands, both answer RANGE_INCOMPLETE.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -149,6 +155,47 @@ async function handleGET(req: NextRequest) {
   );
 
   if (!anchors.length) {
+    // No anchor is only benign when the tenant has no chained rows at all.
+    // An anchor that vanished while chained rows survive is indistinguishable
+    // from "never anchored" on the anchor read alone, and answering ok:true
+    // there would report VALID having verified nothing.
+    const chainedRows = await withBypassRls(
+      prisma,
+      async (tx) =>
+        tx.$queryRawUnsafe<{ count: bigint }[]>(
+          `SELECT COUNT(*) AS count
+           FROM audit_logs
+           WHERE tenant_id = $1
+             AND chain_seq IS NOT NULL`,
+          tenantId,
+        ),
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+    if (Number(chainedRows[0]?.count ?? 0) > 0) {
+      await logAuditAsync({
+        ...tenantAuditBase(req, auth.subjectUserId, membership.tenantId),
+        actorType: ACTOR_TYPE.HUMAN,
+        action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
+        metadata: {
+          tokenSubjectUserId: auth.subjectUserId,
+          tokenId: auth.tokenId,
+          targetTenantId: tenantId,
+          ok: false,
+          reason: "ANCHOR_MISSING",
+          totalVerified: 0,
+        },
+      });
+      return NextResponse.json({
+        ok: false,
+        reason: "ANCHOR_MISSING",
+        truncated: false,
+        walkedThrough: 0,
+        firstTamperedSeq: null,
+        firstGapAfterSeq: null,
+        firstTimestampViolationSeq: null,
+        totalVerified: 0,
+      });
+    }
     return NextResponse.json({ ok: true, totalVerified: 0 });
   }
 
@@ -301,25 +348,44 @@ async function handleGET(req: NextRequest) {
     walkedThrough++;
   }
 
-  // Detect truncation: query hit MAX_ROWS_PER_REQUEST before covering full range
-  const truncated = rows.length >= MAX_ROWS_PER_REQUEST && (prevSeq === null || prevSeq < toSeq);
+  // How far up the requested range the walk actually got. With no rows walked,
+  // nothing above the lower bound is covered.
+  const coveredUpToSeq = prevSeq !== null ? prevSeq : fromSeq - 1;
+  // Anything short of toSeq means the walk did not verify what it was asked to.
+  // Hitting the row cap is one cause; rows deleted or purged out of the range
+  // (which leave no gap BETWEEN the returned rows, so integrityOk stays true)
+  // are others, and they reach here without the cap being involved.
+  const incomplete = fromSeq > toSeq || coveredUpToSeq < toSeq;
+  // Kept as a distinct signal so an operator can tell "ask for a smaller range"
+  // apart from "the range is missing rows".
+  const truncated = rows.length >= MAX_ROWS_PER_REQUEST && incomplete;
   const verifiedUpToSeq = prevSeq !== null ? prevSeq : undefined;
 
   const integrityOk = firstTamperedSeq === null && firstGapAfterSeq === null && firstTimestampViolationSeq === null;
-  // Fail-closed: truncated verification is never reported as ok
-  const ok = integrityOk && !truncated;
+  // Fail-closed: a walk that did not cover the requested range is never ok,
+  // whatever stopped it.
+  const ok = integrityOk && !incomplete;
 
-  // Machine-readable failure reason
-  let reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined;
+  // Machine-readable failure reason. Integrity violations outrank coverage
+  // shortfalls — a tamper bails the walk, which also leaves it incomplete.
+  let reason:
+    | "TRUNCATED"
+    | "TAMPER_DETECTED"
+    | "GAP_DETECTED"
+    | "TIMESTAMP_VIOLATION"
+    | "RANGE_INCOMPLETE"
+    | undefined;
   if (!ok) {
-    if (truncated && integrityOk) {
-      reason = "TRUNCATED";
-    } else if (firstTamperedSeq !== null) {
+    if (firstTamperedSeq !== null) {
       reason = "TAMPER_DETECTED";
     } else if (firstGapAfterSeq !== null) {
       reason = "GAP_DETECTED";
     } else if (firstTimestampViolationSeq !== null) {
       reason = "TIMESTAMP_VIOLATION";
+    } else if (truncated) {
+      reason = "TRUNCATED";
+    } else {
+      reason = "RANGE_INCOMPLETE";
     }
   }
 
@@ -332,6 +398,7 @@ async function handleGET(req: NextRequest) {
       tokenId: auth.tokenId,
       targetTenantId: tenantId,
       ok,
+      reason,
       totalVerified,
       truncated,
       verifiedUpToSeq,
