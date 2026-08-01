@@ -191,13 +191,18 @@ npx next build      exit=0   ✓ Compiled successfully in 8.6s
                              ✓ Generating static pages (243/243)
 ```
 
-Note on a first attempt at this transcript: piping all four through a single filter
-produced `eslint_exit=2` and a build summary reading "1 routes … Errors: 1". Both were
-artifacts of this environment's output-compressing command proxy mangling the streams,
-not real failures — re-running with plain file redirection gave exit 0 and zero output
-for eslint, and the full 243-route build above. Recorded because a compressed exit code
-is exactly the R44 shape, arriving from the tooling rather than from a pipeline the
-author wrote.
+Note on a first attempt at this transcript: the four commands were chained inside one
+`{ ...; } | grep -v ... | tail -40` pipeline, which produced `eslint_exit=2` and a build
+summary reading "1 routes … Errors: 1". Both figures are wrong — the re-run above gives
+exit 0 with zero output for eslint and a 243-route build. **The mechanism was not
+diagnosed**, and two candidates are consistent with what was observed: the ordinary R44
+shape (`$?` read after a filter reports the filter's status, not the command's) and
+mangling by this environment's output-compressing command proxy, whose truncation marker
+appeared in the same output. Recorded as an unexplained anomaly rather than an attributed
+one, because attributing it to the tooling would invite the next reader to stop
+suspecting their own pipeline — which is the more common cause and the one they can fix.
+The operative lesson stands either way: read exit status from the command itself, with
+nothing between it and `$?`.
 
 **Licenses** (T7): `npm run licenses:check:strict` → `PASSED (strict) — allowlisted=15,
 unreviewed=0, expired=0`; `:ext:strict` and `:cli:strict` → `PASSED (strict)`.
