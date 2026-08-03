@@ -182,6 +182,16 @@ BACKUP_DIR=/mnt/vault BACKUP_RETAIN=30 scripts/backup-db.sh
 BACKUP_DRY_RUN=true scripts/backup-db.sh   # preview the prune, dump nothing
 ```
 
+Only one run may hold a destination at a time. If a run is killed hard — SIGKILL,
+OOM, power loss — the lock survives it and the next run stops with
+`BACKUP_ERR:LOCKED` naming the holder. That is deliberate: taking the lock
+automatically raced two runs into one directory in every variant tried. When you
+have confirmed no backup is running, take it explicitly:
+
+```bash
+BACKUP_FORCE_UNLOCK=true scripts/backup-db.sh
+```
+
 Each run produces one directory:
 
 ```

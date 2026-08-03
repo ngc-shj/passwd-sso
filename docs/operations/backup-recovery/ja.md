@@ -182,6 +182,16 @@ BACKUP_DIR=/mnt/vault BACKUP_RETAIN=30 scripts/backup-db.sh
 BACKUP_DRY_RUN=true scripts/backup-db.sh   # 削除対象の確認のみ。ダンプは取らない
 ```
 
+1 つの保存先を同時に扱えるのは 1 実行だけです。SIGKILL・OOM・電源断などで実行が
+強制終了された場合、ロックだけが残り、次の実行は保持者を明示して
+`BACKUP_ERR:LOCKED` で停止します。これは意図した挙動です — 自動で奪い取る実装は、
+試したどの方式でも 2 つの実行を同じディレクトリへ同時に入れるレースを起こしました。
+バックアップが動いていないことを確認したうえで、明示的に奪ってください。
+
+```bash
+BACKUP_FORCE_UNLOCK=true scripts/backup-db.sh
+```
+
 1 回の実行で 1 ディレクトリが作られます。
 
 ```

@@ -410,7 +410,23 @@ exit 0`);
     }
   });
 
-  it("reclaims a lock whose holder is gone rather than wedging every future run", () => {
+  it("does not silently take a lock whose holder is gone", () => {
+    // Automatic reclaim was racy in every variant tried: two runs can both judge
+    // the same lock stale, and the second renames away the lock the first has
+    // just re-created. Fail closed and name the escape instead.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const lock = join(backupDir, ".lock.d");
+    mkdirSync(lock, { recursive: true, mode: 0o700 });
+    writeFileSync(join(lock, "pid"), "999999\n", "utf8");
+    writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
+    const r = run();
+    expect(err(r)).toBe("LOCKED");
+    expect(r.stderr, "the message must name the escape").toMatch(/BACKUP_FORCE_UNLOCK=true/);
+    expect(generations()).toEqual([]);
+  });
+
+  it("takes a stale lock when the operator asks explicitly", () => {
     // A SIGKILL, an OOM or a power loss leaves the lock behind with no live
     // holder. Treating that as contention disables the deployment's only backup
     // path permanently, and the operator finds out when the corpus stops moving.
@@ -420,9 +436,9 @@ exit 0`);
     mkdirSync(lock, { recursive: true, mode: 0o700 });
     writeFileSync(join(lock, "pid"), "999999\n", "utf8");
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
-    const r = run();
+    const r = run({ BACKUP_FORCE_UNLOCK: "true" });
     expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toMatch(/reclaiming stale lock/);
+    expect(r.stderr).toMatch(/taking .* from a holder that is gone/);
     expect(generations()).toHaveLength(1);
   });
 
@@ -1004,7 +1020,10 @@ exit 0`);
   it("delivers the password only through a mode-0600 file inside the audited root", () => {
     stub("pg_dump", `
 echo "pg_dump $* PGPASSWORD=[\${PGPASSWORD:-}]" >> "${logFile}"
-stat -c '%a %n' -- "\${PGPASSFILE}" >> "${logFile}.stat"
+case "$(uname -s)" in
+  Darwin|*BSD) stat -f '%Lp %N' -- "\${PGPASSFILE}" >> "${logFile}.stat" ;;
+  *)           stat -c '%a %n'  -- "\${PGPASSFILE}" >> "${logFile}.stat" ;;
+esac
 out=""; prev=""; for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
 printf 'PGDMP' > "$out"
 exit 0`);
@@ -1224,5 +1243,94 @@ describe("ignore-rule coverage", () => {
     // matched there. Pinning it means a future widening is a deliberate edit.
     expect(ignored("custom-backups/20260101T000000Z/globals.sql"),
       "globals.sql outside the default directory name is NOT covered").toBe(false);
+  });
+});
+
+
+describe("concurrency and destination ownership", () => {
+  it("lets exactly one of two runs reclaim the same stale lock", { timeout: 30000 }, async () => {
+    // Two runs can judge the same lock stale simultaneously. rm-then-mkdir let
+    // the later one delete the earlier one's FRESH lock, so both proceeded into
+    // one root and each swept the other's residue. The claim is a rename now,
+    // which exactly one can win.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const lock = join(backupDir, ".lock.d");
+    mkdirSync(lock, { recursive: true, mode: 0o700 });
+    writeFileSync(join(lock, "pid"), "999999\n", "utf8");        // gone
+    writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
+
+    // Slow the dump so the two runs genuinely overlap.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    sleep 1; printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+
+    const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
+    const both = await Promise.all([0, 1].map(() => new Promise((res) => {
+      const c = spawn("bash", [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      c.stdout.on("data", (d) => { out += d; });
+      c.stderr.on("data", (d) => { out += d; });
+      c.on("exit", (code) => res({ code, out }));
+    })));
+
+    // Neither may take it: automatic reclaim is what raced. Both fail closed,
+    // and the operator decides.
+    expect(both.filter((r) => r.code === 0), "no run may take a stale lock on its own").toHaveLength(0);
+    for (const r of both) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
+    expect(generations()).toEqual([]);
+  });
+
+  it("refuses an ancestor owned by a third party", () => {
+    // stat is PATH-resolved, so the ownership branch is reachable without a
+    // second real uid: report a foreign owner for the parent only.
+    const parent = dirname(backupDir);
+    const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+for a in "$@"; do
+  if [ "$a" = "${parent}" ]; then
+    case " $* " in
+      *" %u "*|*"'%u'"*) echo 4242; exit 0 ;;
+    esac
+  fi
+done
+exec "${realStat}" "$@"`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/owned by uid 4242, who can rename our entry/);
+  });
+
+  it("accepts an ancestor owned by the invoking user (paired allow case)", () => {
+    // Without this, the refusal above would pass against a check that refuses
+    // every ancestor.
+    expect(run().status).toBe(0);
+  });
+
+  it("refuses a password whose literal trailing newline a substitution would eat", () => {
+    // Distinct from the %0A case: the raw byte is stripped by the command
+    // substitution inside percent_decode, so a decoded-form check sees a clean
+    // password and connects as a different secret.
+    const r = run({ MIGRATION_DATABASE_URL: "postgresql://u:secret\n@h:5432/d?sslrootcert=/x" });
+    expect(err(r)).toBe("BAD_URL");
+    expect(r.stderr).toMatch(/literal newline/);
+  });
+
+  it("previews only the residue it would actually remove", () => {
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    mkdirSync(join(backupDir, "20200101T000000Z.partial"), { recursive: true });
+    writeFileSync(join(backupDir, "notes.partial"), "not a run", "utf8");
+    const r = run({ BACKUP_DRY_RUN: "true" });
+    expect(r.stdout).toContain("would remove residue 20200101T000000Z.partial");
+    expect(r.stdout, "a regular file is not a candidate and must not be listed")
+      .not.toContain("notes.partial");
   });
 });

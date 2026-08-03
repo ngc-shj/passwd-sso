@@ -18,6 +18,7 @@
 #   MIGRATION_DATABASE_URL (optional) When set, selects URL mode instead of Compose mode
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
 #   COMPOSE_DB_SUPERUSER  (optional) Role used for pg_dump in Compose mode (default: passwd_user)
+#   BACKUP_FORCE_UNLOCK   (optional) "true" takes a lock whose holder is gone (default: false)
 #   PGSSLROOTCERT         (optional) CA bundle for the TLS floor, when the URL carries no sslrootcert=
 #
 # Exit codes:
@@ -262,6 +263,7 @@ BACKUP_RETAIN="${BACKUP_RETAIN:-7}"
 BACKUP_DATABASES="${BACKUP_DATABASES:-passwd_sso jackson}"
 BACKUP_DRY_RUN="${BACKUP_DRY_RUN:-false}"
 BACKUP_ALLOW_IN_REPO="${BACKUP_ALLOW_IN_REPO:-false}"
+BACKUP_FORCE_UNLOCK="${BACKUP_FORCE_UNLOCK:-false}"
 BACKUP_TLS_MODE="${BACKUP_TLS_MODE:-verify-full}"
 COMPOSE_DB_SERVICE="${COMPOSE_DB_SERVICE:-db}"
 COMPOSE_DB_SUPERUSER="${COMPOSE_DB_SUPERUSER:-passwd_user}"
@@ -296,7 +298,7 @@ done
 [ "$_db_count" -gt 0 ] || fail BAD_ENV "BACKUP_DATABASES must name at least one database"
 unset _db _db_count
 
-for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO"; do
+for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO" "BACKUP_FORCE_UNLOCK:$BACKUP_FORCE_UNLOCK"; do
   case "${_pair#*:}" in
     true|false) ;;
     *) fail BAD_ENV "${_pair%%:*} must be exactly 'true' or 'false' (got: ${_pair#*:})" ;;
@@ -400,6 +402,7 @@ parse_url() {
           # variable at all.
           case "$URL_PASSWORD_ENCODED" in
             *%0[Aa]*|*%0[Dd]*|*%00*) fail BAD_URL "the password contains an encoded newline or NUL, which .pgpass cannot represent" ;;
+            *$'\n'*|*$'\r'*) fail BAD_URL "the password contains a literal newline, which .pgpass cannot represent" ;;
           esac
           case "$URL_PASSWORD" in
             *$'\n'*|*$'\r'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
@@ -750,19 +753,19 @@ if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
     fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder, alive)"
   fi
 
-  warn "reclaiming stale lock $LOCK_CANDIDATE (holder $holder is gone)"
-  # Claim it by rename, not by rm-then-mkdir: renaming onto a name that does not
-  # exist is atomic, so of two runs that both judged the lock stale exactly one
-  # succeeds. The loser's rename fails because the source is gone, and it must
-  # re-evaluate rather than proceed — otherwise it would delete the winner's
-  # fresh lock and both would dump into one root.
-  stale_claim="$BACKUP_ROOT/.lock.stale.$$"
-  if ! mv -- "$LOCK_CANDIDATE" "$stale_claim" 2>/dev/null; then
-    fail LOCKED "$LOCK_CANDIDATE was reclaimed by another run while we were deciding — retry"
+  # Deliberately NOT reclaimed automatically. Two runs can reach this point
+  # having both judged the same lock stale; whichever acts second renames away
+  # the lock the first has already re-created, because the decision was made
+  # about one object and the action lands on whatever now occupies the path.
+  # Every automatic variant tried here has been racy or fail-open, and a wedged
+  # lock is a rare state a human notices — so the escape is explicit.
+  if [ "${BACKUP_FORCE_UNLOCK:-false}" != "true" ]; then
+    fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). No run is active; re-run with BACKUP_FORCE_UNLOCK=true to take it, or remove the directory by hand."
   fi
-  rm -rf -- "$stale_claim"
+  warn "BACKUP_FORCE_UNLOCK=true — taking $LOCK_CANDIDATE from a holder that is gone (pid $holder)"
+  rm -rf -- "$LOCK_CANDIDATE"
   mkdir -- "$LOCK_CANDIDATE" 2>/dev/null \
-    || fail LOCKED "another run took $LOCK_CANDIDATE immediately after it was reclaimed — retry"
+    || fail LOCKED "another run took $LOCK_CANDIDATE while it was being force-unlocked"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"
 # Recorded immediately, and guarded: a lock we hold but cannot describe would
@@ -797,7 +800,15 @@ EOF
   done <<EOF
 $existing
 EOF
-  for _res in "$BACKUP_ROOT"/*.partial "$BACKUP_ROOT"/.pgpass.*; do
+  # The same predicate the sweep uses, so the preview cannot name something the
+  # run would leave alone (a regular file called notes.partial, say).
+  while IFS= read -r _res; do
+    [ -n "$_res" ] || continue
+    log "DRY RUN — would remove residue $_res"
+  done <<EOF
+$(list_stamped ".partial")
+EOF
+  for _res in "$BACKUP_ROOT"/.pgpass.*; do
     [ -e "$_res" ] || continue
     log "DRY RUN — would remove residue $(basename -- "$_res")"
   done
