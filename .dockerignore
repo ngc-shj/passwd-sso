@@ -50,6 +50,9 @@ node_modules
 **/*.tfvars
 **/*.tfvars.json
 !**/*.tfvars.example
+# --- Database backups (scripts/backup-db.sh) ---
+**/*.dump
+**/passwd-sso-backups
 # --- Test / coverage output (not needed in the image) ---
 **/test-results
 **/coverage

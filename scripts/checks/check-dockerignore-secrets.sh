@@ -60,7 +60,7 @@ DOCKERIGNORE=".dockerignore"
 # DIR_CLASSES: directory names whose ENTIRE subtree is a secret/artifact. The
 # bundle scan flags the dir itself; the static check verifies .dockerignore
 # excludes a file nested inside it. Adding one here auto-extends both checks.
-DIR_CLASSES=(".terraform" "postgres_data" "saml")
+DIR_CLASSES=(".terraform" "postgres_data" "saml" "passwd-sso-backups")
 
 MUST_EXCLUDE=(
   # env files
@@ -84,6 +84,9 @@ MUST_EXCLUDE=(
   # generated automatically from DIR_CLASSES (dirProbes), so no OTHER nested
   # files need listing here — adding a dir-class is a one-line DIR_CLASSES edit.
   "saml/metadata.xml" "postgres_data/base/1"
+  "passwd-sso-backups/20260101T000000Z/globals.sql"
+  # Loose archive outside a run directory — covered by the *.dump class.
+  "backup.dump" "sub/dir/passwd_sso.dump"
   "infra/terraform/.terraform/providers/x"
 )
 # Committed placeholders that MUST remain included (never excluded).

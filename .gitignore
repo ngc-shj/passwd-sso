@@ -139,3 +139,13 @@ ios/*.xcodeproj/
 ios/*.xcworkspace/xcuserdata/
 *.xcuserstate
 *.xcuserdatad/
+
+# Database backups produced by scripts/backup-db.sh. The archives carry every
+# ciphertext blob, the audit log, and every wrapped key — a committed dump is a
+# published database. The extension rule catches a stray archive anywhere; the
+# directory rule catches a whole run tree (MANIFEST and globals.sql included)
+# under the script's default name. A run directory the operator names something
+# else via BACKUP_ALLOW_IN_REPO is NOT covered — the script refuses in-repo
+# destinations by default for that reason.
+*.dump
+passwd-sso-backups/

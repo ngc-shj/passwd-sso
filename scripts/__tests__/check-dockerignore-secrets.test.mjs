@@ -55,6 +55,7 @@ const RECURSIVE_IGNORE = [
   "**/.passwd-sso-env.json",
   "**/*review-credentials.local.md", "**/.load-test-auth.json", "**/.auth-state.json",
   "**/*.db", "**/*.sqlite", "**/*.db-journal", "**/postgres_data",
+  "**/*.dump", "**/passwd-sso-backups",
   "**/.terraform", "**/*.tfstate", "**/*.tfstate.*",
   "**/*.tfvars", "**/*.tfvars.json", "!**/*.tfvars.example",
   "**/test-results", "**/coverage", "**/.coverage-snapshots", "**/playwright-report",
@@ -93,7 +94,10 @@ describe("check-dockerignore-secrets", () => {
 
   it("FAILS when .dockerignore misses session-token / DB-data artifacts (.auth-state.json, postgres_data, *.db-journal, saml)", () => {
     // Everything covered EXCEPT the Round-4-review class — proves each is enforced.
-    const missing = ["**/.auth-state.json", "**/postgres_data", "**/*.db-journal", "**/saml"];
+    // `**/*.dump` is an extension class, not a DIR_CLASSES entry, so the
+    // generated dir-probe test below does not cover it — drop-proving it here
+    // is what makes it load-bearing rather than decorative.
+    const missing = ["**/.auth-state.json", "**/postgres_data", "**/*.db-journal", "**/saml", "**/*.dump"];
     for (const drop of missing) {
       const partial = RECURSIVE_IGNORE.replace(drop + "\n", "");
       writeDockerignore(partial);
