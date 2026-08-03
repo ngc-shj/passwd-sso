@@ -340,6 +340,7 @@ URL_PASSWORD=""
 URL_DISPLAY=""
 URL_PGPASS_HOST=""
 URL_PGPASS_PORT=""
+URL_PASSWORD_ENCODED=""
 
 percent_decode() {
   # Byte-exact: no printf '%b', which re-interprets backslashes already present
@@ -390,7 +391,19 @@ parse_url() {
       hostpart="${authority##*@}"
       case "$userinfo" in
         *:*)
-          URL_PASSWORD="$(percent_decode "${userinfo#*:}")"
+          URL_PASSWORD_ENCODED="${userinfo#*:}"
+          URL_PASSWORD="$(percent_decode "$URL_PASSWORD_ENCODED")"
+          # Decided on the ENCODED form: percent_decode's output passes
+          # through a command substitution, which strips trailing newlines, so
+          # a password ending in %0A arrives here already altered and would
+          # authenticate as a different secret. NUL cannot survive a shell
+          # variable at all.
+          case "$URL_PASSWORD_ENCODED" in
+            *%0[Aa]*|*%0[Dd]*|*%00*) fail BAD_URL "the password contains an encoded newline or NUL, which .pgpass cannot represent" ;;
+          esac
+          case "$URL_PASSWORD" in
+            *$'\n'*|*$'\r'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
+          esac
           userinfo="${userinfo%%:*}"
           ;;
         *)
@@ -449,8 +462,8 @@ parse_url() {
     # Member set derived from every parameter that can carry a credential,
     # redirect the peer, or select a transport the TLS floor does not govern.
     case "$decoded_query" in
-      *password=*|*passfile=*|*service=*|*oauth_client_secret=*|*sslpassword=*|*sslkeylogfile=*)
-        fail BAD_URL "MIGRATION_DATABASE_URL must not carry a credential or credential-file parameter (password, passfile, service, oauth_client_secret, sslpassword, sslkeylogfile) — the password goes in the userinfo, and the rest select material this script cannot audit" ;;
+      *password=*|*passfile=*|*service=*|*oauth_client_secret=*|*sslpassword=*|*sslkeylogfile=*|*scram_client_key=*|*scram_server_key=*)
+        fail BAD_URL "MIGRATION_DATABASE_URL must not carry a credential or credential-file parameter (password, passfile, service, oauth_client_secret, sslpassword, sslkeylogfile, scram_client_key, scram_server_key) — the password goes in the userinfo, and the rest select material this script cannot audit" ;;
       *host=*|*hostaddr=*)
         fail BAD_URL "MIGRATION_DATABASE_URL must not carry host= or hostaddr= — they move the connection away from the authority that MANIFEST records and that the TLS floor verifies" ;;
       *gssencmode=*)
@@ -633,11 +646,13 @@ while [ "$anc" != "/" ]; do
   if [ "$(( 8#$anc_mode & 8#022 ))" -ne 0 ] && [ "$(( 8#$anc_mode & 8#1000 ))" -eq 0 ]; then
     fail DEST_UNSAFE "ancestor $anc is writable by others without the sticky bit (mode $anc_mode)"
   fi
-  # The sticky bit protects against third parties, not against the directory's
-  # OWNER: POSIX lets a parent's owner rename any entry in it. So a sticky
-  # ancestor is only acceptable when root or we own it.
-  if [ "$(( 8#$anc_mode & 8#1000 ))" -ne 0 ] && [ "$anc_uid" != "0" ] && [ "$anc_uid" != "$(id -u)" ]; then
-    fail DEST_UNSAFE "ancestor $anc is sticky but owned by uid $anc_uid, who can rename our entry out of it"
+  # A directory's OWNER can rename any entry in it whenever the owner-write bit
+  # is set — sticky or not. So a third-party-owned ancestor is unsafe in the
+  # ordinary 0755 case too, which is what an admin creating the root and
+  # chown-ing it to the operator produces.
+  if [ "$anc_uid" != "0" ] && [ "$anc_uid" != "$(id -u)" ] \
+     && [ "$(( 8#$anc_mode & 8#200 ))" -ne 0 ]; then
+    fail DEST_UNSAFE "ancestor $anc is owned by uid $anc_uid, who can rename our entry out of it (mode $anc_mode)"
   fi
   # Mode bits do not show an ACL grant. An ancestor at 0700 with a named-user
   # ACL is writable by that user, who can then substitute the backup root.
@@ -736,9 +751,18 @@ if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
   fi
 
   warn "reclaiming stale lock $LOCK_CANDIDATE (holder $holder is gone)"
-  rm -rf -- "$LOCK_CANDIDATE"
+  # Claim it by rename, not by rm-then-mkdir: renaming onto a name that does not
+  # exist is atomic, so of two runs that both judged the lock stale exactly one
+  # succeeds. The loser's rename fails because the source is gone, and it must
+  # re-evaluate rather than proceed — otherwise it would delete the winner's
+  # fresh lock and both would dump into one root.
+  stale_claim="$BACKUP_ROOT/.lock.stale.$$"
+  if ! mv -- "$LOCK_CANDIDATE" "$stale_claim" 2>/dev/null; then
+    fail LOCKED "$LOCK_CANDIDATE was reclaimed by another run while we were deciding — retry"
+  fi
+  rm -rf -- "$stale_claim"
   mkdir -- "$LOCK_CANDIDATE" 2>/dev/null \
-    || fail LOCKED "could not take $LOCK_CANDIDATE after reclaiming it"
+    || fail LOCKED "another run took $LOCK_CANDIDATE immediately after it was reclaimed — retry"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"
 # Recorded immediately, and guarded: a lock we hold but cannot describe would
@@ -747,10 +771,45 @@ printf '%s\n' "$$" > "$LOCK_DIR/pid" || fail INTERNAL "could not record the lock
 printf '%s\n' "$(uname -n)" > "$LOCK_DIR/host" || fail INTERNAL "could not record the lock host"
 printf '%s\n' "$(proc_starttime "$$")" > "$LOCK_DIR/starttime" || true
 
-# Sweep residue from interrupted runs while the lock is held and BEFORE this run
-# creates its own passfile — a sweep placed after it deletes the credential the
-# run is about to use.
+# ─── Dry run (C6g) ───────────────────────────────────────────
+
+list_generations() { list_stamped ""; }
+
+if [ "$BACKUP_DRY_RUN" = "true" ]; then
+  existing="$(list_generations)"
+  n=0
+  while IFS= read -r g; do [ -n "$g" ] && n=$((n + 1)); done <<EOF
+$existing
+EOF
+  # The real run adds a generation BEFORE pruning, so previewing over the
+  # current count reports one deletion too few — and says "nothing will be
+  # deleted" at exactly the boundary where the real run deletes one.
+  total=$((n + 1))
+  would_delete=$((total - BACKUP_RETAIN))
+  [ "$would_delete" -lt 0 ] && would_delete=0
+  log "DRY RUN — $n existing generation(s); a real run would hold $total and delete $would_delete of them"
+  i=0
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    [ "$i" -lt "$would_delete" ] || break
+    log "DRY RUN — would delete $g"
+    i=$((i + 1))
+  done <<EOF
+$existing
+EOF
+  for _res in "$BACKUP_ROOT"/*.partial "$BACKUP_ROOT"/.pgpass.*; do
+    [ -e "$_res" ] || continue
+    log "DRY RUN — would remove residue $(basename -- "$_res")"
+  done
+  unset _res
+  log "DRY RUN — nothing was dumped and nothing was deleted"
+  exit 0
+fi
+
+# Only past the dry-run exit: a preview must delete nothing. Still before this
+# run creates its own passfile, which a later sweep would delete.
 prune_orphaned_partials
+
 
 # After the destination is verified and the lock is held: the passfile lives
 # inside BACKUP_ROOT, so it cannot be created before BACKUP_ROOT exists.
@@ -763,9 +822,6 @@ if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
     || fail INTERNAL "could not create a password file"
   # Wildcards for host/port/database: the script decides those per target, and a
   # mismatch would silently fall back to no password.
-  case "$URL_PASSWORD" in
-    *$'\n'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
-  esac
   # Escape the two bytes .pgpass treats as syntax. Backslash first: escaping the
   # colon first would then have its own backslash escaped again.
   _pgpass_pw="${URL_PASSWORD//\\/\\\\}"
@@ -809,35 +865,6 @@ unset _tries
 RUN_PARTIAL="$BACKUP_ROOT/$STAMP.partial"
 RUN_FINAL="$BACKUP_ROOT/$STAMP"
 
-# ─── Dry run (C6g) ───────────────────────────────────────────
-
-list_generations() { list_stamped ""; }
-
-if [ "$BACKUP_DRY_RUN" = "true" ]; then
-  existing="$(list_generations)"
-  n=0
-  while IFS= read -r g; do [ -n "$g" ] && n=$((n + 1)); done <<EOF
-$existing
-EOF
-  # The real run adds a generation BEFORE pruning, so previewing over the
-  # current count reports one deletion too few — and says "nothing will be
-  # deleted" at exactly the boundary where the real run deletes one.
-  total=$((n + 1))
-  would_delete=$((total - BACKUP_RETAIN))
-  [ "$would_delete" -lt 0 ] && would_delete=0
-  log "DRY RUN — $n existing generation(s); a real run would hold $total and delete $would_delete of them"
-  i=0
-  while IFS= read -r g; do
-    [ -n "$g" ] || continue
-    [ "$i" -lt "$would_delete" ] || break
-    log "DRY RUN — would delete $g"
-    i=$((i + 1))
-  done <<EOF
-$existing
-EOF
-  log "DRY RUN — nothing was dumped and nothing was deleted"
-  exit 0
-fi
 
 # Only now, past the dry-run exit: previewing must delete nothing. Still before
 # any dump, because .FAILED directories are produced only by runs that did NOT

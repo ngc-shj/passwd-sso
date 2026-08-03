@@ -252,15 +252,23 @@ the dump already marked applied, so `prisma migrate deploy` will not redo it,
 and every login role in the cluster — `jackson_user` included — can then open a
 connection to `passwd_sso`.
 
+`psql` continues after a failed statement and still exits 0 by default, so a
+`GRANT` that fails — a role the target cluster does not have, say — would look
+like success. `-v ON_ERROR_STOP=1` plus a transaction makes the block
+all-or-nothing and the exit status meaningful.
+
 ```bash
-docker compose exec -T db psql -U passwd_user -d passwd_sso <<'SQL'
+docker compose exec -T db psql -X -v ON_ERROR_STOP=1 -U passwd_user -d passwd_sso <<'SQL'
+BEGIN;
 REVOKE CONNECT ON DATABASE passwd_sso FROM PUBLIC;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_dcr_cleanup_worker;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_anchor_publisher;
 GRANT CONNECT ON DATABASE passwd_sso TO passwd_retention_gc_worker;
+COMMIT;
 SQL
+echo "exit=$?"   # must be 0; any non-zero means nothing was applied
 ```
 
 Verify against the source host rather than trusting the statements — the role
