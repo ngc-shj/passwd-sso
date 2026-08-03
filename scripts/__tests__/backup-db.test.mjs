@@ -906,3 +906,323 @@ describe("C8 documentation", () => {
     }
   });
 });
+
+
+// ─── Guards the mutation sweep found unpinned ───────────────
+//
+// A mutation sweep put the suite's kill rate at 31%: nearly every guard added
+// after the first review round could be deleted with the suite still green. The
+// dominant single cause was the sentinel — one password containing none of
+// `:` `\` `/` `?` `#` `%` or a newline cannot exercise any guard that exists
+// because those bytes are dangerous.
+
+describe("credential-shaped inputs", () => {
+  const CA = "sslrootcert=/tmp/ca.pem";
+  const url = (userinfo, query = "") =>
+    `postgresql://${userinfo}@127.0.0.1:5432/d?${CA}${query}`;
+
+  const pgStubs = () => {
+    for (const bin of ["pg_dump", "pg_dumpall"]) {
+      stub(bin, `
+echo "${bin} $* PGPASSWORD=[\${PGPASSWORD:-}] PGSSLMODE=[\${PGSSLMODE:-}] PGHOST=[\${PGHOST:-}] PGSERVICE=[\${PGSERVICE:-}]" >> "${logFile}"
+[ -n "\${PGPASSFILE:-}" ] && cat -- "\${PGPASSFILE}" >> "${logFile}.pgpass"
+out=""; prev=""
+for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
+if [ "${bin}" = "pg_dumpall" ]; then
+  printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n' > "$out"
+else
+  printf 'PGDMP' > "$out"
+fi
+exit 0`);
+    }
+    stub("pg_restore", `printf '; h\\n1; 1 TABLE t o\\n'
+exit 0`);
+    stub("psql", `printf 't|TLSv1.3|AESGCM\\n'
+exit 0`);
+  };
+
+  // Derived from the script's own refusal list, not from memory: every
+  // parameter libpq accepts that carries a credential, redirects the peer, or
+  // selects a transport the TLS floor cannot govern.
+  const REFUSED_PARAMS = [
+    "password", "passfile", "service", "oauth_client_secret", "sslpassword",
+    "sslkeylogfile", "scram_client_key", "scram_server_key",
+    "host", "hostaddr", "gssencmode", "dbname",
+  ];
+
+  it("refuses every credential-, peer- and transport-selecting query parameter", () => {
+    pgStubs();
+    for (const param of REFUSED_PARAMS) {
+      expect(err(run({ MIGRATION_DATABASE_URL: url("u:p", `&${param}=x`) })),
+        `${param}= must be refused`).toBe("BAD_URL");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses them percent-encoded too, because libpq decodes the keyword first", () => {
+    pgStubs();
+    // %70assword, %68ost, %67ssencmode … a raw-string match sees none of these.
+    const encoded = { password: "%70assword", host: "%68ost", gssencmode: "%67ssencmode" };
+    for (const [name, spelling] of Object.entries(encoded)) {
+      expect(err(run({ MIGRATION_DATABASE_URL: url("u:p", `&${spelling}=x`) })),
+        `${spelling}= (${name}) must be refused`).toBe("BAD_URL");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a raw delimiter in the userinfo instead of passing the URL through", () => {
+    pgStubs();
+    // The authority is cut at the first / ? #, so a raw one of these moves the
+    // '@' past the cut and the mandatory strip cannot fire. Falling through
+    // would hand the whole URL, password included, to pg_dump's argv.
+    for (const pw of ["pa/ss", "pa?ss", "pa#ss"]) {
+      expect(err(run({ MIGRATION_DATABASE_URL: url(`u:${pw}`) })),
+        `${pw} must be refused`).toBe("BAD_URL");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an encoded newline or NUL, which .pgpass cannot represent", () => {
+    pgStubs();
+    for (const pw of ["s%0A", "s%0D", "s%00"]) {
+      expect(err(run({ MIGRATION_DATABASE_URL: url(`u:${pw}`) })), `${pw}`).toBe("BAD_URL");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("escapes .pgpass syntax and narrows the entry to the authority", () => {
+    pgStubs();
+    // pa:ss\x — the two bytes .pgpass gives syntactic meaning, which the old
+    // single sentinel contained neither of.
+    const r = run({ MIGRATION_DATABASE_URL: url("u:pa%3Ass%5Cx") });
+    expect(r.status, r.stderr).toBe(0);
+    const line = readFileSync(`${logFile}.pgpass`, "utf8").split("\n")[0];
+    expect(line, "the colon and backslash must be escaped").toBe("127.0.0.1:5432:*:*:pa\\:ss\\\\x");
+    expect(line, "a wildcard host would offer the password to any peer").not.toMatch(/^\*:\*:/);
+  });
+
+  it("delivers the password only through a mode-0600 file inside the audited root", () => {
+    stub("pg_dump", `
+echo "pg_dump $* PGPASSWORD=[\${PGPASSWORD:-}]" >> "${logFile}"
+stat -c '%a %n' -- "\${PGPASSFILE}" >> "${logFile}.stat"
+out=""; prev=""; for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
+printf 'PGDMP' > "$out"
+exit 0`);
+    stub("pg_dumpall", `
+out=""; prev=""; for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
+printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n' > "$out"
+exit 0`);
+    stub("pg_restore", `printf '; h\\n1; 1 TABLE t o\\n'
+exit 0`);
+    stub("psql", `printf 't|TLSv1.3|AESGCM\\n'
+exit 0`);
+    const r = run({ MIGRATION_DATABASE_URL: url("u:S3cr3t") });
+    expect(r.status, r.stderr).toBe(0);
+    const statLine = readFileSync(`${logFile}.stat`, "utf8").split("\n")[0];
+    expect(statLine, "mode must be 0600 at the time the child reads it").toMatch(/^600 /);
+    expect(statLine, "the credential belongs in the one audited directory").toContain(backupDir);
+    expect(readdirSync(backupDir).filter((n) => n.startsWith(".pgpass")),
+      "and must not outlive the run").toEqual([]);
+  });
+
+  it("neutralises an ambient libpq environment rather than passing it through", () => {
+    pgStubs();
+    // Asserting PGPASSWORD=[] against an unset parent proves nothing: replacing
+    // `env -i <allowlist>` with plain `env` would pass too.
+    const r = run({
+      MIGRATION_DATABASE_URL: url("u:p"),
+      PGPASSWORD: "leak-me", PGSSLMODE: "disable", PGHOST: "evil.example",
+      PGSERVICE: "svc", PGGSSENCMODE: "require",
+    });
+    expect(r.status, r.stderr).toBe(0);
+    // Each ambient variable was set in the parent above, so an empty value in
+    // the child is evidence of the allowlist, not of the parent being unset.
+    for (const v of ["PGPASSWORD", "PGSSLMODE", "PGHOST", "PGSERVICE"]) {
+      expect(readLog(), `${v} must not reach the child`).toContain(`${v}=[]`);
+    }
+  });
+
+  it("records the transport the server reports, not the one requested", () => {
+    pgStubs();
+    run({ MIGRATION_DATABASE_URL: url("u:p") });
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/achieved_tls: TLSv1\.3/);
+  });
+
+  it("fails when the server reports an unencrypted session", () => {
+    pgStubs();
+    stub("psql", `printf 'f||\\n'
+exit 0`);
+    expect(err(run({ MIGRATION_DATABASE_URL: url("u:p") }))).toBe("DUMP_FAILED");
+    expect(generations()).toEqual([]);
+  });
+});
+
+describe("guards the sweep found unpinned", () => {
+  it("rejects a whitespace-only BACKUP_DATABASES", () => {
+    // A tab published a generation containing no database at all and exited 0,
+    // because the guard stripped spaces while the loop split on IFS.
+    for (const v of ["\t", "  ", "\n"]) {
+      expect(err(run({ BACKUP_DATABASES: v })), JSON.stringify(v)).toBe("BAD_ENV");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("pins the compose-mode dump flags, which is the default path", () => {
+    expect(run().status).toBe(0);
+    const log = readLog();
+    expect(log, "--create carries the database-level ACLs").toMatch(/pg_dump [^\n]*-Fc[^\n]*--create/);
+    expect(log, "--no-role-passwords keeps SCRAM verifiers out of the archive")
+      .toMatch(/pg_dumpall [^\n]*--globals-only[^\n]*--no-role-passwords/);
+  });
+
+  it("fails when pg_dump exits non-zero even though it wrote bytes", () => {
+    // Disjoint from the empty-archive guard: the ordinary failure stub trips
+    // both at once, so neither was individually provable.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PARTIAL-BYTES'; exit 1 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(err(r)).toBe("DUMP_FAILED");
+    expect(r.stderr).toMatch(/pg_dump failed for database/);
+    expect(generations()).toEqual([]);
+  });
+
+  it("routes a truncated globals dump to VALIDATE_FAILED through the script", () => {
+    // The fixture-only assertion this replaces could not fail for any script
+    // defect: the script was not on its call path.
+    const truncated = readFileSync(join(FIXTURES, "globals-truncated.sql"), "utf8");
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) cat <<'GLOBALS'
+${truncated}
+GLOBALS
+                exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    expect(err(run())).toBe("VALIDATE_FAILED");
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toHaveLength(1);
+  });
+
+  it("fails when the globals dump declares no roles", () => {
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf -- '-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    expect(err(run())).toBe("VALIDATE_FAILED");
+  });
+
+  it("sweeps an orphaned .partial from an interrupted run", () => {
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    mkdirSync(join(backupDir, "20200101T000000Z.partial"), { recursive: true });
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(backupDir, "20200101T000000Z.partial"))).toBe(false);
+    expect(r.stderr).toMatch(/removed orphaned/);
+  });
+
+  it("deletes nothing during a dry run, including residue", () => {
+    // The residue sweep once ran ahead of the dry-run exit, so a preview removed
+    // orphaned corpora and then reported that it had removed nothing.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    mkdirSync(join(backupDir, "20200101T000000Z.partial"), { recursive: true });
+    writeFileSync(join(backupDir, ".pgpass.aaaaaa"), "x", "utf8");
+    const r = run({ BACKUP_DRY_RUN: "true" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/would remove residue/);
+    expect(existsSync(join(backupDir, "20200101T000000Z.partial"))).toBe(true);
+    expect(existsSync(join(backupDir, ".pgpass.aaaaaa"))).toBe(true);
+  });
+
+  it("refuses to publish over an existing generation", () => {
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    // Every stamp the retry loop can reach is already taken.
+    const now = new Date();
+    for (let i = -2; i < 12; i++) {
+      const d = new Date(now.getTime() + i * 1000);
+      const s = d.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+      mkdirSync(join(backupDir, s), { recursive: true });
+    }
+    const r = run();
+    expect(r.status).toBe(1);
+    expect(err(r)).toBe("INTERNAL");
+  });
+
+  it("reports the signal by name and leaves no credential behind", { timeout: 20000 }, () => {
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do case "$a" in pg_dump) exec sleep 5 ;; esac; done
+exit 0`);
+    const child = spawn("bash", [SCRIPT], {
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (d) => { stderr += d; });
+    const done = new Promise((res) => child.on("exit", res));
+    return new Promise((resolve) => setTimeout(resolve, 700))
+      .then(() => { child.kill("SIGHUP"); return done; })
+      .then(() => {
+        expect(stderr, "the handler records which signal, not a derived guess")
+          .toMatch(/BACKUP_ERR:INTERRUPTED terminated by SIGHUP/);
+        expect(readdirSync(backupDir).filter((n) => n.startsWith(".pgpass"))).toEqual([]);
+        expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
+      });
+  });
+});
+
+describe("ignore-rule coverage", () => {
+  const ignored = (p) =>
+    spawnSync("git", ["check-ignore", "-q", "--no-index", p], { cwd: REPO_ROOT }).status === 0;
+
+  it("excludes every member of a run directory under the default name", () => {
+    for (const p of [
+      "passwd-sso-backups/20260101T000000Z/passwd_sso.dump",
+      "passwd-sso-backups/20260101T000000Z/globals.sql",
+      "passwd-sso-backups/20260101T000000Z/MANIFEST",
+    ]) {
+      expect(ignored(p), `${p} must be ignored`).toBe(true);
+    }
+    expect(ignored("stray.dump"), "a loose archive anywhere").toBe(true);
+  });
+
+  it("does not exclude the committed test fixtures", () => {
+    // The paired case: an ignore rule broad enough to swallow the fixtures
+    // would make CI run the validation group without them.
+    expect(ignored("scripts/__tests__/fixtures/backup-db/valid.pgdump")).toBe(false);
+  });
+
+  it("states the boundary rather than implying coverage it does not have", () => {
+    // BACKUP_ALLOW_IN_REPO permits a custom directory name, and only *.dump is
+    // matched there. Pinning it means a future widening is a deliberate edit.
+    expect(ignored("custom-backups/20260101T000000Z/globals.sql"),
+      "globals.sql outside the default directory name is NOT covered").toBe(false);
+  });
+});
