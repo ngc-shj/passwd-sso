@@ -186,11 +186,17 @@ Only one run may hold a destination at a time. If a run is killed hard — SIGKI
 OOM, power loss — the lock survives it and the next run stops with
 `BACKUP_ERR:LOCKED` naming the holder. That is deliberate: taking the lock
 automatically raced two runs into one directory in every variant tried. When you
-have confirmed no backup is running, take it explicitly:
+have confirmed no backup is running, remove it — the error message names the
+exact path:
 
 ```bash
-BACKUP_FORCE_UNLOCK=true scripts/backup-db.sh
+rm -rf ~/passwd-sso-backups/.lock.d
 ```
+
+There is deliberately no flag for this. Every in-script variant raced: two runs
+can each judge the lock stale, and whichever acts second removes the lock the
+first has already re-created. Once the directory is gone the script only ever
+`mkdir`s it, which is atomic.
 
 Each run produces one directory:
 
@@ -213,8 +219,10 @@ What the script guarantees, and what it does not:
   deleted: the fault may be the reader, and destroying a possibly-good archive
   to punish the validator is the wrong direction.
 - **A failed run's corpus is kept, but not forever.** A validation failure is
-  retained as `<stamp>.FAILED` for diagnosis; those are bounded by `BACKUP_RETAIN`
-  and by `BACKUP_FAILED_MAX_AGE_DAYS` (default 7). A retained failure is a full
+  retained as `<stamp>.FAILED` for diagnosis. Older ones are bounded by
+  `BACKUP_RETAIN` and by `BACKUP_FAILED_MAX_AGE_DAYS` (default 7); pruning runs
+  before the dump, so a run that fails leaves its own on top of that bound until
+  the next run. A retained failure is a full
   plaintext copy of the database, so it is subject to the same handling as a
   successful generation.
 - **The pruner never endangers the run just taken.** It is excluded by resolved

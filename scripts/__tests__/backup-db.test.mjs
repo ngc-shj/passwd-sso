@@ -422,11 +422,11 @@ exit 0`);
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
     const r = run();
     expect(err(r)).toBe("LOCKED");
-    expect(r.stderr, "the message must name the escape").toMatch(/BACKUP_FORCE_UNLOCK=true/);
+    expect(r.stderr, "the message must name the escape").toMatch(/rm -rf /);
     expect(generations()).toEqual([]);
   });
 
-  it("takes a stale lock when the operator asks explicitly", () => {
+  it("names the exact removal the operator must perform", () => {
     // A SIGKILL, an OOM or a power loss leaves the lock behind with no live
     // holder. Treating that as contention disables the deployment's only backup
     // path permanently, and the operator finds out when the corpus stops moving.
@@ -436,10 +436,12 @@ exit 0`);
     mkdirSync(lock, { recursive: true, mode: 0o700 });
     writeFileSync(join(lock, "pid"), "999999\n", "utf8");
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
-    const r = run({ BACKUP_FORCE_UNLOCK: "true" });
-    expect(r.status, r.stderr).toBe(0);
-    expect(r.stderr).toMatch(/taking .* from a holder that is gone/);
-    expect(generations()).toHaveLength(1);
+    const r = run();
+    expect(err(r)).toBe("LOCKED");
+    // A flag would only have moved the same rm-then-mkdir race behind an opt-in.
+    expect(r.stderr, "the message must be actionable without a flag")
+      .toContain(`rm -rf '${join(backupDir, ".lock.d")}'`);
+    expect(generations()).toEqual([]);
   });
 
   it("releases the lock so the next run succeeds", () => {
@@ -1336,6 +1338,32 @@ exec "${realStat}" "$@"`);
   });
 
 
+  it("rejects an age bound that would delete every retained failure", () => {
+    // `-1` becomes `find -mtime "+-1"`, which matches every candidate; a
+    // non-numeric value makes find error into a discarded stream and the bound
+    // silently stops existing.
+    // An empty value is not in the list: `${VAR:-7}` treats it as unset and
+    // substitutes the default, which is the convention every variable here uses.
+    for (const v of ["-1", "bogus", "7d", "+3"]) {
+      expect(err(run({ BACKUP_FAILED_MAX_AGE_DAYS: v })), JSON.stringify(v)).toBe("BAD_ENV");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("manages a collision-suffixed failure like any other", () => {
+    // <stamp>.<pid>.FAILED keeps the suffix terminal so list_stamped sees it;
+    // <stamp>.FAILED.<pid> would be outside both the age and the count bound.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const collided = join(backupDir, "20200101T000000Z.4242.FAILED");
+    mkdirSync(collided, { recursive: true, mode: 0o700 });
+    const longAgo = new Date(Date.now() - 30 * 86400_000);
+    utimesSync(collided, longAgo, longAgo);
+    const r = run({ BACKUP_RETAIN: "9" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(collided), "the collision form is bounded too").toBe(false);
+  });
+
   it("bounds .FAILED corpora by age as well as count", () => {
     // "Kept for diagnosis" without a window is just an extra full copy of the
     // database sitting on disk.
@@ -1364,5 +1392,3 @@ exec "${realStat}" "$@"`);
       .not.toContain("notes.partial");
   });
 });
-
-

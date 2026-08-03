@@ -18,7 +18,6 @@
 #   MIGRATION_DATABASE_URL (optional) When set, selects URL mode instead of Compose mode
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
 #   COMPOSE_DB_SUPERUSER  (optional) Role used for pg_dump in Compose mode (default: passwd_user)
-#   BACKUP_FORCE_UNLOCK   (optional) "true" takes a lock whose holder is gone (default: false)
 #   BACKUP_FAILED_MAX_AGE_DAYS (optional) Age bound for <stamp>.FAILED corpora (default: 7)
 #   PGSSLROOTCERT         (optional) CA bundle for the TLS floor, when the URL carries no sslrootcert=
 #
@@ -80,7 +79,10 @@ cleanup() {
       failed_dst="${RUN_PARTIAL%.partial}.FAILED"
       # `mv a b` with b an existing directory moves a INTO b. Suffixing keeps the
       # corpus visible and correctly named instead of nesting it out of reach.
-      [ -e "$failed_dst" ] && failed_dst="$failed_dst.$$"
+      # <stamp>.<pid>.FAILED, not <stamp>.FAILED.<pid>: the suffix has to stay
+      # terminal or list_stamped ".FAILED" cannot see it, and an unmanaged
+      # directory is a full plaintext corpus nothing ever bounds.
+      [ -e "$failed_dst" ] && failed_dst="${RUN_PARTIAL%.partial}.$$.FAILED"
       if mv -- "$RUN_PARTIAL" "$failed_dst" 2>/dev/null; then
         warn "kept $failed_dst for diagnosis"
       else
@@ -264,8 +266,8 @@ BACKUP_RETAIN="${BACKUP_RETAIN:-7}"
 BACKUP_DATABASES="${BACKUP_DATABASES:-passwd_sso jackson}"
 BACKUP_DRY_RUN="${BACKUP_DRY_RUN:-false}"
 BACKUP_ALLOW_IN_REPO="${BACKUP_ALLOW_IN_REPO:-false}"
-BACKUP_FORCE_UNLOCK="${BACKUP_FORCE_UNLOCK:-false}"
 BACKUP_TLS_MODE="${BACKUP_TLS_MODE:-verify-full}"
+BACKUP_FAILED_MAX_AGE_DAYS="${BACKUP_FAILED_MAX_AGE_DAYS:-7}"
 COMPOSE_DB_SERVICE="${COMPOSE_DB_SERVICE:-db}"
 COMPOSE_DB_SUPERUSER="${COMPOSE_DB_SUPERUSER:-passwd_user}"
 MIGRATION_DATABASE_URL="${MIGRATION_DATABASE_URL:-}"
@@ -299,7 +301,7 @@ done
 [ "$_db_count" -gt 0 ] || fail BAD_ENV "BACKUP_DATABASES must name at least one database"
 unset _db _db_count
 
-for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO" "BACKUP_FORCE_UNLOCK:$BACKUP_FORCE_UNLOCK"; do
+for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO"; do
   case "${_pair#*:}" in
     true|false) ;;
     *) fail BAD_ENV "${_pair%%:*} must be exactly 'true' or 'false' (got: ${_pair#*:})" ;;
@@ -314,6 +316,13 @@ case "$BACKUP_TLS_MODE" in
   verify-full|verify-ca) ;;
   *) fail BAD_ENV "BACKUP_TLS_MODE must be verify-full or verify-ca (got: $BACKUP_TLS_MODE)" ;;
 esac
+
+if ! [[ "$BACKUP_FAILED_MAX_AGE_DAYS" =~ ^[0-9]+$ ]]; then
+  # A negative value would become `find -mtime "+-1"`, which matches every
+  # candidate and deletes the whole retained-failure set; a non-numeric one
+  # makes find error into a discarded stream and the bound stops existing.
+  fail BAD_ENV "BACKUP_FAILED_MAX_AGE_DAYS must be a non-negative integer (got: $BACKUP_FAILED_MAX_AGE_DAYS)"
+fi
 
 if ! [[ "$COMPOSE_DB_SERVICE" =~ ^[A-Za-z_][A-Za-z0-9_-]*$ ]]; then
   fail BAD_ENV "COMPOSE_DB_SERVICE has an invalid form: $COMPOSE_DB_SERVICE"
@@ -674,7 +683,8 @@ list_stamped() {
   ( cd -- "$BACKUP_ROOT" 2>/dev/null && ls -1 2>/dev/null ) | while IFS= read -r n; do
     base="${n%"$suffix"}"
     [ "$base$suffix" = "$n" ] || continue
-    [[ "$base" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+    # The optional .<pid> is the collision form written by the cleanup trap.
+    [[ "$base" =~ ^[0-9]{8}T[0-9]{6}Z(\.[0-9]+)?$ ]] || continue
     [ -L "$BACKUP_ROOT/$n" ] && continue
     [ -d "$BACKUP_ROOT/$n" ] || continue
     printf '%s\n' "$n"
@@ -718,7 +728,7 @@ $names
 EOF
   # Age first: a corpus kept "for diagnosis" past the window in which anyone
   # would diagnose it is just an extra copy of the database.
-  local cutoff_days="${BACKUP_FAILED_MAX_AGE_DAYS:-7}"
+  local cutoff_days="$BACKUP_FAILED_MAX_AGE_DAYS"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     if [ -n "$(find "$BACKUP_ROOT" -maxdepth 1 -name "$name" -type d -mtime "+$cutoff_days" -print 2>/dev/null)" ]; then
@@ -782,19 +792,13 @@ if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
     fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder, alive)"
   fi
 
-  # Deliberately NOT reclaimed automatically. Two runs can reach this point
-  # having both judged the same lock stale; whichever acts second renames away
-  # the lock the first has already re-created, because the decision was made
-  # about one object and the action lands on whatever now occupies the path.
-  # Every automatic variant tried here has been racy or fail-open, and a wedged
-  # lock is a rare state a human notices — so the escape is explicit.
-  if [ "${BACKUP_FORCE_UNLOCK:-false}" != "true" ]; then
-    fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). No run is active; re-run with BACKUP_FORCE_UNLOCK=true to take it, or remove the directory by hand."
-  fi
-  warn "BACKUP_FORCE_UNLOCK=true — taking $LOCK_CANDIDATE from a holder that is gone (pid $holder)"
-  rm -rf -- "$LOCK_CANDIDATE"
-  mkdir -- "$LOCK_CANDIDATE" 2>/dev/null \
-    || fail LOCKED "another run took $LOCK_CANDIDATE while it was being force-unlocked"
+  # Not reclaimed by this script, at all. Every in-process variant tried here
+  # raced: two runs can each judge the lock stale, and whichever acts second
+  # removes the lock the first has already re-created. A flag would only move
+  # the race behind an opt-in. The escape is a removal the operator performs
+  # after confirming no run is active; from then on the script only ever mkdirs,
+  # which is atomic and has no such window.
+  fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). Confirm no backup is running, then: rm -rf '$LOCK_CANDIDATE'"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"
 # Recorded immediately, and guarded: a lock we hold but cannot describe would

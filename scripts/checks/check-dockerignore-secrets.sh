@@ -89,6 +89,9 @@ MUST_EXCLUDE=(
   # excluded, so globals.sql and MANIFEST are covered wherever BACKUP_DIR points.
   "ops-backups/20260101T000000Z/globals.sql" "ops-backups/20260101T000000Z/MANIFEST"
   "ops-backups/20260102T000000Z.FAILED/globals.sql" "x/.pgpass.abc123"
+  # In-progress and collision-suffixed runs carry the same corpus.
+  "ops-backups/20260103T000000Z.partial/globals.sql"
+  "ops-backups/20260104T000000Z.4242.FAILED/MANIFEST"
   # Loose archive outside a run directory — covered by the *.dump class.
   "backup.dump" "sub/dir/passwd_sso.dump"
   "infra/terraform/.terraform/providers/x"

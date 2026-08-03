@@ -156,4 +156,8 @@ passwd-sso-backups/
 # run committable.
 **/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z/
 **/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.FAILED/
+# In-progress and collision-suffixed runs hold the same corpus. The *.dump rule
+# reaches the archives; without these, globals.sql and MANIFEST do not.
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.partial/
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.[0-9]*.FAILED/
 **/.pgpass.*
