@@ -193,6 +193,14 @@ EOF
 # before any process is spawned; the self-test re-derives the set from the
 # usage header and asserts equality.
 
+# Suppress xtrace from the FIRST expansion of the credential, not from the
+# parse. `set -x` traces the default-assignment below and the mode test that
+# follows it, so a suppression that starts at the parser leaks the URL twice
+# before it runs — measured, not assumed.
+XTRACE_WAS_ON=""
+case "$-" in *x*) XTRACE_WAS_ON=1 ;; esac
+{ set +x; } 2>/dev/null
+
 BACKUP_DIR="${BACKUP_DIR:-$HOME/passwd-sso-backups}"
 BACKUP_RETAIN="${BACKUP_RETAIN:-7}"
 BACKUP_DATABASES="${BACKUP_DATABASES:-passwd_sso jackson}"
@@ -362,18 +370,7 @@ conninfo_for() {
 }
 
 if [ "$MODE" = "url" ]; then
-  # Suppress xtrace across credential handling. `set -x` traces both the
-  # assignment and the command prefix, so a `bash -x` run of a straightforward
-  # implementation prints the password several times. Restored afterwards only
-  # if it was on, so the suppression cannot silently disable an operator's
-  # trace for the rest of the run.
-  XTRACE_WAS_ON=""
-  case "$-" in *x*) XTRACE_WAS_ON=1 ;; esac
-  { set +x; } 2>/dev/null
-
   parse_url "$MIGRATION_DATABASE_URL"
-
-  [ -n "$XTRACE_WAS_ON" ] && set -x
 
   # verify-* is unusable without a root certificate, and libpq's own error text
   # steers the operator toward disabling verification. Refuse before any dump
@@ -390,6 +387,12 @@ if [ "$MODE" = "url" ]; then
   esac
 fi
 
+# Past this point nothing expands the raw URL or the password outside run_pg,
+# which suppresses tracing around its own credential-bearing prefix. Restore the
+# operator's trace so the rest of the run stays debuggable.
+[ -n "$XTRACE_WAS_ON" ] && set -x
+true
+
 # ─── Required binaries (derived from the invocation sites) ───
 
 require_binary() {
@@ -397,11 +400,16 @@ require_binary() {
 }
 
 if [ "$MODE" = "url" ]; then
+  # The whole set is preflighted, not just the one the first failure would
+  # reveal: a host with pg_restore but no pg_dumpall would otherwise dump both
+  # databases and then die mid-run, after the partial directory exists.
   require_binary pg_dump "required by URL mode"
   require_binary pg_dumpall "required for the cluster globals member"
   require_binary pg_restore "required to validate each archive"
 else
-  require_binary docker "required by Compose mode"
+  # A distinct code from NO_CLIENT: "install Docker" and "install the Postgres
+  # client" are different remedies, and one exit status cannot say which.
+  command -v -- docker >/dev/null 2>&1 || fail NO_DOCKER "docker not found on PATH (required by Compose mode)"
 fi
 
 # ─── Compose preflight (C2) ──────────────────────────────────
