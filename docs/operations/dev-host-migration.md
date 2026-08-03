@@ -242,6 +242,38 @@ docker compose exec -T db pg_restore -U passwd_user --exit-on-error -d passwd_ss
 docker compose exec -T db pg_restore -U passwd_user --exit-on-error -d jackson    < "$RUN/jackson.dump"
 ```
 
+**Reapply the database-level ACLs.** `pg_dump -Fc --create` captures them in the
+archive's `DATABASE` TOC entry, but `pg_restore` selects that entry only when
+`--create` is passed to `pg_restore` too — and `--create` cannot be used here,
+because initdb already created the database. So the ACLs must be applied
+explicitly. Skipping this silently restores `PUBLIC`'s `CONNECT`, which
+migration `20260611011121` exists to remove; `_prisma_migrations` arrives from
+the dump already marked applied, so `prisma migrate deploy` will not redo it,
+and every login role in the cluster — `jackson_user` included — can then open a
+connection to `passwd_sso`.
+
+```bash
+docker compose exec -T db psql -U passwd_user -d passwd_sso <<'SQL'
+REVOKE CONNECT ON DATABASE passwd_sso FROM PUBLIC;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_dcr_cleanup_worker;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_anchor_publisher;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_retention_gc_worker;
+SQL
+```
+
+Verify against the source host rather than trusting the statements — the role
+set is deployment-specific and this list is a snapshot:
+
+```bash
+docker compose exec -T db psql -U passwd_user -d passwd_sso -tAc \
+  "select rolname, has_database_privilege(rolname,'passwd_sso','CONNECT')
+     from pg_roles where rolcanlogin order by rolname"
+```
+
+`jackson_user` must report `f`. If it reports `t`, the REVOKE did not take.
+
 **Do not restore `globals.sql` here.** The initdb scripts already created the
 roles with the passwords from `.env`, and `--no-role-passwords` means replaying
 the file would add nothing while erroring on every existing role. `globals.sql`
@@ -345,6 +377,10 @@ npm run dev -- -p 3001      # the serve target is 3001, not the default 3000
 - [ ] `docker compose logs audit-outbox-worker` shows drains, and
       `audit_outbox` is not accumulating `PENDING` rows
 - [ ] `npx vitest run` and `npx next build` pass on the new host
+- [ ] `select datname, datacl from pg_database where datname='passwd_sso'` matches
+      the source host, and `jackson_user` reports `f` for
+      `has_database_privilege(...,'passwd_sso','CONNECT')` — the connection
+      isolation is the one thing a `-Fc` restore does not carry by itself
 
 Integration tests additionally require the Compose workers to be stopped —
 they claim rows `FOR UPDATE SKIP LOCKED` across the whole table:

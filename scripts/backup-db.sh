@@ -61,6 +61,7 @@ RUN_PUBLISHED=""
 LOCK_DIR=""
 FAILED_CODE=""
 KEEP_PARTIAL_AS_FAILED=""
+SIGNAL_NAME=""
 PGPASS_FILE=""
 PGSSLROOTCERT_IN="${PGSSLROOTCERT:-}"
 ORIGINAL_CWD="$(pwd -P)"
@@ -96,7 +97,10 @@ cleanup() {
     # 130 from SIGINT. C1 promises exactly one identifier per failure, so the
     # trap supplies one rather than letting the run exit anonymously.
     if [ "$rc" -ge 128 ]; then
-      printf 'BACKUP_ERR:INTERRUPTED terminated by signal %d\n' "$((rc - 128))" >&2
+      # The signal NAME, recorded by the handler. Deriving it from the status
+      # cannot work when several handlers share one exit code, and reporting a
+      # systemctl stop as Ctrl-C points the diagnosis at an absent operator.
+      printf 'BACKUP_ERR:INTERRUPTED terminated by SIG%s\n' "${SIGNAL_NAME:-UNKNOWN}" >&2
     else
       printf 'BACKUP_ERR:INTERNAL command exited %d without a named cause\n' "$rc" >&2
     fi
@@ -105,8 +109,22 @@ cleanup() {
   [ "$rc" -eq 0 ] && exit 0
   exit 1
 }
+on_signal() {
+  SIGNAL_NAME="$1"
+  exit $((128 + $2))
+}
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+# Every fatal signal an operator or a supervisor can realistically send. Without
+# these the EXIT trap never runs and the credential file survives. SIGKILL stays
+# irreducible — the passfile lives inside the audited backup root for that case.
+trap 'on_signal INT 2' INT
+trap 'on_signal TERM 15' TERM
+trap 'on_signal HUP 1' HUP
+trap 'on_signal QUIT 3' QUIT
+trap 'on_signal PIPE 13' PIPE
+trap 'on_signal ALRM 14' ALRM
+trap 'on_signal USR1 10' USR1
+trap 'on_signal USR2 12' USR2
 
 # ─── Portability helpers ─────────────────────────────────────
 #
@@ -139,6 +157,16 @@ stat_mode() {
     Darwin|*BSD) stat -f '%Lp' -- "$1" ;;
     *)           stat -c '%a' -- "$1" ;;
   esac
+}
+
+# The holder's start time, so a reused pid is not mistaken for a live run. Empty
+# where the platform does not expose it, in which case the pid check stands alone.
+proc_starttime() {
+  if [ -r "/proc/$1/stat" ]; then
+    awk '{print $22}' "/proc/$1/stat" 2>/dev/null || true
+  else
+    ps -o lstart= -p "$1" 2>/dev/null | tr -d ' ' || true
+  fi
 }
 
 # device:inode of a path — the object's identity, which a path string is not.
@@ -242,13 +270,18 @@ if ! [[ "$BACKUP_RETAIN" =~ ^[1-9][0-9]*$ ]]; then
   fail BAD_ENV "BACKUP_RETAIN must be a positive integer (got: $BACKUP_RETAIN)"
 fi
 
+# Counted by iterating the SAME loop that does the work: a guard that strips
+# only spaces while the loop splits on IFS disagrees with it about what "empty"
+# means, and a tab-only value published a run containing no database at all.
+_db_count=0
 for _db in $BACKUP_DATABASES; do
   if ! [[ "$_db" =~ ^[A-Za-z_][A-Za-z0-9_$]*$ ]]; then
     fail BAD_ENV "BACKUP_DATABASES contains an invalid database name: $_db"
   fi
+  _db_count=$((_db_count + 1))
 done
-unset _db
-[ -n "${BACKUP_DATABASES// /}" ] || fail BAD_ENV "BACKUP_DATABASES must name at least one database"
+[ "$_db_count" -gt 0 ] || fail BAD_ENV "BACKUP_DATABASES must name at least one database"
+unset _db _db_count
 
 for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO"; do
   case "${_pair#*:}" in
@@ -292,6 +325,8 @@ fi
 URL_STRIPPED=""
 URL_PASSWORD=""
 URL_DISPLAY=""
+URL_PGPASS_HOST=""
+URL_PGPASS_PORT=""
 
 percent_decode() {
   # Byte-exact: no printf '%b', which re-interprets backslashes already present
@@ -356,6 +391,14 @@ parse_url() {
       ;;
   esac
 
+  # An '@' surviving in the remainder means the authority was cut before the
+  # userinfo ended — i.e. the password contained a raw '/', '?' or '#'. The
+  # strip could not have run, so refusing is the only option that does not put
+  # the credential in argv.
+  case "$tail" in
+    *@*) fail BAD_URL "MIGRATION_DATABASE_URL has an unencoded '/', '?' or '#' in the userinfo — percent-encode them (%2F, %3F, %23)" ;;
+  esac
+
   # Belt and braces. The refusal that actually closes the leak class is the
   # mandatory strip above: an authority containing '@' must yield a password or
   # the URL is rejected. This post-condition cannot fire once that branch has
@@ -368,8 +411,15 @@ parse_url() {
   URL_STRIPPED="${scheme}${authority}${tail}"
   URL_DISPLAY="${scheme}${authority}"
 
-  case "$URL_STRIPPED" in
-    *dbname=*) fail BAD_URL "MIGRATION_DATABASE_URL must not carry dbname= (the target set is BACKUP_DATABASES)" ;;
+  # Narrow the passfile to this host/port when the authority is a single plain
+  # host — a wildcard entry offers the superuser password to whatever peer the
+  # connection reaches. Multi-host and bracketed IPv6 forms keep the wildcard;
+  # host=/hostaddr= are refused above, so the authority is the peer either way.
+  local hp="${authority##*@}"
+  case "$hp" in
+    *,*|\[*) URL_PGPASS_HOST="*"; URL_PGPASS_PORT="*" ;;
+    *:*)     URL_PGPASS_HOST="${hp%:*}"; URL_PGPASS_PORT="${hp##*:}" ;;
+    *)       URL_PGPASS_HOST="$hp";      URL_PGPASS_PORT="*" ;;
   esac
 
   # libpq accepts the password as a URI QUERY parameter too, and percent-decodes
@@ -383,9 +433,17 @@ parse_url() {
   [ "$decoded_query" = "$URL_STRIPPED" ] && decoded_query=""
   if [ -n "$decoded_query" ]; then
     decoded_query="$(percent_decode "$decoded_query")"
+    # Member set derived from every parameter that can carry a credential,
+    # redirect the peer, or select a transport the TLS floor does not govern.
     case "$decoded_query" in
-      *password=*|*passfile=*|*service=*)
-        fail BAD_URL "MIGRATION_DATABASE_URL must not carry password=, passfile= or service= — the credential goes in the userinfo, and the others select a connection this script cannot audit" ;;
+      *password=*|*passfile=*|*service=*|*oauth_client_secret=*|*sslpassword=*|*sslkeylogfile=*)
+        fail BAD_URL "MIGRATION_DATABASE_URL must not carry a credential or credential-file parameter (password, passfile, service, oauth_client_secret, sslpassword, sslkeylogfile) — the password goes in the userinfo, and the rest select material this script cannot audit" ;;
+      *host=*|*hostaddr=*)
+        fail BAD_URL "MIGRATION_DATABASE_URL must not carry host= or hostaddr= — they move the connection away from the authority that MANIFEST records and that the TLS floor verifies" ;;
+      *gssencmode=*)
+        fail BAD_URL "gssencmode is not accepted: it selects a transport the TLS floor does not govern" ;;
+      *dbname=*)
+        fail BAD_URL "MIGRATION_DATABASE_URL must not carry dbname= (the target set is BACKUP_DATABASES)" ;;
     esac
   fi
 }
@@ -405,7 +463,7 @@ conninfo_for() {
   # string-level rejection cannot: libpq percent-decodes both the keyword and
   # the value, so ?%73slmode=disable is sslmode=disable to it and matches no
   # regex over the raw text.
-  printf '%s%sdbname=%s&sslmode=%s' "$url" "$sep" "$db" "$BACKUP_TLS_MODE"
+  printf '%s%sdbname=%s&sslmode=%s&gssencmode=disable' "$url" "$sep" "$db" "$BACKUP_TLS_MODE"
 }
 
 if [ "$MODE" = "url" ]; then
@@ -421,9 +479,6 @@ if [ "$MODE" = "url" ]; then
         "$BACKUP_TLS_MODE needs a CA: pass sslrootcert= in MIGRATION_DATABASE_URL or set PGSSLROOTCERT"
       ;;
   esac
-  case "$URL_STRIPPED" in
-    *gssencmode=*) fail BAD_URL "gssencmode is not accepted: it selects a transport the TLS floor does not govern" ;;
-  esac
 fi
 
 # Past this point nothing expands the raw URL or the password outside run_pg,
@@ -432,17 +487,6 @@ fi
 [ -n "$XTRACE_WAS_ON" ] && set -x
 true
 
-{ set +x; } 2>/dev/null
-if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
-  PGPASS_FILE="$(umask 077 && mktemp "${TMPDIR:-/tmp}/backup-db-pgpass.XXXXXX")" \
-    || fail INTERNAL "could not create a password file"
-  # Wildcards for host/port/database: the script decides those per target, and a
-  # mismatch would silently fall back to no password.
-  printf '*:*:*:*:%s\n' "$URL_PASSWORD" > "$PGPASS_FILE"
-  URL_PASSWORD=""
-fi
-[ -n "$XTRACE_WAS_ON" ] && set -x
-true
 
 # ─── Required binaries (derived from the invocation sites) ───
 
@@ -457,6 +501,7 @@ if [ "$MODE" = "url" ]; then
   require_binary pg_dump "required by URL mode"
   require_binary pg_dumpall "required for the cluster globals member"
   require_binary pg_restore "required to validate each archive"
+  require_binary psql "required to verify the achieved transport"
 else
   # A distinct code from NO_CLIENT: "install Docker" and "install the Postgres
   # client" are different remedies, and one exit status cannot say which.
@@ -494,6 +539,19 @@ if [ "$MODE" = "compose" ]; then
     fail DB_NOT_RUNNING "compose service '$COMPOSE_DB_SERVICE' is not running — start it first"
   fi
 fi
+
+ACHIEVED_TLS=""
+
+verify_transport() {
+  local row
+  row="$(run_pg psql -Atq -d "$(conninfo_for "${BACKUP_DATABASES%% *}")" \
+    -c "select ssl, coalesce(version,''), coalesce(cipher,'') from pg_stat_ssl where pid = pg_backend_pid()" 2>/dev/null)" \
+    || fail DUMP_FAILED "could not reach the database to verify the connection transport"
+  case "$row" in
+    t\|*) ACHIEVED_TLS="${row#t|}" ;;
+    *) fail DUMP_FAILED "the connection is not encrypted with TLS despite a $BACKUP_TLS_MODE floor (pg_stat_ssl reports ssl=false) — a GSSAPI-encrypted or cleartext session would report this" ;;
+  esac
+}
 
 # ─── Destination safety (C4) ─────────────────────────────────
 
@@ -562,6 +620,17 @@ while [ "$anc" != "/" ]; do
   if [ "$(( 8#$anc_mode & 8#022 ))" -ne 0 ] && [ "$(( 8#$anc_mode & 8#1000 ))" -eq 0 ]; then
     fail DEST_UNSAFE "ancestor $anc is writable by others without the sticky bit (mode $anc_mode)"
   fi
+  # The sticky bit protects against third parties, not against the directory's
+  # OWNER: POSIX lets a parent's owner rename any entry in it. So a sticky
+  # ancestor is only acceptable when root or we own it.
+  if [ "$(( 8#$anc_mode & 8#1000 ))" -ne 0 ] && [ "$anc_uid" != "0" ] && [ "$anc_uid" != "$(id -u)" ]; then
+    fail DEST_UNSAFE "ancestor $anc is sticky but owned by uid $anc_uid, who can rename our entry out of it"
+  fi
+  # Mode bits do not show an ACL grant. An ancestor at 0700 with a named-user
+  # ACL is writable by that user, who can then substitute the backup root.
+  if has_extended_acl "$anc"; then
+    fail DEST_UNSAFE "ancestor $anc carries an extended ACL, which grants access the mode bits do not show"
+  fi
 done
 
 # ─── Mutual exclusion ────────────────────────────────────────
@@ -570,11 +639,52 @@ done
 # flock(1) is util-linux and does not ship on macOS, the primary operator host.
 LOCK_CANDIDATE="$BACKUP_ROOT/.lock.d"
 if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
-  holder="$(cat -- "$LOCK_CANDIDATE/pid" 2>/dev/null || echo unknown)"
-  fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder)"
+  holder="$(cat -- "$LOCK_CANDIDATE/pid" 2>/dev/null || true)"
+  # Reclaim a lock whose holder is gone. The pid was previously written and
+  # never read, so one SIGKILL, OOM or power loss disabled backups permanently —
+  # a fail-closed wedge on the deployment's only backup path, discovered only
+  # when someone noticed the corpus had stopped advancing.
+  holder_host="$(cat -- "$LOCK_CANDIDATE/host" 2>/dev/null || true)"
+  holder_start="$(cat -- "$LOCK_CANDIDATE/starttime" 2>/dev/null || true)"
+  if [ -n "$holder" ] && [ "$holder_host" = "$(uname -n)" ] \
+     && kill -0 "$holder" 2>/dev/null \
+     && { [ -z "$holder_start" ] || [ "$holder_start" = "$(proc_starttime "$holder")" ]; }; then
+    fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder, alive)"
+  fi
+  warn "reclaiming stale lock $LOCK_CANDIDATE (holder ${holder:-unknown} is gone)"
+  rm -rf -- "$LOCK_CANDIDATE"
+  mkdir -- "$LOCK_CANDIDATE" 2>/dev/null \
+    || fail LOCKED "could not take $LOCK_CANDIDATE after reclaiming it"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"
 printf '%s\n' "$$" > "$LOCK_DIR/pid"
+printf '%s\n' "$(uname -n)" > "$LOCK_DIR/host"
+printf '%s\n' "$(proc_starttime "$$")" > "$LOCK_DIR/starttime"
+
+# After the destination is verified and the lock is held: the passfile lives
+# inside BACKUP_ROOT, so it cannot be created before BACKUP_ROOT exists.
+{ set +x; } 2>/dev/null
+if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
+  # Inside BACKUP_ROOT, not $TMPDIR: the destination is the only directory whose
+  # owner, mode, extended ACLs, mount options and ancestors this script has
+  # verified, and $TMPDIR is neither declared nor audited.
+  PGPASS_FILE="$(umask 077 && mktemp "$BACKUP_ROOT/.pgpass.XXXXXX")" \
+    || fail INTERNAL "could not create a password file"
+  # Wildcards for host/port/database: the script decides those per target, and a
+  # mismatch would silently fall back to no password.
+  case "$URL_PASSWORD" in
+    *$'\n'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
+  esac
+  # Escape the two bytes .pgpass treats as syntax. Backslash first: escaping the
+  # colon first would then have its own backslash escaped again.
+  _pgpass_pw="${URL_PASSWORD//\\/\\\\}"
+  _pgpass_pw="${_pgpass_pw//:/\\:}"
+  printf '%s:%s:*:*:%s\n' "${URL_PGPASS_HOST:-*}" "${URL_PGPASS_PORT:-*}" "$_pgpass_pw" > "$PGPASS_FILE"
+  unset _pgpass_pw
+  URL_PASSWORD=""
+fi
+[ -n "$XTRACE_WAS_ON" ] && set -x
+true
 
 # ─── Prune failed generations (before any dump) ──────────────
 #
@@ -595,6 +705,20 @@ list_stamped() {
     [ -d "$BACKUP_ROOT/$n" ] || continue
     printf '%s\n' "$n"
   done | sort
+}
+
+# Under the lock there can be no live writer, so any surviving .partial is an
+# orphan from a killed run. It matched neither list_stamped "" nor
+# list_stamped ".FAILED", so it accumulated without bound.
+prune_orphaned_partials() {
+  local name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    ( cd -- "$BACKUP_ROOT" && rm -rf -- "$name" )
+    warn "removed orphaned $name from an interrupted run"
+  done <<EOF
+$(list_stamped ".partial")
+EOF
 }
 
 prune_failed() {
@@ -618,7 +742,25 @@ EOF
 
 # ─── Run directory ───────────────────────────────────────────
 
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+# The stamp has one-second resolution and is the generation key, so a second
+# run inside the same second would collide. Waiting for the clock to advance
+# keeps the name in the ^[0-9]{8}T[0-9]{6}Z$ shape the pruner matches — a suffix
+# would not — and the no-clobber check before the publish stays as the backstop
+# for the case this loop cannot see (another host writing the same directory).
+STAMP=""
+_tries=0
+while [ "$_tries" -lt 5 ]; do
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+  if [ ! -e "$BACKUP_ROOT/$STAMP" ] && [ ! -e "$BACKUP_ROOT/$STAMP.partial" ]; then
+    break
+  fi
+  sleep 1
+  _tries=$((_tries + 1))
+  STAMP=""
+done
+[ -n "$STAMP" ] || fail INTERNAL "could not obtain an unused generation stamp under $BACKUP_ROOT"
+unset _tries
+
 RUN_PARTIAL="$BACKUP_ROOT/$STAMP.partial"
 RUN_FINAL="$BACKUP_ROOT/$STAMP"
 
@@ -656,6 +798,7 @@ fi
 # any dump, because .FAILED directories are produced only by runs that did NOT
 # publish — pruning them after publication would never run in a persistently
 # failing deployment, which is exactly when they accumulate.
+prune_orphaned_partials
 prune_failed
 
 mkdir -- "$RUN_PARTIAL" || fail INTERNAL "could not create $RUN_PARTIAL"
@@ -750,7 +893,13 @@ MANIFEST="$RUN_PARTIAL/MANIFEST"
   printf 'pg_dump_version: %s\n' "$(tool_version pg_dump)"
   printf 'pg_restore_version: %s\n' "$(tool_version pg_restore)"
   printf 'validated_at: %s\n' "$([ "$MODE" = "url" ] && printf host || printf 'compose service %s' "$COMPOSE_DB_SERVICE")"
+  [ "$MODE" = "url" ] && printf 'achieved_tls: %s\n' "${ACHIEVED_TLS:-unknown}"
 } > "$MANIFEST"
+
+if [ "$MODE" = "url" ]; then
+  verify_transport
+  log "transport verified: $ACHIEVED_TLS"
+fi
 
 for db in $BACKUP_DATABASES; do
   archive="$RUN_PARTIAL/$db.dump"
@@ -790,6 +939,10 @@ printf 'member: globals.sql size=%s roles=%s structural_check_only=true\n' \
 
 # ─── Publish ─────────────────────────────────────────────────
 
+# `mv a b` where b is a directory moves a INTO b. INV-C4e's protection was the
+# bare mkdir of the .partial, which a collision at the PUBLISH step walks past:
+# the run nested itself inside the existing generation and reported success.
+[ -e "$RUN_FINAL" ] && fail INTERNAL "$RUN_FINAL already exists — refusing to publish over it"
 mv -- "$RUN_PARTIAL" "$RUN_FINAL" || fail INTERNAL "could not publish $RUN_FINAL"
 RUN_PUBLISHED="$RUN_FINAL"
 RUN_PARTIAL=""

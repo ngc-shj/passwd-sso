@@ -52,7 +52,8 @@ A team's encryption key may have been exposed.
 
 PostgreSQL-level encryption at rest is compromised.
 
-1. Take the database offline
+1. Stop the writers (`docker compose stop audit-outbox-worker retention-gc-worker`
+   plus the app), leaving the database itself up — the export needs to connect
 2. Export data: `BACKUP_DIR=/secure/path scripts/backup-db.sh`
 
    Not a bare `pg_dump passwd_sso`: that captures one of three members —
@@ -61,11 +62,14 @@ PostgreSQL-level encryption at rest is compromised.
    full set, validates each archive with `pg_restore`, and refuses a
    destination that is group- or world-readable. Under incident pressure is
    exactly when an unvalidated export is least affordable.
-3. Create a new encrypted database instance
-4. Restore from the run directory the script printed, following
-   [dev-host-migration.md](dev-host-migration.md) step 5 for the ordering
-   constraint (an initdb-bootstrapped cluster must exist before the archives
-   are restored, or the ACLs land on roles that do not exist)
+3. Take the database offline, then create a new encrypted database instance
+4. Restore from the run directory the script printed. Which branch of
+   [dev-host-migration.md](dev-host-migration.md) step 5 applies depends on how
+   the new instance was built: on an initdb-bootstrapped cluster follow it as
+   written (roles already exist, `globals.sql` is a cross-check only); on a bare
+   cluster restore `globals.sql` FIRST, because nothing else creates the roles
+   the archives' ownership and ACLs refer to. Either way, apply the
+   database-level ACL block in that step — a `-Fc` restore does not carry it
 5. Update `DATABASE_URL` and redeploy
 
 ---

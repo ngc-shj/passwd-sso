@@ -22,14 +22,14 @@
  * real backups.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
   existsSync, readdirSync, statSync, lstatSync, symlinkSync,
 } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir } from "node:os";
+import { tmpdir, hostname } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -388,10 +388,42 @@ exit 0`);
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toHaveLength(1);
   });
 
-  it("refuses a second concurrent run", () => {
-    mkdirSync(join(backupDir, ".lock.d"), { recursive: true, mode: 0o700 });
+  it("refuses a run while a live holder owns the lock", () => {
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
-    expect(err(run())).toBe("LOCKED");
+    const lock = join(backupDir, ".lock.d");
+    mkdirSync(lock, { recursive: true, mode: 0o700 });
+    // A holder that is genuinely alive, identified the way the script does:
+    // pid plus host plus start time, so a reused pid cannot impersonate it.
+    const holder = spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      const start = existsSync(`/proc/${holder.pid}/stat`)
+        ? readFileSync(`/proc/${holder.pid}/stat`, "utf8").split(" ")[21]
+        : "";
+      writeFileSync(join(lock, "pid"), `${holder.pid}\n`, "utf8");
+      writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
+      writeFileSync(join(lock, "starttime"), `${start}\n`, "utf8");
+      expect(err(run())).toBe("LOCKED");
+      expect(generations()).toEqual([]);
+    } finally {
+      holder.kill("SIGKILL");
+    }
+  });
+
+  it("reclaims a lock whose holder is gone rather than wedging every future run", () => {
+    // A SIGKILL, an OOM or a power loss leaves the lock behind with no live
+    // holder. Treating that as contention disables the deployment's only backup
+    // path permanently, and the operator finds out when the corpus stops moving.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const lock = join(backupDir, ".lock.d");
+    mkdirSync(lock, { recursive: true, mode: 0o700 });
+    writeFileSync(join(lock, "pid"), "999999\n", "utf8");
+    writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/reclaiming stale lock/);
+    expect(generations()).toHaveLength(1);
   });
 
   it("releases the lock so the next run succeeds", () => {
@@ -554,6 +586,13 @@ exit 0`);
     stub("pg_restore", `
 echo "pg_restore $*" >> "${logFile}"
 printf '; Archive created at 2026-01-01\\n1; 1259 1 TABLE public t owner\\n'
+exit 0`);
+    // URL mode asks the server what transport was actually negotiated rather
+    // than trusting what was requested — libpq's gssencmode default would
+    // otherwise satisfy a verify-full request over a non-TLS session.
+    stub("psql", `
+echo "psql $* PGPASSFILE=[\${PGPASSFILE:-}]" >> "${logFile}"
+printf 't|TLSv1.3|TLS_AES_256_GCM_SHA384\\n'
 exit 0`);
   };
 
