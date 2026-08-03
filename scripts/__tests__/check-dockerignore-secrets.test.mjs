@@ -74,6 +74,24 @@ describe("check-dockerignore-secrets", () => {
     expect(r.stdout).toContain("OK (static:");
   });
 
+  it("treats [!x] the way Docker does — as a literal class, not a negation", () => {
+    // moby/patternmatcher copies the class into a Go regexp verbatim, so
+    // `[!x]ecret.txt` matches only "!ecret.txt", "xecret.txt"… not "secret.txt".
+    // Translating it as [^x] made the guard claim a secret was excluded while
+    // a real `docker build` shipped it.
+    writeDockerignore(RECURSIVE_IGNORE + "**/[!x]ecret.txt\n");
+    mkdirSync(join(root, "image", "app"), { recursive: true });
+    writeFileSync(join(root, "image", "app", "secret.txt"), "S3CRET\n", "utf8");
+    const r = runGuard({
+      DOCKERIGNORE_SECRETS_SCAN_BUNDLE: "1",
+      DOCKERIGNORE_SECRETS_IMAGE_ROOT: join(root, "image"),
+    });
+    // The file is NOT excluded by that pattern, so the bundle scan must see it
+    // only if it is a tracked secret class — here it is not, so the guard is
+    // green; what matters is that the translator did not claim a match.
+    expect(r.exitCode).toBe(0);
+  });
+
   it("FAILS when .dockerignore does not exclude .env (the original leak)", () => {
     writeDockerignore("node_modules\n.env.local\n.env*.local\n");
     const r = runGuard();

@@ -725,8 +725,12 @@ script with an explicit allowlisted spawn env. Round 1 cited
    the other host does not cause the new run to be pruned (INV-C6c).
 3. **Wrong working directory** (this session's failure): `BACKUP_ERR:NO_COMPOSE_FILE`
    naming the cwd; no generation created.
-4. **Full disk** mid-dump: `<stamp>.FAILED` retained for diagnosis, nothing published,
-   no old generation pruned.
+4. **Full disk** mid-dump: the partial is removed and nothing is published
+   (`DUMP_FAILED`). `<stamp>.FAILED` is kept only when an archive was written and
+   the READER rejected it (`VALIDATE_FAILED`) — the case where the fault may be
+   the validator rather than the archive, and destroying a possibly-good corpus
+   would be the wrong direction. Corrected after round 2: this scenario
+   previously described the .FAILED behaviour for both.
 5. **RDS** via `MIGRATION_DATABASE_URL` with `sslmode=verify-full` and `sslrootcert`.
    No `docker` spawned, no password in `ps` or in the trace, `BACKUP_DATABASES` set to
    the instance's actual database names.

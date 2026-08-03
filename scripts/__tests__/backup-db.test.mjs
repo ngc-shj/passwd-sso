@@ -1078,8 +1078,36 @@ exit 0`);
     pgStubs();
     stub("psql", `printf 'f||\\n'
 exit 0`);
-    expect(err(run({ MIGRATION_DATABASE_URL: url("u:p") }))).toBe("DUMP_FAILED");
+    // Not DUMP_FAILED: nothing was dumped, and the code has to separate "could
+    // not connect / not encrypted" from "the dump command failed".
+    expect(err(run({ MIGRATION_DATABASE_URL: url("u:p") }))).toBe("CONNECT_FAILED");
     expect(generations()).toEqual([]);
+  });
+
+  it("surfaces libpq's diagnostic instead of collapsing every fault into one line", () => {
+    // This probe is the first thing that touches the database in URL mode, so a
+    // missing CA, a wrong host, a rejected password and a server with TLS off
+    // all arrive here — and discarding stderr made them indistinguishable on
+    // exactly the path being configured for the first time.
+    pgStubs();
+    stub("psql", `echo 'psql: error: root certificate file "/x" does not exist' >&2
+exit 2`);
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(err(r)).toBe("CONNECT_FAILED");
+    expect(r.stderr).toMatch(/root certificate file/);
+  });
+
+  it("refuses an authority the passfile cannot be scoped to", () => {
+    // The newline refusal and the escaping covered the password field only, so
+    // the host slice reached the same line-oriented credential file unchecked:
+    // an empty host became the wildcard entry the narrowing exists to prevent,
+    // and a newline injected a second .pgpass line.
+    pgStubs();
+    for (const authority of ["u:p@", "u:p@h\n*", "u:p@a:b:5432"]) {
+      expect(err(run({ MIGRATION_DATABASE_URL: `postgresql://${authority}/d?${CA}` })),
+        JSON.stringify(authority)).toBe("BAD_URL");
+      rmSync(backupDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1194,7 +1222,40 @@ exit 0`);
     }
     const r = run();
     expect(r.status).toBe(1);
+    // A retryable collision is not INTERNAL, which the trap uses for "a status
+    // no fail() produced" — an identifier shared with unhandled faults cannot
+    // tell an authored condition from a bug.
+    expect(err(r)).toBe("STAMP_TAKEN");
+    expect(r.stderr).toMatch(/every generation stamp in the last few seconds is taken/);
+  });
+
+  it("refuses to publish over a generation that appears during the run", () => {
+    // The guard the previous case cannot reach: the collision is created after
+    // the stamp is chosen, so the run gets past the retry loop and stops at the
+    // publish. `mv a b` with b an existing directory nests and reports success.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall)
+      # By now the run directory exists; create the published name under it.
+      for d in "${backupDir}"/*.partial; do
+        [ -e "$d" ] || continue
+        base="\$(basename -- "$d" .partial)"
+        mkdir -p -- "${backupDir}/\$base"
+      done
+      printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
     expect(err(r)).toBe("INTERNAL");
+    expect(r.stderr).toMatch(/refusing to publish over it/);
   });
 
   it("reports the signal by name and leaves no credential behind", { timeout: 20000 }, () => {
@@ -1253,6 +1314,11 @@ describe("ignore-rule coverage", () => {
       "custom-backups/20260101T000000Z/globals.sql",
       "custom-backups/20260101T000000Z/MANIFEST",
       "deep/nested/20260102T000000Z.FAILED/globals.sql",
+      // The shape the cleanup trap actually writes on a stamp collision; it
+      // matches neither *.dump nor the plain .FAILED rule.
+      "x/20260101T000000Z.4242.FAILED/globals.sql",
+      "x/20260101T000000Z.4242.FAILED/MANIFEST",
+      "passwd-sso-backups/notes.txt",
       "anywhere/.pgpass.abc123",
     ]) {
       expect(ignored(p), `${p} must be ignored`).toBe(true);

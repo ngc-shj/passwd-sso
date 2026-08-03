@@ -18,7 +18,9 @@
 #   MIGRATION_DATABASE_URL (optional) When set, selects URL mode instead of Compose mode
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
 #   COMPOSE_DB_SUPERUSER  (optional) Role used for pg_dump in Compose mode (default: passwd_user)
-#   BACKUP_FAILED_MAX_AGE_DAYS (optional) Age bound for <stamp>.FAILED corpora (default: 7)
+#   BACKUP_FAILED_MAX_AGE_DAYS (optional) Age bound for <stamp>.FAILED corpora, in
+#                              whole days; 0 means "older than 24h", not "keep
+#                              none" — find -mtime +0 is >= 1 day (default: 7)
 #   PGSSLROOTCERT         (optional) CA bundle for the TLS floor, when the URL carries no sslrootcert=
 #
 # Exit codes:
@@ -38,7 +40,8 @@ IFS=$' \t\n'
 # Mirrors the FORBIDDEN: / EMPTY_SCAN: shape used by scripts/checks/*.
 ERR_CODES="BAD_ENV BAD_URL NO_CA NO_DOCKER NO_COMPOSE_FILE UNKNOWN_SERVICE
 DB_NOT_RUNNING NO_CLIENT DEST_UNSAFE DEST_IN_REPO LOCKED DUMP_FAILED
-VALIDATE_FAILED PRUNE_ABORTED RUN_VANISHED OLD_BASH INTERRUPTED INTERNAL"
+VALIDATE_FAILED PRUNE_ABORTED RUN_VANISHED OLD_BASH INTERRUPTED INTERNAL
+CONNECT_FAILED STAMP_TAKEN"
 
 # Single exit point for failures. The EXIT trap only ever normalises a status
 # it did not produce; it never synthesises a code.
@@ -235,8 +238,13 @@ mount_is_unsafe() {
   while IFS= read -r m; do
     case "$m" in
       "$dev on "*)
-        case "$m" in
-          *noowners*|*msdos*|*exfat*|*vfat*|*smbfs*|*cifs*|*" nfs"*|*osxfuse*|*macfuse*)
+        # Only the parenthesised option/type field: matching the whole line
+        # refuses a safe ext4 destination that merely happens to be mounted at
+        # /mnt/exfat-archive.
+        local opts="${m##*(}"
+        opts="${opts%)*}"
+        case ",$opts," in
+          *,noowners,*|*noowners*|*msdos*|*exfat*|*vfat*|*smbfs*|*cifs*|*nfs*|*osxfuse*|*macfuse*)
             printf '%s' "$m"; return 0 ;;
         esac
         ;;
@@ -455,10 +463,22 @@ parse_url() {
   # connection reaches. Multi-host and bracketed IPv6 forms keep the wildcard;
   # host=/hostaddr= are refused above, so the authority is the peer either way.
   local hp="${authority##*@}"
+  # Validated before it reaches a credential file or the MANIFEST: both are
+  # line-oriented, and neither escapes what it is given.
   case "$hp" in
+    *$'\n'*|*$'\r'*) fail BAD_URL "the connection authority contains a newline" ;;
+    *\\*) fail BAD_URL "the connection authority contains a backslash, which .pgpass reads as an escape" ;;
+  esac
+  case "$hp" in
+    "")      fail BAD_URL "MIGRATION_DATABASE_URL names no host — the Unix-socket form gives the passfile nothing to scope to, so the entry would be a wildcard offering the password to any peer" ;;
     *,*|\[*) URL_PGPASS_HOST="*"; URL_PGPASS_PORT="*" ;;
+    *:*:*)   fail BAD_URL "the connection authority has more than one colon: $hp" ;;
     *:*)     URL_PGPASS_HOST="${hp%:*}"; URL_PGPASS_PORT="${hp##*:}" ;;
     *)       URL_PGPASS_HOST="$hp";      URL_PGPASS_PORT="*" ;;
+  esac
+  case "${URL_PGPASS_PORT}" in
+    \*|[0-9]*) ;;
+    *) fail BAD_URL "the connection port is not numeric: $URL_PGPASS_PORT" ;;
   esac
 
   # libpq accepts the password as a URI QUERY parameter too, and percent-decodes
@@ -583,12 +603,17 @@ ACHIEVED_TLS=""
 
 verify_transport() {
   local row
-  row="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" \
-    -c "select ssl, coalesce(version,''), coalesce(cipher,'') from pg_stat_ssl where pid = pg_backend_pid()" 2>/dev/null)" \
-    || fail DUMP_FAILED "could not reach the database to verify the connection transport"
+  local diag
+  # stderr is kept: the password lives in PGPASSFILE, so libpq's message carries
+  # no credential, and it is the only text that separates a missing CA from a
+  # wrong host, a rejected password, or a server with TLS switched off.
+  diag="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" \
+    -c "select ssl, coalesce(version,''), coalesce(cipher,'') from pg_stat_ssl where pid = pg_backend_pid()" 2>&1)" \
+    || fail CONNECT_FAILED "could not connect to verify the transport: $diag"
+  row="$diag"
   case "$row" in
     t\|*) ACHIEVED_TLS="${row#t|}" ;;
-    *) fail DUMP_FAILED "the connection is not encrypted with TLS despite a $BACKUP_TLS_MODE floor (pg_stat_ssl reports ssl=false) — a GSSAPI-encrypted or cleartext session would report this" ;;
+    *) fail CONNECT_FAILED "the connection is not encrypted with TLS despite a $BACKUP_TLS_MODE floor (pg_stat_ssl reports ssl=false) — a GSSAPI-encrypted or cleartext session would report this" ;;
   esac
 }
 
@@ -609,6 +634,13 @@ if command -v git >/dev/null 2>&1; then
     git -C "$dest_parent" rev-parse --show-toplevel 2>/dev/null || true)"
 fi
 
+if [ -z "$dest_top" ] && [ "$BACKUP_ALLOW_IN_REPO" != "true" ]; then
+  # An unanswered check is not a passed check. git may be absent, or may refuse
+  # the directory under safe.directory; either way the operator should know the
+  # guard did not run rather than assume it did.
+  command -v git >/dev/null 2>&1 \
+    || warn "git is not on PATH — the in-repository destination check did NOT run"
+fi
 if [ -n "$dest_top" ] && [ "$BACKUP_ALLOW_IN_REPO" != "true" ]; then
   if [ -n "$repo_top" ] && [ "$dest_top" = "$repo_top" ]; then
     fail DEST_IN_REPO "BACKUP_DIR is inside this repository ($dest_top) — choose a path outside it"
@@ -642,7 +674,10 @@ if has_extended_acl "$BACKUP_ROOT"; then
   fail DEST_UNSAFE "$BACKUP_ROOT carries an extended ACL, which grants access the mode bits do not show"
 fi
 if unsafe_mount="$(mount_is_unsafe "$BACKUP_ROOT")"; then
-  fail DEST_UNSAFE "$BACKUP_ROOT is on a filesystem that does not enforce ownership or mode: $unsafe_mount"
+  case "$(uname -s)" in
+    Darwin) fail DEST_UNSAFE "$BACKUP_ROOT is on a filesystem that does not enforce ownership or mode: $unsafe_mount — macOS ignores ownership on external volumes by default; enable it with: sudo diskutil enableOwnership '$BACKUP_ROOT'" ;;
+    *)      fail DEST_UNSAFE "$BACKUP_ROOT is on a filesystem that does not enforce ownership or mode: $unsafe_mount" ;;
+  esac
 fi
 
 # Every ancestor must also be closed to other principals: a world-writable
@@ -683,8 +718,15 @@ list_stamped() {
   ( cd -- "$BACKUP_ROOT" 2>/dev/null && ls -1 2>/dev/null ) | while IFS= read -r n; do
     base="${n%"$suffix"}"
     [ "$base$suffix" = "$n" ] || continue
-    # The optional .<pid> is the collision form written by the cleanup trap.
-    [[ "$base" =~ ^[0-9]{8}T[0-9]{6}Z(\.[0-9]+)?$ ]] || continue
+    # The optional .<pid> is the collision form the cleanup trap writes, and it
+    # exists ONLY for .FAILED. Admitting it for the empty suffix would let a
+    # stray <stamp>.<digits> directory count as a published generation and push
+    # a real one out of the retention window.
+    if [ "$suffix" = ".FAILED" ]; then
+      [[ "$base" =~ ^[0-9]{8}T[0-9]{6}Z(\.[0-9]+)?$ ]] || continue
+    else
+      [[ "$base" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+    fi
     [ -L "$BACKUP_ROOT/$n" ] && continue
     [ -d "$BACKUP_ROOT/$n" ] || continue
     printf '%s\n' "$n"
@@ -700,6 +742,7 @@ prune_orphaned_partials() {
   # from a run that died before its trap could fire.
   for name in "$BACKUP_ROOT"/.pgpass.*; do
     [ -e "$name" ] || continue
+    assert_root_unchanged
     rm -f -- "$name"
     warn "removed a credential file left by an interrupted run"
   done
@@ -716,7 +759,9 @@ EOF
 # One place, so a future removal loop cannot be added without it. The check the
 # generation pruner performs was not being performed by the other two.
 assert_root_unchanged() {
-  [ "$(stat_ident "$BACKUP_DIR")" = "$ROOT_IDENT" ] \
+  # $BACKUP_ROOT is what the removals traverse; $BACKUP_DIR resolves through any
+  # symlink and is not the object being protected.
+  [ "$(stat_ident "$BACKUP_ROOT")" = "$ROOT_IDENT" ] \
     || fail PRUNE_ABORTED "$BACKUP_DIR is no longer the directory that was audited"
 }
 
@@ -731,7 +776,7 @@ EOF
   local cutoff_days="$BACKUP_FAILED_MAX_AGE_DAYS"
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    if [ -n "$(find "$BACKUP_ROOT" -maxdepth 1 -name "$name" -type d -mtime "+$cutoff_days" -print 2>/dev/null)" ]; then
+    if [ -n "$(find "$BACKUP_ROOT/$name" -maxdepth 0 -type d -mtime "+$cutoff_days" -print 2>/dev/null)" ]; then
       assert_root_unchanged
       ( cd -- "$BACKUP_ROOT" && rm -rf -- "$name" )
       log "pruned failed run $name (older than ${cutoff_days}d)"
@@ -792,12 +837,13 @@ if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
     fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder, alive)"
   fi
 
-  # Not reclaimed by this script, at all. Every in-process variant tried here
-  # raced: two runs can each judge the lock stale, and whichever acts second
-  # removes the lock the first has already re-created. A flag would only move
-  # the race behind an opt-in. The escape is a removal the operator performs
-  # after confirming no run is active; from then on the script only ever mkdirs,
-  # which is atomic and has no such window.
+  # Not reclaimed by this script, at all. Not because reclaiming cannot be made
+  # atomic — a rename-to-claim is — but because no automatic rule can tell a
+  # dead holder from one whose process table entry is gone while its work is
+  # not: a container restarted mid-dump, a run whose pid was reused, a lock
+  # written by a host this one cannot interrogate. Taking the lock on a guess
+  # puts two writers in one directory. A human confirming nothing is running is
+  # the only check that actually decides it.
   fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). Confirm no backup is running, then: rm -rf '$LOCK_CANDIDATE'"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"
@@ -845,7 +891,28 @@ EOF
     [ -e "$_res" ] || continue
     log "DRY RUN — would remove residue $(basename -- "$_res")"
   done
-  unset _res
+  # .FAILED is pruned by age and by count before every dump, so the preview has
+  # to cover it or it understates what the run destroys.
+  _failed_n=0
+  while IFS= read -r _res; do [ -n "$_res" ] && _failed_n=$((_failed_n + 1)); done <<EOF
+$(list_stamped ".FAILED")
+EOF
+  _failed_excess=$((_failed_n - BACKUP_RETAIN))
+  [ "$_failed_excess" -lt 0 ] && _failed_excess=0
+  log "DRY RUN — $_failed_n failed run(s) retained; would prune $_failed_excess by count, plus any older than ${BACKUP_FAILED_MAX_AGE_DAYS}d"
+  _i=0
+  while IFS= read -r _res; do
+    [ -n "$_res" ] || continue
+    if [ -n "$(find "$BACKUP_ROOT/$_res" -maxdepth 0 -type d -mtime "+$BACKUP_FAILED_MAX_AGE_DAYS" -print 2>/dev/null)" ]; then
+      log "DRY RUN — would prune failed run $_res (older than ${BACKUP_FAILED_MAX_AGE_DAYS}d)"
+    elif [ "$_i" -lt "$_failed_excess" ]; then
+      log "DRY RUN — would prune failed run $_res"
+      _i=$((_i + 1))
+    fi
+  done <<EOF
+$(list_stamped ".FAILED")
+EOF
+  unset _res _failed_n _failed_excess _i
   log "DRY RUN — nothing was dumped and nothing was deleted"
   exit 0
 fi
@@ -903,7 +970,7 @@ while [ "$_tries" -lt 5 ]; do
   _tries=$((_tries + 1))
   STAMP=""
 done
-[ -n "$STAMP" ] || fail INTERNAL "could not obtain an unused generation stamp under $BACKUP_ROOT"
+[ -n "$STAMP" ] || fail STAMP_TAKEN "every generation stamp in the last few seconds is taken under $BACKUP_ROOT — retry"
 unset _tries
 
 RUN_PARTIAL="$BACKUP_ROOT/$STAMP.partial"
@@ -1018,6 +1085,12 @@ MANIFEST="$RUN_PARTIAL/MANIFEST"
   printf 'validated_at: %s\n' "$([ "$MODE" = "url" ] && printf host || printf 'compose service %s' "$COMPOSE_DB_SERVICE")"
   [ "$MODE" = "url" ] && printf 'achieved_tls: %s\n' "${ACHIEVED_TLS:-unknown}"
 } > "$MANIFEST"
+
+if [ "$MODE" = "url" ]; then
+  log "mode=url target=$URL_DISPLAY tls_floor=$BACKUP_TLS_MODE"
+else
+  log "mode=compose target=service:$COMPOSE_DB_SERVICE user=$COMPOSE_DB_SUPERUSER"
+fi
 
 for db in $BACKUP_DATABASES; do
   archive="$RUN_PARTIAL/$db.dump"

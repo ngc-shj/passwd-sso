@@ -129,18 +129,20 @@ function globToRegExp(glob) {
     }
     if (glob[i] === "*" && glob[i + 1] === "*") { out += ".*"; i += 1; continue; }
     if (glob[i] === "*") { out += "[^/]*"; continue; }
-    // Character classes: Docker matches with Go's filepath.Match, which supports
-    // [0-9] and [!abc]. Escaping the brackets away made a class pattern match
-    // nothing, so the gate under-reported instead of failing loudly.
+    // Character classes. Docker does NOT use filepath.Match here: moby's
+    // patternmatcher copies the class verbatim into a Go regexp, so '!' is an
+    // ordinary member and only '^' negates — verified against a real
+    // `docker build`, where `**/[!x]ecret.txt` did NOT exclude secret.txt.
+    // Rewriting '!' to '^' made this gate report exclusion that does not
+    // happen, which is a fail-open in the one place whose job is faithfulness.
     if (glob[i] === "[") {
       const close = glob.indexOf("]", i + 1);
-      if (close > i) {
-        let cls = glob.slice(i + 1, close);
-        if (cls.startsWith("!")) cls = "^" + cls.slice(1);
-        out += "[" + cls + "]";
-        i = close;
-        continue;
+      if (close <= i) {
+        throw new Error(`unterminated character class in .dockerignore pattern: ${glob}`);
       }
+      out += "[" + glob.slice(i + 1, close) + "]";
+      i = close;
+      continue;
     }
     out += glob[i].replace(/[.+^${}()|[\]\\]/g, "\\$&");
   }
