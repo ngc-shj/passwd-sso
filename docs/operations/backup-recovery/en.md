@@ -169,3 +169,54 @@ The following must all be completed before considering production deployment don
 3. Vault Lock "undeletable" verification (confirm `aws backup delete-recovery-point` is rejected in non-production)
 4. Monthly restore drill: snapshot → RDS restore → app startup → login → decryption E2E verification → RTO measurement
 5. EventBridge → SNS notification delivery verification (send test FAILED event via `aws events put-events`)
+
+## Self-Hosted Backups (Docker Compose)
+
+The sections above describe the AWS path (RDS snapshots, PITR, Backup Vault
+Lock). A self-hosted deployment has none of that, and until `scripts/backup-db.sh`
+landed the repository documented no backup procedure for it at all.
+
+```bash
+scripts/backup-db.sh                       # defaults: ~/passwd-sso-backups, keep 7
+BACKUP_DIR=/mnt/vault BACKUP_RETAIN=30 scripts/backup-db.sh
+BACKUP_DRY_RUN=true scripts/backup-db.sh   # preview the prune, dump nothing
+```
+
+Each run produces one directory:
+
+```
+20260803T164500Z/
+  passwd_sso.dump    application data (pg_dump -Fc --create)
+  jackson.dump       SSO connection records — restoring without this loses every IdP binding
+  globals.sql        cluster roles (pg_dumpall --globals-only --no-role-passwords)
+  MANIFEST           host, mode, per-member size and entry count, tool versions
+```
+
+What the script guarantees, and what it does not:
+
+- **Validated, not merely written.** Each archive is read back by `pg_restore`
+  — the implementation that will restore it — before the run is published. A
+  truncated dump is non-empty and unreadable, which a size check cannot detect.
+- **Atomic.** Work happens in `<stamp>.partial` and is renamed only after every
+  member validates, so a half-written run is never mistaken for a generation.
+  A validation failure is kept as `<stamp>.FAILED` for diagnosis rather than
+  deleted: the fault may be the reader, and destroying a possibly-good archive
+  to punish the validator is the wrong direction.
+- **The pruner never endangers the run just taken.** It is excluded by resolved
+  path, not by assuming it sorts newest — a clock step or two hosts sharing one
+  destination can make it the oldest name.
+- **`globals.sql` carries structural assurance only.** It is plain SQL, so
+  `pg_restore` is not its reader; the script checks the trailing completion
+  marker and the role count.
+- **The archives are plaintext secrets.** They hold every ciphertext blob, the
+  audit log, and every wrapped key. The script verifies the destination's mode,
+  owner, extended ACLs, mount options and ancestors before writing, and refuses
+  a filesystem that cannot enforce ownership — a USB stick is a case for an
+  encrypted volume, not for writing the corpus unprotected. **Encryption at
+  rest and offsite replication are out of scope**: anyone who can read
+  `$BACKUP_DIR` has the database.
+
+Restoring is deliberately not the script's job. Follow
+[dev-host-migration.md](../dev-host-migration.md) step 5 — the ordering
+constraint there (empty volume → initdb → restore) is what lands the correct
+roles and ACLs.

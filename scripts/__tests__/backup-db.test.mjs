@@ -681,3 +681,39 @@ describe("Group B — validation by a real pg_restore", () => {
     expect(readFileSync(join(FIXTURES, "globals-truncated.sql"), "utf8")).not.toContain(marker);
   });
 });
+
+// ─── C8: documentation ──────────────────────────────────────
+
+describe("C8 documentation", () => {
+  // No gate enforces these edits on an ordinary PR: check-doc-paths.mjs is
+  // invoked only by refactor-phase-verify.mjs, whose workflow triggers on
+  // refactor/** and merge_group. Asserting the references here is what moves
+  // them from author obligation to a red build.
+  const DOCS = [
+    "CLAUDE.md",
+    "docs/operations/backup-recovery/en.md",
+    "docs/operations/backup-recovery/ja.md",
+    "docs/operations/dev-host-migration.md",
+    "docs/operations/incident-runbook.md",
+  ];
+
+  for (const rel of DOCS) {
+    it(`${rel} points operators at the script`, () => {
+      const text = readFileSync(resolve(REPO_ROOT, rel), "utf8");
+      // The invocation, not the bare path: a doc that merely names the file in
+      // a "do not use this" sentence would satisfy a path-only check.
+      expect(text).toMatch(/scripts\/backup-db\.sh/);
+    });
+  }
+
+  it("keeps the bilingual pair in step, per docs/operations/language-policy.md", () => {
+    const en = readFileSync(resolve(REPO_ROOT, "docs/operations/backup-recovery/en.md"), "utf8");
+    const ja = readFileSync(resolve(REPO_ROOT, "docs/operations/backup-recovery/ja.md"), "utf8");
+    // A content property both files must hold, not a diff property: a test
+    // reads file content, and "both changed" is only visible against a base ref.
+    for (const invocation of ["scripts/backup-db.sh", "BACKUP_DIR=", "BACKUP_RETAIN=", "BACKUP_DRY_RUN=true"]) {
+      expect(en, `en.md must document ${invocation}`).toContain(invocation);
+      expect(ja, `ja.md must document ${invocation}`).toContain(invocation);
+    }
+  });
+});

@@ -53,9 +53,19 @@ A team's encryption key may have been exposed.
 PostgreSQL-level encryption at rest is compromised.
 
 1. Take the database offline
-2. Export data: `pg_dump -Fc passwd_sso > backup.dump`
+2. Export data: `BACKUP_DIR=/secure/path scripts/backup-db.sh`
+
+   Not a bare `pg_dump passwd_sso`: that captures one of three members —
+   losing the `jackson` database (every SSO connection record) and the cluster
+   globals — and reports success on a truncated archive. The script dumps the
+   full set, validates each archive with `pg_restore`, and refuses a
+   destination that is group- or world-readable. Under incident pressure is
+   exactly when an unvalidated export is least affordable.
 3. Create a new encrypted database instance
-4. Restore: `pg_restore -d passwd_sso backup.dump`
+4. Restore from the run directory the script printed, following
+   [dev-host-migration.md](dev-host-migration.md) step 5 for the ordering
+   constraint (an initdb-bootstrapped cluster must exist before the archives
+   are restored, or the ACLs land on roles that do not exist)
 5. Update `DATABASE_URL` and redeploy
 
 ---
