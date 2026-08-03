@@ -234,7 +234,36 @@ rm -rf ~/passwd-sso-backups/.lock.d
   USB メモリは「暗号化ボリュームを使う」ケースであって、そのまま書く場所では
   ありません。**保存時暗号化とオフサイト複製は範囲外です。**
   `$BACKUP_DIR` を読める者はデータベースを読めます。
-- 復元はこのスクリプトの仕事ではありません。
+- ### リモート / マネージド Postgres (URL モード)
+
+`MIGRATION_DATABASE_URL` を設定すると、Compose サービスではなく直接接続に切り替わり
+ます。RDS 経路がこれです。
+
+```bash
+MIGRATION_DATABASE_URL='postgresql://backup_user:<pw>@db.example:5432/postgres?sslrootcert=/etc/ssl/rds-ca.pem' \
+BACKUP_DATABASES='passwd_sso' \
+BACKUP_DIR=/var/backups/passwd-sso \
+  scripts/backup-db.sh
+```
+
+- **クライアントバイナリが 4 つ必要です**: `pg_dump`、`pg_dumpall`、`pg_restore`、
+  `psql`。`pg_restore` は各アーカイブを読み直し、`psql` は実際に確立された通信方式を
+  サーバーに問い合わせます。
+- **CA は必須です。** フロアは `verify-full` で、ルート証明書なしには満たせません。
+  URL に `sslrootcert=` を渡すか `PGSSLROOTCERT` を設定してください。AWS の RDS
+  バンドルは <https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem>
+  にあり、libpq の既定ストアには含まれていません。`BACKUP_TLS_MODE=verify-ca` は
+  ホスト名検証のみを外します。`require` は意図的に受け付けません。
+- **URL は使うだけでなく検証します。** 資格情報を運ぶパラメータや接続先を差し替える
+  パラメータ（`password`、`passfile`、`service`、`oauth_client_secret`、`host`、
+  `hostaddr`、`gssencmode`、`dbname` ほか）は拒否し、パスワードはモード 0600 の
+  パスファイル経由で渡すのでどのプロセスの argv にも現れません。
+- **`BACKUP_DATABASES` は既定値であって探索結果ではありません。** マネージド
+  インスタンスでは名前が Compose 構成と異なるのが普通です。スクリプトは見えている
+  データベースのうち一覧に無いものを警告し、MANIFEST の `not_backed_up:` に記録
+  します。
+
+復元はこのスクリプトの仕事ではありません。
   [dev-host-migration.md](../dev-host-migration.md) の手順 5 に従ってください。
   そこにある順序（空ボリューム → initdb → 復元）が、正しいロールと ACL を
   着地させる唯一の順序です。

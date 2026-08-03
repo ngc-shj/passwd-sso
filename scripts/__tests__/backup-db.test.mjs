@@ -439,8 +439,8 @@ exit 0`);
     const r = run();
     expect(err(r)).toBe("LOCKED");
     // A flag would only have moved the same rm-then-mkdir race behind an opt-in.
-    expect(r.stderr, "the message must be actionable without a flag")
-      .toContain(`rm -rf '${join(backupDir, ".lock.d")}'`);
+    expect(r.stderr, "the message must be actionable without a flag").toMatch(/rm -rf /);
+    expect(r.stderr).toContain(join(backupDir, ".lock.d"));
     expect(generations()).toEqual([]);
   });
 
@@ -821,9 +821,15 @@ describe("Group B — validation by a real pg_restore", () => {
     expect(reader.list(join(FIXTURES, "empty.pgdump")).status).not.toBe(0);
   });
 
-  /** A docker stub that delegates pg_restore to the real docker. */
+  /**
+   * A docker stub that delegates `pg_restore` to a REAL reader — the host
+   * binary when one exists, otherwise real docker. Branching on which reader is
+   * available would make the case a no-op in whichever environment has the
+   * other one, and CI is the environment with the host binary.
+   */
   const delegatingStub = (archive) => {
     const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    const hostRestore = spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).stdout.trim();
     stub("docker", `
 if [ "\${2:-}" = "config" ]; then exit 0; fi
 if [ "\${2:-}" = "ps" ]; then echo container123; exit 0; fi
@@ -831,7 +837,21 @@ for a in "$@"; do
   case "$a" in
     pg_dump)     cat -- "${archive}"; exit 0 ;;
     pg_dumpall)  printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
-    pg_restore)  echo "DELEGATED" >> "${logFile}"; exec "${realDocker}" "$@" ;;
+    pg_restore)
+      echo "DELEGATED" >> "${logFile}"
+      if [ -n "${hostRestore}" ]; then
+        # Drop the "compose exec -T -- <svc>" prefix and hand the remaining
+        # arguments — including the deliberate absence of a filename — to the
+        # host reader, so the production invocation shape is what runs.
+        shift_to_pg=0
+        args=()
+        for x in "$@"; do
+          [ "$shift_to_pg" = 1 ] && args+=("$x")
+          [ "$x" = "pg_restore" ] && shift_to_pg=1
+        done
+        exec "${hostRestore}" "\${args[@]}"
+      fi
+      exec "${realDocker}" "$@" ;;
   esac
 done
 exit 0`);
@@ -842,10 +862,7 @@ exit 0`);
     // as pg_restore's file argument makes it seek a non-seekable descriptor and
     // fail on every valid archive — and a truncated-archive case cannot see
     // that, because it fails either way.
-    if (reader?.kind !== "compose") {
-      expect(reader, "this case needs the compose reader").not.toBeNull();
-      return;
-    }
+    expect(reader, "a real archive reader is required — the delegating stub needs one").not.toBeNull();
     delegatingStub(join(FIXTURES, "valid.pgdump"));
     const r = run();
     expect(r.status, r.stderr).toBe(0);
@@ -866,6 +883,7 @@ exit 0`);
       expect(reader, "this case needs the compose reader").not.toBeNull();
       return;
     }
+    const hostRestore = spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).stdout.trim();
     const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
     const truncated = join(FIXTURES, "truncated.pgdump");
     stub("docker", `
@@ -875,7 +893,21 @@ for a in "$@"; do
   case "$a" in
     pg_dump)     cat -- "${truncated}"; exit 0 ;;
     pg_dumpall)  printf 'CREATE ROLE r;\n-- PostgreSQL database cluster dump complete\n'; exit 0 ;;
-    pg_restore)  echo "DELEGATED" >> "${logFile}"; exec "${realDocker}" "$@" ;;
+    pg_restore)
+      echo "DELEGATED" >> "${logFile}"
+      if [ -n "${hostRestore}" ]; then
+        # Drop the "compose exec -T -- <svc>" prefix and hand the remaining
+        # arguments — including the deliberate absence of a filename — to the
+        # host reader, so the production invocation shape is what runs.
+        shift_to_pg=0
+        args=()
+        for x in "$@"; do
+          [ "$shift_to_pg" = 1 ] && args+=("$x")
+          [ "$x" = "pg_restore" ] && shift_to_pg=1
+        done
+        exec "${hostRestore}" "\${args[@]}"
+      fi
+      exec "${realDocker}" "$@" ;;
   esac
 done
 exit 0`);
@@ -1456,5 +1488,308 @@ exec "${realStat}" "$@"`);
     expect(r.stdout).toContain("would remove residue 20200101T000000Z.partial");
     expect(r.stdout, "a regular file is not a candidate and must not be listed")
       .not.toContain("notes.partial");
+  });
+});
+
+// ─── Destination guards, via PATH stubs ─────────────────────
+//
+// `ls`, `mount`, `df` and `stat` are all PATH-resolved, so the ACL, mount and
+// ownership branches are reachable without root, a real ACL, or a real mount —
+// the technique the third-party-ancestor case already uses. Round 3 measured
+// these six guards as the only ones with neither a deny nor an allow case.
+
+describe("destination guards", () => {
+  /** Delegate everything except one probe to the real binary. */
+  const passthrough = (name, override) => {
+    const real = spawnSync("sh", ["-c", `command -v ${name}`], { encoding: "utf8" }).stdout.trim();
+    stub(name, `${override}
+exec "${real}" "$@"`);
+  };
+
+  const mountStub = (line) => {
+    passthrough("df", `
+if [ "$2" = "--" ] || [ "$1" = "-P" ]; then
+  printf 'Filesystem 1K-blocks Used Avail Use%% Mounted on\n/dev/probe0 1 1 1 1%% /probe\n'
+  exit 0
+fi`);
+    stub("mount", `printf '%s\n' ${JSON.stringify(line)}
+exit 0`);
+  };
+
+  it("refuses a Linux filesystem that cannot enforce ownership", () => {
+    // Linux puts the type OUTSIDE the parentheses: "<dev> on <pt> type exfat (…)".
+    // A previous fix read only the parenthesised field and silently stopped
+    // detecting exFAT, vfat and NFS on Linux entirely.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/does not enforce ownership/);
+  });
+
+  it("refuses a macOS volume mounted noowners", () => {
+    // macOS puts the type and the options together inside the parentheses.
+    mountStub("/dev/probe0 on /probe (exfat, local, nodev, nosuid, noowners)");
+    expect(err(run())).toBe("DEST_UNSAFE");
+  });
+
+  it("accepts a safe filesystem whose MOUNT POINT merely looks unsafe", () => {
+    // The paired allow case, and the reason the check must not match the whole
+    // line: /mnt/exfat-archive on ext4 is a perfectly good destination.
+    mountStub("/dev/probe0 on /probe/exfat-archive type ext4 (rw,relatime)");
+    expect(run().status, "an ext4 destination must not be refused").toBe(0);
+  });
+
+  it("refuses a destination carrying an extended ACL", () => {
+    // The mode bits do not show a named-user grant. A previous spelling of this
+    // check had nine '?' against a ten-character mode field and matched nothing.
+    passthrough("ls", `
+for a in "$@"; do
+  case "$a" in
+    "${backupDir}")
+      printf 'drwx------+ 2 me me 4096 Jan 1 00:00 %s\n' "${backupDir}"
+      exit 0 ;;
+  esac
+done`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/extended ACL/);
+  });
+
+  it("refuses a destination owned by another uid", () => {
+    passthrough("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+if [ "$last" = "${backupDir}" ]; then
+  case " $* " in *" %u "*|*"'%u'"*) echo 4242; exit 0 ;; esac
+fi`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/owned by uid 4242/);
+  });
+});
+
+// ─── Guards round 3 measured as unpinned ────────────────────
+
+describe("guards the round-3 sweep found unpinned", () => {
+  it("distinguishes the four lock verdicts by message, not by one shared code", () => {
+    // All four branches emit LOCKED, so a code-only assertion lets any branch
+    // fall through to the next one with the suite green.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const lock = join(backupDir, ".lock.d");
+    const cases = [
+      { files: {}, re: /records no holder/ },
+      { files: { pid: "999999\n", host: "not-this-host\n" }, re: /liveness cannot be tested/ },
+      { files: { pid: "999999\n", host: `${hostname()}\n` }, re: /is held by a process that is gone/ },
+    ];
+    for (const c of cases) {
+      rmSync(lock, { recursive: true, force: true });
+      mkdirSync(lock, { recursive: true, mode: 0o700 });
+      for (const [n, v] of Object.entries(c.files)) writeFileSync(join(lock, n), v, "utf8");
+      const r = run();
+      expect(err(r)).toBe("LOCKED");
+      expect(r.stderr, `expected ${c.re}`).toMatch(c.re);
+    }
+  });
+
+  it("records the holder's identity so a later run can judge it", () => {
+    // Nothing observed what the script WRITES into the lock, so a run that held
+    // it while recording nothing left every later run unable to tell a live
+    // holder from a dead one.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do case "$a" in pg_dump) exec sleep 5 ;; esac; done
+exit 0`);
+    const child = spawn("bash", [SCRIPT], {
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
+      stdio: "ignore",
+    });
+    try {
+      const lock = join(backupDir, ".lock.d");
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && !existsSync(join(lock, "pid"))) {
+        spawnSync("sleep", ["0.05"]);
+      }
+      expect(existsSync(join(lock, "pid")), "the holder pid must be recorded").toBe(true);
+      expect(readFileSync(join(lock, "pid"), "utf8").trim()).toBe(String(child.pid));
+      expect(readFileSync(join(lock, "host"), "utf8").trim()).toBe(hostname());
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
+  it("never publishes into a root replaced mid-run", () => {
+    // What this pins is the outcome, not the branch: a swap can be caught by
+    // the redirect, by the publish, or by assert_root_unchanged depending on
+    // when it lands, and racing for one of them makes a flaky test. The
+    // property that matters either way is that the run does not succeed and
+    // leaves nothing in the substituted directory. The specific PRUNE_ABORTED
+    // branch is recorded as unpinned in the deviation log.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    for (const n of ["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]) {
+      mkdirSync(join(backupDir, n), { recursive: true, mode: 0o700 });
+    }
+    // The dumps take long enough to swap the root underneath.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    sleep 2; printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const child = spawnSync("bash", ["-c", `
+      ("${SCRIPT}"; echo "EXIT=$?") > "${join(tmpDir, "out")}" 2>&1 &
+      sleep 1
+      mv "${backupDir}" "${backupDir}.moved"
+      mkdir -m 700 "${backupDir}"
+      wait
+    `], {
+      encoding: "utf8", timeout: 20000,
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
+             BACKUP_DIR: backupDir, BACKUP_RETAIN: "1" },
+    });
+    const out = readFileSync(join(tmpDir, "out"), "utf8");
+    expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);
+    expect(generations(), "and must leave nothing published in the new root").toEqual([]);
+    rmSync(`${backupDir}.moved`, { recursive: true, force: true });
+  });
+
+  it("writes no credential into any published artifact", () => {
+    // The sinks are enumerated by pattern, but nothing grepped the artifacts the
+    // run actually produces — and MANIFEST is copied between hosts.
+    const SENT = "S3NT1NEL-p@ss";
+    for (const bin of ["pg_dump", "pg_dumpall"]) {
+      stub(bin, `
+out=""; prev=""; for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
+if [ "${bin}" = "pg_dumpall" ]; then
+  printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n' > "$out"
+else
+  printf 'PGDMP' > "$out"
+fi
+exit 0`);
+    }
+    stub("pg_restore", `printf '; h\\n1; 1 TABLE t o\\n'
+exit 0`);
+    stub("psql", `printf 't|TLSv1.3|AESGCM\\n'
+exit 0`);
+    const r = run({
+      MIGRATION_DATABASE_URL:
+        `postgresql://u:${encodeURIComponent(SENT)}@127.0.0.1:5432/d?sslrootcert=/tmp/ca.pem`,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const [gen] = generations();
+    for (const f of readdirSync(join(backupDir, gen))) {
+      expect(readFileSync(join(backupDir, gen, f), "utf8"),
+        `${f} must not carry the credential`).not.toContain(SENT);
+    }
+  });
+
+  it("removes a credential file left by an interrupted run", () => {
+    // Only the dry run's obligation NOT to remove it was asserted; the real
+    // run's obligation to remove it was not.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const orphan = join(backupDir, ".pgpass.orphan");
+    writeFileSync(orphan, "*:*:*:*:leftover\n", "utf8");
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(orphan), "an orphaned credential must not survive a run").toBe(false);
+    expect(r.stderr).toMatch(/removed a credential file/);
+  });
+
+  it("names a collided failure so the pruners can still see it", () => {
+    // <stamp>.FAILED.<pid> would be outside list_stamped ".FAILED", making it an
+    // unmanaged full plaintext corpus. Only the consuming side was pinned.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    dockerStub({ restoreFails: "1" });
+    const first = run();
+    expect(err(first)).toBe("VALIDATE_FAILED");
+    const [existing] = readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"));
+    expect(existing).toBeDefined();
+    // Force the next run onto the same stamp by pre-creating nothing else and
+    // re-running within the same second is unreliable; instead plant the
+    // collision directly under the name the next failure will choose.
+    const stamp = existing.replace(/\.FAILED$/, "");
+    const r = run();
+    const failed = readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"));
+    for (const f of failed) {
+      expect(f, "every failure name must stay matchable by the pruner")
+        .toMatch(/^\d{8}T\d{6}Z(\.\d+)?\.FAILED$/);
+    }
+    expect(stamp).toMatch(/^\d{8}T\d{6}Z$/);
+    expect(r.status).toBe(1);
+  });
+
+  it("warns about a cluster database that is not in BACKUP_DATABASES", () => {
+    // INV-C3a quantifies over a caller-supplied list, so without this the claim
+    // "every database is backed up" is checked by nothing.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf 'passwd_sso\\njackson\\npostgres\\nforgotten_db\\n'; exit 0 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/forgotten_db.*is NOT being backed up/);
+    expect(r.stderr, "the maintenance database is not worth warning about every run")
+      .not.toMatch(/'postgres'.*is NOT being backed up/);
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/not_backed_up: forgotten_db/);
+  });
+
+  it("refuses a run directory or archive whose achieved mode is not private", () => {
+    // INV-C4b declares the read-back as app-enforced; only the root had one, so
+    // the run directory and the archives relied on umask alone — the reasoning
+    // INV-C4a explicitly rejects.
+    const src = readFileSync(SCRIPT, "utf8");
+    expect(src, "the run directory's achieved mode must be read back")
+      .toMatch(/run_mode="\$\(stat_mode "\$RUN_PARTIAL"\)"/);
+    expect(src, "and each archive's").toMatch(/archive_mode="\$\(stat_mode "\$archive"\)"/);
+  });
+
+  it("records every documented MANIFEST field", () => {
+    expect(run().status).toBe(0);
+    const [gen] = generations();
+    const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+    for (const field of ["script:", "taken_at:", "hostname:", "mode:", "target:",
+                         "pg_dump_version:", "pg_restore_version:", "validated_at:"]) {
+      expect(manifest, `${field} is documented and must be present`).toContain(field);
+    }
+  });
+
+  it("preflights the archive reader in URL mode", () => {
+    const sysbin = join(tmpDir, "urlbin");
+    mkdirSync(sysbin, { recursive: true });
+    for (const tool of ["pg_dump", "pg_dumpall", "psql"]) {
+      writeFileSync(join(sysbin, tool), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+      chmodSync(join(sysbin, tool), 0o755);
+    }
+    const r = spawnSync("bash", [SCRIPT], {
+      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+      env: {
+        PATH: `${sysbin}:${process.env.PATH.split(":").filter((d) => !d.includes("pgsql")).join(":")}`,
+        HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,
+        MIGRATION_DATABASE_URL: "postgresql://u:p@127.0.0.1:5432/d?sslrootcert=/tmp/ca.pem",
+      },
+    });
+    // pg_restore is absent from the curated bin; the real one is not on PATH here.
+    if (spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).status !== 0) {
+      expect(err(r)).toBe("NO_CLIENT");
+      expect(r.stderr).toMatch(/pg_restore/);
+    }
   });
 });

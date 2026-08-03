@@ -282,6 +282,12 @@ docker compose exec -T db psql -U passwd_user -d passwd_sso -tAc \
 
 `jackson_user` must report `f`. If it reports `t`, the REVOKE did not take.
 
+`globals.sql` is produced by `pg_dumpall`, which on PostgreSQL 16.12 emits
+`\restrict` / `\unrestrict` around the body. Those are recent psql
+meta-commands: an older client reports `invalid command \restrict` and, without
+`ON_ERROR_STOP`, keeps going and exits 0. Restore it only with a psql at least
+as new as the server that produced it.
+
 **Do not restore `globals.sql` here.** The initdb scripts already created the
 roles with the passwords from `.env`, and `--no-role-passwords` means replaying
 the file would add nothing while erroring on every existing role. `globals.sql`

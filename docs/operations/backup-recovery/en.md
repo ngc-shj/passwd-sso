@@ -239,6 +239,37 @@ What the script guarantees, and what it does not:
   rest and offsite replication are out of scope**: anyone who can read
   `$BACKUP_DIR` has the database.
 
+### Remote / managed Postgres (URL mode)
+
+Setting `MIGRATION_DATABASE_URL` switches the script from the Compose service to
+a direct connection. It is the RDS path.
+
+```bash
+MIGRATION_DATABASE_URL='postgresql://backup_user:<pw>@db.example:5432/postgres?sslrootcert=/etc/ssl/rds-ca.pem' \
+BACKUP_DATABASES='passwd_sso' \
+BACKUP_DIR=/var/backups/passwd-sso \
+  scripts/backup-db.sh
+```
+
+- **Four client binaries are required**: `pg_dump`, `pg_dumpall`, `pg_restore`
+  and `psql`. `pg_restore` reads each archive back; `psql` asks the server what
+  transport was actually negotiated.
+- **A CA is mandatory.** The floor is `verify-full`, which cannot be satisfied
+  without a root certificate — pass `sslrootcert=` in the URL or set
+  `PGSSLROOTCERT`. AWS publishes its RDS bundle at
+  <https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem>; libpq's
+  default store does not contain it. `BACKUP_TLS_MODE=verify-ca` drops hostname
+  verification only; `require` is deliberately not accepted.
+- **The URL is validated, not merely used.** Credential-bearing and
+  peer-redirecting query parameters (`password`, `passfile`, `service`,
+  `oauth_client_secret`, `host`, `hostaddr`, `gssencmode`, `dbname`, …) are
+  refused, and the password is delivered through a mode-0600 passfile so it
+  never reaches any process's argv.
+- **`BACKUP_DATABASES` is a default, not a discovery.** On a managed instance
+  the names usually differ from the Compose deployment's. The script warns for
+  every database it can see that is not in the list, and records them in the
+  MANIFEST under `not_backed_up:`.
+
 Restoring is deliberately not the script's job. Follow
 [dev-host-migration.md](../dev-host-migration.md) step 5 — the ordering
 constraint there (empty volume → initdb → restore) is what lands the correct

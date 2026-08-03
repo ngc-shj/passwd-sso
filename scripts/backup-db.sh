@@ -238,15 +238,39 @@ mount_is_unsafe() {
   while IFS= read -r m; do
     case "$m" in
       "$dev on "*)
-        # Only the parenthesised option/type field: matching the whole line
-        # refuses a safe ext4 destination that merely happens to be mounted at
-        # /mnt/exfat-archive.
-        local opts="${m##*(}"
-        opts="${opts%)*}"
-        case ",$opts," in
-          *,noowners,*|*noowners*|*msdos*|*exfat*|*vfat*|*smbfs*|*cifs*|*nfs*|*osxfuse*|*macfuse*)
+        # Parse the type and the options separately, and never the mount POINT:
+        # matching the whole line refuses a safe ext4 destination that merely
+        # happens to live at /mnt/exfat-archive.
+        local fstype="" opts=""
+        case "$m" in
+          *" type "*)
+            # Linux: "<dev> on <point> type <fstype> (<opts>)"
+            fstype="${m#* type }"
+            fstype="${fstype%% *}"
+            ;;
+        esac
+        case "$m" in
+          *\(*\)*)
+            opts="${m##*(}"
+            opts="${opts%)*}"
+            ;;
+        esac
+        # On macOS the first parenthesised field IS the type, so the option list
+        # carries it; on Linux the type is its own field and the options do not.
+        case "$fstype" in
+          exfat|vfat|msdos|ntfs|ntfs3|fuseblk|cifs|smbfs|smb3|nfs|nfs4|afpfs|sshfs|osxfuse|macfuse)
             printf '%s' "$m"; return 0 ;;
         esac
+        local o
+        local IFS=,
+        for o in $opts; do
+          # Trim the spaces macOS puts after each comma.
+          o="${o# }"; o="${o% }"
+          case "$o" in
+            noowners|exfat|vfat|msdos|ntfs|cifs|smbfs|nfs|webdav|osxfuse|macfuse)
+              printf '%s' "$m"; return 0 ;;
+          esac
+        done
         ;;
     esac
   done <<EOF
@@ -462,9 +486,12 @@ parse_url() {
   # host — a wildcard entry offers the superuser password to whatever peer the
   # connection reaches. Multi-host and bracketed IPv6 forms keep the wildcard;
   # host=/hostaddr= are refused above, so the authority is the peer either way.
+  # The WHOLE authority: the username reaches URL_DISPLAY, which is written to
+  # the MANIFEST and logged, and both are line-oriented.
+  case "$authority" in
+    *$'\n'*|*$'\r'*) fail BAD_URL "the connection authority contains a newline" ;;
+  esac
   local hp="${authority##*@}"
-  # Validated before it reaches a credential file or the MANIFEST: both are
-  # line-oriented, and neither escapes what it is given.
   case "$hp" in
     *$'\n'*|*$'\r'*) fail BAD_URL "the connection authority contains a newline" ;;
     *\\*) fail BAD_URL "the connection authority contains a backslash, which .pgpass reads as an escape" ;;
@@ -476,9 +503,11 @@ parse_url() {
     *:*)     URL_PGPASS_HOST="${hp%:*}"; URL_PGPASS_PORT="${hp##*:}" ;;
     *)       URL_PGPASS_HOST="$hp";      URL_PGPASS_PORT="*" ;;
   esac
-  case "${URL_PGPASS_PORT}" in
-    \*|[0-9]*) ;;
-    *) fail BAD_URL "the connection port is not numeric: $URL_PGPASS_PORT" ;;
+  case "$URL_PGPASS_PORT" in
+    "*") ;;
+    # Anchored: `[0-9]*` is "starts with a digit", which admits 5432evil.
+    *) [[ "$URL_PGPASS_PORT" =~ ^[0-9]+$ ]] \
+         || fail BAD_URL "the connection port is not numeric: $URL_PGPASS_PORT" ;;
   esac
 
   # libpq accepts the password as a URI QUERY parameter too, and percent-decodes
@@ -627,20 +656,37 @@ dest_parent="$(nearest_existing "$BACKUP_DIR")"
 # would let the environment decide the verdict.
 repo_top=""
 dest_top=""
+dest_repo_known=""
 if command -v git >/dev/null 2>&1; then
   repo_top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_CEILING_DIRECTORIES \
     git -C "$(dirname -- "$0")" rev-parse --show-toplevel 2>/dev/null || true)"
-  dest_top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_CEILING_DIRECTORIES \
-    git -C "$dest_parent" rev-parse --show-toplevel 2>/dev/null || true)"
+  git_err=""
+  if dest_top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_CEILING_DIRECTORIES \
+      git -C "$dest_parent" rev-parse --show-toplevel 2>/tmp/.backup-db-git-err.$$)"; then
+    dest_repo_known=1
+  else
+    git_err="$(cat "/tmp/.backup-db-git-err.$$" 2>/dev/null || true)"
+    dest_top=""
+    # "not a git repository" is a real ANSWER — the destination is outside any
+    # worktree. Anything else (safe.directory refusal, a broken object store) is
+    # the check failing to run, which is not the same thing.
+    case "$git_err" in
+      *"not a git repository"*|*"Not a git repository"*) dest_repo_known=1 ;;
+    esac
+  fi
+  rm -f "/tmp/.backup-db-git-err.$$" 2>/dev/null || true
 fi
 
-if [ -z "$dest_top" ] && [ "$BACKUP_ALLOW_IN_REPO" != "true" ]; then
-  # An unanswered check is not a passed check. git may be absent, or may refuse
-  # the directory under safe.directory; either way the operator should know the
-  # guard did not run rather than assume it did.
-  command -v git >/dev/null 2>&1 \
-    || warn "git is not on PATH — the in-repository destination check did NOT run"
+if [ -z "$dest_repo_known" ] && [ "$BACKUP_ALLOW_IN_REPO" != "true" ]; then
+  # Refusing rather than warning: a guard whose result is unknown has not passed,
+  # and this one exists to stop a plaintext database landing where it can be
+  # committed or copied into a build context.
+  if command -v git >/dev/null 2>&1; then
+    fail DEST_IN_REPO "git could not determine whether $BACKUP_DIR is inside a repository (${git_err:-no output}) — resolve it, or set BACKUP_ALLOW_IN_REPO=true to proceed without the check"
+  fi
+  fail DEST_IN_REPO "git is not on PATH, so the in-repository destination check cannot run — install git, or set BACKUP_ALLOW_IN_REPO=true to proceed without it"
 fi
+
 if [ -n "$dest_top" ] && [ "$BACKUP_ALLOW_IN_REPO" != "true" ]; then
   if [ -n "$repo_top" ] && [ "$dest_top" = "$repo_top" ]; then
     fail DEST_IN_REPO "BACKUP_DIR is inside this repository ($dest_top) — choose a path outside it"
@@ -844,7 +890,9 @@ if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
   # written by a host this one cannot interrogate. Taking the lock on a guess
   # puts two writers in one directory. A human confirming nothing is running is
   # the only check that actually decides it.
-  fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). Confirm no backup is running, then: rm -rf '$LOCK_CANDIDATE'"
+  # %q, not hand-rolled quoting: a path containing a single quote would
+  # otherwise break the command the operator is invited to paste.
+  fail LOCKED "$LOCK_CANDIDATE is held by a process that is gone (pid $holder). Confirm no backup is running, then: rm -rf $(printf '%q' "$LOCK_CANDIDATE")"
 fi
 LOCK_DIR="$LOCK_CANDIDATE"
 # Recorded immediately, and guarded: a lock we hold but cannot describe would
@@ -892,27 +940,43 @@ EOF
     log "DRY RUN — would remove residue $(basename -- "$_res")"
   done
   # .FAILED is pruned by age and by count before every dump, so the preview has
-  # to cover it or it understates what the run destroys.
-  _failed_n=0
-  while IFS= read -r _res; do [ -n "$_res" ] && _failed_n=$((_failed_n + 1)); done <<EOF
-$(list_stamped ".FAILED")
-EOF
-  _failed_excess=$((_failed_n - BACKUP_RETAIN))
-  [ "$_failed_excess" -lt 0 ] && _failed_excess=0
-  log "DRY RUN — $_failed_n failed run(s) retained; would prune $_failed_excess by count, plus any older than ${BACKUP_FAILED_MAX_AGE_DAYS}d"
-  _i=0
+  # to cover it or it understates what the run destroys. Age first, then count
+  # over what REMAINS — the order the real prune uses. Counting the excess
+  # against the pre-age total spends the same slot twice.
+  _aged=""
+  _kept=""
   while IFS= read -r _res; do
     [ -n "$_res" ] || continue
     if [ -n "$(find "$BACKUP_ROOT/$_res" -maxdepth 0 -type d -mtime "+$BACKUP_FAILED_MAX_AGE_DAYS" -print 2>/dev/null)" ]; then
-      log "DRY RUN — would prune failed run $_res (older than ${BACKUP_FAILED_MAX_AGE_DAYS}d)"
-    elif [ "$_i" -lt "$_failed_excess" ]; then
-      log "DRY RUN — would prune failed run $_res"
-      _i=$((_i + 1))
+      _aged="$_aged$_res"$'\n'
+    else
+      _kept="$_kept$_res"$'\n'
     fi
   done <<EOF
 $(list_stamped ".FAILED")
 EOF
-  unset _res _failed_n _failed_excess _i
+  _kept_n=0
+  while IFS= read -r _res; do [ -n "$_res" ] && _kept_n=$((_kept_n + 1)); done <<EOF
+$_kept
+EOF
+  _failed_excess=$((_kept_n - BACKUP_RETAIN))
+  [ "$_failed_excess" -lt 0 ] && _failed_excess=0
+  while IFS= read -r _res; do
+    [ -n "$_res" ] || continue
+    log "DRY RUN — would prune failed run $_res (older than ${BACKUP_FAILED_MAX_AGE_DAYS}d)"
+  done <<EOF
+$_aged
+EOF
+  _i=0
+  while IFS= read -r _res; do
+    [ -n "$_res" ] || continue
+    [ "$_i" -lt "$_failed_excess" ] || break
+    log "DRY RUN — would prune failed run $_res"
+    _i=$((_i + 1))
+  done <<EOF
+$_kept
+EOF
+  unset _res _aged _kept _kept_n _failed_excess _i
   log "DRY RUN — nothing was dumped and nothing was deleted"
   exit 0
 fi
@@ -984,6 +1048,12 @@ RUN_FINAL="$BACKUP_ROOT/$STAMP"
 prune_failed
 
 mkdir -- "$RUN_PARTIAL" || fail INTERNAL "could not create $RUN_PARTIAL"
+# Read back rather than trust umask — the same reasoning INV-C4a applies to the
+# root. A default ACL on a parent, or a filesystem that reinterprets the mode,
+# produces something else.
+run_mode="$(stat_mode "$RUN_PARTIAL")"
+[ "$(( 8#$run_mode & 8#077 ))" -eq 0 ] \
+  || fail DEST_UNSAFE "$RUN_PARTIAL was created with mode $run_mode — group/other access must be absent"
 
 # ─── Dump ────────────────────────────────────────────────────
 #
@@ -1068,6 +1138,35 @@ if [ "$MODE" = "url" ]; then
   log "transport verified: $ACHIEVED_TLS"
 fi
 
+# Reconcile the configured set against what the cluster actually holds. A
+# caller-supplied list turns "every database is backed up" into a claim nothing
+# checks; the operator finds out at restore time otherwise.
+cluster_dbs=""
+if [ "$MODE" = "url" ]; then
+  cluster_dbs="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" \
+    -c "select datname from pg_database where not datistemplate and datallowconn" 2>/dev/null || true)"
+else
+  cluster_dbs="$(compose exec -T -- "$COMPOSE_DB_SERVICE" \
+    psql -Atq -U "$COMPOSE_DB_SUPERUSER" -d postgres \
+    -c "select datname from pg_database where not datistemplate and datallowconn" 2>/dev/null || true)"
+fi
+unlisted=""
+while IFS= read -r _cdb; do
+  [ -n "$_cdb" ] || continue
+  case " $BACKUP_DATABASES " in
+    *" $_cdb "*) continue ;;
+  esac
+  # `postgres` is the maintenance database every cluster carries and holds no
+  # application data; naming it every run would train the operator to ignore
+  # this warning.
+  [ "$_cdb" = "postgres" ] && continue
+  unlisted="$unlisted $_cdb"
+  warn "database '$_cdb' exists in the cluster but is not in BACKUP_DATABASES — it is NOT being backed up"
+done <<EOF
+$cluster_dbs
+EOF
+unset _cdb
+
 MANIFEST="$RUN_PARTIAL/MANIFEST"
 {
   printf 'script: scripts/backup-db.sh\n'
@@ -1083,8 +1182,10 @@ MANIFEST="$RUN_PARTIAL/MANIFEST"
   printf 'pg_dump_version: %s\n' "$(tool_version pg_dump)"
   printf 'pg_restore_version: %s\n' "$(tool_version pg_restore)"
   printf 'validated_at: %s\n' "$([ "$MODE" = "url" ] && printf host || printf 'compose service %s' "$COMPOSE_DB_SERVICE")"
+  printf 'not_backed_up:%s\n' "${unlisted:- (none)}"
   [ "$MODE" = "url" ] && printf 'achieved_tls: %s\n' "${ACHIEVED_TLS:-unknown}"
 } > "$MANIFEST"
+
 
 if [ "$MODE" = "url" ]; then
   log "mode=url target=$URL_DISPLAY tls_floor=$BACKUP_TLS_MODE"
@@ -1097,6 +1198,9 @@ for db in $BACKUP_DATABASES; do
   log "dumping $db"
   dump_database "$db" "$archive" || fail DUMP_FAILED "pg_dump failed for database $db"
   [ -s "$archive" ] || fail DUMP_FAILED "pg_dump produced an empty archive for $db"
+  archive_mode="$(stat_mode "$archive")"
+  [ "$(( 8#$archive_mode & 8#077 ))" -eq 0 ] \
+    || fail DEST_UNSAFE "$archive was created with mode $archive_mode — group/other access must be absent"
 
   KEEP_PARTIAL_AS_FAILED=1
   entries="$(toc_entries "$archive")" || fail VALIDATE_FAILED "pg_restore could not read $db.dump"

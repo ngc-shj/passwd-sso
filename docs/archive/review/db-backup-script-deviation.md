@@ -71,3 +71,30 @@ four sibling scripts.** Unchanged from the plan, and round 2 widened the class
 description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr on
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.
+
+## Round-3 residuals
+
+**[Test] The `PRUNE_ABORTED` branch is not individually pinned.** Skipped. A root
+replaced mid-run is caught by whichever check the swap lands in front of — the
+archive redirect, the publish, or `assert_root_unchanged` — and racing for one of
+them produced a flaky test. The committed case asserts the outcome instead: the
+run does not succeed and leaves nothing published in the substituted directory.
+What would settle it: a seam that lets a stub trigger the swap at a chosen point
+(for example a `BACKUP_TEST_HOOK` invoked between publish and prune) so the
+branch is reachable deterministically.
+
+**[Test] `BACKUP_FAILED_MAX_AGE_DAYS=0` means "older than 24 h", not "keep none".**
+Accepted, not changed. `find -mtime +0` is "at least one day", which is find's
+documented behaviour; special-casing 0 to mean immediate removal would make this
+script's meaning differ from every other `-mtime` a reader knows. The usage
+header states it explicitly.
+
+**[Ops] The destination check runs after the Compose connectivity preflight.**
+Skipped. An unsafe destination is therefore only reported once the database is
+reachable, which is the wrong order for a safety property. Moving it is a
+three-line change with no dependencies, but this branch has produced four
+defects from reordering (the passfile before `BACKUP_ROOT` existed, the sweep
+before the dry-run exit, the sweep after the passfile, the MANIFEST before both
+`verify_transport` and the cluster reconciliation), and the cost of a fifth
+outweighs the diagnostic improvement. What would settle it: doing it as its own
+change, with the ordering asserted by a test rather than by reading.
