@@ -75,8 +75,16 @@ cleanup() {
       # A validation failure keeps the archives: the fault may be the reader
       # (a missing or skewed client), and destroying a possibly-good archive
       # to punish the validator is the wrong direction.
-      mv -- "$RUN_PARTIAL" "${RUN_PARTIAL%.partial}.FAILED" 2>/dev/null || true
-      warn "kept ${RUN_PARTIAL%.partial}.FAILED for diagnosis"
+      failed_dst="${RUN_PARTIAL%.partial}.FAILED"
+      # `mv a b` with b an existing directory moves a INTO b. Suffixing keeps the
+      # corpus visible and correctly named instead of nesting it out of reach.
+      [ -e "$failed_dst" ] && failed_dst="$failed_dst.$$"
+      if mv -- "$RUN_PARTIAL" "$failed_dst" 2>/dev/null; then
+        warn "kept $failed_dst for diagnosis"
+      else
+        warn "could not keep $RUN_PARTIAL for diagnosis; removing it"
+        rm -rf -- "$RUN_PARTIAL"
+      fi
     else
       rm -rf -- "$RUN_PARTIAL"
     fi
@@ -88,7 +96,10 @@ cleanup() {
   # reporting a successful run as a failure.
   [ -n "$PGPASS_FILE" ] && rm -f -- "$PGPASS_FILE" 2>/dev/null
 
-  if [ -n "$LOCK_DIR" ] && [ -d "$LOCK_DIR" ]; then
+  # Only if it is still OURS: a run that lost a race and exits must not remove
+  # the winner's lock.
+  if [ -n "$LOCK_DIR" ] && [ -d "$LOCK_DIR" ] \
+     && [ "$(cat -- "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
     rm -rf -- "$LOCK_DIR" 2>/dev/null || true
   fi
 
@@ -274,7 +285,9 @@ fi
 # only spaces while the loop splits on IFS disagrees with it about what "empty"
 # means, and a tab-only value published a run containing no database at all.
 _db_count=0
+FIRST_DB=""
 for _db in $BACKUP_DATABASES; do
+  [ -n "$FIRST_DB" ] || FIRST_DB="$_db"
   if ! [[ "$_db" =~ ^[A-Za-z_][A-Za-z0-9_$]*$ ]]; then
     fail BAD_ENV "BACKUP_DATABASES contains an invalid database name: $_db"
   fi
@@ -544,7 +557,7 @@ ACHIEVED_TLS=""
 
 verify_transport() {
   local row
-  row="$(run_pg psql -Atq -d "$(conninfo_for "${BACKUP_DATABASES%% *}")" \
+  row="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" \
     -c "select ssl, coalesce(version,''), coalesce(cipher,'') from pg_stat_ssl where pid = pg_backend_pid()" 2>/dev/null)" \
     || fail DUMP_FAILED "could not reach the database to verify the connection transport"
   case "$row" in
@@ -633,64 +646,6 @@ while [ "$anc" != "/" ]; do
   fi
 done
 
-# ─── Mutual exclusion ────────────────────────────────────────
-#
-# mkdir is atomic on every POSIX filesystem and needs no external binary.
-# flock(1) is util-linux and does not ship on macOS, the primary operator host.
-LOCK_CANDIDATE="$BACKUP_ROOT/.lock.d"
-if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
-  holder="$(cat -- "$LOCK_CANDIDATE/pid" 2>/dev/null || true)"
-  # Reclaim a lock whose holder is gone. The pid was previously written and
-  # never read, so one SIGKILL, OOM or power loss disabled backups permanently —
-  # a fail-closed wedge on the deployment's only backup path, discovered only
-  # when someone noticed the corpus had stopped advancing.
-  holder_host="$(cat -- "$LOCK_CANDIDATE/host" 2>/dev/null || true)"
-  holder_start="$(cat -- "$LOCK_CANDIDATE/starttime" 2>/dev/null || true)"
-  if [ -n "$holder" ] && [ "$holder_host" = "$(uname -n)" ] \
-     && kill -0 "$holder" 2>/dev/null \
-     && { [ -z "$holder_start" ] || [ "$holder_start" = "$(proc_starttime "$holder")" ]; }; then
-    fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder, alive)"
-  fi
-  warn "reclaiming stale lock $LOCK_CANDIDATE (holder ${holder:-unknown} is gone)"
-  rm -rf -- "$LOCK_CANDIDATE"
-  mkdir -- "$LOCK_CANDIDATE" 2>/dev/null \
-    || fail LOCKED "could not take $LOCK_CANDIDATE after reclaiming it"
-fi
-LOCK_DIR="$LOCK_CANDIDATE"
-printf '%s\n' "$$" > "$LOCK_DIR/pid"
-printf '%s\n' "$(uname -n)" > "$LOCK_DIR/host"
-printf '%s\n' "$(proc_starttime "$$")" > "$LOCK_DIR/starttime"
-
-# After the destination is verified and the lock is held: the passfile lives
-# inside BACKUP_ROOT, so it cannot be created before BACKUP_ROOT exists.
-{ set +x; } 2>/dev/null
-if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
-  # Inside BACKUP_ROOT, not $TMPDIR: the destination is the only directory whose
-  # owner, mode, extended ACLs, mount options and ancestors this script has
-  # verified, and $TMPDIR is neither declared nor audited.
-  PGPASS_FILE="$(umask 077 && mktemp "$BACKUP_ROOT/.pgpass.XXXXXX")" \
-    || fail INTERNAL "could not create a password file"
-  # Wildcards for host/port/database: the script decides those per target, and a
-  # mismatch would silently fall back to no password.
-  case "$URL_PASSWORD" in
-    *$'\n'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
-  esac
-  # Escape the two bytes .pgpass treats as syntax. Backslash first: escaping the
-  # colon first would then have its own backslash escaped again.
-  _pgpass_pw="${URL_PASSWORD//\\/\\\\}"
-  _pgpass_pw="${_pgpass_pw//:/\\:}"
-  printf '%s:%s:*:*:%s\n' "${URL_PGPASS_HOST:-*}" "${URL_PGPASS_PORT:-*}" "$_pgpass_pw" > "$PGPASS_FILE"
-  unset _pgpass_pw
-  URL_PASSWORD=""
-fi
-[ -n "$XTRACE_WAS_ON" ] && set -x
-true
-
-# ─── Prune failed generations (before any dump) ──────────────
-#
-# .FAILED directories are produced only by runs that did NOT publish, so
-# pruning them after publication would never run in a persistently failing
-# deployment — the exact state in which they accumulate.
 # Candidates are exactly the non-symlink directories directly under the root
 # whose basename matches the generation stamp plus the given suffix. Everything
 # else — notes/, a regular file named like a generation, .partial, .lock.d — is
@@ -712,6 +667,13 @@ list_stamped() {
 # list_stamped ".FAILED", so it accumulated without bound.
 prune_orphaned_partials() {
   local name
+  # Under the lock there is no live writer, so a surviving passfile is residue
+  # from a run that died before its trap could fire.
+  for name in "$BACKUP_ROOT"/.pgpass.*; do
+    [ -e "$name" ] || continue
+    rm -f -- "$name"
+    warn "removed a credential file left by an interrupted run"
+  done
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     ( cd -- "$BACKUP_ROOT" && rm -rf -- "$name" )
@@ -740,6 +702,88 @@ $names
 EOF
 }
 
+# ─── Mutual exclusion ────────────────────────────────────────
+#
+# mkdir is atomic on every POSIX filesystem and needs no external binary.
+# flock(1) is util-linux and does not ship on macOS, the primary operator host.
+LOCK_CANDIDATE="$BACKUP_ROOT/.lock.d"
+
+# mkdir is the atomic exclusion primitive: it fails when the directory exists.
+# (mv cannot serve here — moving onto an existing directory nests inside it and
+# reports success.) The window between taking the lock and recording the holder
+# is closed on the READER side: a lock with no pid is treated as held.
+if ! mkdir -- "$LOCK_CANDIDATE" 2>/dev/null; then
+  holder="$(cat -- "$LOCK_CANDIDATE/pid" 2>/dev/null || true)"
+  # Reclaim a lock whose holder is gone. The pid was previously written and
+  # never read, so one SIGKILL, OOM or power loss disabled backups permanently —
+  # a fail-closed wedge on the deployment's only backup path, discovered only
+  # when someone noticed the corpus had stopped advancing.
+  holder_host="$(cat -- "$LOCK_CANDIDATE/host" 2>/dev/null || true)"
+  holder_start="$(cat -- "$LOCK_CANDIDATE/starttime" 2>/dev/null || true)"
+
+  # Every uncertainty resolves toward "held". A lock with no pid, or one written
+  # by a different host whose liveness we cannot test, is not evidence that the
+  # holder is gone — and treating it as such lets two runs dump into one root.
+  if [ -z "$holder" ]; then
+    fail LOCKED "$LOCK_CANDIDATE exists but records no holder — remove it by hand if you are sure no run is active"
+  fi
+  if [ "$holder_host" != "$(uname -n)" ]; then
+    fail LOCKED "$LOCK_CANDIDATE is held by ${holder_host:-an unknown host} (pid $holder) — liveness cannot be tested from here"
+  fi
+  if kill -0 "$holder" 2>/dev/null \
+     && { [ -z "$holder_start" ] || [ "$holder_start" = "$(proc_starttime "$holder")" ]; }; then
+    fail LOCKED "another backup run holds $LOCK_CANDIDATE (pid $holder, alive)"
+  fi
+
+  warn "reclaiming stale lock $LOCK_CANDIDATE (holder $holder is gone)"
+  rm -rf -- "$LOCK_CANDIDATE"
+  mkdir -- "$LOCK_CANDIDATE" 2>/dev/null \
+    || fail LOCKED "could not take $LOCK_CANDIDATE after reclaiming it"
+fi
+LOCK_DIR="$LOCK_CANDIDATE"
+# Recorded immediately, and guarded: a lock we hold but cannot describe would
+# make the NEXT run unable to distinguish us from a dead holder.
+printf '%s\n' "$$" > "$LOCK_DIR/pid" || fail INTERNAL "could not record the lock holder"
+printf '%s\n' "$(uname -n)" > "$LOCK_DIR/host" || fail INTERNAL "could not record the lock host"
+printf '%s\n' "$(proc_starttime "$$")" > "$LOCK_DIR/starttime" || true
+
+# Sweep residue from interrupted runs while the lock is held and BEFORE this run
+# creates its own passfile — a sweep placed after it deletes the credential the
+# run is about to use.
+prune_orphaned_partials
+
+# After the destination is verified and the lock is held: the passfile lives
+# inside BACKUP_ROOT, so it cannot be created before BACKUP_ROOT exists.
+{ set +x; } 2>/dev/null
+if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
+  # Inside BACKUP_ROOT, not $TMPDIR: the destination is the only directory whose
+  # owner, mode, extended ACLs, mount options and ancestors this script has
+  # verified, and $TMPDIR is neither declared nor audited.
+  PGPASS_FILE="$(umask 077 && mktemp "$BACKUP_ROOT/.pgpass.XXXXXX")" \
+    || fail INTERNAL "could not create a password file"
+  # Wildcards for host/port/database: the script decides those per target, and a
+  # mismatch would silently fall back to no password.
+  case "$URL_PASSWORD" in
+    *$'\n'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
+  esac
+  # Escape the two bytes .pgpass treats as syntax. Backslash first: escaping the
+  # colon first would then have its own backslash escaped again.
+  _pgpass_pw="${URL_PASSWORD//\\/\\\\}"
+  _pgpass_pw="${_pgpass_pw//:/\\:}"
+  printf '%s:%s:*:*:%s\n' "${URL_PGPASS_HOST:-*}" "${URL_PGPASS_PORT:-*}" "$_pgpass_pw" > "$PGPASS_FILE"
+  unset _pgpass_pw
+  URL_PASSWORD=""
+fi
+[ -n "$XTRACE_WAS_ON" ] && set -x
+true
+
+
+# ─── Prune failed generations (before any dump) ──────────────
+#
+# .FAILED directories are produced only by runs that did NOT publish, so
+# pruning them after publication would never run in a persistently failing
+# deployment — the exact state in which they accumulate.
+
 # ─── Run directory ───────────────────────────────────────────
 
 # The stamp has one-second resolution and is the generation key, so a second
@@ -751,7 +795,8 @@ STAMP=""
 _tries=0
 while [ "$_tries" -lt 5 ]; do
   STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-  if [ ! -e "$BACKUP_ROOT/$STAMP" ] && [ ! -e "$BACKUP_ROOT/$STAMP.partial" ]; then
+  if [ ! -e "$BACKUP_ROOT/$STAMP" ] && [ ! -e "$BACKUP_ROOT/$STAMP.partial" ] \
+     && [ ! -e "$BACKUP_ROOT/$STAMP.FAILED" ]; then
     break
   fi
   sleep 1
@@ -798,7 +843,6 @@ fi
 # any dump, because .FAILED directories are produced only by runs that did NOT
 # publish — pruning them after publication would never run in a persistently
 # failing deployment, which is exactly when they accumulate.
-prune_orphaned_partials
 prune_failed
 
 mkdir -- "$RUN_PARTIAL" || fail INTERNAL "could not create $RUN_PARTIAL"
@@ -845,7 +889,7 @@ dump_database() {
 dump_globals() {
   local out="$1"
   if [ "$MODE" = "url" ]; then
-    run_pg pg_dumpall --globals-only --no-role-passwords -d "$(conninfo_for "${BACKUP_DATABASES%% *}")" -f "$out"
+    run_pg pg_dumpall --globals-only --no-role-passwords -d "$(conninfo_for "$FIRST_DB")" -f "$out"
   else
     compose exec -T -- "$COMPOSE_DB_SERVICE" \
       pg_dumpall --globals-only --no-role-passwords -U "$COMPOSE_DB_SUPERUSER" > "$out"
@@ -878,6 +922,14 @@ tool_version() {
   fi
 }
 
+if [ "$MODE" = "url" ]; then
+  # Before the MANIFEST is written, not after: the manifest records what the
+  # connection actually negotiated, and a group written first can only record
+  # the unset default.
+  verify_transport
+  log "transport verified: $ACHIEVED_TLS"
+fi
+
 MANIFEST="$RUN_PARTIAL/MANIFEST"
 {
   printf 'script: scripts/backup-db.sh\n'
@@ -895,11 +947,6 @@ MANIFEST="$RUN_PARTIAL/MANIFEST"
   printf 'validated_at: %s\n' "$([ "$MODE" = "url" ] && printf host || printf 'compose service %s' "$COMPOSE_DB_SERVICE")"
   [ "$MODE" = "url" ] && printf 'achieved_tls: %s\n' "${ACHIEVED_TLS:-unknown}"
 } > "$MANIFEST"
-
-if [ "$MODE" = "url" ]; then
-  verify_transport
-  log "transport verified: $ACHIEVED_TLS"
-fi
 
 for db in $BACKUP_DATABASES; do
   archive="$RUN_PARTIAL/$db.dump"
