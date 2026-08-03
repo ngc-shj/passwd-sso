@@ -18,6 +18,7 @@
 #   MIGRATION_DATABASE_URL (optional) When set, selects URL mode instead of Compose mode
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
 #   COMPOSE_DB_SUPERUSER  (optional) Role used for pg_dump in Compose mode (default: passwd_user)
+#   PGSSLROOTCERT         (optional) CA bundle for the TLS floor, when the URL carries no sslrootcert=
 #
 # Exit codes:
 #   0 — success
@@ -60,6 +61,8 @@ RUN_PUBLISHED=""
 LOCK_DIR=""
 FAILED_CODE=""
 KEEP_PARTIAL_AS_FAILED=""
+PGPASS_FILE=""
+PGSSLROOTCERT_IN="${PGSSLROOTCERT:-}"
 ORIGINAL_CWD="$(pwd -P)"
 
 cleanup() {
@@ -82,6 +85,8 @@ cleanup() {
   # this is the last command in the trap before the status decision, and under
   # `set -e` its failure would otherwise become the script's exit status —
   # reporting a successful run as a failure.
+  [ -n "$PGPASS_FILE" ] && rm -f -- "$PGPASS_FILE" 2>/dev/null
+
   if [ -n "$LOCK_DIR" ] && [ -d "$LOCK_DIR" ]; then
     rm -rf -- "$LOCK_DIR" 2>/dev/null || true
   fi
@@ -136,6 +141,14 @@ stat_mode() {
   esac
 }
 
+# device:inode of a path — the object's identity, which a path string is not.
+stat_ident() {
+  case "$(uname -s)" in
+    Darwin|*BSD) stat -f '%d:%i' -- "$1" 2>/dev/null || printf 'unknown' ;;
+    *)           stat -c '%d:%i' -- "$1" 2>/dev/null || printf 'unknown' ;;
+  esac
+}
+
 stat_uid() {
   case "$(uname -s)" in
     Darwin|*BSD) stat -f '%u' -- "$1" ;;
@@ -153,8 +166,12 @@ has_extended_acl() {
   esac
   # A trailing '+' on the mode field marks an ACL on both flavours; macOS
   # additionally prints the ACEs on continuation lines.
+  # Ten '?' — the mode field is 10 characters (type + 3x3 permission bits), and
+  # the ACL marker is the 11th. Nine matched nothing, so this branch was dead
+  # and a directory carrying a default ACL passed the check with mode 0700
+  # while another uid could read every published archive.
   case "$listing" in
-    ?????????+*) return 0 ;;
+    ??????????+*) return 0 ;;
   esac
   case "$listing" in
     *$'\n'*) return 0 ;;
@@ -279,21 +296,23 @@ URL_DISPLAY=""
 percent_decode() {
   # Byte-exact: no printf '%b', which re-interprets backslashes already present
   # in the password, and no eval, which would execute $(...) from a secret.
-  local s="$1" out="" c hex
+  local s="$1" c hex
   while [ -n "$s" ]; do
     c="${s%"${s#?}"}"
     s="${s#?}"
     if [ "$c" = "%" ] && [ "${#s}" -ge 2 ]; then
       hex="${s:0:2}"
       if [[ "$hex" =~ ^[0-9A-Fa-f]{2}$ ]]; then
-        out="$out$(printf '\\x%s' "$hex")"
+        # Decode this pair and emit it immediately. Accumulating into a buffer
+        # and running `printf %b` at the end would re-interpret backslashes the
+        # password legitimately contains — `p\nass` would become p-newline-ass.
+        printf "\\x$hex"
         s="${s:2}"
         continue
       fi
     fi
-    out="$out$c"
+    printf '%s' "$c"
   done
-  printf '%b' "$out"
 }
 
 parse_url() {
@@ -337,8 +356,11 @@ parse_url() {
       ;;
   esac
 
-  # Post-condition: no ':' may remain before the '@' in the outgoing authority.
-  # This is what turns a mis-parse into a refusal instead of a silent leak.
+  # Belt and braces. The refusal that actually closes the leak class is the
+  # mandatory strip above: an authority containing '@' must yield a password or
+  # the URL is rejected. This post-condition cannot fire once that branch has
+  # run — after the userinfo/hostpart split no ':' can precede an '@' — and is
+  # kept only so a future edit to the split is caught here rather than in argv.
   case "$authority" in
     *:*@*) fail BAD_URL "could not separate the password from MIGRATION_DATABASE_URL" ;;
   esac
@@ -349,6 +371,23 @@ parse_url() {
   case "$URL_STRIPPED" in
     *dbname=*) fail BAD_URL "MIGRATION_DATABASE_URL must not carry dbname= (the target set is BACKUP_DATABASES)" ;;
   esac
+
+  # libpq accepts the password as a URI QUERY parameter too, and percent-decodes
+  # the keyword before lookup — `?password=`, `?%70assword=` and every other
+  # encoding of those bytes are the same parameter to it. A strip that covers
+  # only the userinfo therefore leaves that spelling in the URL that reaches
+  # pg_dump's argv, where every local user can read it. Decoding the query here
+  # would be a second adjudicator of libpq's grammar (the mistake this design
+  # exists to avoid), so the spelling is refused outright.
+  local decoded_query="${URL_STRIPPED#*\?}"
+  [ "$decoded_query" = "$URL_STRIPPED" ] && decoded_query=""
+  if [ -n "$decoded_query" ]; then
+    decoded_query="$(percent_decode "$decoded_query")"
+    case "$decoded_query" in
+      *password=*|*passfile=*|*service=*)
+        fail BAD_URL "MIGRATION_DATABASE_URL must not carry password=, passfile= or service= — the credential goes in the userinfo, and the others select a connection this script cannot audit" ;;
+    esac
+  fi
 }
 
 # Build the per-target conninfo. The database is appended as a query parameter
@@ -390,6 +429,18 @@ fi
 # Past this point nothing expands the raw URL or the password outside run_pg,
 # which suppresses tracing around its own credential-bearing prefix. Restore the
 # operator's trace so the rest of the run stays debuggable.
+[ -n "$XTRACE_WAS_ON" ] && set -x
+true
+
+{ set +x; } 2>/dev/null
+if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
+  PGPASS_FILE="$(umask 077 && mktemp "${TMPDIR:-/tmp}/backup-db-pgpass.XXXXXX")" \
+    || fail INTERNAL "could not create a password file"
+  # Wildcards for host/port/database: the script decides those per target, and a
+  # mismatch would silently fall back to no password.
+  printf '*:*:*:*:%s\n' "$URL_PASSWORD" > "$PGPASS_FILE"
+  URL_PASSWORD=""
+fi
 [ -n "$XTRACE_WAS_ON" ] && set -x
 true
 
@@ -480,6 +531,7 @@ fi
 
 BACKUP_ROOT="$(resolve_path "$BACKUP_DIR")"
 [ -n "$BACKUP_ROOT" ] || fail DEST_UNSAFE "could not resolve $BACKUP_DIR"
+ROOT_IDENT="$(stat_ident "$BACKUP_ROOT")"
 
 # umask governs only NEWLY created inodes, so from the second run onward — when
 # the root already exists — it verifies nothing. Read the achieved state back.
@@ -503,8 +555,12 @@ while [ "$anc" != "/" ]; do
   anc="$(dirname -- "$anc")"
   anc_mode="$(stat_mode "$anc")"
   anc_uid="$(stat_uid "$anc")"
-  if [ "$(( 8#$anc_mode & 8#022 ))" -ne 0 ] && [ "$anc_uid" != "0" ] && [ "$anc_uid" != "$(id -u)" ]; then
-    fail DEST_UNSAFE "ancestor $anc is writable by others (mode $anc_mode, uid $anc_uid)"
+  # Group/other-writable is only safe when the sticky bit stops another
+  # principal renaming our entry out from under us (/tmp is the archetype).
+  # Ownership is NOT a substitute: a directory we own at 0777 is renameable by
+  # anyone, which is precisely the sequence this check exists to prevent.
+  if [ "$(( 8#$anc_mode & 8#022 ))" -ne 0 ] && [ "$(( 8#$anc_mode & 8#1000 ))" -eq 0 ]; then
+    fail DEST_UNSAFE "ancestor $anc is writable by others without the sticky bit (mode $anc_mode)"
   fi
 done
 
@@ -560,8 +616,6 @@ $names
 EOF
 }
 
-prune_failed
-
 # ─── Run directory ───────────────────────────────────────────
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -598,6 +652,12 @@ EOF
   exit 0
 fi
 
+# Only now, past the dry-run exit: previewing must delete nothing. Still before
+# any dump, because .FAILED directories are produced only by runs that did NOT
+# publish — pruning them after publication would never run in a persistently
+# failing deployment, which is exactly when they accumulate.
+prune_failed
+
 mkdir -- "$RUN_PARTIAL" || fail INTERNAL "could not create $RUN_PARTIAL"
 
 # ─── Dump ────────────────────────────────────────────────────
@@ -608,12 +668,22 @@ mkdir -- "$RUN_PARTIAL" || fail INTERNAL "could not create $RUN_PARTIAL"
 # documentation again.
 run_pg() {
   local bin="$1"; shift
+  local xt=""
+  case "$-" in *x*) xt=1 ;; esac
   { set +x; } 2>/dev/null
+  # env -i gives an allowlisted child environment, so no ambient PG* variable
+  # can influence the connection — but a `PGPASSWORD=<secret>` element would
+  # then be part of env(1)'s OWN argv, readable through /proc/<pid>/cmdline for
+  # the life of that process. A PGPASSFILE path is not a secret, so the
+  # credential travels in a mode-0600 file instead and never reaches any argv.
   env -i \
     PATH="$PATH" HOME="$HOME" LANG="${LANG:-C}" \
-    ${URL_PASSWORD:+PGPASSWORD="$URL_PASSWORD"} \
-    ${PGSSLROOTCERT:+PGSSLROOTCERT="$PGSSLROOTCERT"} \
+    ${PGPASS_FILE:+PGPASSFILE="$PGPASS_FILE"} \
+    ${PGSSLROOTCERT_IN:+PGSSLROOTCERT="$PGSSLROOTCERT_IN"} \
     "$bin" "$@"
+  local rc=$?
+  [ -n "$xt" ] && set -x
+  return $rc
 }
 
 dump_database() {
@@ -655,6 +725,16 @@ toc_entries() {
   printf '%s\n' "$listing" | grep -cv '^;' || true
 }
 
+# Recorded because a restore reads these archives with whatever client the
+# target host has, and pg_restore refuses a format version newer than its own.
+tool_version() {
+  if [ "$MODE" = "url" ]; then
+    run_pg "$1" --version 2>/dev/null || printf 'unknown'
+  else
+    compose exec -T -- "$COMPOSE_DB_SERVICE" "$1" --version 2>/dev/null || printf 'unknown'
+  fi
+}
+
 MANIFEST="$RUN_PARTIAL/MANIFEST"
 {
   printf 'script: scripts/backup-db.sh\n'
@@ -667,6 +747,9 @@ MANIFEST="$RUN_PARTIAL/MANIFEST"
   else
     printf 'target: compose service %s\n' "$COMPOSE_DB_SERVICE"
   fi
+  printf 'pg_dump_version: %s\n' "$(tool_version pg_dump)"
+  printf 'pg_restore_version: %s\n' "$(tool_version pg_restore)"
+  printf 'validated_at: %s\n' "$([ "$MODE" = "url" ] && printf host || printf 'compose service %s' "$COMPOSE_DB_SERVICE")"
 } > "$MANIFEST"
 
 for db in $BACKUP_DATABASES; do
@@ -743,8 +826,12 @@ if [ "$to_delete" -gt 0 ]; then
     # Re-verify that the root the name will resolve through is still the root
     # that was audited. `rm` re-walks every component by name, so a swap
     # between the scan and the removal lands the deletion elsewhere.
-    if [ "$(resolve_path "$BACKUP_DIR")" != "$BACKUP_ROOT" ]; then
-      fail PRUNE_ABORTED "$BACKUP_DIR no longer resolves to $BACKUP_ROOT"
+    # Identity, not path text: a rename-and-recreate leaves `cd … && pwd -P`
+    # byte-identical while the directory `rm` will walk into is a different
+    # object. Comparing the strings could never detect the swap the surrounding
+    # comment describes.
+    if [ "$(stat_ident "$BACKUP_DIR")" != "$ROOT_IDENT" ]; then
+      fail PRUNE_ABORTED "$BACKUP_DIR is no longer the directory that was audited"
     fi
     ( cd -- "$BACKUP_ROOT" && rm -rf -- "$g" ) || fail PRUNE_ABORTED "could not remove generation $g"
     deleted=$((deleted + 1))

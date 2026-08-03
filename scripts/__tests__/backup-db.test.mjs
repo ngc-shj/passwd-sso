@@ -319,7 +319,17 @@ describe("C3/C4 dump set and atomic publication", () => {
   });
 
   it("refuses a destination inside a git worktree", () => {
-    expect(err(run({ BACKUP_DIR: join(REPO_ROOT, "tmp-backup-test") }))).toBe("DEST_IN_REPO");
+    // A throwaway worktree, not this repository: if the guard ever regresses,
+    // the archives land inside the temp tree afterEach removes rather than in
+    // the working copy, where nothing would reclaim them.
+    const fakeRepo = join(tmpDir, "somerepo");
+    mkdirSync(join(fakeRepo, ".git"), { recursive: true });
+    writeFileSync(join(fakeRepo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+    writeFileSync(join(fakeRepo, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n", "utf8");
+    mkdirSync(join(fakeRepo, ".git", "objects"), { recursive: true });
+    mkdirSync(join(fakeRepo, ".git", "refs"), { recursive: true });
+    expect(err(run({ BACKUP_DIR: join(fakeRepo, "bkp") }))).toBe("DEST_IN_REPO");
+    expect(existsSync(join(fakeRepo, "bkp"))).toBe(false);
   });
 
   it("leaves nothing published when a dump fails, and no .FAILED for a dump failure", () => {
@@ -450,6 +460,19 @@ describe("C6 retention pruning", () => {
     expect(readLog(), "a dry run dumps nothing").not.toMatch(/pg_dump|pg_dumpall/);
   });
 
+  it("deletes no .FAILED archive during a dry run", () => {
+    // The .FAILED prune runs before any dump on a real run. Placed before the
+    // dry-run exit it would make a preview destroy real archives and then
+    // report that it had destroyed nothing.
+    setup([]);
+    for (const n of ["20200101T000000Z.FAILED", "20200102T000000Z.FAILED", "20200103T000000Z.FAILED"]) {
+      mkdirSync(join(backupDir, n), { recursive: true });
+    }
+    const r = run({ BACKUP_DRY_RUN: "true" });
+    expect(r.status).toBe(0);
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toHaveLength(3);
+  });
+
   it("prunes .FAILED directories before any dump, not after publication", () => {
     // .FAILED is produced only by runs that did NOT publish, so pruning it after
     // publication never runs in a persistently failing deployment — the exact
@@ -476,7 +499,8 @@ describe("C7 credential and transport handling", () => {
   const pgStubs = () => {
     for (const bin of ["pg_dump", "pg_dumpall"]) {
       stub(bin, `
-echo "${bin} $* PGPASSWORD=[\${PGPASSWORD:-}] PGSSLMODE=[\${PGSSLMODE:-}]" >> "${logFile}"
+echo "${bin} $* PGPASSWORD=[\${PGPASSWORD:-}] PGPASSFILE=[\${PGPASSFILE:-}] PGSSLMODE=[\${PGSSLMODE:-}]" >> "${logFile}"
+[ -n "\${PGPASSFILE:-}" ] && cat -- "\${PGPASSFILE}" >> "${logFile}.pgpass"
 out=""
 prev=""
 for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
@@ -493,19 +517,37 @@ printf '; Archive created at 2026-01-01\\n1; 1259 1 TABLE public t owner\\n'
 exit 0`);
   };
 
-  it("keeps the password out of argv while placing it in the child environment", () => {
+  it("keeps the password out of every argv, delivering it through a mode-0600 passfile", () => {
     pgStubs();
     const r = run(urlEnv(
       `postgresql://u:${encodeURIComponent(SENTINEL_PASSWORD)}@127.0.0.1:5432/passwd_sso?sslrootcert=/tmp/ca.pem`,
     ));
     expect(r.status).toBe(0);
     const log = readLog();
-    expect(log, "the password must not reach argv").not.toContain(SENTINEL_PASSWORD.replace("@", "%40"));
-    expect(log.split("\n").filter((l) => l.startsWith("pg_dump ")).join("\n"))
-      .not.toContain("u:");
-    // Paired allow case: without this the test would pass on a script that
-    // simply never connects.
-    expect(log).toContain(`PGPASSWORD=[${SENTINEL_PASSWORD}]`);
+    // Not just pg_dump's argv: `env -i PGPASSWORD=<secret> pg_dump …` would put
+    // the secret in env(1)'s own argv, which /proc/<pid>/cmdline exposes.
+    expect(log, "the password must reach no argv and no environment variable")
+      .not.toContain(SENTINEL_PASSWORD);
+    expect(log).not.toContain(encodeURIComponent(SENTINEL_PASSWORD));
+    expect(log).toMatch(/PGPASSWORD=\[\]/);
+    // Paired allow case: the credential really was delivered, so the assertions
+    // above are not passing on a script that never connects.
+    const delivered = readFileSync(`${logFile}.pgpass`, "utf8");
+    expect(delivered).toContain(SENTINEL_PASSWORD);
+    const pgpassPath = log.match(/PGPASSFILE=\[([^\]]+)\]/)?.[1];
+    expect(pgpassPath, "PGPASSFILE must be set").toBeTruthy();
+  });
+
+  it("pins the flags whose absence would silently change what is captured", () => {
+    pgStubs();
+    run(urlEnv("postgresql://u:p@127.0.0.1:5432/d?sslrootcert=/tmp/ca.pem"));
+    const log = readLog();
+    // --create carries the database-level ACLs (GRANT/REVOKE CONNECT); without
+    // it a restore silently loses them. --no-role-passwords keeps SCRAM role
+    // verifiers out of a plaintext backup. Neither is observable in the output,
+    // so only an argv assertion can hold them.
+    expect(log).toMatch(/pg_dump [^\n]*-Fc[^\n]*--create/);
+    expect(log).toMatch(/pg_dumpall [^\n]*--globals-only[^\n]*--no-role-passwords/);
   });
 
   it("spawns no docker in URL mode", () => {
@@ -517,7 +559,7 @@ exit 0`);
   it("appends the TLS floor last so libpq's last-occurrence-wins settles it", () => {
     pgStubs();
     run(urlEnv("postgresql://u:p@127.0.0.1:5432/passwd_sso?sslmode=disable&sslrootcert=/tmp/ca.pem"));
-    const dumpLine = readLog().split("\n").find((l) => l.startsWith("pg_dump "));
+    const dumpLine = readLog().split("\n").find((l) => l.startsWith("pg_dump ") && l.includes("-Fc"));
     expect(dumpLine).toMatch(/sslmode=verify-full\b/);
     expect(dumpLine.lastIndexOf("sslmode=verify-full")).toBeGreaterThan(dumpLine.indexOf("sslmode=disable"));
   });
@@ -611,8 +653,8 @@ describe("source-level contracts", () => {
     const documented = [...s.matchAll(/^#\s{3}([A-Z][A-Z0-9_]+)\s+\(optional\)/gm)].map((m) => m[1]);
     expect(documented.length).toBeGreaterThan(5);
     for (const v of documented) {
-      expect(s, `${v} is documented but never defaulted`).toMatch(
-        new RegExp(`${v}="\\$\\{${v}:-`),
+      expect(s, `${v} is documented but never read with a default`).toMatch(
+        new RegExp(`\\$\\{${v}:-`),
       );
     }
   });
@@ -673,6 +715,71 @@ describe("Group B — validation by a real pg_restore", () => {
 
   it("rejects a zero-byte archive", () => {
     expect(reader.list(join(FIXTURES, "empty.pgdump")).status).not.toBe(0);
+  });
+
+  /** A docker stub that delegates pg_restore to the real docker. */
+  const delegatingStub = (archive) => {
+    const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    stub("docker", `
+if [ "\${2:-}" = "config" ]; then exit 0; fi
+if [ "\${2:-}" = "ps" ]; then echo container123; exit 0; fi
+for a in "$@"; do
+  case "$a" in
+    pg_dump)     cat -- "${archive}"; exit 0 ;;
+    pg_dumpall)  printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore)  echo "DELEGATED" >> "${logFile}"; exec "${realDocker}" "$@" ;;
+  esac
+done
+exit 0`);
+  };
+
+  it("publishes a VALID archive through the script's own reader invocation", () => {
+    // This is the case that reds on a regressed invocation. Naming /dev/stdin
+    // as pg_restore's file argument makes it seek a non-seekable descriptor and
+    // fail on every valid archive — and a truncated-archive case cannot see
+    // that, because it fails either way.
+    if (reader?.kind !== "compose") {
+      expect(reader, "this case needs the compose reader").not.toBeNull();
+      return;
+    }
+    delegatingStub(join(FIXTURES, "valid.pgdump"));
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
+    expect(generations()).toHaveLength(1);
+    const manifest = readFileSync(join(backupDir, generations()[0], "MANIFEST"), "utf8");
+    expect(manifest, "the entry count must come from the real archive").toMatch(/entries=[1-9]/);
+  });
+
+  it("routes a truncated archive to VALIDATE_FAILED through the script's own reader", () => {
+    // The other Group B cases call pg_restore directly, which proves the oracle
+    // but not that the script reaches it: reintroducing `--list /dev/stdin`
+    // into the script — the footgun that fails on every valid archive — left
+    // them all green. This case runs the script with a docker stub that
+    // DELEGATES pg_restore to the real docker, so the production invocation is
+    // the thing under test.
+    if (reader?.kind !== "compose") {
+      expect(reader, "this case needs the compose reader").not.toBeNull();
+      return;
+    }
+    const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
+    const truncated = join(FIXTURES, "truncated.pgdump");
+    stub("docker", `
+if [ "\${2:-}" = "config" ]; then exit 0; fi
+if [ "\${2:-}" = "ps" ]; then echo container123; exit 0; fi
+for a in "$@"; do
+  case "$a" in
+    pg_dump)     cat -- "${truncated}"; exit 0 ;;
+    pg_dumpall)  printf 'CREATE ROLE r;\n-- PostgreSQL database cluster dump complete\n'; exit 0 ;;
+    pg_restore)  echo "DELEGATED" >> "${logFile}"; exec "${realDocker}" "$@" ;;
+  esac
+done
+exit 0`);
+    const r = run({}, {});
+    expect(err(r)).toBe("VALIDATE_FAILED");
+    expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toHaveLength(1);
+    expect(generations()).toEqual([]);
   });
 
   it("distinguishes a complete globals dump from a truncated one by its marker", () => {
