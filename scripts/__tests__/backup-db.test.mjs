@@ -323,6 +323,8 @@ describe("C3/C4 dump set and atomic publication", () => {
     // the archives land inside the temp tree afterEach removes rather than in
     // the working copy, where nothing would reclaim them.
     const fakeRepo = join(tmpDir, "somerepo");
+    mkdirSync(fakeRepo, { recursive: true, mode: 0o700 });
+    chmodSync(fakeRepo, 0o700);
     mkdirSync(join(fakeRepo, ".git"), { recursive: true });
     writeFileSync(join(fakeRepo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
     writeFileSync(join(fakeRepo, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n", "utf8");
@@ -332,12 +334,50 @@ describe("C3/C4 dump set and atomic publication", () => {
     expect(existsSync(join(fakeRepo, "bkp"))).toBe(false);
   });
 
+  it("permits an in-repo destination when the operator opts in (paired allow case)", () => {
+    // The deny side is tested above. A guard whose override is never exercised
+    // is a guard whose false-deny cost nobody has measured — and this override
+    // is the documented remedy the refusal message points operators at.
+    const fakeRepo = join(tmpDir, "optin");
+    mkdirSync(fakeRepo, { recursive: true, mode: 0o700 });
+    chmodSync(fakeRepo, 0o700);
+    mkdirSync(join(fakeRepo, ".git", "objects"), { recursive: true });
+    mkdirSync(join(fakeRepo, ".git", "refs"), { recursive: true });
+    writeFileSync(join(fakeRepo, ".git", "HEAD"), "ref: refs/heads/main\n", "utf8");
+    writeFileSync(join(fakeRepo, ".git", "config"), "[core]\n\trepositoryformatversion = 0\n", "utf8");
+    const dest = join(fakeRepo, "bkp");
+    const r = run({ BACKUP_DIR: dest, BACKUP_ALLOW_IN_REPO: "true" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, "the override must announce what it permits").toMatch(/BACKUP_ALLOW_IN_REPO/);
+    expect(readdirSync(dest).filter((n) => /^\d{8}T\d{6}Z$/.test(n))).toHaveLength(1);
+  });
+
   it("leaves nothing published when a dump fails, and no .FAILED for a dump failure", () => {
     dockerStub({ dumpFails: "jackson" });
     const r = run();
     expect(err(r)).toBe("DUMP_FAILED");
     expect(generations()).toEqual([]);
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toEqual([]);
+  });
+
+  it("fails when pg_dump exits 0 but writes an empty archive", () => {
+    // Disjoint from the exit-status guard: a redirect that fails silently, or a
+    // dump truncated to nothing, leaves a zero-byte file behind a zero status.
+    // The ordinary failure stub trips both at once, so neither is provable alone.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; hdr\\n1; 1259 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(err(r)).toBe("DUMP_FAILED");
+    expect(generations()).toEqual([]);
   });
 
   it("keeps a .FAILED directory when validation fails, so a bad reader cannot destroy a good archive", () => {
@@ -697,7 +737,10 @@ describe("Group B — validation by a real pg_restore", () => {
       reader,
       "no pg_restore reachable — install postgresql-client or start the compose db service",
     ).not.toBeNull();
-    expect(reader.version).toMatch(/pg_restore.*\b(1[6-9]|[2-9]\d)\b/);
+    const major = Number(reader.version.match(/\)\s*(\d+)/)?.[1] ?? 0);
+    // Anchored on the MAJOR component: a /\b(1[6-9]|[2-9]\d)\b/ over the whole
+    // string is satisfied by the minor number, so "13.22" would pass.
+    expect(major, `reader too old: ${reader.version}`).toBeGreaterThanOrEqual(16);
   });
 
   it("reads a real archive and reports non-comment entries", () => {
