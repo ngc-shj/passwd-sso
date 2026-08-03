@@ -85,6 +85,10 @@ MUST_EXCLUDE=(
   # files need listing here — adding a dir-class is a one-line DIR_CLASSES edit.
   "saml/metadata.xml" "postgres_data/base/1"
   "passwd-sso-backups/20260101T000000Z/globals.sql"
+  # A run directory under an operator-chosen name: the shape is what is
+  # excluded, so globals.sql and MANIFEST are covered wherever BACKUP_DIR points.
+  "ops-backups/20260101T000000Z/globals.sql" "ops-backups/20260101T000000Z/MANIFEST"
+  "ops-backups/20260102T000000Z.FAILED/globals.sql" "x/.pgpass.abc123"
   # Loose archive outside a run directory — covered by the *.dump class.
   "backup.dump" "sub/dir/passwd_sso.dump"
   "infra/terraform/.terraform/providers/x"
@@ -122,6 +126,19 @@ function globToRegExp(glob) {
     }
     if (glob[i] === "*" && glob[i + 1] === "*") { out += ".*"; i += 1; continue; }
     if (glob[i] === "*") { out += "[^/]*"; continue; }
+    // Character classes: Docker matches with Go's filepath.Match, which supports
+    // [0-9] and [!abc]. Escaping the brackets away made a class pattern match
+    // nothing, so the gate under-reported instead of failing loudly.
+    if (glob[i] === "[") {
+      const close = glob.indexOf("]", i + 1);
+      if (close > i) {
+        let cls = glob.slice(i + 1, close);
+        if (cls.startsWith("!")) cls = "^" + cls.slice(1);
+        out += "[" + cls + "]";
+        i = close;
+        continue;
+      }
+    }
     out += glob[i].replace(/[.+^${}()|[\]\\]/g, "\\$&");
   }
   return new RegExp(out + "$");

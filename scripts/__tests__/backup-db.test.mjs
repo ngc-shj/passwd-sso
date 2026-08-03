@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync, spawn } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
-  existsSync, readdirSync, statSync, lstatSync, symlinkSync,
+  existsSync, readdirSync, statSync, lstatSync, symlinkSync, utimesSync,
 } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -570,9 +570,13 @@ describe("C6 retention pruning", () => {
       mkdirSync(join(backupDir, n), { recursive: true });
     }
     dockerStub({ restoreFails: "1" });
-    run();
+    run({ BACKUP_RETAIN: "2" });
     const failed = readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"));
-    expect(failed.length, "old .FAILED runs are pruned even though this run also failed").toBeLessThanOrEqual(2);
+    // Exact, not an upper bound: `<= 2` also passes if the pruner deleted every
+    // .FAILED including this run's, which is the opposite of the contract.
+    // Three pre-seeded are pruned to BACKUP_RETAIN=2 before the dump, then this
+    // run's own validation failure adds one.
+    expect(failed.length, "retention applies to .FAILED, and this run's is kept").toBe(3);
   });
 });
 
@@ -1238,11 +1242,19 @@ describe("ignore-rule coverage", () => {
     expect(ignored("scripts/__tests__/fixtures/backup-db/valid.pgdump")).toBe(false);
   });
 
-  it("states the boundary rather than implying coverage it does not have", () => {
-    // BACKUP_ALLOW_IN_REPO permits a custom directory name, and only *.dump is
-    // matched there. Pinning it means a future widening is a deliberate edit.
-    expect(ignored("custom-backups/20260101T000000Z/globals.sql"),
-      "globals.sql outside the default directory name is NOT covered").toBe(false);
+  it("covers a run directory under an operator-chosen name too", () => {
+    // BACKUP_ALLOW_IN_REPO permits a custom directory name, so excluding by the
+    // default name alone left globals.sql (the cluster's role topology) and
+    // MANIFEST (host and connection target) committable. The run-directory
+    // SHAPE is what is excluded now.
+    for (const p of [
+      "custom-backups/20260101T000000Z/globals.sql",
+      "custom-backups/20260101T000000Z/MANIFEST",
+      "deep/nested/20260102T000000Z.FAILED/globals.sql",
+      "anywhere/.pgpass.abc123",
+    ]) {
+      expect(ignored(p), `${p} must be ignored`).toBe(true);
+    }
   });
 });
 
@@ -1323,6 +1335,24 @@ exec "${realStat}" "$@"`);
     expect(r.stderr).toMatch(/literal newline/);
   });
 
+
+  it("bounds .FAILED corpora by age as well as count", () => {
+    // "Kept for diagnosis" without a window is just an extra full copy of the
+    // database sitting on disk.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const old = join(backupDir, "20200101T000000Z.FAILED");
+    mkdirSync(old, { recursive: true, mode: 0o700 });
+    const longAgo = new Date(Date.now() - 30 * 86400_000);
+    utimesSync(old, longAgo, longAgo);
+    mkdirSync(join(backupDir, "20200102T000000Z.FAILED"), { recursive: true, mode: 0o700 });
+
+    const r = run({ BACKUP_RETAIN: "9" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(old), "past the age bound even though the count allows it").toBe(false);
+    expect(existsSync(join(backupDir, "20200102T000000Z.FAILED")), "recent one kept").toBe(true);
+  });
+
   it("previews only the residue it would actually remove", () => {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
@@ -1334,3 +1364,5 @@ exec "${realStat}" "$@"`);
       .not.toContain("notes.partial");
   });
 });
+
+

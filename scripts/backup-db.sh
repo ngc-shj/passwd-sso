@@ -19,6 +19,7 @@
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
 #   COMPOSE_DB_SUPERUSER  (optional) Role used for pg_dump in Compose mode (default: passwd_user)
 #   BACKUP_FORCE_UNLOCK   (optional) "true" takes a lock whose holder is gone (default: false)
+#   BACKUP_FAILED_MAX_AGE_DAYS (optional) Age bound for <stamp>.FAILED corpora (default: 7)
 #   PGSSLROOTCERT         (optional) CA bundle for the TLS floor, when the URL carries no sslrootcert=
 #
 # Exit codes:
@@ -694,6 +695,7 @@ prune_orphaned_partials() {
   done
   while IFS= read -r name; do
     [ -n "$name" ] || continue
+    assert_root_unchanged
     ( cd -- "$BACKUP_ROOT" && rm -rf -- "$name" )
     warn "removed orphaned $name from an interrupted run"
   done <<EOF
@@ -701,17 +703,44 @@ $(list_stamped ".partial")
 EOF
 }
 
+# One place, so a future removal loop cannot be added without it. The check the
+# generation pruner performs was not being performed by the other two.
+assert_root_unchanged() {
+  [ "$(stat_ident "$BACKUP_DIR")" = "$ROOT_IDENT" ] \
+    || fail PRUNE_ABORTED "$BACKUP_DIR is no longer the directory that was audited"
+}
+
 prune_failed() {
-  local keep=1 names count=0 name removed=0 excess
+  local keep="$BACKUP_RETAIN" names count=0 name removed=0 excess
   names="$(list_stamped ".FAILED")"
   while IFS= read -r name; do [ -n "$name" ] && count=$((count + 1)); done <<EOF
 $names
 EOF
+  # Age first: a corpus kept "for diagnosis" past the window in which anyone
+  # would diagnose it is just an extra copy of the database.
+  local cutoff_days="${BACKUP_FAILED_MAX_AGE_DAYS:-7}"
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    if [ -n "$(find "$BACKUP_ROOT" -maxdepth 1 -name "$name" -type d -mtime "+$cutoff_days" -print 2>/dev/null)" ]; then
+      assert_root_unchanged
+      ( cd -- "$BACKUP_ROOT" && rm -rf -- "$name" )
+      log "pruned failed run $name (older than ${cutoff_days}d)"
+    fi
+  done <<EOF
+$names
+EOF
+  names="$(list_stamped ".FAILED")"
+  count=0
+  while IFS= read -r name; do [ -n "$name" ] && count=$((count + 1)); done <<EOF
+$names
+EOF
+
   excess=$((count - keep))
   [ "$excess" -gt 0 ] || return 0
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     [ "$removed" -lt "$excess" ] || break
+    assert_root_unchanged
     ( cd -- "$BACKUP_ROOT" && rm -rf -- "$name" )
     removed=$((removed + 1))
     log "pruned failed run $name"
@@ -1068,9 +1097,7 @@ if [ "$to_delete" -gt 0 ]; then
     # byte-identical while the directory `rm` will walk into is a different
     # object. Comparing the strings could never detect the swap the surrounding
     # comment describes.
-    if [ "$(stat_ident "$BACKUP_DIR")" != "$ROOT_IDENT" ]; then
-      fail PRUNE_ABORTED "$BACKUP_DIR is no longer the directory that was audited"
-    fi
+    assert_root_unchanged
     ( cd -- "$BACKUP_ROOT" && rm -rf -- "$g" ) || fail PRUNE_ABORTED "could not remove generation $g"
     deleted=$((deleted + 1))
     log "pruned generation $g"

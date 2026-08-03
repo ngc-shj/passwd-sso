@@ -212,6 +212,11 @@ What the script guarantees, and what it does not:
   A validation failure is kept as `<stamp>.FAILED` for diagnosis rather than
   deleted: the fault may be the reader, and destroying a possibly-good archive
   to punish the validator is the wrong direction.
+- **A failed run's corpus is kept, but not forever.** A validation failure is
+  retained as `<stamp>.FAILED` for diagnosis; those are bounded by `BACKUP_RETAIN`
+  and by `BACKUP_FAILED_MAX_AGE_DAYS` (default 7). A retained failure is a full
+  plaintext copy of the database, so it is subject to the same handling as a
+  successful generation.
 - **The pruner never endangers the run just taken.** It is excluded by resolved
   path, not by assuming it sorts newest — a clock step or two hosts sharing one
   destination can make it the oldest name.
