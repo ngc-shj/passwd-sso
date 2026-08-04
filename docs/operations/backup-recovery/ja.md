@@ -245,6 +245,10 @@ rm -rf ~/passwd-sso-backups/.lock.d
     実行する場合は `PATH=/usr/bin:/bin:/sbin:/usr/sbin` を明示してください。
   - `BACKUP_ALLOW_UNVERIFIED_MOUNT=true` で上記のいずれも警告に落として続行できます。
     許可リストが知らない正当なファイルシステムを使う場合の逃げ道です。
+  - **macOS で暗号化ボリュームを使う場合はこのフラグが必要です。** macFUSE は
+    どのバックエンドに対しても汎用の種別 `macfuse` を報告するため、マウント表から
+    gocryptfs と s3fs を区別できず、推測せずに拒否します。Linux 側の綴り
+    （`fuse.gocryptfs` など）は許可リストにあり、フラグは不要です。
 - ### リモート / マネージド Postgres (URL モード)
 
 `MIGRATION_DATABASE_URL` を設定すると、Compose サービスではなく直接接続に切り替わり
@@ -279,8 +283,9 @@ BACKUP_DIR=/var/backups/passwd-sso \
   - 保守用データベース `postgres` も他と同じように報告します。通常は
     アプリケーションデータを持ちませんが、それをスクリプトが確認する方法はありません。
     毎回の警告を止めたい場合は `BACKUP_DATABASES` に明示的に含めてください。
-  - 列挙自体に失敗した場合は `not_backed_up: unknown` と記録し、警告を出します。
-    「未バックアップは無い」を意味する `(none)` は書きません。
+  - 列挙自体に失敗した場合は `not_backed_up: (unknown — cluster enumeration failed)`
+    と記録し、警告を出します。「未バックアップは無い」を意味する `(none)` は書きません。
+    実在の DB 名と衝突しないよう括弧付きにしています。
   - データベース名は hex 符号化されてスクリプトに渡ります。PostgreSQL の引用識別子は
     NUL 以外の任意のバイトを含められるため、改行を含む名前が行指向のログや MANIFEST を
     分断するのを防ぐためです。`BACKUP_DATABASES` に指定できる形（`[A-Za-z_][A-Za-z0-9_$]*`)

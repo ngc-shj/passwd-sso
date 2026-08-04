@@ -87,6 +87,30 @@ be filed with this PR.
 
 ## Round-5 residuals
 
+**[Ops] A mount whose device AND mount point both contain a space is
+undetermined.** Measured on the macOS verification host (Darwin 25.5.0): `mount`
+prints `map auto_home on …` (space in the device) and
+`/dev/disk5s1 on /Volumes/Backups of mrx33 (apfs, …)` (space in the mount
+point), and `df -P`'s device and mount-point fields are extracted with `%% *`
+and `##* ` respectively. Two keys are used precisely so either survives the
+other's truncation, and all four real paths on that host resolve correctly. A
+mount with a space in BOTH fields matches neither key and refuses as
+undetermined. Justification: fail-closed, `BACKUP_ALLOW_UNVERIFIED_MOUNT` is the
+documented escape, and parsing either field unambiguously needs a delimiter
+neither tool provides. What would settle it: matching by longest mount-point
+prefix over `mount`'s own output and dropping `df` entirely.
+
+**[Ops] macOS cannot verify an encrypting FUSE backend, by design.** macFUSE
+reports the generic type `macfuse` for every backend it carries, so the mount
+table cannot distinguish gocryptfs from s3fs — verified on the host with both
+line shapes. Allowlisting `macfuse` would admit s3fs on the identical line, so
+the script refuses and names `BACKUP_ALLOW_UNVERIFIED_MOUNT` in the message.
+Both operator documents state it. The Linux spellings are on the allowlist and
+need no flag. What would settle it: identifying the backend from the device
+field (`gocryptfs@/path`), which a mount can spell however it likes — a
+heuristic, not a verification, which is why it was not taken.
+
+
 **[Test] `PRUNE_ABORTED`'s second emitter is still unpinned.** The
 root-identity branch is now driven behaviourally (a `stat` PATH stub that flips
 device:inode once the dump has run), but `( cd … && rm -rf ) || fail

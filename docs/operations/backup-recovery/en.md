@@ -250,7 +250,12 @@ What the script guarantees, and what it does not:
     the nightly backup stops with `DEST_UNSAFE`.
   - `BACKUP_ALLOW_UNVERIFIED_MOUNT=true` downgrades either refusal to a loud
     warning. It exists for a legitimate filesystem the allowlist has not heard
-    of; the encrypted volume this section recommends is already on the list.
+    of.
+  - **On macOS an encrypted volume needs that flag.** macFUSE reports the
+    generic type `macfuse` for every backend it carries, so the mount table
+    cannot distinguish gocryptfs from s3fs and the script refuses rather than
+    guess. The Linux spellings (`fuse.gocryptfs`, `fuse.veracrypt`, …) are on
+    the allowlist and need no flag.
 
 ### Remote / managed Postgres (URL mode)
 
@@ -290,8 +295,9 @@ BACKUP_DIR=/var/backups/passwd-sso \
     holds no application data, but the script has no way to confirm that. Name
     it in `BACKUP_DATABASES` to silence the warning.
   - If the enumeration itself fails, the MANIFEST records
-    `not_backed_up: unknown` and the run warns. It never writes `(none)`, which
-    means "nothing was left out".
+    `not_backed_up: (unknown — cluster enumeration failed)` and the run warns.
+    It never writes `(none)`, which means "nothing was left out"; the marker is
+    parenthesised so it cannot collide with a real database name.
   - Database names reach the script hex-encoded. A PostgreSQL quoted identifier
     may contain any byte but NUL, so a name carrying a newline would otherwise
     split the line-oriented log and MANIFEST. A name of the shape

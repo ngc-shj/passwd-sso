@@ -1304,6 +1304,34 @@ exit 0`);
       .toMatch(/not_backed_up: \(unknown/);
   });
 
+  it("rejects an enumeration row whose SHAPE is wrong, not just its alphabet", () => {
+    // Validating the payload's charset alone was not enough. `x616263` has a
+    // bad connect flag and a payload that decodes cleanly: the flag was
+    // discarded and `abc` — a database that does not exist — went into the
+    // warning and the MANIFEST. `y0` is an odd-length payload that no encoder
+    // can produce. Both are the class the hex transport exists to close,
+    // reached from the other end.
+    for (const row of ["x616263", "y0", "y616"]) {
+      pgStubs();
+      stub("psql", `
+echo "psql $*" >> "${logFile}"
+case " $* " in
+  *pg_database*) printf '${"${row}"}\n' ;;
+  *)             printf 't|TLSv1.3|AESGCM\n' ;;
+esac
+exit 0`.replace("${row}", row));
+      const r = run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@dbhost:5432/d?${CA}` });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr, `${row} must be reported as malformed`)
+        .toMatch(/malformed row; the reconciliation is incomplete/);
+      const [gen] = generations();
+      const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+      expect(manifest, `${row} must not produce a coverage claim`).toMatch(/not_backed_up: \(unknown/);
+      expect(manifest, "and must never name a database it invented").not.toMatch(/\babc\b/);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
   it("passes -X to psql so ~/.psqlrc cannot answer for the server", () => {
     // HOME is in run_pg's allowlist, so the file-based configuration channel
     // env -i closes is re-opened unless -X is given — and psqlrc output lands in
@@ -2089,6 +2117,42 @@ done`);
       expect(run().status, `${fs} must be accepted`).toBe(0);
       rmSync(backupDir, { recursive: true, force: true });
     }
+  });
+
+  // Mount lines below are copied verbatim from `mount` on the macOS
+  // verification host (Darwin 25.5.0, /bin/bash 3.2.57) — the platform the
+  // portability floor exists for and the one the plan names as primary. The
+  // parser had only ever been exercised against hand-written Linux shapes.
+  it("refuses a macFUSE mount, whose generic type names no backend", () => {
+    // macOS reports `macfuse` for gocryptfs, s3fs and everything else on that
+    // transport, so the allowlist's Linux `fuse.gocryptfs` spelling can never
+    // match there — and allowlisting `macfuse` wholesale would admit s3fs on the
+    // identical line. Both are refused, and the message names the escape.
+    mountStub("gocryptfs@/Users/x/enc on /probe (macfuse, nodev, nosuid, synchronous, mounted by noguchi)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/generic type macfuse/);
+    expect(r.stderr, "the operator needs to be told what to do about it")
+      .toMatch(/BACKUP_ALLOW_UNVERIFIED_MOUNT=true/);
+
+    rmSync(backupDir, { recursive: true, force: true });
+    mountStub("s3fs on /probe (macfuse, nodev, nosuid, mounted by noguchi)");
+    expect(err(run()), "the same line shape must not become an allow").toBe("DEST_UNSAFE");
+  });
+
+  it("accepts a real macOS apfs volume (paired allow case)", () => {
+    mountStub("/dev/disk3s1s1 on /probe (apfs, sealed, local, read-only, journaled)");
+    expect(run().status, "apfs is the ordinary macOS destination").toBe(0);
+  });
+
+  it("refuses a real macOS autofs mount whose DEVICE contains a space", () => {
+    // `map auto_home on … (autofs, automounted, nobrowse)` — verbatim from the
+    // host. `${line%% *}` truncates the device to `map`, so the device key alone
+    // could not find this entry; the mount-point key is what does.
+    mountStub("map auto_home on /probe (autofs, automounted, nobrowse)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/autofs is not known to enforce ownership/);
   });
 
   it("refuses a filesystem type the allowlist has never heard of", () => {

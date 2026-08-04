@@ -354,6 +354,18 @@ mount_is_unsafe() {
       fstype="${opts%%,*}"
       fstype="${fstype# }"; fstype="${fstype% }"
     fi
+    # macFUSE (and a bare Linux `fuse`) report a GENERIC type, so the backend
+    # behind them cannot be identified from the mount table at all — and macOS
+    # is where the encrypting backends this script allowlists actually run.
+    # Allowlisting `macfuse` wholesale would admit s3fs on the same transport.
+    # The device field names the backend, but a mount can call itself anything,
+    # so this refuses with the operator's own escape rather than guessing.
+    case "$fstype" in
+      macfuse|osxfuse|fuse)
+        printf 'the mount reports the generic type %s, so the backend behind %s cannot be identified — if it is an ownership-preserving one such as gocryptfs, set BACKUP_ALLOW_UNVERIFIED_MOUNT=true (%s)' \
+          "$fstype" "$dev" "$m"
+        return 0 ;;
+    esac
     if ! fstype_enforces_ownership "$fstype"; then
       printf 'filesystem type %s is not known to enforce ownership and mode (%s)' \
         "${fstype:-unknown}" "$m"
@@ -1470,16 +1482,22 @@ else
     [ -n "$_row" ] || continue
     _conn="${_row:0:1}"
     _hex="${_row:1}"
-    # Validated BEFORE the membership test, not only inside display_of: the
-    # `case` below consumes this value as a GLOB PATTERN, so a payload of `*`
-    # matched every member and silently dropped a real database from both the
-    # warning and the MANIFEST.
-    case "$_hex" in
-      ""|*[!0-9a-f]*)
-        warn "the cluster enumeration returned a malformed row; the reconciliation is incomplete"
-        recon_failed=1
-        break ;;
-    esac
+    # The whole ROW's shape, not just the payload's charset. Validated BEFORE the
+    # membership test, because the `case` below consumes the payload as a GLOB
+    # PATTERN: `*` matched every member and silently dropped a real database.
+    # And the flag and the length matter as much as the alphabet — a row of
+    # `x616263` had its bad flag discarded and its payload decoded to `abc`,
+    # putting a database that does not exist into the MANIFEST. That is the
+    # class the hex transport exists to close, reached through the other end.
+    _malformed=""
+    case "$_conn" in y|n) ;; *) _malformed=1 ;; esac
+    case "$_hex" in ""|*[!0-9a-f]*) _malformed=1 ;; esac
+    [ $(( ${#_hex} % 2 )) -eq 0 ] || _malformed=1
+    if [ -n "$_malformed" ]; then
+      warn "the cluster enumeration returned a malformed row; the reconciliation is incomplete"
+      recon_failed=1
+      break
+    fi
     # Compared as HEX, never decoded: decoding first would put a control
     # character into a variable whose only remaining uses are the log and the
     # MANIFEST. DB_SET_HEX, not `" $BACKUP_DATABASES "`: one tokenisation, the
@@ -1501,7 +1519,7 @@ else
   done <<EOF
 $cluster_dbs
 EOF
-  unset _cdb _conn _hex _row
+  unset _cdb _conn _hex _malformed _row
 fi
 
 MANIFEST="$RUN_PARTIAL/MANIFEST"
