@@ -810,6 +810,19 @@ commits, plus the work it forced. **2 findings: 1 Critical, 1 Major.**
   attacker's to write and the trailing one has ` on <their own mount point> (…)`
   appended by mount(8) itself. Measured: the forged line was adopted as the
   destination's filesystem and the run reported it verified safe.
+- **U3 [Major, found while verifying U1 on the macOS host]** Group B's
+  delegating case — the only one that runs the production reader invocation
+  rather than calling `pg_restore` directly — had never executed on macOS. The
+  suite stubs `HOME` so a case exercising the default `BACKUP_DIR` cannot prune
+  the developer's real backups, and Docker Desktop discovers its `compose` CLI
+  plugin under `$HOME/.docker/cli-plugins`; with HOME redirected the plugin is
+  not found and `docker compose exec -T` is parsed as a top-level `-T`.
+  Isolated by replaying the exact spawn environment against the real binary:
+  the same `env -i` with the real HOME succeeds, with a temporary one it fails.
+  Linux keeps the plugin in a system directory, so the case passed there and
+  the gap was invisible — the same shape as the eight destination guards that
+  had never fired on macOS. Fixed by giving the delegating stub `DOCKER_CONFIG`
+  only, so the plugin is found while the script's HOME stays stubbed.
 - **U2 [Major]** The URL query refusal percent-decoded the whole query and
   matched substrings, so `application_name=report=1` was refused as `port=` — a
   legal conninfo denied, with the boundary decided by whatever bytes preceded
@@ -867,6 +880,22 @@ killed by the injection case, and pointing the mountinfo reader at a
 non-existent path fails thirteen cases, so the structured reader is load-bearing
 rather than a preference. The failing test named for each mutant is recorded in
 the sweep log.
+
+Full suite green (14,178), pre-PR gate green (70 checks), and **191/191 on the
+macOS verification host** — the first run there in which Group B's delegating
+case actually executed. One further race surfaced under the parallel pre-PR run
+and was fixed in the test: the lock case polled for `pid` and then read `host`,
+which `record_lock_metadata` writes second. Production is unaffected — a reader
+that finds a pid and no host treats the lock as held, which is the fail-closed
+direction.
+
+## Environment Verification Report
+
+- **VE1** — unchanged, `blocked-deferred`.
+- **VE2** — `verified-local` on both platforms, and stronger than in round 6:
+  the macOS run now exercises Group B's compose reader instead of failing
+  before it.
+- **VE3** — unchanged; `BACKUP_DB_EXPECT_READER` still unset in CI.
 
 ---
 
