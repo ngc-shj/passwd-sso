@@ -114,6 +114,19 @@ payable from a shell; it needs a per-mount structured table, which macOS does
 not expose to one. Bounded by: the same direction as every other verdict here —
 an unanswered check is not a passed check.
 
+**[Ops] On Linux the reader descends the mount TREE, and the rule is
+order-independent by construction.** Recorded because the first two spellings
+were both wrong and the reason is not obvious. Longest covering mount point is
+wrong: `/backup/sub` mounted before `/backup` is hidden by it, and the hidden
+child's mount point is the longer string — measured reporting a destination on
+exFAT as verified safe. "Last among siblings" is wrong for a subtler reason:
+mountinfo's order is not a promise about visibility, so the same tree listed the
+other way round flips the verdict. What is used instead is a deduction from the
+tree: two children of one parent can only stand in a prefix relation if the
+shorter was mounted last, because otherwise the longer would have landed inside
+it and be its child rather than its sibling. Both orderings are committed cases,
+as is the paired allow case where the child is NOT hidden and must answer.
+
 **[Ops] The two stat(2)-only designs do not work on macOS, and the measurement
 is recorded so they are not proposed again.** Both were tried first, on the
 verification host (Darwin 25.5.0). Walking ancestors while `st_dev` is unchanged

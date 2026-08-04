@@ -83,7 +83,8 @@ function readLog() {
  * `PG_TOC_ENTRIES` real entries, so a script counting raw lines instead of
  * non-comment lines would read a non-zero count from an empty TOC.
  */
-function dockerStub({ psStatus = 0, psOutput = "container123", dumpFails = "", restoreFails = "" } = {}) {
+function dockerStub({ psStatus = 0, psOutput = "container123", dumpFails = "", restoreFails = "",
+                     clusterRows = "", clusterStatus = 0, clusterStderr = "" } = {}) {
   stub("docker", `
 echo "docker $*" >> "${logFile}"
 sub="\${2:-}"
@@ -103,6 +104,14 @@ case "$sub" in
         pg_dumpall)
           printf 'CREATE ROLE stub_role;\\n--\\n-- PostgreSQL database cluster dump complete\\n--\\n'
           exit 0 ;;
+        psql)
+          # The cluster enumeration and its diagnostic re-run. Silent success
+          # is the default because that is what every earlier case saw, and it
+          # is itself a fixture: an enumeration that answers nothing has not
+          # run, whatever its exit status.
+          [ -n "${clusterStderr}" ] && printf '%s\\n' "${clusterStderr}" >&2
+          [ -n "${clusterRows}" ] && printf '%s' "${clusterRows}"
+          exit ${clusterStatus} ;;
         pg_restore)
           [ -n "${restoreFails}" ] && exit 1
           cat > /dev/null
@@ -649,9 +658,18 @@ exit 0`);
     // URL mode asks the server what transport was actually negotiated rather
     // than trusting what was requested — libpq's gssencmode default would
     // otherwise satisfy a verify-full request over a non-TLS session.
+    // Dispatches on the query, like its twin. A stub that answered every
+    // invocation with the transport row made the cluster enumeration read that
+    // row as a database list: every run through THIS stub recorded
+    // `not_backed_up: hex:|TLSv1.3|…`, and no case here asserts on that field,
+    // so the drift was invisible — the same defect round 5 fixed in the twin
+    // and left standing here.
     stub("psql", `
 echo "psql $* PGPASSFILE=[\${PGPASSFILE:-}]" >> "${logFile}"
-printf 't|TLSv1.3|TLS_AES_256_GCM_SHA384\\n'
+case " $* " in
+  *pg_database*) printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n' ;;
+  *)             printf 't|TLSv1.3|TLS_AES_256_GCM_SHA384\\n' ;;
+esac
 exit 0`);
   };
 
@@ -1133,6 +1151,29 @@ exit 0`);
     }
   });
 
+  it("passes -X to psql on the URL-mode diagnostic re-run, which only a failure reaches", () => {
+    // The fifth site. It runs the same query a second time to capture stderr,
+    // so a `-X` dropped there re-opens ~/.psqlrc on precisely the path where
+    // the operator is reading the output to decide what went wrong.
+    pgStubs();
+    stub("psql", `
+echo "psql $*" >> "${logFile}"
+case " $* " in
+  *pg_database*) echo "FATAL: connection refused" >&2; exit 1 ;;
+  *)             printf 't|TLSv1.3|AESGCM\\n' ;;
+esac
+exit 0`);
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(r.status, r.stderr).toBe(0);
+    const calls = readLog().split("\n")
+      .filter((l) => l.startsWith("psql ") && l.includes("pg_database"));
+    expect(calls.length, "the enumeration and its diagnostic re-run").toBeGreaterThanOrEqual(2);
+    for (const c of calls) {
+      expect(c, `psql invoked without -X: ${c}`).toMatch(/(^|\s)-X(\s|$)/);
+    }
+    expect(r.stderr).toMatch(/FATAL: connection refused/);
+  });
+
   it("refuses only the PARAMETER, not any value that spells one", () => {
     pgStubs();
     // The refusal used to percent-decode the whole query and match substrings,
@@ -1414,6 +1455,85 @@ describe("guards the sweep found unpinned", () => {
       expect(err(run({ BACKUP_DATABASES: v })), JSON.stringify(v)).toBe("BAD_ENV");
       rmSync(backupDir, { recursive: true, force: true });
     }
+  });
+
+  // ─── The cluster reconciliation ────────────────────────────
+  //
+  // Every earlier compose case let the enumeration fail silently — the docker
+  // stub had no `psql` arm at all — so the rows were never a fixture and the
+  // whole block below the query was reachable by nothing.
+
+  const manifestOf = () =>
+    readFileSync(join(backupDir, generations()[0], "MANIFEST"), "utf8");
+
+  it("treats an enumeration that answers nothing as one that failed", () => {
+    // A query that succeeded returns at least the database it connected to.
+    // Without the guard the loop runs over an empty result, finds no unlisted
+    // database, and the MANIFEST records `(none)` — the all-clear — for a
+    // check that never ran.
+    dockerStub({ clusterRows: "" });
+    expect(run().status).toBe(0);
+    expect(manifestOf(), "an empty answer is not the all-clear")
+      .toMatch(/not_backed_up: \(unknown/);
+  });
+
+  it("reports a database the cluster has and BACKUP_DATABASES does not (paired allow case)", () => {
+    // The other direction, and the reason the block exists: without it the
+    // reconciliation could be broken in any way at all and every case above
+    // would still pass, because none of them ever received a row.
+    dockerStub({ clusterRows: `${dbRow("passwd_sso")}\n${dbRow("jackson")}\n${dbRow("forgotten")}\n` });
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stderr, "the unlisted database must be named").toMatch(/'forgotten'[^\n]*NOT being backed up/);
+    expect(manifestOf()).toMatch(/not_backed_up: forgotten/);
+  });
+
+  for (const [label, row] of [
+    ["a flag that is neither y nor n", `x${Buffer.from("abc", "utf8").toString("hex")}`],
+    ["a payload outside the hex alphabet, at EVEN length", "yzzzz"],
+    ["a payload of odd length", "y616"],
+  ]) {
+    it(`refuses a cluster row with ${label}`, () => {
+      // One fixture per arm. The only non-hex fixture used to be odd-length as
+      // well, so the length guard refused it first and the charset arm was
+      // exercised by nothing — and the flag arm decides whether a row whose
+      // `x` was discarded puts a database that does not exist in the MANIFEST.
+      dockerStub({ clusterRows: `${row}\n` });
+      const r = run();
+      expect(r.status).toBe(0);
+      expect(r.stderr).toMatch(/malformed row/);
+      expect(manifestOf(), "a table read as malformed has not reconciled anything")
+        .toMatch(/not_backed_up: \(unknown/);
+    });
+  }
+
+  it("stops reading rows at the first malformed one", () => {
+    // Without the break the loop keeps going, so a table the run has just
+    // declared unreadable goes on producing findings — each one a database
+    // name taken from the same output.
+    dockerStub({ clusterRows: `yzzzz\n${dbRow("keepreading")}\n` });
+    const r = run();
+    expect(r.status).toBe(0);
+    expect(r.stderr, "a malformed table must not go on answering")
+      .not.toMatch(/keepreading/);
+  });
+
+  it("passes -X to psql in compose mode, and on the diagnostic re-run", () => {
+    // The existing case filters log lines starting `psql `, which only URL mode
+    // produces. Compose is the DEFAULT path, and the diagnostic re-run is
+    // reached only when the enumeration fails, so three of the five sites were
+    // unmeasured — including both of the ones a scheduled run takes.
+    dockerStub({ clusterStatus: 1, clusterStderr: "FATAL: connection refused" });
+    const r = run();
+    expect(r.status).toBe(0);
+    const calls = readLog().split("\n").filter((l) => /\bpsql\b/.test(l));
+    expect(calls.length, "the enumeration and its diagnostic re-run must both appear")
+      .toBeGreaterThanOrEqual(2);
+    for (const c of calls) {
+      expect(c, `psql invoked without -X: ${c}`).toMatch(/(^|\s)-X(\s|$)/);
+    }
+    expect(r.stderr, "the diagnostic re-run is what makes the failure readable")
+      .toMatch(/FATAL: connection refused/);
   });
 
   it("pins the compose-mode dump flags, which is the default path", () => {
@@ -2060,6 +2180,13 @@ exec "${real}" "$@"`);
     // shape the round-4 delegating-reader Critical had.
     const esc = (v) => v.replace(/\\/g, "\\134").replace(/ /g, "\\040")
                         .replace(/\t/g, "\\011").replace(/\n/g, "\\012");
+    // Parent ids are computed, not stamped 1: the reader descends the mount
+    // TREE, because a later mount over an ancestor hides a child whose mount
+    // point is the longer string. A mount's parent is the mount that owned its
+    // mount point at the time it was made — the LAST already-listed entry
+    // covering it — which is what makes an over-mount a child of what it covers.
+    const under = (p, mp) => mp === "/" || p === mp || p.startsWith(`${mp}/`);
+    const emitted = [];
     const mi = lines.map((l, i) => {
       // "<src> on <mp> type <fs> (<opts>)"  |  "<src> on <mp> (<fs>, <opts>)"
       const m = /^(.*?) on (.*?)(?: type (\S+))? \((.*)\)$/.exec(l);
@@ -2067,7 +2194,11 @@ exec "${real}" "$@"`);
       const [, src, mp, ltype, opts] = m;
       const fs = ltype || opts.split(",")[0].trim();
       const rest = ltype ? opts : opts.split(",").slice(1).join(",").trim();
-      return `${i + 20} 1 0:${i + 20} / ${esc(mp)} rw - ${esc(fs)} ${esc(src)} ${esc(rest || "rw")}`;
+      const id = i + 20;
+      let parent = 1;
+      for (const e of emitted) if (under(mp, e.mp)) parent = e.id;
+      emitted.push({ id, mp });
+      return `${id} ${parent} 0:${id} / ${esc(mp)} rw - ${esc(fs)} ${esc(src)} ${esc(rest || "rw")}`;
     }).filter(Boolean).join("\n");
     const miPath = join(tmpDir, "mountinfo");
     writeFileSync(miPath, mi + "\n", "utf8");
@@ -2271,6 +2402,148 @@ fi`);
     // answers nothing, rather than the last one winning.
     expect(r.stderr, "two claims on one mount point must be undetermined, not a verdict")
       .toMatch(/2 mount\(8\) lines claim/);
+  });
+
+  // ─── Visibility is the mount TREE, not the longest string ──
+  //
+  // mountinfo's own spec says so: which mount a path resolves through is
+  // decided by the mount-id/parent-id relation, because a later mount over an
+  // ancestor HIDES a child whose mount point is the longer string.
+
+  it("is not decided by a child mount that a later mount over its ancestor hides", () => {
+    // /probe/sub (ext4) was mounted first, so its parent is the root mount.
+    // Then exFAT was mounted at /probe, which covers the directory /probe/sub
+    // lives in — the child is unreachable and the destination is on exFAT.
+    // Picking the longest covering mount point reports the hidden ext4.
+    const sub = join(realBackupDir, "sub");
+    mkdirSync(sub, { recursive: true, mode: 0o700 });
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(sub)} rw - ext4 /dev/safe rw`,
+      `22 20 0:22 / ${esc(realBackupDir)} rw - exfat /dev/usb rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run({ BACKUP_DIR: sub });
+    expect(err(r), "the destination is on the exFAT that hid the child").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("reaches the same verdict when the hiding mount is listed FIRST", () => {
+    // The same tree, listed the other way round. mountinfo's order is not a
+    // promise about visibility, so a rule that takes the last covering entry —
+    // or the last among siblings — flips the verdict on this input while the
+    // tree it describes is unchanged. Two children of one parent can only be
+    // in a prefix relation if the shorter was mounted last, which is the
+    // deduction the reader makes instead of reading the order.
+    const sub = join(realBackupDir, "sub");
+    mkdirSync(sub, { recursive: true, mode: 0o700 });
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `22 20 0:22 / ${esc(realBackupDir)} rw - exfat /dev/usb rw`,
+      `21 20 0:21 / ${esc(sub)} rw - ext4 /dev/safe rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run({ BACKUP_DIR: sub });
+    expect(err(r), "the hidden child must not answer, whichever line comes first")
+      .toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("still descends INTO a child that nothing hides (paired allow case)", () => {
+    // The other direction, and the reason the rule is not simply "shortest
+    // wins": a child mounted inside its parent is a child in the tree, so the
+    // descent reaches it and it is the one that answers. Without this, refusing
+    // the hidden case could be done by always taking the ancestor.
+    const sub = join(realBackupDir, "sub");
+    mkdirSync(sub, { recursive: true, mode: 0o700 });
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/outer rw`,
+      `22 21 0:22 / ${esc(sub)} rw - exfat /dev/inner rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run({ BACKUP_DIR: sub });
+    expect(err(r), "the visible child is the filesystem the path is on").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("starts from the LAST root entry when / itself is mounted over", () => {
+    // Two mounts at / with the same parent: by the same deduction used for any
+    // other sibling pair, the later one is the one covering. Starting the
+    // descent from the first reports the filesystem underneath — and the
+    // descent cannot recover, because the second is a sibling, not a child.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/under rw",
+      "21 1 0:21 / / rw - exfat /dev/over rw",
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run();
+    expect(err(r), "the topmost root is the one the path resolves through").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("skips a mountinfo line too short to be one, rather than dying on it", () => {
+    // The format cannot produce a line with fewer than ten fields, but a
+    // truncated read can, and the seam accepts any path. Without the field
+    // count the reader indexes $2 of a one-field line, which `set -u` turns
+    // into an abort partway through the destination check.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      "truncated",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - exfat /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run();
+    expect(err(r), "the well-formed entry must still decide").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("refuses a mountinfo that describes a cycle instead of walking it forever", () => {
+    // A mount whose parent id is its own is its own child, and the descent
+    // never returns. Nothing in the format forbids it, and a backup that HANGS
+    // is worse than one that refuses: there is no timeout around a cron run, so
+    // it would sit holding the lock until somebody noticed. Found by a mutant
+    // that removed the parent check and left a vitest run wedged for 94 minutes.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    // The root names ITSELF as its parent, so it is its own child and every
+    // step of the descent selects it again. A self-parent deeper in the table
+    // is unreachable and therefore harmless; this is the one shape that spins.
+    writeFileSync(miPath, [
+      "20 20 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run();
+    expect(err(r), "an unwalkable table is undetermined, not a hang").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/cycle at mount id/);
+  });
+
+  it("refuses an ID-mapped mount", () => {
+    // The kernel prints `idmapped` in the PER-MOUNT options. An id-mapped mount
+    // translates owner uid/gid across the mount, so the archive can read back
+    // as owned by this uid at 0600 here and be owned by another uid in the view
+    // the mapping exists to serve — the same property `uid=` is refused for.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw,idmapped - ext4 /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/ownership advisory/);
   });
 
   // ─── df's own row is the same injection surface ────────────

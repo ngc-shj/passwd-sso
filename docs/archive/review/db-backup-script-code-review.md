@@ -810,6 +810,26 @@ commits, plus the work it forced. **2 findings: 1 Critical, 1 Major.**
   attacker's to write and the trailing one has ` on <their own mount point> (…)`
   appended by mount(8) itself. Measured: the forged line was adopted as the
   destination's filesystem and the run reported it verified safe.
+- **U4 [Critical, second external pass]** The new mountinfo reader picked the
+  LONGEST covering mount point, and mountinfo's visibility is not a string
+  relation. Given `/backup/sub` (ext4, mounted first, so its parent is the root
+  mount) and a later `/backup` (exFAT), the child is unreachable — the exFAT
+  covers the directory it hangs off — but its mount point is the longer string,
+  so a destination on exFAT was reported verified safe. Reproduced before
+  fixing. The reader now descends the mount TREE by the parent relation, and
+  among the children of one mount that cover the target it takes the SHORTEST
+  mount point. That is a deduction from the tree rather than from the listing
+  order: two children of one parent can only stand in a prefix relation if the
+  shorter was mounted last, because otherwise the longer would have landed
+  inside it and be its child. An ordering rule — including the "last among
+  siblings" one written first — flips the verdict when the same tree is listed
+  the other way round, which is a committed case.
+- **U5 [Major, same pass]** `idmapped` was missing from `UNSAFE_MOUNT_OPTS`. It
+  is the one per-mount flag in the kernel's mountinfo vocabulary that carries
+  the fabricated-ownership property, and `rw,idmapped` on an allowlisted type
+  read as verified safe. An id-mapped mount translates owner uid and gid across
+  the mount, so the mode read-back cannot see it — the same reason `uid=` is
+  refused.
 - **U3 [Major, found while verifying U1 on the macOS host]** Group B's
   delegating case — the only one that runs the production reader invocation
   rather than calling `pg_restore` directly — had never executed on macOS. The

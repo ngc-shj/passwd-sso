@@ -273,8 +273,15 @@ fuse.gocryptfs fuse.cryfs fuse.encfs fuse.securefs fuse.veracrypt fuse.ext4fuse"
 # archive really is 0600, the kernel just stops enforcing it without
 # default_permissions. They matter more now that the allowlist invites the
 # encrypting FUSE backends, which is exactly where allow_other gets used.
+#
+# `idmapped` is the same property arriving from the other side, and it is the
+# only PER-MOUNT flag in the kernel's mountinfo vocabulary that carries it: an
+# id-mapped mount translates owner uid and gid across the mount, so an archive
+# that reads back as owned by this uid at 0600 here is owned by a different uid
+# in the view the mapping exists to serve. The mode read-back cannot see it
+# either.
 UNSAFE_MOUNT_OPTS="noowners uid gid umask fmask dmask mode file_umask dir_umask
-allow_other allow_root"
+allow_other allow_root idmapped"
 
 fstype_enforces_ownership() {
   local t="$1" m
@@ -348,36 +355,87 @@ mount_fields_verdict() {
 # injects a whole synthetic line that no amount of per-line parsing can tell
 # from a real one. Measured: the injected line passes every structural check.
 mountinfo_verdict() {
-  local target="$1" mi="${2:-/proc/self/mountinfo}" ln mp opts fstype src sup esc
-  local best_mp="" best_opts="" best_fstype="" best_src="" best_line=""
+  local target="$1" mi="${2:-/proc/self/mountinfo}" ln esc
+  local cur_id="" cur_line="" next_id="" next_line="" next_mp="" seen=""
+  local opts fstype src sup
   esc="${target//\\/\\134}"
   esc="${esc// /\\040}"
   esc="${esc//$'\t'/\\011}"
   esc="${esc//$'\n'/\\012}"
+
+  # The root mount, and the LAST one listed if the root itself is mounted over.
   while IFS= read -r ln; do
     # Word splitting is safe here precisely because the format escapes every
     # byte that could otherwise act as a separator.
     set -- $ln
     [ "$#" -ge 10 ] || continue
-    mp="$5"; opts="$6"
-    shift 6
-    while [ "$#" -gt 0 ] && [ "$1" != "-" ]; do shift; done
-    [ "$#" -ge 3 ] || continue
-    shift
-    fstype="$1"; src="$2"; sup="${3:-}"
-    path_is_under "$esc" "$mp" || continue
-    # Longest covering mount point; among equals the last listed, which is the
-    # topmost mount and the one the path resolves through.
-    if [ "${#mp}" -ge "${#best_mp}" ]; then
-      best_mp="$mp"; best_opts="$opts"; best_fstype="$fstype"
-      best_src="$src"; best_line="$ln"
-      # FUSE puts uid=/gid=/allow_other in the SUPER options, not the per-mount
-      # ones, so the option check has to see both.
-      [ -n "$sup" ] && best_opts="$opts,$sup"
-    fi
+    [ "$5" = "/" ] || continue
+    cur_id="$1"; cur_line="$ln"
   done < "$mi"
-  [ -n "$best_line" ] || { printf 'no mountinfo entry covers %s' "$target"; return 2; }
-  mount_fields_verdict "$best_fstype" "$best_opts" "$best_src" "$best_line"
+  [ -n "$cur_id" ] || { printf 'mountinfo has no entry for /'; return 2; }
+
+  # Then DESCEND THE MOUNT TREE. Which mount a path resolves through is decided
+  # by the mount-id/parent-id relation, not by whose mount point is the longest
+  # string — mountinfo's own page says so, and the difference is not cosmetic:
+  #
+  #   21 20 … /backup/sub … - ext4  /dev/safe
+  #   22 20 … /backup     … - exfat /dev/usb
+  #
+  # /backup/sub was mounted first, so its parent is the root mount; the later
+  # exFAT at /backup covers the directory the child hangs off, and the child is
+  # unreachable. The longest covering mount point is the HIDDEN one, and taking
+  # it reported a destination on exFAT as verified safe. Measured.
+  #
+  # Descending is what makes a hidden mount unreachable here too: a mount is
+  # only reachable once its parent has been. Among the children of the current
+  # mount that cover the target, the SHORTEST mount point wins — which is a
+  # deduction from the tree, not from the listing order. Two children of one
+  # parent whose mount points are prefix-comparable can only exist in that
+  # relation if the shorter one was mounted LAST: had it been there first, the
+  # longer one would have landed inside it and be its child, not its sibling.
+  # So the shorter one is the one covering the other. Ordering cannot be the
+  # rule here — mountinfo's order is not a promise about visibility, and the
+  # same tree listed the other way round would flip the verdict.
+  # The descent is over a table this process does not control, so it is bounded
+  # by an explicit visited set rather than by trusting the ids to form a tree. A
+  # mount whose parent id is its own — which nothing forbids in a file that can
+  # also come from BACKUP_MOUNTINFO_PATH — makes it its own child and the loop
+  # never returns. A backup that hangs is worse than one that refuses: cron has
+  # no timeout here, so the run would sit holding the lock until someone looked.
+  seen=" $cur_id "
+  while :; do
+    next_id=""; next_line=""; next_mp=""
+    while IFS= read -r ln; do
+      set -- $ln
+      [ "$#" -ge 10 ] || continue
+      [ "$2" = "$cur_id" ] || continue
+      path_is_under "$esc" "$5" || continue
+      # `-le`, so an over-mount listed later at the SAME point still wins.
+      if [ -z "$next_id" ] || [ "${#5}" -le "${#next_mp}" ]; then
+        next_id="$1"; next_line="$ln"; next_mp="$5"
+      fi
+    done < "$mi"
+    [ -n "$next_id" ] || break
+    case "$seen" in
+      *" $next_id "*)
+        printf 'mountinfo describes a cycle at mount id %s, so the mount table cannot be walked' "$next_id"
+        return 2 ;;
+    esac
+    seen="$seen$next_id "
+    cur_id="$next_id"; cur_line="$next_line"
+  done
+
+  set -- $cur_line
+  opts="$6"
+  shift 6
+  while [ "$#" -gt 0 ] && [ "$1" != "-" ]; do shift; done
+  [ "$#" -ge 3 ] || { printf 'mountinfo entry for %s has no fstype field' "$target"; return 2; }
+  shift
+  fstype="$1"; src="$2"; sup="${3:-}"
+  # FUSE puts uid=/gid=/allow_other in the SUPER options, not the per-mount
+  # ones, so the option check has to see both.
+  if [ -n "$sup" ]; then opts="$opts,$sup"; fi
+  mount_fields_verdict "$fstype" "$opts" "$src" "$cur_line"
 }
 
 # The mount point the destination is on, from statfs(2) via `df -P PATH` — the
