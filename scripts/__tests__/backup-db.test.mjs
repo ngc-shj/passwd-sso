@@ -29,7 +29,7 @@ import {
 } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { tmpdir, hostname } from "node:os";
+import { tmpdir, hostname, homedir } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -906,6 +906,17 @@ describe("Group B — validation by a real pg_restore", () => {
   const delegatingStub = (archive) => {
     const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
     const hostRestore = spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).stdout.trim();
+    // Docker Desktop keeps its `compose` CLI plugin under $HOME/.docker, and
+    // run() hands the script a STUBBED HOME so that a case exercising the
+    // default BACKUP_DIR cannot prune the developer's real backups. On macOS
+    // that combination hid the plugin: `docker compose exec -T …` was parsed as
+    // a top-level `-T` and this case — the only one that runs the production
+    // reader invocation — failed on the verification host, which is the
+    // platform Group B exists to cover. Linux keeps the plugin in a system
+    // directory, so it passed there and the gap was invisible. DOCKER_CONFIG is
+    // the narrow knob: the real docker finds its plugin, the script's HOME stays
+    // stubbed.
+    const dockerConfig = process.env.DOCKER_CONFIG || join(homedir(), ".docker");
     stub("docker", `
 if [ "\${2:-}" = "config" ]; then exit 0; fi
 if [ "\${2:-}" = "ps" ]; then echo container123; exit 0; fi
@@ -927,7 +938,7 @@ for a in "$@"; do
         done
         exec "${hostRestore}" "\${args[@]}"
       fi
-      exec "${realDocker}" "$@" ;;
+      exec env "DOCKER_CONFIG=${dockerConfig}" "${realDocker}" "$@" ;;
   esac
 done
 exit 0`);
