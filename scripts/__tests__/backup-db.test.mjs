@@ -2583,7 +2583,15 @@ exit 0`);
     try {
       const lock = join(backupDir, ".lock.d");
       const deadline = Date.now() + 5000;
-      while (Date.now() < deadline && !existsSync(join(lock, "pid"))) {
+      // Wait for the LAST field the script writes, not the first. `pid` is
+      // written, then `host`, then `starttime`, each by its own redirection, so
+      // polling on `pid` returns while `host` may not exist yet — this failed
+      // under the parallel pre-PR run, which loads the machine enough to widen
+      // the gap. The window is real but harmless in production: the reader
+      // above resolves a lock with a pid and no host to "held by an unknown
+      // host", which is the fail-closed direction.
+      const written = () => ["pid", "host", "starttime"].every((f) => existsSync(join(lock, f)));
+      while (Date.now() < deadline && !written()) {
         spawnSync("sleep", ["0.05"]);
       }
       expect(existsSync(join(lock, "pid")), "the holder pid must be recorded").toBe(true);
