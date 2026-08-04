@@ -238,6 +238,19 @@ What the script guarantees, and what it does not:
   encrypted volume, not for writing the corpus unprotected. **Encryption at
   rest and offsite replication are out of scope**: anyone who can read
   `$BACKUP_DIR` has the database.
+  - The filesystem check is an **allowlist**. Only types known to enforce
+    ownership and mode are accepted — ext4, xfs, btrfs, zfs, apfs, and the
+    ownership-preserving FUSE backends gocryptfs, cryfs, encfs, securefs and
+    veracrypt — and everything else is refused. A denylist answers "safe" for
+    every type nobody enumerated. A mount that fabricates ownership (`uid=`,
+    `gid=`, `umask=`, `noowners`) is refused whatever the type is.
+  - A destination whose filesystem `df(1)` and `mount(8)` cannot describe is
+    refused as well. **macOS keeps `mount` in /sbin, which cron's default PATH
+    omits** — set `PATH=/usr/bin:/bin:/sbin:/usr/sbin` for a scheduled run, or
+    the nightly backup stops with `DEST_UNSAFE`.
+  - `BACKUP_ALLOW_UNVERIFIED_MOUNT=true` downgrades either refusal to a loud
+    warning. It exists for a legitimate filesystem the allowlist has not heard
+    of; the encrypted volume this section recommends is already on the list.
 
 ### Remote / managed Postgres (URL mode)
 

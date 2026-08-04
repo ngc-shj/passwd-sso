@@ -996,8 +996,14 @@ describe("C8 documentation", () => {
     const prePr = readFileSync(resolve(REPO_ROOT, "scripts/pre-pr.sh"), "utf8");
     const paths = prePr.match(/^\s*local app_paths='(.+)'$/m)?.[1];
     expect(paths, "pre-pr.sh must declare app_paths").toBeDefined();
-    expect(new RegExp(paths).test("docs/operations/backup-recovery/ja.md"),
-      `app_paths must match a document path, got ${paths}`).toBe(true);
+    // EVERY member of DOCS, not one representative: `CLAUDE.md` could be
+    // dropped from both gate files with the suite green, and the case that
+    // asserts CLAUDE.md points at the script would then never run.
+    for (const rel of DOCS) {
+      expect(new RegExp(paths).test(rel), `app_paths must match ${rel}, got ${paths}`).toBe(true);
+    }
+    expect(app, "ci.yml's app filter must reach CLAUDE.md")
+      .toMatch(/^[ \t]*- "CLAUDE\.md"$/m);
     // Positive control: the same regex must NOT match an unrelated path, or a
     // catch-all would satisfy the assertion above without gating anything.
     expect(new RegExp(paths).test("ios/project.yml")).toBe(false);
@@ -1054,7 +1060,17 @@ exit 0`);
     }
     stub("pg_restore", `printf '; h\\n1; 1 TABLE t o\\n'
 exit 0`);
-    stub("psql", `printf 't|TLSv1.3|AESGCM\\n'
+    // Dispatches on the query. A stub that answers every invocation with the
+    // transport row made the cluster enumeration read that row as a database:
+    // every URL-mode run recorded `not_backed_up: hex:|TLSv1.3|AESGCM`, and
+    // because no URL-mode case asserted on that field it was invisible — while
+    // leaving the URL-mode enumeration branch with no valid-payload test at all.
+    stub("psql", `
+echo "psql $*" >> "${logFile}"
+case " $* " in
+  *pg_database*) printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n' ;;
+  *)             printf 't|TLSv1.3|AESGCM\\n' ;;
+esac
 exit 0`);
   };
 
@@ -1198,10 +1214,107 @@ exit 2`);
     // an empty host became the wildcard entry the narrowing exists to prevent,
     // and a newline injected a second .pgpass line.
     pgStubs();
-    for (const authority of ["u:p@", "u:p@h\n*", "u:p@a:b:5432"]) {
+    // The member set is "a COMPUTED host that .pgpass reads as a wildcard", not
+    // "an authority spelled with nothing before the slash". `u:p@:5432` and
+    // `u:p@*` produce the same wildcard entry as `u:p@`; the first was fixed in
+    // round 4 with no test, so reverting the fix to the spelling-based form
+    // survived, and the second was never closed at all.
+    for (const authority of ["u:p@", "u:p@:5432", "u:p@:", "u:p@*", "u:p@*:5432",
+                             "u:p@h\n*", "u:p@a:b:5432"]) {
       expect(err(run({ MIGRATION_DATABASE_URL: `postgresql://${authority}/d?${CA}` })),
         JSON.stringify(authority)).toBe("BAD_URL");
       rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("scopes the passfile to a bracketed IPv6 literal instead of widening it", () => {
+    // libpq strips the brackets before its .pgpass lookup, so this peer IS
+    // known and the entry can name it. The wildcard here was one nobody needed:
+    // it offered the superuser password to every peer the connection could
+    // reach, which is the property the refusal above exists to prevent — and
+    // the plan lists this spelling as one that MUST be accepted.
+    pgStubs();
+    const r = run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@[2001:db8::1]:5432/d?${CA}` });
+    expect(r.status, r.stderr).toBe(0);
+    const line = readFileSync(`${logFile}.pgpass`, "utf8").split("\n")[0];
+    // Every colon of the literal is escaped, or .pgpass reads them as field
+    // separators and the entry means something else entirely.
+    expect(line).toBe("2001\\:db8\\:\\:1:5432:*:*:pw");
+    expect(line, "the wildcard entry must not be written").not.toMatch(/^\*:/);
+  });
+
+  it("keeps the wildcard only for the multi-host form, which cannot be scoped", () => {
+    // libpq may connect to any member and consults the passfile per attempt, so
+    // this is the one accepted form where the wildcard is unavoidable. Recorded
+    // in the deviation log; pinned here so it stays the ONLY one.
+    pgStubs();
+    const r = run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@a.example.com,b.example.com/d?${CA}` });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(`${logFile}.pgpass`, "utf8").split("\n")[0]).toBe("*:*:*:*:pw");
+  });
+
+  it("scopes an empty port to the port libpq will actually use", () => {
+    // `postgres://u:pw@host:/db` is a legal URI meaning "the default port".
+    // `env -i` in run_pg means PGPORT cannot reach libpq, so that port is
+    // deterministically 5432 — a wildcard would be wider than the spelling.
+    pgStubs();
+    const r = run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@dbhost:/d?${CA}` });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(`${logFile}.pgpass`, "utf8").split("\n")[0]).toBe("dbhost:5432:*:*:pw");
+  });
+
+  it("reads back the passfile's achieved mode", () => {
+    // The member of the mode-checked set with the most to lose — it holds the
+    // superuser password — and the one still trusting mktemp's creation-time
+    // mode, which is the assumption the helper exists to reject.
+    pgStubs();
+    const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+case "$last" in
+  *.pgpass.*)
+    case " $* " in *" %a "*|*"'%Lp'"*|*" %Lp "*) echo 644; exit 0 ;; esac ;;
+esac
+exec "${realStat}" "$@"`);
+    const r = run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@dbhost:5432/d?${CA}` });
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/the passfile[^\n]*mode 644/);
+  });
+
+  it("treats a malformed enumeration payload as a failed reconciliation", () => {
+    // The payload is consumed as a `case` GLOB before anything validates it, so
+    // a row of `y*` matched every member of DB_SET_HEX and silently dropped a
+    // real database from both the warning and the MANIFEST. Validating only
+    // inside display_of is too late — that runs after the membership test.
+    pgStubs();
+    stub("psql", `
+echo "psql $*" >> "${logFile}"
+case " $* " in
+  *pg_database*) printf 'y*\\n' ;;
+  *)             printf 't|TLSv1.3|AESGCM\\n' ;;
+esac
+exit 0`);
+    const r = run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@dbhost:5432/d?${CA}` });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/malformed row; the reconciliation is incomplete/);
+    const [gen] = generations();
+    const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+    expect(manifest, "an unvalidated payload must not read as a clean reconciliation")
+      .toMatch(/not_backed_up: \(unknown/);
+  });
+
+  it("passes -X to psql so ~/.psqlrc cannot answer for the server", () => {
+    // HOME is in run_pg's allowlist, so the file-based configuration channel
+    // env -i closes is re-opened unless -X is given — and psqlrc output lands in
+    // front of the rows that decide the TLS verdict and the cluster
+    // enumeration. A `\echo t|…` line satisfies the transport check outright.
+    pgStubs();
+    run({ MIGRATION_DATABASE_URL: `postgresql://u:pw@dbhost:5432/d?${CA}` });
+    const psqlCalls = readLog().split("\n").filter((l) => l.startsWith("psql "));
+    expect(psqlCalls.length, "psql must have been invoked").toBeGreaterThan(0);
+    for (const call of psqlCalls) {
+      expect(call, `psql invoked without -X: ${call}`).toMatch(/(^|\s)-X(\s|$)/);
     }
   });
 });
@@ -1501,6 +1614,116 @@ exit 0`);
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
   });
 
+  it("aborts the prune when the root is no longer the audited object", () => {
+    // The deviation log recorded this as needing "a BACKUP_TEST_HOOK invoked
+    // between publish and prune". That was wrong, and the entry is corrected:
+    // stat_ident shells out to a PATH-resolved `stat`, which this file already
+    // stubs in five other cases. A stub that changes device:inode once a marker
+    // appears drives the branch with no production change at all.
+    //
+    // Deleting the guard's whole body left the suite green before this.
+    const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    const marker = join(tmpDir, "swapped");
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+if [ -e "${marker}" ] && [ "$last" = "${backupDir}" ]; then
+  case " $* " in
+    # The inode half is what must decide: reporting a different DEVICE alone
+    # would also pass a comparison that only looks at the device.
+    *"%d:%i"*) printf '%s:9999\\n' "$(${realStat} -c '%d' -- "${backupDir}")"; exit 0 ;;
+  esac
+fi
+exec "${realStat}" "$@"`);
+    // Armed from pg_dumpall, which runs after both pre-dump prunes and before
+    // the publish, so the swap lands in front of the generation pruner.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) : > "${marker}"; printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    for (const g of ["20200101T000000Z", "20200102T000000Z"]) mkGeneration(g);
+
+    const r = run({ BACKUP_RETAIN: "1" });
+    expect(err(r)).toBe("PRUNE_ABORTED");
+    expect(r.stderr).toMatch(/no longer the directory that was audited/);
+    // And nothing was removed: aborting must not mean aborting halfway.
+    for (const g of ["20200101T000000Z", "20200102T000000Z"]) {
+      expect(existsSync(join(backupDir, g)), `${g} must survive an aborted prune`).toBe(true);
+    }
+  });
+
+  it("lets exactly one of two runs take a FREE lock, under real contention",
+    { timeout: 30000 }, async () => {
+    // The previous version of this case could not see the race it was written
+    // for: two spawn() calls land milliseconds apart while a test-then-create
+    // window is microseconds wide, so the second run always found the lock
+    // already there and took the ordinary LOCKED branch. `sleep` in the pg_dump
+    // stub widens the HOLD, not the ACQUIRE. A test-then-`mkdir -p` acquire
+    // survived it three times out of three.
+    //
+    // `mkdir` is an external binary, so the acquire window itself is stubbable:
+    // sleep before creating the lock directory, and any non-atomic acquire loses
+    // deterministically.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    stub("mkdir", `
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) sleep 0.3 ;;
+  esac
+done
+exec "${realMkdir}" "$@"`);
+    const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
+    const both = await Promise.all([0, 1].map(() => new Promise((res) => {
+      const c = spawn(BASH, [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      c.stdout.on("data", (d) => { out += d; });
+      c.stderr.on("data", (d) => { out += d; });
+      c.on("exit", (code) => res({ code, out }));
+    })));
+
+    expect(both.filter((r) => r.code === 0), "exactly one run may hold the lock").toHaveLength(1);
+    for (const r of both.filter((r) => r.code !== 0)) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
+    expect(generations()).toHaveLength(1);
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
+  });
+
+  it("removes the lock it just took when it cannot record the holder", () => {
+    // The wedge the rollback exists to prevent: a lock no run can attribute, so
+    // every later run reports "exists but records no holder". Both the failure
+    // propagation and the rollback itself were unpinned.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const realMkdir = spawnSync("sh", ["-c", "command -v mkdir"], { encoding: "utf8" }).stdout.trim();
+    const lock = join(backupDir, ".lock.d");
+    // The lock's own mkdir also creates `pid` as a DIRECTORY, so the script's
+    // `printf … > "$LOCK_DIR/pid"` cannot succeed. Deterministic, and it leaves
+    // the acquire itself untouched.
+    stub("mkdir", `
+"${realMkdir}" "$@" || exit $?
+for a in "$@"; do
+  case "$a" in
+    */.lock.d) "${realMkdir}" -p -- "$a/pid" ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(err(r)).toBe("INTERNAL");
+    expect(r.stderr).toMatch(/could not record the lock holder/);
+    if (existsSync(lock)) chmodSync(lock, 0o700);
+    expect(existsSync(lock), "a lock nobody can attribute must not survive").toBe(false);
+  });
+
   it("refuses an ancestor owned by a third party", () => {
     // stat is PATH-resolved, so the ownership branch is reachable without a
     // second real uid: report a foreign owner for the parent only.
@@ -1635,6 +1858,48 @@ exec "${realStat}" "$@"`);
     expect(generations()).toHaveLength(4);
   });
 
+  it("prunes oldest-first regardless of the order the directory returns", () => {
+    // `| sort` in list_stamped: without it the pruner deletes in readdir order,
+    // which on this filesystem happens to match creation order — so the C6
+    // expectations held by accident and dropping the sort survived. Created
+    // newest-first so the two orders disagree.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    for (const g of ["20200103T000000Z", "20200101T000000Z", "20200102T000000Z"]) mkGeneration(g);
+    // A stray <stamp>.<digits> must stay invisible to the generation count: the
+    // optional .<pid> belongs to .FAILED alone, and admitting it here inflated
+    // the candidate set and deleted one MORE validated generation.
+    mkdirSync(join(backupDir, "20200101T000000Z.4242"), { recursive: true });
+
+    const r = run({ BACKUP_RETAIN: "3" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(existsSync(join(backupDir, "20200101T000000Z")), "the oldest goes first").toBe(false);
+    for (const g of ["20200102T000000Z", "20200103T000000Z"]) {
+      expect(existsSync(join(backupDir, g)), `${g} is inside the window`).toBe(true);
+    }
+    expect(existsSync(join(backupDir, "20200101T000000Z.4242")),
+      "a stray <stamp>.<digits> is not a generation and must be left alone").toBe(true);
+  });
+
+  it("keeps every MANIFEST value on one line, whatever the command printed", () => {
+    // first_line covers three call sites; only tool_version was pinned. A
+    // hostname or a transport string spanning two lines becomes a second, bogus
+    // MANIFEST record — the class round 3 closed for the authority alone.
+    const realUname = spawnSync("sh", ["-c", "command -v uname"], { encoding: "utf8" }).stdout.trim();
+    stub("uname", `
+[ "\${1:-}" = "-n" ] && { printf 'host-one\\nhost-two\\n'; exit 0; }
+exec "${realUname}" "$@"`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    const [gen] = generations();
+    const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+    for (const line of manifest.split("\n").filter(Boolean)) {
+      expect(line, `MANIFEST line is not a record: ${JSON.stringify(line)}`).toMatch(/^[a-z_]+: /);
+    }
+    expect(manifest).toMatch(/hostname: host-one$/m);
+    expect(manifest, "the second line must not survive").not.toMatch(/host-two/);
+  });
+
   it("previews only the residue it would actually remove", () => {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
@@ -1679,7 +1944,7 @@ exit 0`);
     mountStub("/dev/probe0 on /probe type exfat (rw,relatime)");
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/does not enforce ownership/);
+    expect(r.stderr).toMatch(/not known to enforce ownership/);
   });
 
   it("refuses a macOS volume mounted noowners", () => {
@@ -1766,7 +2031,40 @@ case " $* " in
 esac`);
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/could not read the ACL state/);
+    // Anchored on the ROOT arm. The two call sites share one message stem, so an
+    // unanchored match let either arm satisfy the other's deletion.
+    expect(r.stderr).toMatch(/could not read the ACL state of (?!ancestor)/);
+  });
+
+  it("refuses when the ACL check cannot answer for an ANCESTOR", () => {
+    // The second call site, which the root assertion above cannot distinguish.
+    const parent = dirname(backupDir);
+    passthrough("ls", `
+case " $* " in
+  *" -ld "*|*" -lde "*)
+    for a in "$@"; do [ "$a" = "${parent}" ] && exit 1; done ;;
+esac`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/could not read the ACL state of ancestor/);
+  });
+
+  it("refuses a destination whose ACL is shown on continuation lines", () => {
+    // macOS prints the ACEs below the listing with no `+` on the mode field, so
+    // the newline arm is the only thing that sees them — and it is reachable on
+    // Linux too, because that case runs after the uname switch.
+    passthrough("ls", `
+for a in "$@"; do
+  case "$a" in
+    "${backupDir}")
+      printf 'drwx------ 2 me me 4096 Jan 1 00:00 %s\n' "${backupDir}"
+      printf ' 0: user:someone allow read,write\n'
+      exit 0 ;;
+  esac
+done`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/extended ACL/);
   });
 
   it("refuses a Linux FUSE filesystem whatever the backend is", () => {
@@ -1777,7 +2075,64 @@ esac`);
     mountStub("/dev/probe0 on /probe type fuse.s3fs (rw,nosuid,nodev)");
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/does not enforce ownership/);
+    expect(r.stderr).toMatch(/not known to enforce ownership/);
+  });
+
+  it("accepts an encrypting FUSE backend — the medium the docs prescribe", () => {
+    // The paired allow case the blanket `fuse.*` refusal had none of. gocryptfs,
+    // veracrypt and friends store POSIX uid and mode and default to owner-only,
+    // and both operator documents name an encrypted volume as THE remedy for the
+    // removable-media scenario this guard exists to catch. A guard that denies
+    // its own prescribed remedy has nowhere left to send the operator.
+    for (const fs of ["fuse.gocryptfs", "fuse.veracrypt", "fuse.cryfs"]) {
+      mountStub(`/dev/probe0 on /probe type ${fs} (rw,nosuid,nodev,user_id=0)`);
+      expect(run().status, `${fs} must be accepted`).toBe(0);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a filesystem type the allowlist has never heard of", () => {
+    // The denylist answered "safe" for every type nobody enumerated. Measured
+    // survivors included the Parallels and VMware shared folders — the same
+    // class as the vboxsf that WAS listed.
+    for (const fs of ["prl_fs", "vmhgfs", "ceph", "iso9660"]) {
+      mountStub(`/dev/probe0 on /probe type ${fs} (rw)`);
+      const r = run();
+      expect(err(r), `${fs} must not be accepted`).toBe("DEST_UNSAFE");
+      expect(r.stderr).toMatch(/not known to enforce ownership/);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an allowlisted filesystem mounted with a fabricated owner", () => {
+    // ext4 mounted with uid= is still ext4, so the type alone cannot rule this
+    // out. These options are the property the type list exists to detect.
+    for (const opt of ["uid=1000", "gid=1000", "umask=0022", "fmask=0111", "mode=0777"]) {
+      mountStub(`/dev/probe0 on /probe type ext4 (rw,relatime,${opt})`);
+      const r = run();
+      expect(err(r), `${opt} must not be accepted`).toBe("DEST_UNSAFE");
+      expect(r.stderr).toMatch(/ownership advisory/);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("proceeds under BACKUP_ALLOW_UNVERIFIED_MOUNT, and says so loudly", () => {
+    // Both non-safe verdicts, one escape. Without it an allowlist that has not
+    // heard of the operator's filesystem stops the only backup path, which is
+    // the failure mode the blanket fuse.* refusal demonstrated.
+    mountStub("/dev/probe0 on /probe type prl_fs (rw)");
+    const r = run({ BACKUP_ALLOW_UNVERIFIED_MOUNT: "true" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/BACKUP_ALLOW_UNVERIFIED_MOUNT=true — proceeding without a verified filesystem/);
+
+    rmSync(backupDir, { recursive: true, force: true });
+    stub("mount", "exit 1");
+    const r2 = run({ BACKUP_ALLOW_UNVERIFIED_MOUNT: "true" });
+    expect(r2.status, "the undetermined verdict takes the same escape").toBe(0);
+  });
+
+  it("rejects a non-boolean BACKUP_ALLOW_UNVERIFIED_MOUNT", () => {
+    expect(err(run({ BACKUP_ALLOW_UNVERIFIED_MOUNT: "yes" }))).toBe("BAD_ENV");
   });
 
   it("refuses a filesystem named only in the macOS option list", () => {
@@ -1789,7 +2144,7 @@ esac`);
     mountStub("/dev/probe0 on /probe (afpfs, local, nodev, nosuid)");
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/does not enforce ownership/);
+    expect(r.stderr).toMatch(/not known to enforce ownership/);
   });
 });
 
@@ -2030,7 +2385,7 @@ exit 0`);
       .toMatch(/could not enumerate the cluster's databases/);
     const [gen] = generations();
     const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
-    expect(manifest).toMatch(/not_backed_up: unknown/);
+    expect(manifest).toMatch(/not_backed_up: \(unknown/);
     expect(manifest, "the all-clear sentinel must not be written").not.toMatch(/not_backed_up: \(none\)/);
   });
 
@@ -2323,7 +2678,7 @@ exit 0`);
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(/could not enumerate the cluster's databases/);
     const [gen] = generations();
-    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/not_backed_up: unknown/);
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/not_backed_up: \(unknown/);
   });
 
   it("decides membership with the same split that validated the names", () => {
@@ -2391,6 +2746,47 @@ exec "${real}" "$@"`);
     expect(r.stderr).toMatch(/globals\.sql[^\n]*mode 755/);
   });
 
+  it("refuses the MANIFEST when its achieved mode is not private", () => {
+    // The fourth call site. `modeStub("*.partial")` does not match
+    // <stamp>.partial/MANIFEST, so deleting this one left the suite green.
+    modeStub("*MANIFEST");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/MANIFEST[^\n]*mode 755/);
+  });
+
+  it("refuses a mode that opens only the GROUP bits", () => {
+    // Every other fixture reports 755, which trips an other-bits-only mask too.
+    // A guard narrowed from 077 to 007 was therefore invisible.
+    const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+case "$last" in
+  *.dump)
+    case " $* " in *" %a "*|*"\'%Lp\'"*|*" %Lp "*) echo 640; exit 0 ;; esac ;;
+esac
+exec "${real}" "$@"`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/mode 640/);
+  });
+
+  it("refuses when the mode itself cannot be read", () => {
+    const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+case "$last" in
+  *.dump)
+    case " $* " in *" %a "*|*"\'%Lp\'"*|*" %Lp "*) exit 1 ;; esac ;;
+esac
+exec "${real}" "$@"`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/could not read the mode/);
+  });
+
   it("accepts the private modes the run actually creates (paired allow case)", () => {
     // Without this the three refusals above would pass against a check that
     // refuses every mode.
@@ -2456,6 +2852,10 @@ exec "${real}" "$@"`);
         MIGRATION_DATABASE_URL: "postgresql://u:p@127.0.0.1:5432/d?sslrootcert=/tmp/ca.pem",
       },
     });
-    expect(err(r), "the client preflight must not be what fails here").not.toBe("NO_CLIENT");
+    // Positively, not by negation: `not.toBe("NO_CLIENT")` is satisfied by 19
+    // of the 20 declared codes. The run reaches the transport probe and stops
+    // there, because the stub clients cannot connect.
+    expect(err(r), "the preflight must be passed, and the next gate is the one that fails")
+      .toBe("CONNECT_FAILED");
   });
 });

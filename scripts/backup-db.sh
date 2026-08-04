@@ -14,6 +14,9 @@
 #   BACKUP_DATABASES      (optional) Space-separated targets (default: passwd_sso jackson)
 #   BACKUP_DRY_RUN        (optional) "true" previews the prune and exits (default: false)
 #   BACKUP_ALLOW_IN_REPO  (optional) "true" permits a destination inside a git worktree
+#   BACKUP_ALLOW_UNVERIFIED_MOUNT (optional) "true" proceeds when the destination's
+#                          filesystem is not on the ownership-enforcing allowlist, or
+#                          when df/mount could not answer. Warns loudly (default: false)
 #   BACKUP_TLS_MODE       (optional) TLS floor for URL mode: verify-full|verify-ca (default: verify-full)
 #   MIGRATION_DATABASE_URL (optional) When set, selects URL mode instead of Compose mode
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
@@ -248,56 +251,65 @@ has_extended_acl() {
   return 1
 }
 
-# Filesystems that do not enforce ownership or mode. ONE member set, consulted
-# by both readings: Linux prints the type in its own `type <fs>` field, macOS
-# has no such field and carries the type as the first parenthesised option, so a
-# name present in only one of two lists is enforced on one platform and ignored
-# on the other. The previous pair differed by six members (ntfs3, fuseblk, smb3,
-# nfs4, afpfs, sshfs), all of them missing from the options list that is the
-# ONLY one macOS ever reaches.
-UNSAFE_FS_TYPES="exfat vfat msdos ntfs ntfs3 fuseblk fuse cifs smbfs smb3
-nfs nfs4 afpfs sshfs osxfuse macfuse virtiofs vboxsf 9p davfs webdav"
+# Filesystems known to ENFORCE ownership and mode. An allowlist, not a denylist:
+# a denylist answers "safe" for every type nobody thought to enumerate, which is
+# the same uncertainty the tri-state verdict below refuses to call safe when the
+# TOOL cannot answer. Measured survivors of the denylist: prl_fs and vmhgfs
+# (Parallels / VMware shared folders — the same class as the vboxsf that WAS
+# listed), ceph, glusterfs, lustre, beegfs, afs, udf, iso9660.
+#
+# The encrypting FUSE backends are listed explicitly. They store POSIX uid and
+# mode and default to owner-only access, and they are the remedy both operator
+# documents prescribe for scenario 2 — a blanket `fuse.*` refusal denied the
+# very medium the guard exists to steer the operator toward.
+OWNERSHIP_ENFORCING_FS="ext2 ext3 ext4 xfs btrfs zfs f2fs jfs reiserfs
+apfs hfs hfsplus ufs tmpfs overlay
+fuse.gocryptfs fuse.cryfs fuse.encfs fuse.securefs fuse.veracrypt fuse.ext4fuse"
 
-fstype_is_unsafe() {
+# Mount options that make ownership advisory whatever the filesystem is: the
+# fabricated-uid family, which is the property the type list exists to detect and
+# which a type name alone cannot rule out (ext4 mounted with uid= is still ext4).
+UNSAFE_MOUNT_OPTS="noowners uid gid umask fmask dmask mode"
+
+fstype_enforces_ownership() {
   local t="$1" m
-  # Its own IFS. bash scopes `local` dynamically, so opts_are_unsafe's `IFS=,`
-  # reaches into this function and would split the whitespace-separated member
-  # list into a single token — under which every macOS option-list lookup
-  # silently matched nothing. Measured: afpfs read as safe.
+  # Its own IFS. bash scopes `local` dynamically, so the caller's `IFS=,` reaches
+  # into this function and would collapse the whitespace-separated member list
+  # into a single token — under which every macOS lookup silently matched
+  # nothing. Measured: afpfs read as safe.
   local IFS=$' \t\n'
-  # Linux spells every FUSE backend `fuse.<name>`, so an exact-match list can
-  # never see fuse.sshfs, fuse.s3fs or fuse.rclone — the last two write the
-  # corpus to a remote store in the clear. `sshfs` was in the list and dead on
-  # both platforms: prefixed on Linux, no type field at all on macOS.
-  case "$t" in
-    fuse.*) return 0 ;;
-  esac
-  for m in $UNSAFE_FS_TYPES; do
+  [ -n "$t" ] || return 1
+  for m in $OWNERSHIP_ENFORCING_FS; do
     [ "$t" = "$m" ] && return 0
   done
   return 1
 }
 
-# Mount options that make ownership advisory whatever the filesystem is. macOS
-# mounts external media `noowners` by default, which is scenario 2's own medium.
 opts_are_unsafe() {
-  local o
+  local o k m
   local IFS=,
   for o in $1; do
     # Trim the spaces macOS puts after each comma.
     o="${o# }"; o="${o% }"
-    [ "$o" = "noowners" ] && return 0
-    if fstype_is_unsafe "$o"; then return 0; fi
+    # `uid=1000` and `uid` are the same option for this purpose.
+    k="${o%%=*}"
+    local IFS=$' \t\n'
+    for m in $UNSAFE_MOUNT_OPTS; do
+      [ "$k" = "$m" ] && return 0
+    done
+    IFS=,
   done
   return 1
 }
 
-# Verdicts: 0 = unsafe (prints the mount line), 1 = verified safe,
-# 2 = could not determine (prints why). Every path that once ended in "not
-# unsafe" without having looked — df absent or failing, mount absent or
-# failing, a device the mount table does not list — now says so instead.
+# Verdicts: 0 = unsafe (prints the reason), 1 = verified safe, 2 = could not
+# determine (prints why). "Could not determine" is never folded into "safe" —
+# df absent or failing, mount absent or failing, an entry the mount table does
+# not carry. BACKUP_ALLOW_UNVERIFIED_MOUNT is the operator's escape from both
+# non-safe verdicts; without it a filesystem this list has not heard of stops
+# the run, and with a bad list that would stop the only backup path.
 mount_is_unsafe() {
-  local target="$1" line dev mounts m found=""
+  local target="$1" line dev point mounts m found=""
   line="$(df -P -- "$target" 2>/dev/null | tail -n1)" || line=""
   [ -n "$line" ] || { printf 'df(1) produced no output for %s' "$target"; return 2; }
   dev="${line%% *}"
@@ -305,44 +317,57 @@ mount_is_unsafe() {
   case "$dev" in
     Filesystem) printf 'df(1) printed only a header for %s' "$target"; return 2 ;;
   esac
+  # The mount POINT as a second key. `${line%% *}` truncates any device name
+  # containing a space — macOS prints `map auto_home` for an automount, Linux
+  # `systemd-1` vs `/dev/dm-0` for the same LVM volume — and the device match
+  # became the discriminator of a fail-closed verdict when this went tri-state.
+  # df -P guarantees the mount point is the final field.
+  point="${line##* }"
   mounts="$(mount 2>/dev/null)" || mounts=""
   [ -n "$mounts" ] || { printf 'mount(8) produced no output'; return 2; }
   while IFS= read -r m; do
     case "$m" in
-      "$dev on "*)
-        found=1
-        # Parse the type and the options separately, and never the mount POINT:
-        # matching the whole line refuses a safe ext4 destination that merely
-        # happens to live at /mnt/exfat-archive.
-        local fstype="" opts=""
-        case "$m" in
-          *" type "*)
-            # Linux: "<dev> on <point> type <fstype> (<opts>)"
-            fstype="${m#* type }"
-            fstype="${fstype%% *}"
-            ;;
-        esac
-        case "$m" in
-          *\(*\)*)
-            opts="${m##*(}"
-            opts="${opts%)*}"
-            ;;
-        esac
-        # On macOS the first parenthesised field IS the type, so the option list
-        # carries it; on Linux the type is its own field and the options do not.
-        # Both are checked against the same member set for that reason.
-        if [ -n "$fstype" ] && fstype_is_unsafe "$fstype"; then
-          printf '%s' "$m"; return 0
-        fi
-        if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
-          printf '%s' "$m"; return 0
-        fi
+      "$dev on "*|*" on $point type "*|*" on $point ("*) ;;
+      *) continue ;;
+    esac
+    found=1
+    # Parse the type and the options separately, and never the mount POINT as a
+    # substring: matching the whole line refuses a safe ext4 destination that
+    # merely happens to live at /mnt/exfat-archive.
+    local fstype="" opts=""
+    case "$m" in
+      *" type "*)
+        # Linux: "<dev> on <point> type <fstype> (<opts>)"
+        fstype="${m#* type }"
+        fstype="${fstype%% *}"
         ;;
     esac
+    case "$m" in
+      *\(*\)*)
+        opts="${m##*(}"
+        opts="${opts%)*}"
+        ;;
+    esac
+    # macOS has no `type` field and carries the type as the FIRST parenthesised
+    # option, so that is where the type is read from there.
+    if [ -z "$fstype" ] && [ -n "$opts" ]; then
+      fstype="${opts%%,*}"
+      fstype="${fstype# }"; fstype="${fstype% }"
+    fi
+    if ! fstype_enforces_ownership "$fstype"; then
+      printf 'filesystem type %s is not known to enforce ownership and mode (%s)' \
+        "${fstype:-unknown}" "$m"
+      return 0
+    fi
+    if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
+      printf 'mounted with an option that makes ownership advisory (%s)' "$m"
+      return 0
+    fi
+    return 1
   done <<EOF
 $mounts
 EOF
-  [ -n "$found" ] || { printf 'no mount(8) entry for device %s carrying %s' "$dev" "$target"; return 2; }
+  [ -n "$found" ] || { printf 'no mount(8) entry for device %s or mount point %s' "$dev" "$point"; return 2; }
   return 1
 }
 
@@ -401,6 +426,7 @@ BACKUP_RETAIN="${BACKUP_RETAIN:-7}"
 BACKUP_DATABASES="${BACKUP_DATABASES:-passwd_sso jackson}"
 BACKUP_DRY_RUN="${BACKUP_DRY_RUN:-false}"
 BACKUP_ALLOW_IN_REPO="${BACKUP_ALLOW_IN_REPO:-false}"
+BACKUP_ALLOW_UNVERIFIED_MOUNT="${BACKUP_ALLOW_UNVERIFIED_MOUNT:-false}"
 BACKUP_TLS_MODE="${BACKUP_TLS_MODE:-verify-full}"
 BACKUP_FAILED_MAX_AGE_DAYS="${BACKUP_FAILED_MAX_AGE_DAYS:-7}"
 COMPOSE_DB_SERVICE="${COMPOSE_DB_SERVICE:-db}"
@@ -444,7 +470,8 @@ done
 [ "$_db_count" -gt 0 ] || fail BAD_ENV "BACKUP_DATABASES must name at least one database"
 unset _db _db_count
 
-for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO"; do
+for _pair in "BACKUP_DRY_RUN:$BACKUP_DRY_RUN" "BACKUP_ALLOW_IN_REPO:$BACKUP_ALLOW_IN_REPO" \
+             "BACKUP_ALLOW_UNVERIFIED_MOUNT:$BACKUP_ALLOW_UNVERIFIED_MOUNT"; do
   case "${_pair#*:}" in
     true|false) ;;
     *) fail BAD_ENV "${_pair%%:*} must be exactly 'true' or 'false' (got: ${_pair#*:})" ;;
@@ -557,9 +584,11 @@ parse_url() {
             *%0[Aa]*|*%0[Dd]*|*%00*) fail BAD_URL "the password contains an encoded newline or NUL, which .pgpass cannot represent" ;;
             *$'\n'*|*$'\r'*) fail BAD_URL "the password contains a literal newline, which .pgpass cannot represent" ;;
           esac
-          case "$URL_PASSWORD" in
-            *$'\n'*|*$'\r'*) fail BAD_URL "the password contains a newline, which .pgpass cannot represent" ;;
-          esac
+          # No second newline arm on the DECODED form: the encoded check above
+          # already refuses %0A/%0a/%0D/%0d/%00 and both literal bytes, so an arm
+          # here can never fire. Proven by brute force over all 256 %XX escapes —
+          # zero inputs reach it. It read as a live second layer, which is the
+          # shape removed from the host slice for the same reason.
           userinfo="${userinfo%%:*}"
           ;;
         *)
@@ -613,7 +642,19 @@ parse_url() {
     *\\*) fail BAD_URL "the connection authority contains a backslash, which .pgpass reads as an escape" ;;
   esac
   case "$hp" in
-    *,*|\[*) URL_PGPASS_HOST="*"; URL_PGPASS_PORT="*" ;;
+    # Multi-host is the ONE form where the wildcard is unavoidable: libpq may
+    # connect to any member and the passfile is consulted per attempt. Recorded
+    # as such in the deviation log rather than left implicit here.
+    *,*)     URL_PGPASS_HOST="*"; URL_PGPASS_PORT="*" ;;
+    # A bracketed IPv6 literal IS a single known peer. libpq strips the brackets
+    # before the .pgpass lookup, so the entry can be scoped exactly — the
+    # wildcard here was a wildcard nobody needed, offering the superuser
+    # password to every peer the connection could reach.
+    \[*\]:*) URL_PGPASS_HOST="${hp%]*}"; URL_PGPASS_HOST="${URL_PGPASS_HOST#[}"
+             URL_PGPASS_PORT="${hp##*]:}" ;;
+    \[*\])   URL_PGPASS_HOST="${hp%]*}"; URL_PGPASS_HOST="${URL_PGPASS_HOST#[}"
+             URL_PGPASS_PORT="*" ;;
+    \[*)     fail BAD_URL "the connection authority has an unclosed IPv6 bracket: $hp" ;;
     *:*:*)   fail BAD_URL "the connection authority has more than one colon: $hp" ;;
     *:*)     URL_PGPASS_HOST="${hp%:*}"; URL_PGPASS_PORT="${hp##*:}" ;;
     *)       URL_PGPASS_HOST="$hp";      URL_PGPASS_PORT="*" ;;
@@ -623,15 +664,24 @@ parse_url() {
   # which reaches the same `${…:-*}` and writes the same wildcard entry —
   # measured as `*:5432:*:*:<password>`. The multi-host and bracketed-IPv6 arms
   # above choose the wildcard deliberately and have already set it.
-  case "$URL_PGPASS_HOST" in
-    "") fail BAD_URL "MIGRATION_DATABASE_URL names no host — the passfile would be scoped to a wildcard, offering the password to whatever peer the connection reaches" ;;
+  # The primitive is "a computed host that .pgpass reads as a wildcard", which
+  # has two representable members: the empty string and a literal `*`. Refusing
+  # only the empty one left `postgres://u:pw@*/db` writing *:*:*:*:<password>.
+  # The multi-host arm above sets the wildcard deliberately and is exempt.
+  case "$hp" in
+    *,*) ;;
+    *)
+      case "$URL_PGPASS_HOST" in
+        ""|*\**) fail BAD_URL "MIGRATION_DATABASE_URL names no single host — the passfile would be scoped to a wildcard, offering the password to whatever peer the connection reaches" ;;
+      esac
+      ;;
   esac
   case "$URL_PGPASS_PORT" in
     "*") ;;
     # An empty port is a legal URI spelling that libpq reads as "the default".
     # Refusing it is the false-deny class C7 exists to avoid; scope the entry
     # with the wildcard port instead, which is what "no port given" means.
-    "")  URL_PGPASS_PORT="*" ;;
+    "")  URL_PGPASS_PORT="5432" ;;
     # Anchored: `[0-9]*` is "starts with a digit", which admits 5432evil.
     *) [[ "$URL_PGPASS_PORT" =~ ^[0-9]+$ ]] \
          || fail BAD_URL "the connection port is not numeric: $URL_PGPASS_PORT" ;;
@@ -763,7 +813,7 @@ verify_transport() {
   # stderr is kept: the password lives in PGPASSFILE, so libpq's message carries
   # no credential, and it is the only text that separates a missing CA from a
   # wrong host, a rejected password, or a server with TLS switched off.
-  diag="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" \
+  diag="$(run_pg psql -X -Atq -d "$(conninfo_for "$FIRST_DB")" \
     -c "select ssl, coalesce(version,''), coalesce(cipher,'') from pg_stat_ssl where pid = pg_backend_pid()" 2>&1)" \
     || fail CONNECT_FAILED "could not connect to verify the transport: $diag"
   row="$diag"
@@ -863,15 +913,25 @@ esac
 unsafe_mount=""
 mount_status=0
 unsafe_mount="$(mount_is_unsafe "$BACKUP_ROOT")" || mount_status=$?
-case "$mount_status" in
-  0)
-    case "$(uname -s)" in
-      Darwin) fail DEST_UNSAFE "$BACKUP_ROOT is on a filesystem that does not enforce ownership or mode: $unsafe_mount — macOS ignores ownership on external volumes by default; enable it with: sudo diskutil enableOwnership '$BACKUP_ROOT'" ;;
-      *)      fail DEST_UNSAFE "$BACKUP_ROOT is on a filesystem that does not enforce ownership or mode: $unsafe_mount" ;;
+if [ "$mount_status" -ne 1 ]; then
+  # One escape for both non-safe verdicts. With an allowlist "unsafe" and
+  # "unverified" are the same statement — a type this script has not heard of —
+  # so a separate flag per verdict would be a distinction the operator cannot
+  # act on differently.
+  if [ "$BACKUP_ALLOW_UNVERIFIED_MOUNT" = "true" ]; then
+    warn "BACKUP_ALLOW_UNVERIFIED_MOUNT=true — proceeding without a verified filesystem: $unsafe_mount"
+  else
+    case "$mount_status" in
+      0)
+        case "$(uname -s)" in
+          Darwin) fail DEST_UNSAFE "$BACKUP_ROOT: $unsafe_mount — macOS ignores ownership on external volumes by default; enable it with: sudo diskutil enableOwnership '$BACKUP_ROOT', or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
+          *)      fail DEST_UNSAFE "$BACKUP_ROOT: $unsafe_mount — choose a filesystem that enforces ownership, or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
+        esac
+        ;;
+      2) fail DEST_UNSAFE "could not determine whether $BACKUP_ROOT enforces ownership and mode ($unsafe_mount) — an unanswered check has not passed; df(1) and mount(8) must be on PATH (macOS keeps mount in /sbin, which cron omits), or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
     esac
-    ;;
-  2) fail DEST_UNSAFE "could not determine whether $BACKUP_ROOT enforces ownership and mode ($unsafe_mount) — an unanswered check has not passed; df(1) and mount(8) must be on PATH (macOS keeps mount in /sbin, which cron omits)" ;;
-esac
+  fi
+fi
 
 # Every ancestor must also be closed to other principals: a world-writable
 # parent lets another local user rename the leaf away between runs.
@@ -960,9 +1020,11 @@ $(list_stamped ".partial")
 EOF
 }
 
-# One place for the three removal loops that run under the lock in the main
-# flow: prune_orphaned_partials (both its passfile and its .partial sweep) and
-# prune_failed, which the generation pruner's check was not covering.
+# One place for every removal that runs under the lock in the main flow:
+# prune_orphaned_partials (both its passfile and its .partial sweep),
+# prune_failed, the generation pruner, and the lock-metadata rollback. The
+# comment said THREE while the rollback added in the same commit was a fourth
+# that did not call it.
 #
 # The EXIT trap's own removals are DELIBERATELY outside it. `fail` inside the
 # trap re-enters cleanup, and a skip-on-mismatch there would leave the
@@ -1076,9 +1138,16 @@ if ! record_lock_metadata; then
   # run can attribute — every later run reporting "exists but records no
   # holder", a permanent wedge on the deployment's only backup path. mkdir had
   # just succeeded, so nothing else holds it.
-  rm -rf -- "$LOCK_DIR" 2>/dev/null || true
-  LOCK_DIR=""
-  fail INTERNAL "could not record the lock holder"
+  # The fourth main-flow removal, so it takes the same re-verification the
+  # other three do. And the rm's own status is kept: discarding it left the
+  # wedge this branch exists to prevent, on the very filesystem (ENOSPC) whose
+  # failure produced the missing pid file in the first place.
+  assert_root_unchanged
+  if rm -rf -- "$LOCK_DIR" 2>/dev/null; then
+    LOCK_DIR=""
+    fail INTERNAL "could not record the lock holder"
+  fi
+  fail INTERNAL "could not record the lock holder, and could not remove the lock either. Confirm no backup is running, then: rm -rf $(printf '%q' "$LOCK_DIR")"
 fi
 
 # ─── Dry run (C6g) ───────────────────────────────────────────
@@ -1179,11 +1248,19 @@ if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
   # mismatch would silently fall back to no password.
   # Escape the two bytes .pgpass treats as syntax. Backslash first: escaping the
   # colon first would then have its own backslash escaped again.
+  # The HOST needs the same two escapes: a bracket-stripped IPv6 literal is
+  # full of colons, which .pgpass reads as its field separator.
+  _pgpass_host="${URL_PGPASS_HOST//\\/\\\\}"
+  _pgpass_host="${_pgpass_host//:/\\:}"
   _pgpass_pw="${URL_PASSWORD//\\/\\\\}"
   _pgpass_pw="${_pgpass_pw//:/\\:}"
-  printf '%s:%s:*:*:%s\n' "${URL_PGPASS_HOST:-*}" "${URL_PGPASS_PORT:-*}" "$_pgpass_pw" > "$PGPASS_FILE"
-  unset _pgpass_pw
+  printf '%s:%s:*:*:%s\n' "${_pgpass_host:-*}" "${URL_PGPASS_PORT:-*}" "$_pgpass_pw" > "$PGPASS_FILE"
+  unset _pgpass_pw _pgpass_host
   URL_PASSWORD=""
+  # The credential file is the member of this set with the most to lose, and it
+  # was the one relying on mktemp's creation-time mode — exactly the assumption
+  # the helper exists to reject.
+  assert_mode_private "$PGPASS_FILE" "the passfile"
 fi
 [ -n "$XTRACE_WAS_ON" ] && set -x
 true
@@ -1295,7 +1372,10 @@ toc_entries() {
 # reduced here. Member set: every value the MANIFEST group interpolates that
 # comes from a command rather than from a validated variable.
 first_line() {
-  printf '%s' "${1%%$'\n'*}"
+  # CR as well as LF. The check this cites as its precedent refuses both, and a
+  # lone CR survives into the MANIFEST record it is meant to keep on one line.
+  local v="${1%%$'\n'*}"
+  printf '%s' "${v%%$'\r'*}"
 }
 
 # Recorded because a restore reads these archives with whatever client the
@@ -1357,11 +1437,11 @@ cluster_dbs=""
 recon_failed=""
 recon_diag=""
 if [ "$MODE" = "url" ]; then
-  cluster_dbs="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" -c "$CLUSTER_DB_QUERY" 2>/dev/null)" \
+  cluster_dbs="$(run_pg psql -X -Atq -d "$(conninfo_for "$FIRST_DB")" -c "$CLUSTER_DB_QUERY" 2>/dev/null)" \
     || recon_failed=1
 else
   cluster_dbs="$(compose exec -T -- "$COMPOSE_DB_SERVICE" \
-    psql -Atq -U "$COMPOSE_DB_SUPERUSER" -d postgres -c "$CLUSTER_DB_QUERY" 2>/dev/null)" \
+    psql -X -Atq -U "$COMPOSE_DB_SUPERUSER" -d postgres -c "$CLUSTER_DB_QUERY" 2>/dev/null)" \
     || recon_failed=1
 fi
 # A query that succeeded always returns at least the database it connected to,
@@ -1371,10 +1451,10 @@ if [ -n "$recon_failed" ]; then
   # Re-run for the diagnostic only, and only on the failing path — the same
   # shape the in-repo git check uses, for the same reason: no temp file.
   if [ "$MODE" = "url" ]; then
-    recon_diag="$(run_pg psql -Atq -d "$(conninfo_for "$FIRST_DB")" -c "$CLUSTER_DB_QUERY" 2>&1 >/dev/null || true)"
+    recon_diag="$(run_pg psql -X -Atq -d "$(conninfo_for "$FIRST_DB")" -c "$CLUSTER_DB_QUERY" 2>&1 >/dev/null || true)"
   else
     recon_diag="$(compose exec -T -- "$COMPOSE_DB_SERVICE" \
-      psql -Atq -U "$COMPOSE_DB_SUPERUSER" -d postgres -c "$CLUSTER_DB_QUERY" 2>&1 >/dev/null || true)"
+      psql -X -Atq -U "$COMPOSE_DB_SUPERUSER" -d postgres -c "$CLUSTER_DB_QUERY" 2>&1 >/dev/null || true)"
   fi
 fi
 
@@ -1390,7 +1470,16 @@ else
     [ -n "$_row" ] || continue
     _conn="${_row:0:1}"
     _hex="${_row:1}"
-    [ -n "$_hex" ] || continue
+    # Validated BEFORE the membership test, not only inside display_of: the
+    # `case` below consumes this value as a GLOB PATTERN, so a payload of `*`
+    # matched every member and silently dropped a real database from both the
+    # warning and the MANIFEST.
+    case "$_hex" in
+      ""|*[!0-9a-f]*)
+        warn "the cluster enumeration returned a malformed row; the reconciliation is incomplete"
+        recon_failed=1
+        break ;;
+    esac
     # Compared as HEX, never decoded: decoding first would put a control
     # character into a variable whose only remaining uses are the log and the
     # MANIFEST. DB_SET_HEX, not `" $BACKUP_DATABASES "`: one tokenisation, the
@@ -1431,7 +1520,10 @@ MANIFEST="$RUN_PARTIAL/MANIFEST"
   printf 'pg_restore_version: %s\n' "$(tool_version pg_restore)"
   printf 'validated_at: %s\n' "$([ "$MODE" = "url" ] && printf host || printf 'compose service %s' "$COMPOSE_DB_SERVICE")"
   if [ -n "$recon_failed" ]; then
-    printf 'not_backed_up: unknown (cluster enumeration failed)\n'
+    # Parenthesised, like `(none)`: display_of emits only identifier-shaped
+    # names or `hex:<digits>`, so neither sentinel can collide with a real one.
+    # A bare `unknown` CAN — it is a name BACKUP_DATABASES itself accepts.
+    printf 'not_backed_up: (unknown — cluster enumeration failed)\n'
   else
     printf 'not_backed_up:%s\n' "${unlisted:- (none)}"
   fi

@@ -85,15 +85,45 @@ description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr o
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.
 
+## Round-5 residuals
+
+**[Test] `PRUNE_ABORTED`'s second emitter is still unpinned.** The
+root-identity branch is now driven behaviourally (a `stat` PATH stub that flips
+device:inode once the dump has run), but `( cd … && rm -rf ) || fail
+PRUNE_ABORTED "could not remove generation"` has no case: replacing that clause
+with `|| true` keeps the suite green. What would settle it: an `rm` stub, or a
+root chmod-ed 0500 between the publish and the prune.
+
+**[Ops] `BACKUP_ALLOW_UNVERIFIED_MOUNT` widens what the destination check
+accepts, by operator decision.** Recorded because it is a boundary the plan did
+not have. Worst case: an operator sets it, points `BACKUP_DIR` at exFAT, and the
+plaintext corpus lands somewhere mode bits do not bind — the exposure SC3
+already names, reached one step earlier. Likelihood: low; it is off by default,
+the refusal message names it, and using it requires reading that message.
+Cost-to-fix if it proves wrong: one line, plus the two documents. Chosen over the
+alternative because round 5 measured the opposite failure — a blanket `fuse.*`
+refusal denied gocryptfs and veracrypt, the media both operator documents
+prescribe, with no way for the operator to proceed at all. A guard that stops the
+only backup path is not a safe default.
+
+**[Ops] The allowlist is a member set that will need extending.** `ext2 ext3
+ext4 xfs btrfs zfs f2fs jfs reiserfs apfs hfs hfsplus ufs tmpfs overlay` plus
+five encrypting FUSE backends. A legitimate filesystem outside it stops the run
+until the operator sets the flag or the list grows. This is the deliberate
+direction — a denylist answered "safe" for every type nobody enumerated, and
+round 5 measured prl_fs, vmhgfs, ceph, glusterfs, lustre, beegfs, afs, udf and
+iso9660 passing it.
+
 ## Round-4 residuals
 
 **[Test] `PRUNE_ABORTED` and the device:inode re-verification are still not
-individually pinned.** Open, and now measured rather than asserted: a sweep
-through the `BACKUP_DB_SCRIPT` seam confirms that reverting
-`assert_root_unchanged` from a device:inode comparison to a path-text one keeps
-the suite green. Both need the same thing — a seam that substitutes the root at
-a chosen point mid-run — which is the same unmet precondition round 3 recorded.
-What would settle it: a `BACKUP_TEST_HOOK` invoked between publish and prune.
+individually pinned.** **Closed in round 5, and this entry's stated reason was
+wrong.** It claimed both needed "a `BACKUP_TEST_HOOK` invoked between publish and
+prune". They did not: `stat_ident` shells out to a PATH-resolved `stat`, which
+the suite already stubs in five other cases, so a stub that flips device:inode
+once a marker appears drives the branch with no production change. The
+precondition was never checked before it was written down — the same defect
+shape as the findings the entry was recording.
 
 **[Test] `OLD_BASH` remains a source assertion, not a behavioural one.** The
 branch is reachable only under an actual bash 2.x; `BASH_VERSINFO` is read-only,

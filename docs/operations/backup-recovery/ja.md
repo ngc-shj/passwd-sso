@@ -234,6 +234,17 @@ rm -rf ~/passwd-sso-backups/.lock.d
   USB メモリは「暗号化ボリュームを使う」ケースであって、そのまま書く場所では
   ありません。**保存時暗号化とオフサイト複製は範囲外です。**
   `$BACKUP_DIR` を読める者はデータベースを読めます。
+  - ファイルシステムの判定は**許可リスト**です。所有権とモードを強制すると分かって
+    いる型（ext4、xfs、btrfs、zfs、apfs、および gocryptfs / cryfs / encfs /
+    securefs / veracrypt といった所有権を保存する FUSE）だけを受け入れ、
+    それ以外は拒否します。拒否リストだと、誰も列挙しなかった型がすべて「安全」に
+    なるためです。`uid=` / `gid=` / `umask=` / `noowners` などで所有権が捏造される
+    マウントも、型に関わらず拒否します。
+  - `df(1)` と `mount(8)` が答えられない場合も拒否します。**macOS は mount を
+    /sbin に置き、cron の既定 PATH はそれを含みません。** cron や launchd から
+    実行する場合は `PATH=/usr/bin:/bin:/sbin:/usr/sbin` を明示してください。
+  - `BACKUP_ALLOW_UNVERIFIED_MOUNT=true` で上記のいずれも警告に落として続行できます。
+    許可リストが知らない正当なファイルシステムを使う場合の逃げ道です。
 - ### リモート / マネージド Postgres (URL モード)
 
 `MIGRATION_DATABASE_URL` を設定すると、Compose サービスではなく直接接続に切り替わり

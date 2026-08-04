@@ -507,6 +507,170 @@ the first number was already written down before it was checked.
 
 ---
 
+# Round 5
+
+## Changes from Previous Round
+
+All three perspectives, incremental over `882f41c1a..HEAD` (the two round-4
+commits). **31 findings after dedup: 2 Critical, 14 Major, 15 Minor.** Four of
+the Majors are regressions the round-4 fixes introduced, and two of those make
+the script REFUSE a legitimate destination — the first time on this branch that
+a fix has broken the operator's path rather than left a hole in it.
+
+Two perspectives converged independently on the same two member sets: the
+`.pgpass` wildcard hosts (Func F5 + Sec S1) and the filesystem list (Func F1 +
+Sec S2).
+
+## Functionality Findings
+
+13 findings, 6 Major.
+
+- **F1 [Major]** The `fuse.*` blanket refusal added in round 4 also refuses
+  gocryptfs, veracrypt, cryfs and encfs — the encrypted volumes both operator
+  documents prescribe as THE remedy for the removable-media scenario the guard
+  exists to catch. No override existed. **The guard denied its own prescribed
+  remedy.** Red-proved.
+- **F2 [Major]** The round-4 tri-state turned "macOS cron omits /sbin, so the
+  check silently did not run" into "no backup is produced at all, every night"
+  on the declared primary host — and the same diff edited both operator
+  documents without recording the new PATH requirement.
+- **F3 [Major]** `dev="${line%% *}"` truncates any device name containing a
+  space (`map auto_home`, `systemd-1` vs `/dev/dm-0`). Adequate while an
+  unmatched device fell through to "not unsafe"; it became the discriminator of
+  a fail-closed verdict without being re-audited (R52).
+- **F4 [Major]** R55 re-opened by its own fix: `unknown` matches
+  `^[A-Za-z_][A-Za-z0-9_$]*$`, i.e. a name `BACKUP_DATABASES` accepts, whereas
+  the `(none)` it replaced was collision-free because `display_of` can only emit
+  identifier-shaped names or `hex:<digits>`.
+- **F5 [Major]** Converges with S1.
+- **F6 [Major]** `assert_mode_private` — the helper introduced to stop "the one
+  member that happened to get an inline check" — omitted `PGPASS_FILE`, the one
+  file in the audited root holding the superuser password.
+- F7–F13 Minor: the INV-C2a log line still absent from every preflight failure;
+  `postgres` warned on every run of the default configuration (raised, and the
+  user confirmed the current behaviour stands); `first_line` covers `\n` but not
+  `\r`; a malformed enumeration row dropped silently; the ci.yml comment's case
+  count; the empty port scoped to a wildcard rather than the deterministic 5432;
+  the lock rollback discarding its own `rm` failure.
+
+## Security Findings
+
+6 findings, 3 Major, no Critical (third round with none).
+
+- **S1 [Major]** The `.pgpass` wildcard class has four members and two were
+  closed. `postgres://u:pw@*/db`, `@[::1]:5432/db` and `@h1,h2/db` all write
+  `*:*:*:*:<superuser password>`. The two bracketed/multi-host spellings are
+  ones the plan lists as acceptance criteria, and the suite's only `.pgpass`
+  content assertion runs against a plain host, so it never saw them.
+- **S2 [Major]** The denylist answers "safe" for every type nobody enumerated —
+  measured: `prl_fs`, `vmhgfs`, `ceph`, `glusterfs`, `lustre`, `beegfs`, `afs`,
+  `udf`, `iso9660`. The same commit had just made "could not determine"
+  fail-closed; these are the same uncertainty. `uid=`/`gid=`/`umask=` were never
+  inspected at all.
+- **S3 [Major]** The round-4 empty-host fix has no regression test — zero `@:`
+  cases in the suite — so reverting it to the spelling-based form it replaced
+  survives. RT7 on a guard whose whole point was that a spelling-based refusal
+  misses members.
+- **S4 [Minor]** `psql` invoked without `-X` at all four sites: `HOME` is in
+  `run_pg`'s allowlist, so `~/.psqlrc` output lands in front of the rows that
+  decide the TLS verdict — a `\echo t|…` line satisfies INV-C7b without the
+  server being asked. And `_hex` is consumed as a `case` GLOB before validation,
+  so a payload of `*` matched every member and silently dropped a real database.
+- **S5 [Minor]** A second unreachable layered guard, proven by brute force over
+  all 256 `%XX` escapes: the decoded-password newline arm cannot fire.
+- **S6 [Minor]** The lock rollback is a fourth main-flow removal skipping
+  `assert_root_unchanged`, while the comment added in the same commit says three.
+
+## Testing Findings
+
+12 findings, 2 Critical, 5 Major. **Independent sweep: 23 of 45 mutants
+survived** (22/44 non-equivalent).
+
+- **T1 [Critical]** `assert_root_unchanged` and both `PRUNE_ABORTED` emitters
+  entirely unpinned — deleting the guard's body left 149 passing. **And the
+  deviation log's recorded reason was disproven**: it said a `BACKUP_TEST_HOOK`
+  was needed; a `stat` PATH stub (a technique the suite already uses in five
+  cases) drives the branch with no production change.
+- **T2 [Critical]** The FREE-lock case added in round 4 still exercises no
+  contention: a test-then-`mkdir -p` acquire survives it 3 of 3. Two `spawn()`
+  calls land milliseconds apart while the window is microseconds wide, and
+  `sleep` in the dump stub widens the HOLD, not the ACQUIRE.
+- **T3–T7 [Major]** `has_extended_acl`'s two call sites share one unanchored
+  assertion; `assert_mode_private` has 4 sites and 3 deny cases, all reporting
+  mode 755 so the group half of the `077` mask is unmeasured; `pgStubs`'s `psql`
+  stub is query-blind, so every URL-mode run recorded
+  `not_backed_up: hex:|TLSv1.3|AESGCM` and the URL-mode enumeration had no
+  valid-payload test at all; `display_of`'s malformed-input arms are unpinned;
+  the CI-reachability case pins 4 of 5 `DOCS` members, so `CLAUDE.md` could be
+  dropped from both gate files with the suite green.
+- T8–T12 Minor: the lock-metadata failure path; the Group B reader line never
+  reaching the default reporter's output; the URL-mode allow case asserting only
+  a negation; `list_stamped`'s `sort` and its empty-suffix regex; `first_line` at
+  two of three call sites.
+
+## Adjacent Findings
+
+- Func F4/F5 → Security: converge with S1.
+- Func F1 → Testing: the `fuse.*` arm had a deny case and no allow case (RT10).
+- Sec S3 → Testing: the missing regression test for the round-4 fix.
+- Test T4 → Security: the surviving mutants are transport-floor changes.
+
+## Quality Warnings
+
+None. All three experts red-proved their findings and reported a clean tree.
+
+## Cross-perspective tradeoff — the mount design
+
+Func F1 (the deny is too broad; it blocks the documented remedy) and Sec S2 (the
+deny is too narrow; unenumerated types pass) are the same function read from two
+sides. Neither finding's own proposal satisfies both.
+
+Alternatives searched before choosing: (a) keep the denylist and carve out the
+encrypting FUSE backends — closes F1, leaves S2 open and keeps contradicting the
+same commit's fail-closed tri-state; (b) invert to an allowlist with no override
+— closes both, and reproduces F1's actual failure the first time an operator has
+a legitimate filesystem the list has not heard of; (c) invert to an allowlist
+plus a documented override.
+
+(c) chosen, **with explicit user approval recorded here**, because it is the only
+option under which a wrong member set costs a warning rather than the deployment's
+only backup path. The widening it introduces is recorded in the deviation log
+with the Worst case / Likelihood / Cost-to-fix quantification the Anti-Deferral
+format requires.
+
+Separately, F8 (`postgres` warned on every default run) reverses a behaviour the
+user directed in round 4. Raised rather than silently reverted; **the user
+confirmed the current behaviour stands**, and it is unchanged.
+
+## Resolution Status — Round 5
+
+Every Critical and Major fixed; Minors fixed except those recorded in the
+deviation log's round-5 residuals with a full Anti-Deferral entry.
+
+The suite went 149 → 170 cases. **20 mutants over the round-5 fixes, 20 killed**,
+baseline asserted green through the `BACKUP_DB_SCRIPT` seam first. The seam paid
+for itself this round: the testing expert re-ran the sweep in one command instead
+of rebuilding a repository mirror, which is why 23 survivors were found rather
+than re-derived.
+
+Two findings corrected records rather than code:
+- The round-4 deviation entry claiming `PRUNE_ABORTED` needed a `BACKUP_TEST_HOOK`
+  is marked **wrong**, with the reason. The precondition was written down without
+  being checked — the same defect shape as the findings the entry recorded.
+- `assert_root_unchanged`'s comment now names four removals, not three.
+
+## Environment Verification Report
+
+- **VE1** — URL mode against RDS remains `blocked-deferred`; substituted by
+  stubbed-client URL-mode runs, now including the bracketed-IPv6, multi-host,
+  empty-port and literal-`*` authority forms.
+- **VE2** — `verified-local`. No sub-agent ran the script against the live
+  database; all three reported artifacts removed and a clean tree.
+- **VE3** — unchanged. `BACKUP_DB_EXPECT_READER` is honoured by the suite and
+  still unset in CI (recorded residual).
+
+---
+
 # External review passes
 
 Four additional review passes were performed by the user between sub-agent
