@@ -25,7 +25,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync, spawn } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
-  existsSync, readdirSync, statSync, lstatSync, symlinkSync, utimesSync,
+  existsSync, readdirSync, statSync, lstatSync, symlinkSync, utimesSync, realpathSync,
 } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -57,6 +57,13 @@ const dbRow = (name, conn = "y") => conn + Buffer.from(name, "utf8").toString("h
 const BASH = spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "/bin/bash";
 
 let tmpDir, binDir, homeDir, backupDir, logFile;
+// The RESOLVED spellings. The script resolves its destination with `cd … && pwd -P`
+// (INV-C4a), and on macOS /var is a symlink to /private/var — so a stub comparing
+// against the mkdtemp path never matched the path the script actually passes to
+// `stat` or `ls`. Measured on Darwin 25.5.0: mkdtemp gives /var/folders/…, `pwd -P`
+// gives /private/var/folders/…, and eight destination-guard cases silently
+// exercised nothing on the platform the portability floor exists for.
+let realBackupDir, realParentDir;
 
 function stub(name, body) {
   const p = join(binDir, name);
@@ -160,6 +167,10 @@ beforeEach(() => {
   logFile = join(tmpDir, "calls.log");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(homeDir, { recursive: true });
+  // Derived from tmpDir, which exists; backupDir may not yet.
+  const realTmpDir = realpathSync(tmpDir);
+  realBackupDir = join(realTmpDir, "bkp");
+  realParentDir = realTmpDir;
   // Explicit, not umask-derived: a real $HOME is 0755 and passes the ancestor
   // check, but this process's umask is 002, which would make the fixture 0775
   // and refuse the default BACKUP_DIR for a reason no operator would hit.
@@ -1655,11 +1666,11 @@ exit 0`);
     stub("stat", `
 last=""
 for a in "$@"; do last="$a"; done
-if [ -e "${marker}" ] && [ "$last" = "${backupDir}" ]; then
+if [ -e "${marker}" ] && [ "$last" = "${realBackupDir}" ]; then
   case " $* " in
     # The inode half is what must decide: reporting a different DEVICE alone
     # would also pass a comparison that only looks at the device.
-    *"%d:%i"*) printf '%s:9999\\n' "$(${realStat} -c '%d' -- "${backupDir}")"; exit 0 ;;
+    *"%d:%i"*) printf '%s:9999\\n' "$(${realStat} -f '%d' -- "${realBackupDir}" 2>/dev/null || ${realStat} -c '%d' -- "${realBackupDir}")"; exit 0 ;;
   esac
 fi
 exec "${realStat}" "$@"`);
@@ -1755,7 +1766,7 @@ exit 0`);
   it("refuses an ancestor owned by a third party", () => {
     // stat is PATH-resolved, so the ownership branch is reachable without a
     // second real uid: report a foreign owner for the parent only.
-    const parent = dirname(backupDir);
+    const parent = realParentDir;
     const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
     stub("stat", `
 for a in "$@"; do
@@ -1778,7 +1789,7 @@ exec "${realStat}" "$@"`);
     // exempts an owner from the writability check (the exemption D3 records as
     // deliberately rejected) survived. This reports the "admin created it and
     // chowned it to the operator" shape: our uid, mode 0755, no sticky bit.
-    const parent = dirname(backupDir);
+    const parent = realParentDir;
     const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
     const uid = String(process.getuid());
     stub("stat", `
@@ -1994,8 +2005,8 @@ exit 0`);
     passthrough("ls", `
 for a in "$@"; do
   case "$a" in
-    "${backupDir}")
-      printf 'drwx------+ 2 me me 4096 Jan 1 00:00 %s\n' "${backupDir}"
+    "${realBackupDir}")
+      printf 'drwx------+ 2 me me 4096 Jan 1 00:00 %s\n' "${realBackupDir}"
       exit 0 ;;
   esac
 done`);
@@ -2008,7 +2019,7 @@ done`);
     passthrough("stat", `
 last=""
 for a in "$@"; do last="$a"; done
-if [ "$last" = "${backupDir}" ]; then
+if [ "$last" = "${realBackupDir}" ]; then
   case " $* " in *" %u "*|*"'%u'"*) echo 4242; exit 0 ;; esac
 fi`);
     const r = run();
@@ -2066,7 +2077,7 @@ esac`);
 
   it("refuses when the ACL check cannot answer for an ANCESTOR", () => {
     // The second call site, which the root assertion above cannot distinguish.
-    const parent = dirname(backupDir);
+    const parent = realParentDir;
     passthrough("ls", `
 case " $* " in
   *" -ld "*|*" -lde "*)
@@ -2084,8 +2095,8 @@ esac`);
     passthrough("ls", `
 for a in "$@"; do
   case "$a" in
-    "${backupDir}")
-      printf 'drwx------ 2 me me 4096 Jan 1 00:00 %s\n' "${backupDir}"
+    "${realBackupDir}")
+      printf 'drwx------ 2 me me 4096 Jan 1 00:00 %s\n' "${realBackupDir}"
       printf ' 0: user:someone allow read,write\n'
       exit 0 ;;
   esac
@@ -2478,7 +2489,7 @@ exit 0`);
   });
 
   it("refuses an ancestor that is group/other-writable without the sticky bit", () => {
-    const parent = dirname(backupDir);
+    const parent = realParentDir;
     const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
     stub("stat", `
 last=""
@@ -2495,7 +2506,7 @@ exec "${realStat}" "$@"`);
   it("accepts a group/other-writable ancestor that IS sticky (paired allow case)", () => {
     // /tmp is the archetype, and refusing it would refuse the ordinary
     // destination. 1777 = sticky + 777.
-    const parent = dirname(backupDir);
+    const parent = realParentDir;
     const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
     stub("stat", `
 last=""
