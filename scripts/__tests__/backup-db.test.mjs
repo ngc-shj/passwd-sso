@@ -44,6 +44,14 @@ const FIXTURES = resolve(__dirname, "fixtures", "backup-db");
 
 const SENTINEL_PASSWORD = "S3NT1NEL-p@ss";
 
+/**
+ * One row of the cluster enumeration as the script reads it: the connect flag
+ * followed by the HEX-encoded datname. Hex is the transport because a quoted
+ * identifier may contain any byte but NUL, and a newline in one used to split a
+ * single database into two rows.
+ */
+const dbRow = (name, conn = "y") => conn + Buffer.from(name, "utf8").toString("hex");
+
 // Absolute, so a case can hand the script a curated PATH that deliberately
 // omits a client without also making the interpreter unresolvable.
 const BASH = spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "/bin/bash";
@@ -1978,7 +1986,7 @@ exit 0`);
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
 for a in "$@"; do
   case "$a" in
-    psql)       printf 'ypasswd_sso\\nyjackson\\nypostgres\\nyforgotten_db\\n'; exit 0 ;;
+    psql)       printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n${dbRow("postgres")}\\n${dbRow("forgotten_db")}\\n'; exit 0 ;;
     pg_dump)    printf 'PGDMP'; exit 0 ;;
     pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
     pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
@@ -2167,7 +2175,7 @@ exit 0`);
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
 for a in "$@"; do
   case "$a" in
-    psql)       printf 'ypasswd_sso\\nyjackson\\nnquarantined_db\\n'; exit 0 ;;
+    psql)       printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n${dbRow("quarantined_db", "n")}\\n'; exit 0 ;;
     pg_dump)    printf 'PGDMP'; exit 0 ;;
     pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
     pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
@@ -2184,6 +2192,98 @@ exit 0`);
       .toMatch(/not_backed_up:.*quarantined_db\[no-connect\]/);
   });
 
+  it("keeps a database whose name contains a newline as ONE database", () => {
+    // A quoted identifier may hold any byte but NUL. Read line-by-line, such a
+    // name split into two rows and the second row's first byte was consumed as
+    // the connect flag, so the MANIFEST recorded a database that does not
+    // exist — measured: `evil\ninjected: not a database` was reported as `evil`
+    // plus `njected: not a database`. It can never be in BACKUP_DATABASES, so
+    // its row is always one that must reach the warning.
+    const nasty = "evil\ninjected: not a database";
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n${dbRow(nasty)}\\n'; exit 0 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    const warnings = r.stderr.split("\n").filter((l) => l.includes("is NOT being backed up"));
+    expect(warnings, "one database, one warning").toHaveLength(1);
+    expect(warnings[0], "the raw name must not reach the log")
+      .toContain(`hex:${Buffer.from(nasty, "utf8").toString("hex")}`);
+    expect(r.stderr, "no fabricated database may be named")
+      .not.toMatch(/'njected: not a database'/);
+
+    const [gen] = generations();
+    const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+    const field = manifest.split("\n").filter((l) => l.startsWith("not_backed_up:"));
+    expect(field, "not_backed_up must stay one MANIFEST record").toHaveLength(1);
+    expect(field[0]).toContain(`hex:${Buffer.from(nasty, "utf8").toString("hex")}`);
+    // Every MANIFEST line must remain a `key: value` record.
+    for (const line of manifest.split("\n").filter(Boolean)) {
+      expect(line, `MANIFEST line is not a record: ${JSON.stringify(line)}`).toMatch(/^[a-z_]+: /);
+    }
+  });
+
+  it("does not display a name ending in a newline as a different, legal one", () => {
+    // The nastiest spelling, because it fails SILENTLY rather than loudly:
+    // command substitution strips trailing newlines, so decoding `trailing\n`
+    // yields `trailing`, which IS identifier-shaped and is therefore printed as
+    // a plain name. The operator reads a database that does not exist, and the
+    // one that does is never named.
+    const nasty = "trailing\n";
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n${dbRow(nasty)}\\n'; exit 0 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, "the stripped form must never be presented as the name")
+      .not.toMatch(/'trailing'/);
+    expect(r.stderr).toContain(`hex:${Buffer.from(nasty, "utf8").toString("hex")}`);
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8"))
+      .toContain(`hex:${Buffer.from(nasty, "utf8").toString("hex")}`);
+  });
+
+  it("still prints an ordinary database name in the clear (paired allow case)", () => {
+    // The hex transport must not turn every warning into an unreadable one.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n${dbRow("plain_db")}\\n'; exit 0 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/'plain_db'.*is NOT being backed up/);
+    expect(r.stderr, "a readable name must not be hex-escaped").not.toContain("hex:");
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8"))
+      .toMatch(/not_backed_up:.*\bplain_db\b/);
+  });
+
   it("enumerates every non-template database, filtering on nothing else", () => {
     // The condition itself, not only its effect: a future edit that narrows the
     // WHERE clause again removes databases from the operator's only record of
@@ -2192,6 +2292,9 @@ exit 0`);
     const query = readLog().split("\n").find((l) => l.includes("pg_database"));
     expect(query, "the enumeration query must reach psql").toBeDefined();
     expect(query).toMatch(/from pg_database where not datistemplate/);
+    // And the name must leave the server encoded, or a datname containing a
+    // newline splits the line-oriented transport again.
+    expect(query, "datname must travel hex-encoded").toMatch(/encode\(convert_to\(datname/);
     const narrowed = "select datname from pg_database where not datistemplate and datallowconn";
     expect(query, "datallowconn must be reported, never filtered on")
       .not.toMatch(/where not datistemplate and/);
@@ -2209,7 +2312,7 @@ exit 0`);
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
 for a in "$@"; do
   case "$a" in
-    psql)       printf 'ypasswd_sso\\n'; echo 'psql: connection lost' >&2; exit 2 ;;
+    psql)       printf '${dbRow("passwd_sso")}\\n'; echo 'psql: connection lost' >&2; exit 2 ;;
     pg_dump)    printf 'PGDMP'; exit 0 ;;
     pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
     pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
@@ -2233,7 +2336,7 @@ exit 0`);
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
 for a in "$@"; do
   case "$a" in
-    psql)       printf 'ypasswd_sso\\nyjackson\\n'; exit 0 ;;
+    psql)       printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n'; exit 0 ;;
     pg_dump)    printf 'PGDMP'; exit 0 ;;
     pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
     pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;

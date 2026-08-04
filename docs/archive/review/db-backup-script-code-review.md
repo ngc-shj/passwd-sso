@@ -417,6 +417,7 @@ Reproduced before fixing, per the standing instruction. All confirmed.
 | 4 | Low | `not a git repository` matched without `LC_ALL=C` |
 | 5 | Low | The collision test creates no collision (independently T6) |
 | 6 | Medium | `datallowconn` used as a WHERE condition hid every database with connections disabled — raised after the first fix pass and fixed with a regression test over the query condition itself |
+| 7 | Low | A `datname` containing a newline mis-parsed the enumeration. Reproduced before fixing: `evil\ninjected: not a database` was reported as TWO databases, the second one's first byte eaten as the connect flag, and the MANIFEST recorded `njected: not a database` — a database that does not exist. The name travels hex-encoded now |
 
 ## Findings found while fixing
 
@@ -433,6 +434,18 @@ Reproduced before fixing, per the standing instruction. All confirmed.
   dynamically — so its member list collapsed to one token and every macOS
   option-list lookup matched nothing. Found by the paired allow/deny probe, not
   by review.
+- **A sixth ordering defect, mine, caught by the suite.** `hex_of` was defined
+  hundreds of lines below the validation loop that calls it, so every
+  environment check reported `INTERNAL` instead of `BAD_ENV` — 113 failures on
+  the first run. The same shape as the five before it: a value (here, a
+  function) used before the block that defines it.
+- **The trailing-newline spelling fails silently where the others fail loudly.**
+  Command substitution strips trailing newlines, so decoding a datname of
+  `trailing\n` yields `trailing`, which IS identifier-shaped and is therefore
+  printed as a plain, legal-looking name — the operator reads a database that
+  does not exist and never sees the one that does. A sentinel byte preserves it.
+  The mutant that removes the sentinel survived the first sweep; it has its own
+  case now.
 - **A dead guard read as a second layer.** The newline arm on the host slice was
   unreachable: `hp` is a substring of `authority`, which is checked first.
   Deleting it kept the suite green. Removed, and the live check pinned for both

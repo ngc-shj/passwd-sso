@@ -270,6 +270,10 @@ BACKUP_DIR=/var/backups/passwd-sso \
     毎回の警告を止めたい場合は `BACKUP_DATABASES` に明示的に含めてください。
   - 列挙自体に失敗した場合は `not_backed_up: unknown` と記録し、警告を出します。
     「未バックアップは無い」を意味する `(none)` は書きません。
+  - データベース名は hex 符号化されてスクリプトに渡ります。PostgreSQL の引用識別子は
+    NUL 以外の任意のバイトを含められるため、改行を含む名前が行指向のログや MANIFEST を
+    分断するのを防ぐためです。`BACKUP_DATABASES` に指定できる形（`[A-Za-z_][A-Za-z0-9_$]*`)
+    の名前はそのまま表示し、それ以外は `hex:<16進>` と表示します。
 
 復元はこのスクリプトの仕事ではありません。
   [dev-host-migration.md](../dev-host-migration.md) の手順 5 に従ってください。

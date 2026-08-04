@@ -346,6 +346,42 @@ EOF
   return 1
 }
 
+# Hex-encode an identifier. Only ever called on a BACKUP_DATABASES member, which
+# the INV-C1a block has already constrained to [A-Za-z0-9_$] — every character is
+# a single byte there, so `printf "'c"` is exact.
+hex_of() {
+  local s="$1" i c out=""
+  for (( i = 0; i < ${#s}; i++ )); do
+    c="${s:i:1}"
+    out="$out$(printf '%02x' "'$c")"
+  done
+  printf '%s' "$out"
+}
+
+# Render a hex-encoded datname for the log and the MANIFEST. Decoded ONLY when
+# the result is a name this script could itself have accepted; anything else is
+# shown as hex, because printing it would put the control character into exactly
+# the two line-oriented sinks the hex transport exists to keep it out of.
+display_of() {
+  local hex="$1" fmt="" i decoded
+  case "$hex" in
+    ""|*[!0-9a-f]*) printf 'hex:%s' "$hex"; return ;;
+  esac
+  [ $(( ${#hex} % 2 )) -eq 0 ] || { printf 'hex:%s' "$hex"; return; }
+  for (( i = 0; i < ${#hex}; i += 2 )); do
+    fmt="$fmt\\x${hex:i:2}"
+  done
+  # Sentinel: command substitution strips trailing newlines, so a database named
+  # "abc\n" would otherwise be displayed as the different, legal-looking "abc".
+  decoded="$(printf "$fmt"'X')"
+  decoded="${decoded%X}"
+  if [[ "$decoded" =~ ^[A-Za-z_][A-Za-z0-9_$]*$ ]]; then
+    printf '%s' "$decoded"
+  else
+    printf 'hex:%s' "$hex"
+  fi
+}
+
 # ─── Environment validation (INV-C1a) ────────────────────────
 #
 # Member set = this block. Every variable the script reads is validated here
@@ -391,17 +427,18 @@ fi
 _db_count=0
 FIRST_DB=""
 # The membership set every later consumer tests against, built by the SAME
-# split that validates. The cluster reconciliation used to ask
+# split that validates, and HEX-encoded because that is the form the cluster
+# enumeration arrives in. The reconciliation used to ask
 # `case " $BACKUP_DATABASES " in *" $db "*`, which splits on spaces only, so a
 # tab-separated list reported every database it had just dumped as not backed
 # up — the same two-tokenisations defect `88a9da80d` fixed for `%% *`.
-DB_SET=" "
+DB_SET_HEX=" "
 for _db in $BACKUP_DATABASES; do
   [ -n "$FIRST_DB" ] || FIRST_DB="$_db"
   if ! [[ "$_db" =~ ^[A-Za-z_][A-Za-z0-9_$]*$ ]]; then
     fail BAD_ENV "BACKUP_DATABASES contains an invalid database name: $_db"
   fi
-  DB_SET="$DB_SET$_db "
+  DB_SET_HEX="$DB_SET_HEX$(hex_of "$_db") "
   _db_count=$((_db_count + 1))
 done
 [ "$_db_count" -gt 0 ] || fail BAD_ENV "BACKUP_DATABASES must name at least one database"
@@ -1305,7 +1342,17 @@ fi
 #
 # The flag is a one-character PREFIX rather than a second column: a datname may
 # contain the field separator, and splitting on it would mis-attribute the flag.
-CLUSTER_DB_QUERY="select case when datallowconn then 'y' else 'n' end || datname from pg_database where not datistemplate"
+# The name travels HEX-encoded. A quoted identifier may contain any byte but NUL,
+# so a datname carrying a newline split one database into two rows — the second
+# row's first byte was eaten as the connect flag, and the MANIFEST recorded a
+# database that does not exist. Measured: `evil\ninjected: not a database` was
+# reported as `evil` and `njected: not a database`. Such a name can never appear
+# in BACKUP_DATABASES, so its row is ALWAYS one that must reach the warning,
+# which is precisely the row the line-oriented transport was dropping.
+#
+# server_encoding, not a fixed UTF8: convert_to errors on a byte sequence that is
+# not valid in the target encoding, and a SQL_ASCII cluster can hold one.
+CLUSTER_DB_QUERY="select case when datallowconn then 'y' else 'n' end || encode(convert_to(datname::text, current_setting('server_encoding')), 'hex') from pg_database where not datistemplate"
 cluster_dbs=""
 recon_failed=""
 recon_diag=""
@@ -1342,13 +1389,16 @@ else
   while IFS= read -r _row; do
     [ -n "$_row" ] || continue
     _conn="${_row:0:1}"
-    _cdb="${_row:1}"
-    [ -n "$_cdb" ] || continue
-    # DB_SET, not `" $BACKUP_DATABASES "`: one tokenisation, the one that
-    # validated the names.
-    case "$DB_SET" in
-      *" $_cdb "*) continue ;;
+    _hex="${_row:1}"
+    [ -n "$_hex" ] || continue
+    # Compared as HEX, never decoded: decoding first would put a control
+    # character into a variable whose only remaining uses are the log and the
+    # MANIFEST. DB_SET_HEX, not `" $BACKUP_DATABASES "`: one tokenisation, the
+    # one that validated the names.
+    case "$DB_SET_HEX" in
+      *" $_hex "*) continue ;;
     esac
+    _cdb="$(display_of "$_hex")"
     # `postgres` is reported like any other. It is the maintenance database and
     # usually holds nothing, but "usually" is not a property this script can
     # check, and the operator silences it by naming it in BACKUP_DATABASES.
@@ -1362,7 +1412,7 @@ else
   done <<EOF
 $cluster_dbs
 EOF
-  unset _cdb _conn _row
+  unset _cdb _conn _hex _row
 fi
 
 MANIFEST="$RUN_PARTIAL/MANIFEST"

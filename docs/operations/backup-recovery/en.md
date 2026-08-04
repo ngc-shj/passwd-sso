@@ -279,6 +279,11 @@ BACKUP_DIR=/var/backups/passwd-sso \
   - If the enumeration itself fails, the MANIFEST records
     `not_backed_up: unknown` and the run warns. It never writes `(none)`, which
     means "nothing was left out".
+  - Database names reach the script hex-encoded. A PostgreSQL quoted identifier
+    may contain any byte but NUL, so a name carrying a newline would otherwise
+    split the line-oriented log and MANIFEST. A name of the shape
+    `BACKUP_DATABASES` itself accepts (`[A-Za-z_][A-Za-z0-9_$]*`) is shown as
+    written; anything else is shown as `hex:<hex digits>`.
 
 Restoring is deliberately not the script's job. Follow
 [dev-host-migration.md](../dev-host-migration.md) step 5 — the ordering
