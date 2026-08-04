@@ -85,6 +85,47 @@ description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr o
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.
 
+## Round-6 residuals
+
+Round 6 returned **42 findings (4 Critical, 22 Major)** across the three
+perspectives. The four Criticals and six Majors were fixed; the rest are open
+and listed here so the next round starts from a true statement of what is done.
+
+**[Test] `assert_mode_private "$PGPASS_FILE"` runs before the write, but nothing
+pins the ORDER.** The code is correct — `mktemp` creates the file empty, so the
+mode is checked while it holds nothing. Moving the call back after the `printf`
+keeps the suite green: no case observes the file's size at check time. What
+would settle it: a `stat` stub that records `wc -c` of the passfile when asked
+for its mode, asserting 0.
+
+**[Test] Twelve Major coverage gaps are open, each with a named seam.** Recorded
+individually in the code-review artifact's Round 6 section: `psql -X` pinned at
+2 of 5 sites (the case filters log lines starting `psql `, so both compose-mode
+sites — the DEFAULT path — and both `recon_diag` sites are unmeasured); the
+`077` mask measured on its group half only; `first_line` at the `achieved_tls`
+site and its CR strip; the row-charset guard masked by the length guard (the
+only non-hex fixture is also odd-length); the malformed-row `break`; the
+stamp-retry `.FAILED`/`.partial` arms; "an empty enumeration is a failed
+enumeration"; the port-anchoring guard (`5432evil`); the mount member sets and
+`REFUSED_PARAMS` hand-copied into the test rather than derived from the script
+(5 of 20 allowlist members exercised); the C7 describe's second `pgStubs()`
+still carrying the query-blind `psql` stub round 5 fixed in its twin.
+
+**[Test] `PRUNE_ABORTED`'s second emitter — the seam is now named.** Round 6
+confirmed the residual and identified the settling instrument: `rm` is
+PATH-resolved and the suite already stubs `mkdir`, `stat`, `ls`, `mount` and
+`uname` the same way, so a stub that exits non-zero for a generation name —
+armed from the `pg_dumpall` stub — drives the branch with no production change.
+The earlier entry's "an rm stub, or a root chmod-ed 0500" was right; only the
+first half is needed.
+
+**[Process] A review ran against a moving tree.** The Testing expert's sweep was
+in flight when this session committed `f5eb6770d` and left further uncommitted
+edits in the same worktree. It detected the change, discarded fifteen verdicts,
+rebuilt a frozen mirror of `b377b642d` and re-ran them there. The findings
+survived; the cost was ~80 minutes and it was avoidable. Editing the subject
+while an agent reviews it invalidates its instrument.
+
 ## Round-5 residuals
 
 **[Ops] A mount whose device AND mount point both contain a space is

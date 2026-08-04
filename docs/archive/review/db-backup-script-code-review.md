@@ -671,6 +671,125 @@ Two findings corrected records rather than code:
 
 ---
 
+# Round 6
+
+## Changes from Previous Round
+
+All three perspectives, incremental over the round-5 commits. **42 findings after
+dedup: 4 Critical, 22 Major, 16 Minor** — the highest count of any round, and the
+first in which a defect this branch introduced was **reachable by an attacker**.
+
+Both Functionality and Security converged, independently, on the mount matcher
+added in round 5.
+
+## Functionality Findings
+
+13 findings, 1 Critical, 5 Major.
+
+- **F1 [Critical]** `mount_is_unsafe` returned on the FIRST mount line whose
+  device matched. A device name is not unique — the host lists five `tmpfs` and
+  four `overlay` — so an unrelated mount adjudicated the destination. Both
+  directions red-proved: a `/run` line refusing a safe destination, and a
+  destination whose own line carried `uid=/gid=/mode=777` passing.
+- **F2–F6 [Major]** the no-port class closed for 2 of 4 members with a comment
+  contradicting the line beneath it; the passfile mode assertion running after
+  the password was written; `psql -X` applied to `backup-db.sh` only while a
+  sibling gate decides pass/fail from unguarded `psql` output; `found=1` dead.
+- F7–F9 Minor: the Darwin remediation offered for verdicts it cannot fix; a
+  stray list marker demoting an H3 in `ja.md`; a commit-message count.
+
+## Security Findings
+
+8 findings, 1 Critical (escalate: true), 2 Major.
+
+- **S1 [Critical, escalate]** The mount-point key added in round 5 was an
+  **unanchored substring match over the whole line**. `fusermount` is setuid, a
+  FUSE target may be any directory the user owns, and directory names may
+  contain spaces — so a mount target named `m on <BACKUP_DIR> type ext4 (rw)`
+  made the guard read the **attacker's** type and options and report the
+  destination verified safe. Red-proved end-to-end against the unmodified
+  script, together with two attacker-free variants (a source named via
+  `-o fsname=`, and a safe tmpfs the destination is mounted over — the latter
+  being the documented scenario-2 order). Consequence: the full plaintext corpus
+  written where mode bits do not bind, while the guard reports success.
+- **S2 [Major]** `UNSAFE_MOUNT_OPTS` omitted `allow_other` — the option whose
+  purpose is exposing a FUSE mount to other uids, and the one `assert_mode_private`
+  cannot see, because the archive really is 0600 and the kernel simply stops
+  enforcing it. It matters precisely because this round invited the encrypting
+  FUSE backends onto the allowlist.
+- S3–S8: `psql -X` not propagated; `found` unreachable; the wildcard-port class
+  closed for 1 of 3; the passfile check ordering; `mount_status` having no
+  default arm while status 1 encodes "safe"; the operator's account name copied
+  verbatim into a committed fixture.
+
+## Testing Findings
+
+25 findings, 2 Critical, 12 Major. **Independent sweep: 83 mutants, 27 survived**
+(23 of 79 non-equivalent; 71%), with three baselines stated.
+
+- **T1 [Critical]** `refuses a macOS volume mounted noowners` passed for the
+  wrong reason: macOS reads the type from the first parenthesised option, so the
+  `exfat` fixture was refused by the TYPE and `opts_are_unsafe` never ran.
+  `noowners` — the one member macOS actually emits — was exercised by nothing.
+- **T2 [Critical]** `prunes oldest-first regardless of the order the directory
+  returns` could not fail. The orders that must disagree are readdir and sorted,
+  not creation and sorted; ext4 already returns these names sorted, so
+  `list_stamped`'s `| sort` was a no-op for the fixture and its removal survived.
+- T3–T13 Major: twin drift in the second `pgStubs()`; the charset guard masked
+  by the length guard; the malformed-row `break`; `psql -X` pinned at 2 of 5
+  sites (the compose path is the default and is unmeasured); the `077` mask
+  measured on its group half only; `first_line` at `achieved_tls` and its CR
+  strip; the stamp-retry `.FAILED` arm; "an empty enumeration is a failed
+  enumeration"; member sets hand-copied rather than derived; the port anchoring;
+  `PRUNE_ABORTED`'s second emitter, now with a named seam.
+- **T14** independently derived the macOS `/var` → `/private/var` divergence and
+  confirmed it was closed mid-review by `f5eb6770d`.
+
+## The macOS end-to-end run
+
+The user offered the verification host. Pulling the branch there and running the
+suite under Darwin 25.5.0 / bash 3.2.57 found **8 of 174 failing**: the script
+resolves its root with `pwd -P`, `/var` is a symlink to `/private/var`, and every
+destination-guard stub compared against the unresolved `mkdtemp` path. Those
+eight guards had never executed on the platform the portability floor exists
+for. Fixed in `f5eb6770d`; 8 → 1 remaining (a Group B docker interaction, open).
+
+Real `mount` output from that host also produced two shapes no hand-written
+fixture had: a space in the DEVICE (`map auto_home`) and a space in the MOUNT
+POINT (`/Volumes/Backups of mrx33`).
+
+## Resolution Status — Round 6
+
+**Fixed:** all four Criticals (F1, S1, T1, T2) and six Majors (S2, S5/F2, S6/F3,
+S7, S8, F6/S4).
+
+`mount_is_unsafe` was rewritten rather than patched: `df` is gone, each line's
+own mount point is parsed by cutting at the FIRST `" type "` / `" ("` — which is
+what stops a forged target or source from moving the boundary — and the verdict
+comes from the longest covering mount point, taking the last listed among
+equals. Nothing matches a substring of a line. Five mutants over the rewrite are
+killed, including both forgery vectors and the mounted-over case.
+
+**Open:** 12 Major and the Minors, each recorded in the deviation log's round-6
+residuals with the seam that settles it. They are coverage gaps, not production
+defects — every one is a guard whose behaviour is correct and whose test cannot
+red.
+
+**Process failure recorded:** this session edited the working tree while the
+Testing expert's sweep was running against it. The expert detected the change,
+discarded fifteen verdicts and rebuilt a frozen mirror. Reviewing and editing the
+same tree concurrently invalidates the instrument.
+
+## Environment Verification Report
+
+- **VE1** — unchanged, `blocked-deferred`.
+- **VE2** — now `verified-local` on **both** platforms: Linux throughout, and
+  macOS via the verification host, which is what surfaced the eight silently
+  passing guards.
+- **VE3** — unchanged; `BACKUP_DB_EXPECT_READER` still unset in CI.
+
+---
+
 # External review passes
 
 Four additional review passes were performed by the user between sub-agent

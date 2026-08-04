@@ -1905,6 +1905,19 @@ exec "${realStat}" "$@"`);
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     for (const g of ["20200103T000000Z", "20200101T000000Z", "20200102T000000Z"]) mkGeneration(g);
+    // The orders that must disagree are READDIR order and sorted order — not
+    // creation order and sorted order. ext4 returns these names already sorted,
+    // so creating them newest-first made `| sort` a no-op and its removal
+    // survived. `find` is PATH-resolved: reverse its listing so the two orders
+    // disagree on every filesystem.
+    const realFind = spawnSync("sh", ["-c", "command -v find"], { encoding: "utf8" }).stdout.trim();
+    stub("find", `
+case " $* " in
+  *" -mindepth 1 "*" -print0 "*|*" -mindepth 1 -maxdepth 1 -print0"*)
+    "${realFind}" "$@" | tr '\\0' '\\n' | sort -r | tr '\\n' '\\0'
+    exit 0 ;;
+esac
+exec "${realFind}" "$@"`);
     // A stray <stamp>.<digits> must stay invisible to the generation count: the
     // optional .<pid> belongs to .FAILED alone, and admitting it here inflated
     // the candidate set and deleted one MORE validated generation.
@@ -1966,14 +1979,24 @@ describe("destination guards", () => {
 exec "${real}" "$@"`);
   };
 
-  const mountStub = (line) => {
-    passthrough("df", `
-if [ "$2" = "--" ] || [ "$1" = "-P" ]; then
-  printf 'Filesystem 1K-blocks Used Avail Use%% Mounted on\n/dev/probe0 1 1 1 1%% /probe\n'
-  exit 0
-fi`);
-    stub("mount", `printf '%s\n' ${JSON.stringify(line)}
-exit 0`);
+  // Accepts one line or many. Every mount case used to emit exactly one, so no
+  // case exercised line ordering, a second matching entry, or the substring
+  // nature of the old mount-point key — which is how an unrelated mount came to
+  // decide the verdict.
+  const mountStub = (line, before = []) => {
+    // `/probe` stands for the destination, so a line describes the filesystem
+    // the run actually lands on. A root entry is always present, because the
+    // real table always has one and the guard now picks the LONGEST covering
+    // mount point rather than a string match anywhere in the line.
+    //
+    // `before` is listed AHEAD of the destination's own entry: no case used to
+    // emit more than one line, so nothing exercised ordering, a second matching
+    // entry, or the substring nature of the old mount-point key — which is how
+    // an unrelated mount came to decide the verdict.
+    const lines = ["/dev/root on / type ext4 (rw,relatime)", ...before,
+                   ...(Array.isArray(line) ? line : [line])]
+      .map((l) => l.split("/probe").join(realBackupDir));
+    stub("mount", `cat <<'MOUNTEOF'\n${lines.join("\n")}\nMOUNTEOF\nexit 0`);
   };
 
   it("refuses a Linux filesystem that cannot enforce ownership", () => {
@@ -1987,9 +2010,17 @@ exit 0`);
   });
 
   it("refuses a macOS volume mounted noowners", () => {
-    // macOS puts the type and the options together inside the parentheses.
-    mountStub("/dev/probe0 on /probe (exfat, local, nodev, nosuid, noowners)");
-    expect(err(run())).toBe("DEST_UNSAFE");
+    // macOS puts the type and the options together inside the parentheses, and
+    // the FIRST one is read as the type — so an `exfat` fixture was refused by
+    // the type before `opts_are_unsafe` ran, and `noowners` was exercised by
+    // nothing. It is the one member of UNSAFE_MOUNT_OPTS macOS actually emits,
+    // and the reason this check exists on the declared primary host. The type
+    // here is allowlisted so the option is the only thing left that can refuse.
+    mountStub("/dev/probe0 on /probe (apfs, local, nodev, nosuid, noowners)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr, "the OPTION must be what refuses, not the type")
+      .toMatch(/ownership advisory/);
   });
 
   it("accepts a safe filesystem whose MOUNT POINT merely looks unsafe", () => {
@@ -2034,6 +2065,61 @@ fi`);
   // default PATH omits, so on the declared primary host the ordinary scheduled
   // run was the one silently losing the check.
 
+  it("is not decided by an unrelated mount that happens to be listed first", () => {
+    // A device name is not unique — this host lists five `tmpfs` and four
+    // `overlay`. Keying on it and returning on the first match let /run
+    // adjudicate every tmpfs destination. The destination's own entry decides.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)",
+              ["tmpfs on /run type tmpfs (rw,nosuid,nodev,mode=755)"]);
+    const r = run();
+    expect(err(r), "the destination is exfat, whatever else is mounted").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("is not decided by a safe filesystem that the destination is mounted OVER", () => {
+    // No attacker needed. If a safe tmpfs was mounted at the path before the
+    // real exFAT volume, the earlier line used to win — and that is the
+    // documented scenario-2 order, where the operator attaches the backup
+    // volume at backup time.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)",
+              ["tmpfs on /probe type tmpfs (rw,nosuid,nodev)"]);
+    expect(err(run()), "the topmost mount is the one the path resolves through")
+      .toBe("DEST_UNSAFE");
+  });
+
+  it("cannot be forged by a mount whose TARGET DIRECTORY is named like a line", () => {
+    // fusermount is setuid: an unprivileged user may mount a FUSE filesystem on
+    // any directory they own, and directory names may contain spaces. A target
+    // named `m on <BACKUP_DIR> type ext4 (rw)` produced a mount line that the
+    // old unanchored substring key matched, and the guard then read the
+    // ATTACKER's type and options and reported the destination verified safe.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)",
+              ["attacker_fs on /home/mallory/m on /probe type ext4 (rw) type fuse.sshfs (rw,nosuid,nodev,user_id=1001)"]);
+    const r = run();
+    expect(err(r), "an attacker-named directory must not answer for the destination")
+      .toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("cannot be forged by a mount whose SOURCE is named like a line", () => {
+    // The same via `-o fsname=`. The source is everything before the FIRST
+    // " on ", so a source carrying one yields a non-absolute target, and a line
+    // that cannot be attributed is not allowed to answer for anything.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)",
+              ["evil on /probe type ext4 (rw) on /elsewhere type fuse.sshfs (rw)"]);
+    expect(err(run())).toBe("DEST_UNSAFE");
+  });
+
+  it("refuses an encrypting FUSE backend opened to other uids", () => {
+    // allow_other is the standard way to expose such a mount, and without
+    // default_permissions the kernel stops checking entirely. assert_mode_private
+    // cannot see it: the archive really is 0600, it is just not enforced.
+    mountStub("gocryptfs@ on /probe type fuse.gocryptfs (rw,nosuid,nodev,user_id=1000,allow_other)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/ownership advisory/);
+  });
+
   it("refuses when mount(8) cannot answer", () => {
     passthrough("df", `
 if [ "$2" = "--" ] || [ "$1" = "-P" ]; then
@@ -2046,18 +2132,16 @@ fi`);
     expect(r.stderr).toMatch(/could not determine whether/);
   });
 
-  it("refuses when df(1) cannot answer", () => {
-    passthrough("df", `
-if [ "$2" = "--" ] || [ "$1" = "-P" ]; then exit 1; fi`);
-    const r = run();
-    expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/could not determine whether/);
-  });
 
-  it("refuses when the device is absent from the mount table", () => {
-    // df names a device, mount lists something else entirely: the check has not
-    // been performed, which is not the same as having passed.
-    mountStub("/dev/somethingelse on / type ext4 (rw,relatime)");
+
+  it("refuses when no mount(8) entry covers the destination", () => {
+    // Not "the device is missing" — the object is the PATH now. An
+    // unattributable table has not performed the check, which is not the same
+    // as having passed.
+    stub("mount", `cat <<'MOUNTEOF'
+sysfs /sys sysfs rw 0 0
+MOUNTEOF
+exit 0`);
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
     expect(r.stderr).toMatch(/could not determine whether/);
@@ -2139,7 +2223,7 @@ done`);
     // transport, so the allowlist's Linux `fuse.gocryptfs` spelling can never
     // match there — and allowlisting `macfuse` wholesale would admit s3fs on the
     // identical line. Both are refused, and the message names the escape.
-    mountStub("gocryptfs@/Users/x/enc on /probe (macfuse, nodev, nosuid, synchronous, mounted by noguchi)");
+    mountStub("gocryptfs@/Users/x/enc on /probe (macfuse, nodev, nosuid, synchronous, mounted by operator)");
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
     expect(r.stderr).toMatch(/generic type macfuse/);
@@ -2147,7 +2231,7 @@ done`);
       .toMatch(/BACKUP_ALLOW_UNVERIFIED_MOUNT=true/);
 
     rmSync(backupDir, { recursive: true, force: true });
-    mountStub("s3fs on /probe (macfuse, nodev, nosuid, mounted by noguchi)");
+    mountStub("s3fs on /probe (macfuse, nodev, nosuid, mounted by operator)");
     expect(err(run()), "the same line shape must not become an allow").toBe("DEST_UNSAFE");
   });
 

@@ -269,7 +269,12 @@ fuse.gocryptfs fuse.cryfs fuse.encfs fuse.securefs fuse.veracrypt fuse.ext4fuse"
 # Mount options that make ownership advisory whatever the filesystem is: the
 # fabricated-uid family, which is the property the type list exists to detect and
 # which a type name alone cannot rule out (ext4 mounted with uid= is still ext4).
-UNSAFE_MOUNT_OPTS="noowners uid gid umask fmask dmask mode"
+# allow_other / allow_root are the ones the mode read-back CANNOT catch: the
+# archive really is 0600, the kernel just stops enforcing it without
+# default_permissions. They matter more now that the allowlist invites the
+# encrypting FUSE backends, which is exactly where allow_other gets used.
+UNSAFE_MOUNT_OPTS="noowners uid gid umask fmask dmask mode file_umask dir_umask
+allow_other allow_root"
 
 fstype_enforces_ownership() {
   local t="$1" m
@@ -302,84 +307,106 @@ opts_are_unsafe() {
   return 1
 }
 
+# Is $1 the path $2, or under it?
+path_is_under() {
+  local p="$1" mp="$2"
+  [ "$mp" = "/" ] && return 0
+  [ "$p" = "$mp" ] && return 0
+  case "$p" in "$mp"/*) return 0 ;; esac
+  return 1
+}
+
 # Verdicts: 0 = unsafe (prints the reason), 1 = verified safe, 2 = could not
-# determine (prints why). "Could not determine" is never folded into "safe" —
-# df absent or failing, mount absent or failing, an entry the mount table does
-# not carry. BACKUP_ALLOW_UNVERIFIED_MOUNT is the operator's escape from both
-# non-safe verdicts; without it a filesystem this list has not heard of stops
-# the run, and with a bad list that would stop the only backup path.
+# determine (prints why). "Could not determine" is never folded into "safe".
+# BACKUP_ALLOW_UNVERIFIED_MOUNT is the operator's escape from both non-safe
+# verdicts; without it a filesystem this list has not heard of stops the run.
+#
+# df(1) is not used. Two earlier designs keyed on the string it prints — first
+# the device field, then the device OR the mount point — and both decided from
+# whichever mount(8) line matched FIRST. A device name is not unique (this host
+# lists five `tmpfs` and four `overlay`), so an unrelated mount adjudicated the
+# destination; and the mount-point key was an unanchored substring of the whole
+# line, which an unprivileged user could forge outright: fusermount is setuid,
+# a FUSE target may be any directory the user owns, and a directory named
+# `m on <BACKUP_DIR> type ext4 (rw)` made the guard read the ATTACKER's type and
+# options and report the destination verified safe. Measured, end to end.
+#
+# So: parse each line's own mount point, compare it to the destination by
+# EQUALITY-or-prefix, and decide on the longest match — the filesystem the path
+# is actually on. Nothing here matches a substring of a line.
 mount_is_unsafe() {
-  local target="$1" line dev point mounts m found=""
-  line="$(df -P -- "$target" 2>/dev/null | tail -n1)" || line=""
-  [ -n "$line" ] || { printf 'df(1) produced no output for %s' "$target"; return 2; }
-  dev="${line%% *}"
-  [ -n "$dev" ] || { printf 'df(1) named no device for %s' "$target"; return 2; }
-  case "$dev" in
-    Filesystem) printf 'df(1) printed only a header for %s' "$target"; return 2 ;;
-  esac
-  # The mount POINT as a second key. `${line%% *}` truncates any device name
-  # containing a space — macOS prints `map auto_home` for an automount, Linux
-  # `systemd-1` vs `/dev/dm-0` for the same LVM volume — and the device match
-  # became the discriminator of a fail-closed verdict when this went tri-state.
-  # df -P guarantees the mount point is the final field.
-  point="${line##* }"
+  local target="$1" mounts m left mt src
+  local best_line="" best_mt="" best_src=""
   mounts="$(mount 2>/dev/null)" || mounts=""
   [ -n "$mounts" ] || { printf 'mount(8) produced no output'; return 2; }
   while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    # Cut at the FIRST " type " / " (", never the last: `%%` is what stops a
+    # target or source carrying a second one from moving the boundary right.
     case "$m" in
-      "$dev on "*|*" on $point type "*|*" on $point ("*) ;;
-      *) continue ;;
+      *" type "*) left="${m%% type *}" ;;
+      *" ("*)     left="${m%% (*}" ;;
+      *)          continue ;;
     esac
-    found=1
-    # Parse the type and the options separately, and never the mount POINT as a
-    # substring: matching the whole line refuses a safe ext4 destination that
-    # merely happens to live at /mnt/exfat-archive.
-    local fstype="" opts=""
-    case "$m" in
-      *" type "*)
-        # Linux: "<dev> on <point> type <fstype> (<opts>)"
-        fstype="${m#* type }"
-        fstype="${fstype%% *}"
-        ;;
+    case "$left" in
+      *" on "*) mt="${left#* on }"; src="${left%% on *}" ;;
+      *)        continue ;;
     esac
-    case "$m" in
-      *\(*\)*)
-        opts="${m##*(}"
-        opts="${opts%)*}"
-        ;;
-    esac
-    # macOS has no `type` field and carries the type as the FIRST parenthesised
-    # option, so that is where the type is read from there.
-    if [ -z "$fstype" ] && [ -n "$opts" ]; then
-      fstype="${opts%%,*}"
-      fstype="${fstype# }"; fstype="${fstype% }"
+    # A target that is not absolute means the SOURCE contained " on " — the line
+    # cannot be attributed, so it is not allowed to answer for anything.
+    case "$mt" in /*) ;; *) continue ;; esac
+    path_is_under "$target" "$mt" || continue
+    # Longest wins, and among equals the LAST listed does: that is the topmost
+    # mount, which is the one the path resolves through.
+    if [ "${#mt}" -ge "${#best_mt}" ]; then
+      best_mt="$mt"; best_line="$m"; best_src="$src"
     fi
-    # macFUSE (and a bare Linux `fuse`) report a GENERIC type, so the backend
-    # behind them cannot be identified from the mount table at all — and macOS
-    # is where the encrypting backends this script allowlists actually run.
-    # Allowlisting `macfuse` wholesale would admit s3fs on the same transport.
-    # The device field names the backend, but a mount can call itself anything,
-    # so this refuses with the operator's own escape rather than guessing.
-    case "$fstype" in
-      macfuse|osxfuse|fuse)
-        printf 'the mount reports the generic type %s, so the backend behind %s cannot be identified — if it is an ownership-preserving one such as gocryptfs, set BACKUP_ALLOW_UNVERIFIED_MOUNT=true (%s)' \
-          "$fstype" "$dev" "$m"
-        return 0 ;;
-    esac
-    if ! fstype_enforces_ownership "$fstype"; then
-      printf 'filesystem type %s is not known to enforce ownership and mode (%s)' \
-        "${fstype:-unknown}" "$m"
-      return 0
-    fi
-    if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
-      printf 'mounted with an option that makes ownership advisory (%s)' "$m"
-      return 0
-    fi
-    return 1
   done <<EOF
 $mounts
 EOF
-  [ -n "$found" ] || { printf 'no mount(8) entry for device %s or mount point %s' "$dev" "$point"; return 2; }
+  [ -n "$best_line" ] || { printf 'no mount(8) entry covers %s' "$target"; return 2; }
+
+  local fstype="" opts=""
+  case "$best_line" in
+    *" type "*)
+      # Linux: "<source> on <target> type <fstype> (<opts>)"
+      fstype="${best_line#* type }"
+      fstype="${fstype%% *}"
+      ;;
+  esac
+  case "$best_line" in
+    *\(*\)*)
+      opts="${best_line##*(}"
+      opts="${opts%)*}"
+      ;;
+  esac
+  # macOS has no `type` field and carries the type as the FIRST parenthesised
+  # option, so that is where the type is read from there.
+  if [ -z "$fstype" ] && [ -n "$opts" ]; then
+    fstype="${opts%%,*}"
+    fstype="${fstype# }"; fstype="${fstype% }"
+  fi
+  # macFUSE (and a bare Linux `fuse`) report a GENERIC type, so the backend
+  # behind them cannot be identified from the mount table at all — and macOS is
+  # where the encrypting backends this script allowlists actually run.
+  # Allowlisting `macfuse` wholesale would admit s3fs on the same transport. The
+  # source field names the backend, but a mount can call itself anything, so
+  # this refuses with the operator's own escape rather than guessing.
+  case "$fstype" in
+    macfuse|osxfuse|fuse)
+      printf 'the mount reports the generic type %s, so the backend behind %s cannot be identified — if it is an ownership-preserving one such as gocryptfs, set BACKUP_ALLOW_UNVERIFIED_MOUNT=true (%s)' \
+        "$fstype" "$best_src" "$best_line"
+      return 0 ;;
+  esac
+  if ! fstype_enforces_ownership "$fstype"; then
+    printf 'filesystem type %s is not known to enforce ownership and mode (%s)' \
+      "${fstype:-unknown}" "$best_line"
+    return 0
+  fi
+  if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
+    printf 'mounted with an option that makes ownership advisory (%s)' "$best_line"
+    return 0
+  fi
   return 1
 }
 
@@ -665,11 +692,11 @@ parse_url() {
     \[*\]:*) URL_PGPASS_HOST="${hp%]*}"; URL_PGPASS_HOST="${URL_PGPASS_HOST#[}"
              URL_PGPASS_PORT="${hp##*]:}" ;;
     \[*\])   URL_PGPASS_HOST="${hp%]*}"; URL_PGPASS_HOST="${URL_PGPASS_HOST#[}"
-             URL_PGPASS_PORT="*" ;;
+             URL_PGPASS_PORT="5432" ;;
     \[*)     fail BAD_URL "the connection authority has an unclosed IPv6 bracket: $hp" ;;
     *:*:*)   fail BAD_URL "the connection authority has more than one colon: $hp" ;;
     *:*)     URL_PGPASS_HOST="${hp%:*}"; URL_PGPASS_PORT="${hp##*:}" ;;
-    *)       URL_PGPASS_HOST="$hp";      URL_PGPASS_PORT="*" ;;
+    *)       URL_PGPASS_HOST="$hp";      URL_PGPASS_PORT="5432" ;;
   esac
   # Decided on the COMPUTED host, not on the authority's spelling. Refusing the
   # bare `postgres://u:pw@/db` form left `postgres://u:pw@:5432/db` accepted,
@@ -690,10 +717,12 @@ parse_url() {
   esac
   case "$URL_PGPASS_PORT" in
     "*") ;;
-    # An empty port is a legal URI spelling that libpq reads as "the default".
-    # Refusing it is the false-deny class C7 exists to avoid; scope the entry
-    # with the wildcard port instead, which is what "no port given" means.
-    "")  URL_PGPASS_PORT="5432" ;;
+    # An empty port is a legal URI spelling that libpq reads as "the default",
+    # and so are `@host/db` and `@[v6]/db`. All three name the same port, so all
+    # three scope to it: `env -i` in run_pg strips PGPORT, so the port libpq
+    # will use is deterministically 5432. Leaving some of them on the wildcard
+    # closed the class for the member that happened to be reported.
+    "")  URL_PGPASS_PORT="5432" ;;   # see the arms above: the whole class is 5432
     # Anchored: `[0-9]*` is "starts with a digit", which admits 5432evil.
     *) [[ "$URL_PGPASS_PORT" =~ ^[0-9]+$ ]] \
          || fail BAD_URL "the connection port is not numeric: $URL_PGPASS_PORT" ;;
@@ -934,13 +963,14 @@ if [ "$mount_status" -ne 1 ]; then
     warn "BACKUP_ALLOW_UNVERIFIED_MOUNT=true — proceeding without a verified filesystem: $unsafe_mount"
   else
     case "$mount_status" in
+      1) ;;
       0)
         case "$(uname -s)" in
           Darwin) fail DEST_UNSAFE "$BACKUP_ROOT: $unsafe_mount — macOS ignores ownership on external volumes by default; enable it with: sudo diskutil enableOwnership '$BACKUP_ROOT', or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
           *)      fail DEST_UNSAFE "$BACKUP_ROOT: $unsafe_mount — choose a filesystem that enforces ownership, or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
         esac
         ;;
-      2) fail DEST_UNSAFE "could not determine whether $BACKUP_ROOT enforces ownership and mode ($unsafe_mount) — an unanswered check has not passed; df(1) and mount(8) must be on PATH (macOS keeps mount in /sbin, which cron omits), or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
+      *) fail DEST_UNSAFE "could not determine whether $BACKUP_ROOT enforces ownership and mode ($unsafe_mount) — an unanswered check has not passed; df(1) and mount(8) must be on PATH (macOS keeps mount in /sbin, which cron omits), or set BACKUP_ALLOW_UNVERIFIED_MOUNT=true" ;;
     esac
   fi
 fi
@@ -1256,6 +1286,11 @@ if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
   # verified, and $TMPDIR is neither declared nor audited.
   PGPASS_FILE="$(umask 077 && mktemp "$BACKUP_ROOT/.pgpass.XXXXXX")" \
     || fail INTERNAL "could not create a password file"
+  # Before the write, not after. mktemp creates the file empty, so the check
+  # that decides whether the mode is private can run while the file still holds
+  # nothing — checking afterwards leaves the superuser password on disk for the
+  # length of the window it is meant to prevent.
+  assert_mode_private "$PGPASS_FILE" "the passfile"
   # Wildcards for host/port/database: the script decides those per target, and a
   # mismatch would silently fall back to no password.
   # Escape the two bytes .pgpass treats as syntax. Backslash first: escaping the
@@ -1269,10 +1304,6 @@ if [ "$MODE" = "url" ] && [ -n "$URL_PASSWORD" ]; then
   printf '%s:%s:*:*:%s\n' "${_pgpass_host:-*}" "${URL_PGPASS_PORT:-*}" "$_pgpass_pw" > "$PGPASS_FILE"
   unset _pgpass_pw _pgpass_host
   URL_PASSWORD=""
-  # The credential file is the member of this set with the most to lose, and it
-  # was the one relying on mktemp's creation-time mode — exactly the assumption
-  # the helper exists to reject.
-  assert_mode_private "$PGPASS_FILE" "the passfile"
 fi
 [ -n "$XTRACE_WAS_ON" ] && set -x
 true
