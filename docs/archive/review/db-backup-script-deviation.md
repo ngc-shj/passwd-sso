@@ -30,28 +30,41 @@ Each entry follows the Anti-Deferral format: what is open, why it stays open, an
 what would settle it.
 
 **[Sec-8 / Func-F3] Major — `has_extended_acl` and `mount_is_unsafe` have no test.**
-Skipped. The off-by-one in the ACL glob was fixed and verified by hand (a default
-ACL now yields `DEST_UNSAFE`), but no automated case covers either helper.
-Justification: a test would need `setfacl` on Linux and `chmod +a` on macOS, and a
-mount-option fixture needs a mount — neither is available in CI, so the test would
-either skip (reading as coverage) or red for environment reasons. What would settle
-it: a fixture that fakes `ls -ld` / `mount` output through the same PATH-stub
-mechanism the rest of Group A uses, testing the parsing rather than the platform.
+**Closed in round 4.** Round 3 took the settling move this entry named — PATH
+stubs for `ls`, `mount` and `df`, testing the parsing rather than the platform —
+but every case it added stubbed a *succeeding* tool, so the branch where the tool
+fails or is absent stayed both unfixed and unpinned. Round 4 found both helpers
+folding "could not answer" into "verified clean", made them tri-state
+(unsafe / verified safe / undetermined ⇒ `DEST_UNSAFE`), and added the failure
+cases. Six mutants over the pair are killed, including the two that restore the
+fail-open.
 
 **[Test-12] Major — several guards are proven only by the source-level ERR_CODES
-mirror, never behaviourally.** Open: `BACKUP_DIR` newline rejection,
-`COMPOSE_DB_SUPERUSER` form, the ancestor-writability branch, `PRUNE_ABORTED`,
-`OLD_BASH`, `RUN_VANISHED`. Justification: each needs a fixture that is either
-platform-specific (an old bash), destructive to construct (a mid-prune rename), or
-unreachable without mutating the script. What would settle it: the script-path seam
-(`BACKUP_DB_SCRIPT`, read only by the test) that round-2 finding N-09 proposed, so
-mutants can be driven through the real harness.
+mirror, never behaviourally.** **Mostly closed in round 4.** The settling move
+this entry named — the `BACKUP_DB_SCRIPT` seam from round-2 finding N-09 — is
+implemented, and the sweep it enables ran: `BACKUP_DIR` newline rejection,
+`COMPOSE_DB_SUPERUSER` form, the ancestor-writability branch and `RUN_VANISHED`
+now have behavioural cases and their mutants die. Round 4 also measured five
+guards this list did not name (authority newline, `gssencmode=disable`, the TLS
+floor's POSITION, the collision-suffix naming, the dry-run `.pgpass` preview);
+all five are pinned. `PRUNE_ABORTED` and `OLD_BASH` remain open — see the
+round-4 residuals below for what each still needs.
+
+The entry also understated the problem. The mirror fires only when a code stops
+being emitted ANYWHERE, so a guard sharing its code with another site is
+invisible to it: `RUN_VANISHED` has three emitters and deleting any one left the
+other two, so no single deletion could red the mirror. "Proven by the mirror" was
+never a weaker form of proof — for those guards it was none.
 
 **[Test-10] Major — Group B's reader differs between local and CI.**
-Open. Locally it resolves to the compose `db` service; in CI to the runner's host
-binary. The suite asserts the major version is ≥ 16 but does not record which
-implementation ran. What would settle it: printing the resolved reader and its
-version, and pinning the CI client's major version.
+**Half closed in round 4**, and round 4 showed it was not the diagnosability gap
+this entry described. Which reader is discovered *decided whether two test bodies
+executed at all*: one delegating case early-returned whenever a host `pg_restore`
+existed — the CI shape — so "144 passed" locally and in CI named two different
+suites. That case is fixed (it uses the shared delegating stub, which works with
+either reader). The resolved kind, path and version are now printed, and asserted
+when `BACKUP_DB_EXPECT_READER` is set. Setting it in CI is the open half — see
+the round-4 residuals.
 
 **[Sec-7 / R51] Major — the pre-`rm` re-verification narrows the window, it does not
 close it.** The check now compares device:inode rather than path text, so a
@@ -71,6 +84,39 @@ four sibling scripts.** Unchanged from the plan, and round 2 widened the class
 description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr on
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.
+
+## Round-4 residuals
+
+**[Test] `PRUNE_ABORTED` and the device:inode re-verification are still not
+individually pinned.** Open, and now measured rather than asserted: a sweep
+through the `BACKUP_DB_SCRIPT` seam confirms that reverting
+`assert_root_unchanged` from a device:inode comparison to a path-text one keeps
+the suite green. Both need the same thing — a seam that substitutes the root at
+a chosen point mid-run — which is the same unmet precondition round 3 recorded.
+What would settle it: a `BACKUP_TEST_HOOK` invoked between publish and prune.
+
+**[Test] `OLD_BASH` remains a source assertion, not a behavioural one.** The
+branch is reachable only under an actual bash 2.x; `BASH_VERSINFO` is read-only,
+so no stub can drive it. The case now says so in its name and asserts the
+comparison reads the MAJOR element with a positive control, rather than reading
+as behavioural coverage it does not have.
+
+**[Ops] `BACKUP_DB_EXPECT_READER` is honoured by the suite but not set in CI.**
+Group B now prints which reader it resolved and asserts the kind when the
+variable is present, so the local/CI divergence is visible in the log. Setting
+it in the workflow makes a runner image that drops `postgresql-client` a red
+rather than a silent change of shape. Deferred as a separate change: it edits a
+shared workflow and belongs with its own verification that the assertion fires
+in CI, not only locally. Owner: the follow-up issue filed with this PR.
+
+**[Sec-7 / R51 extension] The EXIT trap's removals stay outside
+`assert_root_unchanged`.** The trap performs a rename and three removals — one
+of them the credential file — that re-resolve `$BACKUP_ROOT` by name. Calling
+`fail` from inside the trap re-enters cleanup, and a skip-on-mismatch would
+leave the passfile on disk, which is the worse of the two outcomes. The comment
+at the helper now names the three loops it actually governs and states the trap
+is deliberately excluded, instead of claiming a completeness the code does not
+have. Bounded by the same destination property as the recorded Sec-7 residual.
 
 ## Round-3 residuals
 

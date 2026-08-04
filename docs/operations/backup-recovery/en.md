@@ -266,9 +266,19 @@ BACKUP_DIR=/var/backups/passwd-sso \
   refused, and the password is delivered through a mode-0600 passfile so it
   never reaches any process's argv.
 - **`BACKUP_DATABASES` is a default, not a discovery.** On a managed instance
-  the names usually differ from the Compose deployment's. The script warns for
-  every database it can see that is not in the list, and records them in the
-  MANIFEST under `not_backed_up:`.
+  the names usually differ from the Compose deployment's. The script enumerates
+  every non-template database, warns for each one absent from the list, and
+  records them in the MANIFEST under `not_backed_up:`.
+  - A database that refuses connections (`datallowconn=false`) is enumerated
+    too, and recorded as `name[no-connect]`. Disabling connections is the
+    ordinary state of a database under maintenance; it does not mean the
+    database is empty.
+  - The maintenance database `postgres` is reported like any other. It usually
+    holds no application data, but the script has no way to confirm that. Name
+    it in `BACKUP_DATABASES` to silence the warning.
+  - If the enumeration itself fails, the MANIFEST records
+    `not_backed_up: unknown` and the run warns. It never writes `(none)`, which
+    means "nothing was left out".
 
 Restoring is deliberately not the script's job. Follow
 [dev-host-migration.md](../dev-host-migration.md) step 5 — the ordering

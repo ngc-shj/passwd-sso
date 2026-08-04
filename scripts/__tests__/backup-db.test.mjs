@@ -33,10 +33,20 @@ import { tmpdir, hostname } from "node:os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
-const SCRIPT = resolve(REPO_ROOT, "scripts", "backup-db.sh");
+// Read only by the test — the script never looks at it. It exists so a mutation
+// sweep can drive a modified COPY through this harness (`BACKUP_DB_SCRIPT=<copy>
+// npx vitest run …`) instead of editing the tracked file. Without it every sweep
+// first rebuilds a mirror of the whole repository, which is why the sweep keeps
+// being re-derived rather than re-run, and why guards stay unpinned between
+// rounds. Round-2 finding N-09.
+const SCRIPT = process.env.BACKUP_DB_SCRIPT ?? resolve(REPO_ROOT, "scripts", "backup-db.sh");
 const FIXTURES = resolve(__dirname, "fixtures", "backup-db");
 
 const SENTINEL_PASSWORD = "S3NT1NEL-p@ss";
+
+// Absolute, so a case can hand the script a curated PATH that deliberately
+// omits a client without also making the interpreter unresolvable.
+const BASH = spawnSync("sh", ["-c", "command -v bash"], { encoding: "utf8" }).stdout.trim() || "/bin/bash";
 
 let tmpDir, binDir, homeDir, backupDir, logFile;
 
@@ -142,6 +152,10 @@ beforeEach(() => {
   logFile = join(tmpDir, "calls.log");
   mkdirSync(binDir, { recursive: true });
   mkdirSync(homeDir, { recursive: true });
+  // Explicit, not umask-derived: a real $HOME is 0755 and passes the ancestor
+  // check, but this process's umask is 002, which would make the fixture 0775
+  // and refuse the default BACKUP_DIR for a reason no operator would hit.
+  chmodSync(homeDir, 0o700);
   dockerStub();
 });
 
@@ -661,8 +675,27 @@ exit 0`);
     pgStubs();
     run(urlEnv("postgresql://u:p@127.0.0.1:5432/passwd_sso?sslmode=disable&sslrootcert=/tmp/ca.pem"));
     const dumpLine = readLog().split("\n").find((l) => l.startsWith("pg_dump ") && l.includes("-Fc"));
+    // The operator's own parameters must still be THERE before their position
+    // means anything. `indexOf` returns -1 for a missing needle and every index
+    // beats -1, so the ordering assertion alone was satisfied by the whole query
+    // having been discarded — under which sslrootcert= disappears too and the
+    // floor cannot be met at all. Measured: a conninfo builder that dropped the
+    // operator's query and put the floor FIRST kept the suite green.
+    expect(dumpLine, "the operator's own query must survive").toContain("sslmode=disable");
+    expect(dumpLine, "including the CA the floor needs").toContain("sslrootcert=/tmp/ca.pem");
     expect(dumpLine).toMatch(/sslmode=verify-full\b/);
     expect(dumpLine.lastIndexOf("sslmode=verify-full")).toBeGreaterThan(dumpLine.indexOf("sslmode=disable"));
+  });
+
+  it("disables GSSAPI encryption, which libpq negotiates BEFORE TLS", () => {
+    // libpq's default is gssencmode=prefer and the GSS handshake happens first,
+    // so a server offering GSSAPI gets an encrypted-but-unverified session that
+    // the sslmode floor never governs. The correction was made in round 1 and
+    // had no test: removing it entirely left the suite green.
+    pgStubs();
+    run(urlEnv("postgresql://u:p@127.0.0.1:5432/passwd_sso?sslrootcert=/tmp/ca.pem"));
+    const dumpLine = readLog().split("\n").find((l) => l.startsWith("pg_dump ") && l.includes("-Fc"));
+    expect(dumpLine, "gssencmode=disable must reach the conninfo").toContain("gssencmode=disable");
   });
 
   it("selects each target with dbname=, since PGDATABASE loses to the URL path", () => {
@@ -762,8 +795,18 @@ describe("source-level contracts", () => {
 
   it("uses no utility the portability floor excludes", () => {
     // macOS is the primary operator host: /bin/bash is 3.2 and coreutils are BSD.
-    for (const banned of [/\bmapfile\b/, /\breadarray\b/, /\breadlink -f\b/, /\bflock\b/]) {
-      expect(src()).not.toMatch(banned);
+    // Each pattern carries a positive control, per INV-C9d: without one a typo'd
+    // regex (`/\bmapfle\b/`) passes vacuously and the floor stops being enforced
+    // with no signal. The block above already does this; this one did not.
+    const banned = [
+      { re: /\bmapfile\b/, control: "mapfile -t names < list" },
+      { re: /\breadarray\b/, control: "readarray names < list" },
+      { re: /\breadlink -f\b/, control: 'p="$(readlink -f "$x")"' },
+      { re: /\bflock\b/, control: "flock 9" },
+    ];
+    for (const { re, control } of banned) {
+      expect(src()).not.toMatch(re);
+      expect(control, `${re} must match a plausible violation`).toMatch(re);
     }
   });
 });
@@ -798,6 +841,16 @@ describe("Group B — validation by a real pg_restore", () => {
       reader,
       "no pg_restore reachable — install postgresql-client or start the compose db service",
     ).not.toBeNull();
+    // Recorded, because WHICH reader was discovered decides how the delegating
+    // cases run, and "115 passed" locally and in CI otherwise describe two
+    // different suites with no way to tell them apart from the log.
+    console.log(`[Group B] reader kind=${reader.kind} version=${JSON.stringify(reader.version)}`);
+    // And asserted when CI declares what it expects, so a runner image that
+    // drops the client is a red rather than a silent change of shape.
+    const expected = process.env.BACKUP_DB_EXPECT_READER;
+    if (expected) {
+      expect(reader.kind, `CI declared BACKUP_DB_EXPECT_READER=${expected}`).toBe(expected);
+    }
     const major = Number(reader.version.match(/\)\s*(\d+)/)?.[1] ?? 0);
     // Anchored on the MAJOR component: a /\b(1[6-9]|[2-9]\d)\b/ over the whole
     // string is satisfied by the minor number, so "13.22" would pass.
@@ -879,38 +932,13 @@ exit 0`);
     // them all green. This case runs the script with a docker stub that
     // DELEGATES pg_restore to the real docker, so the production invocation is
     // the thing under test.
-    if (reader?.kind !== "compose") {
-      expect(reader, "this case needs the compose reader").not.toBeNull();
-      return;
-    }
-    const hostRestore = spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).stdout.trim();
-    const realDocker = spawnSync("sh", ["-c", "command -v docker"], { encoding: "utf8" }).stdout.trim();
-    const truncated = join(FIXTURES, "truncated.pgdump");
-    stub("docker", `
-if [ "\${2:-}" = "config" ]; then exit 0; fi
-if [ "\${2:-}" = "ps" ]; then echo container123; exit 0; fi
-for a in "$@"; do
-  case "$a" in
-    pg_dump)     cat -- "${truncated}"; exit 0 ;;
-    pg_dumpall)  printf 'CREATE ROLE r;\n-- PostgreSQL database cluster dump complete\n'; exit 0 ;;
-    pg_restore)
-      echo "DELEGATED" >> "${logFile}"
-      if [ -n "${hostRestore}" ]; then
-        # Drop the "compose exec -T -- <svc>" prefix and hand the remaining
-        # arguments — including the deliberate absence of a filename — to the
-        # host reader, so the production invocation shape is what runs.
-        shift_to_pg=0
-        args=()
-        for x in "$@"; do
-          [ "$shift_to_pg" = 1 ] && args+=("$x")
-          [ "$x" = "pg_restore" ] && shift_to_pg=1
-        done
-        exec "${hostRestore}" "\${args[@]}"
-      fi
-      exec "${realDocker}" "$@" ;;
-  esac
-done
-exit 0`);
+    // Uses the SHARED delegating stub. It previously carried a hand-copied
+    // duplicate plus an early return on `reader.kind !== "compose"`, so on any
+    // host with a pg_restore — every CI runner — the body executed zero
+    // assertions and reported PASS. The round-3 fix for exactly this shape
+    // landed on the sibling case above and not on this twin.
+    expect(reader, "a real archive reader is required — the delegating stub needs one").not.toBeNull();
+    delegatingStub(join(FIXTURES, "truncated.pgdump"));
     const r = run({}, {});
     expect(err(r)).toBe("VALIDATE_FAILED");
     expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
@@ -939,6 +967,33 @@ describe("C8 documentation", () => {
     "docs/operations/dev-host-migration.md",
     "docs/operations/incident-runbook.md",
   ];
+
+  it("is reachable on a PR that changes only these documents", () => {
+    // The comment above says asserting the references here turns them into a red
+    // build. That holds only if the suite RUNS. `ci.yml`'s `app:` filter and
+    // `pre-pr.sh`'s `app_paths` (kept in lockstep, R33) both gate the Web steps,
+    // and neither listed `docs/`, so a docs-only PR ran neither gate — the
+    // assertions above reported nothing on exactly the change they exist to
+    // catch, and SC5's justification for not wiring check-doc-paths.mjs rests on
+    // them. Pinned in both files because the lockstep is a comment, not a check.
+    const ci = readFileSync(resolve(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    // Scoped to the `filters:` literal and split on the NEXT key inside it. A
+    // whole-file split cuts at the `extension:` in the job's `outputs:` block,
+    // which comes first — measured: the slice ended 372 bytes in, before the
+    // filter list existed.
+    const filters = ci.slice(ci.indexOf("filters: |"));
+    const app = filters.slice(filters.indexOf("app:"), filters.indexOf("extension:"));
+    expect(app, "ci.yml's app filter must reach the documents this describe asserts")
+      .toMatch(/^[ \t]*- "docs\/operations\/\*\*"$/m);
+    const prePr = readFileSync(resolve(REPO_ROOT, "scripts/pre-pr.sh"), "utf8");
+    const paths = prePr.match(/^\s*local app_paths='(.+)'$/m)?.[1];
+    expect(paths, "pre-pr.sh must declare app_paths").toBeDefined();
+    expect(new RegExp(paths).test("docs/operations/backup-recovery/ja.md"),
+      `app_paths must match a document path, got ${paths}`).toBe(true);
+    // Positive control: the same regex must NOT match an unrelated path, or a
+    // catch-all would satisfy the assertion above without gating anything.
+    expect(new RegExp(paths).test("ios/project.yml")).toBe(false);
+  });
 
   for (const rel of DOCS) {
     it(`${rel} points operators at the script`, () => {
@@ -1242,7 +1297,7 @@ exit 0`);
     expect(existsSync(join(backupDir, ".pgpass.aaaaaa"))).toBe(true);
   });
 
-  it("refuses to publish over an existing generation", () => {
+  it("refuses to publish over an existing generation", { timeout: 30000 }, () => {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     // Every stamp the retry loop can reach is already taken.
@@ -1401,6 +1456,43 @@ exit 0`);
     expect(generations()).toEqual([]);
   });
 
+  it("lets exactly one of two runs take a FREE lock", { timeout: 30000 }, async () => {
+    // The case above pre-creates a stale lock, so both runs take the
+    // existing-lock branch and neither ever races for a free one — nothing
+    // observed the atomicity `mkdir` is chosen for. Replacing the acquire with
+    // a test-then-`mkdir -p` (two runs both see "absent", both proceed into one
+    // root) left the suite green.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    sleep 2; printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const env = { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir };
+    const both = await Promise.all([0, 1].map(() => new Promise((res) => {
+      const c = spawn(BASH, [SCRIPT], { env, stdio: ["ignore", "pipe", "pipe"] });
+      let out = "";
+      c.stdout.on("data", (d) => { out += d; });
+      c.stderr.on("data", (d) => { out += d; });
+      c.on("exit", (code) => res({ code, out }));
+    })));
+
+    const winners = both.filter((r) => r.code === 0);
+    expect(winners, "exactly one run may hold the lock").toHaveLength(1);
+    const losers = both.filter((r) => r.code !== 0);
+    for (const r of losers) expect(r.out).toMatch(/BACKUP_ERR:LOCKED/);
+    // One writer means one generation and no residue from a second one.
+    expect(generations()).toHaveLength(1);
+    expect(readdirSync(backupDir).filter((n) => n.endsWith(".partial"))).toEqual([]);
+  });
+
   it("refuses an ancestor owned by a third party", () => {
     // stat is PATH-resolved, so the ownership branch is reachable without a
     // second real uid: report a foreign owner for the parent only.
@@ -1420,10 +1512,46 @@ exec "${realStat}" "$@"`);
     expect(r.stderr).toMatch(/owned by uid 4242, who can rename our entry/);
   });
 
-  it("accepts an ancestor owned by the invoking user (paired allow case)", () => {
-    // Without this, the refusal above would pass against a check that refuses
-    // every ancestor.
-    expect(run().status).toBe(0);
+  it("accepts an ancestor owned by the invoking user at 0755 (paired allow case)", () => {
+    // Boundary-adjacent, per RT10. Installing no stub at all made this
+    // byte-identical to the plain happy path, so it could not tell the ownership
+    // branch from any other reason the run might succeed — and a widening that
+    // exempts an owner from the writability check (the exemption D3 records as
+    // deliberately rejected) survived. This reports the "admin created it and
+    // chowned it to the operator" shape: our uid, mode 0755, no sticky bit.
+    const parent = dirname(backupDir);
+    const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    const uid = String(process.getuid());
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+if [ "$last" = "${parent}" ]; then
+  case " $* " in
+    *" %u "*|*"'%u'"*) echo ${uid}; exit 0 ;;
+    *" %a "*|*"'%Lp'"*|*" %Lp "*) echo 755; exit 0 ;;
+  esac
+fi
+exec "${realStat}" "$@"`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+  });
+
+  it("uses $HOME/passwd-sso-backups when BACKUP_DIR is unset", () => {
+    // `run()` always sets BACKUP_DIR, so the documented default was exercised by
+    // nothing and a typo in it would ship. Safe to exercise precisely because
+    // INV-C9c makes HOME a per-test tmpdir — that allowlist is what this case
+    // buys.
+    const { BACKUP_DIR: _omitted, ...rest } = {
+      PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,
+    };
+    const r = spawnSync(BASH, [SCRIPT], { encoding: "utf8", timeout: 8000, cwd: REPO_ROOT, env: rest });
+    expect(r.status, r.stderr).toBe(0);
+    const defaultRoot = join(homeDir, "passwd-sso-backups");
+    expect(existsSync(defaultRoot), "the documented default must be where the run lands").toBe(true);
+    expect(
+      readdirSync(defaultRoot).filter((n) => /^\d{8}T\d{6}Z$/.test(n)),
+      "a generation must have been published under the default root",
+    ).toHaveLength(1);
   });
 
   it("refuses a password whose literal trailing newline a substitution would eat", () => {
@@ -1477,6 +1605,26 @@ exec "${realStat}" "$@"`);
     expect(r.status, r.stderr).toBe(0);
     expect(existsSync(old), "past the age bound even though the count allows it").toBe(false);
     expect(existsSync(join(backupDir, "20200102T000000Z.FAILED")), "recent one kept").toBe(true);
+  });
+
+  it("counts a directory whose name contains a newline exactly once", () => {
+    // INV-C6e mandates a NUL-delimited reader. `ls -1` writes such a name as two
+    // lines, and when both halves look like generations the candidate count is
+    // inflated — so the pruner deletes one MORE validated generation than
+    // BACKUP_RETAIN permits, the same outcome the <stamp>.<digits> spelling
+    // produced through a different route.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    for (const g of ["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]) mkGeneration(g);
+    mkdirSync(join(backupDir, "20200101T000000Z\n20200102T000000Z"), { recursive: true });
+
+    // 3 existing + the one this run publishes = exactly BACKUP_RETAIN.
+    const r = run({ BACKUP_RETAIN: "4" });
+    expect(r.status, r.stderr).toBe(0);
+    for (const g of ["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]) {
+      expect(existsSync(join(backupDir, g)), `${g} is inside the retention window`).toBe(true);
+    }
+    expect(generations()).toHaveLength(4);
   });
 
   it("previews only the residue it would actually remove", () => {
@@ -1565,6 +1713,75 @@ fi`);
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
     expect(r.stderr).toMatch(/owned by uid 4242/);
+  });
+
+  // ─── "could not determine" is not "safe" ───────────────────
+  //
+  // Both helpers used to fold a failed or absent tool into the same verdict as
+  // a verified-clean destination. macOS keeps mount(8) in /sbin, which cron's
+  // default PATH omits, so on the declared primary host the ordinary scheduled
+  // run was the one silently losing the check.
+
+  it("refuses when mount(8) cannot answer", () => {
+    passthrough("df", `
+if [ "$2" = "--" ] || [ "$1" = "-P" ]; then
+  printf 'Filesystem 1K-blocks Used Avail Use%% Mounted on\n/dev/probe0 1 1 1 1%% /probe\n'
+  exit 0
+fi`);
+    stub("mount", "exit 1");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/could not determine whether/);
+  });
+
+  it("refuses when df(1) cannot answer", () => {
+    passthrough("df", `
+if [ "$2" = "--" ] || [ "$1" = "-P" ]; then exit 1; fi`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/could not determine whether/);
+  });
+
+  it("refuses when the device is absent from the mount table", () => {
+    // df names a device, mount lists something else entirely: the check has not
+    // been performed, which is not the same as having passed.
+    mountStub("/dev/somethingelse on / type ext4 (rw,relatime)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/could not determine whether/);
+  });
+
+  it("refuses when the ACL check cannot answer", () => {
+    passthrough("ls", `
+case " $* " in
+  *" -ld "*|*" -lde "*) exit 1 ;;
+esac`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/could not read the ACL state/);
+  });
+
+  it("refuses a Linux FUSE filesystem whatever the backend is", () => {
+    // Linux spells every FUSE backend `fuse.<name>`, so the exact-match list
+    // could never see fuse.sshfs, fuse.s3fs or fuse.rclone — the last two write
+    // the corpus to a remote store in the clear. `sshfs` was IN the list and
+    // unreachable on both platforms.
+    mountStub("/dev/probe0 on /probe type fuse.s3fs (rw,nosuid,nodev)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/does not enforce ownership/);
+  });
+
+  it("refuses a filesystem named only in the macOS option list", () => {
+    // macOS prints no `type` field at all, so the options are the ONLY reading
+    // that ever runs there. The two lists used to differ by six members, every
+    // one of them missing from this one. Also the case that reds when
+    // fstype_is_unsafe inherits `IFS=,` from its caller and stops splitting its
+    // own member list — bash scopes `local` dynamically.
+    mountStub("/dev/probe0 on /probe (afpfs, local, nodev, nosuid)");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/does not enforce ownership/);
   });
 });
 
@@ -1663,7 +1880,7 @@ exit 0`);
   it("writes no credential into any published artifact", () => {
     // The sinks are enumerated by pattern, but nothing grepped the artifacts the
     // run actually produces — and MANIFEST is copied between hosts.
-    const SENT = "S3NT1NEL-p@ss";
+    const SENT = SENTINEL_PASSWORD;
     for (const bin of ["pg_dump", "pg_dumpall"]) {
       stub(bin, `
 out=""; prev=""; for a in "$@"; do [ "$prev" = "-f" ] && out="$a"; prev="$a"; done
@@ -1705,26 +1922,52 @@ exit 0`);
 
   it("names a collided failure so the pruners can still see it", () => {
     // <stamp>.FAILED.<pid> would be outside list_stamped ".FAILED", making it an
-    // unmanaged full plaintext corpus. Only the consuming side was pinned.
+    // unmanaged full plaintext corpus.
+    //
+    // The previous version of this case produced no collision at all: it
+    // computed a stamp and re-ran, but the stamp loop skips any stamp whose
+    // .FAILED already exists, so the second run always picked a fresh one — and
+    // the asserted shape made the `.<pid>` group optional, so a plain
+    // <stamp>.FAILED satisfied it. Renaming the collision form back to the
+    // pre-fix spelling left the suite green.
+    //
+    // The collision has to appear DURING the run, which is what the stub does:
+    // it creates <stamp>.FAILED for the in-flight run and then rejects the
+    // archive, so the cleanup trap meets an occupied destination.
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
-    dockerStub({ restoreFails: "1" });
-    const first = run();
-    expect(err(first)).toBe("VALIDATE_FAILED");
-    const [existing] = readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"));
-    expect(existing).toBeDefined();
-    // Force the next run onto the same stamp by pre-creating nothing else and
-    // re-running within the same second is unreliable; instead plant the
-    // collision directly under the name the next failure will choose.
-    const stamp = existing.replace(/\.FAILED$/, "");
+    stub("docker", `
+echo "docker $*" >> "${logFile}"
+case "\${2:-}" in
+  config) exit 0 ;;
+  ps) echo container123; exit 0 ;;
+esac
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PGDMP-STUB-ARCHIVE'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore)
+      for p in "${backupDir}"/*.partial; do
+        [ -e "$p" ] || continue
+        mkdir -p -- "\${p%.partial}.FAILED"
+      done
+      exit 1 ;;
+  esac
+done
+exit 0`);
     const r = run();
+    expect(err(r)).toBe("VALIDATE_FAILED");
     const failed = readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"));
+    // Mandatory, not optional: the collision form must actually have been taken.
+    expect(
+      failed.filter((n) => /^\d{8}T\d{6}Z\.\d+\.FAILED$/.test(n)),
+      `the collision form must be produced, got ${JSON.stringify(failed)}`,
+    ).toHaveLength(1);
     for (const f of failed) {
       expect(f, "every failure name must stay matchable by the pruner")
         .toMatch(/^\d{8}T\d{6}Z(\.\d+)?\.FAILED$/);
     }
-    expect(stamp).toMatch(/^\d{8}T\d{6}Z$/);
-    expect(r.status).toBe(1);
+    expect(generations()).toEqual([]);
   });
 
   it("warns about a cluster database that is not in BACKUP_DATABASES", () => {
@@ -1735,7 +1978,7 @@ exit 0`);
 [ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
 for a in "$@"; do
   case "$a" in
-    psql)       printf 'passwd_sso\\njackson\\npostgres\\nforgotten_db\\n'; exit 0 ;;
+    psql)       printf 'ypasswd_sso\\nyjackson\\nypostgres\\nyforgotten_db\\n'; exit 0 ;;
     pg_dump)    printf 'PGDMP'; exit 0 ;;
     pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
     pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
@@ -1745,20 +1988,315 @@ exit 0`);
     const r = run();
     expect(r.status, r.stderr).toBe(0);
     expect(r.stderr).toMatch(/forgotten_db.*is NOT being backed up/);
-    expect(r.stderr, "the maintenance database is not worth warning about every run")
-      .not.toMatch(/'postgres'.*is NOT being backed up/);
+    // `postgres` is reported like any other database now. It usually holds no
+    // application data, but "usually" is not a property this script can check,
+    // and the operator silences it by naming it in BACKUP_DATABASES.
+    expect(r.stderr).toMatch(/'postgres'.*is NOT being backed up/);
     const [gen] = generations();
-    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/not_backed_up: forgotten_db/);
+    const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+    expect(manifest).toMatch(/not_backed_up:.*forgotten_db/);
+    expect(manifest).toMatch(/not_backed_up:.*postgres/);
   });
 
-  it("refuses a run directory or archive whose achieved mode is not private", () => {
-    // INV-C4b declares the read-back as app-enforced; only the root had one, so
-    // the run directory and the archives relied on umask alone — the reasoning
-    // INV-C4a explicitly rejects.
+  it("records not_backed_up: unknown when the cluster enumeration fails", () => {
+    // `(none)` is a legitimate value of this field's own domain, so writing it
+    // after a failed enumeration made "nothing was left out" and "we could not
+    // tell" indistinguishable — on the one field whose job is to say what the
+    // corpus is missing. Measured: psql exiting 2 produced `(none)` and no
+    // warning at all.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       echo 'psql: FATAL: permission denied for database "postgres"' >&2; exit 2 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, "the operator must be told the check did not run")
+      .toMatch(/could not enumerate the cluster's databases/);
+    const [gen] = generations();
+    const manifest = readFileSync(join(backupDir, gen, "MANIFEST"), "utf8");
+    expect(manifest).toMatch(/not_backed_up: unknown/);
+    expect(manifest, "the all-clear sentinel must not be written").not.toMatch(/not_backed_up: \(none\)/);
+  });
+
+  // ─── Guards proven only by the ERR_CODES source mirror ────
+  //
+  // The mirror fires only when a code stops being emitted ANYWHERE, so a guard
+  // sharing its code with another site is invisible to it. Each of these
+  // survived deletion with the suite green.
+
+  it("rejects a BACKUP_DIR containing a newline", () => {
+    // The passfile and the MANIFEST are both line-oriented and both derive from
+    // this path.
+    const r = run({ BACKUP_DIR: `${backupDir}\nevil` });
+    expect(err(r)).toBe("BAD_ENV");
+    expect(r.stderr).toMatch(/must not contain a newline/);
+  });
+
+  it("rejects an option-shaped COMPOSE_DB_SUPERUSER before any docker call", () => {
+    const r = run({ COMPOSE_DB_SUPERUSER: "-e" });
+    expect(err(r)).toBe("BAD_ENV");
+    expect(readLog(), "nothing may be spawned with an unvalidated role name").toBe("");
+  });
+
+  it("accepts an ordinary role name (paired allow case)", () => {
+    expect(run({ COMPOSE_DB_SUPERUSER: "passwd_user" }).status).toBe(0);
+  });
+
+  it("refuses an ancestor that is group/other-writable without the sticky bit", () => {
+    const parent = dirname(backupDir);
+    const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+if [ "$last" = "${parent}" ]; then
+  case " $* " in *" %a "*|*"'%Lp'"*|*" %Lp "*) echo 777; exit 0 ;; esac
+fi
+exec "${realStat}" "$@"`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/writable by others without the sticky bit/);
+  });
+
+  it("accepts a group/other-writable ancestor that IS sticky (paired allow case)", () => {
+    // /tmp is the archetype, and refusing it would refuse the ordinary
+    // destination. 1777 = sticky + 777.
+    const parent = dirname(backupDir);
+    const realStat = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+if [ "$last" = "${parent}" ]; then
+  case " $* " in *" %a "*|*"'%Lp'"*|*" %Lp "*) echo 1777; exit 0 ;; esac
+fi
+exec "${realStat}" "$@"`);
+    expect(run().status).toBe(0);
+  });
+
+  it("declares a bash floor that compares the MAJOR component", () => {
+    // Source-level on purpose, and labelled as such: BASH_VERSINFO is read-only
+    // and the branch is only reachable under an actual bash 2.x, which no
+    // supported platform still ships. What IS checkable is that the comparison
+    // reads the major element and is not a constant, and that the branch has its
+    // own identifier. Positive control included, per INV-C9d.
     const src = readFileSync(SCRIPT, "utf8");
-    expect(src, "the run directory's achieved mode must be read back")
-      .toMatch(/run_mode="\$\(stat_mode "\$RUN_PARTIAL"\)"/);
-    expect(src, "and each archive's").toMatch(/archive_mode="\$\(stat_mode "\$archive"\)"/);
+    const floor = /BASH_VERSINFO\[0\]:-0\}" -lt 3/;
+    expect(src).toMatch(floor);
+    expect('if [ "${BASH_VERSINFO[0]:-0}" -lt 3 ]; then', "the pattern must match a real floor")
+      .toMatch(floor);
+    expect(src, "and it must fail with its own identifier").toMatch(/fail OLD_BASH/);
+  });
+
+  it("fails when the published run disappears during pruning", () => {
+    // RUN_VANISHED has three emitters and the mirror only notices when all
+    // three stop existing, so each was individually unpinned. This drives the
+    // per-archive one: the pruner's own `rm` removes the file it just validated.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall)
+      # By now both archives exist inside the run directory. Remove one, so the
+      # post-prune re-stat meets a published generation missing a member.
+      rm -f "${backupDir}"/*.partial/passwd_sso.dump
+      printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run({ BACKUP_DATABASES: "passwd_sso" });
+    expect(err(r)).toBe("RUN_VANISHED");
+    expect(r.stderr).toMatch(/passwd_sso\.dump is missing/);
+  });
+
+  // The authority reaches URL_DISPLAY, and from there both the MANIFEST and the
+  // log; the host slice additionally reaches the .pgpass line. All three are
+  // line-oriented. Validation used to cover the host slice only, so both slices
+  // are pinned here — the check is one `case` over the whole authority, and a
+  // single-slice test cannot tell that from a single-slice check.
+  for (const [what, url] of [
+    ["USERNAME", "postgresql://us\ner:pw@dbhost:5432/d?sslrootcert=/x"],
+    ["HOST", "postgresql://u:pw@db\nhost:5432/d?sslrootcert=/x"],
+  ]) {
+    it(`refuses an authority whose ${what} carries a newline`, () => {
+      const r = run({ MIGRATION_DATABASE_URL: url });
+      expect(err(r)).toBe("BAD_URL");
+      expect(r.stderr).toMatch(/authority contains a newline/);
+    });
+  }
+
+  it("refuses a host containing a backslash, which .pgpass reads as an escape", () => {
+    // Not covered by the authority newline check — its own arm, and until now
+    // its own untested one.
+    const r = run({ MIGRATION_DATABASE_URL: "postgresql://u:pw@db\\host:5432/d?sslrootcert=/x" });
+    expect(err(r)).toBe("BAD_URL");
+    expect(r.stderr).toMatch(/backslash, which \.pgpass reads as an escape/);
+  });
+
+  it("previews the orphaned credential file it would remove", () => {
+    // The dry run must name the same residue the real sweep removes, and must
+    // remove nothing.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const orphan = join(backupDir, ".pgpass.orphan");
+    writeFileSync(orphan, "*:*:*:*:leftover\n", "utf8");
+    const r = run({ BACKUP_DRY_RUN: "true" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toContain("would remove residue .pgpass.orphan");
+    expect(existsSync(orphan), "a preview must delete nothing").toBe(true);
+  });
+
+  it("reports a database that exists but refuses connections", () => {
+    // `datallowconn` used to be a WHERE condition, so a database with
+    // connections disabled was invisible to the enumeration: absent from
+    // BACKUP_DATABASES, absent from the warning, and recorded as `(none)` —
+    // the all-clear, for a database nothing was backing up. Disabling
+    // connections is the ordinary state of a database under maintenance; the
+    // data is still there.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf 'ypasswd_sso\\nyjackson\\nnquarantined_db\\n'; exit 0 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/'quarantined_db'.*is NOT being backed up/);
+    expect(r.stderr, "and the operator is told why it could not be dumped anyway")
+      .toMatch(/connections to it are currently disabled/);
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8"))
+      .toMatch(/not_backed_up:.*quarantined_db\[no-connect\]/);
+  });
+
+  it("enumerates every non-template database, filtering on nothing else", () => {
+    // The condition itself, not only its effect: a future edit that narrows the
+    // WHERE clause again removes databases from the operator's only record of
+    // what the corpus is missing, and does it silently.
+    expect(run().status).toBe(0);
+    const query = readLog().split("\n").find((l) => l.includes("pg_database"));
+    expect(query, "the enumeration query must reach psql").toBeDefined();
+    expect(query).toMatch(/from pg_database where not datistemplate/);
+    const narrowed = "select datname from pg_database where not datistemplate and datallowconn";
+    expect(query, "datallowconn must be reported, never filtered on")
+      .not.toMatch(/where not datistemplate and/);
+    // Positive control: the pattern above does match the spelling it forbids.
+    expect(narrowed).toMatch(/where not datistemplate and/);
+  });
+
+  it("treats a failed enumeration as failed even when it printed rows", () => {
+    // The exit status is the authority, not the emptiness of stdout. A psql that
+    // prints a partial result and then dies would otherwise have its output read
+    // as the complete cluster list, and the MANIFEST would name the databases it
+    // happened to reach as the whole set.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf 'ypasswd_sso\\n'; echo 'psql: connection lost' >&2; exit 2 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/could not enumerate the cluster's databases/);
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/not_backed_up: unknown/);
+  });
+
+  it("decides membership with the same split that validated the names", () => {
+    // IFS=$' \\t\\n' governs every other consumer, but the reconciliation asked
+    // `case " $BACKUP_DATABASES " in *" $db "*`, which splits on spaces only —
+    // so a tab-separated list reported both databases it had just dumped as not
+    // backed up, in the MANIFEST field the operator reads at restore time.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do
+  case "$a" in
+    psql)       printf 'ypasswd_sso\\nyjackson\\n'; exit 0 ;;
+    pg_dump)    printf 'PGDMP'; exit 0 ;;
+    pg_dumpall) printf 'CREATE ROLE r;\\n-- PostgreSQL database cluster dump complete\\n'; exit 0 ;;
+    pg_restore) printf '; h\\n1; 1 TABLE t o\\n'; exit 0 ;;
+  esac
+done
+exit 0`);
+    const r = run({ BACKUP_DATABASES: "passwd_sso\tjackson" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, "a database that WAS dumped must not be reported as missing")
+      .not.toMatch(/is NOT being backed up/);
+    const [gen] = generations();
+    expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/not_backed_up: \(none\)/);
+  });
+
+  // The previous version of this case asserted the two `stat_mode` ASSIGNMENTS
+  // in the source text. Deleting the refusals while keeping the assignments left
+  // it green, and it carried no positive control either. `stat` is PATH-resolved,
+  // so the refusal itself is reachable.
+  const modeStub = (target) => {
+    const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+case "$last" in
+  ${target})
+    case " $* " in *" %a "*|*"'%Lp'"*|*" %Lp "*) echo 755; exit 0 ;; esac ;;
+esac
+exec "${real}" "$@"`);
+  };
+
+  it("refuses a run directory whose achieved mode is not private", () => {
+    modeStub("*.partial");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/run directory[^\n]*mode 755/);
+  });
+
+  it("refuses an archive whose achieved mode is not private", () => {
+    modeStub("*.dump");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/\.dump[^\n]*mode 755/);
+  });
+
+  it("refuses globals.sql when its achieved mode is not private", () => {
+    // The third member of the set. INV-C4b's read-back covered <db>.dump only,
+    // while the commit that added it said "each archive's achieved mode is read
+    // back" — globals.sql and MANIFEST were both unchecked.
+    modeStub("*globals.sql");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/globals\.sql[^\n]*mode 755/);
+  });
+
+  it("accepts the private modes the run actually creates (paired allow case)", () => {
+    // Without this the three refusals above would pass against a check that
+    // refuses every mode.
+    expect(run().status).toBe(0);
+    const [gen] = generations();
+    for (const f of ["MANIFEST", "passwd_sso.dump", "globals.sql"]) {
+      const mode = statSync(join(backupDir, gen, f)).mode & 0o077;
+      expect(mode, `${f} must not be group/other accessible`).toBe(0);
+    }
   });
 
   it("records every documented MANIFEST field", () => {
@@ -1778,18 +2316,43 @@ exit 0`);
       writeFileSync(join(sysbin, tool), "#!/usr/bin/env bash\nexit 0\n", "utf8");
       chmodSync(join(sysbin, tool), 0o755);
     }
-    const r = spawnSync("bash", [SCRIPT], {
+    // PATH is the curated directory ALONE. Filtering "pgsql" out of the
+    // inherited PATH left /usr/bin in place, which is exactly where a Debian
+    // runner keeps pg_restore — so on CI the binary was found, NO_CLIENT could
+    // not fire, and the `if` below silently skipped every assertion. Nothing
+    // before require_binary spawns an external command (the version floor, the
+    // environment block and the URL parser are all shell builtins), so the
+    // absence of pg_restore is constructed here rather than hoped for.
+    const r = spawnSync(BASH, [SCRIPT], {
       encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
       env: {
-        PATH: `${sysbin}:${process.env.PATH.split(":").filter((d) => !d.includes("pgsql")).join(":")}`,
+        PATH: sysbin,
         HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,
         MIGRATION_DATABASE_URL: "postgresql://u:p@127.0.0.1:5432/d?sslrootcert=/tmp/ca.pem",
       },
     });
-    // pg_restore is absent from the curated bin; the real one is not on PATH here.
-    if (spawnSync("sh", ["-c", "command -v pg_restore"], { encoding: "utf8" }).status !== 0) {
-      expect(err(r)).toBe("NO_CLIENT");
-      expect(r.stderr).toMatch(/pg_restore/);
+    expect(err(r)).toBe("NO_CLIENT");
+    expect(r.stderr).toMatch(/pg_restore/);
+  });
+
+  it("accepts a URL-mode PATH that does carry every client (paired allow case)", () => {
+    // The allow half of the case above: with pg_restore present the preflight
+    // passes and the run proceeds past it, so the refusal is not simply
+    // refusing everything.
+    const sysbin = join(tmpDir, "urlbin-full");
+    mkdirSync(sysbin, { recursive: true });
+    for (const tool of ["pg_dump", "pg_dumpall", "psql", "pg_restore"]) {
+      writeFileSync(join(sysbin, tool), "#!/usr/bin/env bash\nexit 0\n", "utf8");
+      chmodSync(join(sysbin, tool), 0o755);
     }
+    const r = spawnSync("bash", [SCRIPT], {
+      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+      env: {
+        PATH: `${sysbin}:${process.env.PATH}`,
+        HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,
+        MIGRATION_DATABASE_URL: "postgresql://u:p@127.0.0.1:5432/d?sslrootcert=/tmp/ca.pem",
+      },
+    });
+    expect(err(r), "the client preflight must not be what fails here").not.toBe("NO_CLIENT");
   });
 });

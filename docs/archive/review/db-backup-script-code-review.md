@@ -286,6 +286,214 @@ Contracts declaring `Verification environment constraints` in Phase 1:
 
 ---
 
+# Round 4
+
+## Changes from Previous Round
+
+All three perspectives, run against the round-3 fixes. Ollama was down, so Step
+3-2's seed generation fell back to full-diff review and the merge was manual.
+32 findings after dedup: **1 Critical, 17 Major, 12 Minor** — a higher count than
+round 3, because the round-3 fixes introduced five of them and because the
+testing sweep was run independently rather than re-derived from the previous
+round's numbers.
+
+## Functionality Findings
+
+11 findings, 5 Major.
+
+- **F1 [Major]** The cluster reconciliation decided membership with
+  `case " $BACKUP_DATABASES "` — a space-only split — while every other consumer
+  splits on `IFS`. A tab-separated list made the MANIFEST report both databases
+  it had just dumped as not backed up. Re-introduced the class `88a9da80d` fixed
+  for `${BACKUP_DATABASES%% *}`.
+- **F2 [Major]** A failed enumeration was recorded as `not_backed_up: (none)` —
+  the all-clear sentinel — with no warning. `(none)` is a legitimate value of the
+  field's own domain (R55), so no consumer could distinguish "nothing was left
+  out" from "we could not tell".
+- **F3 [Major]** `list_stamped` read candidates with `ls -1` instead of INV-C6e's
+  mandated `find -print0`, an undeclared deviation. A directory whose name
+  contains a newline is emitted as two lines; when both halves look like
+  generations the pruner deletes one MORE validated generation than
+  `BACKUP_RETAIN` permits. Red-proved.
+- **F4 [Major]** The in-repo guard wrote git's stderr to `/tmp/.backup-db-git-err.$$`
+  — predictable, world-writable, symlink-followable, and before `umask 077`.
+  Converges with Sec S1.
+- **F5 [Major]** `mount_is_unsafe` kept two filesystem lists differing by six
+  members, and on macOS — the platform the guard exists for — only the shorter
+  one is ever consulted.
+- **F6 [Minor]** The port anchoring added for `5432evil` also rejected the legal
+  libpq empty-port form `postgres://u:pw@host:/db`, and named an empty value in
+  the error.
+- F7–F11 Minor: achieved-mode read-back covered 1 of 3 run-directory members; a
+  `.gitignore` comment contradicted the rule three lines below it; a section
+  banner sat over an empty block; a failed lock-metadata write wedged the
+  destination permanently; the INV-C2a mode/target log line ran after
+  `verify_transport`, so `CONNECT_FAILED` still printed without it.
+
+## Security Findings
+
+5 findings, 3 Major, no Critical (second round with none).
+
+- **S1 [Major]** The `/tmp` write is a symlink-follow write primitive against the
+  operator. Red-proved by pid spray: the victim file was truncated and
+  overwritten with git's stderr on the fourth attempt. **Introduced by the
+  round-3 fix** that tightened the same guard to fail closed — confirmed with
+  `git log -L`.
+- **S2 [Major]** The filesystem member set missed the whole Linux `fuse.*` family
+  and every VM-share type. `fuse.s3fs` / `fuse.rclone` mean the corpus is written
+  unencrypted to a remote store. The declared member `sshfs` was dead on both
+  platforms: prefixed on Linux, no `type` field on macOS.
+- **S3 [Major]** `has_extended_acl` and `mount_is_unsafe` failed **open** when
+  their tool failed or was absent — the exact class `882f41c1a` closed for the
+  sibling in-repo guard in the same commit. macOS keeps `mount` in `/sbin`, which
+  cron's default PATH omits.
+- **S4 [Minor]** `assert_root_unchanged`'s "one place, so a future removal loop
+  cannot be added without it" claim omits the EXIT trap's four removal sites, one
+  of which deletes the credential.
+- **S5 [Minor]** Converges with Func F1.
+
+## Testing Findings
+
+14 findings, 1 Critical, 10 Major.
+
+- **T1 [Critical]** The Group B truncated-archive case executed **zero**
+  assertions whenever a host `pg_restore` exists — i.e. always, in CI. The
+  round-3 fix for exactly this shape landed on its twin and not on this one
+  (RT9 twin drift inside the test file). Red-proved with a tripwire in both
+  environment shapes.
+- **T2 [Major]** The URL-mode preflight filtered `pgsql` out of the inherited
+  PATH, which does not remove `/usr/bin` where a Debian runner keeps
+  `pg_restore`; every assertion sat inside an `if` that then skipped.
+- **T3 [Major]** Independent mutation sweep: **25 of 50 non-equivalent mutants
+  survived**. The claimed 71% reproduces only for *deletion* mutants (68.8% on
+  32); against *weakening* mutants that keep the `fail <CODE>` token the rate was
+  **0/10**. Eleven unpinned guards beyond the six `[Test-12]` lists.
+- **T4 [Major]** `expect(lastIndexOf(a)).toBeGreaterThan(indexOf(b))` is
+  satisfied when `b` is missing, because `indexOf` returns −1. A conninfo builder
+  that dropped the operator's whole query (including `sslrootcert=`) and put the
+  floor first kept the suite green.
+- **T5 [Major]** The achieved-mode case asserted the two `stat_mode`
+  ASSIGNMENTS in the source text; deleting the refusals left it green, and it
+  carried no positive control.
+- **T6 [Major]** "names a collided failure" never produced a collision, and its
+  regex made the `.<pid>` group optional. The pre-`c02762c8f` naming defect
+  survived.
+- **T7 [Major]** Two of four forbidden-pattern scans had no paired positive
+  control, violating INV-C9d.
+- **T8 [Major]** No test exercised lock contention: the "concurrency" case
+  pre-creates a stale lock, so both runs take the existing-lock branch and
+  neither races for a free one. A non-atomic test-then-create acquire survived.
+- **T9 [Major]** The C8 documentation cases are unreachable on a docs-only PR —
+  neither `ci.yml`'s `app` filter nor `pre-pr.sh`'s `app_paths` includes
+  `docs/**`, and SC5's justification for not wiring `check-doc-paths.mjs` rests
+  on those cases running.
+- T10–T14: reader identity unrecorded (and load-bearing, per T1); a 5089 ms case
+  under the 10 s default timeout in a batch that already produced expiries; a
+  non-boundary-adjacent allow case; the default `BACKUP_DIR` never exercised; the
+  sentinel literal duplicated.
+
+## Adjacent Findings
+
+- Func F4 → Security: converges with S1 (the `/tmp` write).
+- Func F5 → Security: converges with S2/S3 (the mount member set).
+- Sec S5 → Functionality: converges with F1 (the membership split).
+- Test T4 → Security: the surviving mutants are transport-floor behaviour
+  changes; the finding itself is the vacuous assertion.
+
+## Quality Warnings
+
+None. All three experts shipped reproducing commands, and all three verified a
+clean tracked tree and removed their artifacts.
+
+## Findings raised by the user in this round
+
+Reproduced before fixing, per the standing instruction. All confirmed.
+
+| # | Severity | Finding |
+|---|---|---|
+| 1 | High | The predictable `/tmp` file (independently S1/F4) |
+| 2 | Medium | mount undecidability treated as safe (independently S3) |
+| 3 | Medium | Enumeration failure recorded as `(none)` (independently F2) |
+| 4 | Low | `not a git repository` matched without `LC_ALL=C` |
+| 5 | Low | The collision test creates no collision (independently T6) |
+| 6 | Medium | `datallowconn` used as a WHERE condition hid every database with connections disabled — raised after the first fix pass and fixed with a regression test over the query condition itself |
+
+## Findings found while fixing
+
+- **The `.pgpass` wildcard class was closed for one spelling only.**
+  `66b2f685c` refused `postgres://u:pw@/db` because the empty host became
+  `${…:-*}`. `postgres://u:pw@:5432/db` produces the same empty host and was
+  accepted — measured as `*:5432:*:*:<password>`. The refusal is decided on the
+  computed host now, not on the authority's spelling.
+- **MANIFEST values were not constrained to one line.** Round 3 closed this for
+  the authority; `tool_version` and `ACHIEVED_TLS` reach the same line-oriented
+  file from command output. Observed corrupting a MANIFEST during a
+  reproduction.
+- **`fstype_is_unsafe` inherited `IFS=,` from its caller** — bash scopes `local`
+  dynamically — so its member list collapsed to one token and every macOS
+  option-list lookup matched nothing. Found by the paired allow/deny probe, not
+  by review.
+- **A dead guard read as a second layer.** The newline arm on the host slice was
+  unreachable: `hp` is a substring of `authority`, which is checked first.
+  Deleting it kept the suite green. Removed, and the live check pinned for both
+  the username and host slices.
+
+## Recurring Issue Check
+
+### Functionality expert
+R1 · R3 · R29 · R31 · R42 · R43 · R47 · R48 · R49 · R50 · R51 · R55. Findings
+fired on R1 (F4), R3 (F1), R29 (F8), R42 (F5, F7), R43 (F1, F2, F4, F5, F6),
+R48 (F1), R49 (F2, F3), R50 (F2), R55 (F2). Others `pass` or `n/a` with a stated
+reason.
+
+### Security expert
+R3 · R29 · R42 · R43 · R47 · R48 · R49 · R51 · RS1–RS6. Findings fired on
+R3 (S3, S5), R42 (S2, S3, S4), R43 (S1), R47 (S2), R49 (S2, S3, S4), R51 (S4).
+RS1, RS2 `n/a`; RS3, RS4, RS5, RS6 `pass`, RS5 and RS6 red-proved.
+
+### Testing expert
+R16 · R21 · R29 · R31 · R33 · R34 · R42 · R44 · R45 · R49 · R50 · R51 · R55 ·
+RT1–RT11. Findings fired on R16 (T1, T2, T10), R42 (T3), R49 (T3, T5, T9),
+R50 (T1, T2), R51 (T3), RT3 (T14), RT4 (T8), RT5 (T1), RT7 (T3), RT8 (T6, T14),
+RT9 (T1), RT10 (T3, T12). RT2, RT6, RT11, R21, R31, R33, R44, R45 `pass` or
+`n/a` with a stated reason.
+
+## Resolution Status — Round 4
+
+Every Critical and Major fixed. Minors fixed except the ones recorded in the
+deviation log's round-4 residuals with a full Anti-Deferral entry.
+
+**R42 class `destination-safety predicates` — member-set expanded 2× (mount
+options → mount options + fstype → fstype + fstype prefix + tool-failure
+verdict).** Per Step 3-8 this is the accretion signature, so "no findings" alone
+does not close it. Closed instead by a mutation sweep through the new
+`BACKUP_DB_SCRIPT` seam: **23 mutants, 23 killed, baseline green through the
+seam first** so a false-KILLED verdict is impossible. The sweep is re-runnable in
+one command rather than re-derived, which is what the seam buys.
+
+The first run of that sweep reported 16/16 killed and was **wrong**: it passed
+`--reporter=basic`, which Vitest 4 does not accept, so every mutant exited
+non-zero regardless. Re-run with a baseline assertion, the true figure was 7 of
+16 surviving. The corrected harness is what the 23/23 above comes from. Recorded
+because the failure mode — a verification harness that cannot report a pass —
+is the same shape as the findings it was measuring (RT7 shape b), and because
+the first number was already written down before it was checked.
+
+## Environment Verification Report
+
+- **VE1 (no RDS reachable)** — URL mode end-to-end remains `blocked-deferred`,
+  linked to the plan's VE1 entry and to deviation-log D2. Substituted by URL-mode
+  runs against stubbed clients, including the empty-host and empty-port forms.
+- **VE2 (Compose local)** — `verified-local`. No sub-agent ran the script against
+  the live database this round; every run used PATH stubs and a throwaway root,
+  and all three reported their artifacts removed and `git status --porcelain`
+  empty.
+- **VE3 (CI has no Postgres server)** — unchanged from round 2. Round 4 closed
+  the consequence rather than the constraint: the delegating cases no longer
+  branch on which reader was found, and the resolved reader is now printed.
+
+---
+
 # External review passes
 
 Four additional review passes were performed by the user between sub-agent
@@ -299,10 +507,14 @@ auditable.
 | After round 2 | 3 High, 3 Medium — concurrent stale-lock reclaim, dry run deletes, third-party ancestor, literal newline, SCRAM keys, ACL step lacks `ON_ERROR_STOP` | All fixed in `f53bf8c92` and `c02762c8f` |
 | After the lock change | 2 Medium, 1 Low — `BACKUP_FORCE_UNLOCK` kept the race, age bound unvalidated, ignore rules miss `.partial` / collision form | All fixed in `c02762c8f` |
 | After round 3 | 1 High, 2 Medium, 2 Low — Linux mount detection regression, git check fail-open, lock message quoting, dry-run double count, authority validation scope | All fixed in `882f41c1a` |
+| During round 4 | 1 High, 2 Medium, 2 Low — predictable `/tmp` file, mount undecidability read as safe, enumeration failure recorded as `(none)`, `LC_ALL=C`, the collision test that collides with nothing | All fixed this round; three were found independently by the sub-agents (S1/F4, S3, F2) |
+| After the round-4 fixes | 1 Medium — `datallowconn` used as a WHERE condition hid every database with connections disabled | Fixed, with a regression test over the query condition itself |
 
-The Linux mount regression is the one worth carrying forward: a fix for a
+Two are worth carrying forward. The Linux mount regression: a fix for a
 false-positive (matching the mount POINT) removed true-positive detection on the
-platform that was not being tested.
+platform that was not being tested. And the `/tmp` file: the round-3 fix that
+made the in-repo check fail closed opened a symlink-follow write primitive in the
+same edit — the tightening and the new hole were one change.
 
 ## Recurring Issue Check
 
@@ -335,6 +547,27 @@ finding, and one by the fix for an external pass:
 2. The passfile relocation (round 1 fix) created a namespace no sweeper covered.
 3. The stamp-regex relaxation (round 2 fix) widened what the pruners delete.
 4. The mount-options fix (round 3) removed Linux filesystem detection.
+5. The in-repo fail-closed fix (round 3) introduced the predictable `/tmp` write.
+
+A second pattern is now the dominant one, and it is not the same as the first:
+**a class closed for one member and recorded as closed.** Four instances, each
+found a round after the commit message said the class was shut.
+
+1. `.pgpass` line injection was closed for the password field while the host
+   slice reached the same file (round 3).
+2. The empty-host wildcard entry was closed for `postgres://u:pw@/db` while
+   `postgres://u:pw@:5432/db` produced the identical wildcard (round 4).
+3. MANIFEST line-orientation was closed for the authority while `tool_version`
+   and `ACHIEVED_TLS` reach the same file from command output (round 4).
+4. The delegating-reader early return was closed on one twin of two (round 4).
+
+The common shape: the member set was enumerated from the instance that was
+reported, not derived from the primitive — "values reaching a line-oriented
+file", "authority forms yielding an empty host", "call sites of this stub".
+Round 4's countermeasure is mechanical rather than editorial: the
+`BACKUP_DB_SCRIPT` seam makes the mutation sweep a single command, so the next
+round re-runs it instead of re-deriving it, and a member that was closed in
+prose but not in code shows up as a surviving mutant.
 
 Five ordering defects also recurred: a value written into an artifact before the
 step that computes it, or a destructive step placed before the exit that is

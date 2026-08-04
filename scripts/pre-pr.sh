@@ -33,7 +33,7 @@ detect_web_changes() {
   # match `eslint.extension.config.mjs`, so without it a PR editing only that file
   # (which is what adding an entry to its two-file override audit surface looks
   # like) would skip the self-test that proves the gate can still fail.
-  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/)'
+  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/|docs/operations/|CLAUDE\.md)'
   local base diff ref
   # Prefer origin/main (CI's base; survives a stale local main) and fall back to
   # local main only if the remote ref is absent.
