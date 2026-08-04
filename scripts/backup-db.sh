@@ -335,12 +335,32 @@ path_is_under() {
 # EQUALITY-or-prefix, and decide on the longest match — the filesystem the path
 # is actually on. Nothing here matches a substring of a line.
 mount_is_unsafe() {
-  local target="$1" mounts m left mt src
-  local best_line="" best_mt="" best_src=""
+  local target="$1" mounts m left mt src ambiguous
+  local best_line="" best_mt="" best_src="" saw_ambiguous=""
   mounts="$(mount 2>/dev/null)" || mounts=""
   [ -n "$mounts" ] || { printf 'mount(8) produced no output'; return 2; }
   while IFS= read -r m; do
     [ -n "$m" ] || continue
+    # A line whose separators are not UNIQUE cannot be attributed at all, and
+    # both of them are chosen by whoever makes the mount: a FUSE target may be
+    # any directory the user owns (fusermount is setuid) and the source is
+    # `-o fsname=`. Cutting at the first occurrence is not enough —
+    # `evil on /probe type ext4 (rw) on /elsewhere type fuse.sshfs (rw)` parses
+    # as target=/probe, type=ext4, and was read as verified safe whenever it was
+    # listed after the destination's own entry. Measured.
+    #
+    # So an ambiguous line answers for nothing; and if it could be describing
+    # the destination, nothing else may answer either, because it might be the
+    # topmost mount over it.
+    ambiguous=""
+    case "${m#* on }" in *" on "*) ambiguous=1 ;; esac
+    case "$m" in
+      *" type "*) case "${m#* type }" in *" type "*) ambiguous=1 ;; esac ;;
+    esac
+    if [ -n "$ambiguous" ]; then
+      case "$m" in *"$target"*) saw_ambiguous=1 ;; esac
+      continue
+    fi
     # Cut at the FIRST " type " / " (", never the last: `%%` is what stops a
     # target or source carrying a second one from moving the boundary right.
     case "$m" in
@@ -364,6 +384,10 @@ mount_is_unsafe() {
   done <<EOF
 $mounts
 EOF
+  if [ -n "$saw_ambiguous" ]; then
+    printf 'a mount(8) line mentioning %s has non-unique separators, so the mount table cannot be attributed' "$target"
+    return 2
+  fi
   [ -n "$best_line" ] || { printf 'no mount(8) entry covers %s' "$target"; return 2; }
 
   local fstype="" opts=""
@@ -744,6 +768,8 @@ parse_url() {
     case "$decoded_query" in
       *password=*|*passfile=*|*service=*|*oauth_client_secret=*|*sslpassword=*|*sslkeylogfile=*|*scram_client_key=*|*scram_server_key=*)
         fail BAD_URL "MIGRATION_DATABASE_URL must not carry a credential or credential-file parameter (password, passfile, service, oauth_client_secret, sslpassword, sslkeylogfile, scram_client_key, scram_server_key) — the password goes in the userinfo, and the rest select material this script cannot audit" ;;
+      *port=*)
+        fail BAD_URL "MIGRATION_DATABASE_URL must not carry port= — libpq lets it override the authority's port, while the passfile is scoped to the port the authority names, so the connection would find no entry" ;;
       *host=*|*hostaddr=*)
         fail BAD_URL "MIGRATION_DATABASE_URL must not carry host= or hostaddr= — they move the connection away from the authority that MANIFEST records and that the TLS floor verifies" ;;
       *gssencmode=*)

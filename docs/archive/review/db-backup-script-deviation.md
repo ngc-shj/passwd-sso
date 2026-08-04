@@ -87,6 +87,20 @@ be filed with this PR.
 
 ## Round-6 residuals
 
+**[Ops] The mount table is parsed from `mount(8)`'s human-readable output, and
+an ambiguous line now refuses rather than being attributed.** A line whose
+`" on "` or `" type "` separators are not unique cannot be assigned a mount
+point, and both separators are chosen by whoever makes the mount — a FUSE target
+is any directory the user owns (`fusermount` is setuid) and the source is
+`-o fsname=`. Such a line answers for nothing, and if it mentions the
+destination the whole verdict becomes undetermined, because it might be the
+topmost mount over it. Residual: a LEGITIMATE mount point containing `" on "`
+makes the destination undetermined and needs `BACKUP_ALLOW_UNVERIFIED_MOUNT`.
+What would settle it: `/proc/self/mountinfo` on Linux, whose fields are
+space-separated with `\040` escapes and therefore unambiguous. macOS has no
+equivalent, so the text parse stays there either way.
+
+
 Round 6 returned **42 findings (4 Critical, 22 Major)** across the three
 perspectives. The four Criticals and six Majors were fixed; the rest are open
 and listed here so the next round starts from a true statement of what is done.

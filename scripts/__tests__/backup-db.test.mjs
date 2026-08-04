@@ -1092,6 +1092,10 @@ exit 0`);
     "password", "passfile", "service", "oauth_client_secret", "sslpassword",
     "sslkeylogfile", "scram_client_key", "scram_server_key",
     "host", "hostaddr", "gssencmode", "dbname",
+    // libpq accepts `port` as a URI parameter and lets it override the
+    // authority's, while the passfile is scoped to the port the AUTHORITY
+    // names — so `…@host/db?port=6543` connected to 6543 and found no entry.
+    "port",
   ];
 
   it("refuses every credential-, peer- and transport-selecting query parameter", () => {
@@ -2087,28 +2091,44 @@ fi`);
       .toBe("DEST_UNSAFE");
   });
 
-  it("cannot be forged by a mount whose TARGET DIRECTORY is named like a line", () => {
-    // fusermount is setuid: an unprivileged user may mount a FUSE filesystem on
-    // any directory they own, and directory names may contain spaces. A target
-    // named `m on <BACKUP_DIR> type ext4 (rw)` produced a mount line that the
-    // old unanchored substring key matched, and the guard then read the
-    // ATTACKER's type and options and reported the destination verified safe.
-    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)",
-              ["attacker_fs on /home/mallory/m on /probe type ext4 (rw) type fuse.sshfs (rw,nosuid,nodev,user_id=1001)"]);
-    const r = run();
-    expect(err(r), "an attacker-named directory must not answer for the destination")
-      .toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
-  });
+  // BOTH orders. The forged line was previously listed only BEFORE the
+  // destination's own entry, so the real line won by "last among equals" and the
+  // case passed for a reason that had nothing to do with the guard. Reversed,
+  // the forgery won and the run was verified safe — measured.
+  for (const evilLast of [false, true]) {
+    it(`cannot be forged by a mount whose SOURCE is named like a line (evil ${evilLast ? "last" : "first"})`, () => {
+      const evil = "evil on /probe type ext4 (rw) on /elsewhere type fuse.sshfs (rw)";
+      const real = "/dev/probe0 on /probe type exfat (rw,relatime)";
+      mountStub(evilLast ? [real, evil] : [evil, real]);
+      const r = run();
+      expect(err(r), "a line with non-unique separators must not decide anything")
+        .toBe("DEST_UNSAFE");
+    });
 
-  it("cannot be forged by a mount whose SOURCE is named like a line", () => {
-    // The same via `-o fsname=`. The source is everything before the FIRST
-    // " on ", so a source carrying one yields a non-absolute target, and a line
-    // that cannot be attributed is not allowed to answer for anything.
-    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)",
-              ["evil on /probe type ext4 (rw) on /elsewhere type fuse.sshfs (rw)"]);
-    expect(err(run())).toBe("DEST_UNSAFE");
-  });
+    it(`cannot be forged by a mount whose TARGET is named like a line (evil ${evilLast ? "last" : "first"})`, () => {
+      const evil = "attacker_fs on /home/mallory/m on /probe type ext4 (rw) type fuse.sshfs (rw,user_id=1001)";
+      const real = "/dev/probe0 on /probe type exfat (rw,relatime)";
+      mountStub(evilLast ? [real, evil] : [evil, real]);
+      expect(err(run())).toBe("DEST_UNSAFE");
+    });
+  }
+
+  // One fixture per ambiguity arm, and each is the ONLY line covering the
+  // destination — otherwise the destination's own entry refuses anyway and the
+  // arm under test is not what decided. Without the fail-closed step the run
+  // falls back to the root mount (a safe ext4) and succeeds.
+  for (const [label, line] of [
+    ["two ' on ', one ' type '", "evil on /probe on /elsewhere type ext4 (rw)"],
+    ["two ' type ', one ' on '", "evil type x on /probe type ext4 (rw)"],
+  ]) {
+    it(`refuses when a line mentioning the destination is ambiguous: ${label}`, () => {
+      mountStub(line);
+      const r = run();
+      expect(err(r)).toBe("DEST_UNSAFE");
+      expect(r.stderr, "an unattributable table must not be answered by an ancestor")
+        .toMatch(/non-unique separators/);
+    });
+  }
 
   it("refuses an encrypting FUSE backend opened to other uids", () => {
     // allow_other is the standard way to expose such a mount, and without
