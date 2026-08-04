@@ -247,7 +247,13 @@ What the script guarantees, and what it does not:
   - A destination whose filesystem `df(1)` and `mount(8)` cannot describe is
     refused as well. **macOS keeps `mount` in /sbin, which cron's default PATH
     omits** — set `PATH=/usr/bin:/bin:/sbin:/usr/sbin` for a scheduled run, or
-    the nightly backup stops with `DEST_UNSAFE`.
+    the nightly backup stops with `DEST_UNSAFE`. On Linux the table is read
+    from `/proc/self/mountinfo` and neither tool is needed.
+  - macOS has no such table, so `df` names the mount point and `mount(8)` must
+    show **exactly one** line for it. A second line claiming the same mount
+    point — which any local user can produce, since a FUSE source is theirs to
+    spell — makes the check undetermined rather than wrong, and stops the run
+    until the mount is gone or the flag below is set.
   - `BACKUP_ALLOW_UNVERIFIED_MOUNT=true` downgrades either refusal to a loud
     warning. It exists for a legitimate filesystem the allowlist has not heard
     of.

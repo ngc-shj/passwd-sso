@@ -307,7 +307,8 @@ opts_are_unsafe() {
   return 1
 }
 
-# Is $1 the path $2, or under it?
+# Is $1 the path $2, or under it? Both sides must be in the same spelling —
+# mountinfo's escaped form, or both raw.
 path_is_under() {
   local p="$1" mp="$2"
   [ "$mp" = "/" ] && return 0
@@ -316,53 +317,162 @@ path_is_under() {
   return 1
 }
 
+# Shared verdict, given the filesystem type and the full option set of the mount
+# the destination is on. 0 = unsafe (prints the reason), 1 = safe.
+mount_fields_verdict() {
+  local fstype="$1" opts="$2" src="$3" line="$4"
+  case "$fstype" in
+    macfuse|osxfuse|fuse)
+      printf 'the mount reports the generic type %s, so the backend behind %s cannot be identified — if it is an ownership-preserving one such as gocryptfs, set BACKUP_ALLOW_UNVERIFIED_MOUNT=true (%s)' \
+        "$fstype" "$src" "$line"
+      return 0 ;;
+  esac
+  if ! fstype_enforces_ownership "$fstype"; then
+    printf 'filesystem type %s is not known to enforce ownership and mode (%s)' \
+      "${fstype:-unknown}" "$line"
+    return 0
+  fi
+  if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
+    printf 'mounted with an option that makes ownership advisory (%s)' "$line"
+    return 0
+  fi
+  return 1
+}
+
+# Linux: /proc/self/mountinfo. One mount per line, fields separated by single
+# spaces, and every field that could contain whitespace is escaped — space as
+# \040, tab \011, NEWLINE \012, backslash \134. That is what makes it safe:
+# `mount(8)`'s human-readable output copies the FUSE source verbatim, so an
+# unprivileged user mounting with
+#   -o fsname=$'junk\n/dev/fake on /dest type ext4 (rw)\ntail'
+# injects a whole synthetic line that no amount of per-line parsing can tell
+# from a real one. Measured: the injected line passes every structural check.
+mountinfo_verdict() {
+  local target="$1" mi="${2:-/proc/self/mountinfo}" ln mp opts fstype src sup esc
+  local best_mp="" best_opts="" best_fstype="" best_src="" best_line=""
+  esc="${target//\\/\\134}"
+  esc="${esc// /\\040}"
+  esc="${esc//$'\t'/\\011}"
+  esc="${esc//$'\n'/\\012}"
+  while IFS= read -r ln; do
+    # Word splitting is safe here precisely because the format escapes every
+    # byte that could otherwise act as a separator.
+    set -- $ln
+    [ "$#" -ge 10 ] || continue
+    mp="$5"; opts="$6"
+    shift 6
+    while [ "$#" -gt 0 ] && [ "$1" != "-" ]; do shift; done
+    [ "$#" -ge 3 ] || continue
+    shift
+    fstype="$1"; src="$2"; sup="${3:-}"
+    path_is_under "$esc" "$mp" || continue
+    # Longest covering mount point; among equals the last listed, which is the
+    # topmost mount and the one the path resolves through.
+    if [ "${#mp}" -ge "${#best_mp}" ]; then
+      best_mp="$mp"; best_opts="$opts"; best_fstype="$fstype"
+      best_src="$src"; best_line="$ln"
+      # FUSE puts uid=/gid=/allow_other in the SUPER options, not the per-mount
+      # ones, so the option check has to see both.
+      [ -n "$sup" ] && best_opts="$opts,$sup"
+    fi
+  done < "$mi"
+  [ -n "$best_line" ] || { printf 'no mountinfo entry covers %s' "$target"; return 2; }
+  mount_fields_verdict "$best_fstype" "$best_opts" "$best_src" "$best_line"
+}
+
+# The mount point the destination is on, from statfs(2) via `df -P PATH` — the
+# only structured answer a shell gets on macOS, and the one thing mount(8)'s
+# table cannot be asked for. df answers for the PATH it is given, so a mount
+# somebody else made elsewhere is not a candidate at all.
+#
+# This is NOT the df keying two earlier designs got wrong. Those took the string
+# df printed — first the device field, then device-or-mount-point — and matched
+# it as a SUBSTRING against mount(8)'s lines, so any line containing it could
+# adjudicate. Here df supplies exactly one thing, f_mntonname, and a line
+# answers only if its own mount point is that string EXACTLY and no other line
+# is too.
+#
+# Measured on the macOS verification host (Darwin 25.5.0), which is why the two
+# stat(2)-only alternatives are not used: they are wrong there, not just
+# awkward. Walking ancestors while st_dev is unchanged runs all the way to `/`,
+# because every ancestor of a /private/var destination reports the DATA volume's
+# st_dev and so does `/` — whose mount(8) line describes the sealed, read-only
+# SYSTEM volume. Selecting lines by st_dev has the same cause and matches two,
+# `/` and /System/Volumes/Data, making every macOS run undetermined. df names
+# /System/Volumes/Data, which is the filesystem the backup actually lands on.
+df_mount_point() {
+  local out row="" n=0 ln
+  out="$(df -P -- "$1" 2>/dev/null)" || return 1
+  # -P is one physical line per filesystem, and a PATH selects one filesystem,
+  # so a second data row means a field carried a newline. That is the same
+  # injection the text table below cannot survive, and here it is refused
+  # rather than parsed.
+  while IFS= read -r ln; do
+    n=$((n + 1))
+    if [ "$n" -eq 2 ]; then row="$ln"; fi
+  done <<EOF
+$out
+EOF
+  [ "$n" -eq 2 ] || return 1
+  # Everything after the capacity field. Cutting at the LAST `% ` is what stops
+  # a device name carrying one from moving the boundary right; a MOUNT POINT
+  # carrying one truncates the answer, which then matches no line and refuses.
+  case "$row" in
+    *"% "*) row="${row##*% }" ;;
+    *)      return 1 ;;
+  esac
+  # macOS pads the capacity column, so the field is reached with spaces on it.
+  while [ "${row# }" != "$row" ]; do row="${row# }"; done
+  case "$row" in /*) ;; *) return 1 ;; esac
+  printf '%s' "$row"
+}
+
 # Verdicts: 0 = unsafe (prints the reason), 1 = verified safe, 2 = could not
 # determine (prints why). "Could not determine" is never folded into "safe".
 # BACKUP_ALLOW_UNVERIFIED_MOUNT is the operator's escape from both non-safe
-# verdicts; without it a filesystem this list has not heard of stops the run.
-#
-# df(1) is not used. Two earlier designs keyed on the string it prints — first
-# the device field, then the device OR the mount point — and both decided from
-# whichever mount(8) line matched FIRST. A device name is not unique (this host
-# lists five `tmpfs` and four `overlay`), so an unrelated mount adjudicated the
-# destination; and the mount-point key was an unanchored substring of the whole
-# line, which an unprivileged user could forge outright: fusermount is setuid,
-# a FUSE target may be any directory the user owns, and a directory named
-# `m on <BACKUP_DIR> type ext4 (rw)` made the guard read the ATTACKER's type and
-# options and report the destination verified safe. Measured, end to end.
-#
-# So: parse each line's own mount point, compare it to the destination by
-# EQUALITY-or-prefix, and decide on the longest match — the filesystem the path
-# is actually on. Nothing here matches a substring of a line.
+# verdicts.
 mount_is_unsafe() {
-  local target="$1" mounts m left mt src ambiguous
-  local best_line="" best_mt="" best_src="" saw_ambiguous=""
+  local target="$1" mounts m left mt src ambiguous mp matches=0
+  local best_line="" best_src="" saw_ambiguous=""
+  # Structured where a structured table exists. The text path below is macOS,
+  # which has no equivalent — see the deviation log's round-6 residual for what
+  # that leaves open there.
+  # The path is a seam so the suite can drive the production reader with a
+  # fixture; the environment here is the operator's own, and a user who can set
+  # it can already set BACKUP_DIR. Default is the real table.
+  local mi="${BACKUP_MOUNTINFO_PATH:-/proc/self/mountinfo}"
+  if [ -r "$mi" ]; then
+    mountinfo_verdict "$target" "$mi"
+    return $?
+  fi
+  # WHICH line describes the destination is decided by df, not by the table:
+  # `fusermount` is setuid and `-o fsname=` is the mounting user's to spell, so
+  # an unprivileged user can put a NEWLINE in the field mount(8) prints
+  # verbatim. The fragments between those newlines are read as whole lines, and
+  # every one can be made well-formed — the leading fragment is the attacker's
+  # to write and the trailing one has ` on <their own mount point> (…)` appended
+  # by mount(8) itself — so the injected middle line carries exactly one of each
+  # separator and no per-line parse can tell it from a real entry. Measured: it
+  # was adopted as the destination's own filesystem and reported verified safe.
+  mp="$(df_mount_point "$target")" || {
+    printf 'df(1) could not name the filesystem %s is on' "$target"
+    return 2
+  }
   mounts="$(mount 2>/dev/null)" || mounts=""
   [ -n "$mounts" ] || { printf 'mount(8) produced no output'; return 2; }
   while IFS= read -r m; do
     [ -n "$m" ] || continue
-    # A line whose separators are not UNIQUE cannot be attributed at all, and
-    # both of them are chosen by whoever makes the mount: a FUSE target may be
-    # any directory the user owns (fusermount is setuid) and the source is
-    # `-o fsname=`. Cutting at the first occurrence is not enough —
-    # `evil on /probe type ext4 (rw) on /elsewhere type fuse.sshfs (rw)` parses
-    # as target=/probe, type=ext4, and was read as verified safe whenever it was
-    # listed after the destination's own entry. Measured.
-    #
-    # So an ambiguous line answers for nothing; and if it could be describing
-    # the destination, nothing else may answer either, because it might be the
-    # topmost mount over it.
+    # A line whose separators are not UNIQUE cannot be attributed, and both are
+    # chosen by whoever makes the mount.
     ambiguous=""
     case "${m#* on }" in *" on "*) ambiguous=1 ;; esac
     case "$m" in
       *" type "*) case "${m#* type }" in *" type "*) ambiguous=1 ;; esac ;;
     esac
     if [ -n "$ambiguous" ]; then
-      case "$m" in *"$target"*) saw_ambiguous=1 ;; esac
+      case "$m" in *"$mp"*) saw_ambiguous=1 ;; esac
       continue
     fi
-    # Cut at the FIRST " type " / " (", never the last: `%%` is what stops a
-    # target or source carrying a second one from moving the boundary right.
     case "$m" in
       *" type "*) left="${m%% type *}" ;;
       *" ("*)     left="${m%% (*}" ;;
@@ -372,66 +482,40 @@ mount_is_unsafe() {
       *" on "*) mt="${left#* on }"; src="${left%% on *}" ;;
       *)        continue ;;
     esac
-    # A target that is not absolute means the SOURCE contained " on " — the line
-    # cannot be attributed, so it is not allowed to answer for anything.
-    case "$mt" in /*) ;; *) continue ;; esac
-    path_is_under "$target" "$mt" || continue
-    # Longest wins, and among equals the LAST listed does: that is the topmost
-    # mount, which is the one the path resolves through.
-    if [ "${#mt}" -ge "${#best_mt}" ]; then
-      best_mt="$mt"; best_line="$m"; best_src="$src"
-    fi
+    [ "$mt" = "$mp" ] || continue
+    matches=$((matches + 1))
+    best_line="$m"; best_src="$src"
   done <<EOF
 $mounts
 EOF
   if [ -n "$saw_ambiguous" ]; then
-    printf 'a mount(8) line mentioning %s has non-unique separators, so the mount table cannot be attributed' "$target"
+    printf 'a mount(8) line mentioning %s has non-unique separators, so the mount table cannot be attributed' "$mp"
     return 2
   fi
-  [ -n "$best_line" ] || { printf 'no mount(8) entry covers %s' "$target"; return 2; }
+  if [ "$matches" -eq 0 ]; then
+    printf 'no mount(8) line names %s, the filesystem %s is on' "$mp" "$target"
+    return 2
+  fi
+  # Forging a line is still possible; deciding WITH it is not. An injected line
+  # that claims the destination's mount point now collides with the real entry
+  # for it, and two claims are an unattributable table, not a verdict.
+  if [ "$matches" -gt 1 ]; then
+    printf '%s mount(8) lines claim %s, so the table cannot be attributed' "$matches" "$mp"
+    return 2
+  fi
 
   local fstype="" opts=""
   case "$best_line" in
-    *" type "*)
-      # Linux: "<source> on <target> type <fstype> (<opts>)"
-      fstype="${best_line#* type }"
-      fstype="${fstype%% *}"
-      ;;
+    *" type "*) fstype="${best_line#* type }"; fstype="${fstype%% *}" ;;
   esac
   case "$best_line" in
-    *\(*\)*)
-      opts="${best_line##*(}"
-      opts="${opts%)*}"
-      ;;
+    *\(*\)*) opts="${best_line##*(}"; opts="${opts%)*}" ;;
   esac
-  # macOS has no `type` field and carries the type as the FIRST parenthesised
-  # option, so that is where the type is read from there.
   if [ -z "$fstype" ] && [ -n "$opts" ]; then
     fstype="${opts%%,*}"
     fstype="${fstype# }"; fstype="${fstype% }"
   fi
-  # macFUSE (and a bare Linux `fuse`) report a GENERIC type, so the backend
-  # behind them cannot be identified from the mount table at all — and macOS is
-  # where the encrypting backends this script allowlists actually run.
-  # Allowlisting `macfuse` wholesale would admit s3fs on the same transport. The
-  # source field names the backend, but a mount can call itself anything, so
-  # this refuses with the operator's own escape rather than guessing.
-  case "$fstype" in
-    macfuse|osxfuse|fuse)
-      printf 'the mount reports the generic type %s, so the backend behind %s cannot be identified — if it is an ownership-preserving one such as gocryptfs, set BACKUP_ALLOW_UNVERIFIED_MOUNT=true (%s)' \
-        "$fstype" "$best_src" "$best_line"
-      return 0 ;;
-  esac
-  if ! fstype_enforces_ownership "$fstype"; then
-    printf 'filesystem type %s is not known to enforce ownership and mode (%s)' \
-      "${fstype:-unknown}" "$best_line"
-    return 0
-  fi
-  if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
-    printf 'mounted with an option that makes ownership advisory (%s)' "$best_line"
-    return 0
-  fi
-  return 1
+  mount_fields_verdict "$fstype" "$opts" "$best_src" "$best_line"
 }
 
 # Hex-encode an identifier. Only ever called on a BACKUP_DATABASES member, which
@@ -759,24 +843,35 @@ parse_url() {
   # pg_dump's argv, where every local user can read it. Decoding the query here
   # would be a second adjudicator of libpq's grammar (the mistake this design
   # exists to avoid), so the spelling is refused outright.
-  local decoded_query="${URL_STRIPPED#*\?}"
-  [ "$decoded_query" = "$URL_STRIPPED" ] && decoded_query=""
-  if [ -n "$decoded_query" ]; then
-    decoded_query="$(percent_decode "$decoded_query")"
-    # Member set derived from every parameter that can carry a credential,
-    # redirect the peer, or select a transport the TLS floor does not govern.
-    case "$decoded_query" in
-      *password=*|*passfile=*|*service=*|*oauth_client_secret=*|*sslpassword=*|*sslkeylogfile=*|*scram_client_key=*|*scram_server_key=*)
-        fail BAD_URL "MIGRATION_DATABASE_URL must not carry a credential or credential-file parameter (password, passfile, service, oauth_client_secret, sslpassword, sslkeylogfile, scram_client_key, scram_server_key) — the password goes in the userinfo, and the rest select material this script cannot audit" ;;
-      *port=*)
-        fail BAD_URL "MIGRATION_DATABASE_URL must not carry port= — libpq lets it override the authority's port, while the passfile is scoped to the port the authority names, so the connection would find no entry" ;;
-      *host=*|*hostaddr=*)
-        fail BAD_URL "MIGRATION_DATABASE_URL must not carry host= or hostaddr= — they move the connection away from the authority that MANIFEST records and that the TLS floor verifies" ;;
-      *gssencmode=*)
-        fail BAD_URL "gssencmode is not accepted: it selects a transport the TLS floor does not govern" ;;
-      *dbname=*)
-        fail BAD_URL "MIGRATION_DATABASE_URL must not carry dbname= (the target set is BACKUP_DATABASES)" ;;
-    esac
+  local raw_query="${URL_STRIPPED#*\?}"
+  [ "$raw_query" = "$URL_STRIPPED" ] && raw_query=""
+  if [ -n "$raw_query" ]; then
+    # Per PARAMETER, and only the key. The previous form percent-decoded the
+    # whole query and substring-matched, so `application_name=report=` was
+    # refused as `port=` — a legal conninfo denied — and the boundary was
+    # decided by whatever bytes happened to precede the name. Splitting the RAW
+    # query on `&` first is what keeps a `%26` inside a value from forging a
+    # parameter boundary; each KEY is decoded after the split, because libpq
+    # decodes keywords before matching them.
+    local _kv _key IFS='&'
+    for _kv in $raw_query; do
+      IFS=$' \t\n'
+      _key="$(percent_decode "${_kv%%=*}")"
+      case "$_key" in
+        password|passfile|service|oauth_client_secret|sslpassword|sslkeylogfile|scram_client_key|scram_server_key)
+          fail BAD_URL "MIGRATION_DATABASE_URL must not carry a credential or credential-file parameter ($_key) — the password goes in the userinfo, and the rest select material this script cannot audit" ;;
+        port)
+          fail BAD_URL "MIGRATION_DATABASE_URL must not carry port= — libpq lets it override the authority's port, while the passfile is scoped to the port the authority names, so the connection would find no entry" ;;
+        host|hostaddr)
+          fail BAD_URL "MIGRATION_DATABASE_URL must not carry host= or hostaddr= — they move the connection away from the authority that MANIFEST records and that the TLS floor verifies" ;;
+        gssencmode)
+          fail BAD_URL "gssencmode is not accepted: it selects a transport the TLS floor does not govern" ;;
+        dbname)
+          fail BAD_URL "MIGRATION_DATABASE_URL must not carry dbname= (the target set is BACKUP_DATABASES)" ;;
+      esac
+      IFS='&'
+    done
+    IFS=$' \t\n'
   fi
 }
 

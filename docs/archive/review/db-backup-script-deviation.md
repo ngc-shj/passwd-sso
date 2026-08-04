@@ -85,20 +85,63 @@ description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr o
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.
 
+**[SC7] `psql -X` is applied in this script and not in the five siblings.** Round
+6 (F4/S3) established the class and round 7 measured its worst member:
+`scripts/rls-cross-tenant-negative-test.sh` decides whether the RLS check PASSED
+from a SUBSTRING of psql's output, so `\echo [E-RLS-MANIFEST-EXTRA]` in
+`~/.psqlrc` forges a pass without the database being asked anything. The three
+`set-*-password.sh` scripts connect as a superuser and execute `~/.psqlrc` as
+SQL. Not fixed here, by decision: the fix touches five files that this branch's
+diff does not otherwise reach, and it widens what the remaining review round has
+to cover. Worst case: a compromised or careless `~/.psqlrc` turns a security
+regression test green, or runs attacker SQL as a superuser. Likelihood: low —
+it needs write access to the operator's home, which is already most of the game.
+Cost-to-fix: one flag per invocation across five scripts, plus a test per script
+that the flag is present. Owner: the same follow-up issue as SC6.
+
+## Round-7 residuals
+
+**[Ops] A forged mount line is still a DENIAL, and an unprivileged user can
+cause one.** On the text path (macOS) a line injected through `-o fsname=` that
+claims the mount point `df` named now collides with the real entry for it, and
+two claims are an unattributable table rather than a verdict. So the spoof is
+closed and a fail-closed denial takes its place: any local user can make the
+destination check undetermined and stop the scheduled backup until the operator
+removes the mount or sets `BACKUP_ALLOW_UNVERIFIED_MOUNT`, which is the weaker
+state. Worst case: backups stop, or run with the mount check disabled.
+Likelihood: low — it needs a local account on the backup host. Cost-to-fix: not
+payable from a shell; it needs a per-mount structured table, which macOS does
+not expose to one. Bounded by: the same direction as every other verdict here —
+an unanswered check is not a passed check.
+
+**[Ops] The two stat(2)-only designs do not work on macOS, and the measurement
+is recorded so they are not proposed again.** Both were tried first, on the
+verification host (Darwin 25.5.0). Walking ancestors while `st_dev` is unchanged
+runs to `/`: every ancestor of a `/private/var` destination reports the DATA
+volume's `st_dev`, and so does `/`, whose `mount` line describes the sealed,
+read-only SYSTEM volume — the walk would adjudicate the wrong filesystem.
+Selecting lines by `st_dev` has the same cause and matches two of them, `/` and
+`/System/Volumes/Data`, so every macOS run would be undetermined. `df -P` names
+`/System/Volumes/Data`, which is the filesystem the backup actually lands on,
+and it is the only structured answer a shell gets there. Note that df's answer
+is NOT an ancestor of the destination path on that platform, so no
+prefix-relationship check may be added between the two.
+
 ## Round-6 residuals
 
 **[Ops] The mount table is parsed from `mount(8)`'s human-readable output, and
-an ambiguous line now refuses rather than being attributed.** A line whose
-`" on "` or `" type "` separators are not unique cannot be assigned a mount
-point, and both separators are chosen by whoever makes the mount — a FUSE target
-is any directory the user owns (`fusermount` is setuid) and the source is
-`-o fsname=`. Such a line answers for nothing, and if it mentions the
-destination the whole verdict becomes undetermined, because it might be the
-topmost mount over it. Residual: a LEGITIMATE mount point containing `" on "`
-makes the destination undetermined and needs `BACKUP_ALLOW_UNVERIFIED_MOUNT`.
-What would settle it: `/proc/self/mountinfo` on Linux, whose fields are
-space-separated with `\040` escapes and therefore unambiguous. macOS has no
-equivalent, so the text parse stays there either way.
+an ambiguous line now refuses rather than being attributed.** **Superseded in
+round 7 — the ambiguity check was necessary and not sufficient.** The user's
+review pass showed that a newline in `-o fsname=` injects a WHOLE line, and that
+every fragment can be made well-formed: the leading one is the attacker's to
+spell and the trailing one gets ` on <their own mount point> (…)` appended by
+mount(8) itself, so the injected middle line carries exactly one of each
+separator and no per-line parse can see it. Measured: adopted as the
+destination's filesystem and reported verified safe. Settled as this entry
+named for Linux — `/proc/self/mountinfo`, whose `\040 \011 \012 \134` escaping
+makes the input unrepresentable — and on macOS by taking WHICH line answers
+from `df -P`'s `f_mntonname` rather than from the table, then requiring exactly
+one line to claim it. See the round-7 residual for what that leaves.
 
 
 Round 6 returned **42 findings (4 Critical, 22 Major)** across the three
@@ -143,17 +186,17 @@ while an agent reviews it invalidates its instrument.
 ## Round-5 residuals
 
 **[Ops] A mount whose device AND mount point both contain a space is
-undetermined.** Measured on the macOS verification host (Darwin 25.5.0): `mount`
-prints `map auto_home on …` (space in the device) and
-`/dev/disk5s1 on /Volumes/Backups of mrx33 (apfs, …)` (space in the mount
-point), and `df -P`'s device and mount-point fields are extracted with `%% *`
-and `##* ` respectively. Two keys are used precisely so either survives the
-other's truncation, and all four real paths on that host resolve correctly. A
-mount with a space in BOTH fields matches neither key and refuses as
-undetermined. Justification: fail-closed, `BACKUP_ALLOW_UNVERIFIED_MOUNT` is the
-documented escape, and parsing either field unambiguously needs a delimiter
-neither tool provides. What would settle it: matching by longest mount-point
-prefix over `mount`'s own output and dropping `df` entirely.
+undetermined.** **Closed in round 7, by a different move than this entry
+proposed.** It named "matching by longest mount-point prefix over `mount`'s own
+output and dropping `df` entirely" — which round 6 did, and which is exactly
+what the newline injection then defeated, because a table nobody can attribute
+cannot be made attributable by a better prefix rule. What closed it instead was
+keeping df for one thing only: the mount point of the PATH, taken as the whole
+field after the capacity column rather than with `##* `, so a space in it is an
+ordinary byte; and matching a line on its own mount point, so the device column
+is never a key at all. Both measured shapes from that host — `map auto_home on
+…` and `/dev/disk5s1 on /Volumes/Backups of mrx33 (apfs, …)` — now resolve, and
+the second is a committed test case.
 
 **[Ops] macOS cannot verify an encrypting FUSE backend, by design.** macFUSE
 reports the generic type `macfuse` for every backend it carries, so the mount

@@ -790,6 +790,86 @@ same tree concurrently invalidates the instrument.
 
 ---
 
+# Round 7 — external pass after round 6
+
+## Changes from Previous Round
+
+No sub-agent round ran. This is the user's independent pass over the round-6
+commits, plus the work it forced. **2 findings: 1 Critical, 1 Major.**
+
+## Findings
+
+- **U1 [Critical]** A newline in a FUSE `fsname` injects a whole synthetic line
+  into `mount(8)`'s output. `fusermount` is setuid, `-o fsname=` is the mounting
+  user's to spell, and mount(8) prints it verbatim into a line-oriented,
+  unescaped table — so the fragments between the newlines are read as complete
+  mount lines. Round 6's ambiguity check cannot see it: the injected line
+  carries exactly one `" on "` and one `" type "`. Reproduced before fixing.
+  The PoC in the report used `junk\n…\ntail`, and the stronger form is worse —
+  **every** fragment can be made well-formed, because the leading one is the
+  attacker's to write and the trailing one has ` on <their own mount point> (…)`
+  appended by mount(8) itself. Measured: the forged line was adopted as the
+  destination's filesystem and the run reported it verified safe.
+- **U2 [Major]** The URL query refusal percent-decoded the whole query and
+  matched substrings, so `application_name=report=1` was refused as `port=` — a
+  legal conninfo denied, with the boundary decided by whatever bytes preceded
+  the keyword. `ghost=`, `mydbname=` and `mypassword=` are the same defect; the
+  class is every refused name that is a substring of something a value may
+  legally contain.
+
+## Disposition
+
+**U1, Linux.** `/proc/self/mountinfo` is read directly. One mount per line, and
+every field that could contain whitespace is escaped — `\040 \011 \012 \134` —
+so the input is unrepresentable rather than parsed carefully. The destination's
+own path is escaped the same way before comparison. FUSE reports `uid=` and
+`allow_other` in the SUPER options, so those are merged with the per-mount ones
+before the option check.
+
+**U1, macOS.** No such table exists, so **which** line answers is taken from
+`df -P`'s `f_mntonname` — df answers for the PATH it is given, which no mount
+made elsewhere can influence — and a line answers only if its own mount point is
+that string exactly and **no other line claims it too**. Forging a line remains
+possible; deciding with one does not, because a forged claim on the destination's
+mount point collides with the real entry and two claims are an unattributable
+table. df's own row is the same injection surface when the destination sits on
+the attacker's mount, so exactly one data row is required, and the field boundary
+is fixed at the capacity column rather than at bytes the device carries.
+
+Two structured alternatives were tried first and measured wrong on the
+verification host — a `st_dev` ancestor walk, and selecting lines by `st_dev` —
+both because every ancestor of a `/private/var` destination reports the Data
+volume's `st_dev` and so does `/`. Recorded in the deviation log so they are not
+proposed again.
+
+**U2.** The raw query is split on `&` first, so a `%26` inside a value cannot
+forge a parameter boundary, and each KEY alone is decoded and matched exactly —
+libpq decodes keywords before matching them, so `%70assword` as a key is still
+refused. Both directions are now pinned: five legal spellings accepted, the
+encoded key refused, the encoded ampersand accepted as a byte.
+
+**Also closed:** the round-5 residual "a mount whose device AND mount point both
+contain a space is undetermined". It was a consequence of keying on df's device
+column and taking the mount point with `##* `; neither is done now, and the
+measured macOS line `/dev/disk5s1 on /Volumes/Backups of mrx33 (apfs, …)` is a
+committed case.
+
+**Open:** the round-6 residuals are unchanged, and one new residual is recorded —
+a forged line is now a fail-closed DENIAL that any local user can cause. Both are
+in the deviation log.
+
+## Verification
+
+Sixteen mutants over the new and adjacent guards, **16 killed, 0 survived** —
+baseline green through the `BACKUP_DB_SCRIPT` seam first, so no verdict is a
+false KILLED. The two that matter most: removing the uniqueness requirement is
+killed by the injection case, and pointing the mountinfo reader at a
+non-existent path fails thirteen cases, so the structured reader is load-bearing
+rather than a preference. The failing test named for each mutant is recorded in
+the sweep log.
+
+---
+
 # External review passes
 
 Four additional review passes were performed by the user between sub-agent

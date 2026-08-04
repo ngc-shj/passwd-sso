@@ -64,6 +64,8 @@ let tmpDir, binDir, homeDir, backupDir, logFile;
 // gives /private/var/folders/…, and eight destination-guard cases silently
 // exercised nothing on the platform the portability floor exists for.
 let realBackupDir, realParentDir;
+// Set by mountStub; run() passes it so the Linux reader sees the fixture.
+let mountinfoPath;
 
 function stub(name, body) {
   const p = join(binDir, name);
@@ -129,6 +131,7 @@ function run(env = {}, { tocEntries } = {}) {
       HOME: homeDir,
       LANG: "C",
       BACKUP_DIR: backupDir,
+      ...(mountinfoPath ? { BACKUP_MOUNTINFO_PATH: mountinfoPath } : {}),
       ...(tocEntries === undefined ? {} : { PG_TOC_ENTRIES: String(tocEntries) }),
       ...env,
     },
@@ -175,6 +178,7 @@ beforeEach(() => {
   // check, but this process's umask is 002, which would make the fixture 0775
   // and refuse the default BACKUP_DIR for a reason no operator would hit.
   chmodSync(homeDir, 0o700);
+  mountinfoPath = undefined;
   dockerStub();
 });
 
@@ -1118,6 +1122,35 @@ exit 0`);
     }
   });
 
+  it("refuses only the PARAMETER, not any value that spells one", () => {
+    pgStubs();
+    // The refusal used to percent-decode the whole query and match substrings,
+    // so the boundary was decided by whatever bytes happened to precede a
+    // keyword: `re|port=`, `g|host=`, `my|dbname=`. A legal conninfo was denied.
+    // The member set is every refused name that is a substring of something a
+    // value can legally contain — one spelling per refused name that has one,
+    // plus a percent-encoded value, which only the KEY is decoded from now.
+    for (const value of ["report=1", "ghost=1", "mydbname=1", "mypassword=1",
+                         "%70assword=1"]) {
+      const r = run({ MIGRATION_DATABASE_URL: url("u:p", `&application_name=${value}`) });
+      expect(r.status, `application_name=${value} is a legal conninfo: ${r.stderr}`).toBe(0);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a parameter whose ENCODED key spells a refused one after the split", () => {
+    pgStubs();
+    // The paired deny case. Splitting on the RAW `&` first is what keeps a
+    // `%26` inside a value from forging a parameter boundary, so the key is
+    // taken before decoding and decoded after — `%70assword` as a KEY is still
+    // `password`, while `%26port=x` inside a value is not a parameter at all.
+    expect(err(run({ MIGRATION_DATABASE_URL: url("u:p", "&%70assword=x") })),
+      "an encoded key is the parameter libpq will act on").toBe("BAD_URL");
+    rmSync(backupDir, { recursive: true, force: true });
+    expect(run({ MIGRATION_DATABASE_URL: url("u:p", "&application_name=a%26port=x") }).status,
+      "an encoded ampersand is a byte in a value, not a parameter boundary").toBe(0);
+  });
+
   it("refuses a raw delimiter in the userinfo instead of passing the URL through", () => {
     pgStubs();
     // The authority is cut at the first / ? #, so a raw one of these moves the
@@ -1983,11 +2016,20 @@ describe("destination guards", () => {
 exec "${real}" "$@"`);
   };
 
+  // df is what names WHICH mount point the destination is on, and the text
+  // reader accepts only a line claiming exactly that. The real df answers with
+  // this host's own mount point — `/` here, /System/Volumes/Data on the macOS
+  // verification host — which no fixture can name portably, so the fixtures put
+  // the destination on its own mount point and df is told the same.
+  const dfStub = (mountPoint) =>
+    stub("df", "printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n"
+      + `/dev/probe0 1 1 1 1%%    %s\\n' '${mountPoint}'`);
+
   // Accepts one line or many. Every mount case used to emit exactly one, so no
   // case exercised line ordering, a second matching entry, or the substring
   // nature of the old mount-point key — which is how an unrelated mount came to
   // decide the verdict.
-  const mountStub = (line, before = []) => {
+  const mountStub = (line, before = [], { textPath = false } = {}) => {
     // `/probe` stands for the destination, so a line describes the filesystem
     // the run actually lands on. A root entry is always present, because the
     // real table always has one and the guard now picks the LONGEST covering
@@ -2001,6 +2043,28 @@ exec "${real}" "$@"`);
                    ...(Array.isArray(line) ? line : [line])]
       .map((l) => l.split("/probe").join(realBackupDir));
     stub("mount", `cat <<'MOUNTEOF'\n${lines.join("\n")}\nMOUNTEOF\nexit 0`);
+    // On Linux the production reader is /proc/self/mountinfo, so the same
+    // fixtures are translated into that format and pointed at through the
+    // seam. A text-only stub would leave the real reader untested here — the
+    // shape the round-4 delegating-reader Critical had.
+    const esc = (v) => v.replace(/\\/g, "\\134").replace(/ /g, "\\040")
+                        .replace(/\t/g, "\\011").replace(/\n/g, "\\012");
+    const mi = lines.map((l, i) => {
+      // "<src> on <mp> type <fs> (<opts>)"  |  "<src> on <mp> (<fs>, <opts>)"
+      const m = /^(.*?) on (.*?)(?: type (\S+))? \((.*)\)$/.exec(l);
+      if (!m) return null;
+      const [, src, mp, ltype, opts] = m;
+      const fs = ltype || opts.split(",")[0].trim();
+      const rest = ltype ? opts : opts.split(",").slice(1).join(",").trim();
+      return `${i + 20} 1 0:${i + 20} / ${esc(mp)} rw - ${esc(fs)} ${esc(src)} ${esc(rest || "rw")}`;
+    }).filter(Boolean).join("\n");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, mi + "\n", "utf8");
+    // The forgery and ambiguity cases are ABOUT mount(8)'s human-readable
+    // text; mountinfo's escaping makes those inputs unrepresentable, so those
+    // cases drive the fallback reader deliberately.
+    mountinfoPath = textPath ? join(tmpDir, "no-such-mountinfo") : miPath;
+    if (textPath) dfStub(realBackupDir);
   };
 
   it("refuses a Linux filesystem that cannot enforce ownership", () => {
@@ -2020,7 +2084,7 @@ exec "${real}" "$@"`);
     // nothing. It is the one member of UNSAFE_MOUNT_OPTS macOS actually emits,
     // and the reason this check exists on the declared primary host. The type
     // here is allowlisted so the option is the only thing left that can refuse.
-    mountStub("/dev/probe0 on /probe (apfs, local, nodev, nosuid, noowners)");
+    mountStub("/dev/probe0 on /probe (apfs, local, nodev, nosuid, noowners)", [], { textPath: true });
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
     expect(r.stderr, "the OPTION must be what refuses, not the type")
@@ -2099,7 +2163,7 @@ fi`);
     it(`cannot be forged by a mount whose SOURCE is named like a line (evil ${evilLast ? "last" : "first"})`, () => {
       const evil = "evil on /probe type ext4 (rw) on /elsewhere type fuse.sshfs (rw)";
       const real = "/dev/probe0 on /probe type exfat (rw,relatime)";
-      mountStub(evilLast ? [real, evil] : [evil, real]);
+      mountStub(evilLast ? [real, evil] : [evil, real], [], { textPath: true });
       const r = run();
       expect(err(r), "a line with non-unique separators must not decide anything")
         .toBe("DEST_UNSAFE");
@@ -2108,7 +2172,7 @@ fi`);
     it(`cannot be forged by a mount whose TARGET is named like a line (evil ${evilLast ? "last" : "first"})`, () => {
       const evil = "attacker_fs on /home/mallory/m on /probe type ext4 (rw) type fuse.sshfs (rw,user_id=1001)";
       const real = "/dev/probe0 on /probe type exfat (rw,relatime)";
-      mountStub(evilLast ? [real, evil] : [evil, real]);
+      mountStub(evilLast ? [real, evil] : [evil, real], [], { textPath: true });
       expect(err(run())).toBe("DEST_UNSAFE");
     });
   }
@@ -2122,13 +2186,163 @@ fi`);
     ["two ' type ', one ' on '", "evil type x on /probe type ext4 (rw)"],
   ]) {
     it(`refuses when a line mentioning the destination is ambiguous: ${label}`, () => {
-      mountStub(line);
+      mountStub(line, [], { textPath: true });
       const r = run();
       expect(err(r)).toBe("DEST_UNSAFE");
       expect(r.stderr, "an unattributable table must not be answered by an ancestor")
         .toMatch(/non-unique separators/);
     });
   }
+
+  // ─── A source field carrying a NEWLINE ─────────────────────
+  //
+  // `fusermount` is setuid and `-o fsname=` is the mounting user's to spell, so
+  // an unprivileged user chooses bytes that mount(8) prints VERBATIM into a
+  // line-oriented, unescaped table. The fragments between the newlines are then
+  // read as whole mount lines, and every one of them can be made well-formed:
+  // the leading fragment is spelled by the attacker, and the trailing one has
+  // ` on <their own mount point> (…)` appended by mount(8) itself. So the
+  // injected middle line carries exactly one of each separator and is
+  // indistinguishable, by any per-line parse, from a real entry — the
+  // ambiguity check above cannot see it. /proc/self/mountinfo escapes the
+  // newline to \012, which is the whole reason the Linux reader is the
+  // structured table rather than the text.
+  const newlineInjection = () => {
+    const injected = [
+      "decoy on /decoy type ext4 (rw)",
+      `/dev/fake on ${realBackupDir} type ext4 (rw)`,
+      "tail",
+    ].join("\n");
+    // The real destination entry is exfat — refused on its own merits — and the
+    // forged line claims the same mount point AFTER it, so on any reader that
+    // splits this text the forgery wins by "last among equals" and the run is
+    // reported verified safe.
+    const lines = [
+      "/dev/root on / type ext4 (rw,relatime)",
+      `/dev/probe0 on ${realBackupDir} type exfat (rw,relatime)`,
+      `${injected} on /home/mallory/x type fuse.sshfs (rw,user_id=1001)`,
+    ];
+    stub("mount", `cat <<'MOUNTEOF'\n${lines.join("\n")}\nMOUNTEOF\nexit 0`);
+    return injected;
+  };
+
+  it("is not decided by a forged line injected through a newline in a SOURCE", () => {
+    const injected = newlineInjection();
+    // mountinfo's own spelling of the same table: the injected bytes stay
+    // inside the source field of the attacker's OWN mount, whose mount point
+    // (/home/mallory/x) covers nothing.
+    const esc = (v) => v.replace(/\\/g, "\\134").replace(/ /g, "\\040")
+                        .replace(/\t/g, "\\011").replace(/\n/g, "\\012");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - exfat /dev/probe0 rw`,
+      `22 20 0:22 / /home/mallory/x rw - fuse.sshfs ${esc(injected)} rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run();
+    expect(err(r), "the destination's own entry decides, not a forged one")
+      .toBe("DEST_UNSAFE");
+    expect(r.stderr, "the escaped source must not be read as a mount line")
+      .toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("is not decided by that forged line when mount(8) is the only reader", () => {
+    newlineInjection();
+    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    dfStub(realBackupDir);
+    const r = run();
+    expect(err(r), "an unprivileged user must not be able to report the destination safe")
+      .toBe("DEST_UNSAFE");
+    // Forging a line is still possible; deciding with it is not. The forged
+    // line has to claim the mount point df named to be considered at all, and
+    // the real entry for it is already there — so the table has two claims and
+    // answers nothing, rather than the last one winning.
+    expect(r.stderr, "two claims on one mount point must be undetermined, not a verdict")
+      .toMatch(/2 mount\(8\) lines claim/);
+  });
+
+  // ─── df's own row is the same injection surface ────────────
+  //
+  // Naming the mount point with df moves the question, it does not remove it:
+  // when the destination is ON the attacker's FUSE mount, df prints THEIR
+  // fsname in its device column. The member set is therefore both readers, not
+  // just mount(8) — one row is required, and the field boundary is fixed at the
+  // capacity column rather than at whatever bytes the device happens to carry.
+
+  it("refuses when df prints more than one row for the destination", () => {
+    mountStub("/dev/probe0 on /probe type ext4 (rw,relatime)", [], { textPath: true });
+    // -P is one physical line per filesystem and a PATH selects one filesystem,
+    // so a second row is a newline in a field, not a second answer.
+    stub("df", `printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n`
+      + `injected 1 1 1 1%%    /elsewhere\\n/dev/probe0 1 1 1 1%%    %s\\n' '${realBackupDir}'`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/df\(1\) could not name/);
+  });
+
+  it("is not moved by a '%' in df's DEVICE field", () => {
+    // The device is the attacker-spelled field. Cutting at the FIRST `% `
+    // instead of the last hands the boundary to it: the mount point read back
+    // is then whatever followed the device's own, and the destination's real
+    // line matches nothing.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)", [], { textPath: true });
+    stub("df", `printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n`
+      + `evil%% /decoy 1 1 1 1%%    %s\\n' '${realBackupDir}'`);
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr, "the destination's own exfat line must still be the one that answers")
+      .toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("refuses rather than guesses when a '%' in the MOUNT POINT truncates df's answer", () => {
+    mountStub("/dev/probe0 on /probe type ext4 (rw,relatime)", [], { textPath: true });
+    stub("df", "printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n"
+      + "/dev/probe0 1 1 1 1%%    /Volumes/50%% off\\n'");
+    const r = run();
+    expect(err(r), "a truncated answer is not an answer").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/df\(1\) could not name/);
+  });
+
+  it("accepts a mount point containing a SPACE", () => {
+    // Measured on the macOS verification host: `/dev/disk5s1 on /Volumes/Backups
+    // of mrx33 (apfs, local, nodev, nosuid, journaled, nobrowse)`, alongside a
+    // `map auto_home on …` whose DEVICE has one. The round-5 residual — a mount
+    // with a space in both fields is undetermined — was a consequence of keying
+    // on df's device column and taking the mount point with `##* `. Neither is
+    // done now: df supplies the whole field after the capacity, and the line is
+    // matched on its own mount point, so both spaces are ordinary bytes.
+    const vol = "/Volumes/Backups of mrx33";
+    stub("mount", `cat <<'MOUNTEOF'
+/dev/root on / type ext4 (rw,relatime)
+map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)
+/dev/disk5s1 on ${vol} (apfs, local, nodev, nosuid, journaled, nobrowse)
+MOUNTEOF
+exit 0`);
+    dfStub(vol);
+    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    expect(run().status, "an apfs volume whose name has a space must not be refused").toBe(0);
+  });
+
+  it("resolves a mount point containing a SPACE through mountinfo's \\040", () => {
+    // The structured table escapes the space, so the destination's own path has
+    // to be escaped the same way before it is compared — otherwise the entry
+    // for a volume like the one above is never found and Linux falls back to an
+    // ancestor.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const spaced = join(realBackupDir, "with space");
+    mkdirSync(spaced, { recursive: true, mode: 0o700 });
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(spaced)} rw - exfat /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run({ BACKUP_DIR: spaced });
+    expect(err(r), "the escaped entry for the destination must be the one that answers")
+      .toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+  });
 
   it("refuses an encrypting FUSE backend opened to other uids", () => {
     // allow_other is the standard way to expose such a mount, and without
@@ -2146,6 +2360,7 @@ if [ "$2" = "--" ] || [ "$1" = "-P" ]; then
   printf 'Filesystem 1K-blocks Used Avail Use%% Mounted on\n/dev/probe0 1 1 1 1%% /probe\n'
   exit 0
 fi`);
+    mountinfoPath = join(tmpDir, "no-such-mountinfo");
     stub("mount", "exit 1");
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
@@ -2158,6 +2373,7 @@ fi`);
     // Not "the device is missing" — the object is the PATH now. An
     // unattributable table has not performed the check, which is not the same
     // as having passed.
+    mountinfoPath = join(tmpDir, "no-such-mountinfo");
     stub("mount", `cat <<'MOUNTEOF'
 sysfs /sys sysfs rw 0 0
 MOUNTEOF
