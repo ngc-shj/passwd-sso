@@ -162,32 +162,37 @@ perspectives. The four Criticals and six Majors were fixed; the rest are open
 and listed here so the next round starts from a true statement of what is done.
 
 **[Test] `assert_mode_private "$PGPASS_FILE"` runs before the write, but nothing
-pins the ORDER.** The code is correct — `mktemp` creates the file empty, so the
-mode is checked while it holds nothing. Moving the call back after the `printf`
-keeps the suite green: no case observes the file's size at check time. What
-would settle it: a `stat` stub that records `wc -c` of the passfile when asked
-for its mode, asserting 0.
+pins the ORDER.** **Closed in round 7**, by exactly the instrument this entry
+named: a `stat` stub that records `wc -c` of the passfile when asked for its
+mode, asserting 0. The mutant that makes the file non-empty at check time dies.
 
-**[Test] Twelve Major coverage gaps are open, each with a named seam.** Recorded
-individually in the code-review artifact's Round 6 section: `psql -X` pinned at
-2 of 5 sites (the case filters log lines starting `psql `, so both compose-mode
-sites — the DEFAULT path — and both `recon_diag` sites are unmeasured); the
-`077` mask measured on its group half only; `first_line` at the `achieved_tls`
-site and its CR strip; the row-charset guard masked by the length guard (the
-only non-hex fixture is also odd-length); the malformed-row `break`; the
-stamp-retry `.FAILED`/`.partial` arms; "an empty enumeration is a failed
-enumeration"; the port-anchoring guard (`5432evil`); the mount member sets and
-`REFUSED_PARAMS` hand-copied into the test rather than derived from the script
-(5 of 20 allowlist members exercised); the C7 describe's second `pgStubs()`
-still carrying the query-blind `psql` stub round 5 fixed in its twin.
+**[Test] Twelve Major coverage gaps are open, each with a named seam.**
+**All twelve closed in round 7**, each with a mutant that dies. Two of them
+turned out to be more than coverage:
 
-**[Test] `PRUNE_ABORTED`'s second emitter — the seam is now named.** Round 6
-confirmed the residual and identified the settling instrument: `rm` is
-PATH-resolved and the suite already stubs `mkdir`, `stat`, `ls`, `mount` and
-`uname` the same way, so a stub that exits non-zero for a generation name —
-armed from the `pg_dumpall` stub — drives the branch with no production change.
-The earlier entry's "an rm stub, or a root chmod-ed 0500" was right; only the
-first half is needed.
+- The compose-mode `psql` stub had no arm at all, so the cluster enumeration
+  failed silently in EVERY compose case and the whole reconciliation block —
+  the row validation, the malformed-row `break`, the unlisted-database
+  reporting — was reachable by nothing. It has fixtures now, in both
+  directions.
+- The `.partial` stamp-collision arm is unreachable on the ordinary path:
+  `prune_orphaned_partials` runs under the lock and removes every `.partial`
+  BEFORE the stamp is chosen. That is why nothing exercised it. What reaches it
+  is the sweep not succeeding — its removal is best-effort — so the case drives
+  it through an `rm` that fails, which is the situation the arm exists for.
+
+The remaining ten were coverage as described: both halves of the `077` mask at
+both sites that spell it, `first_line` at `achieved_tls` including the CR arm,
+the row-charset guard with an EVEN-length non-hex payload, the malformed-row
+`break`, the `.FAILED` arm, the empty enumeration, the port anchoring, the
+member sets now READ OUT of the script rather than copied beside it, and the
+query refusal list derived from the script's own case arms.
+
+**[Test] `PRUNE_ABORTED`'s second emitter — the seam is now named.** **Closed in
+round 7** with exactly that instrument: an `rm` stub that exits non-zero for one
+generation name and delegates everything else. Replacing the clause with
+`|| true` now reds. Open across rounds 3, 4, 5 and 6; the seam was available the
+whole time, and each round's entry named a harder one.
 
 **[Process] A review ran against a moving tree.** The Testing expert's sweep was
 in flight when this session committed `f5eb6770d` and left further uncommitted

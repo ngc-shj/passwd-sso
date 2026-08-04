@@ -552,6 +552,104 @@ describe("C6 retention pruning", () => {
     expect(generations()).not.toContain("20200101T000000Z");
   });
 
+  it("aborts when a generation cannot be removed", () => {
+    // The second PRUNE_ABORTED emitter. `rm` is PATH-resolved, so a stub that
+    // fails for ONE generation name and delegates everything else drives the
+    // branch with no production change — the seam the deviation log named.
+    // Replacing the clause with `|| true` keeps every other prune case green:
+    // they all assert on what survived, and a removal that silently failed
+    // leaves MORE behind, not less.
+    setup(["20200101T000000Z", "20200102T000000Z", "20200103T000000Z"]);
+    const real = spawnSync("sh", ["-c", "command -v rm"], { encoding: "utf8" }).stdout.trim();
+    stub("rm", `
+for a in "$@"; do
+  case "$a" in 20200101T000000Z) exit 1 ;; esac
+done
+exec "${real}" "$@"`);
+    const r = run({ BACKUP_RETAIN: "1" });
+    expect(err(r), "a prune that could not complete is not a successful run")
+      .toBe("PRUNE_ABORTED");
+    expect(r.stderr).toMatch(/could not remove generation 20200101T000000Z/);
+  });
+
+  // ─── The stamp-retry arms ──────────────────────────────────
+  //
+  // `date` is PATH-resolved and the script calls it at exactly one site, so a
+  // stub that hands out a taken stamp once and a free one afterwards makes the
+  // collision deterministic. Pre-creating the name for the current second
+  // proves nothing on a run that starts a second later.
+  const dateStub = () => {
+    const real = spawnSync("sh", ["-c", "command -v date"], { encoding: "utf8" }).stdout.trim();
+    stub("date", `
+case " $* " in
+  *"+%Y%m%dT%H%M%SZ"*)
+    n=0
+    [ -f "${logFile}.datecalls" ] && n="$(cat "${logFile}.datecalls")"
+    n=$((n + 1)); echo "$n" > "${logFile}.datecalls"
+    if [ "$n" -le 1 ]; then echo 20250101T000000Z; else echo 20250101T000001Z; fi
+    exit 0 ;;
+esac
+exec "${real}" "$@"`);
+  };
+
+  const takenName = (suffix) => {
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    const taken = join(backupDir, `20250101T000000Z${suffix}`);
+    mkdirSync(taken, { recursive: true, mode: 0o700 });
+    writeFileSync(join(taken, "MARKER"), "x", "utf8");
+    dateStub();
+    return taken;
+  };
+
+  it("retries the stamp when <stamp> is already taken", () => {
+    const taken = takenName("");
+    const r = run({ BACKUP_RETAIN: "5" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(generations(), "the run lands on the next free stamp")
+      .toContain("20250101T000001Z");
+    expect(readdirSync(taken).sort(), "and writes nothing into the taken name")
+      .toEqual(["MARKER"]);
+  });
+
+  it("retries the stamp when a .partial that could not be swept is still there", () => {
+    // `prune_orphaned_partials` runs under the lock and removes every .partial
+    // BEFORE the stamp is chosen, so on the ordinary path this arm is
+    // unreachable — which is why nothing exercised it. What makes it reachable
+    // is the sweep not succeeding: its removal is best-effort, so an `rm` that
+    // fails leaves the directory, and reusing that name would have this run
+    // write into a directory another run's remains are in.
+    const taken = takenName(".partial");
+    const real = spawnSync("sh", ["-c", "command -v rm"], { encoding: "utf8" }).stdout.trim();
+    stub("rm", `
+for a in "$@"; do
+  case "$a" in 20250101T000000Z.partial) exit 0 ;; esac
+done
+exec "${real}" "$@"`);
+    const r = run({ BACKUP_RETAIN: "5" });
+    expect(r.status, r.stderr).toBe(0);
+    expect(generations(), "the run lands on the next free stamp")
+      .toContain("20250101T000001Z");
+    expect(readdirSync(taken).sort(), "and writes nothing into the taken name")
+      .toEqual(["MARKER"]);
+  });
+
+  it("retries the stamp when <stamp>.FAILED is already taken", () => {
+    // The third arm, and the only one a SUCCESSFUL run cannot reach: .FAILED is
+    // produced by the rename a failing run does, and `mv a b` with b an
+    // existing directory moves a INTO b — so without this arm the previous
+    // failure's diagnosis directory acquires the new one inside itself, and
+    // both become unreadable as generations.
+    const taken = takenName(".FAILED");
+    dockerStub({ restoreFails: "1" });
+    const r = run();
+    expect(err(r)).toBe("VALIDATE_FAILED");
+    expect(readdirSync(taken).sort(), "the earlier diagnosis must not be nested into")
+      .toEqual(["MARKER"]);
+    expect(existsSync(join(backupDir, "20250101T000001Z.FAILED")),
+      "this failure gets a name of its own").toBe(true);
+  });
+
   it("never prunes the run it just took, even when a future-dated generation exists", () => {
     // A clock step, a VM snapshot restore, or two hosts sharing one BACKUP_DIR
     // makes the new run the oldest NAME. A name-ordered pruner deletes the
@@ -1131,6 +1229,20 @@ exit 0`);
     "port",
   ];
 
+  it("drives every parameter the SCRIPT refuses, not a list copied beside it", () => {
+    // A hand-copied list measures the copy. Derive the arms from the source, so
+    // a parameter added to the script with no case here fails this rather than
+    // being silently unmeasured.
+    const src = readFileSync(SCRIPT, "utf8");
+    const block = src.split("for _kv in $raw_query; do")[1]?.split("\n      esac")[0];
+    expect(block, "the query refusal block must be locatable in the script").toBeDefined();
+    const derived = [...block.matchAll(/^\s+([a-z_]+(?:\|[a-z_]+)*)\)\s*$/gm)]
+      .flatMap((m) => m[1].split("|"));
+    expect(derived.length, "the script must refuse something").toBeGreaterThan(5);
+    expect([...new Set(derived)].sort(), "the suite must drive exactly the script's set")
+      .toEqual([...new Set(REFUSED_PARAMS)].sort());
+  });
+
   it("refuses every credential-, peer- and transport-selecting query parameter", () => {
     pgStubs();
     for (const param of REFUSED_PARAMS) {
@@ -1283,6 +1395,57 @@ exit 0`);
     run({ MIGRATION_DATABASE_URL: url("u:p") });
     const [gen] = generations();
     expect(readFileSync(join(backupDir, gen, "MANIFEST"), "utf8")).toMatch(/achieved_tls: TLSv1\.3/);
+  });
+
+  it("keeps the achieved transport on ONE MANIFEST line, at LF and at CR", () => {
+    // ACHIEVED_TLS is whatever psql printed with the leading `t|` removed, so
+    // everything after the first row travels with it into a line-oriented
+    // record. first_line trims at both bytes; the CR arm is the one a check
+    // that only looked for \n leaves open, and a lone CR still ends the line
+    // for anything reading the MANIFEST back.
+    pgStubs();
+    stub("psql", `printf 't|TLSv1.3|AESGCM\\rCARRIAGE\\nSECOND-ROW\\n'
+exit 0`);
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(r.status, r.stderr).toBe(0);
+    const manifest = readFileSync(join(backupDir, generations()[0], "MANIFEST"), "utf8");
+    expect(manifest.split("\n").filter((l) => l.startsWith("achieved_tls:")))
+      .toEqual(["achieved_tls: TLSv1.3|AESGCM"]);
+    expect(manifest, "nothing past the CR may reach the record").not.toContain("CARRIAGE");
+    expect(manifest, "nor anything past the LF").not.toContain("SECOND-ROW");
+  });
+
+  it("refuses a port that merely STARTS with digits", () => {
+    // `[0-9]*` as a glob is "starts with a digit", which admits 5432evil — and
+    // the passfile entry is scoped to the port the authority names, so a port
+    // libpq reads differently from this script means the entry never matches.
+    pgStubs();
+    expect(err(run({ MIGRATION_DATABASE_URL: `postgresql://u:p@127.0.0.1:5432evil/d?${CA}` })),
+      "an anchored match is the whole string").toBe("BAD_URL");
+  });
+
+  it("checks the passfile's mode while it is still EMPTY", () => {
+    // The order is the property: mktemp creates the file empty, so the check
+    // that decides whether the mode is private runs before the password is in
+    // it. Moving the call after the write keeps every other assertion green —
+    // nothing else observes the file's size at check time.
+    pgStubs();
+    const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+    stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+case "$last" in
+  *.pgpass.*)
+    case " $* " in
+      *" %a "*|*"\'%Lp\'"*|*" %Lp "*)
+        wc -c < "$last" | tr -d ' ' >> "${logFile}.pgpasssize" ;;
+    esac ;;
+esac
+exec "${real}" "$@"`);
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(r.status, r.stderr).toBe(0);
+    const sizes = readFileSync(`${logFile}.pgpasssize`, "utf8").trim().split("\n");
+    expect(sizes[0], "the mode is checked before the credential is written").toBe("0");
   });
 
   it("fails when the server reports an unencrypted session", () => {
@@ -2404,6 +2567,52 @@ fi`);
       .toMatch(/2 mount\(8\) lines claim/);
   });
 
+  // ─── The mount member sets, derived from the script ────────
+  //
+  // Hand-copying a list into the suite measures the copy: 5 of the 20
+  // allowlisted types were driven, and a type added to the script arrived with
+  // no case at all. These read the lists out of the source, so the suite covers
+  // whatever the script currently claims.
+  const scriptList = (name) => {
+    const m = new RegExp(`^${name}="([^"]*)"`, "m").exec(readFileSync(SCRIPT, "utf8"));
+    expect(m, `${name} must be readable from the script`).not.toBeNull();
+    return m[1].split(/\s+/).filter(Boolean);
+  };
+
+  const mountinfoFixture = (perMountOpts, fstype) => {
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${realBackupDir.replace(/ /g, "\\040")} ${perMountOpts} - ${fstype} /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+  };
+
+  it("accepts every filesystem type on the script's own allowlist", () => {
+    const types = scriptList("OWNERSHIP_ENFORCING_FS");
+    expect(types.length, "the allowlist must be non-trivial").toBeGreaterThan(10);
+    for (const t of types) {
+      mountinfoFixture("rw", t);
+      const r = run();
+      expect(r.status, `${t} is on the allowlist but was refused: ${r.stderr}`).toBe(0);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses every option the script calls unsafe, on an allowlisted type", () => {
+    const opts = scriptList("UNSAFE_MOUNT_OPTS");
+    expect(opts.length, "the unsafe-option set must be non-trivial").toBeGreaterThan(5);
+    for (const o of opts) {
+      // ext4 is allowlisted, so the OPTION is the only thing left that can
+      // refuse — an unlisted type would refuse first and prove nothing.
+      mountinfoFixture(`rw,${o}`, "ext4");
+      const r = run();
+      expect(err(r), `${o}= must make the destination unsafe`).toBe("DEST_UNSAFE");
+      expect(r.stderr, `${o}: the option must be the stated reason`).toMatch(/ownership advisory/);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
   // ─── Visibility is the mount TREE, not the longest string ──
   //
   // mountinfo's own spec says so: which mount a path resolves through is
@@ -3442,22 +3651,41 @@ exec "${real}" "$@"`);
     expect(r.stderr).toMatch(/MANIFEST[^\n]*mode 755/);
   });
 
-  it("refuses a mode that opens only the GROUP bits", () => {
-    // Every other fixture reports 755, which trips an other-bits-only mask too.
-    // A guard narrowed from 077 to 007 was therefore invisible.
-    const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
-    stub("stat", `
+  // Both halves of the mask, on both of the sites that spell it. Every other
+  // fixture reports 755, which trips a group-only AND an other-only mask, so a
+  // guard narrowed from 077 to either half was invisible to all of them.
+  for (const [half, mode] of [["GROUP", "640"], ["OTHER", "604"]]) {
+    it(`refuses an archive mode that opens only the ${half} bits`, () => {
+      const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+      stub("stat", `
 last=""
 for a in "$@"; do last="$a"; done
 case "$last" in
   *.dump)
-    case " $* " in *" %a "*|*"\'%Lp\'"*|*" %Lp "*) echo 640; exit 0 ;; esac ;;
+    case " $* " in *" %a "*|*"\'%Lp\'"*|*" %Lp "*) echo ${mode}; exit 0 ;; esac ;;
 esac
 exec "${real}" "$@"`);
-    const r = run();
-    expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/mode 640/);
-  });
+      const r = run();
+      expect(err(r)).toBe("DEST_UNSAFE");
+      expect(r.stderr).toMatch(new RegExp(`mode ${mode}`));
+    });
+
+    it(`refuses a DESTINATION mode that opens only the ${half} bits`, () => {
+      // The second site with the same spelling. It is reached before any dump,
+      // so a mask narrowed there is a different line from the one above.
+      const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
+      stub("stat", `
+last=""
+for a in "$@"; do last="$a"; done
+if [ "$last" = "${realBackupDir}" ]; then
+  case " $* " in *" %a "*|*"\'%Lp\'"*|*" %Lp "*) echo ${mode === "640" ? "750" : "705"}; exit 0 ;; esac
+fi
+exec "${real}" "$@"`);
+      const r = run();
+      expect(err(r)).toBe("DEST_UNSAFE");
+      expect(r.stderr).toMatch(new RegExp(`has mode ${mode === "640" ? "750" : "705"}`));
+    });
+  }
 
   it("refuses when the mode itself cannot be read", () => {
     const real = spawnSync("sh", ["-c", "command -v stat"], { encoding: "utf8" }).stdout.trim();
