@@ -55,6 +55,12 @@ const RECURSIVE_IGNORE = [
   "**/.passwd-sso-env.json",
   "**/*review-credentials.local.md", "**/.load-test-auth.json", "**/.auth-state.json",
   "**/*.db", "**/*.sqlite", "**/*.db-journal", "**/postgres_data",
+  "**/*.dump", "**/passwd-sso-backups",
+  "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z", "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z/**",
+  "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.FAILED", "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.FAILED/**",
+  "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.partial", "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.partial/**",
+  "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.[0-9]*.FAILED", "**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.[0-9]*.FAILED/**",
+  "**/.pgpass.*",
   "**/.terraform", "**/*.tfstate", "**/*.tfstate.*",
   "**/*.tfvars", "**/*.tfvars.json", "!**/*.tfvars.example",
   "**/test-results", "**/coverage", "**/.coverage-snapshots", "**/playwright-report",
@@ -66,6 +72,31 @@ describe("check-dockerignore-secrets", () => {
     const r = runGuard();
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain("OK (static:");
+  });
+
+  it("translates character classes the way Docker does, not the way filepath.Match does", () => {
+    // The previous case ran the guard and asserted exit 0, which passes with or
+    // without the bug: secret.txt is not a MUST_EXCLUDE path and the bundle scan
+    // never consults the pattern. Assert the translator itself.
+    //
+    // Docker does not use filepath.Match for .dockerignore: moby's
+    // patternmatcher copies the class verbatim into a Go regexp, where `!` is an
+    // ordinary member and only `^` negates. Verified against a real docker
+    // build — `**/[!x]ecret.txt` does NOT exclude secret.txt.
+    const src = readFileSync(GUARD, "utf8");
+    const fn = src.match(/function globToRegExp[\s\S]*?\n}/)[0];
+    const globToRegExp = new Function(`${fn}; return globToRegExp;`)();
+    const cases = [
+      ["**/[!x]ecret.txt", "secret.txt", false],
+      ["**/[!x]ecret.txt", "!ecret.txt", true],
+      ["**/[!x]ecret.txt", "xecret.txt", true],
+      ["**/[^x]ecret.txt", "secret.txt", true],
+      ["**/[0-9]T", "3T", true],
+      ["**/[0-9]T", "aT", false],
+    ];
+    for (const [glob, path, want] of cases) {
+      expect(globToRegExp(glob).test(path), `${glob} vs ${path}`).toBe(want);
+    }
   });
 
   it("FAILS when .dockerignore does not exclude .env (the original leak)", () => {
@@ -93,7 +124,10 @@ describe("check-dockerignore-secrets", () => {
 
   it("FAILS when .dockerignore misses session-token / DB-data artifacts (.auth-state.json, postgres_data, *.db-journal, saml)", () => {
     // Everything covered EXCEPT the Round-4-review class — proves each is enforced.
-    const missing = ["**/.auth-state.json", "**/postgres_data", "**/*.db-journal", "**/saml"];
+    // `**/*.dump` is an extension class, not a DIR_CLASSES entry, so the
+    // generated dir-probe test below does not cover it — drop-proving it here
+    // is what makes it load-bearing rather than decorative.
+    const missing = ["**/.auth-state.json", "**/postgres_data", "**/*.db-journal", "**/saml", "**/*.dump"];
     for (const drop of missing) {
       const partial = RECURSIVE_IGNORE.replace(drop + "\n", "");
       writeDockerignore(partial);

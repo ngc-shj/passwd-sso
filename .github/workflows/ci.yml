@@ -48,6 +48,14 @@ jobs:
               - "eslint.extension.config.*"
               - "next.config.*"
               - "scripts/**"
+              # Operator documentation is asserted BY the suite: the C8 block in
+              # scripts/__tests__/backup-db.test.mjs covers all five documents
+              # below, two of them under backup-recovery/. SC5's
+              # reason for not wiring check-doc-paths.mjs is that those assertions
+              # cover it. Without these two entries a docs-only PR runs neither
+              # gate, which is exactly the change they exist to catch.
+              - "docs/operations/**"
+              - "CLAUDE.md"
             extension:
               - "extension/**"
             cli:

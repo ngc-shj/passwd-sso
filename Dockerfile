@@ -117,9 +117,12 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 #   WebSocket → DoS). npm 11.16.0 bundles 6.26.0. The app's own top-level undici
 #   is already 7.28.0 (also fixed); this patches npm's bundled copy, which Trivy
 #   reports separately.
-# - brace-expansion >=5.0.8: closes CVE-2026-13149 (exponential-time DoS) AND
-#   GHSA-mh99-v99m-4gvg (unbounded expansion → OOM), whose range is <=5.0.7 —
-#   so the previous 5.0.7 pin was itself affected once that advisory landed.
+# - brace-expansion >=5.0.9: closes CVE-2026-13149 (exponential-time DoS),
+#   GHSA-mh99-v99m-4gvg (unbounded expansion → OOM, range <=5.0.7) AND
+#   GHSA-rgw5-rvv9-x895 / CVE-2026-69152, whose range is 4.0.0 – 5.0.8
+#   INCLUSIVE — so each pin in turn has been inside the next advisory's band.
+#   That has now happened twice; the version here is a floor to raise, not a
+#   value to trust because it was once correct.
 #   npm 11.16.0 bundles 5.0.6, so this patch is doing real work. The app's own
 #   copy is pinned separately via the package.json overrides block; this patches
 #   npm's bundled copy, which Trivy scans as part of the image.
@@ -135,8 +138,9 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 RUN TAR_VER=7.5.19 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
-    BE_VER=5.0.8 && \
+    BE_VER=5.0.9 && \
     UNDICI_VER=6.28.0 && \
+    IPADDR_VER=10.4.0 && \
     NPM_VER=11.16.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
@@ -199,6 +203,21 @@ RUN TAR_VER=7.5.19 && \
     else \
       echo "ERROR: brace-expansion directory not found at ${BE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
     fi && \
+    IPADDR_DIR=/usr/local/lib/node_modules/npm/node_modules/ip-address && \
+    if [ -d "$IPADDR_DIR" ]; then \
+      CURRENT=$(node -p "require('${IPADDR_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$IPADDR_VER" "$CURRENT" | sort -V | head -n1)" != "$IPADDR_VER" ]; then \
+        cd "$IPADDR_DIR" && \
+        npm pack "ip-address@${IPADDR_VER}" --quiet && \
+        tar xzf "ip-address-${IPADDR_VER}.tgz" --strip-components=1 && \
+        rm -f "ip-address-${IPADDR_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${IPADDR_VER}'){console.error('ip-address patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "ip-address ${CURRENT} already >= ${IPADDR_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "ERROR: ip-address directory not found at ${IPADDR_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
+    fi && \
     UNDICI_DIR=/usr/local/lib/node_modules/npm/node_modules/undici && \
     if [ -d "$UNDICI_DIR" ]; then \
       CURRENT=$(node -p "require('${UNDICI_DIR}/package.json').version") && \
@@ -223,7 +242,8 @@ RUN TAR_VER=7.5.19 && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}" && \
-    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version,c=v.split('.').map(Number),m='${UNDICI_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('undici still '+v);process.exit(1)}}"
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version,c=v.split('.').map(Number),m='${UNDICI_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('undici still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/ip-address/package.json').version,c=v.split('.').map(Number),m='${IPADDR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('ip-address still '+v);process.exit(1)}}"
 
 # Prisma CLI: COPY the self-contained closure from the dedicated `prisma-cli`
 # stage (isolated npm install with .npmrc), NOT a runner-side `npm install`

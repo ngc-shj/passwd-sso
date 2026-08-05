@@ -8,6 +8,7 @@ Language policy:
 | Document | Description |
 | --- | --- |
 | [deployment.md](deployment.md) | Deployment procedures |
+| [dev-host-migration.md](dev-host-migration.md) | Moving a development / verification deployment to another machine |
 | [admin-tokens.md](admin-tokens.md) | Operator token mint / use / rotate / revoke runbook |
 | [incident-runbook.md](incident-runbook.md) | Incident response runbook |
 | [audit-log-reference.md](audit-log-reference.md) | Audit log schema reference |

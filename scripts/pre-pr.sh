@@ -33,7 +33,7 @@ detect_web_changes() {
   # match `eslint.extension.config.mjs`, so without it a PR editing only that file
   # (which is what adding an entry to its two-file override audit surface looks
   # like) would skip the self-test that proves the gate can still fail.
-  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/)'
+  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/|docs/operations/|CLAUDE\.md)'
   local base diff ref
   # Prefer origin/main (CI's base; survives a stale local main) and fall back to
   # local main only if the remote ref is absent.
@@ -742,7 +742,11 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   # batch — but both were 10s-timeout expiries under CPU contention, not file
   # races, and they no longer occur now that Build overlaps Test rather than
   # competing with the whole batch.)
-  queue_step "Lint"       npx eslint .
+  # `npm run lint`, not a bare eslint: the package script carries
+  # `--max-warnings 0`, which is what CI runs, and without it this gate exits 0
+  # on a warning that reds CI. Measured — an unused variable sat in the tree for
+  # four review rounds and every pre-PR run passed it through to the PR.
+  queue_step "Lint"       npm run lint
   queue_step "Test"       npx vitest run
   queue_step "Build"      npx next build
 
