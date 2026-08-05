@@ -2591,12 +2591,45 @@ fi`);
   it("accepts every filesystem type on the script's own allowlist", () => {
     const types = scriptList("OWNERSHIP_ENFORCING_FS");
     expect(types.length, "the allowlist must be non-trivial").toBeGreaterThan(10);
+    // A `fuse.` type is a SELF-DECLARATION — the subtype is `-o subtype=`, which
+    // the mounting user spells — so those members are accepted only with the
+    // kernel-supplied user_id naming this uid. Everything else is a real type.
+    const uid = process.getuid();
     for (const t of types) {
-      mountinfoFixture("rw", t);
+      mountinfoFixture(t.startsWith("fuse.") ? `rw,user_id=${uid}` : "rw", t);
       const r = run();
       expect(r.status, `${t} is on the allowlist but was refused: ${r.stderr}`).toBe(0);
       rmSync(backupDir, { recursive: true, force: true });
     }
+  });
+
+  it("refuses every FUSE type on the allowlist when another uid made the mount", () => {
+    // The paired deny side of the case above, over the same derived member set:
+    // the subtype is the attacker's to write, so the allowlist was reading
+    // their word for it. `user_id=` is what the kernel supplies, and it names
+    // the principal whose daemon answers every ownership, mode and ACL probe
+    // this script makes about the destination.
+    const fuseTypes = scriptList("OWNERSHIP_ENFORCING_FS").filter((t) => t.startsWith("fuse."));
+    expect(fuseTypes.length, "the allowlist must still invite the encrypting backends")
+      .toBeGreaterThan(0);
+    for (const t of fuseTypes) {
+      mountinfoFixture("rw,user_id=9999", t);
+      const r = run();
+      expect(err(r), `${t} claimed by uid 9999 must not be verified safe`).toBe("DEST_UNSAFE");
+      expect(r.stderr, `${t}: the daemon's owner must be the stated reason`)
+        .toMatch(/was not made by this uid/);
+      rmSync(backupDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a FUSE mount whose table cannot say who made it", () => {
+    // "Examined nothing" must not be spelled like "found nothing": a line with
+    // no user_id at all is a table that cannot be asked, not a mount that
+    // passed.
+    mountinfoFixture("rw", "fuse.gocryptfs");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/was not made by this uid/);
   });
 
   it("refuses every option the script calls unsafe, on an allowlisted type", () => {
@@ -2611,6 +2644,74 @@ fi`);
       expect(r.stderr, `${o}: the option must be the stated reason`).toMatch(/ownership advisory/);
       rmSync(backupDir, { recursive: true, force: true });
     }
+  });
+
+  // ─── A path is not a pattern ───────────────────────────────
+  //
+  // mountinfo escapes only \040 \011 \012 \134, so every glob metacharacter
+  // reaches the reader verbatim. An unquoted expansion does pathname expansion
+  // as well as word splitting, so a mount point containing one used to expand
+  // to a DIFFERENT string as soon as something beside it matched: the
+  // destination's own mount matched nothing, the descent stopped at its parent,
+  // and the verdict was inherited from an ancestor. The direction is what makes
+  // it matter — a mount the reader cannot see is indistinguishable from one
+  // that is not there, and the ancestor is normally the safe root.
+  for (const [label, fstype, wantStatus] of [
+    ["refuses", "exfat", null],
+    ["accepts", "ext4", 0],
+  ]) {
+    it(`${label} a destination whose NAME contains a glob, with a sibling that matches`, () => {
+      const dest = join(realBackupDir, "gen[1]");
+      mkdirSync(dest, { recursive: true, mode: 0o700 });
+      // The sibling is what makes the pattern match something; without it the
+      // expansion is a no-op and the case proves nothing.
+      mkdirSync(join(realBackupDir, "gen1"), { recursive: true, mode: 0o700 });
+      const esc = (v) => v.replace(/ /g, "\\040");
+      const miPath = join(tmpDir, "mountinfo");
+      writeFileSync(miPath, [
+        "20 1 0:20 / / rw - ext4 /dev/root rw",
+        `21 20 0:21 / ${esc(dest)} rw - ${fstype} /dev/probe0 rw`,
+      ].join("\n") + "\n", "utf8");
+      mountinfoPath = miPath;
+      const r = run({ BACKUP_DIR: dest });
+      if (wantStatus === 0) {
+        expect(r.status, `an ${fstype} destination must not be refused: ${r.stderr}`).toBe(0);
+      } else {
+        expect(err(r), "the destination's own entry must still be found").toBe("DEST_UNSAFE");
+        expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+      }
+    });
+  }
+
+  it("says in the log when the mount table came from somewhere else", () => {
+    // The seam decides the whole destination-safety verdict from a file the
+    // operator names. The other escape from the same verdict — the
+    // ALLOW_UNVERIFIED flag — warns loudly; this one said nothing, so a log
+    // review could not tell the check had been answered by a fixture.
+    mountStub("/dev/probe0 on /probe type ext4 (rw,relatime)");
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, "an overridden mount table must be visible")
+      .toMatch(/reading the mount table from .* instead of \/proc\/self\/mountinfo/);
+  });
+
+  it("says nothing when the mount table is the real one (paired allow case)", () => {
+    // The direction that keeps the warning worth reading: the default must stay
+    // silent, or every run gains a line nobody looks at.
+    mountinfoPath = undefined;
+    const r = run();
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr, "the default path must not warn").not.toMatch(/reading the mount table from/);
+  });
+
+  it("does not expand BACKUP_DATABASES as a pattern", () => {
+    // The same missing option, one loop away: the validator inspected the
+    // EXPANSION, so in a working directory whose entries are identifier-shaped
+    // the run proceeded with a silently substituted target set.
+    const r = run({ BACKUP_DATABASES: "*" });
+    expect(err(r), "a pattern is not a database name").toBe("BAD_ENV");
+    expect(r.stderr, "and the value reported must be the one the operator set")
+      .toMatch(/invalid database name: \*/);
   });
 
   // ─── Visibility is the mount TREE, not the longest string ──
@@ -2717,20 +2818,53 @@ fi`);
     expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
   });
 
-  it("refuses a mountinfo that describes a cycle instead of walking it forever", () => {
-    // A mount whose parent id is its own is its own child, and the descent
-    // never returns. Nothing in the format forbids it, and a backup that HANGS
+  it("resolves the destination when the ROOT names itself as its parent", () => {
+    // proc_pid_mountinfo(5): the parent ID is "the ID of the parent mount (or
+    // of self for the root of this mount namespace)". A self-parent root is the
+    // documented spelling, not a malformed table — and a reader that re-selects
+    // it as its own child refuses EVERY run on such a host, which is the whole
+    // destination check denied rather than one destination misjudged.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 20 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - exfat /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    const r = run();
+    expect(err(r), "the destination's own entry must still decide").toBe("DEST_UNSAFE");
+    expect(r.stderr, "and for ITS reason, not for a cycle")
+      .toMatch(/exfat is not known to enforce ownership/);
+  });
+
+  it("accepts a self-parent root whose destination is safe (paired allow case)", () => {
+    // The direction that proves the fix is not "always deny": the same shape
+    // with an allowlisted type must publish. Without it, refusing the cycle
+    // could be done by refusing everything.
+    const esc = (v) => v.replace(/ /g, "\\040");
+    const miPath = join(tmpDir, "mountinfo");
+    writeFileSync(miPath, [
+      "20 20 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/probe0 rw`,
+    ].join("\n") + "\n", "utf8");
+    mountinfoPath = miPath;
+    expect(run().status, "a self-parent root is a normal table").toBe(0);
+  });
+
+  it("refuses a mountinfo that describes a real cycle instead of walking it forever", () => {
+    // A cycle through TWO ids, which is what the visited set is for now that a
+    // mount can no longer be its own child. Nothing in the format forbids it and
+    // the reader's path is a seam, so it is reachable input. A backup that HANGS
     // is worse than one that refuses: there is no timeout around a cron run, so
     // it would sit holding the lock until somebody noticed. Found by a mutant
     // that removed the parent check and left a vitest run wedged for 94 minutes.
     const esc = (v) => v.replace(/ /g, "\\040");
     const miPath = join(tmpDir, "mountinfo");
-    // The root names ITSELF as its parent, so it is its own child and every
-    // step of the descent selects it again. A self-parent deeper in the table
-    // is unreachable and therefore harmless; this is the one shape that spins.
     writeFileSync(miPath, [
       "20 20 0:20 / / rw - ext4 /dev/root rw",
-      `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/probe0 rw`,
+      `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/a rw`,
+      `22 21 0:22 / ${esc(realBackupDir)} rw - ext4 /dev/b rw`,
+      `21 22 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/a rw`,
     ].join("\n") + "\n", "utf8");
     mountinfoPath = miPath;
     const r = run();
@@ -2774,18 +2908,28 @@ fi`);
     expect(r.stderr).toMatch(/df\(1\) could not name/);
   });
 
-  it("is not moved by a '%' in df's DEVICE field", () => {
-    // The device is the attacker-spelled field. Cutting at the FIRST `% `
-    // instead of the last hands the boundary to it: the mount point read back
-    // is then whatever followed the device's own, and the destination's real
-    // line matches nothing.
+  it("refuses when a '%' in df's DEVICE field makes the boundary ambiguous", () => {
+    // The device is the attacker-spelled field (a FUSE fsname), and the mount
+    // point is a directory name; neither is this script's to control, so when
+    // both could hold the capacity boundary there is nothing to prefer between
+    // them. Preferring the rightmost is what let a mount point carrying `% `
+    // hand the verdict to an unrelated filesystem, so this row is refused
+    // rather than adjudicated — one row, one boundary, or no answer.
     mountStub("/dev/probe0 on /probe type exfat (rw,relatime)", [], { textPath: true });
     stub("df", `printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n`
       + `evil%% /decoy 1 1 1 1%%    %s\\n' '${realBackupDir}'`);
     const r = run();
-    expect(err(r)).toBe("DEST_UNSAFE");
-    expect(r.stderr, "the destination's own exfat line must still be the one that answers")
-      .toMatch(/exfat is not known to enforce ownership/);
+    expect(err(r), "an ambiguous row is not an answer").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/df\(1\) could not name/);
+  });
+
+  it("still answers for an ordinary df row (paired allow case)", () => {
+    // The direction the uniqueness rule must not break: every real row has
+    // exactly one `% `, and the macOS path depends entirely on this working.
+    mountStub("/dev/probe0 on /probe type exfat (rw,relatime)", [], { textPath: true });
+    const r = run();
+    expect(err(r), "the destination's own line must still decide").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
   });
 
   it("refuses rather than guesses when a '%' in the MOUNT POINT truncates df's answer", () => {
@@ -2794,6 +2938,28 @@ fi`);
       + "/dev/probe0 1 1 1 1%%    /Volumes/50%% off\\n'");
     const r = run();
     expect(err(r), "a truncated answer is not an answer").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/df\(1\) could not name/);
+  });
+
+  it("refuses when the truncation would leave a REAL other mount point", () => {
+    // The case the previous comment claimed was already handled: `${row##*% }`
+    // leaves everything after the LAST `% `, and when a mount point contains
+    // `% /…` the remainder is a well-formed absolute path — so it does not
+    // "match no line and refuse", it matches an entirely different filesystem
+    // and that filesystem's verdict is returned for this destination. The
+    // boundary has to be unique, not merely rightmost.
+    stub("mount", `cat <<'MOUNTEOF'
+/dev/root on / type ext4 (rw,relatime)
+/dev/safe on /mnt/safe type ext4 (rw,relatime)
+gocryptfs on /home/att/x% /mnt/safe type exfat (rw,relatime)
+MOUNTEOF
+exit 0`);
+    stub("df", "printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n"
+      + "/dev/fuse0 1 1 1 1%%    /home/att/x%% /mnt/safe\\n'");
+    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    const r = run();
+    expect(err(r), "an unrelated ext4 must not answer for an exfat destination")
+      .toBe("DEST_UNSAFE");
     expect(r.stderr).toMatch(/df\(1\) could not name/);
   });
 
@@ -2936,8 +3102,11 @@ done`);
     // and both operator documents name an encrypted volume as THE remedy for the
     // removable-media scenario this guard exists to catch. A guard that denies
     // its own prescribed remedy has nowhere left to send the operator.
+    // user_id names THIS uid: the subtype is the mounter's to spell, so the
+    // allowlist entry alone is the mounter's word for it, and the operator's
+    // own mount is the case that must keep working.
     for (const fs of ["fuse.gocryptfs", "fuse.veracrypt", "fuse.cryfs"]) {
-      mountStub(`/dev/probe0 on /probe type ${fs} (rw,nosuid,nodev,user_id=0)`);
+      mountStub(`/dev/probe0 on /probe type ${fs} (rw,nosuid,nodev,user_id=${process.getuid()})`);
       expect(run().status, `${fs} must be accepted`).toBe(0);
       rmSync(backupDir, { recursive: true, force: true });
     }

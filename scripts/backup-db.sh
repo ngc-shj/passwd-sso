@@ -18,6 +18,10 @@
 #                          filesystem is not on the ownership-enforcing allowlist, or
 #                          when df/mount could not answer. Warns loudly (default: false)
 #   BACKUP_TLS_MODE       (optional) TLS floor for URL mode: verify-full|verify-ca (default: verify-full)
+#   BACKUP_MOUNTINFO_PATH (optional) Mount table to read on Linux
+#                          (default: /proc/self/mountinfo). Pointing it elsewhere
+#                          decides the destination-safety verdict from a file of
+#                          your choosing, so the run says so in its log
 #   MIGRATION_DATABASE_URL (optional) When set, selects URL mode instead of Compose mode
 #   COMPOSE_DB_SERVICE    (optional) Compose service name (default: db)
 #   COMPOSE_DB_SUPERUSER  (optional) Role used for pg_dump in Compose mode (default: passwd_user)
@@ -34,6 +38,21 @@
 # Restore is deliberately out of scope: see docs/operations/dev-host-migration.md.
 
 set -euo pipefail
+# Pathname expansion OFF for the whole script. Every unquoted expansion here is
+# a WORD-SPLITTING site — mountinfo's fields, the two option lists, the target
+# set, the query parameters — and not one of them is a pattern. Word splitting
+# is not all an unquoted expansion does, which is what the mountinfo reader's
+# comment used to claim: with globbing on, a mount point containing `*`, `?` or
+# a bracket expression expands to a DIFFERENT string the moment something beside
+# it matches. The destination's own mount then matches nothing, the descent
+# stops at its parent, and the verdict is inherited from an ancestor — measured,
+# an exFAT destination named `bkp[1]` reported verified safe as soon as `bkp1`
+# existed next to it. mountinfo escapes only \040 \011 \012 \134; every glob
+# metacharacter is a legal byte in a path and arrives verbatim.
+#
+# The two loops that genuinely want a pattern (the `.pgpass.*` sweeps) turn it
+# back on around themselves and off again.
+set -f
 IFS=$' \t\n'
 
 # ─── Error identity ──────────────────────────────────────────
@@ -274,12 +293,16 @@ fuse.gocryptfs fuse.cryfs fuse.encfs fuse.securefs fuse.veracrypt fuse.ext4fuse"
 # default_permissions. They matter more now that the allowlist invites the
 # encrypting FUSE backends, which is exactly where allow_other gets used.
 #
-# `idmapped` is the same property arriving from the other side, and it is the
-# only PER-MOUNT flag in the kernel's mountinfo vocabulary that carries it: an
-# id-mapped mount translates owner uid and gid across the mount, so an archive
-# that reads back as owned by this uid at 0600 here is owned by a different uid
-# in the view the mapping exists to serve. The mode read-back cannot see it
-# either.
+# `idmapped` is the same property arriving from the other side: an id-mapped
+# mount translates owner uid and gid across the mount, so an archive that reads
+# back as owned by this uid at 0600 here is owned by a different uid in the view
+# the mapping exists to serve, and the mode read-back cannot see it. Listed
+# DEFENSIVELY — proc_pid_mountinfo(5) documents only shared/master/
+# propagate_from/unbindable as optional fields, this host's 66-entry table
+# prints no `idmapped`, and creating an id-mapped mount to observe the spelling
+# needs CAP_SYS_ADMIN, which the unprivileged local user in this reader's threat
+# model does not have. So the entry costs nothing and closes nothing that user
+# can reach; do not cite it as a closed path.
 UNSAFE_MOUNT_OPTS="noowners uid gid umask fmask dmask mode file_umask dir_umask
 allow_other allow_root idmapped"
 
@@ -327,7 +350,7 @@ path_is_under() {
 # Shared verdict, given the filesystem type and the full option set of the mount
 # the destination is on. 0 = unsafe (prints the reason), 1 = safe.
 mount_fields_verdict() {
-  local fstype="$1" opts="$2" src="$3" line="$4"
+  local fstype="$1" opts="$2" src="$3" line="$4" _uid
   case "$fstype" in
     macfuse|osxfuse|fuse)
       printf 'the mount reports the generic type %s, so the backend behind %s cannot be identified — if it is an ownership-preserving one such as gocryptfs, set BACKUP_ALLOW_UNVERIFIED_MOUNT=true (%s)' \
@@ -339,6 +362,33 @@ mount_fields_verdict() {
       "${fstype:-unknown}" "$line"
     return 0
   fi
+  # Allowlisted, and a FUSE subtype — which is `-o subtype=`, spelled by the
+  # mounting user with no privilege check. Five of the twenty allowlisted types
+  # are therefore SELF-DECLARATIONS, and the list was reading the mounter's own
+  # word for it: measured, a mount owned by another uid calling itself
+  # `fuse.gocryptfs` was reported verified safe, while the identical mount
+  # spelled `fuse.sshfs` was refused. The verdict was the attacker's to write.
+  #
+  # `user_id=` is the field on that line the KERNEL supplies. It names the
+  # principal whose daemon answers every stat(2) this script makes about the
+  # destination — owner, mode, ACL state — so a foreign one means every one of
+  # those checks is answered by the party being checked. This is the same
+  # unverifiable self-declaration macOS already refuses for `macfuse`; the Linux
+  # side was accepting it on one unargued sentence.
+  #
+  # Checked AFTER the allowlist so an unlisted backend still refuses for the
+  # reason that names it, which is the one the operator can act on.
+  case "$fstype" in
+    fuse.*)
+      _uid="$(id -u)"
+      case ",${opts// /}," in
+        *",user_id=$_uid,"*) ;;
+        *)
+          printf 'the FUSE mount %s was not made by this uid, so its own daemon answers every ownership and mode check made about the destination (%s)' \
+            "$src" "$line"
+          return 0 ;;
+      esac ;;
+  esac
   if [ -n "$opts" ] && opts_are_unsafe "$opts"; then
     printf 'mounted with an option that makes ownership advisory (%s)' "$line"
     return 0
@@ -396,12 +446,18 @@ mountinfo_verdict() {
   # So the shorter one is the one covering the other. Ordering cannot be the
   # rule here — mountinfo's order is not a promise about visibility, and the
   # same tree listed the other way round would flip the verdict.
-  # The descent is over a table this process does not control, so it is bounded
-  # by an explicit visited set rather than by trusting the ids to form a tree. A
-  # mount whose parent id is its own — which nothing forbids in a file that can
-  # also come from BACKUP_MOUNTINFO_PATH — makes it its own child and the loop
-  # never returns. A backup that hangs is worse than one that refuses: cron has
-  # no timeout here, so the run would sit holding the lock until someone looked.
+  # A mount is never its own child. The namespace root names ITSELF as its
+  # parent — proc_pid_mountinfo(5): "the ID of the parent mount (or of self for
+  # the root of this mount namespace)" — so without this the root is re-selected
+  # as its own child on the first step. Treating that as a cycle refused every
+  # Linux run on any host whose root is spelled that way: not a wrong verdict on
+  # one destination, the whole check denied. Measured.
+  #
+  # The visited set below therefore bounds real cycles only — a chain through
+  # two or more ids, which the format does not forbid and this reader does not
+  # control, since the table can also come from BACKUP_MOUNTINFO_PATH. A backup
+  # that hangs is worse than one that refuses: cron has no timeout here, so the
+  # run would sit holding the lock until someone looked.
   seen=" $cur_id "
   while :; do
     next_id=""; next_line=""; next_mp=""
@@ -409,6 +465,7 @@ mountinfo_verdict() {
       set -- $ln
       [ "$#" -ge 10 ] || continue
       [ "$2" = "$cur_id" ] || continue
+      [ "$1" != "$cur_id" ] || continue
       path_is_under "$esc" "$5" || continue
       # `-le`, so an over-mount listed later at the SAME point still wins.
       if [ -z "$next_id" ] || [ "${#5}" -le "${#next_mp}" ]; then
@@ -472,13 +529,27 @@ df_mount_point() {
 $out
 EOF
   [ "$n" -eq 2 ] || return 1
-  # Everything after the capacity field. Cutting at the LAST `% ` is what stops
-  # a device name carrying one from moving the boundary right; a MOUNT POINT
-  # carrying one truncates the answer, which then matches no line and refuses.
+  # Everything after the capacity field, and the boundary must be UNIQUE. Taking
+  # the RIGHTMOST candidate is what an earlier spelling did, on the stated
+  # reasoning that a MOUNT POINT carrying `% ` would truncate to something that
+  # "matches no line and refuses". It does not: the remainder is itself a
+  # well-formed absolute path, which then matches, by exact equality, a mount(8)
+  # line for a DIFFERENT filesystem. Measured — a destination on
+  # `/home/att/x% /mnt/safe` was adjudicated by the unrelated ext4 at /mnt/safe
+  # and reported verified safe.
+  #
+  # A row with two candidate boundaries therefore has no boundary and is
+  # refused. Both fields that can carry one are outside this script's control —
+  # the device is a FUSE fsname, the mount point is a directory name — so there
+  # is nothing to prefer between them. The cost is explicit and is the direction
+  # taken everywhere else here: a DEVICE name containing `% ` now refuses
+  # instead of answering.
   case "$row" in
-    *"% "*) row="${row##*% }" ;;
+    *"% "*) ;;
     *)      return 1 ;;
   esac
+  case "${row#*% }" in *"% "*) return 1 ;; esac
+  row="${row#*% }"
   # macOS pads the capacity column, so the field is reached with spaces on it.
   while [ "${row# }" != "$row" ]; do row="${row# }"; done
   case "$row" in /*) ;; *) return 1 ;; esac
@@ -499,6 +570,14 @@ mount_is_unsafe() {
   # fixture; the environment here is the operator's own, and a user who can set
   # it can already set BACKUP_DIR. Default is the real table.
   local mi="${BACKUP_MOUNTINFO_PATH:-/proc/self/mountinfo}"
+  # An override decides this verdict from a file the operator names, so it must
+  # be visible in the log. BACKUP_ALLOW_UNVERIFIED_MOUNT — the other escape from
+  # the same verdict — warns loudly; this one used to say nothing at all, so a
+  # log review could not tell the mount check had been answered by a fixture.
+  # The default stays silent, or every run gains a line nobody reads.
+  if [ "$mi" != "/proc/self/mountinfo" ]; then
+    warn "reading the mount table from $mi instead of /proc/self/mountinfo — the destination-safety verdict comes from that file"
+  fi
   if [ -r "$mi" ]; then
     mountinfo_verdict "$target" "$mi"
     return $?
@@ -898,9 +977,22 @@ parse_url() {
   # the keyword before lookup — `?password=`, `?%70assword=` and every other
   # encoding of those bytes are the same parameter to it. A strip that covers
   # only the userinfo therefore leaves that spelling in the URL that reaches
-  # pg_dump's argv, where every local user can read it. Decoding the query here
-  # would be a second adjudicator of libpq's grammar (the mistake this design
-  # exists to avoid), so the spelling is refused outright.
+  # pg_dump's argv, where every local user can read it.
+  #
+  # What this block is, stated as the class it belongs to: a best-effort
+  # TRIPWIRE over the credential-bearing keywords, not the enforcement. It does
+  # decode each key, which makes it a second reader of libpq's keyword grammar —
+  # an earlier comment here said decoding "would be a second adjudicator … the
+  # mistake this design exists to avoid" while the code eleven lines below did
+  # exactly that, which is the sort of contradiction the next editor resolves in
+  # favour of the wrong half. The narrow decode is deliberate and matches libpq
+  # (it decodes keywords before matching them, and only `%XX` — `+` is a literal
+  # byte), and splitting the RAW query on `&` first is what stops a `%26` inside
+  # a value forging a parameter boundary.
+  #
+  # The ENFORCEABLE half is elsewhere and is not a notation judgement at all:
+  # conninfo_for appends sslmode/dbname last, and libpq takes the last
+  # occurrence, so whatever the URL spells is overridden rather than parsed.
   local raw_query="${URL_STRIPPED#*\?}"
   [ "$raw_query" = "$URL_STRIPPED" ] && raw_query=""
   if [ -n "$raw_query" ]; then
@@ -1225,12 +1317,18 @@ prune_orphaned_partials() {
   local name
   # Under the lock there is no live writer, so a surviving passfile is residue
   # from a run that died before its trap could fire.
+  # One of the two sites that WANT a pattern: with the script-wide `set -f` this
+  # loop would iterate the literal string once and sweep nothing, leaving the
+  # credential on disk — the failure the sweep exists to prevent.
+  set +f
   for name in "$BACKUP_ROOT"/.pgpass.*; do
+    set -f
     [ -e "$name" ] || continue
     assert_root_unchanged
     rm -f -- "$name"
     warn "removed a credential file left by an interrupted run"
   done
+  set -f
   while IFS= read -r name; do
     [ -n "$name" ] || continue
     assert_root_unchanged
@@ -1405,10 +1503,14 @@ EOF
   done <<EOF
 $(list_stamped ".partial")
 EOF
+  # The other site that wants a pattern — see prune_orphaned_partials.
+  set +f
   for _res in "$BACKUP_ROOT"/.pgpass.*; do
+    set -f
     [ -e "$_res" ] || continue
     log "DRY RUN — would remove residue $(basename -- "$_res")"
   done
+  set -f
   # .FAILED is pruned by age and by count before every dump, so the preview has
   # to cover it or it understates what the run destroys. Age first, then count
   # over what REMAINS — the order the real prune uses. Counting the excess

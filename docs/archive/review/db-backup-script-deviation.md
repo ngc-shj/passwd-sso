@@ -85,19 +85,39 @@ description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr o
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.
 
-**[SC7] `psql -X` is applied in this script and not in the five siblings.** Round
-6 (F4/S3) established the class and round 7 measured its worst member:
+**[SC7] `psql -X` is applied in this script and not in its siblings.** Round 6
+(F4/S3) established the class and round 7 measured its worst member:
 `scripts/rls-cross-tenant-negative-test.sh` decides whether the RLS check PASSED
 from a SUBSTRING of psql's output, so `\echo [E-RLS-MANIFEST-EXTRA]` in
 `~/.psqlrc` forges a pass without the database being asked anything. The three
 `set-*-password.sh` scripts connect as a superuser and execute `~/.psqlrc` as
-SQL. Not fixed here, by decision: the fix touches five files that this branch's
-diff does not otherwise reach, and it widens what the remaining review round has
-to cover. Worst case: a compromised or careless `~/.psqlrc` turns a security
-regression test green, or runs attacker SQL as a superuser. Likelihood: low —
-it needs write access to the operator's home, which is already most of the game.
-Cost-to-fix: one flag per invocation across five scripts, plus a test per script
-that the flag is present. Owner: the same follow-up issue as SC6.
+SQL.
+
+The member set, derived rather than counted — round 7 found this entry said
+"five siblings" and then named four:
+
+```
+for f in scripts/*.sh; do
+  grep -qE '(^|[^a-z_])psql ' "$f" && printf '%s\n' "$f"
+done
+```
+
+Five members: `rls-cross-tenant-negative-test.sh`,
+`set-audit-anchor-publisher-password.sh`, `set-outbox-worker-password.sh`,
+`set-retention-gc-worker-password.sh`, and **`migrate-prf-per-credential-salt.sh`**
+— which the earlier text omitted, and which is also the fifth SC6 member: line
+20 puts `"$MIGRATION_DATABASE_URL"`, password included, straight onto psql's
+argv. `scripts/pre-pr.sh:358` invokes psql without `-X` and is NOT a member: it
+runs through `docker exec` into the db container, where the operator's
+`~/.psqlrc` does not exist.
+
+Not fixed here, by decision: the fix touches five files this branch's diff does
+not otherwise reach, and it widens what the remaining review round must cover.
+Worst case: a compromised or careless `~/.psqlrc` turns a security regression
+test green, or runs attacker SQL as a superuser. Likelihood: low — it needs write
+access to the operator's home, which is already most of the game. Cost-to-fix:
+one flag per invocation across five scripts, plus a test per script that the flag
+is present. Owner: the same follow-up issue as SC6.
 
 ## Round-7 residuals
 
