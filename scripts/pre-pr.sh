@@ -742,7 +742,11 @@ if [ "$STATIC_ONLY" != "1" ] && [ "$RUN_WEB" = "1" ]; then
   # batch — but both were 10s-timeout expiries under CPU contention, not file
   # races, and they no longer occur now that Build overlaps Test rather than
   # competing with the whole batch.)
-  queue_step "Lint"       npx eslint .
+  # `npm run lint`, not a bare eslint: the package script carries
+  # `--max-warnings 0`, which is what CI runs, and without it this gate exits 0
+  # on a warning that reds CI. Measured — an unused variable sat in the tree for
+  # four review rounds and every pre-PR run passed it through to the PR.
+  queue_step "Lint"       npm run lint
   queue_step "Test"       npx vitest run
   queue_step "Build"      npx next build
 

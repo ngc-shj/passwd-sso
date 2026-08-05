@@ -3453,7 +3453,10 @@ for a in "$@"; do
   esac
 done
 exit 0`);
-    const child = spawnSync("bash", ["-c", `
+    // The wrapper's own status says nothing — it is the shell that performed
+    // the swap, not the run under test. What the run did is in the redirected
+    // output, which carries the script's exit code as a line.
+    const swap = spawnSync("bash", ["-c", `
       ("${SCRIPT}"; echo "EXIT=$?") > "${join(tmpDir, "out")}" 2>&1 &
       sleep 1
       mv "${backupDir}" "${backupDir}.moved"
@@ -3464,6 +3467,7 @@ exit 0`);
       env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
              BACKUP_DIR: backupDir, BACKUP_RETAIN: "1" },
     });
+    expect(swap.error, "the swap harness itself must have run").toBeUndefined();
     const out = readFileSync(join(tmpDir, "out"), "utf8");
     expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);
     expect(generations(), "and must leave nothing published in the new root").toEqual([]);
