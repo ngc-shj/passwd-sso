@@ -55,3 +55,36 @@ if [ "$docker_ver" != "$lock_ver" ]; then
 fi
 
 echo "OK (Dockerfile PRISMA_VER=$docker_ver matches lockfile)"
+
+# brace-expansion is pinned TWICE — the app tree via package.json `overrides`,
+# and npm's own bundled copy via BE_VER in the Dockerfile. Nothing tied them
+# together, and GHSA-rgw5-rvv9-x895 (4.0.0 – 5.0.8 inclusive) found both stale
+# at once: the override said ^5.0.8 and BE_VER said 5.0.8, and the image
+# shipped the vulnerable version while `npm audit` had been made green. That is
+# the second time a brace-expansion pin has been inside the next advisory's
+# band, so the floor is asserted rather than remembered.
+be_override=$(node -p "
+  const o = require('./package.json').overrides || {};
+  const k = Object.keys(o).find((k) => /^brace-expansion@>=3/.test(k));
+  k ? String(o[k]).replace(/^[\\^~]/, '') : ''
+")
+be_docker=$( (grep -oE 'BE_VER=[0-9]+\.[0-9]+\.[0-9]+' "$DOCKERFILE" || true) | head -1 | cut -d= -f2)
+
+if [ -z "$be_override" ]; then
+  echo "ERROR: no 'brace-expansion@>=3...' override found in package.json — the app-tree pin this gate compares against is gone"
+  exit 1
+fi
+if [ -z "$be_docker" ]; then
+  echo "ERROR: no pinned 'BE_VER=X.Y.Z' found in $DOCKERFILE — npm's bundled brace-expansion must be version-pinned, not floating"
+  exit 1
+fi
+# The Dockerfile patches npm's bundled copy UP to BE_VER, so it must be at
+# least the app tree's floor. Higher is fine; lower means the image ships a
+# version the app tree has already rejected.
+if [ "$(printf '%s\n%s\n' "$be_override" "$be_docker" | sort -V | head -n1)" != "$be_override" ]; then
+  echo "ERROR: Dockerfile BE_VER=$be_docker is below the package.json brace-expansion override floor $be_override"
+  echo "Raise BE_VER in $DOCKERFILE to at least $be_override — npm's bundled copy is scanned separately by Trivy."
+  exit 1
+fi
+
+echo "OK (Dockerfile BE_VER=$be_docker >= override floor $be_override)"
