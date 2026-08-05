@@ -121,6 +121,32 @@ is present. Owner: the same follow-up issue as SC6.
 
 ## Round-7 residuals
 
+**[Ops] Three of the destination check's arms are proven against FIXTURES, not
+against the thing they describe.** Named in the round-7 approval, and true: the
+FUSE `user_id=` refusal, the `idmapped` member, and the whole macOS `df` +
+`mount(8)` path are driven by hand-written tables and PATH stubs. What that
+proves is the READER — that these bytes produce that verdict. What it does not
+prove is that the kernel and `mount(8)` emit those bytes.
+
+Worst case, per arm. FUSE: if a real `fuse.gocryptfs` line spells the owner
+differently from `user_id=<uid>`, the operator's own encrypted volume is refused
+and they need `BACKUP_ALLOW_UNVERIFIED_MOUNT` — a false deny on the medium both
+operator documents prescribe. `idmapped`: the option is already recorded as
+defensive, and an id-mapped mount needs `CAP_SYS_ADMIN`, so it is outside this
+reader's threat model either way. macOS: the shapes came from the verification
+host's real `mount` and `df -P` output and are quoted verbatim in the cases, so
+the fixtures are transcriptions rather than inventions — but no case runs
+against a live macFUSE mount.
+
+Likelihood of the FUSE arm being wrong: low. `user_id=` is what
+`fs/fuse/inode.c` writes into the super options and what this host's own FUSE
+mounts print. Cost-to-fix: one gocryptfs mount on the verification host, one
+`cat /proc/self/mountinfo`, and the line pasted into the case as a transcription
+like the macOS ones. What would settle it: exactly that — the arms stay as they
+are, and the fixture gains a provenance comment naming the host and date it was
+copied from, which is the standard the macOS cases already meet and the FUSE and
+idmapped cases do not.
+
 **[Ops] A forged mount line is still a DENIAL, and an unprivileged user can
 cause one.** On the text path (macOS) a line injected through `-o fsname=` that
 claims the mount point `df` named now collides with the real entry for it, and

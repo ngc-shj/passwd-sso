@@ -976,13 +976,50 @@ which `record_lock_metadata` writes second. Production is unaffected — a reade
 that finds a pid and no host treats the lock as held, which is the fail-closed
 direction.
 
+## Verification at HEAD (`843f1fa2c`)
+
+Each figure with the command that produced it, so a stale one is visible as
+stale rather than carried forward:
+
+| Measure | Result | Command |
+|---|---|---|
+| Target suite, Linux | 236 passed | `npx vitest run scripts/__tests__/backup-db.test.mjs` |
+| Target suite, macOS (Darwin 25.5.0, uid 501) | 236 passed | same, on the verification host after `git pull --ff-only` |
+| Full suite | 1008 files, 14,223 passed / 1 skipped | `npx vitest run` |
+| pre-PR gate | passed | `bash ~/.claude/hooks/check-pre-pr.sh run` (and again at push) |
+| Mutants, round-7 fixes | 7 killed, 0 survived | `BACKUP_DB_SCRIPT` seam, baseline green first |
+| Mutants, session total | 55 killed, 0 survived | seven sweeps, each with its own baseline |
+
+Two mutants survived their first pass. One was equivalent by mistake
+(`${VAR+never}` is non-empty exactly when `${VAR+set}` is). The other was real:
+the case written for the narrowed ambiguity gate used a fixture whose ambiguous
+line did not contain the mount point at all, so it could not tell the new
+spelling from the old. Both are recorded because a sweep that reports 0 survived
+on the first attempt is the outcome to distrust.
+
+## Resolution Status — Round 7
+
+Every Major fixed in `e3de64cfa`, `a79564a38` and `843f1fa2c`; every Minor
+applied. The findings and their dispositions are in the section above. Three
+items are NOT closed and are recorded in the deviation log with the
+Anti-Deferral triple: SC5, SC6/SC7 (the sibling-script classes, with a
+derivation command), the macOS text path's attacker-causable fail-closed denial,
+`BACKUP_DB_EXPECT_READER` unset in CI, and the fixture-versus-real-environment
+constraint the round-7 approval named for the FUSE, idmapped and macOS arms.
+
 ## Environment Verification Report
 
 - **VE1** — unchanged, `blocked-deferred`.
 - **VE2** — `verified-local` on both platforms, and stronger than in round 6:
   the macOS run now exercises Group B's compose reader instead of failing
-  before it.
+  before it, and the mountinfo allow cases now assert that the fixture was the
+  table consulted rather than inferring it from an exit status.
 - **VE3** — unchanged; `BACKUP_DB_EXPECT_READER` still unset in CI.
+- **VE4 (new)** — `blocked-deferred` for the FUSE `user_id=`, `idmapped` and
+  macOS `df`/`mount(8)` arms: proven against transcribed or hand-written
+  tables, not against a live mount. Linked residual: the round-7 entry in the
+  deviation log, which carries the worst case, likelihood and cost-to-fix per
+  arm.
 
 ---
 
