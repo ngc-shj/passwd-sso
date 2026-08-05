@@ -82,8 +82,7 @@ instead, which is stronger for this change and weaker for nothing.
 **[SC6] The `$MIGRATION_DATABASE_URL` credential-egress class is not closed for the
 five sibling scripts.** Unchanged from the plan, and round 2 widened the class
 description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr on
-its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
-be filed with this PR.
+its `DRY_RUN` path, which is a wider egress than argv. Owner: issue #756, filed with PR #755.
 
 **[SC7] `psql -X` is applied in this script and not in its siblings.** Round 6
 (F4/S3) established the class and round 7 measured its worst member:
@@ -117,7 +116,7 @@ Worst case: a compromised or careless `~/.psqlrc` turns a security regression
 test green, or runs attacker SQL as a superuser. Likelihood: low — it needs write
 access to the operator's home, which is already most of the game. Cost-to-fix:
 one flag per invocation across five scripts, plus a test per script that the flag
-is present. Owner: the same follow-up issue as SC6.
+is present. Owner: issue #756, the same as SC6.
 
 ## Round-7 residuals
 
@@ -323,7 +322,7 @@ variable is present, so the local/CI divergence is visible in the log. Setting
 it in the workflow makes a runner image that drops `postgresql-client` a red
 rather than a silent change of shape. Deferred as a separate change: it edits a
 shared workflow and belongs with its own verification that the assertion fires
-in CI, not only locally. Owner: the follow-up issue filed with this PR.
+in CI, not only locally. Owner: issue #756.
 
 **[Sec-7 / R51 extension] The EXIT trap's removals stay outside
 `assert_root_unchanged`.** The trap performs a rename and three removals — one
