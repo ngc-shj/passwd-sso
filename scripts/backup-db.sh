@@ -363,8 +363,8 @@ mount_fields_verdict() {
     return 0
   fi
   # Allowlisted, and a FUSE subtype — which is `-o subtype=`, spelled by the
-  # mounting user with no privilege check. Five of the twenty allowlisted types
-  # are therefore SELF-DECLARATIONS, and the list was reading the mounter's own
+  # mounting user with no privilege check. Six of the twenty-one allowlisted
+  # types are therefore SELF-DECLARATIONS, and the list was reading the mounter's own
   # word for it: measured, a mount owned by another uid calling itself
   # `fuse.gocryptfs` was reported verified safe, while the identical mount
   # spelled `fuse.sshfs` was refused. The verdict was the attacker's to write.
@@ -405,23 +405,36 @@ mount_fields_verdict() {
 # injects a whole synthetic line that no amount of per-line parsing can tell
 # from a real one. Measured: the injected line passes every structural check.
 mountinfo_verdict() {
-  local target="$1" mi="${2:-/proc/self/mountinfo}" ln esc
-  local cur_id="" cur_line="" next_id="" next_line="" next_mp="" seen=""
+  local target="$1" mi="${2:-/proc/self/mountinfo}" ln esc mounttab
+  local cur_id="" cur_line="" next_id="" next_line="" next_mp="" next_tie="" seen=""
   local opts fstype src sup
   esc="${target//\\/\\134}"
   esc="${esc// /\\040}"
   esc="${esc//$'\t'/\\011}"
   esc="${esc//$'\n'/\\012}"
 
+  # Read ONCE, as the text path does. Re-opening per descent level let the walk
+  # straddle a table that changed under it — a tree that never existed — and,
+  # since the path is a seam, made a FIFO block the run under the lock, which is
+  # the hang the visited set exists to avoid.
+  mounttab="$(cat -- "$mi" 2>/dev/null)" || mounttab=""
+  [ -n "$mounttab" ] || { printf 'mountinfo at %s is empty or unreadable' "$mi"; return 2; }
+
   # The root mount, and the LAST one listed if the root itself is mounted over.
+  # For a table the kernel produced this choice is not load-bearing: an
+  # over-mount of / is a CHILD of what it covers, so the descent reaches it from
+  # either starting point. It decides only for a hand-supplied table.
   while IFS= read -r ln; do
     # Word splitting is safe here precisely because the format escapes every
-    # byte that could otherwise act as a separator.
+    # byte that could otherwise act as a separator. Pathname expansion is off
+    # script-wide, which is the other half of that claim.
     set -- $ln
     [ "$#" -ge 10 ] || continue
     [ "$5" = "/" ] || continue
     cur_id="$1"; cur_line="$ln"
-  done < "$mi"
+  done <<EOF
+$mounttab
+EOF
   [ -n "$cur_id" ] || { printf 'mountinfo has no entry for /'; return 2; }
 
   # Then DESCEND THE MOUNT TREE. Which mount a path resolves through is decided
@@ -467,11 +480,24 @@ mountinfo_verdict() {
       [ "$2" = "$cur_id" ] || continue
       [ "$1" != "$cur_id" ] || continue
       path_is_under "$esc" "$5" || continue
-      # `-le`, so an over-mount listed later at the SAME point still wins.
-      if [ -z "$next_id" ] || [ "${#5}" -le "${#next_mp}" ]; then
-        next_id="$1"; next_line="$ln"; next_mp="$5"
+      # Strictly shorter wins. Two covering siblings are prefix-comparable, so
+      # equal length means the SAME mount point — a shape the kernel does not
+      # produce (an over-mount is a CHILD of what it covers, not a sibling; this
+      # host's table has no duplicate parent+mount-point pair), and one this
+      # reader must not resolve by listing order. The earlier `-le` did exactly
+      # that, for a case its own comment said ordering must never decide.
+      if [ -z "$next_id" ] || [ "${#5}" -lt "${#next_mp}" ]; then
+        next_id="$1"; next_line="$ln"; next_mp="$5"; next_tie=""
+      elif [ "$5" = "$next_mp" ]; then
+        next_tie=1
       fi
-    done < "$mi"
+    done <<EOF
+$mounttab
+EOF
+    if [ -n "$next_tie" ]; then
+      printf 'two mounts with one parent both claim %s, so the tree cannot be walked' "$next_mp"
+      return 2
+    fi
     [ -n "$next_id" ] || break
     case "$seen" in
       *" $next_id "*)
@@ -569,18 +595,43 @@ mount_is_unsafe() {
   # The path is a seam so the suite can drive the production reader with a
   # fixture; the environment here is the operator's own, and a user who can set
   # it can already set BACKUP_DIR. Default is the real table.
-  local mi="${BACKUP_MOUNTINFO_PATH:-/proc/self/mountinfo}"
+  # `-` and not `:-`: SET-BUT-EMPTY is its own answer, "this platform has no
+  # structured table, use the text reader". That distinction is the shell's own,
+  # so it needs no sentinel value of the path domain (an in-band `none` would be
+  # a legal filename), and it is what lets an unreadable override REFUSE instead
+  # of silently downgrading while the suite can still drive the macOS reader on
+  # a host where /proc/self/mountinfo exists.
+  local mi="${BACKUP_MOUNTINFO_PATH-/proc/self/mountinfo}"
   # An override decides this verdict from a file the operator names, so it must
-  # be visible in the log. BACKUP_ALLOW_UNVERIFIED_MOUNT — the other escape from
-  # the same verdict — warns loudly; this one used to say nothing at all, so a
-  # log review could not tell the mount check had been answered by a fixture.
-  # The default stays silent, or every run gains a line nobody reads.
-  if [ "$mi" != "/proc/self/mountinfo" ]; then
-    warn "reading the mount table from $mi instead of /proc/self/mountinfo — the destination-safety verdict comes from that file"
-  fi
-  if [ -r "$mi" ]; then
-    mountinfo_verdict "$target" "$mi"
-    return $?
+  # be visible in the log — BACKUP_ALLOW_UNVERIFIED_MOUNT, the other escape from
+  # the same verdict, warns loudly and this one used to say nothing at all.
+  #
+  # The announcement goes INSIDE the readable branch, and an override that
+  # cannot be read is a refusal rather than a silent downgrade. Emitting it
+  # before the test made an unreadable override log two false statements at
+  # once: that the verdict came from that file, when it came from the weaker
+  # text parser, and nothing at all about the structured reader having been
+  # skipped. Keying the refusal on "the variable was SET" and not on "the path
+  # is unreadable" is what keeps macOS — where the default does not exist —
+  # falling through silently.
+  if [ -n "$mi" ]; then
+    # A REGULAR file, not merely a readable one. `/proc/self/mountinfo` is one;
+    # a FIFO is readable and blocks forever with no writer, and the reader's
+    # path is a seam, so a run would sit holding the lock until someone looked —
+    # the hang the visited set exists to avoid, arriving through the open.
+    if [ -f "$mi" ] && [ -r "$mi" ]; then
+      if [ "$mi" != "/proc/self/mountinfo" ]; then
+        warn "reading the mount table from $mi instead of /proc/self/mountinfo — the destination-safety verdict comes from that file"
+      fi
+      mountinfo_verdict "$target" "$mi"
+      return $?
+    fi
+    if [ -n "${BACKUP_MOUNTINFO_PATH+set}" ]; then
+      printf 'BACKUP_MOUNTINFO_PATH names %s, which is not a readable regular file — an override that does not resolve is not a reason to fall back to the weaker reader' "$mi"
+      return 2
+    fi
+  else
+    warn "BACKUP_MOUNTINFO_PATH is empty — reading the mount table from mount(8) text, which cannot be attributed as reliably"
   fi
   # WHICH line describes the destination is decided by df, not by the table:
   # `fusermount` is setuid and `-o fsname=` is the mounting user's to spell, so
@@ -607,7 +658,16 @@ mount_is_unsafe() {
       *" type "*) case "${m#* type }" in *" type "*) ambiguous=1 ;; esac ;;
     esac
     if [ -n "$ambiguous" ]; then
-      case "$m" in *"$mp"*) saw_ambiguous=1 ;; esac
+      # Only if the line could be claiming the mount point df named — which is
+      # `<src> on <mp> ` followed by ` type ` or `(`. Testing whether the line
+      # merely CONTAINS $mp was far too wide: a mount point is a short, generic
+      # string, so an ambiguous line anywhere denied the whole table. Measured —
+      # on the Linux fallback, where $mp is `/`, every line contains it, so a
+      # directory named `x on y` plus fusermount stopped every backup on the
+      # host without going near the destination.
+      case "$m" in
+        *" on $mp "*|*" on $mp("*) saw_ambiguous=1 ;;
+      esac
       continue
     fi
     case "$m" in
@@ -724,6 +784,22 @@ esac
 case "$BACKUP_DIR" in
   *$'\n'*) fail BAD_ENV "BACKUP_DIR must not contain a newline" ;;
 esac
+
+# Same table, same reason: this one reaches a line-oriented sink too (the
+# warning that tells a log reader where the destination verdict came from), and
+# it was documented in the usage header while having no branch here at all —
+# a newline in it forged a second log line. Empty is the "no structured table"
+# answer and is left alone; any other value must be an absolute path with no
+# newline, like every other path this script accepts.
+if [ -n "${BACKUP_MOUNTINFO_PATH+set}" ] && [ -n "$BACKUP_MOUNTINFO_PATH" ]; then
+  case "$BACKUP_MOUNTINFO_PATH" in
+    /*) ;;
+    *) fail BAD_ENV "BACKUP_MOUNTINFO_PATH must be an absolute path (got: $BACKUP_MOUNTINFO_PATH)" ;;
+  esac
+  case "$BACKUP_MOUNTINFO_PATH" in
+    *$'\n'*) fail BAD_ENV "BACKUP_MOUNTINFO_PATH must not contain a newline" ;;
+  esac
+fi
 
 if ! [[ "$BACKUP_RETAIN" =~ ^[1-9][0-9]*$ ]]; then
   # Zero is rejected rather than treated as "unlimited": a naive pruner with

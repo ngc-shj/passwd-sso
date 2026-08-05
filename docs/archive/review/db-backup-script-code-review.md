@@ -891,6 +891,69 @@ committed case.
 a forged line is now a fail-closed DENIAL that any local user can cause. Both are
 in the deviation log.
 
+## Findings from the second and third external passes, and from the sub-agent round
+
+Recorded here because the earlier version of this section described a tree two
+production commits behind, with verification figures measured before ~50 tests
+and two rewrites of the reader — the failure this artifact's own header
+apologises for.
+
+- **U6 [Major, user]** A spec-legal self-parent root was read as a cycle.
+  `proc_pid_mountinfo(5)`: the parent ID is "the ID of the parent mount (or of
+  self for the root of this mount namespace)". The descent re-selected the root
+  as its own child and the visited set called that a cycle, so on any host whose
+  root is spelled that way EVERY Linux run refused — the whole check denied, not
+  one destination misjudged. Fixed: a mount is never its own child; the visited
+  set now bounds real cycles, which need a duplicated id and have their own
+  fixture.
+- **S1 [Major, security]** `set -- $ln` performs PATHNAME EXPANSION as well as
+  word splitting, and the reader's comment claimed the format's escaping made it
+  safe. mountinfo escapes `\040 \011 \012 \134` only, so a mount point holding a
+  glob metacharacter expands to a different string as soon as a sibling matches:
+  the destination's mount matched nothing, the descent stopped at its parent,
+  and the verdict came from an ancestor. Measured — an exFAT destination named
+  `bkp[1]` published the corpus once `bkp1` existed. Fixed with a script-wide
+  `set -f` and two scoped `set +f` windows for the `.pgpass.*` sweeps.
+- **S2 [Major, security]** `df_mount_point`'s `% ` cut took the rightmost
+  candidate, and the comment claimed a mount point carrying one would "match no
+  line and refuse". It does not — the remainder is a well-formed absolute path
+  that matches a different filesystem's line. The boundary must now be unique.
+- **S3 [Major, security]** `fuse.<subtype>` is `-o subtype=`, spelled by the
+  mounting user with no privilege check, so six of the twenty-one allowlisted
+  types were self-declarations. A mount owned by another uid calling itself
+  `fuse.gocryptfs` read as verified safe. Fixed: the kernel-supplied `user_id=`
+  must name this uid, checked after the allowlist so an unlisted backend still
+  refuses for the reason that names it.
+- **F1 [Major, functionality]** The ambiguity gate was re-keyed from the
+  destination path to the mount point, which is short and generic — on the
+  Linux fallback, where it is `/`, every line contains it, so one ambiguous line
+  anywhere denied every backup on the host. Narrowed to lines that could be
+  claiming that mount point.
+- **F2 [Major, functionality]** The `BACKUP_MOUNTINFO_PATH` announcement was
+  emitted before the readability test, so an unreadable override logged that the
+  verdict came from a file it did not come from. Moved inside the branch; an
+  override that cannot be read now refuses, and SET-BUT-EMPTY is the explicit
+  "no structured table" answer.
+- **F3 [Major, functionality]** `BACKUP_MOUNTINFO_PATH` was documented and read
+  with no validation branch, against INV-C1a, and a newline in it forged a log
+  line. The gate meant to enforce INV-C1a only checked that a default expansion
+  existed; it now requires a guard and has a positive control.
+- **T1 / T2 / T3 / T4 / T5 [Major, testing]** The descent's equal-length
+  tie-break was decided by listing order and survived the full suite (now
+  refuses, with a case); eight mountinfo ALLOW cases asserted only `status === 0`
+  and passed with the seam disabled — including the one certifying all 21
+  allowlisted types — so each now asserts a receipt that the fixture was the
+  table consulted; the root-over-mount case used a table the kernel cannot
+  produce and had no reversed-order twin; the CR/LF case installed a
+  query-blind `psql` stub, re-creating the drift this round removed elsewhere;
+  and the reconciliation comment overstated what had been uncovered.
+
+Minor findings from the same passes — the `idmapped` rationale, the
+`parse_url` comment contradiction, the `-le` comment, an allowlist count stated
+as 5-of-20 rather than 6-of-21, the mount table re-opened per descent level, the
+undocumented seam, SC6/SC7 member sets stated by count, and the same glob class
+unfixed in `check-e2e-selectors.sh` — are all applied.
+
 ## Verification
 
 Sixteen mutants over the new and adjacent guards, **16 killed, 0 survived** —
@@ -900,6 +963,10 @@ killed by the injection case, and pointing the mountinfo reader at a
 non-existent path fails thirteen cases, so the structured reader is load-bearing
 rather than a preference. The failing test named for each mutant is recorded in
 the sweep log.
+
+Those figures were measured at `18a8017f9` and are kept for that commit. The
+numbers for HEAD are in the "Verification at HEAD" block below; each is stated
+with the commit it was measured at, so a stale one is visible as stale.
 
 Full suite green (14,178), pre-PR gate green (70 checks), and **191/191 on the
 macOS verification host** — the first run there in which Group B's delegating

@@ -80,7 +80,7 @@ Unchanged from the plan. The documentation references are asserted by the test s
 instead, which is stronger for this change and weaker for nothing.
 
 **[SC6] The `$MIGRATION_DATABASE_URL` credential-egress class is not closed for the
-four sibling scripts.** Unchanged from the plan, and round 2 widened the class
+five sibling scripts.** Unchanged from the plan, and round 2 widened the class
 description: `set-outbox-worker-password.sh:81` echoes the whole URL to stderr on
 its `DRY_RUN` path, which is a wider egress than argv. Owner: a follow-up issue, to
 be filed with this PR.

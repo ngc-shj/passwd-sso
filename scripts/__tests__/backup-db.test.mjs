@@ -84,7 +84,14 @@ function readLog() {
  * non-comment lines would read a non-zero count from an empty TOC.
  */
 function dockerStub({ psStatus = 0, psOutput = "container123", dumpFails = "", restoreFails = "",
-                     clusterRows = "", clusterStatus = 0, clusterStderr = "" } = {}) {
+                     clusterStatus = 0, clusterStderr = "",
+                     // The HEALTHY shape by default: a real psql answers the
+                     // enumeration with at least the database it connected to,
+                     // so an empty answer as the shared default made the
+                     // recon-failed branch the suite's normal state and every
+                     // compose case carried its warning. The empty answer is
+                     // now an explicit deviation, stated where it is meant.
+                     clusterRows = `${dbRow("passwd_sso")}\n${dbRow("jackson")}\n` } = {}) {
   stub("docker", `
 echo "docker $*" >> "${logFile}"
 sub="\${2:-}"
@@ -140,7 +147,11 @@ function run(env = {}, { tocEntries } = {}) {
       HOME: homeDir,
       LANG: "C",
       BACKUP_DIR: backupDir,
-      ...(mountinfoPath ? { BACKUP_MOUNTINFO_PATH: mountinfoPath } : {}),
+      // `!== undefined`, not truthiness: SET-BUT-EMPTY is the seam's way of
+      // saying "no structured table, use the text reader", which is how a Linux
+      // host — where /proc/self/mountinfo exists — drives the macOS path. An
+      // unreadable path is a different answer entirely and now refuses.
+      ...(mountinfoPath !== undefined ? { BACKUP_MOUNTINFO_PATH: mountinfoPath } : {}),
       ...(tocEntries === undefined ? {} : { PG_TOC_ENTRIES: String(tocEntries) }),
       ...env,
     },
@@ -616,9 +627,11 @@ exec "${real}" "$@"`);
     // `prune_orphaned_partials` runs under the lock and removes every .partial
     // BEFORE the stamp is chosen, so on the ordinary path this arm is
     // unreachable — which is why nothing exercised it. What makes it reachable
-    // is the sweep not succeeding: its removal is best-effort, so an `rm` that
-    // fails leaves the directory, and reusing that name would have this run
-    // write into a directory another run's remains are in.
+    // is the sweep not REMOVING it. The clause has no `|| ` guard, so an rm that
+    // exits non-zero aborts the run under `set -e`; the reachable shape is an
+    // rm that reports success and removes nothing, which is what this stub is.
+    // Reusing that name would have this run write into a directory another
+    // run's remains are in.
     const taken = takenName(".partial");
     const real = spawnSync("sh", ["-c", "command -v rm"], { encoding: "utf8" }).stdout.trim();
     stub("rm", `
@@ -922,14 +935,39 @@ describe("source-level contracts", () => {
   it("validates every environment variable its usage header documents", () => {
     // Raw source: the documented member set lives in the usage comment block,
     // which the forbidden-pattern reader deliberately strips.
+    //
+    // INV-C1a says every variable in the table is VALIDATED before a process is
+    // spawned. Asserting only that a default expansion exists does not say
+    // that: BACKUP_MOUNTINFO_PATH was documented, read, and reached a
+    // line-oriented sink with no validation branch anywhere, and this case
+    // passed the whole time. So each documented variable must also reach a
+    // GUARD — one of the four shapes this script validates with. Not "must be
+    // in the INV-C1a block": PGSSLROOTCERT is legitimately guarded where the
+    // TLS floor is decided, and BACKUP_DATABASES is validated per member inside
+    // the loop that splits it.
     const s = readFileSync(SCRIPT, "utf8");
     const documented = [...s.matchAll(/^#\s{3}([A-Z][A-Z0-9_]+)\s+\(optional\)/gm)].map((m) => m[1]);
     expect(documented.length).toBeGreaterThan(5);
+    // The five shapes: a `case` arm, a `[[ =~ ]]` match, a presence test, an
+    // equality test (the boolean flags), and a split-then-validate loop.
+    const guarded = (src, v) => new RegExp(
+      `(case "\\$\\{?${v}[}"]`
+      + `|\\[\\[ "\\$\\{?${v}[}"]`
+      + `|\\[ -[nz] "\\$\\{?${v}`
+      + `|\\[ "\\$${v}" `
+      + `|for [A-Za-z_]+ in \\$\\{?${v}\\b)`,
+    ).test(src);
     for (const v of documented) {
       expect(s, `${v} is documented but never read with a default`).toMatch(
-        new RegExp(`\\$\\{${v}:-`),
+        new RegExp(`\\$\\{${v}:?[-+]`),
       );
+      expect(guarded(s, v), `${v} is documented but reaches no guard (INV-C1a)`).toBe(true);
     }
+    // Positive control: a variable that is only ever read with a default, and
+    // never guarded, must NOT satisfy the rule — otherwise this assertion is
+    // the one it replaced.
+    expect(guarded('X="${BACKUP_NEW_THING:-/tmp/x}"\necho "$BACKUP_NEW_THING"', "BACKUP_NEW_THING"),
+      "the guard pattern must not match a bare default expansion").toBe(false);
   });
 
   it("uses no utility the portability floor excludes", () => {
@@ -1404,7 +1442,14 @@ exit 0`);
     // that only looked for \n leaves open, and a lone CR still ends the line
     // for anything reading the MANIFEST back.
     pgStubs();
-    stub("psql", `printf 't|TLSv1.3|AESGCM\\rCARRIAGE\\nSECOND-ROW\\n'
+    // Dispatches on the query. A stub that answers every invocation with the
+    // transport row feeds that row to the cluster enumeration as a database
+    // list — the drift this same diff removed from pgStubs, re-created here.
+    stub("psql", `
+case " $* " in
+  *pg_database*) printf '${dbRow("passwd_sso")}\\n${dbRow("jackson")}\\n' ;;
+  *)             printf 't|TLSv1.3|AESGCM\\rCARRIAGE\\nSECOND-ROW\\n' ;;
+esac
 exit 0`);
     const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
     expect(r.status, r.stderr).toBe(0);
@@ -1622,9 +1667,11 @@ describe("guards the sweep found unpinned", () => {
 
   // ─── The cluster reconciliation ────────────────────────────
   //
-  // Every earlier compose case let the enumeration fail silently — the docker
-  // stub had no `psql` arm at all — so the rows were never a fixture and the
-  // whole block below the query was reachable by nothing.
+  // The SHARED dockerStub had no `psql` arm, so every case using it ran the
+  // reconciliation's failure path. The block itself was not uncovered — five
+  // cases further down install their own stub with a `psql)` arm and drive it
+  // end to end. What was missing is here: the empty-answer guard, the three
+  // row-shape arms, the `break`, and three of the five `-X` sites.
 
   const manifestOf = () =>
     readFileSync(join(backupDir, generations()[0], "MANIFEST"), "utf8");
@@ -1640,7 +1687,7 @@ describe("guards the sweep found unpinned", () => {
       .toMatch(/not_backed_up: \(unknown/);
   });
 
-  it("reports a database the cluster has and BACKUP_DATABASES does not (paired allow case)", () => {
+  it("reports a database the cluster has and BACKUP_DATABASES does not", () => {
     // The other direction, and the reason the block exists: without it the
     // reconciliation could be broken in any way at all and every case above
     // would still pass, because none of them ever received a row.
@@ -2356,7 +2403,12 @@ exec "${real}" "$@"`);
       if (!m) return null;
       const [, src, mp, ltype, opts] = m;
       const fs = ltype || opts.split(",")[0].trim();
-      const rest = ltype ? opts : opts.split(",").slice(1).join(",").trim();
+      // Trim each option: mount(8) writes ", " between them and real mountinfo
+      // never has a space inside an option name, so escaping it would emit
+      // `\\040nodev` — a token nothing in production would ever unescape.
+      const restOpts = (ltype ? opts : opts.split(",").slice(1).join(","))
+        .split(",").map((o) => o.trim()).filter(Boolean).join(",");
+      const rest = restOpts;
       const id = i + 20;
       let parent = 1;
       for (const e of emitted) if (under(mp, e.mp)) parent = e.id;
@@ -2368,7 +2420,7 @@ exec "${real}" "$@"`);
     // The forgery and ambiguity cases are ABOUT mount(8)'s human-readable
     // text; mountinfo's escaping makes those inputs unrepresentable, so those
     // cases drive the fallback reader deliberately.
-    mountinfoPath = textPath ? join(tmpDir, "no-such-mountinfo") : miPath;
+    mountinfoPath = textPath ? "" : miPath;
     if (textPath) dfStub(realBackupDir);
   };
 
@@ -2400,7 +2452,9 @@ exec "${real}" "$@"`);
     // The paired allow case, and the reason the check must not match the whole
     // line: /mnt/exfat-archive on ext4 is a perfectly good destination.
     mountStub("/dev/probe0 on /probe/exfat-archive type ext4 (rw,relatime)");
-    expect(run().status, "an ext4 destination must not be refused").toBe(0);
+    const okExt4 = run();
+    expect(okExt4.status, "an ext4 destination must not be refused").toBe(0);
+    readTheFixture(okExt4);
   });
 
   it("refuses a destination carrying an extended ACL", () => {
@@ -2554,7 +2608,7 @@ fi`);
 
   it("is not decided by that forged line when mount(8) is the only reader", () => {
     newlineInjection();
-    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    mountinfoPath = "";
     dfStub(realBackupDir);
     const r = run();
     expect(err(r), "an unprivileged user must not be able to report the destination safe")
@@ -2588,6 +2642,17 @@ fi`);
     mountinfoPath = miPath;
   };
 
+  // A RECEIPT that the fixture is what answered. An allow case asserting only
+  // `status === 0` passes on any host whose own root filesystem is allowlisted
+  // — measured: with the seam ignored entirely, eight allow cases stayed green,
+  // including the one that certifies all 21 allowlisted types. The script emits
+  // this line for exactly the runs whose table came from the seam, so it is the
+  // positive evidence those cases were missing.
+  const readTheFixture = (r) => {
+    expect(r.stderr, "the fixture must be the table the verdict came from")
+      .toMatch(/reading the mount table from .*mountinfo instead of/);
+  };
+
   it("accepts every filesystem type on the script's own allowlist", () => {
     const types = scriptList("OWNERSHIP_ENFORCING_FS");
     expect(types.length, "the allowlist must be non-trivial").toBeGreaterThan(10);
@@ -2599,6 +2664,7 @@ fi`);
       mountinfoFixture(t.startsWith("fuse.") ? `rw,user_id=${uid}` : "rw", t);
       const r = run();
       expect(r.status, `${t} is on the allowlist but was refused: ${r.stderr}`).toBe(0);
+      readTheFixture(r);
       rmSync(backupDir, { recursive: true, force: true });
     }
   });
@@ -2676,6 +2742,7 @@ fi`);
       const r = run({ BACKUP_DIR: dest });
       if (wantStatus === 0) {
         expect(r.status, `an ${fstype} destination must not be refused: ${r.stderr}`).toBe(0);
+        readTheFixture(r);
       } else {
         expect(err(r), "the destination's own entry must still be found").toBe("DEST_UNSAFE");
         expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
@@ -2698,10 +2765,65 @@ fi`);
   it("says nothing when the mount table is the real one (paired allow case)", () => {
     // The direction that keeps the warning worth reading: the default must stay
     // silent, or every run gains a line nobody looks at.
+    // No status assertion: on a host whose TMPDIR is not on an allowlisted
+    // filesystem the run legitimately refuses, and that would red this case for
+    // a reason that has nothing to do with the warning it names.
     mountinfoPath = undefined;
     const r = run();
-    expect(r.status, r.stderr).toBe(0);
     expect(r.stderr, "the default path must not warn").not.toMatch(/reading the mount table from/);
+  });
+
+  it("is not denied by an ambiguous line that could not be claiming the destination", () => {
+    // The allow side of the ambiguity gate. Its subject is the mount point df
+    // named, which is a short generic string — testing whether a line merely
+    // CONTAINS it denied the whole table for a mount nowhere near the
+    // destination. A local user owning a directory called `a on b` plus
+    // fusermount was enough, and on the fallback where the mount point is `/`
+    // every line contains it.
+    stub("mount", `cat <<'MOUNTEOF'
+/dev/root on / type ext4 (rw,relatime)
+evil on ${realBackupDir}/sub/a on b type fuse.sshfs (rw,user_id=1001)
+/dev/probe0 on ${realBackupDir} type exfat (rw,relatime)
+MOUNTEOF
+exit 0`);
+    dfStub(realBackupDir);
+    mountinfoPath = "";
+    const r = run();
+    expect(err(r), "the destination's own entry must still decide").toBe("DEST_UNSAFE");
+    expect(r.stderr, "an unrelated ambiguous line must not poison the table")
+      .toMatch(/exfat is not known to enforce ownership/);
+    expect(r.stderr).not.toMatch(/non-unique separators/);
+  });
+
+  it("refuses a mount table that is not a regular file", () => {
+    // A FIFO is readable and blocks forever with no writer, and the seam accepts
+    // any path — so this arrives through the open, before any of the parsing
+    // the visited set guards. The run would hold the lock until somebody looked.
+    const fifo = join(tmpDir, "mi.fifo");
+    spawnSync("mkfifo", [fifo]);
+    expect(existsSync(fifo), "mkfifo must be available for this case").toBe(true);
+    mountinfoPath = fifo;
+    const r = run();
+    expect(err(r), "a table that cannot be opened is not a verdict").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/not a readable regular file/);
+  });
+
+  it("refuses an override that names nothing", () => {
+    // The other half of F2: an override that does not resolve must not silently
+    // hand the verdict to the weaker text reader.
+    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    const r = run();
+    expect(err(r)).toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/BACKUP_MOUNTINFO_PATH names .* which is not a readable regular file/);
+  });
+
+  it("refuses a BACKUP_MOUNTINFO_PATH carrying a newline", () => {
+    // It reaches a line-oriented sink — the warning that tells a log reader
+    // where the verdict came from — so INV-C1a's table covers it like every
+    // other path this script accepts.
+    const r = run({ BACKUP_MOUNTINFO_PATH: "/tmp/x\n[backup-db] mount check: verified safe" });
+    expect(err(r)).toBe("BAD_ENV");
+    expect(r.stderr).toMatch(/must not contain a newline/);
   });
 
   it("does not expand BACKUP_DATABASES as a pattern", () => {
@@ -2783,21 +2905,51 @@ fi`);
     expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
   });
 
-  it("starts from the LAST root entry when / itself is mounted over", () => {
-    // Two mounts at / with the same parent: by the same deduction used for any
-    // other sibling pair, the later one is the one covering. Starting the
-    // descent from the first reports the filesystem underneath — and the
-    // descent cannot recover, because the second is a sibling, not a child.
+  // / itself mounted over, spelled the way the kernel spells it: the covering
+  // mount is a CHILD of the one it covers, so the descent reaches it from
+  // either starting point. Both listing orders assert the same verdict, which
+  // is the order-independence claim the design actually makes. The earlier
+  // version of this case used two roots naming a parent absent from the table —
+  // a shape the kernel cannot emit — and so certified a rule against input that
+  // never arrives.
+  for (const [label, lines] of [
+    ["covering mount listed last", [
+      "20 20 0:20 / / rw - ext4 /dev/under rw",
+      "21 20 0:21 / / rw - exfat /dev/over rw",
+    ]],
+    ["covering mount listed first", [
+      "21 20 0:21 / / rw - exfat /dev/over rw",
+      "20 20 0:20 / / rw - ext4 /dev/under rw",
+    ]],
+  ]) {
+    it(`resolves a / that is mounted over — ${label}`, () => {
+      const miPath = join(tmpDir, "mountinfo");
+      writeFileSync(miPath, lines.join("\n") + "\n", "utf8");
+      mountinfoPath = miPath;
+      const r = run();
+      expect(err(r), "the topmost mount is the one the path resolves through").toBe("DEST_UNSAFE");
+      expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+    });
+  }
+
+  it("refuses when two mounts with one parent claim the same point", () => {
+    // Equal-length covering mount points among siblings are the SAME string,
+    // which the kernel does not produce — an over-mount is a child of what it
+    // covers, and this host's table has no duplicate parent+mount-point pair.
+    // The reader used to break that tie by listing order, in the one place its
+    // own comment says ordering must never decide. An input it cannot attribute
+    // is refused instead.
     const esc = (v) => v.replace(/ /g, "\\040");
     const miPath = join(tmpDir, "mountinfo");
     writeFileSync(miPath, [
-      "20 1 0:20 / / rw - ext4 /dev/under rw",
-      "21 1 0:21 / / rw - exfat /dev/over rw",
+      "20 1 0:20 / / rw - ext4 /dev/root rw",
+      `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/safe rw`,
+      `22 20 0:22 / ${esc(realBackupDir)} rw - exfat /dev/usb rw`,
     ].join("\n") + "\n", "utf8");
     mountinfoPath = miPath;
     const r = run();
-    expect(err(r), "the topmost root is the one the path resolves through").toBe("DEST_UNSAFE");
-    expect(r.stderr).toMatch(/exfat is not known to enforce ownership/);
+    expect(err(r), "an unattributable tie is not a verdict").toBe("DEST_UNSAFE");
+    expect(r.stderr).toMatch(/two mounts with one parent both claim/);
   });
 
   it("skips a mountinfo line too short to be one, rather than dying on it", () => {
@@ -2848,7 +3000,9 @@ fi`);
       `21 20 0:21 / ${esc(realBackupDir)} rw - ext4 /dev/probe0 rw`,
     ].join("\n") + "\n", "utf8");
     mountinfoPath = miPath;
-    expect(run().status, "a self-parent root is a normal table").toBe(0);
+    const okSelf = run();
+    expect(okSelf.status, "a self-parent root is a normal table").toBe(0);
+    readTheFixture(okSelf);
   });
 
   it("refuses a mountinfo that describes a real cycle instead of walking it forever", () => {
@@ -2858,6 +3012,9 @@ fi`);
     // is worse than one that refuses: there is no timeout around a cron run, so
     // it would sit holding the lock until somebody noticed. Found by a mutant
     // that removed the parent check and left a vitest run wedged for 94 minutes.
+    // Note the fixture lists id 21 twice — mount ids are unique per mount, so a
+    // parent-id cycle over DISTINCT ids cannot be built. Only a corrupt or
+    // hand-written table has one, and the reader's path accepts any file.
     const esc = (v) => v.replace(/ /g, "\\040");
     const miPath = join(tmpDir, "mountinfo");
     writeFileSync(miPath, [
@@ -2873,7 +3030,11 @@ fi`);
   });
 
   it("refuses an ID-mapped mount", () => {
-    // The kernel prints `idmapped` in the PER-MOUNT options. An id-mapped mount
+    // The option name this script refuses if the kernel ever prints it in the
+    // per-mount field — see the script, which records that it could not observe
+    // one. What this case pins is MEMBERSHIP of the list, which the derived-set
+    // case cannot: deleting the member deletes it from the derivation too. An
+    // id-mapped mount
     // translates owner uid/gid across the mount, so the archive can read back
     // as owned by this uid at 0600 here and be owned by another uid in the view
     // the mapping exists to serve — the same property `uid=` is refused for.
@@ -2956,7 +3117,7 @@ MOUNTEOF
 exit 0`);
     stub("df", "printf 'Filesystem 512-blocks Used Available Capacity Mounted on\\n"
       + "/dev/fuse0 1 1 1 1%%    /home/att/x%% /mnt/safe\\n'");
-    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    mountinfoPath = "";
     const r = run();
     expect(err(r), "an unrelated ext4 must not answer for an exfat destination")
       .toBe("DEST_UNSAFE");
@@ -2979,7 +3140,7 @@ map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)
 MOUNTEOF
 exit 0`);
     dfStub(vol);
-    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    mountinfoPath = "";
     expect(run().status, "an apfs volume whose name has a space must not be refused").toBe(0);
   });
 
@@ -3023,7 +3184,7 @@ if [ "$2" = "--" ] || [ "$1" = "-P" ]; then
   printf 'Filesystem 1K-blocks Used Avail Use%% Mounted on\n/dev/probe0 1 1 1 1%% /probe\n'
   exit 0
 fi`);
-    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    mountinfoPath = "";
     stub("mount", "exit 1");
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
@@ -3036,7 +3197,7 @@ fi`);
     // Not "the device is missing" — the object is the PATH now. An
     // unattributable table has not performed the check, which is not the same
     // as having passed.
-    mountinfoPath = join(tmpDir, "no-such-mountinfo");
+    mountinfoPath = "";
     stub("mount", `cat <<'MOUNTEOF'
 sysfs /sys sysfs rw 0 0
 MOUNTEOF
