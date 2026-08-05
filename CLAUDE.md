@@ -29,6 +29,8 @@ ADMIN_API_TOKEN=<op_token> scripts/purge-history.sh                             
 ADMIN_API_TOKEN=<op_token> scripts/purge-audit-logs.sh                               # System-wide audit-log purge
 ADMIN_API_TOKEN=<op_token> TARGET_VERSION=<int> scripts/rotate-master-key.sh         # Rotate ShareLink master key
 
+BACKUP_DIR=<dir> BACKUP_RETAIN=<n> scripts/backup-db.sh                               # Take + validate a full backup (passwd_sso, jackson, cluster globals); take-only, restore via docs/operations/dev-host-migration.md
+
 PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
 
 MIGRATION_DATABASE_URL=<superuser-url> node scripts/bootstrap-rds-roles.mjs     # Create/converge least-privilege DB roles (RDS bootstrap; convergent, re-runnable)

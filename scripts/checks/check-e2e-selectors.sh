@@ -9,6 +9,13 @@
 #   base-branch defaults to "main"
 
 set -euo pipefail
+# Pathname expansion OFF. Every unquoted expansion in this file splits a
+# newline-separated list that came from `git diff --name-only` or a grep over
+# the tree — App Router paths, which are full of `[locale]`, `[id]`, `[teamId]`.
+# With globbing on, a bracket expression that matches a real file expands to
+# that file and the gate then checks a path nobody changed. Nothing here wants a
+# pattern; `case` and `[[ ]]` matching are unaffected by this.
+set -f
 
 BASE="${1:-main}"
 E2E_DIR="e2e"

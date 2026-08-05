@@ -169,3 +169,148 @@ The following must all be completed before considering production deployment don
 3. Vault Lock "undeletable" verification (confirm `aws backup delete-recovery-point` is rejected in non-production)
 4. Monthly restore drill: snapshot → RDS restore → app startup → login → decryption E2E verification → RTO measurement
 5. EventBridge → SNS notification delivery verification (send test FAILED event via `aws events put-events`)
+
+## Self-Hosted Backups (Docker Compose)
+
+The sections above describe the AWS path (RDS snapshots, PITR, Backup Vault
+Lock). A self-hosted deployment has none of that, and until `scripts/backup-db.sh`
+landed the repository documented no backup procedure for it at all.
+
+```bash
+scripts/backup-db.sh                       # defaults: ~/passwd-sso-backups, keep 7
+BACKUP_DIR=/mnt/vault BACKUP_RETAIN=30 scripts/backup-db.sh
+BACKUP_DRY_RUN=true scripts/backup-db.sh   # preview the prune, dump nothing
+```
+
+Only one run may hold a destination at a time. If a run is killed hard — SIGKILL,
+OOM, power loss — the lock survives it and the next run stops with
+`BACKUP_ERR:LOCKED` naming the holder. That is deliberate: taking the lock
+automatically raced two runs into one directory in every variant tried. When you
+have confirmed no backup is running, remove it — the error message names the
+exact path:
+
+```bash
+rm -rf ~/passwd-sso-backups/.lock.d
+```
+
+There is deliberately no flag for this. Every in-script variant raced: two runs
+can each judge the lock stale, and whichever acts second removes the lock the
+first has already re-created. Once the directory is gone the script only ever
+`mkdir`s it, which is atomic.
+
+Each run produces one directory:
+
+```
+20260803T164500Z/
+  passwd_sso.dump    application data (pg_dump -Fc --create)
+  jackson.dump       SSO connection records — restoring without this loses every IdP binding
+  globals.sql        cluster roles (pg_dumpall --globals-only --no-role-passwords)
+  MANIFEST           host, mode, per-member size and entry count, tool versions
+```
+
+What the script guarantees, and what it does not:
+
+- **Validated, not merely written.** Each archive is read back by `pg_restore`
+  — the implementation that will restore it — before the run is published. A
+  truncated dump is non-empty and unreadable, which a size check cannot detect.
+- **Atomic.** Work happens in `<stamp>.partial` and is renamed only after every
+  member validates, so a half-written run is never mistaken for a generation.
+  A validation failure is kept as `<stamp>.FAILED` for diagnosis rather than
+  deleted: the fault may be the reader, and destroying a possibly-good archive
+  to punish the validator is the wrong direction.
+- **A failed run's corpus is kept, but not forever.** A validation failure is
+  retained as `<stamp>.FAILED` for diagnosis. Older ones are bounded by
+  `BACKUP_RETAIN` and by `BACKUP_FAILED_MAX_AGE_DAYS` (default 7); pruning runs
+  before the dump, so a run that fails leaves its own on top of that bound until
+  the next run. A retained failure is a full
+  plaintext copy of the database, so it is subject to the same handling as a
+  successful generation.
+- **The pruner never endangers the run just taken.** It is excluded by resolved
+  path, not by assuming it sorts newest — a clock step or two hosts sharing one
+  destination can make it the oldest name.
+- **`globals.sql` carries structural assurance only.** It is plain SQL, so
+  `pg_restore` is not its reader; the script checks the trailing completion
+  marker and the role count.
+- **The archives are plaintext secrets.** They hold every ciphertext blob, the
+  audit log, and every wrapped key. The script verifies the destination's mode,
+  owner, extended ACLs, mount options and ancestors before writing, and refuses
+  a filesystem that cannot enforce ownership — a USB stick is a case for an
+  encrypted volume, not for writing the corpus unprotected. **Encryption at
+  rest and offsite replication are out of scope**: anyone who can read
+  `$BACKUP_DIR` has the database.
+  - The filesystem check is an **allowlist**. Only types known to enforce
+    ownership and mode are accepted — ext4, xfs, btrfs, zfs, apfs, and the
+    ownership-preserving FUSE backends gocryptfs, cryfs, encfs, securefs and
+    veracrypt — and everything else is refused. A denylist answers "safe" for
+    every type nobody enumerated. A mount that fabricates ownership (`uid=`,
+    `gid=`, `umask=`, `noowners`) is refused whatever the type is.
+  - A destination whose filesystem `df(1)` and `mount(8)` cannot describe is
+    refused as well. **macOS keeps `mount` in /sbin, which cron's default PATH
+    omits** — set `PATH=/usr/bin:/bin:/sbin:/usr/sbin` for a scheduled run, or
+    the nightly backup stops with `DEST_UNSAFE`. On Linux the table is read
+    from `/proc/self/mountinfo` and neither tool is needed.
+  - macOS has no such table, so `df` names the mount point and `mount(8)` must
+    show **exactly one** line for it. A second line claiming the same mount
+    point — which any local user can produce, since a FUSE source is theirs to
+    spell — makes the check undetermined rather than wrong, and stops the run
+    until the mount is gone or the flag below is set.
+  - `BACKUP_ALLOW_UNVERIFIED_MOUNT=true` downgrades either refusal to a loud
+    warning. It exists for a legitimate filesystem the allowlist has not heard
+    of.
+  - **On macOS an encrypted volume needs that flag.** macFUSE reports the
+    generic type `macfuse` for every backend it carries, so the mount table
+    cannot distinguish gocryptfs from s3fs and the script refuses rather than
+    guess. The Linux spellings (`fuse.gocryptfs`, `fuse.veracrypt`, …) are on
+    the allowlist and need no flag.
+
+### Remote / managed Postgres (URL mode)
+
+Setting `MIGRATION_DATABASE_URL` switches the script from the Compose service to
+a direct connection. It is the RDS path.
+
+```bash
+MIGRATION_DATABASE_URL='postgresql://backup_user:<pw>@db.example:5432/postgres?sslrootcert=/etc/ssl/rds-ca.pem' \
+BACKUP_DATABASES='passwd_sso' \
+BACKUP_DIR=/var/backups/passwd-sso \
+  scripts/backup-db.sh
+```
+
+- **Four client binaries are required**: `pg_dump`, `pg_dumpall`, `pg_restore`
+  and `psql`. `pg_restore` reads each archive back; `psql` asks the server what
+  transport was actually negotiated.
+- **A CA is mandatory.** The floor is `verify-full`, which cannot be satisfied
+  without a root certificate — pass `sslrootcert=` in the URL or set
+  `PGSSLROOTCERT`. AWS publishes its RDS bundle at
+  <https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem>; libpq's
+  default store does not contain it. `BACKUP_TLS_MODE=verify-ca` drops hostname
+  verification only; `require` is deliberately not accepted.
+- **The URL is validated, not merely used.** Credential-bearing and
+  peer-redirecting query parameters (`password`, `passfile`, `service`,
+  `oauth_client_secret`, `host`, `hostaddr`, `gssencmode`, `dbname`, …) are
+  refused, and the password is delivered through a mode-0600 passfile so it
+  never reaches any process's argv.
+- **`BACKUP_DATABASES` is a default, not a discovery.** On a managed instance
+  the names usually differ from the Compose deployment's. The script enumerates
+  every non-template database, warns for each one absent from the list, and
+  records them in the MANIFEST under `not_backed_up:`.
+  - A database that refuses connections (`datallowconn=false`) is enumerated
+    too, and recorded as `name[no-connect]`. Disabling connections is the
+    ordinary state of a database under maintenance; it does not mean the
+    database is empty.
+  - The maintenance database `postgres` is reported like any other. It usually
+    holds no application data, but the script has no way to confirm that. Name
+    it in `BACKUP_DATABASES` to silence the warning.
+  - If the enumeration itself fails, the MANIFEST records
+    `not_backed_up: (unknown — cluster enumeration failed)` and the run warns.
+    It never writes `(none)`, which means "nothing was left out"; the marker is
+    parenthesised so it cannot collide with a real database name.
+  - Database names reach the script hex-encoded. A PostgreSQL quoted identifier
+    may contain any byte but NUL, so a name carrying a newline would otherwise
+    split the line-oriented log and MANIFEST. A name of the shape
+    `BACKUP_DATABASES` itself accepts (`[A-Za-z_][A-Za-z0-9_$]*`) is shown as
+    written; anything else is shown as `hex:<hex digits>`.
+
+Restoring is deliberately not the script's job. Follow
+[dev-host-migration.md](../dev-host-migration.md) step 5 — the ordering
+constraint there (empty volume → initdb → restore) is what lands the correct
+roles and ACLs.

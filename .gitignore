@@ -139,3 +139,25 @@ ios/*.xcodeproj/
 ios/*.xcworkspace/xcuserdata/
 *.xcuserstate
 *.xcuserdatad/
+
+# Database backups produced by scripts/backup-db.sh. The archives carry every
+# ciphertext blob, the audit log, and every wrapped key — a committed dump is a
+# published database. The extension rule catches a stray archive anywhere; the
+# directory rule catches a whole run tree (MANIFEST and globals.sql included)
+# under the script's default name. A run directory the operator names something
+# else via BACKUP_ALLOW_IN_REPO is covered by the SHAPE rules below, which is
+# what makes those rules load-bearing rather than redundant.
+*.dump
+passwd-sso-backups/
+# The run-directory SHAPE, so the other two members are covered wherever the
+# operator points BACKUP_DIR — not only under the default name. globals.sql
+# carries the cluster's full role topology and MANIFEST carries the host and the
+# connection target, so an extension rule alone leaves the interesting half of a
+# run committable.
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z/
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.FAILED/
+# In-progress and collision-suffixed runs hold the same corpus. The *.dump rule
+# reaches the archives; without these, globals.sql and MANIFEST do not.
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.partial/
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.[0-9]*.FAILED/
+**/.pgpass.*

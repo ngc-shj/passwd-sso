@@ -60,7 +60,7 @@ DOCKERIGNORE=".dockerignore"
 # DIR_CLASSES: directory names whose ENTIRE subtree is a secret/artifact. The
 # bundle scan flags the dir itself; the static check verifies .dockerignore
 # excludes a file nested inside it. Adding one here auto-extends both checks.
-DIR_CLASSES=(".terraform" "postgres_data" "saml")
+DIR_CLASSES=(".terraform" "postgres_data" "saml" "passwd-sso-backups")
 
 MUST_EXCLUDE=(
   # env files
@@ -84,6 +84,16 @@ MUST_EXCLUDE=(
   # generated automatically from DIR_CLASSES (dirProbes), so no OTHER nested
   # files need listing here — adding a dir-class is a one-line DIR_CLASSES edit.
   "saml/metadata.xml" "postgres_data/base/1"
+  "passwd-sso-backups/20260101T000000Z/globals.sql"
+  # A run directory under an operator-chosen name: the shape is what is
+  # excluded, so globals.sql and MANIFEST are covered wherever BACKUP_DIR points.
+  "ops-backups/20260101T000000Z/globals.sql" "ops-backups/20260101T000000Z/MANIFEST"
+  "ops-backups/20260102T000000Z.FAILED/globals.sql" "x/.pgpass.abc123"
+  # In-progress and collision-suffixed runs carry the same corpus.
+  "ops-backups/20260103T000000Z.partial/globals.sql"
+  "ops-backups/20260104T000000Z.4242.FAILED/MANIFEST"
+  # Loose archive outside a run directory — covered by the *.dump class.
+  "backup.dump" "sub/dir/passwd_sso.dump"
   "infra/terraform/.terraform/providers/x"
 )
 # Committed placeholders that MUST remain included (never excluded).
@@ -119,6 +129,21 @@ function globToRegExp(glob) {
     }
     if (glob[i] === "*" && glob[i + 1] === "*") { out += ".*"; i += 1; continue; }
     if (glob[i] === "*") { out += "[^/]*"; continue; }
+    // Character classes. Docker does NOT use filepath.Match here: moby's
+    // patternmatcher copies the class verbatim into a Go regexp, so '!' is an
+    // ordinary member and only '^' negates — verified against a real
+    // `docker build`, where `**/[!x]ecret.txt` did NOT exclude secret.txt.
+    // Rewriting '!' to '^' made this gate report exclusion that does not
+    // happen, which is a fail-open in the one place whose job is faithfulness.
+    if (glob[i] === "[") {
+      const close = glob.indexOf("]", i + 1);
+      if (close <= i) {
+        throw new Error(`unterminated character class in .dockerignore pattern: ${glob}`);
+      }
+      out += "[" + glob.slice(i + 1, close) + "]";
+      i = close;
+      continue;
+    }
     out += glob[i].replace(/[.+^${}()|[\]\\]/g, "\\$&");
   }
   return new RegExp(out + "$");
