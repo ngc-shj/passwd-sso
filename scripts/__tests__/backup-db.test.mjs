@@ -3007,7 +3007,11 @@ exit 0`);
     // allow_other is the standard way to expose such a mount, and without
     // default_permissions the kernel stops checking entirely. assert_mode_private
     // cannot see it: the archive really is 0600, it is just not enforced.
-    mountStub("gocryptfs@ on /probe type fuse.gocryptfs (rw,nosuid,nodev,user_id=1000,allow_other)");
+    // user_id must be THIS uid, or the FUSE ownership check refuses first and
+    // `allow_other` — the thing this case is about — is never reached. Hardcoded
+    // as 1000 it passed on Linux and refused for the wrong reason on macOS,
+    // where the operator's uid is 501.
+    mountStub(`gocryptfs@ on /probe type fuse.gocryptfs (rw,nosuid,nodev,user_id=${process.getuid()},allow_other)`);
     const r = run();
     expect(err(r)).toBe("DEST_UNSAFE");
     expect(r.stderr).toMatch(/ownership advisory/);
