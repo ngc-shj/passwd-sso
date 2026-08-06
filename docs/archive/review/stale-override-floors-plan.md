@@ -761,6 +761,79 @@ reds fail-closed.
 | SC-G | Per-package response-shaping resistance beyond TLS and the origin refusal (S12's residual). **Worst case**: an adversary able to shape responses per package serves the canary and empties the other 17, and the gate reports clean. **Likelihood**: very low — requires defeating TLS to a public CA, controlling the runner's egress, or injecting a Node loader, at which point the same adversary can edit the gate. **Cost to fix**: a per-package baseline of expected advisory counts is a second moving-input problem with its own staleness class. Layer 1 and layer 3 make the residual visible rather than closed. | not filed |
 | SC-H | Forbidding an aliased (`npm run …`) invocation of the gate in a workflow, so C7's flag cannot be flipped off by a spelling (R51). **Worst case**: someone replaces the literal invocation with an alias and the four masking prohibitions silently stop applying to that workflow. **Likelihood**: low — it requires editing the workflow the gate runs in, which is already the "edit the gate" bypass C3's control class names. **Cost to fix**: no decidable predicate exists short of resolving `package.json` scripts inside the workflow checker, which is a second parser standing in for npm (N3's mistake). Revisit if an alias is ever introduced; AC-7.4 records the residual so a reader does not assume coverage. | not filed |
 
+## Implementation Checklist
+
+Authored in Phase 2 Step 2-1 from impact analysis. Phase 3 reads this as the list of
+files that must appear in the diff.
+
+### Files to modify or create
+
+| File | Contract | Why |
+|---|---|---|
+| `package.json` | C1 | five floor raises (hono, @hono/node-server, postcss, brace-expansion@1, brace-expansion@2) |
+| `cli/package.json` | C1 | postcss floor raise |
+| `package-lock.json` | C1 | regenerated; only `node_modules/hono` expected to move |
+| `cli/package-lock.json`, `extension/package-lock.json` | C1 | regenerated; no diff expected (npm does not record `overrides`) |
+| `scripts/checks/check-override-key-disjointness.mjs` | C2 | carry pin + package identity + `"."` self-pins; refuse to recurse into arrays |
+| `scripts/__tests__/check-override-key-disjointness.test.mjs` | C2 | new cases only; the 25 existing bodies unedited (AC-2.1) |
+| `scripts/checks/check-override-floor-staleness.mjs` | C3 | new gate |
+| `scripts/__tests__/check-override-floor-staleness.test.mjs` | C4 | sibling self-test — required by `check-gate-selftest-coverage.sh` member set (1) |
+| `scripts/__tests__/fixtures/advisories/lodash.json` | C4 / O-9 | recorded RT1 anchor, untrimmed |
+| `.github/workflows/override-floor-staleness.yml` | C5 | weekly sweep |
+| `.github/workflows/ci.yml` | C5 | PR job |
+| `scripts/pre-pr.sh` | C5 | probe-gated local step (I-5.6, I-5.7) |
+| `scripts/checks/check-workflow-supply-chain.mjs` | C7 | widen the member set |
+| `scripts/__tests__/check-workflow-supply-chain.test.mjs` | C7 | new fixtures (AC-7.1) |
+| `docs/security/dependency-cve-response.md` | C6 | playbook |
+
+**No new `scripts/checks/` file beyond C3's gate** (I-5.7): a second file would need its
+own sibling self-test that no contract owns, and AC-4.2 forbids a debt entry.
+
+### Shared code that MUST be reused (R1)
+
+| Symbol | Location | Use |
+|---|---|---|
+| `discoverManifests` | `check-override-key-disjointness.mjs:54` | manifest discovery — but its `git ls-files` fallback is a **refusal** for C3, not a silent fallback (N4) |
+| `splitOverrideKey` | same, `:76` | package-name/selector split, including the scoped-name `lastIndexOf("@")` subtlety (I-2.4) |
+| `collectScopes` / `topLevelScope` | same, `:93` / `:123` | the walker C2 extends; a second copy in the new gate is the R1 defect |
+| `semver.intersects` | `semver` (root devDependency) | the only range predicate (N3) |
+| `extractRunCommands` | `check-workflow-supply-chain.mjs:234` | C7 binds the widened match to extracted `run:` commands, not raw file text |
+| `findMaskedVerifierViolations` | same, `:65` | C7 extends this function's member set rather than adding a parallel rule |
+
+### Gates that fire on files this change adds
+
+| Gate | Trigger | Obligation |
+|---|---|---|
+| `check-gate-selftest-coverage.sh` | new `scripts/checks/*.mjs` | sibling self-test, no new debt entry (AC-4.2) |
+| `check-mjs-imports.mjs` | new `.mjs` under `scripts/` | every relative/alias import must resolve |
+| `check-actions-sha-pinned.sh` | new workflow | SHA-pinned `uses:` (I-5.1, AC-5.1) |
+| `check-workflow-supply-chain.mjs` | new workflow | its own widened rules must pass on it (AC-7.3) |
+| `check-doc-paths.mjs` | doc change | every cited path resolves (AC-6.1) |
+| `check-override-key-disjointness.mjs` | manifest change | no new key pairs (AC-1.5) |
+| `check-dockerfile-prisma-pin.sh` | manifest change | `BE_VER` ≥ the `brace-expansion@>=3` floor (AC-1.4) |
+| `check-no-pipe-into-grep-q.sh` | new shell in `pre-pr.sh` | no `… | grep -q` exit-status masking |
+
+### CI parity gaps (Step 2-1 item 7)
+
+The crude command-string diff reported seven CI-only gates; four were false — `pre-pr.sh`
+invokes `bypass-rls`, `crypto-domains`, `migration-drift` and `team-auth-rls` via
+`node scripts/checks/check-*.mjs` rather than the `npm run` alias CI uses. Verified by
+grep, not assumed.
+
+Three real gaps remain, all pre-existing and none reachable by this change:
+
+- `npm run typecheck` — CI-only. This change adds `.mjs` and YAML, not TypeScript.
+- `npm run licenses:check{,:ext,:cli}:strict` — CI-only. No dependency is added.
+- `bash scripts/check-state-mutation-centralization.sh` — CI-only. Scans `src/`.
+
+**Deferred parity gap** (Anti-Deferral): closing these three is
+`scripts/pre-pr.sh`'s subject, not this PR's, and is the same operator decision as SC-B
+(the Test-step coverage gap). Worst case: a future PR that does touch TypeScript,
+dependencies or `src/` state discovers the failure at push rather than locally.
+Likelihood: certain eventually, zero for this change. Cost to fix: small per gate, but it
+changes `pre-pr`'s runtime for every developer, which is the operator call SC-B is
+already waiting on.
+
 ## Carried-Forward Plan Findings
 
 Phase 1 exits here. These round-3 findings are not resolved in this document; each is
@@ -768,6 +841,7 @@ recorded per the Anti-Deferral format so Phase 2 reads them as work, not as abse
 Phase 2 Step 2-1 reads this section explicitly.
 
 ### R3-CF1 [Major] The command-line contract's exact shape — Out of scope (deferred to Phase 2)
+- **Source findings**: round 3 — TEST-F30, FUNC-R3-F7.
 - **Anti-Deferral check**: out of scope (different phase), tracked here.
 - **Justification** — Worst case: an unrecognized flag is read as a manifest path and
   silently skipped, so `--report` reports nothing and a mistyped scratchpad path reports
@@ -779,6 +853,7 @@ Phase 2 Step 2-1 reads this section explicitly.
   result; only the spelling is deferred.
 
 ### R3-CF2 [Major] AC-3.3's fixture-server reachability under the origin pin — Out of scope (deferred to Phase 2)
+- **Source findings**: round 3 — TEST-F29 (Critical), SEC-R3-F1, SEC-R3-F2, FUNC-R3-F4.
 - **Anti-Deferral check**: out of scope (different phase), tracked here.
 - **Justification** — Worst case: the shell, the canary, the retry policy and the exit
   path ship untested for a third revision, and Phase 2 resolves it by weakening the pin
@@ -791,6 +866,7 @@ Phase 2 Step 2-1 reads this section explicitly.
   implementation, and O-4 requires the ambient-origin refusal to carry a deny/allow pair.
 
 ### R3-CF3 [Minor] O-9's fixture cannot detect an upstream rename — Accepted, with the claim corrected
+- **Source findings**: round 3 — TEST-F37, FUNC-R3-F9.
 - **Anti-Deferral check**: acceptable risk, quantified.
 - **Justification** — Worst case: a reader believes the committed fixture guards against
   a field rename and does not notice that only the live-response shape check does.
@@ -803,6 +879,7 @@ Phase 2 Step 2-1 reads this section explicitly.
   refusal.
 
 ### R3-CF4 [Minor] The `not-judged` row's effect on the census arithmetic — Out of scope (deferred to Phase 2)
+- **Source findings**: round 3 — SEC-R3-F7, TEST-F36, FUNC-R3-F3.
 - **Anti-Deferral check**: out of scope (different phase), tracked here.
 - **Justification** — Worst case: report mode counts scope-opener rows inconsistently
   with AC-3.4's second instrument and the criterion reds for an arithmetic reason rather

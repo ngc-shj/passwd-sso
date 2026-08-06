@@ -2129,3 +2129,21 @@ O-9 requires the recorded response untrimmed "because a fixture trimmed to the f
 - RT9 Fires: AC-3.0 is the retirement mechanism and is non-executable for the second revision running (F2).
 - RT10 OK — O-1 is the correct generalization of round 2's transposed columns.
 - RT11 OK — O-8; F9's committed fixture needs a staleness refusal, not cleanup.
+
+```json
+[
+  {"id": "TEST-F29", "severity": "Critical", "title": "AC-3.3's process seam contradicts S11's import-only parameter and the host pin; the network shell, canary, retry and exit path remain reachable by no executable test", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 484, "adjacent": false, "escalate": null},
+  {"id": "TEST-F30", "severity": "Major", "title": "No argv flag/path contract is declared; AC-3.0, AC-3.2, AC-3.3 and AC-5.4 all need one, and the cited precedent treats every argv element as a path and swallows ENOENT", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 469, "adjacent": false, "escalate": null},
+  {"id": "TEST-F31", "severity": "Major", "title": "I-7.3's deciding tie does not exist (release.yml:315 is a redirect); measured: a pipe alternative in maskRe false-reds release.yml twice, and one AC-7.1 fixture has no rule in the named check", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 662, "adjacent": false, "escalate": null},
+  {"id": "TEST-F32", "severity": "Major", "title": "AC-4.3 records that a mutation red a case but never why; the throw-vs-verdict trap generalizes past the one clause O-6 names", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 545, "adjacent": false, "escalate": null},
+  {"id": "TEST-F33", "severity": "Major", "title": "No obligation forbids an expectation computed by the code under test; a canary case built from the gate's own constant cannot red on a constant edit", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 519, "adjacent": false, "escalate": null},
+  {"id": "TEST-F34", "severity": "Major", "title": "Where the token probe lives is unstated; if it lives in the gate, both CI jobs inherit a skip-and-green branch, and a new wrapper file would red AC-4.2", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 583, "adjacent": false, "escalate": null},
+  {"id": "TEST-F35", "severity": "Minor", "title": "VE-3's suite-level token precondition would block AC-5.4's token-absent run and AC-3.3's fixture cases, which require exactly that environment", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 48, "adjacent": false, "escalate": null},
+  {"id": "TEST-F36", "severity": "Minor", "title": "The census's 18 queried package names is only derivable if scope-opener parent names are queried; an independent walk of the three manifests yields 17 pin names", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 133, "adjacent": false, "escalate": null},
+  {"id": "TEST-F37", "severity": "Minor", "title": "O-9's stated purpose has no trigger: a static committed fixture cannot red on an upstream rename, and nothing regenerates it or refuses when it goes stale", "file": "docs/archive/review/stale-override-floors-plan.md", "line": 536, "adjacent": false, "escalate": null}
+]
+```
+
+The prose headings F1-F9 in this section correspond to TEST-F29 through TEST-F37 in
+that order; the orchestrator's transcription condensed the headings and this index
+restores the identifiers the plan's Carried-Forward entries cite.
