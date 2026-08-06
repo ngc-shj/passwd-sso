@@ -15,7 +15,7 @@ Errors round 3 caught in revision 3, each of them mine:
 
 | Error | How it was caught |
 |---|---|
-| I-7.3 cited `release.yml:315` as "a legitimate pipe on a verifier line" | It is a **redirect** (`… --json --include-attestations > "$AUDIT_JSON"`). `grep -rn "audit signatures.*\|" .github/workflows/` returns nothing — no verifier line in this repo has a pipe. I took the citation from a round-2 finding without re-executing it. |
+| I-7.3 cited `.github/workflows/release.yml:315` as "a legitimate pipe on a verifier line" | It is a **redirect** (`… --json --include-attestations > "$AUDIT_JSON"`). `grep -rn "audit signatures.*\|" .github/workflows/` returns nothing — no verifier line in this repo has a pipe. I took the citation from a round-2 finding without re-executing it. |
 | C3 forbade `process.env` outside the token read | The same document requires a `GITHUB_API_URL`/proxy refusal, which must read `process.env`. The grep-checkable half would have won and the ambient path stayed open. |
 | S11 called the endpoint "a parameter reachable only by direct import"; AC-3.3 drives the shell "as a process" | A spawned process cannot be handed a function parameter. |
 | "18 distinct package names" | An independent walk yields **17** pin names. 18 needs the scope-opener parent, which S1 says is not judged — a rule I never stated. |
@@ -193,7 +193,7 @@ is `npm audit`'s word and never appears in an API response.
 ### Why CI is green today
 
 All three audit jobs run `npm audit --omit=dev --audit-level=high`
-(`.github/workflows/ci.yml:687`, `:716`, `:743`). M1 arrives through `shadcn` (a
+(`.github/workflows/ci.yml:718`, `:747`, `:774`). M1 arrives through `shadcn` (a
 devDependency) → `@modelcontextprotocol/sdk` → `hono`, and is `medium`. `--omit=dev`
 drops it and `--audit-level=high` would drop it anyway. No CI job runs a full-scope
 `npm audit`. Full-scope, by hand: `{"moderate":1,"high":0,"critical":0}` — the single
@@ -296,7 +296,7 @@ the functions and the compiler holds the shapes.
 - **P-4** The command line distinguishes **flags from manifest paths**, and every way
   it can go wrong is a named refusal rather than a skip: an unrecognized flag, a path
   that cannot be read, a discovery fallback, and a walk that yielded zero rows of any
-  kind. Revision 3 cited `check-override-key-disjointness.mjs:260` as the precedent
+  kind. Revision 3 cited `scripts/checks/check-override-key-disjointness.mjs:305` as the precedent
   without stating this; that form treats every argument as a path and swallows
   `ENOENT`, so `--report` would become a path, be skipped, and a mistyped scratchpad
   path would report clean.
@@ -403,7 +403,7 @@ for the C3 control.
   now carry their pin so C3 can judge them (S9) rather than inherit a silent pass.
 - **I-2.3** `"."` keys do not enter the judged bucket. The disjointness gate's exclusion
   of `"."` from its own overlap arithmetic is correct for *its* predicate and is pinned
-  by its own test at `check-override-key-disjointness.test.mjs:116`; it must not be
+  by its own test at `scripts/__tests__/check-override-key-disjointness.test.mjs:116`; it must not be
   "fixed" while satisfying C3's.
 - **I-2.4** A package's identity for C3 comes from the carried name, never from splitting
   a display string (R51).
@@ -666,7 +666,7 @@ reproduces the defect it corrects, one level down.
 the mask set with `set +e` and an unprotected pipe.
 
 **What revision 3 got wrong here, corrected**:
-- The deciding tie is **`release.yml:210`**, not `:315`. `:315` is
+- The deciding tie is **`.github/workflows/release.yml:215`**, not `:315`. `:315` is
   `npm audit signatures --json --include-attestations > "$AUDIT_JSON"` — a redirect — and
   no verifier line in the repo has a pipe. `:210`'s block contains
   `echo "$VIEW" | node -e "…dist?.attestations…"` under `set -euo pipefail`, and it is
@@ -691,12 +691,12 @@ the mask set with `set +e` and an unprotected pipe.
   gate and has an unrelated masked step **is** a violation — a deliberate consequence of
   the existing scope, written down rather than discovered.
 - **I-7.3** `release.yml` and `dependency-signatures.yml` stay green **unedited**, and
-  the `release.yml:210` allow case is asserted to match the per-line predicate first, so
+  the `.github/workflows/release.yml:215` allow case is asserted to match the per-line predicate first, so
   the allow is not vacuous.
 
 **Acceptance criteria**:
 - **AC-7.1** New fixtures covering each of the four forms on the new gate, plus the two
-  allow cases: `release.yml:210`'s real protected pipe, and an unrelated workflow's
+  allow cases: `.github/workflows/release.yml:215`'s real protected pipe, and an unrelated workflow's
   `continue-on-error`.
 - **AC-7.2** One mutation per widened clause, each **observed** to red its own fixture
   while `release.yml` stays green (O-10 applies).
@@ -793,11 +793,11 @@ own sibling self-test that no contract owns, and AC-4.2 forbids a debt entry.
 
 | Symbol | Location | Use |
 |---|---|---|
-| `discoverManifests` | `check-override-key-disjointness.mjs:54` | manifest discovery — but its `git ls-files` fallback is a **refusal** for C3, not a silent fallback (N4) |
-| `splitOverrideKey` | same, `:76` | package-name/selector split, including the scoped-name `lastIndexOf("@")` subtlety (I-2.4) |
-| `collectScopes` / `topLevelScope` | same, `:93` / `:123` | the walker C2 extends; a second copy in the new gate is the R1 defect |
+| `discoverManifests` | `scripts/checks/check-override-key-disjointness.mjs:60` | manifest discovery — but its `git ls-files` fallback is a **refusal** for C3, not a silent fallback (N4) |
+| `splitOverrideKey` | same, `:82` | package-name/selector split, including the scoped-name `lastIndexOf("@")` subtlety (I-2.4) |
+| `collectScopes` / `topLevelScope` | same, `:118` / `:168` | the walker C2 extends; a second copy in the new gate is the R1 defect |
 | `semver.intersects` | `semver` (root devDependency) | the only range predicate (N3) |
-| `extractRunCommands` | `check-workflow-supply-chain.mjs:234` | C7 binds the widened match to extracted `run:` commands, not raw file text |
+| `extractRunCommands` | `scripts/checks/check-workflow-supply-chain.mjs:270` | C7 binds the widened match to extracted `run:` commands, not raw file text |
 | `findMaskedVerifierViolations` | same, `:65` | C7 extends this function's member set rather than adding a parallel rule |
 
 ### Gates that fire on files this change adds

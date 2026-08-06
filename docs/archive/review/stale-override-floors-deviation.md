@@ -77,3 +77,35 @@ operator decision as SC-B. Worst case: a future PR that does touch those surface
 discovers the failure at push rather than locally. Likelihood: certain eventually, zero
 here. Cost to fix: small per gate, but it changes `pre-pr`'s runtime for every
 developer.
+
+## D3 — `refactor-phase-verify` fails on unmodified main; not introduced here
+
+The Phase 2-4 CI-parity sweep ran every gate `extract-ci-checks.sh` finds. Twelve of
+thirteen pass. `node scripts/refactor-phase-verify.mjs --force` fails, and it fails on a
+clean worktree checked out at `origin/main` as well (5/16 of its own scripts pass), so
+it is not introduced by this branch.
+
+Two separate things were confounded in the first reading, and both are worth recording:
+
+- The message this branch produced locally was `Branch is stale vs origin/main`, which
+  reads like a rebase problem. It is not. The gate compares `origin/main`'s SHA against
+  `.refactor-phase-verify-baseline`, a **gitignored, machine-local** file that still held
+  `88c8a859e` (an ancestor of today's `origin/main`). In CI the file does not exist, so
+  the first run records a baseline and proceeds — the staleness message is a local
+  artifact only.
+- The real failure underneath is the 5/16 script result, which reproduces on unmodified
+  `origin/main`.
+
+**Not a parity gap for this change.** The gate is invoked only by
+`.github/workflows/refactor-phase-verify.yml`, whose triggers are `push` to `refactor/**`,
+`merge_group`, and `workflow_dispatch`. This branch is `fix/stale-override-floors`, so the
+workflow does not run on its PR. `ci.yml` mentions the workflow only in a comment.
+
+**Anti-Deferral check**: pre-existing in an unchanged file, routed rather than dropped.
+Worst case: the gate reds in the merge queue, if the repository enables one, for every
+PR — independent of this branch. Likelihood: it is already failing, so certain whenever
+that trigger fires. Cost to fix: unknown from here; it belongs to the
+`split-overcrowded-feature-dirs` initiative that owns the script
+(`docs/archive/review/split-overcrowded-feature-dirs-plan.md` §Phase 0), not to a
+dependency-override subject. Fixing it here would mix two subjects and would be a guess
+at another plan's intent.
