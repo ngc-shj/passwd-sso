@@ -8,10 +8,12 @@
  *     patch/minor bumps that passed tests). Human review must stay required, so
  *     no workflow may pair a `dependabot` context with an auto-merge command.
  *
- *  2. A supply-chain verifier (`npm audit signatures`, or the post-publish
- *     provenance assertion `npm view … dist.attestations`) must never be
- *     exit-masked. A verifier behind `|| true` / `; true` / `|| exit 0` /
- *     `continue-on-error` is theater — a real tamper would be swallowed.
+ *  2. A supply-chain verifier (`npm audit signatures`, the post-publish
+ *     provenance assertion `npm view … dist.attestations`, or an invocation of
+ *     the override-floor staleness gate, `check-override-floor-staleness`)
+ *     must never be exit-masked. A verifier behind `|| true` / `; true` /
+ *     `|| exit 0` / `continue-on-error` / `set +e` / an unprotected pipe is
+ *     theater — a real tamper (or a stale floor) would be swallowed.
  *
  * PRIMARY control note: `/.github/workflows/` is CODEOWNERS-gated to @ngc-shj,
  * so ANY new auto-merge or verifier-masking workflow — in any shape — already
@@ -54,10 +56,12 @@ export function findAutoMergeViolation(content, name) {
 
 /**
  * Returns violation strings for any supply-chain verifier — `npm audit
- * signatures` or the post-publish provenance assertion (`npm view` reading
- * `dist.attestations`) — whose exit status is masked (|| true / ; true /
- * || exit 0 / || : / || echo), or a step-level `continue-on-error: true`
- * anywhere in a workflow that runs such a verifier.
+ * signatures`, the post-publish provenance assertion (`npm view` reading
+ * `dist.attestations`), or an invocation of `check-override-floor-staleness`
+ * (the override-floor staleness gate) — whose exit status is masked
+ * (|| true / ; true / || exit 0 / || : / || echo / set +e / an unprotected
+ * pipe), or a step-level `continue-on-error: true` anywhere in a workflow
+ * that runs such a verifier.
  * @param {string} content
  * @param {string} name
  * @returns {string[]}
@@ -67,6 +71,9 @@ export function findMaskedVerifierViolations(content, name) {
   // Join shell line-continuations (`… \` + newline) into one logical line BEFORE
   // scanning, so a mask split across lines (`npm audit signatures \` / `  || true`)
   // is caught. Track the original 1-based line number of each logical line's start.
+  // `body` mirrors `text` but, for a `run: |`/`run: >` block, omits the block-scalar
+  // HEADER line itself — the header's own `|`/`>` indicator would otherwise read as
+  // an unprotected shell pipe to the pipe rule below.
   const rawLines = content.split("\n");
   const logical = [];
   const indentOf = (s) => (s.match(/^\s*/)?.[0].length ?? 0);
@@ -78,36 +85,65 @@ export function findMaskedVerifierViolations(content, name) {
     const blockMatch = joined.match(/(^\s*)(?:-\s+)?run:\s*[>|][0-9+-]*\s*(#.*)?$/);
     if (blockMatch && i + 1 < rawLines.length) {
       const baseIndent = blockMatch[1].length;
+      let body = "";
       while (
         i + 1 < rawLines.length &&
         (rawLines[i + 1].trim() === "" || indentOf(rawLines[i + 1]) > baseIndent)
       ) {
         joined += " " + rawLines[i + 1].trim();
+        body += (body ? " " : "") + rawLines[i + 1].trim();
         i += 1;
       }
-      logical.push({ text: joined, line: start + 1 });
+      logical.push({ text: joined, body, line: start + 1 });
       continue;
     }
     while (/\\\s*$/.test(joined) && i + 1 < rawLines.length) {
       joined = joined.replace(/\\\s*$/, " ") + rawLines[i + 1];
       i += 1;
     }
-    logical.push({ text: joined, line: start + 1 });
+    logical.push({ text: joined, body: joined, line: start + 1 });
   }
   // `dist\??\.attestations` tolerates optional chaining (`j?.dist?.attestations`
-  // in the real release.yml assertion). `runsVerifier` is a WORKFLOW-level flag,
-  // not per-line, so a `npm view` and an `attestations` reference on separate
-  // lines still mark the workflow as verifier-running.
-  const verifierLineRe = /audit\s+signatures|dist\??\.attestations/;
+  // in the real release.yml assertion). `check-override-floor-staleness` names the
+  // new gate (C7 of stale-override-floors) as a verifier too. `runsVerifier` is a
+  // WORKFLOW-level flag, not per-line, so a `npm view` and an `attestations`
+  // reference on separate lines still mark the workflow as verifier-running.
+  const verifierLineRe =
+    /audit\s+signatures|dist\??\.attestations|check-override-floor-staleness/;
+  // The `check-override-floor-staleness` alternative is bound to actual `run:`
+  // COMMAND text via extractRunCommands, not raw file content — a YAML comment
+  // that merely mentions the gate must not flip this workflow-level flag, which
+  // would otherwise subject the whole file to the continue-on-error ban below.
   const runsVerifier =
     /audit\s+signatures/.test(content) ||
-    (/npm\s+view/.test(content) && /attestations/.test(content));
+    (/npm\s+view/.test(content) && /attestations/.test(content)) ||
+    extractRunCommands(content).some((cmd) => /check-override-floor-staleness/.test(cmd));
   // `:` needs a lookahead boundary (a trailing \b never matches after non-word `:`).
-  const maskRe = /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$))/;
-  for (const { text, line } of logical) {
+  // `set +e` (a `+`-cleared flag cluster containing `e`) disables errexit, so a
+  // verifier's non-zero exit stops aborting the rest of the script.
+  const maskRe =
+    /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$)|\bset\s+\+\S*e\S*\b)/;
+  // An unprotected pipe: a LONE `|` — not `||` (shell OR / JS logical-or both use
+  // adjacent pipe pairs, which the lookaround below excludes on both sides) — whose
+  // exit status only `pipefail` preserves. No workflow here sets `shell:` or
+  // `defaults.run.shell`, so GitHub's default (`bash --noprofile --norc -eo …`,
+  // WITHOUT `pipefail`) applies: a pipe really does discard an upstream verifier's
+  // exit code unless the script opts in itself. Scoped to the whole joined block
+  // (not just the verifier's own line) because the block-join above already
+  // flattens a `run: |` body into one logical line — e.g. release.yml's
+  // `echo "$VIEW" | node -e …` sits under a `set -euo pipefail` a few lines above
+  // it in the SAME block, which is what makes that particular pipe safe.
+  const pipeRe = /(?<!\|)\|(?!\|)/;
+  const pipefailRe = /\bset\s+-\S*o\S*\s+pipefail\b/;
+  for (const { text, body, line } of logical) {
     if (verifierLineRe.test(text) && maskRe.test(text)) {
       violations.push(
-        `${name}:${line}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo) — it must fail closed`,
+        `${name}:${line}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo / set +e) — it must fail closed`,
+      );
+    }
+    if (verifierLineRe.test(text) && pipeRe.test(body) && !pipefailRe.test(text)) {
+      violations.push(
+        `${name}:${line}: supply-chain verifier's exit status can be discarded by a pipe with no 'pipefail' in effect in this run block — add 'set -euo pipefail' (or 'set -o pipefail'), or restructure to avoid piping the verifier`,
       );
     }
   }

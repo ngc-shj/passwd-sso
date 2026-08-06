@@ -4,6 +4,7 @@
  * verifier, so the live guard passes trivially; these synthetic-string cases
  * prove each detector fires on a planted violation and stays quiet on clean input.
  */
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
   extractRunCommands,
@@ -215,6 +216,108 @@ describe("findMaskedVerifierViolations", () => {
         continue-on-error: true
 `;
     expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+});
+
+// C7 (stale-override-floors): check-override-floor-staleness must be recognized
+// as a verifier, and the four masking forms C5 forbids (continue-on-error, || true,
+// set +e, an unprotected pipe) must be caught for it — without false-reddening the
+// real release.yml/dependency-signatures.yml workflows, which the plan measured a
+// naive pipe rule to do (release.yml :210 and :268).
+describe("findMaskedVerifierViolations — check-override-floor-staleness (C7)", () => {
+  it("flags continue-on-error: true on a workflow invoking the new gate", () => {
+    const wf = [
+      "jobs:",
+      "  staleness:",
+      "    steps:",
+      "      - run: node scripts/checks/check-override-floor-staleness.mjs",
+      "        continue-on-error: true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /continue-on-error/.test(m))).toBe(true);
+  });
+
+  it("flags || true on an invocation of the new gate", () => {
+    const wf = [
+      "    steps:",
+      "      - run: node scripts/checks/check-override-floor-staleness.mjs || true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags set +e ahead of the new gate in the same run block", () => {
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          set +e",
+      "          node scripts/checks/check-override-floor-staleness.mjs",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags an unprotected pipe on an invocation of the new gate", () => {
+    const wf = [
+      "    steps:",
+      "      - run: node scripts/checks/check-override-floor-staleness.mjs | tee output.log",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /unprotected pipe|pipefail/.test(m))).toBe(true);
+  });
+
+  it("does NOT flag the real release.yml protected-pipe shape (set -euo pipefail, then echo | node -e)", () => {
+    const wf = [
+      "      - name: Assert published provenance",
+      "        run: |",
+      "          set -euo pipefail",
+      '          VIEW=$(npm view "pkg@1.0.0" --json)',
+      '          echo "$VIEW" | node -e "let d=\'\';process.stdin.on(\'data\',c=>d+=c).on(\'end\',()=>{try{const j=JSON.parse(d);process.stdout.write(j?.dist?.attestations?.provenance?.predicateType||\'\')}catch{process.stdout.write(\'\')}})"',
+    ].join("\n");
+    // Not vacuous: this shape must first match the verifier-line predicate.
+    expect(/dist\??\.attestations/.test(wf)).toBe(true);
+    expect(findMaskedVerifierViolations(wf, "release.yml")).toEqual([]);
+  });
+
+  it("does NOT flag the new workflow's unmasked, unpiped invocation", () => {
+    const wf = "      - run: node scripts/checks/check-override-floor-staleness.mjs\n";
+    expect(findMaskedVerifierViolations(wf, "override-floor-staleness.yml")).toEqual([]);
+  });
+
+  it("does NOT flag continue-on-error on an unrelated step in a workflow that runs no verifier (I-7.2)", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      - run: npm ci",
+      "        continue-on-error: true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+
+  it("does NOT flag a workflow that only mentions the gate in a comment and masks an unrelated step", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      # see scripts/checks/check-override-floor-staleness.mjs for the new gate",
+      "      - run: npm ci",
+      "        continue-on-error: true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+
+  it("stays green on the real release.yml and dependency-signatures.yml (AC-7.3 unit-level echo)", () => {
+    const releaseYml = readFileSync(
+      new URL("../../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    );
+    const depSigYml = readFileSync(
+      new URL("../../.github/workflows/dependency-signatures.yml", import.meta.url),
+      "utf8",
+    );
+    expect(findMaskedVerifierViolations(releaseYml, "release.yml")).toEqual([]);
+    expect(findMaskedVerifierViolations(depSigYml, "dependency-signatures.yml")).toEqual([]);
   });
 });
 
