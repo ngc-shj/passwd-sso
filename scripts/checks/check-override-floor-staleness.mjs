@@ -58,7 +58,6 @@
  *                           errors and 5xx only (default 2)
  */
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 import semver from "semver";
 import {
   FALLBACK_MANIFESTS,
