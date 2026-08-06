@@ -119,10 +119,13 @@ export function findMaskedVerifierViolations(content, name) {
     (/npm\s+view/.test(content) && /attestations/.test(content)) ||
     extractRunCommands(content).some((cmd) => /check-override-floor-staleness/.test(cmd));
   // `:` needs a lookahead boundary (a trailing \b never matches after non-word `:`).
-  // `set +e` (a `+`-cleared flag cluster containing `e`) disables errexit, so a
-  // verifier's non-zero exit stops aborting the rest of the script.
+  // `set +e` disables errexit, so a verifier's non-zero exit stops aborting the
+  // rest of the script. Both spellings count: the `+`-cleared flag cluster
+  // (`set +e`, `set +ex`) and the long option (`set +o errexit`). `pipefailRe`
+  // below already had to handle `-o`'s long form, so covering only the cluster
+  // here left the two halves of one function disagreeing about shell syntax.
   const maskRe =
-    /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$)|\bset\s+\+\S*e\S*\b)/;
+    /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$)|\bset\s+\+\S*e\S*\b|\bset\s+\+o\s+errexit\b)/;
   // An unprotected pipe: a LONE `|` — not `||` (shell OR / JS logical-or both use
   // adjacent pipe pairs, which the lookaround below excludes on both sides) — whose
   // exit status only `pipefail` preserves. No workflow here sets `shell:` or

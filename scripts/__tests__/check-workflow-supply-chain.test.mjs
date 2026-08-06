@@ -257,6 +257,30 @@ describe("findMaskedVerifierViolations — check-override-floor-staleness (C7)",
     expect(v.some((m) => /masked/.test(m))).toBe(true);
   });
 
+  it("flags set +o errexit, the long-option spelling of the same disable", () => {
+    // `pipefailRe` on these same lines already had to handle `-o`'s long form,
+    // so covering only the `+e` cluster left one function disagreeing with
+    // itself about shell syntax.
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          set +o errexit",
+      "          node scripts/checks/check-override-floor-staleness.mjs",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("does NOT flag set -o errexit, which is the opposite instruction", () => {
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          set -o errexit",
+      "          node scripts/checks/check-override-floor-staleness.mjs",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "override-floor-staleness.yml")).toEqual([]);
+  });
+
   it("flags an unprotected pipe on an invocation of the new gate", () => {
     const wf = [
       "    steps:",

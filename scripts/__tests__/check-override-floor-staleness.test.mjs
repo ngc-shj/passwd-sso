@@ -826,9 +826,14 @@ describe("S10 — every walked entry lands in exactly one of five outcomes", () 
   });
 
   it("P-5: report mode changes what is printed, never the verdict", () => {
-    // Same rows, both formatters — the exit status is computed from the rows.
-    expect(exitCodeFor(rows)).toBe(exitCodeFor(rows));
+    // `exitCodeFor(rows) === exitCodeFor(rows)` would have been the obvious
+    // spelling and it cannot fail — the verdict has to be pinned to the ROWS,
+    // so a stale row exits 1 and a clean set exits 0 whichever formatter ran.
+    const clean = rows.map((r) => ({ ...r, outcome: OUTCOME.CLEAN }));
+    expect(exitCodeFor(rows)).toBe(1);
+    expect(exitCodeFor(clean)).toBe(0);
     expect(formatReportLines(rows, cache).length).toBeGreaterThan(formatViolationLines(rows).length);
+    expect(formatReportLines(clean, cache).length).toBeGreaterThan(formatViolationLines(clean).length);
   });
 });
 
@@ -903,6 +908,17 @@ describe("S11 — the advisory origin comes from two places and no third", () =>
   it("the loader and CA variables are in the refused set, because neither TLS nor the origin pin stops them", () => {
     expect(AMBIENT_ORIGIN_VARS).toContain("NODE_OPTIONS");
     expect(AMBIENT_ORIGIN_VARS).toContain("NODE_EXTRA_CA_CERTS");
+    // Strictly wider than NODE_EXTRA_CA_CERTS — it accepts every certificate,
+    // not one more. Refusing the narrow variable and admitting the wide one is
+    // the member-set shape this whole change exists to stop repeating.
+    expect(AMBIENT_ORIGIN_VARS).toContain("NODE_TLS_REJECT_UNAUTHORIZED");
+  });
+
+  it("DENY: NODE_TLS_REJECT_UNAUTHORIZED is refused — it makes the TLS pin meaningless", () => {
+    const result = resolveOrigin(null, { NODE_TLS_REJECT_UNAUTHORIZED: "0" });
+    expect(result.origin).toBeUndefined();
+    expect(result.refusal).toContain("REFUSED_AMBIENT_ORIGIN");
+    expect(result.refusal).toContain("NODE_TLS_REJECT_UNAUTHORIZED");
   });
 
   it("variables that cannot redirect this request stay OUT of the refused set", () => {
@@ -1275,6 +1291,13 @@ describe("the repository's own overrides blocks (AC-3.4)", () => {
     expect(openers.length).toBeGreaterThan(0);
     for (const opener of openers) expect(queried).toContain(opener);
     expect(new Set(queried).size).toBe(queried.length);
+    // The three clauses above are all satisfied by a function that returns ONLY
+    // the opener parents, which is why the set equality is asserted too: the
+    // census figure this case carries is 17 pin names + 1 opener parent, and
+    // dropping either half must red rather than merely shrink the number.
+    const pinNames = entries.filter((e) => e.kind !== "scope-opener" && e.pkg).map((e) => e.pkg);
+    expect([...queried].sort()).toEqual([...new Set([...pinNames, ...openers])].sort());
+    expect(pinNames.length).toBeGreaterThan(openers.length);
   });
 });
 
@@ -1284,8 +1307,16 @@ describe("the repository's own overrides blocks (AC-3.4)", () => {
 
 describe("O-3 — export coverage", () => {
   it("every export of the gate is referenced by at least one case in this file", () => {
+    // Counted over CODE only. Against the raw source the guard was satisfiable
+    // by prose: naming an untested export twice in a comment cleared it, which
+    // is a guard that certifies coverage a reader wrote rather than coverage a
+    // case executed.
+    const code = SELF_SOURCE.split("\n")
+      .filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l))
+      .join("\n")
+      .replace(/\/\/[^\n]*/g, "");
     const unreferenced = Object.keys(gate).filter((name) => {
-      const occurrences = SELF_SOURCE.split(new RegExp(`\\b${name}\\b`)).length - 1;
+      const occurrences = code.split(new RegExp(`\\b${name}\\b`)).length - 1;
       // Once for the import, so a name reached only by the import list is
       // unreferenced.
       return occurrences < 2;

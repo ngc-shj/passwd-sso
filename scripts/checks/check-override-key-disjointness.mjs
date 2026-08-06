@@ -43,7 +43,12 @@ import semver from "semver";
  */
 export const FALLBACK_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
 
-const DEPENDENCY_FIELDS = [
+/**
+ * The npm dependency fields a `$ref` override value (`"$rollup"`) can resolve
+ * against. Exported because the staleness gate resolves the same refs — two
+ * copies of this list would let one gate see a `$ref` the other does not.
+ */
+export const DEPENDENCY_FIELDS = [
   "dependencies",
   "devDependencies",
   "optionalDependencies",
@@ -91,7 +96,7 @@ export function splitOverrideKey(key) {
  * `Object.entries` on an array yields numeric-index keys that are not overrides
  * keys at all.
  */
-function isPlainObject(value) {
+export function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 

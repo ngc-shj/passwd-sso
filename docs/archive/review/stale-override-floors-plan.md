@@ -798,7 +798,7 @@ own sibling self-test that no contract owns, and AC-4.2 forbids a debt entry.
 | `collectScopes` / `topLevelScope` | same, `:118` / `:168` | the walker C2 extends; a second copy in the new gate is the R1 defect |
 | `semver.intersects` | `semver` (root devDependency) | the only range predicate (N3) |
 | `extractRunCommands` | `scripts/checks/check-workflow-supply-chain.mjs:270` | C7 binds the widened match to extracted `run:` commands, not raw file text |
-| `findMaskedVerifierViolations` | same, `:65` | C7 extends this function's member set rather than adding a parallel rule |
+| `findMaskedVerifierViolations` | same, `:69` | C7 extends this function's member set rather than adding a parallel rule |
 
 ### Gates that fire on files this change adds
 

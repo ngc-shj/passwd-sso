@@ -109,3 +109,97 @@ that trigger fires. Cost to fix: unknown from here; it belongs to the
 (`docs/archive/review/split-overcrowded-feature-dirs-plan.md` §Phase 0), not to a
 dependency-override subject. Fixing it here would mix two subjects and would be a guess
 at another plan's intent.
+
+## D4 — Self-R-check findings fixed in Phase 2
+
+The Step 2-5 self-check (three sub-agents, R1–R57 + RS*/RT*) returned two Major findings,
+both proven by execution. Per the disposition rule both were fixed here rather than
+deferred to Phase 3.
+
+**Major — `NODE_TLS_REJECT_UNAUTHORIZED` was not in the refused ambient set.** Proven
+against the gate's own transport: a self-signed certificate for `CN=api.github.com` is
+rejected without the variable and accepted with it. An operator or self-hosted runner
+with `NODE_TLS_REJECT_UNAUTHORIZED=0` exported — the common "fix the corporate proxy"
+reflex — plus name resolution is enough for an interceptor to serve the real canary
+payload and an empty list for the other seventeen names, at which point every row is
+`clean` and the gate exits 0 forever. No code edit, no workflow edit, nothing in a diff.
+
+The member set was internally inconsistent rather than deliberately narrowed:
+`NODE_EXTRA_CA_CERTS`, which appends **one** trusted CA, was refused while the variable
+that accepts **every** certificate was not. S12 and the playbook both name TLS as what
+stands between the gate and a response-shaping adversary, so the claim was stronger than
+the implementation (R49). Added, with a paired deny case.
+
+**Major — `set +o errexit` escaped C7's `set +e` mask clause.** The clause matched the
+`+`-cleared flag cluster only (`set +e`, `set +ex`). The long-option spelling disables
+errexit identically and was not caught, so a `run: |` block could put it ahead of the
+gate and green the job. The same function's `pipefail` predicate already handled `-o`'s
+long form, so the two halves of one function disagreed about shell syntax. Added, with
+a paired allow case for `set -o errexit`, which is the opposite instruction.
+
+Minor findings also fixed here, each straightforward:
+
+- `first_patched_version` was validated as "null or a string" and then handed to
+  `semver.gt`, which throws on a non-version. The throw escaped the comparison guard, so
+  the entry landed in **none** of the five outcomes — fail-closed, but as a stack trace
+  where a named `STALE` row belonged, contradicting I-3.1. Now rejected at the boundary,
+  which is the only place the offending advisory id is still in hand.
+- S12's third layer was inert: none of the three invocations passed `--report`, so a
+  package the API answered nothing about produced output identical to one with 44
+  advisories checked. The weekly sweep now passes it; the verdict is unchanged (P-5).
+- The recorded fixture was a verbatim capture including `credits[].user` — 26 real
+  GitHub logins, user ids and avatar URLs that no assertion reads. Removed; the fields
+  the boundary check and the transform consume are untouched, so the RT1 anchor property
+  survives. 75663 → 40284 bytes.
+- `expect(exitCodeFor(rows)).toBe(exitCodeFor(rows))` cannot fail. Replaced with the
+  property it was reaching for: a stale row exits 1 and the same rows marked clean exit
+  0, under both formatters.
+- The export-coverage guard counted name occurrences over the whole test source,
+  comments included, so naming an untested export twice in a comment cleared it. Now
+  counted over code only.
+- The queried-set case asserted three things a function returning *only* scope-opener
+  parents also satisfies. Set equality against pin names ∪ opener parents added.
+- `DEPENDENCY_FIELDS` and `isPlainObject` were byte-identical copies of primitives the
+  sibling walker owns. `isPlainObject` is load-bearing in both — it decides whether a key
+  opens a nested scope in one and whether a pin is a scope opener in the other, and the
+  two must agree by construction, not by having been typed twice. Both are now imported.
+
+## D5 — AC-5.3 cannot be satisfied before merge
+
+AC-5.3 requires the scheduled workflow to be dispatched and the run **observed** green.
+`workflow_dispatch` requires the workflow to exist on the default branch, so
+`gh workflow run override-floor-staleness.yml` returns 404 until this merges. Phase 1
+discharged R32 and R50 by pointing at AC-5.3, so those are currently discharged by an
+unmet criterion.
+
+The gate itself is exercised — `ci.yml`'s PR job runs the identical command on every
+push to this branch. What is not yet exercised is the new workflow file's own
+`schedule` / `permissions` / checkout wiring.
+
+**Anti-Deferral check**: acceptable risk, quantified. Worst case: the weekly workflow is
+malformed in a way no static check catches and the sweep silently never runs — the
+detection half of the control, not the blocking half. Likelihood: low; the file is
+SHA-pin checked, supply-chain checked, and step-for-step identical to the PR job that
+does run. Cost to fix: one `gh workflow run` after merge. **Post-merge action**: dispatch
+it and confirm a green run before closing this work.
+
+## D6 — Mutation-loop record
+
+AC-4.3 requires the loop to be run with the pairings and the observed failure mode
+recorded. It was run twice, independently:
+
+- The implementing agent ran 19 single mutations on a scratchpad clone; every one red
+  ≥1 named case, 0 survived, 118 assertion-mode reds and 9 throw-mode. The
+  `startsWith`-vs-exact mutation of the same-package filter red only the `lodash` half
+  and left `lodash-es` green — the discriminating split the plan predicted.
+- The Step 2-5 testing self-check re-ran 16 mutations on its own `git clone`, plus 6 on
+  the widened supply-chain check, and reproduced the result independently.
+
+One mutation cannot satisfy O-10's "the allow half stays passing", and it is the
+comma-band one: deleting the normalizer throws on *every* comma band, so both halves of
+the O-6 pair red. That is the trap's own mechanism. What the record carries instead is
+the **mode** — the allow unit case reds with `TypeError: Invalid comparator: >=4.0.0,`
+and the allow manifest case reds with the named `UNDECIDABLE_COMPARISON_THREW`, i.e. the
+gate converts the throw into a refusal rather than swallowing it, which is what I-3.2
+asks for. Recorded rather than replaced with a weaker mutation that would have left the
+allow half green.

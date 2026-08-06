@@ -42,8 +42,8 @@
  * `git ls-files` fallback are correct for its own predicate and are refusals
  * for this one.
  *
- * Network: one GET per distinct queried package name (18 today) plus the
- * canary. The advisory origin comes from a compiled-in default or an explicit
+ * Network: one GET per distinct queried package name — 18 today, the canary's
+ * own package among them, so it costs no extra request. The advisory origin comes from a compiled-in default or an explicit
  * `--origin` argument and from nowhere else; an origin arriving through ambient
  * state is refused before any request is made.
  *
@@ -60,9 +60,11 @@
 import { readFileSync } from "node:fs";
 import semver from "semver";
 import {
+  DEPENDENCY_FIELDS,
   FALLBACK_MANIFESTS,
   collectScopes,
   discoverManifests,
+  isPlainObject,
   splitOverrideKey,
 } from "./check-override-key-disjointness.mjs";
 
@@ -107,6 +109,15 @@ export const AMBIENT_ORIGIN_VARS = [
   "https_proxy",
   "all_proxy",
   "NODE_EXTRA_CA_CERTS",
+  // Strictly wider than NODE_EXTRA_CA_CERTS, which appends ONE trusted CA:
+  // this accepts every certificate, self-signed included. Measured against this
+  // gate's own transport — a self-signed cert for CN=api.github.com is rejected
+  // without it and accepted with it — so an interceptor can serve the real
+  // canary payload and an empty list for the other names, and the gate reports
+  // the cleanest run in its history with no code or workflow edit. Leaving the
+  // narrow variable refused and the wide one accepted would have been the
+  // member-set defect this whole change exists to stop repeating.
+  "NODE_TLS_REJECT_UNAUTHORIZED",
   "NODE_OPTIONS",
 ];
 
@@ -137,18 +148,7 @@ export const OUTCOME = {
 /** Outcomes that make the process exit non-zero (I-3.5). */
 const FAILING_OUTCOMES = new Set([OUTCOME.STALE, OUTCOME.REFUSED, OUTCOME.UNDECIDABLE]);
 
-const DEPENDENCY_FIELDS = [
-  "dependencies",
-  "devDependencies",
-  "optionalDependencies",
-  "peerDependencies",
-];
-
 const MAX_LINE_LENGTH = 2000;
-
-function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 /**
  * GitHub writes a conjunction as `">= 2.0.0, < 2.1.4"`; semver's grammar uses a
@@ -456,8 +456,19 @@ export function checkResponseShape(body) {
       if (typeof v.vulnerable_version_range !== "string") {
         return { ok: false, token: "UNDECIDABLE_RESPONSE_SHAPE", detail: `${a.ghsa_id}: vulnerable_version_range is not a string` };
       }
-      if (!(v.first_patched_version === null || typeof v.first_patched_version === "string")) {
-        return { ok: false, token: "UNDECIDABLE_RESPONSE_SHAPE", detail: `${a.ghsa_id}: first_patched_version is neither null nor a string` };
+      // A string is not enough: `requiredFloor` hands this to `semver.gt`,
+      // which THROWS on a non-version. That throw escapes the comparison guard
+      // and the entry lands in none of the five outcomes — fail-closed, but as
+      // a stack trace where a named STALE row belonged. Reject it at the
+      // boundary instead, which is the only place the offending advisory id is
+      // still in hand.
+      if (
+        !(
+          v.first_patched_version === null ||
+          (typeof v.first_patched_version === "string" && semver.coerce(v.first_patched_version) !== null)
+        )
+      ) {
+        return { ok: false, token: "UNDECIDABLE_RESPONSE_SHAPE", detail: `${a.ghsa_id}: first_patched_version is neither null nor a version` };
       }
     }
   }

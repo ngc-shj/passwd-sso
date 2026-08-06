@@ -13,9 +13,9 @@ name: "Override Floor Staleness"
 #
 # GITHUB_TOKEN is required, not merely helpful: unauthenticated api.github.com
 # allows 60 req/h per IP, and this gate issues one request per distinct
-# queried override package name (18+ at time of writing) plus the canary — an
-# unauthenticated run works until the budget is exhausted, then reds for a
-# reason unrelated to the tree.
+# queried override package name (18 at time of writing; the canary's package is
+# one of them, so it costs no extra request) — an unauthenticated run works
+# until the budget is exhausted, then reds for a reason unrelated to the tree.
 
 on:
   schedule:
@@ -44,6 +44,11 @@ jobs:
       # audit-family jobs (audit-app / audit-ext / audit-cli / dependency-signatures).
       - run: npm ci --ignore-scripts
 
-      - run: node scripts/checks/check-override-floor-staleness.mjs
+      # --report prints the per-package advisory count for every queried name.
+      # That is S12's third layer and it is only useful where someone reads the
+      # log: a package the API answered nothing about is a PASS, and without the
+      # counts it is indistinguishable from one with 44 advisories checked. The
+      # verdict is unchanged by the flag (P-5), so this costs a few log lines.
+      - run: node scripts/checks/check-override-floor-staleness.mjs --report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
