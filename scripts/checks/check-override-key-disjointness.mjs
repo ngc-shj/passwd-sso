@@ -34,8 +34,14 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import semver from "semver";
 
-/** Used only when `git ls-files` is unavailable (e.g. a source tarball). */
-const FALLBACK_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
+/**
+ * Used only when `git ls-files` is unavailable (e.g. a source tarball).
+ * Exported so a caller for which a silent fallback is a REFUSAL rather than a
+ * degraded pass can tell the two apart by reference identity — `discoverManifests`
+ * returns this exact array object on the fallback path and a fresh array
+ * otherwise, which a content comparison cannot distinguish.
+ */
+export const FALLBACK_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
 
 const DEPENDENCY_FIELDS = [
   "dependencies",
