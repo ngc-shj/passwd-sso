@@ -1,0 +1,49 @@
+name: "Override Floor Staleness"
+
+# Detects an `overrides` pin whose RANGE still permits a version inside a
+# live GitHub advisory band (docs/security/dependency-cve-response.md Step 4;
+# scripts/checks/check-override-floor-staleness.mjs). This same gate also
+# runs on every PR (ci.yml's override-floor-staleness job, no paths-filter),
+# but the advisory database moves without the repository moving: a pin whose
+# floor was current on Friday can be stale on Monday with no commit in
+# between, and the PR gate alone would not see that. This weekly wall-clock
+# sweep re-checks all three manifests against the live advisory API
+# independent of code changes — same shape as dependency-signatures.yml, for
+# the same reason (upstream/registry state drifts under an unchanged tree).
+#
+# GITHUB_TOKEN is required, not merely helpful: unauthenticated api.github.com
+# allows 60 req/h per IP, and this gate issues one request per distinct
+# queried override package name (18+ at time of writing) plus the canary — an
+# unauthenticated run works until the budget is exhausted, then reds for a
+# reason unrelated to the tree.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1" # Weekly, Monday 05:00 UTC (staggered after dependency-signatures' 04:00)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-floor-staleness:
+    name: "Check override floor staleness"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".nvmrc"
+
+      # The gate imports `semver`, a root devDependency, so a bare checkout
+      # cannot resolve it. --ignore-scripts matches all four existing
+      # audit-family jobs (audit-app / audit-ext / audit-cli / dependency-signatures).
+      - run: npm ci --ignore-scripts
+
+      - run: node scripts/checks/check-override-floor-staleness.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

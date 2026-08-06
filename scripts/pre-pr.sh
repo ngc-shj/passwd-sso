@@ -345,6 +345,33 @@ queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selft
 queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
 queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs
 run_batch
+
+# Override floor staleness (stale-override-floors plan, C5; I-5.6/I-5.7).
+# scripts/checks/check-override-floor-staleness.mjs needs the network — one
+# GET per distinct overridden package name against api.github.com — so it
+# cannot join the queue_step batches above without giving this script an
+# unconditional network call (VE-1). The probe below is shell logic ONLY,
+# mirroring the Postgres-reachability probe further down this file: it tests
+# for a non-empty GH_TOKEN/GITHUB_TOKEN and makes no request of its own.
+#
+# No token → skip and stay green. The skip line is always printed, never
+# silent — a silent skip is indistinguishable from a pass. The gate itself
+# has NO token-absent branch: run it directly without a token and it makes
+# its requests, hits the unauthenticated 60 req/h limit, and exits non-zero.
+# That asymmetry is deliberate — putting the probe inside the gate would
+# give both CI jobs the same fail-open "no secret ⇒ green" shape that S11
+# closes for the advisory origin.
+#
+# A token present but the API unreachable is INTENDED to red here (I-5.8):
+# that is the correct signal for a real network problem. VE-1's offline
+# property covers the token-absent path only — the one a developer on a
+# plane is actually in.
+if [ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+  run_step "Static: override-floor-staleness" node scripts/checks/check-override-floor-staleness.mjs
+else
+  printf "${BOLD}▸ Static: override-floor-staleness${RESET}\n  (skipped — no GH_TOKEN/GITHUB_TOKEN in the environment; api.github.com is rate-limited to 60 req/h unauthenticated. Set GH_TOKEN or GITHUB_TOKEN to run this locally.)\n\n"
+fi
+
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
 # if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
 # required" contract for the static checks above).
