@@ -57,7 +57,7 @@
  *     --retries=<n>         retries after the first attempt, on transport
  *                           errors and 5xx only (default 2)
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import semver from "semver";
 import {
   DEPENDENCY_FIELDS,
@@ -85,8 +85,22 @@ export const PER_PAGE = 100;
  * Ambient variables that can redirect, intercept or instrument THIS process's
  * request. Their presence is refused unconditionally — the subject of the pin is
  * HOW an origin was supplied, not how it is spelled, so there is no "but it
- * points at api.github.com anyway" branch. NODE_OPTIONS is here because it can
- * carry `--import`/`--require`, which neither TLS nor an origin pin stops.
+ * points at api.github.com anyway" branch.
+ *
+ * The members are NOT equally strong, and saying otherwise would be a claim
+ * stronger than the implementation:
+ *
+ * - `NODE_EXTRA_CA_CERTS` and `NODE_TLS_REJECT_UNAUTHORIZED` are genuine runtime
+ *   controls here. Neither grants code execution, so this refusal really does
+ *   run before any TLS handshake this process makes.
+ * - `NODE_OPTIONS` is a MISCONFIGURATION TRIPWIRE, not an adversary control. A
+ *   loader named in it (`--require`/`--import`) runs BEFORE any line of this
+ *   file, including this refusal, and can therefore delete the variable it would
+ *   have been caught by. Measured: `NODE_OPTIONS="--require erase.cjs"` where the
+ *   module deletes `process.env.NODE_OPTIONS` and stubs `globalThis.fetch`
+ *   produces byte-identical clean output. Nothing in this gate constrains a Node
+ *   loader, and nothing can — the member is kept because the accidental
+ *   misconfiguration it does catch is the common case.
  *
  * Two variables are deliberately NOT here, and both were on the first draft:
  *
@@ -123,6 +137,30 @@ export const AMBIENT_ORIGIN_VARS = [
 
 /** The two variables the gate is allowed to read for authentication. */
 export const TOKEN_VARS = ["GITHUB_TOKEN", "GH_TOKEN"];
+
+/**
+ * The request headers for one advisory query. Pure, so the credential-scoping
+ * rule below is decidable without a socket.
+ *
+ * The credential goes to the DEFAULT origin and to nothing else. `resolveOrigin`
+ * deliberately accepts any http(s) origin so the self-test's fixture server is
+ * reachable by an explicit argument (P-3) — which means an `--origin` can name a
+ * plaintext localhost listener, and attaching the token unconditionally sent a
+ * live GitHub credential there on every request (measured: 15 of 15). The
+ * comparison happens AFTER `resolveOrigin`'s trailing-slash normalization, so
+ * `https://api.github.com/` ties with the default and does get the credential; a
+ * case-different host does not, because a host that is not byte-identical is not
+ * the host the token was issued for.
+ */
+export function advisoryRequestHeaders(origin, token) {
+  const headers = {
+    accept: "application/vnd.github+json",
+    "x-github-api-version": "2022-11-28",
+    "user-agent": "passwd-sso-override-floor-staleness",
+  };
+  if (token && origin === DEFAULT_ORIGIN) headers.authorization = `Bearer ${token}`;
+  return headers;
+}
 
 /**
  * Positive control (S12 layer 2). Asserted structurally — present, not
@@ -198,13 +236,28 @@ export function parseArgs(argv) {
         continue;
       }
       if (name === "timeout-ms" || name === "retries") {
-        const n = Number(value);
-        if (!Number.isInteger(n) || n < 0) {
+        // `Number()` is not the predicate the message claims: it maps "" and " "
+        // to 0 and reads `0x10` and `1e3`, all of which clear
+        // `Number.isInteger(n) && n >= 0`. `--timeout-ms=` would silently become
+        // a 0 ms timeout that aborts every request. Decimal digits only.
+        if (!/^\d+$/.test(value)) {
           result.refusals.push(`REFUSED_BAD_FLAG_VALUE: --${name}=${value} is not a non-negative integer`);
           continue;
         }
-        if (name === "timeout-ms") result.timeoutMs = n;
-        else result.retries = n;
+        const n = Number(value);
+        if (name === "timeout-ms") {
+          // 0 is arithmetically a non-negative integer and an unrunnable
+          // configuration: every request aborts, so the gate could never decide.
+          if (n < 1) {
+            result.refusals.push(
+              `REFUSED_BAD_FLAG_VALUE: --${name}=${value} is not a positive integer — a 0 ms timeout aborts every request before it can be answered`,
+            );
+            continue;
+          }
+          result.timeoutMs = n;
+        } else {
+          result.retries = n;
+        }
         continue;
       }
       result.refusals.push(`REFUSED_UNKNOWN_FLAG: ${arg}`);
@@ -249,18 +302,44 @@ export function resolveOrigin(argOrigin, env) {
 }
 
 /**
- * `discoverManifests` returns its FALLBACK_MANIFESTS array object — by
- * reference — when `git ls-files` does not answer. A degraded-but-plausible
- * manifest list is correct for the disjointness gate and is a refusal here: a
- * gate that silently checked three guessed paths would report clean on a
- * workspace it never saw.
+ * Two ways manifest discovery can hand back an answer this gate must not act on.
+ *
+ * 1. `discoverManifests` returns its FALLBACK_MANIFESTS array object — by
+ *    reference — when `git ls-files` does not answer. A degraded-but-plausible
+ *    manifest list is correct for the disjointness gate and is a refusal here: a
+ *    gate that silently checked three guessed paths would report clean on a
+ *    workspace it never saw.
+ * 2. `git ls-files` ANSWERED, but about a different tree. `GIT_DIR`/`GIT_WORK_TREE`
+ *    in the environment, a `git` shim earlier on PATH, or a nested checkout all
+ *    make it answer with a proper subset — measured: with `GIT_DIR` pointing at a
+ *    decoy repo the walk lost `cli/package.json` and `extension/package.json`
+ *    (27 entries -> 20) and the gate printed its ordinary success line. `cli/`
+ *    is where one of the six original stale floors lived.
+ *
+ * `baselineOnDisk` is the subset of FALLBACK_MANIFESTS that actually exists —
+ * computed by the shell, because this function does no I/O (P-1). The assertion
+ * is a SUBSET (baseline ⊆ discovered), never set equality: a workspace added
+ * later is not in the baseline and must still be picked up, so a strict superset
+ * passes. A path in `discovered` that is absent from disk is not this rule's
+ * business — it arrives as REFUSED_MANIFEST_UNREADABLE.
  */
-export function discoveryRefusal(discovered) {
+export function discoveryRefusal(discovered, baselineOnDisk = FALLBACK_MANIFESTS) {
   if (discovered === FALLBACK_MANIFESTS) {
     return (
       "REFUSED_MANIFEST_DISCOVERY_FALLBACK: `git ls-files` did not answer, so manifest discovery " +
       "fell back to a hardcoded list — a workspace outside that list would be unchecked and " +
       "reported clean. Run inside a git checkout, or name the manifests as arguments."
+    );
+  }
+  const found = new Set(discovered);
+  const missing = baselineOnDisk.filter((path) => !found.has(path));
+  if (missing.length > 0) {
+    return (
+      `REFUSED_MANIFEST_DISCOVERY_INCOMPLETE: manifest discovery answered, but its answer omits ` +
+      `${missing.join(", ")} — manifest(s) this gate is responsible for that are present on disk. ` +
+      "Ambient git state (GIT_DIR/GIT_WORK_TREE, a `git` shim earlier on PATH, a nested checkout) " +
+      "shrinks `git ls-files` silently, and the manifests it dropped would go unwalked and be " +
+      "reported clean. Run inside this repository's checkout, or name the manifests as arguments."
     );
   }
   return null;
@@ -308,6 +387,16 @@ export function pinToRange(pin, key, manifestJson) {
 }
 
 /**
+ * A pin as it should appear in a message. An override value is not always a
+ * string — `{"pkg@latest": {"child": "1.0.0"}}` reaches the unparseable-selector
+ * refusal carrying an object — and template interpolation would print
+ * `[object Object]`, hiding the very value the operator has to go and fix.
+ */
+function formatPin(pin) {
+  return typeof pin === "string" ? `'${pin}'` : JSON.stringify(pin);
+}
+
+/**
  * Turn already-read manifest sources into the flat list of entries to judge.
  * `sources` is `[{path, ok:true, json} | {path, ok:false, detail}]` — reading
  * the files is the shell's job, so this stays pure and injectable.
@@ -336,7 +425,39 @@ export function collectEntries(sources) {
       continue;
     }
     const overrides = source.json?.overrides;
-    if (!overrides) continue;
+    if (!overrides) {
+      // Two different questions, so two different answers. A path an operator
+      // NAMED on the command line is an assertion that this file is a subject of
+      // the run — AC-3.0 and AC-3.2 drive the gate exactly that way — so a file
+      // that reads fine and simply is not a manifest with overrides is the
+      // mistyped-scratchpad-path case P-4 exists to name. A path that came from
+      // DISCOVERY is a workspace that may legitimately carry no overrides at
+      // all; refusing there would red the gate for an override-free workspace,
+      // which is the over-blocking failure O-1 exists to prevent. Either way the
+      // source stops being invisible.
+      //
+      // Tie: a path that is both named and would have been discovered resolves
+      // to NAMED — naming any path suppresses discovery entirely, so the two
+      // sets never overlap in one run.
+      entries.push({
+        manifest,
+        scopePath: "-",
+        key: "-",
+        pkg: null,
+        pin: null,
+        kind: "manifest",
+        ...(source.named
+          ? {
+              outcome: OUTCOME.REFUSED,
+              refusal: `REFUSED_MANIFEST_WITHOUT_OVERRIDES: ${manifest} was named as a subject of this run but carries no \`overrides\` block — it reads as JSON, so this is a path that points at the wrong file rather than an unreadable one`,
+            }
+          : {
+              outcome: OUTCOME.NOT_JUDGED,
+              refusal: `NOT_JUDGED_NO_OVERRIDES: ${manifest} carries no \`overrides\` block, so it yields nothing to judge`,
+            }),
+      });
+      continue;
+    }
 
     const scopes = collectScopes(overrides, "overrides");
     const byScopePath = new Map(scopes.map((s) => [s.scopePath, s]));
@@ -400,7 +521,7 @@ export function collectEntries(sources) {
           depth: scope.depth,
           kind: "unparseable",
           outcome: OUTCOME.REFUSED,
-          refusal: `REFUSED_UNPARSEABLE_SELECTOR: '${key}' has a selector semver cannot parse ('${range}'), so which versions its pin '${pin}' governs is undecidable`,
+          refusal: `REFUSED_UNPARSEABLE_SELECTOR: '${key}' has a selector semver cannot parse ('${range}'), so which versions its pin ${formatPin(pin)} governs is undecidable`,
         });
       }
     }
@@ -508,7 +629,7 @@ export function extractBands(advisory, pkg) {
     const name = v?.package?.name;
     if (typeof name !== "string") {
       problems.push(
-        `UNDECIDABLE_BAND_WITHOUT_PACKAGE_NAME: ${advisory?.ghsa_id ?? "<no id>"} carries a vulnerabilities entry with no package.name`,
+        `UNDECIDABLE_BAND_WITHOUT_PACKAGE_NAME: ${sanitizeUntrusted(advisory?.ghsa_id ?? "<no id>")} carries a vulnerabilities entry with no package.name`,
       );
       continue;
     }
@@ -568,10 +689,10 @@ export function checkPackageIntegrity(list, pkg) {
     const { bands } = extractBands(advisory, pkg);
     if (bands.length > 0) continue;
     const seen = (advisory?.vulnerabilities ?? [])
-      .map((v) => `${v?.package?.ecosystem ?? "?"}:${v?.package?.name ?? "?"}`)
+      .map((v) => sanitizeUntrusted(`${v?.package?.ecosystem ?? "?"}:${v?.package?.name ?? "?"}`))
       .join(", ");
     problems.push(
-      `UNDECIDABLE_PACKAGE_INTEGRITY: ${advisory?.ghsa_id ?? "<no id>"} was returned for affects=${pkg} but carries no npm band for ${pkg} (bands: ${seen || "none"}) — a foreign-ecosystem or foreign-package response is not an answer about ${pkg}`,
+      `UNDECIDABLE_PACKAGE_INTEGRITY: ${sanitizeUntrusted(advisory?.ghsa_id ?? "<no id>")} was returned for affects=${pkg} but carries no npm band for ${pkg} (bands: ${seen || "none"}) — a foreign-ecosystem or foreign-package response is not an answer about ${pkg}`,
     );
   }
   return problems;
@@ -603,7 +724,7 @@ export function checkCanary(fetched, canary = CANARY) {
     return {
       ok: false,
       token: "CANARY_CONSTANT_STALE",
-      message: `CANARY_CONSTANT_STALE: ${canary.ghsaId} is present but was withdrawn at ${found.withdrawn_at} — pick a new positive control; the tree is not the problem`,
+      message: `CANARY_CONSTANT_STALE: ${canary.ghsaId} is present but was withdrawn at ${sanitizeUntrusted(found.withdrawn_at)} — pick a new positive control; the tree is not the problem`,
     };
   }
   const { bands } = extractBands(found, canary.pkg);
@@ -612,10 +733,10 @@ export function checkCanary(fetched, canary = CANARY) {
     return {
       ok: false,
       token: "CANARY_CONSTANT_STALE",
-      message: `CANARY_CONSTANT_STALE: ${canary.ghsaId} is present and live but no longer carries a ${canary.pkg} band containing ${canary.vulnerableVersion} (bands: ${bands.map((b) => `'${b.range}'`).join(", ") || "none"}) — pick a new positive control; the tree is not the problem`,
+      message: `CANARY_CONSTANT_STALE: ${canary.ghsaId} is present and live but no longer carries a ${canary.pkg} band containing ${canary.vulnerableVersion} (bands: ${bands.map((b) => `'${sanitizeUntrusted(b.range)}'`).join(", ") || "none"}) — pick a new positive control; the tree is not the problem`,
     };
   }
-  return { ok: true, message: `positive control: ${canary.ghsaId} live, ${canary.pkg} band '${covering[0].range}' contains ${canary.vulnerableVersion}` };
+  return { ok: true, message: `positive control: ${canary.ghsaId} live, ${canary.pkg} band '${sanitizeUntrusted(covering[0].range)}' contains ${canary.vulnerableVersion}` };
 }
 
 // --- retry policy ----------------------------------------------------------
@@ -670,6 +791,19 @@ export function buildAdvisoryCache(pairs) {
  */
 export function judge(entries, advisoryCache) {
   return entries.map((entry) => {
+    if (entry.outcome === OUTCOME.NOT_JUDGED && !entry.refusal) {
+      // A scope opener is queried but not judged (S1), so nothing else consumes
+      // its fetch result and a failed query for it left no trace anywhere
+      // outside --report. It stays `not-judged` — its children carry the verdict
+      // and the exit status is theirs — but it now names the failure.
+      const fetched = advisoryCache.get(entry.pkg);
+      if (advisoryCache.has(entry.pkg) && fetched?.ok !== true) {
+        return {
+          ...entry,
+          refusal: `${fetched?.token ?? "UNDECIDABLE_FETCH_FAILED"}: ${entry.pkg}: the advisory query for this scope opener's parent failed (${fetched?.detail ?? "no usable response"}); the scope's own children carry the verdict`,
+        };
+      }
+    }
     if (entry.outcome) return { ...entry };
     if (entry.refusal) return { ...entry, outcome: OUTCOME.REFUSED };
 
@@ -706,7 +840,7 @@ export function judge(entries, advisoryCache) {
           return {
             ...entry,
             outcome: OUTCOME.UNDECIDABLE,
-            refusal: `UNDECIDABLE_COMPARISON_THREW: comparing pin '${entry.range}' against ${advisory.id} band '${band.range}' threw: ${err?.message ?? err}`,
+            refusal: `UNDECIDABLE_COMPARISON_THREW: comparing pin '${entry.range}' against ${sanitizeUntrusted(advisory.id)} band '${sanitizeUntrusted(band.range)}' threw: ${sanitizeUntrusted(err?.message ?? err)}`,
             withdrawnIds,
           };
         }
@@ -777,11 +911,36 @@ export function sanitizeLine(line) {
     .join(" ⏎ ");
 }
 
+/**
+ * The same job for an untrusted FRAGMENT rather than a whole line.
+ *
+ * `sanitizeLine`'s leading-`::` clause is structurally unreachable from this
+ * gate's own callers: every one of them composes a literal prefix (`  - `,
+ * `  [outcome] `) before sanitizing, so the `::` an advisory `summary` or band
+ * carries never lands at index 0 — it lands in the MIDDLE, which that clause
+ * does not look at. This is the layer that runs where the untrusted text is
+ * interpolated, and it neutralizes `::` ANYWHERE.
+ *
+ * What must survive byte-identically, because it is the operator's diagnostic:
+ * a legitimate comma band (`">= 2.0.0, < 2.1.4"`), and a summary carrying `<`,
+ * `>`, quotes and a single `:`.
+ */
+export function sanitizeUntrusted(text) {
+  let out = "";
+  for (const ch of String(text)) {
+    const code = ch.codePointAt(0);
+    if (code < 0x20 || code === 0x7f) continue;
+    out += ch;
+  }
+  out = out.replace(/::/g, "[REFUSED_WORKFLOW_COMMAND]");
+  if (out.length > MAX_LINE_LENGTH) out = `${out.slice(0, MAX_LINE_LENGTH)}…[truncated]`;
+  return out;
+}
+
 function describeEntry(row) {
   const subject = row.pkg ? `${row.pkg}` : "<no package>";
-  const pin = typeof row.pin === "string" ? `'${row.pin}'` : JSON.stringify(row.pin);
   const via = row.via ? ` (via ${row.via} -> '${row.range}')` : "";
-  return `${row.manifest} ${row.scopePath}: '${row.key}' pins ${subject}@${pin}${via}`;
+  return `${row.manifest} ${row.scopePath}: '${row.key}' pins ${subject}@${formatPin(row.pin)}${via}`;
 }
 
 /** The lines that make the run fail. Printed under every flag (P-5). */
@@ -793,20 +952,23 @@ export function formatViolationLines(rows) {
       lines.push(`${row.outcome.toUpperCase()}: ${describeEntry(row)} — ${row.refusal}`);
       continue;
     }
+    // Every fragment below arrives from the advisory API, so each is passed
+    // through `sanitizeUntrusted` at the point of interpolation — the summary in
+    // particular is free-form upstream text and is where a `::` would land.
     const detail = row.hits
       .map(
         (h) =>
-          `${h.advisory.id}${h.advisory.type === "unreviewed" ? " [unreviewed]" : ""} [${h.advisory.severity ?? "?"}] band '${h.band.range}'${h.band.firstPatched ? ` -> ${h.band.firstPatched}` : " -> NO_PATCHED_VERSION"} (${h.advisory.summary})`,
+          `${sanitizeUntrusted(h.advisory.id)}${h.advisory.type === "unreviewed" ? " [unreviewed]" : ""} [${h.advisory.severity ?? "?"}] band '${sanitizeUntrusted(h.band.range)}'${h.band.firstPatched ? ` -> ${sanitizeUntrusted(h.band.firstPatched)}` : " -> NO_PATCHED_VERSION"} (${sanitizeUntrusted(h.advisory.summary)})`,
       )
       .join("; ");
     const floor = row.requiredFloor;
     let remedy;
     if (floor.floor === null) {
-      remedy = `NO_PATCHED_VERSION on ${floor.unpatchedIds.join(", ")} — there is no floor to raise to: bound the pin below the band, or drop the dependency`;
+      remedy = `NO_PATCHED_VERSION on ${floor.unpatchedIds.map(sanitizeUntrusted).join(", ")} — there is no floor to raise to: bound the pin below the band, or drop the dependency`;
     } else if (isUnboundedAbove(row.range)) {
-      remedy = `required floor >= ${floor.floor}; the pin is unbounded above, so either raise the floor above the band or bound the pin below it`;
+      remedy = `required floor >= ${sanitizeUntrusted(floor.floor)}; the pin is unbounded above, so either raise the floor above the band or bound the pin below it`;
     } else {
-      remedy = `required floor >= ${floor.floor}`;
+      remedy = `required floor >= ${sanitizeUntrusted(floor.floor)}`;
     }
     lines.push(`STALE: ${describeEntry(row)} — intersects ${row.hits.length} live advisory band(s): ${detail}. ${remedy}`);
   }
@@ -819,13 +981,16 @@ export function formatViolationLines(rows) {
  * is printed and never the verdict — the caller computes the exit status from
  * the same rows either way.
  */
-export function formatReportLines(rows, advisoryCache) {
-  const manifests = [...new Set(rows.map((r) => r.manifest))];
-  const lines = [`walked ${rows.length} entry/entries across ${manifests.length} manifest(s)`];
+export function formatReportLines(rows, advisoryCache, manifestPaths = null) {
+  // Derived from the SOURCE list the run was given, not from the rows: a source
+  // that yields no row would otherwise be subtracted from its own report, which
+  // is how two named manifests came to be reported as "1 manifest(s)".
+  const manifests = manifestPaths ?? [...new Set(rows.map((r) => r.manifest))];
+  const lines = [`walked ${rows.length} entry/entries across ${new Set(manifests).size} manifest(s)`];
   for (const row of rows) {
     const suffix =
       row.outcome === OUTCOME.STALE
-        ? ` intersects ${row.hits.map((h) => h.advisory.id).join(", ")}; required floor ${row.requiredFloor.floor ?? "NO_PATCHED_VERSION"}`
+        ? ` intersects ${row.hits.map((h) => sanitizeUntrusted(h.advisory.id)).join(", ")}; required floor ${row.requiredFloor.floor === null ? "NO_PATCHED_VERSION" : sanitizeUntrusted(row.requiredFloor.floor)}`
         : row.refusal
           ? ` ${row.refusal}`
           : "";
@@ -838,7 +1003,7 @@ export function formatReportLines(rows, advisoryCache) {
       continue;
     }
     const { live, withdrawnIds } = transformAdvisories(fetched.advisories, pkg);
-    const withdrawn = withdrawnIds.length > 0 ? ` (withdrawn, skipped: ${withdrawnIds.join(", ")})` : "";
+    const withdrawn = withdrawnIds.length > 0 ? ` (withdrawn, skipped: ${withdrawnIds.map(sanitizeUntrusted).join(", ")})` : "";
     lines.push(`  ${pkg}: ${fetched.advisories.length} advisory/advisories returned, ${live.length} live band-carrying${withdrawn}`);
   }
   const counts = new Map();
@@ -863,27 +1028,29 @@ export function exitCodeFor(rows, extraViolations = []) {
 // the pure exports above.
 // ---------------------------------------------------------------------------
 
-function readManifestSources(paths) {
+/**
+ * `named` records HOW each path reached this run — an operator's argument, or
+ * manifest discovery. `collectEntries` needs it: a named path with no
+ * `overrides` is a wrong-file refusal, a discovered one is an override-free
+ * workspace. Naming any path suppresses discovery entirely, so the flag is
+ * per-run rather than per-path and the two sets never overlap.
+ */
+function readManifestSources(paths, { named }) {
   return paths.map((path) => {
     try {
-      return { path, ok: true, json: JSON.parse(readFileSync(path, "utf8")) };
+      return { path, named, ok: true, json: JSON.parse(readFileSync(path, "utf8")) };
     } catch (err) {
       // NOT the sibling gate's `ENOENT -> continue`: a named path that cannot
       // be read is a refusal here, so a mistyped scratchpad path cannot report
       // clean.
-      return { path, ok: false, detail: err?.message ?? String(err) };
+      return { path, named, ok: false, detail: err?.message ?? String(err) };
     }
   });
 }
 
 async function fetchAdvisories(pkg, { origin, token, timeoutMs, retries }) {
   const url = `${origin}/advisories?ecosystem=npm&affects=${encodeURIComponent(pkg)}&per_page=${PER_PAGE}`;
-  const headers = {
-    accept: "application/vnd.github+json",
-    "x-github-api-version": "2022-11-28",
-    "user-agent": "passwd-sso-override-floor-staleness",
-  };
-  if (token) headers.authorization = `Bearer ${token}`;
+  const headers = advisoryRequestHeaders(origin, token);
 
   const maxAttempts = retries + 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -940,9 +1107,16 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   if (originResult.refusal) hardRefusals.push(originResult.refusal);
 
   let paths = args.paths;
-  if (paths.length === 0) {
+  const named = paths.length > 0;
+  if (!named) {
     const discovered = discoverManifests();
-    const refusal = discoveryRefusal(discovered);
+    // The on-disk filter is the shell's job: `discoveryRefusal` is pure (P-1),
+    // and asserting a baseline path that legitimately does not exist would red a
+    // tree that simply has no `extension/` workspace.
+    const refusal = discoveryRefusal(
+      discovered,
+      FALLBACK_MANIFESTS.filter((path) => existsSync(path)),
+    );
     if (refusal) hardRefusals.push(refusal);
     paths = discovered;
   }
@@ -953,7 +1127,7 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
     return 1;
   }
 
-  const entries = collectEntries(readManifestSources(paths));
+  const entries = collectEntries(readManifestSources(paths, { named }));
   if (entries.length === 0) {
     emit(stderr, "override floor staleness gate refused to run:");
     emit(
@@ -965,6 +1139,12 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
 
   const token = TOKEN_VARS.map((name) => env?.[name]).find((v) => typeof v === "string" && v.length > 0) ?? null;
   const fetchOptions = { origin: originResult.origin, token, timeoutMs: args.timeoutMs, retries: args.retries };
+  if (originResult.origin !== DEFAULT_ORIGIN) {
+    emit(
+      stderr,
+      `NOTICE: --origin=${originResult.origin} is not ${DEFAULT_ORIGIN}, so no ${TOKEN_VARS.join("/")} credential is attached — this run is UNAUTHENTICATED.`,
+    );
+  }
 
   const names = [...new Set([...packagesToQuery(entries), CANARY.pkg])];
   const pairs = [];
@@ -984,7 +1164,7 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   const extraViolations = canary.ok ? [] : [canary.message];
 
   if (args.report) {
-    for (const line of formatReportLines(rows, advisoryCache)) emit(stdout, line);
+    for (const line of formatReportLines(rows, advisoryCache, paths)) emit(stdout, line);
     emit(stdout, canary.ok ? canary.message : `POSITIVE CONTROL FAILED: ${canary.message}`);
   }
 
@@ -1000,6 +1180,13 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
       "See docs/security/dependency-cve-response.md Step 4 — raise the pin's floor to at or above the highest first_patched_version over its intersecting bands, or bound the pin below them.",
     );
     return code;
+  }
+  // Printed on the PASS path too, not only under --report. A `not-judged` row
+  // carries no verdict of its own, so anything attached to it — a workspace with
+  // no `overrides`, or a scope opener whose advisory query failed — is invisible
+  // otherwise, and neither the PR job nor the `pre-pr` step passes --report.
+  for (const row of rows) {
+    if (row.outcome === OUTCOME.NOT_JUDGED && row.refusal) emit(stdout, `  note: ${describeEntry(row)} — ${row.refusal}`);
   }
   emit(stdout, `override floor staleness gate passed (${rows.length} override entry/entries, ${advisoryCache.size} package(s) queried).`);
   return 0;

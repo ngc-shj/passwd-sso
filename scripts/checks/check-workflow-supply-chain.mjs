@@ -55,13 +55,128 @@ export function findAutoMergeViolation(content, name) {
 }
 
 /**
+ * A supply-chain verifier INVOCATION: a command whose own exit status is the
+ * verdict, matched only at a shell command position (start of line, or straight
+ * after `!`, `;`, `&`, `|`, `(`, `)`, `{`, `}` or whitespace).
+ *
+ * The membership is deliberately narrower than `verifierLineRe` below. That
+ * predicate also matches `dist.attestations`, which is a FIELD READ inside a
+ * data-extraction expression — release.yml's real shape is
+ * `PREDICATE=$(echo "$VIEW" | node -e "…j?.dist?.attestations…")`, whose exit
+ * status is deliberately not the step's (the surrounding `if` compares the
+ * extracted string). Subjecting a field read to a simple-command allowlist would
+ * red the very workflow the allowlist exists to leave alone. So: field reads keep
+ * the spelling-by-spelling mask rules, invocations get the allowlist.
+ *
+ * The command-position anchor is also what keeps a verifier NAME inside a string
+ * from counting — release.yml's `console.log(\`npm audit signatures: …\`)` has a
+ * backtick before `npm`, which is not a command position.
+ */
+export const VERIFIER_INVOCATION_RE =
+  /(?:^|[;&|(){}!]|(?<=\s))\s*(npm\s+audit\s+signatures\b|(?:\S*node\S*\s+(?:-\S+\s+)*)?\S*check-override-floor-staleness\S*)/;
+
+/**
+ * The first shell control operator in `text` that is not inside quotes, or null.
+ * A redirection (`>`, `>>`, `2>&1`, `<`) is NOT one: it changes where output
+ * goes and leaves the exit status alone. An unquoted `#` starts a comment, which
+ * ends the command — everything after it is inert.
+ * @param {string} text
+ * @returns {string | null}
+ */
+export function firstControlOperator(text) {
+  let quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (ch === "\\" && quote === '"') i += 1;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      continue;
+    }
+    if (ch === "\\") {
+      i += 1;
+      continue;
+    }
+    if (ch === "#" && (i === 0 || /\s/.test(text[i - 1]))) return null;
+    if (ch === ">" || ch === "<") {
+      if (text[i + 1] === "&") i += 1; // `2>&1` — still a redirection
+      continue;
+    }
+    if (ch === "|") return text[i + 1] === "|" ? "||" : "|";
+    if (ch === "&") return text[i + 1] === "&" ? "&&" : "&";
+    if (ch === ";") return ";";
+    if (ch === "`") return "`";
+    if (ch === "$" && text[i + 1] === "(") return "$(";
+  }
+  return null;
+}
+
+/**
+ * Polarity inverted: instead of enumerating the shell spellings that mask an
+ * exit status — a list that has had to be extended twice and still missed `!`,
+ * `if`, `|| VAR=1`, a trailing `&` and `trap … ERR` — require the verifier
+ * invocation to be a SIMPLE TOP-LEVEL COMMAND, and name whatever it is instead.
+ *
+ * Simple and top-level means: nothing but whitespace before it on its logical
+ * line, and nothing after it except its own arguments, a redirection, or a
+ * comment. Under GitHub's default `bash -e` that is exactly the condition under
+ * which the verifier's non-zero exit aborts the step.
+ *
+ * Returns a description of the disqualifying construct, or null when the command
+ * either carries no verifier invocation or carries one that is already simple.
+ * @param {string} command
+ * @returns {string | null}
+ */
+export function verifierInvocationDefect(command) {
+  const match = VERIFIER_INVOCATION_RE.exec(command);
+  if (!match) return null;
+  const start = match.index + match[0].length - match[1].length;
+  const before = command.slice(0, start);
+  if (before.trim() !== "") {
+    const head = before.trim();
+    if (/!$/.test(head)) return "a '!' negation, which inverts the exit status";
+    const keyword = /\b(if|elif|while|until)$/.exec(head);
+    if (keyword) return `an '${keyword[1]}' condition, whose test consumes the exit status`;
+    if (/(\$\(|`)$/.test(head)) return "a command substitution, which captures output and drops the status";
+    if (/(&&|\|\||\||;)$/.test(head)) return `a '${/(&&|\|\||\||;)$/.exec(head)[1]}' chain`;
+    if (/=\s*$|=\S*$/.test(head)) return "a variable assignment, whose exit status is the assignment's";
+    return `'${head}' before it on the same logical line`;
+  }
+  const operator = firstControlOperator(command.slice(start + match[1].length));
+  if (operator) {
+    return operator === "&"
+      ? "a trailing '&', which backgrounds it and makes the step's status the shell's"
+      : `a '${operator}' after it, which discards or overrides its exit status`;
+  }
+  return null;
+}
+
+/**
  * Returns violation strings for any supply-chain verifier — `npm audit
  * signatures`, the post-publish provenance assertion (`npm view` reading
  * `dist.attestations`), or an invocation of `check-override-floor-staleness`
- * (the override-floor staleness gate) — whose exit status is masked
- * (|| true / ; true / || exit 0 / || : / || echo / set +e / an unprotected
- * pipe), or a step-level `continue-on-error: true` anywhere in a workflow
- * that runs such a verifier.
+ * (the override-floor staleness gate) — whose exit status is masked, or a
+ * step-level `continue-on-error: true` anywhere in a workflow that runs such a
+ * verifier.
+ *
+ * Two INDEPENDENT layers, in this order:
+ *
+ *   1. The allowlist (`verifierInvocationDefect`): a verifier INVOCATION must be
+ *      a simple top-level command. This decides the class rather than a list of
+ *      spellings, which is what `!`, `if`, `|| VAR=1`, a trailing `&` and
+ *      `trap … ERR` all escaped.
+ *   2. The spelling rules below (`maskRe` / `pipeRe` / `continue-on-error`).
+ *      They stay because they NAME the construct an operator wrote, which is the
+ *      diagnostic; and because two of them — `set +e` and `trap … ERR` — are
+ *      block-scoped rather than line-scoped, so no per-line allowlist sees them.
+ *
+ * Tie: a line both layers fire on is a violation reported ONCE, in the spelling
+ * layer's words, because that is the more specific diagnostic. A line only the
+ * allowlist rejects is reported in its words. Neither layer can turn the other's
+ * deny into a pass.
  * @param {string} content
  * @param {string} name
  * @returns {string[]}
@@ -126,6 +241,13 @@ export function findMaskedVerifierViolations(content, name) {
   // here left the two halves of one function disagreeing about shell syntax.
   const maskRe =
     /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$)|\bset\s+\+\S*e\S*\b|\bset\s+\+o\s+errexit\b)/;
+  // A `trap … ERR` handler is block-scoped like `set +e`, so no per-line rule can
+  // see it: `trap "exit 0" ERR` ahead of the verifier turns its non-zero exit into
+  // a clean step exit. Matched against a single extracted COMMAND rather than the
+  // joined block so that release.yml's real `trap 'rm -rf "$WORK"' EXIT` — a
+  // cleanup handler on a different signal, in a block that does run a verifier —
+  // is not swept up by a `\bERR\b` looked for anywhere in the same joined text.
+  const trapErrRe = /^\s*trap\b[^\n]*\bERR\b/;
   // An unprotected pipe: a LONE `|` — not `||` (shell OR / JS logical-or both use
   // adjacent pipe pairs, which the lookaround below excludes on both sides) — whose
   // exit status only `pipefail` preserves. No workflow here sets `shell:` or
@@ -138,17 +260,64 @@ export function findMaskedVerifierViolations(content, name) {
   // it in the SAME block, which is what makes that particular pipe safe.
   const pipeRe = /(?<!\|)\|(?!\|)/;
   const pipefailRe = /\bset\s+-\S*o\S*\s+pipefail\b/;
+  // Logical lines the spelling layer already named. A line it named is not named
+  // a second time by the allowlist: the spelling is the better diagnostic, and
+  // reporting one construct twice reads as two defects.
+  const spelled = new Set();
   for (const { text, body, line } of logical) {
     if (verifierLineRe.test(text) && maskRe.test(text)) {
+      spelled.add(line);
       violations.push(
         `${name}:${line}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo / set +e) — it must fail closed`,
       );
     }
     if (verifierLineRe.test(text) && pipeRe.test(body) && !pipefailRe.test(text)) {
+      spelled.add(line);
       violations.push(
         `${name}:${line}: supply-chain verifier's exit status can be discarded by a pipe with no 'pipefail' in effect in this run block — add 'set -euo pipefail' (or 'set -o pipefail'), or restructure to avoid piping the verifier`,
       );
     }
+  }
+
+  // --- layer 1: the allowlist over verifier INVOCATIONS ---------------------
+  const records = extractRunCommandRecords(content);
+  const attributed = new Set();
+  for (const record of records) {
+    for (let n = record.firstLine; n <= record.lastLine; n += 1) attributed.add(n);
+  }
+  for (let n = 0; n < rawLines.length; n += 1) {
+    if (/^(\s*)(?:-\s+)?run:/.test(rawLines[n])) attributed.add(n + 1);
+  }
+
+  const invocationBlocks = new Set(
+    records.filter((r) => VERIFIER_INVOCATION_RE.test(r.command)).map((r) => r.blockLine),
+  );
+  for (const record of records) {
+    if (invocationBlocks.has(record.blockLine) && trapErrRe.test(record.command)) {
+      violations.push(
+        `${name}:${record.firstLine}: a 'trap … ERR' handler shares a run block with a supply-chain verifier — an ERR trap that does not re-raise turns the verifier's non-zero exit into a clean step; remove it or move the verifier to its own step`,
+      );
+    }
+    const defect = verifierInvocationDefect(record.command);
+    if (defect && !spelled.has(record.blockLine)) {
+      violations.push(
+        `${name}:${record.firstLine}: supply-chain verifier invocation is not a simple top-level command — ${defect}. Under GitHub's default 'bash -e' only a plain, unwrapped invocation lets its non-zero exit abort the step.`,
+      );
+    }
+  }
+
+  // Fail loudly rather than skipping: a line that names a verifier invocation and
+  // that NO extracted run: command accounts for (a composite-action input, an
+  // unusual YAML shape) cannot be decided by the rules above, and an undecided
+  // line and a clean line produce identical output otherwise.
+  for (let n = 0; n < rawLines.length; n += 1) {
+    const raw = rawLines[n];
+    if (/^\s*#/.test(raw)) continue;
+    if (attributed.has(n + 1)) continue;
+    if (!VERIFIER_INVOCATION_RE.test(raw)) continue;
+    violations.push(
+      `${name}:${n + 1}: REFUSED_UNATTRIBUTED_VERIFIER_LINE: this line invokes a supply-chain verifier but no 'run:' command accounts for it, so whether its exit status is masked cannot be decided — express the invocation as a 'run:' step`,
+    );
   }
   // A workflow-level continue-on-error on a verifier-running workflow silently
   // downgrades a red verifier to a soft warning — including the `${{ true }}`
@@ -271,15 +440,33 @@ export function findTrustedPublishNodeViolation(content, name) {
  * @returns {string[]}
  */
 export function extractRunCommands(text) {
+  return extractRunCommandRecords(text).map((r) => r.command);
+}
+
+/**
+ * The same extraction as `extractRunCommands`, but each command keeps where it
+ * came from: `firstLine`/`lastLine` are the 1-based raw lines it was built from,
+ * and `blockLine` is the 1-based line of the `run:` that owns it. The line
+ * numbers are what let a per-command rule report a location, and what lets a
+ * verifier mention that NO run: command accounts for be told apart from one that
+ * simply passes — a skip and a pass are the same output otherwise.
+ * @param {string} text
+ * @returns {{command: string, firstLine: number, lastLine: number, blockLine: number}[]}
+ */
+export function extractRunCommandRecords(text) {
   const lines = text.split("\n");
-  const commands = [];
+  const records = [];
   const indentOf = (s) => (s.match(/^\s*/)?.[0].length ?? 0);
+  const keep = (record) => {
+    if (record.command && !/^#/.test(record.command)) records.push(record);
+  };
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const runMatch = line.match(/^(\s*)(?:-\s+)?run:\s*(.*)$/);
     if (!runMatch) continue;
     const baseIndent = runMatch[1].length;
     const inline = runMatch[2];
+    const blockLine = i + 1;
     // Block scalar: `run: |` / `run: >` with optional indicators + comment.
     if (/^[>|][0-9+-]*\s*(#.*)?$/.test(inline)) {
       const body = [];
@@ -287,29 +474,34 @@ export function extractRunCommands(text) {
         i + 1 < lines.length &&
         (lines[i + 1].trim() === "" || indentOf(lines[i + 1]) > baseIndent)
       ) {
-        body.push(lines[i + 1]);
+        body.push({ text: lines[i + 1], line: i + 2 });
         i += 1;
       }
-      // Join shell line-continuations, then split into individual commands.
-      let joined = "";
+      // Join shell line-continuations; each unbroken run of them is one command.
+      let current = null;
       for (const b of body) {
-        if (/\\\s*$/.test(joined)) joined = joined.replace(/\\\s*$/, "").trimEnd() + " " + b.trim();
-        else joined += (joined ? "\n" : "") + b.trim();
+        if (current && /\\\s*$/.test(current.command)) {
+          current.command = current.command.replace(/\\\s*$/, "").trimEnd() + " " + b.text.trim();
+          current.lastLine = b.line;
+          continue;
+        }
+        if (current) keep(current);
+        current = { command: b.text.trim(), firstLine: b.line, lastLine: b.line, blockLine };
       }
-      for (const cmd of joined.split("\n")) {
-        if (cmd.trim() && !/^#/.test(cmd.trim())) commands.push(cmd.trim());
-      }
+      if (current) keep(current);
       continue;
     }
     // Inline single-line run. Fold a trailing `\` continuation into the next line.
     let joined = inline;
-    while (/\\\s*$/.test(joined) && i + 1 < lines.length) {
-      joined = joined.replace(/\\\s*$/, "").trimEnd() + " " + lines[i + 1].trim();
-      i += 1;
+    let last = i;
+    while (/\\\s*$/.test(joined) && last + 1 < lines.length) {
+      joined = joined.replace(/\\\s*$/, "").trimEnd() + " " + lines[last + 1].trim();
+      last += 1;
     }
-    if (joined.trim()) commands.push(joined.trim());
+    i = last;
+    keep({ command: joined.trim(), firstLine: blockLine, lastLine: last + 1, blockLine });
   }
-  return commands;
+  return records;
 }
 
 /**

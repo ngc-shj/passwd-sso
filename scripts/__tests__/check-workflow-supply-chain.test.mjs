@@ -345,6 +345,72 @@ describe("findMaskedVerifierViolations — check-override-floor-staleness (C7)",
   });
 });
 
+// I-5.3 — the PR job that runs the staleness gate must NOT be paths-filtered.
+// The gate walks all three manifests every run, so filtering on root
+// package.json would skip a cli/-only stale floor: M6's exact shape, and user
+// scenario 3. Today that is asserted by a nine-line comment in ci.yml and by
+// nothing else — adding `needs: changes` plus an `if:` is a two-line edit that
+// silently reinstates the blind spot one of the six original members occupied.
+describe("I-5.3 — the override-floor-staleness PR job carries no paths-filter", () => {
+  const CI = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+  /**
+   * The narrowest structural extraction that answers this question. The repo
+   * declares no YAML parser (`js-yaml` resolves only as a transitive eslint /
+   * shadcn dependency, so importing it would bind this guard to somebody else's
+   * dependency tree), so the `jobs:` block is read by indentation instead: the
+   * named job's DIRECT child keys, and its body for the run-command extraction.
+   * That is a parse of the job, not a regex over the file.
+   */
+  function extractJob(workflowText, jobName) {
+    const lines = workflowText.split("\n");
+    const start = lines.indexOf(`  ${jobName}:`);
+    if (start === -1) return null;
+    const body = [];
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === "" || /^\s*#/.test(line)) {
+        body.push(line);
+        continue;
+      }
+      if (!/^ {4}\S/.test(line) && !/^ {5,}/.test(line)) break; // dedented out of the job
+      body.push(line);
+    }
+    return {
+      keys: body.filter((l) => /^ {4}[A-Za-z_-]+:/.test(l)).map((l) => l.trim().split(":")[0]),
+      body: body.join("\n"),
+    };
+  }
+
+  const JOB = "override-floor-staleness";
+  const job = extractJob(CI, JOB);
+
+  it("the job exists and runs the gate", () => {
+    // Guarded with a message so a RENAME reds here, on a sentence that says
+    // what to do, rather than downstream on `Cannot read properties of null`.
+    expect(job, `no job named '${JOB}' under jobs: in .github/workflows/ci.yml — if it was renamed, move this guard with it`).toBeTruthy();
+    // extractRunCommands drops comments, so the nine-line rationale comment in
+    // ci.yml cannot satisfy this by mentioning the path.
+    expect(extractRunCommands(job.body)).toContain("node scripts/checks/check-override-floor-staleness.mjs");
+  });
+
+  it("DENY-shape: it declares neither `needs` nor `if`, so a cli/-only stale floor cannot skip it", () => {
+    expect(job.keys, `'${JOB}' gained a job-level key it must not have: ${job.keys.join(", ")}`).not.toContain("needs");
+    expect(job.keys).not.toContain("if");
+  });
+
+  it("ALLOW: a sibling job that IS legitimately paths-filtered keeps its needs/if", () => {
+    // Scoped to one named job on purpose. A repo-wide "no job may declare
+    // `needs: changes`" rule would catch app-ci, which is filtered by design —
+    // and the extractor must be shown to find those keys when they are present,
+    // or the DENY case above passes for the wrong reason.
+    const appCi = extractJob(CI, "app-ci");
+    expect(appCi, "no job named 'app-ci' in ci.yml").toBeTruthy();
+    expect(appCi.keys).toContain("needs");
+    expect(appCi.keys).toContain("if");
+  });
+});
+
 describe("findTrustedPublishNodeViolation", () => {
   it("flags an npm-publish workflow that inherits node-version-file (Node 20)", () => {
     const wf = [

@@ -26,7 +26,7 @@
  * committed under fixtures/advisories/ as evidence that the shape the core
  * parses is a shape the API actually emitted.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -42,6 +42,7 @@ import {
   OUTCOME,
   PER_PAGE,
   TOKEN_VARS,
+  advisoryRequestHeaders,
   buildAdvisoryCache,
   checkCanary,
   checkPackageIntegrity,
@@ -66,6 +67,7 @@ import {
   retryDecision,
   run,
   sanitizeLine,
+  sanitizeUntrusted,
   transformAdvisories,
 } from "../checks/check-override-floor-staleness.mjs";
 import {
@@ -161,14 +163,22 @@ describe("normalizeBand / rangesIntersect — the comma-band trap (O-6)", () => 
     // (`Invalid comparator: >=4.0.0,`), and a throw is a violation — which is
     // why the regression case lives here and not on the deny side.
     expect(rangesIntersect("^5.0.9", ">= 4.0.0, < 5.0.9")).toBe(false);
+    // Two separators, because every band in the tracked manifests carries at
+    // most one (measured: 21 with none, 23 with one) — so the /g flag is
+    // unobserved by every real band. With it dropped only the first comma is
+    // rewritten and this throws `Invalid comparator: <2.0.0,`.
+    expect(rangesIntersect("^0.9.0", ">= 1.0.0, < 2.0.0, < 1.5.0")).toBe(false);
   });
 
   it("DENY: the same comma band reaches a pin one patch lower", () => {
     expect(rangesIntersect("^5.0.8", ">= 4.0.0, < 5.0.9")).toBe(true);
   });
 
-  it("rewrites the comma separator to a space and leaves everything else alone", () => {
+  it("rewrites EVERY comma separator to a space and leaves everything else alone", () => {
     expect(normalizeBand(">= 2.0.0, < 2.1.4")).toBe(">= 2.0.0 < 2.1.4");
+    // The single-separator cases stay: they are what proves the normalizer does
+    // not over-rewrite. The three-comparator band is what observes the /g.
+    expect(normalizeBand(">= 1.0.0, < 2.0.0, < 1.5.0")).toBe(">= 1.0.0 < 2.0.0 < 1.5.0");
     expect(normalizeBand("< 1.1.18")).toBe("< 1.1.18");
   });
 
@@ -272,7 +282,10 @@ describe("S1 — scope openers", () => {
     expect(rows[0].outcome).toBe(OUTCOME.CLEAN);
   });
 
-  it("queries a scope opener's parent name even though it is never judged (17 pins + 1 parent)", () => {
+  it("queries a scope opener's parent name even though it is never judged", () => {
+    // The 17-pins + 1-parent census belongs on the case that measures it — the
+    // AC-3.4 walk over the repository's own manifests — not on this synthetic
+    // one-pin fixture.
     const entries = collectEntries([
       { path: "extension/package.json", ok: true, json: { overrides: { "@crxjs/vite-plugin": { rollup: "^2.80.0" } } } },
     ]);
@@ -285,13 +298,15 @@ describe("S1 — scope openers", () => {
 // ===========================================================================
 
 describe("S2 — '.' self-pins", () => {
-  const withdrawnBand = { id: "GHSA-self-0000-0001", bands: [["pkg", ">= 1.0.0, < 1.5.0", "1.5.0"]] };
+  // The LIVE advisory. The withdrawn variant of the allow case is derived from
+  // it below by adding `withdrawn`, which is the one axis those two differ on.
+  const liveBand = { id: "GHSA-self-0000-0001", bands: [["pkg", ">= 1.0.0, < 1.5.0", "1.5.0"]] };
 
   it("DENY: '.' inside a selector-carrying scope is judged against the parent PACKAGE, not the parent KEY", () => {
     // `{"pkg@1": {".": "^1.0.0"}}` must be judged against `pkg`. The advisory
     // API answers 200 [] for `pkg@1`, so getting this wrong is a silent green.
     const rows = judgeManifest({ overrides: { "pkg@1": { ".": "^1.0.0" } } }, [
-      ["pkg", [advisory(withdrawnBand)]],
+      ["pkg", [advisory(liveBand)]],
     ]);
     const selfPin = rowFor(rows, (r) => r.key === ".", "the '.' self-pin");
     expect(selfPin.pkg).toBe("pkg");
@@ -301,7 +316,7 @@ describe("S2 — '.' self-pins", () => {
 
   it("ALLOW (O-7: '.' self-pin x withdrawn advisory): the same shape is clean when the advisory is withdrawn", () => {
     const rows = judgeManifest({ overrides: { "pkg@1": { ".": "^1.0.0" } } }, [
-      ["pkg", [advisory({ ...withdrawnBand, withdrawn: "2026-01-01T00:00:00Z" })]],
+      ["pkg", [advisory({ ...liveBand, withdrawn: "2026-01-01T00:00:00Z" })]],
     ]);
     expect(rowFor(rows, (r) => r.key === ".", "the '.' self-pin").outcome).toBe(OUTCOME.CLEAN);
     expect(exitCodeFor(rows)).toBe(0);
@@ -417,6 +432,13 @@ describe("O-9 — the recorded API response, as an RT1 anchor", () => {
 
   it("satisfies the per-package integrity rule for both subjects", () => {
     expect(checkPackageIntegrity(RECORDED, "lodash")).toEqual([]);
+    // The lodash/lodash-es pair is the whole reason O-9 chose this fixture, so
+    // the second subject is asserted too. Scoped to the four-band entry rather
+    // than the whole response: the response was recorded for `affects=lodash`,
+    // and three of its advisories legitimately carry no lodash-es band — which
+    // for `affects=lodash-es` is precisely what the rule is meant to refuse.
+    expect(checkPackageIntegrity([entry], "lodash-es")).toEqual([]);
+    expect(checkPackageIntegrity(RECORDED, "lodash-es").length).toBeGreaterThan(0);
   });
 
   it("DENY: the recorded response is not an answer about a package it carries no band for", () => {
@@ -844,8 +866,44 @@ describe("a manifest that cannot be read is a refusal, not a skip", () => {
     expect(String(rows[0].refusal)).toContain("REFUSED_MANIFEST_UNREADABLE");
   });
 
-  it("ALLOW: a readable manifest with no overrides yields no row and no refusal", () => {
-    expect(collectEntries([{ path: "package.json", ok: true, json: { name: "x" } }])).toEqual([]);
+  // A readable manifest with no `overrides` used to yield NO row at all: no
+  // refusal, no report line, and excluded from the report's manifest count — the
+  // "a mistyped scratchpad path would report clean" hole P-4 names, left open for
+  // a path that reads and is simply the wrong JSON file. The two cases below are
+  // the same fixture shape differing in one axis: how the path reached the run.
+  it("DENY: a NAMED manifest with no overrides is a refusal — the operator asserted it is a subject", () => {
+    const rows = judge(
+      collectEntries([{ path: "typo.json", named: true, ok: true, json: { name: "x" } }]),
+      buildAdvisoryCache([]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe(OUTCOME.REFUSED);
+    expect(String(rows[0].refusal)).toContain("REFUSED_MANIFEST_WITHOUT_OVERRIDES");
+  });
+
+  it("ALLOW: a DISCOVERED manifest with no overrides is a visible not-judged row, not a refusal", () => {
+    // An override-free workspace must not red the gate — over-blocking is the
+    // failure mode O-1 exists to prevent — but it must stop being invisible.
+    const rows = judge(
+      collectEntries([{ path: "workspace/package.json", named: false, ok: true, json: { name: "x" } }]),
+      buildAdvisoryCache([]),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].outcome).toBe(OUTCOME.NOT_JUDGED);
+    expect(String(rows[0].refusal)).toContain("NOT_JUDGED_NO_OVERRIDES");
+    expect(exitCodeFor(rows)).toBe(0);
+  });
+
+  it("the report's manifest count comes from the source list, not from the rows", () => {
+    // Two manifests were NAMED and one of them yields no override row; deriving
+    // the count from `new Set(rows.map(r => r.manifest))` reported "1 manifest(s)".
+    const sources = [
+      { path: "a.json", named: false, ok: true, json: { name: "a" } },
+      { path: "b.json", named: false, ok: true, json: { name: "b", overrides: { postcss: ">=8.5.23" } } },
+    ];
+    const rows = judge(collectEntries(sources), okCache([["postcss", []]]));
+    const lines = formatReportLines(rows, okCache([["postcss", []]]), sources.map((s) => s.path));
+    expect(lines[0]).toContain("across 2 manifest(s)");
   });
 });
 
@@ -862,7 +920,31 @@ describe("S11 — the advisory origin comes from two places and no third", () =>
     expect(resolveOrigin("http://127.0.0.1:8123", {})).toEqual({ origin: "http://127.0.0.1:8123" });
   });
 
+  it("the refused set is EXACTLY these nine variables, spelled literally (O-11)", () => {
+    // The `it.each` below takes its table FROM the gate, so deleting a member
+    // does not red a case — it deletes the case. Proven: dropping ALL_PROXY and
+    // all_proxy left 180/180 green; dropping the three HTTP_PROXY spellings left
+    // 179/179 green. This equality is what makes a deletion visible, and it is a
+    // literal because an expected value read from the code under test cannot
+    // fail. Case is part of the identity: HTTP_PROXY and http_proxy are two
+    // different variables, and folding either into the other must red here.
+    expect([...AMBIENT_ORIGIN_VARS].sort()).toEqual([
+      "ALL_PROXY",
+      "HTTPS_PROXY",
+      "HTTP_PROXY",
+      "NODE_EXTRA_CA_CERTS",
+      "NODE_OPTIONS",
+      "NODE_TLS_REJECT_UNAUTHORIZED",
+      "all_proxy",
+      "http_proxy",
+      "https_proxy",
+    ]);
+  });
+
   it.each(AMBIENT_ORIGIN_VARS)("DENY: %s arriving through the environment is refused", (name) => {
+    // Kept alongside the equality above, which pins the membership but says
+    // nothing about behaviour: this is what proves each member actually reaches
+    // a refusal rather than merely appearing in a list.
     const result = resolveOrigin(null, { [name]: "http://example.invalid" });
     expect(result.origin).toBeUndefined();
     expect(result.refusal).toContain("REFUSED_AMBIENT_ORIGIN");
@@ -1082,6 +1164,53 @@ describe("boundary shape validation, fail-closed", () => {
       checkResponseShape([{ ...valid[0], vulnerabilities: [{ package: { ecosystem: "npm", name: "pkg" }, vulnerable_version_range: "< 1.0.0", first_patched_version: { identifier: "1.0.0" } }] }]).detail,
     ).toContain("first_patched_version");
   });
+
+  /** The same band, one axis apart: only `first_patched_version` moves. */
+  const withPatched = (firstPatched) => [
+    {
+      ...valid[0],
+      vulnerabilities: [
+        { package: { ecosystem: "npm", name: "pkg" }, vulnerable_version_range: "< 1.0.0", first_patched_version: firstPatched },
+      ],
+    },
+  ];
+
+  it("DENY: a first_patched_version STRING that semver cannot read is refused at the boundary", () => {
+    // `typeof === "string"` is not enough — the object case above is caught by
+    // that half and cannot observe this one. `requiredFloor` hands this value to
+    // `semver.gt`, which THROWS on a non-version, and the throw escapes the
+    // comparison guard: the entry then lands in none of the five outcomes,
+    // fail-closed but as a stack trace where a named STALE row belonged. The
+    // boundary is the only place the offending advisory id is still in hand.
+    const result = checkResponseShape(withPatched("unknown"));
+    expect(result.token).toBe("UNDECIDABLE_RESPONSE_SHAPE");
+    expect(result.detail).toContain("first_patched_version");
+    expect(result.detail).toContain("GHSA-shap-0000-0001");
+  });
+
+  it("ALLOW: a loose but COERCIBLE version passes — GitHub emits '2', and refusing it would red every PR", () => {
+    // `semver.coerce("2")` is 2.0.0 and `semver.coerce("unknown")` is null: that
+    // is the boundary, and this case and the one above sit either side of it.
+    // Tightening the clause to strict `semver.valid` would reject "2" and turn a
+    // real advisory into a refusal — over-blocking on a gate that reds every PR.
+    expect(checkResponseShape(withPatched("2"))).toEqual({ ok: true });
+  });
+
+  it("DENY: a null array element is a NAMED refusal, not a TypeError", () => {
+    // Without the plain-object guard this is `null.ghsa_id`. Asserted as "does
+    // not throw" rather than by reading `.detail`, so removing the guard reds
+    // with an assertion about the clause and not with an incidental stack trace.
+    let result;
+    expect(() => {
+      result = checkResponseShape([null]);
+    }).not.toThrow();
+    expect(result.token).toBe("UNDECIDABLE_RESPONSE_SHAPE");
+    expect(result.detail).toContain("element 0 is not an object");
+  });
+
+  it("ALLOW: the same array with an object element passes — the axis is the element, not the array", () => {
+    expect(checkResponseShape([valid[0]])).toEqual({ ok: true });
+  });
 });
 
 describe("output sanitization", () => {
@@ -1110,10 +1239,65 @@ describe("output sanitization", () => {
     expect(sanitizeLine("a\u0007b\u0000c\u007fd")).toBe("abcd");
   });
 
-  it("caps a pathological line", () => {
+  it("caps a pathological line at the real bound and marks it", () => {
+    // `toBeLessThan(5000)` was the previous spelling and it stayed green with
+    // the cap raised to 4500 — a bound loose enough to admit the thing it was
+    // written to stop. 2000 is spelled literally because MAX_LINE_LENGTH is not
+    // exported, and an expected value read from the code cannot fail anyway.
     const capped = sanitizeLine("x".repeat(5000));
-    expect(capped.length).toBeLessThan(5000);
+    expect(capped).toBe(`${"x".repeat(2000)}…[truncated]`);
     expect(capped).toContain("[truncated]");
+  });
+
+  it("ALLOW: a line exactly at the cap is untouched; DENY: one character over is capped", () => {
+    expect(sanitizeLine("x".repeat(2000))).toBe("x".repeat(2000));
+    expect(sanitizeLine("x".repeat(2001))).toBe(`${"x".repeat(2000)}…[truncated]`);
+  });
+
+  // sanitizeLine guards the START of a composed line, which is the only place a
+  // runner reads a workflow command. sanitizeUntrusted guards the FRAGMENT, and
+  // it has to neutralize `::` ANYWHERE — an advisory summary is interpolated
+  // mid-line, so the line-start guard can never see it.
+  it("DENY: sanitizeUntrusted neutralizes a workflow command mid-fragment, where a summary lands", () => {
+    expect(sanitizeUntrusted("quadratic blowup ::error::owned in !!omap")).toBe(
+      "quadratic blowup [REFUSED_WORKFLOW_COMMAND]error[REFUSED_WORKFLOW_COMMAND]owned in !!omap",
+    );
+    expect(sanitizeUntrusted("x ::stop-commands::tok y")).not.toContain("::");
+  });
+
+  it("ALLOW: sanitizeUntrusted leaves a legitimate band and a single colon byte-identical", () => {
+    // The operator's diagnostic. Over-sanitizing here is the failure mode: the
+    // band and the summary are what name the offending advisory.
+    const band = ">= 2.0.0, < 2.1.4";
+    expect(sanitizeUntrusted(band)).toBe(band);
+    const summary = `PostCSS: "sourceMappingURL" <script> read when \`from\` is unset & x < y`;
+    expect(sanitizeUntrusted(summary)).toBe(summary);
+  });
+
+  it("sanitizeUntrusted strips control characters, caps at the same bound, and coerces a non-string", () => {
+    expect(sanitizeUntrusted("ab cd")).toBe("abcd");
+    expect(sanitizeUntrusted("x".repeat(2001))).toBe(`${"x".repeat(2000)}…[truncated]`);
+    expect(sanitizeUntrusted(undefined)).toBe("undefined");
+  });
+
+  it("DENY: an advisory summary carrying a workflow command reaches the violation line neutralized", () => {
+    // The end-to-end path the fragment guard exists for: sanitizeLine sees
+    // `  - STALE: …`, never the `::`, so only sanitizeUntrusted can catch it.
+    const rows = judgeManifest({ overrides: { pkg: "^1.0.0" } }, [
+      [
+        "pkg",
+        [
+          advisory({
+            id: "GHSA-inj0-inj0-inj0",
+            summary: "::error::injected and ::stop-commands::tok",
+            bands: [["pkg", "< 2.0.0", "2.0.0"]],
+          }),
+        ],
+      ],
+    ]);
+    const line = formatViolationLines(rows).join("\n");
+    expect(line).toContain("GHSA-inj0-inj0-inj0");
+    expect(line).not.toContain("::");
   });
 });
 
@@ -1240,6 +1424,92 @@ describe("P-4 — flags are distinguished from manifest paths, and every wrong t
     expect(discoveryRefusal([...FALLBACK_MANIFESTS])).toBeNull();
     expect(discoveryRefusal(discoverManifests())).toBeNull();
   });
+
+  // `git ls-files` ANSWERING is not the same as it answering about this tree.
+  // With GIT_DIR/GIT_WORK_TREE pointing at a decoy repo (or a `git` shim on
+  // PATH) the walk silently lost cli/package.json and extension/package.json —
+  // 27 entries down to 20 — and the gate printed its ordinary success line.
+  it("DENY: a discovery answer that omits an on-disk baseline manifest is a refusal", () => {
+    const shrunk = ["package.json"];
+    const refusal = String(discoveryRefusal(shrunk, [...FALLBACK_MANIFESTS]));
+    expect(refusal).toContain("REFUSED_MANIFEST_DISCOVERY_INCOMPLETE");
+    expect(refusal).toContain("cli/package.json");
+    expect(refusal).toContain("extension/package.json");
+  });
+
+  it("ALLOW: the same shrunken answer is clean when those baseline paths are not on disk", () => {
+    // One axis apart from the case above. Without the on-disk filter a tree that
+    // genuinely has no cli/ or extension/ workspace would red for having none.
+    expect(discoveryRefusal(["package.json"], ["package.json"])).toBeNull();
+  });
+
+  it("ALLOW: a discovery answer that is a strict SUPERSET of the baseline passes", () => {
+    // The assertion is a subset, never set equality: a workspace added later is
+    // not in FALLBACK_MANIFESTS and must still be walked.
+    expect(discoveryRefusal([...FALLBACK_MANIFESTS, "apps/new/package.json"], [...FALLBACK_MANIFESTS])).toBeNull();
+    // ...and duplicates in the answer do not defeat the comparison.
+    expect(discoveryRefusal([...FALLBACK_MANIFESTS, "package.json"], [...FALLBACK_MANIFESTS])).toBeNull();
+  });
+
+  // `Number(value)` is not the predicate the refusal message claims: it maps ""
+  // and " " to 0 and reads 0x10 / 1e3, all of which clear
+  // `Number.isInteger(n) && n >= 0`.
+  it("DENY: an empty, hex or exponent numeric flag value is refused, not coerced", () => {
+    for (const value of ["", " ", "0x10", "1e3", "1.5", "+1"]) {
+      expect(parseArgs([`--timeout-ms=${value}`]).refusals.join(" "), `--timeout-ms=${value}`).toContain(
+        "REFUSED_BAD_FLAG_VALUE",
+      );
+    }
+    // The one that mattered most: `--timeout-ms=` became a 0 ms timeout that
+    // aborts every request, i.e. a gate that can never decide anything.
+    expect(parseArgs(["--timeout-ms="]).timeoutMs).toBe(15000);
+  });
+
+  it("DENY: --timeout-ms=0 is an unrunnable configuration, not a fast one", () => {
+    expect(parseArgs(["--timeout-ms=0"]).refusals.join(" ")).toContain("REFUSED_BAD_FLAG_VALUE");
+    expect(parseArgs(["--timeout-ms=0"]).timeoutMs).toBe(15000);
+  });
+
+  it("ALLOW: --retries=0 stays legal — zero retries is a runnable policy", () => {
+    // The same axis one step over: 0 is meaningless for a timeout and meaningful
+    // for a retry budget, so the two flags do not share a floor.
+    expect(parseArgs(["--retries=0"])).toMatchObject({ retries: 0, refusals: [] });
+    expect(parseArgs(["--timeout-ms=1"])).toMatchObject({ timeoutMs: 1, refusals: [] });
+  });
+});
+
+// ===========================================================================
+// The credential is scoped to the origin it was issued for
+// ===========================================================================
+
+describe("advisoryRequestHeaders — the credential goes to the default origin and nowhere else", () => {
+  it("ALLOW: at the compiled-in default the credential is attached", () => {
+    expect(advisoryRequestHeaders(DEFAULT_ORIGIN, "tok").authorization).toBe("Bearer tok");
+  });
+
+  it("ALLOW: the trailing-slash spelling ties with the default, because resolveOrigin normalizes first", () => {
+    expect(advisoryRequestHeaders(resolveOrigin("https://api.github.com/", {}).origin, "tok").authorization).toBe(
+      "Bearer tok",
+    );
+  });
+
+  it("DENY: a plaintext fixture origin gets no authorization header", () => {
+    // `resolveOrigin` accepts any http(s) origin on purpose (P-3), so an
+    // --origin can name a localhost listener — and the credential used to be
+    // attached to every request regardless.
+    const headers = advisoryRequestHeaders("http://127.0.0.1:8123", "tok");
+    expect(Object.keys(headers)).not.toContain("authorization");
+  });
+
+  it("DENY: a case-different host is not the host the token was issued for", () => {
+    expect(Object.keys(advisoryRequestHeaders("https://API.github.com", "tok"))).not.toContain("authorization");
+  });
+
+  it("ALLOW: with no token, the default origin still gets the other headers and no authorization", () => {
+    const headers = advisoryRequestHeaders(DEFAULT_ORIGIN, null);
+    expect(headers.accept).toBe("application/vnd.github+json");
+    expect(Object.keys(headers)).not.toContain("authorization");
+  });
 });
 
 // ===========================================================================
@@ -1248,21 +1518,47 @@ describe("P-4 — flags are distinguished from manifest paths, and every wrong t
 
 describe("the repository's own overrides blocks (AC-3.4)", () => {
   /**
-   * The second instrument. Shares no code with `collectScopes`: a count
+   * The second instrument. Shares no code with `collectScopes` — a count
    * produced by the function under test and compared against itself cannot
-   * fail. A nested object counts as one row for the key that opens it plus one
-   * row per child; every other value counts as one row.
+   * fail — so the plain-object test is re-spelled inline here on purpose. It
+   * must NOT start calling `collectScopes` or importing `isPlainObject`: the
+   * duplication is the independence.
+   *
+   * Every key counts as one row. A key whose value is a plain object opens a
+   * nested scope and its children count too — EXCEPT under a `"."` key, which
+   * pins nothing at any depth: the walker refuses it and stops there, so
+   * counting its children over-counts. `{parent: {".": {nested: "^1.0.0"}}}` is
+   * the shape — the walker yields 2 rows and the unqualified rule counted 3.
+   * Latent only because no tracked manifest carries it today.
    */
   function countOverrideRows(overrides) {
     let total = 0;
-    for (const value of Object.values(overrides ?? {})) {
+    for (const [key, value] of Object.entries(overrides ?? {})) {
       total += 1;
-      if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-        total += countOverrideRows(value);
-      }
+      const opensScope = value !== null && typeof value === "object" && !Array.isArray(value);
+      if (opensScope && key !== ".") total += countOverrideRows(value);
     }
     return total;
   }
+
+  it("the two instruments agree on the edge shapes, not only on the real tree", () => {
+    const shapes = {
+      "an array value refuses and is not recursed into": { pkg: [] },
+      "an unparseable selector is one row": { "pkg@latest": "^1.0.0" },
+      "an empty scope is one refused row": { opener: {} },
+      "a scope nested two deep is three rows": { a: { b: { c: "^1.0.0" } } },
+      "a '.' self-pin is a row beside its opener": { p: { ".": "^1.0.0" } },
+      "an object-valued '.' pins nothing and its children are not rows": { parent: { ".": { nested: "^1.0.0" } } },
+      "a top-level '.' is one refused row": { ".": "^1.0.0" },
+      "a top-level object-valued '.' is likewise one row": { ".": { x: "^1.0.0" } },
+    };
+    for (const [label, overrides] of Object.entries(shapes)) {
+      const rows = collectEntries([{ path: "package.json", ok: true, json: { overrides } }]);
+      expect(rows.length, `${label}: walker=${rows.length} second-instrument=${countOverrideRows(overrides)}; walker rows: ${rows.map((r) => `${r.scopePath}|${r.key}`).join(", ")}`).toBe(
+        countOverrideRows(overrides),
+      );
+    }
+  });
 
   const manifests = discoverManifests();
   const sources = manifests.map((path) => ({ path, ok: true, json: JSON.parse(readFileSync(join(REPO_ROOT, path), "utf8")) }));
@@ -1327,7 +1623,10 @@ describe("O-3 — export coverage", () => {
   it("`run` is callable directly and refuses an empty walk without touching the network", async () => {
     const dir = tempDir();
     const manifest = join(dir, "package.json");
-    writeFileSync(manifest, JSON.stringify({ name: "no-overrides-here" }), "utf8");
+    // `overrides: {}` and not a missing block: a named manifest with NO
+    // `overrides` key is now the more precise REFUSED_MANIFEST_WITHOUT_OVERRIDES,
+    // so an empty-but-present block is what still reaches the zero-row refusal.
+    writeFileSync(manifest, JSON.stringify({ name: "no-overrides-here", overrides: {} }), "utf8");
     const lines = [];
     const code = await run([manifest], {}, { stdout: (l) => lines.push(l), stderr: (l) => lines.push(l) });
     expect(code).toBe(1);
@@ -1392,12 +1691,33 @@ describe("O-12 — forbidden patterns, red-proven both ways", () => {
     // implemented). What is forbidden is a SECOND read that influences the
     // origin, the canary or the verdict — so the count, not the presence, is
     // the predicate.
-    const codeLines = (source) =>
-      source.split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l));
-    const reads = codeLines(GATE_SOURCE).filter((l) => l.includes("process.env"));
-    expect(reads).toEqual(["  process.exitCode = await run(process.argv.slice(2), process.env);"]);
-    // ... and the defect direction matches: a second read is one more line.
-    expect(codeLines("const origin = process.env.GITHUB_API_URL ?? DEFAULT_ORIGIN;")).toHaveLength(1);
+    // ONE predicate, applied to the gate and to the defect string alike. The
+    // previous spelling applied `codeLines` (a comment filter) to the defect
+    // string and asserted `toHaveLength(1)` — which holds for ANY single
+    // non-comment line, so the `process.env` half was never applied to it:
+    // replacing the argument with `const totally = unrelated;` left the suite
+    // green. O-12 requires the forbidden pattern to be shown matching a file
+    // carrying the defect, and this is the pattern S11's structural invariant
+    // rests on.
+    const ambientReads = (source) =>
+      source
+        .split("\n")
+        .filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l))
+        .filter((l) => l.includes("process.env"));
+
+    // Equality, not a count: moving the read to a differently-spelled line reds.
+    expect(ambientReads(GATE_SOURCE)).toEqual([
+      "  process.exitCode = await run(process.argv.slice(2), process.env);",
+    ]);
+    // DENY half — the pattern matches a line carrying the defect.
+    expect(ambientReads("const origin = process.env.GITHUB_API_URL ?? DEFAULT_ORIGIN;")).toEqual([
+      "const origin = process.env.GITHUB_API_URL ?? DEFAULT_ORIGIN;",
+    ]);
+    // ALLOW half — the same line without the ambient read produces no hit, so
+    // the predicate is not matching everything it is handed. The count stays the
+    // predicate rather than a ban: S11 REQUIRES exactly one read, and forbidding
+    // it outright would delete the entry point.
+    expect(ambientReads("const origin = argOrigin ?? DEFAULT_ORIGIN;")).toEqual([]);
   });
 
   it("the pure core is not empty, so the I/O pattern is not vacuously satisfied", () => {
@@ -1489,8 +1809,15 @@ describe("AC-3.3 — the network shell as a process", () => {
       child.stderr.setEncoding("utf8");
       child.stdout.on("data", (d) => (out += d));
       child.stderr.on("data", (d) => (out += d));
-      const timer = setTimeout(() => child.kill("SIGKILL"), 25000);
-      child.on("error", reject);
+      // BELOW vitest.config.ts's testTimeout (10000). At 25000 the SIGKILL
+      // could never fire first: vitest gave up, the promise was abandoned, and
+      // `withServer`'s `finally` never ran — leaving the fixture server
+      // listening for the rest of the file.
+      const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
       child.on("close", (code) => {
         clearTimeout(timer);
         resolve_({ code, out });
@@ -1642,7 +1969,12 @@ describe("AC-3.3 — the network shell as a process", () => {
     );
     const { code, out } = await runGate([`--origin=${closedOrigin}`, "--retries=1", manifest]);
     expect(code).toBe(1);
-    expect(out).toContain("UNDECIDABLE_TRANSPORT");
+    // The TOKEN, not merely the exit code: between the close above and the
+    // spawn the ephemeral port is reclaimable by a parallel worker, and a stray
+    // listener would otherwise surface as a bare "expected 0 to be 1".
+    expect(out, `expected a transport refusal from a closed port — if something else claimed it, the run reached a stranger. Output:\n${out}`).toContain(
+      "UNDECIDABLE_TRANSPORT",
+    );
   });
 
   it("DENY: a request that outlives the timeout is a transport refusal", async () => {
@@ -1696,6 +2028,93 @@ describe("AC-3.3 — the network shell as a process", () => {
     );
   });
 
+  // --- the credential path (I-5.4), negative half --------------------------
+  //
+  // Both CI jobs set GITHUB_TOKEN and `scripts/pre-pr.sh` gates its whole
+  // invocation on a token probe, yet no case ever passed one: `Bearer ${token}`
+  // -> `Basic ${token}` left the suite green. The token goes in through
+  // runGate's existing `env` parameter — switching the spawn to
+  // `...process.env` to get one in would re-import exactly the ambient state
+  // S11 exists to refuse.
+  //
+  // The gate attaches the credential ONLY when the effective origin is the
+  // compiled-in default, so a fixture server can only ever observe its ABSENCE.
+  // The positive half — the `Bearer` spelling and the TOKEN_VARS precedence —
+  // lives in "the credential at the default origin" below, which is the only
+  // way to watch a request to that origin without making one (N2).
+
+  /** Records what the child actually put on the wire, then answers normally. */
+  function captureAuth(payload = CANARY_PAYLOAD) {
+    return (req, res, state) => {
+      state.auth = req.headers.authorization ?? null;
+      json(res, 200, payload);
+    };
+  }
+
+  it("DENY: the credential is NOT put on the wire when the origin is not the default one", async () => {
+    // The negative half of the pair whose positive half is
+    // `runAtDefaultOrigin` below: same env, one axis (the origin) apart.
+    const manifest = manifestWith("^1.1.18");
+    await withServer(captureAuth(), async (state) => {
+      const { code, out } = await runGate([`--origin=${state.origin}`, manifest], { GITHUB_TOKEN: "tok-primary" });
+      expect(code).toBe(0);
+      expect(state.auth).toBeNull();
+      // ...and the run says so, rather than silently degrading to anonymous.
+      expect(out).toContain("UNAUTHENTICATED");
+      expect(out).toContain("GITHUB_TOKEN");
+    });
+  });
+
+  it("ALLOW: with no token at all, the same fixture origin likewise sees no authorization header", async () => {
+    const manifest = manifestWith("^1.1.18");
+    await withServer(captureAuth(), async (state) => {
+      const { code } = await runGate([`--origin=${state.origin}`, manifest]);
+      expect(code).toBe(0);
+      expect(state.auth).toBeNull();
+    });
+  });
+
+  // --- redirect: "error" (the hop the origin pin does not cover) ------------
+
+  it("DENY: a redirect is refused mid-flight — the second hop is never made", async () => {
+    const manifest = manifestWith("^1.1.18");
+    await withServer(
+      (req, res, state) => {
+        if (state.requests === 1) {
+          // SAME-origin on purpose. `redirect: "error"` refuses a redirect as
+          // such, not a change of host; a cross-origin fixture would read as a
+          // host check and would leave the same-origin hop unproven. The origin
+          // pin says where the request STARTS — this is what stops it being
+          // handed to a third host in flight.
+          res.writeHead(302, { location: `${state.origin}/advisories-moved` });
+          res.end();
+          return;
+        }
+        return json(res, 200, CANARY_PAYLOAD);
+      },
+      async (state) => {
+        const { code, out } = await runGate([`--origin=${state.origin}`, "--retries=0", manifest]);
+        expect(code).toBe(1);
+        expect(out).toContain("UNDECIDABLE_TRANSPORT");
+        // `--retries=0` makes the count exact: with `redirect: "follow"` the
+        // second hop lands on the canary payload and the gate exits 0.
+        expect(state.requests).toBe(1);
+      },
+    );
+  });
+
+  it("ALLOW: the identical fixture answering 200 on the first hop is clean, in exactly one request", async () => {
+    const manifest = manifestWith("^1.1.18");
+    await withServer(
+      (req, res) => json(res, 200, CANARY_PAYLOAD),
+      async (state) => {
+        const { code } = await runGate([`--origin=${state.origin}`, "--retries=0", manifest]);
+        expect(code).toBe(0);
+        expect(state.requests).toBe(1);
+      },
+    );
+  });
+
   it("DENY: an unrecognized flag refuses before any request", async () => {
     const manifest = manifestWith("^1.1.18");
     await withServer(
@@ -1721,10 +2140,21 @@ describe("AC-3.3 — the network shell as a process", () => {
     );
   });
 
-  it("DENY: a manifest with no overrides at all refuses rather than reporting clean", async () => {
+  it("DENY: a named manifest with no overrides at all refuses rather than reporting clean", async () => {
     const dir = tempDir();
     const manifest = join(dir, "package.json");
     writeFileSync(manifest, JSON.stringify({ name: "empty" }), "utf8");
+    const { code, out } = await runGate(["--origin=http://127.0.0.1:1", manifest]);
+    expect(code).toBe(1);
+    expect(out).toContain("REFUSED_MANIFEST_WITHOUT_OVERRIDES");
+  });
+
+  it("DENY: a named manifest whose overrides block is present but empty is the zero-row refusal", async () => {
+    // The other side of the split: `overrides: {}` reads, is a manifest, and
+    // yields no row of any kind — which cannot be evidence that nothing is stale.
+    const dir = tempDir();
+    const manifest = join(dir, "package.json");
+    writeFileSync(manifest, JSON.stringify({ name: "empty", overrides: {} }), "utf8");
     const { code, out } = await runGate(["--origin=http://127.0.0.1:1", manifest]);
     expect(code).toBe(1);
     expect(out).toContain("REFUSED_EMPTY_WALK");
@@ -1747,5 +2177,93 @@ describe("AC-3.3 — the network shell as a process", () => {
         expect(out).toContain("[REFUSED_WORKFLOW_COMMAND]");
       },
     );
+  });
+});
+
+// ===========================================================================
+// The credential at the DEFAULT origin (I-5.4), positive half
+// ===========================================================================
+
+describe("the credential at the default origin", () => {
+  // The gate attaches `authorization` only when the effective origin is
+  // DEFAULT_ORIGIN, and N2 forbids the self-test from reaching that origin. So
+  // the request is watched instead of made: `run` is already the seam — argv
+  // and env in, sinks out — and `fetch` is stubbed for the duration of the
+  // call. No socket is opened, and every clause the fixture-server cases cannot
+  // see (the `Bearer` spelling, the TOKEN_VARS walk, the empty-string rule) is
+  // observed on the request the gate actually built.
+  const CANARY_ADVISORIES = [
+    {
+      ghsa_id: "GHSA-rgw5-rvv9-x895",
+      withdrawn_at: null,
+      type: "reviewed",
+      severity: "high",
+      summary: "brace-expansion: DoS via unbounded intermediate arrays",
+      vulnerabilities: [
+        { package: { ecosystem: "npm", name: "brace-expansion" }, vulnerable_version_range: "< 1.1.18", first_patched_version: "1.1.18" },
+        { package: { ecosystem: "npm", name: "brace-expansion" }, vulnerable_version_range: ">= 4.0.0, < 5.0.9", first_patched_version: "5.0.9" },
+      ],
+    },
+  ];
+
+  /** Run with NO --origin, so the compiled-in default applies, and record the request. */
+  async function runAtDefaultOrigin(env) {
+    const dir = tempDir("floor-staleness-default-origin-");
+    const manifest = join(dir, "package.json");
+    writeFileSync(manifest, JSON.stringify({ name: "fixture", overrides: { "brace-expansion@1": "^1.1.18" } }), "utf8");
+
+    const requests = [];
+    vi.stubGlobal("fetch", async (url, init) => {
+      requests.push({ url: String(url), headers: { ...init.headers } });
+      return new Response(JSON.stringify(CANARY_ADVISORIES), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const lines = [];
+    try {
+      const code = await run([manifest], env, { stdout: (l) => lines.push(l), stderr: (l) => lines.push(l) });
+      return { code, requests, out: lines.join("\n") };
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it("the stub is reached at the default origin, so the cases below are not vacuous", async () => {
+    const { code, requests, out } = await runAtDefaultOrigin({ GITHUB_TOKEN: "tok-primary" });
+    expect(requests, `no request was built; output:\n${out}`).toHaveLength(1);
+    expect(requests[0].url.startsWith("https://api.github.com/advisories?")).toBe(true);
+    expect(code).toBe(0);
+    // No NOTICE: this run IS authenticated, which is the axis the fixture-server
+    // pair above sits on the other side of.
+    expect(out).not.toContain("UNAUTHENTICATED");
+  });
+
+  it("ALLOW: GITHUB_TOKEN arrives as exactly one `Bearer <value>` authorization header", async () => {
+    const { requests } = await runAtDefaultOrigin({ GITHUB_TOKEN: "tok-primary" });
+    expect(requests[0].headers.authorization).toBe("Bearer tok-primary");
+  });
+
+  it("ALLOW: GH_TOKEN is used when GITHUB_TOKEN is absent", async () => {
+    const { requests } = await runAtDefaultOrigin({ GH_TOKEN: "tok-fallback" });
+    expect(requests[0].headers.authorization).toBe("Bearer tok-fallback");
+  });
+
+  it("DENY: GH_TOKEN loses to GITHUB_TOKEN when both are set", async () => {
+    const { requests } = await runAtDefaultOrigin({ GITHUB_TOKEN: "tok-primary", GH_TOKEN: "tok-fallback" });
+    expect(requests[0].headers.authorization).toBe("Bearer tok-primary");
+  });
+
+  it("ALLOW: an EMPTY GITHUB_TOKEN is not a credential, so GH_TOKEN wins", async () => {
+    // The walk is `find(v => typeof v === "string" && v.length > 0)`, not
+    // `find(v => v !== undefined)` — an exported-but-empty variable is the shape
+    // a missing CI secret produces, and it must not shadow the fallback.
+    const { requests } = await runAtDefaultOrigin({ GITHUB_TOKEN: "", GH_TOKEN: "tok-fallback" });
+    expect(requests[0].headers.authorization).toBe("Bearer tok-fallback");
+  });
+
+  it("DENY: with no token in the environment, NO authorization header is built at all", async () => {
+    const { requests } = await runAtDefaultOrigin({});
+    expect(Object.keys(requests[0].headers)).not.toContain("authorization");
   });
 });
