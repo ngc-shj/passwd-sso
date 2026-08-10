@@ -1485,9 +1485,12 @@ describe("P-4 — flags are distinguished from manifest paths, and every wrong t
     // Digits-only passed the regex and Infinity cleared every remaining check:
     // measured `parseArgs(["--retries=" + "9".repeat(400)])` returning
     // `{ retries: Infinity, refusals: [] }` — a retry loop with no exit against
-    // an unreachable host. `--timeout-ms` had the same hole and is the worse of
-    // the two: `Infinity < 1` is false, so the positive-integer clause passed it
-    // through as a per-request timeout that never fires.
+    // a host that keeps failing. `--timeout-ms` had the same hole (`Infinity < 1`
+    // is false, so the positive-integer clause passed it through) and failed
+    // differently: `AbortSignal.timeout(Infinity)` throws `ERR_OUT_OF_RANGE`
+    // synchronously, so every query ended at UNDECIDABLE_TRANSPORT in 43 ms.
+    // Unrunnable, not unbounded — both must refuse at parse time, and the case
+    // covers both because the reported instance was only one of them.
     //
     // Asserted on the DIAGNOSIS, not just on "something was refused". The range
     // check below would reject these same inputs on its own — every value

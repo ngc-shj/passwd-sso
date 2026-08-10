@@ -58,9 +58,9 @@
  *                           errors and 5xx only, 0-10 (default 2)
  *
  *   Both numeric flags are bounded in both directions. Digits-only was not
- *   enough: `Number("9".repeat(400))` is Infinity, which reached the retry loop
- *   as a count that never runs out and the request as a timeout that never
- *   fires.
+ *   enough: `Number("9".repeat(400))` is Infinity, which reached `--retries` as
+ *   a count that never runs out, and `--timeout-ms` as a delay
+ *   `AbortSignal.timeout` rejects with a synchronous `ERR_OUT_OF_RANGE`.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -259,11 +259,21 @@ export function parseArgs(argv) {
           result.refusals.push(`REFUSED_BAD_FLAG_VALUE: --${name}=${value} is not a non-negative integer`);
           continue;
         }
-        // Digits-only is still not a bound. `Number("9".repeat(400))` is
-        // Infinity, which `/^\d+$/` admits and `n >= 1` accepted, so a long
-        // enough literal produced `retries: Infinity` — a retry loop with no
-        // exit on an unreachable host — and `timeoutMs: Infinity`, a per-request
-        // timeout that never fires.
+        // Digits-only is still not a bound: `Number("9".repeat(400))` is
+        // Infinity, which `/^\d+$/` admits and `n >= 1` accepted. The two flags
+        // then failed differently, and only one of them looped.
+        //
+        // `retries: Infinity` made `maxAttempts` Infinity — a retry loop with no
+        // exit against a host that keeps failing.
+        //
+        // `timeoutMs: Infinity` did NOT hang. `AbortSignal.timeout` takes a
+        // delay in ms and rejects anything outside 0..2^32-1, so it threw
+        // `ERR_OUT_OF_RANGE` synchronously, before the request was made; the
+        // surrounding catch read that as a transport error and every query ended
+        // at UNDECIDABLE_TRANSPORT. Measured: 43 ms to a full refusal, not a
+        // hang. Unrunnable rather than unbounded — still a configuration that
+        // must not parse, and worth naming precisely, since "it hangs" would
+        // send the next reader looking for a missing timeout.
         const n = Number(value);
         const [min, max] = FLAG_BOUNDS[name];
         // For the bounds below, this clause changes no VERDICT: every value

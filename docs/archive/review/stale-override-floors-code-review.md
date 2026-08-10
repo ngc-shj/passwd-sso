@@ -247,15 +247,33 @@ introduced in Round 1 to replace `Number.isInteger(n) && n >= 0`, which had acce
 `""`, `" "`, `0x10` and `1e3`; it fixed those and removed the only numeric predicate
 in the branch. `Number("9".repeat(400))` is `Infinity`, digits-only, so:
 
-- `--retries=<400 nines>` yielded `{ retries: Infinity, refusals: [] }` — a retry
-  loop with no exit against an unreachable host.
-- `--timeout-ms=<400 nines>` yielded `timeoutMs: Infinity`. This member was not in
-  the report and is the worse of the two: the existing floor clause tested `n < 1`,
-  and `Infinity < 1` is false, so it passed through as a per-request timeout that
-  never fires. Found by deriving the class over both flags rather than fixing the
-  one instance cited (R42).
+- `--retries=<400 nines>` yielded `{ retries: Infinity, refusals: [] }`, making
+  `maxAttempts` Infinity — a retry loop with no exit against a host that keeps
+  failing. This is the unbounded one.
+- `--timeout-ms=<400 nines>` yielded `timeoutMs: Infinity`. Not in the report; found
+  by deriving the class over both flags rather than fixing the one instance cited
+  (R42). The existing floor clause tested `n < 1`, and `Infinity < 1` is false, so it
+  passed through.
 
 Both reproduced before the fix and both now refuse in ~35 ms with exit 1.
+
+**Correction, from the reviewer's second pass.** The first version of this record,
+of the two code comments, and of commit `c51f6568`'s message called
+`timeoutMs: Infinity` a per-request timeout that never fires and therefore the worse
+of the two. That is wrong. `AbortSignal.timeout` takes a delay in ms and rejects
+anything outside `0..2^32-1`, so `Infinity` throws `ERR_OUT_OF_RANGE`
+**synchronously, before the request is made**; the surrounding catch reads it as a
+transport error and every query ends at `UNDECIDABLE_TRANSPORT`. Re-measured on the
+pre-fix branch against a reachable origin — where a hang would have shown — it
+refused in 43 ms with `The value of "delay" is out of range. Received Infinity`. The
+flag is unrunnable, not unbounded, and only `--retries` ever looped.
+
+The measurement I offered as evidence did not test the claim either: "the maximum
+legal configuration terminates in 65 ms against an unreachable origin" exercises
+`ECONNREFUSED`, which returns immediately, so the 120 s timeout never had occasion to
+fire. A timing result from a connection that is refused says nothing about a
+connection that stalls. Both errors were in the description only; the code, the
+bounds and the test structure are unaffected.
 
 ### Fix
 
