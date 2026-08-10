@@ -53,9 +53,14 @@
  *                           advisory counts (changes what is printed, never the
  *                           verdict)
  *     --origin=<url>        advisory API origin (default https://api.github.com)
- *     --timeout-ms=<n>      per-request timeout (default 15000)
+ *     --timeout-ms=<n>      per-request timeout, 1-120000 (default 15000)
  *     --retries=<n>         retries after the first attempt, on transport
- *                           errors and 5xx only (default 2)
+ *                           errors and 5xx only, 0-10 (default 2)
+ *
+ *   Both numeric flags are bounded in both directions. Digits-only was not
+ *   enough: `Number("9".repeat(400))` is Infinity, which reached the retry loop
+ *   as a count that never runs out and the request as a timeout that never
+ *   fires.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -136,6 +141,15 @@ export const AMBIENT_ORIGIN_VARS = [
   "NODE_TLS_REJECT_UNAUTHORIZED",
   "NODE_OPTIONS",
 ];
+
+/**
+ * Accepted range per numeric flag, inclusive. Exported so the self-test spells
+ * the boundary rather than reading it back from the code it is testing.
+ * `timeout-ms` starts at 1 because a 0 ms timeout aborts every request before it
+ * can be answered — arithmetically a non-negative integer, and an unrunnable
+ * configuration.
+ */
+export const FLAG_BOUNDS = { "timeout-ms": [1, 120000], retries: [0, 10] };
 
 /** The two variables the gate is allowed to read for authentication. */
 export const TOKEN_VARS = ["GITHUB_TOKEN", "GH_TOKEN"];
@@ -240,26 +254,42 @@ export function parseArgs(argv) {
       if (name === "timeout-ms" || name === "retries") {
         // `Number()` is not the predicate the message claims: it maps "" and " "
         // to 0 and reads `0x10` and `1e3`, all of which clear
-        // `Number.isInteger(n) && n >= 0`. `--timeout-ms=` would silently become
-        // a 0 ms timeout that aborts every request. Decimal digits only.
+        // `Number.isInteger(n) && n >= 0`. Decimal digits only.
         if (!/^\d+$/.test(value)) {
           result.refusals.push(`REFUSED_BAD_FLAG_VALUE: --${name}=${value} is not a non-negative integer`);
           continue;
         }
+        // Digits-only is still not a bound. `Number("9".repeat(400))` is
+        // Infinity, which `/^\d+$/` admits and `n >= 1` accepted, so a long
+        // enough literal produced `retries: Infinity` — a retry loop with no
+        // exit on an unreachable host — and `timeoutMs: Infinity`, a per-request
+        // timeout that never fires.
         const n = Number(value);
-        if (name === "timeout-ms") {
-          // 0 is arithmetically a non-negative integer and an unrunnable
-          // configuration: every request aborts, so the gate could never decide.
-          if (n < 1) {
-            result.refusals.push(
-              `REFUSED_BAD_FLAG_VALUE: --${name}=${value} is not a positive integer — a 0 ms timeout aborts every request before it can be answered`,
-            );
-            continue;
-          }
-          result.timeoutMs = n;
-        } else {
-          result.retries = n;
+        const [min, max] = FLAG_BOUNDS[name];
+        // For the bounds below, this clause changes no VERDICT: every value
+        // `Number` cannot represent exactly is already past both ceilings, and
+        // removing it leaves the range to reject the same inputs. It is kept for
+        // two things it does decide. It names the coercion in the message —
+        // "outside 0-10" is a strange thing to tell someone who typed 400 nines,
+        // and the reason they got Infinity is the part worth printing. And it
+        // makes finiteness independent of the range, so widening a bound later
+        // cannot silently reopen the hole this fix closed.
+        if (!Number.isSafeInteger(n)) {
+          result.refusals.push(
+            `REFUSED_BAD_FLAG_VALUE: --${name}=${value} is not a finite integer — Number() read it as ${n}`,
+          );
+          continue;
         }
+        // The range rejects the merely absurd. This gate makes one request per
+        // overridden package against one API, so 10 retries and two minutes are
+        // already far past any real configuration; outside them is a typo or a
+        // denial of service against the operator's own CI minutes.
+        if (n < min || n > max) {
+          result.refusals.push(`REFUSED_BAD_FLAG_VALUE: --${name}=${value} is outside ${min}–${max}`);
+          continue;
+        }
+        if (name === "timeout-ms") result.timeoutMs = n;
+        else result.retries = n;
         continue;
       }
       result.refusals.push(`REFUSED_UNKNOWN_FLAG: ${arg}`);

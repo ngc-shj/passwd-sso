@@ -39,6 +39,7 @@ import {
   AMBIENT_ORIGIN_VARS,
   CANARY,
   DEFAULT_ORIGIN,
+  FLAG_BOUNDS,
   OUTCOME,
   PER_PAGE,
   TOKEN_VARS,
@@ -1478,6 +1479,67 @@ describe("P-4 — flags are distinguished from manifest paths, and every wrong t
     // for a retry budget, so the two flags do not share a floor.
     expect(parseArgs(["--retries=0"])).toMatchObject({ retries: 0, refusals: [] });
     expect(parseArgs(["--timeout-ms=1"])).toMatchObject({ timeoutMs: 1, refusals: [] });
+  });
+
+  it("DENY: a digits-only value that `Number` reads as Infinity is refused on BOTH flags", () => {
+    // Digits-only passed the regex and Infinity cleared every remaining check:
+    // measured `parseArgs(["--retries=" + "9".repeat(400)])` returning
+    // `{ retries: Infinity, refusals: [] }` — a retry loop with no exit against
+    // an unreachable host. `--timeout-ms` had the same hole and is the worse of
+    // the two: `Infinity < 1` is false, so the positive-integer clause passed it
+    // through as a per-request timeout that never fires.
+    //
+    // Asserted on the DIAGNOSIS, not just on "something was refused". The range
+    // check below would reject these same inputs on its own — every value
+    // `Number` cannot represent is past both ceilings — so a case that only
+    // asserts a refusal stays green with the finiteness clause deleted and
+    // certifies nothing. Measured: it did.
+    const huge = "9".repeat(400);
+    expect(Number(huge)).toBe(Infinity); // the coercion this case exists for
+    for (const name of ["retries", "timeout-ms"]) {
+      const parsed = parseArgs([`--${name}=${huge}`]);
+      expect(parsed.refusals.join(" "), name).toContain("REFUSED_BAD_FLAG_VALUE");
+      expect(parsed.refusals.join(" "), name).toContain("is not a finite integer — Number() read it as Infinity");
+      expect(parsed.refusals.join(" "), name).not.toContain("is outside");
+    }
+    // ...and the defaults survive, so a refused flag cannot half-apply.
+    expect(parseArgs([`--retries=${huge}`]).retries).toBe(2);
+    expect(parseArgs([`--timeout-ms=${huge}`]).timeoutMs).toBe(15000);
+  });
+
+  it("DENY: a finite value past MAX_SAFE_INTEGER is refused before it can lose precision", () => {
+    // 2^53 is finite, integral and digits-only, and `Number` cannot represent it
+    // distinctly from 2^53 + 1. `Number.isInteger` accepts it; `isSafeInteger`
+    // is the predicate that does not.
+    const unsafe = String(Number.MAX_SAFE_INTEGER + 2);
+    expect(Number.isInteger(Number(unsafe))).toBe(true);
+    const refusal = parseArgs([`--retries=${unsafe}`]).refusals.join(" ");
+    expect(refusal).toContain("is not a finite integer");
+    expect(refusal).not.toContain("is outside");
+  });
+
+  it("DENY/ALLOW: each numeric flag is bounded on both sides, at the boundary", () => {
+    // Spelled literally rather than read from FLAG_BOUNDS: an expectation
+    // computed from the constant under test moves with it and pins nothing.
+    expect(parseArgs(["--retries=10"])).toMatchObject({ retries: 10, refusals: [] });
+    expect(parseArgs(["--retries=11"]).refusals.join(" ")).toContain("is outside 0–10");
+    expect(parseArgs(["--retries=11"]).retries).toBe(2);
+
+    expect(parseArgs(["--timeout-ms=120000"])).toMatchObject({ timeoutMs: 120000, refusals: [] });
+    expect(parseArgs(["--timeout-ms=120001"]).refusals.join(" ")).toContain("is outside 1–120000");
+    expect(parseArgs(["--timeout-ms=120001"]).timeoutMs).toBe(15000);
+
+    // The bounds the code applies are the bounds this file asserts. Deleting a
+    // FLAG_BOUNDS member, or widening one, reds here as well as above.
+    expect(FLAG_BOUNDS).toEqual({ "timeout-ms": [1, 120000], retries: [0, 10] });
+  });
+
+  it("DENY: --timeout-ms=0 is still refused, and now by the range rather than a private clause", () => {
+    // The zero-timeout refusal predates the bounds and had its own branch. It
+    // must survive the merge into FLAG_BOUNDS, since 0 is the value that makes
+    // the gate unable to decide anything at all.
+    expect(parseArgs(["--timeout-ms=0"]).refusals.join(" ")).toContain("REFUSED_BAD_FLAG_VALUE");
+    expect(parseArgs(["--timeout-ms=0"]).timeoutMs).toBe(15000);
   });
 });
 

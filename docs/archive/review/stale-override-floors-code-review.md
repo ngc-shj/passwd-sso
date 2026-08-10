@@ -233,3 +233,62 @@ are carried as stated residuals rather than fixed:
   integrity rule still run on every invocation, so a dead channel is still caught.
 - **Cost to fix**: adding `--report` to the PR job trades a quiet log for a noisy one
   on every pull request.
+
+---
+
+## Round 3 — reviewer finding on numeric flag validation
+
+One Minor, reported against `parseArgs` and reproduced before being fixed.
+
+### Finding — numeric flags had no finiteness or upper bound (availability, Minor)
+
+`--retries` and `--timeout-ms` were validated by `/^\d+$/` alone. That regex was
+introduced in Round 1 to replace `Number.isInteger(n) && n >= 0`, which had accepted
+`""`, `" "`, `0x10` and `1e3`; it fixed those and removed the only numeric predicate
+in the branch. `Number("9".repeat(400))` is `Infinity`, digits-only, so:
+
+- `--retries=<400 nines>` yielded `{ retries: Infinity, refusals: [] }` — a retry
+  loop with no exit against an unreachable host.
+- `--timeout-ms=<400 nines>` yielded `timeoutMs: Infinity`. This member was not in
+  the report and is the worse of the two: the existing floor clause tested `n < 1`,
+  and `Infinity < 1` is false, so it passed through as a per-request timeout that
+  never fires. Found by deriving the class over both flags rather than fixing the
+  one instance cited (R42).
+
+Both reproduced before the fix and both now refuse in ~35 ms with exit 1.
+
+### Fix
+
+`FLAG_BOUNDS` (`timeout-ms` 1–120000, `retries` 0–10) plus a `Number.isSafeInteger`
+clause. The former `n < 1` timeout branch is gone — its floor is now the `min` of its
+bound, so one table states every numeric limit the gate has.
+
+### What the red-prove caught, and why the clauses are separate
+
+The first version was a single condition,
+`!Number.isSafeInteger(n) || n < min || n > max`, with the finiteness diagnosis
+appended to one message. Mutating a throwaway copy showed that deleting
+`Number.isSafeInteger` reds **nothing**: for these bounds every value the double
+cannot represent is already past both ceilings, so the range subsumes it, and the
+message suffix was computed independently of which clause fired. The new cases passed
+against the mutant — decorative coverage of exactly the kind that reads as a
+guarantee.
+
+The clauses are now separate, each with its own refusal string, and the cases assert
+the diagnosis (`is not a finite integer — Number() read it as Infinity`, and *not*
+`is outside`). Re-run over five variants of the file, each clause is load-bearing for
+at least one case:
+
+| mutation | reds |
+|---|---|
+| baseline | — (all four pass) |
+| drop the finiteness clause | both diagnosis cases |
+| drop the range clause | boundary case, `--timeout-ms=0` case |
+| lower the timeout floor to 0 | boundary case, `--timeout-ms=0` case |
+| raise the retries ceiling | boundary case |
+
+The finiteness clause still changes no verdict at today's bounds, and the code says
+so rather than implying otherwise (R49). It is kept for the diagnosis it prints and
+so that widening a bound later cannot silently reopen the hole.
+
+Mutations were applied to copies under the scratchpad, never to the tracked file.
