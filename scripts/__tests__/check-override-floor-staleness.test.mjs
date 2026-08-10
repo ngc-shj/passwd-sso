@@ -1632,6 +1632,39 @@ describe("O-3 — export coverage", () => {
     expect(code).toBe(1);
     expect(lines.join("\n")).toContain("REFUSED_EMPTY_WALK");
   });
+
+  // Making an override-free manifest visible gave it a row, and that row counts.
+  // For one round the guard counted rows rather than judgeable entries, so a
+  // tree with zero override entries stopped refusing and reported "gate passed
+  // (1 override entry/entries)" — a green verdict on an unexamined tree, and a
+  // false count with it.
+  it("DENY: a discovered manifest with no overrides still refuses — the row is not an entry", async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "nothing-here" }), "utf8");
+    const lines = [];
+    const code = await run(
+      [join(dir, "package.json")],
+      {},
+      { stdout: (l) => lines.push(l), stderr: (l) => lines.push(l) },
+    );
+    expect(code).toBe(1);
+    // Named, so the precise refusal must win — EMPTY_WALK must not shadow it.
+    const out = lines.join("\n");
+    expect(out).toContain("REFUSED_MANIFEST_WITHOUT_OVERRIDES");
+    expect(out).not.toContain("REFUSED_EMPTY_WALK");
+  });
+
+  it("ALLOW: one override-free manifest beside one that judges is still a pass", async () => {
+    // The over-blocking direction. An override-free workspace must not red a
+    // gate that runs on every PR — that is what the not-judged row is for.
+    const rows = collectEntries([
+      { path: "empty/package.json", named: false, ok: true, json: { name: "empty" } },
+      { path: "package.json", named: false, ok: true, json: { overrides: { "left-pad": "^1.3.0" } } },
+    ]);
+    expect(rows.filter((r) => r.kind !== "manifest")).toHaveLength(1);
+    expect(rows.some((r) => r.kind === "manifest" && r.outcome === OUTCOME.NOT_JUDGED)).toBe(true);
+    expect(rows.some((r) => r.outcome === OUTCOME.REFUSED)).toBe(false);
+  });
 });
 
 // ===========================================================================
@@ -1649,7 +1682,12 @@ describe("O-12 — forbidden patterns, red-proven both ways", () => {
     {
       name: "a swallowed comparison error",
       re: /catch\s*(\([^)]*\))?\s*\{\s*(return\s+(false|true|null)\s*;?\s*)?\}/,
-      subject: () => GATE_SOURCE,
+      // Scoped to the pure core, which is where comparisons happen. The shell's
+      // `repositoryRoot` catches git not answering and returns null, and the
+      // CALLER turns that into a named REFUSED_REPOSITORY_ROOT_UNRESOLVED — loud,
+      // not swallowed. Widening the subject to the whole file made this pattern
+      // match a refusal path, which is the check being wrong, not the code.
+      subject: () => PURE_SECTION,
       defect: "try { hit = semver.intersects(a, b); } catch { return false; }",
     },
     {

@@ -647,64 +647,84 @@ vocabulary. And S12's residual — what the positive control does not prove.
   census figures are labelled as a census with the command that produced them, since
   report mode does not emit them.
 
-### C7 — Give C5's prohibitions a mechanism
+### C7 — Give C5's prohibitions a mechanism, and say what the mechanism cannot do
 
 **Subject**: `scripts/checks/check-workflow-supply-chain.mjs`.
 
-**Why a contract and not a note**: round 2 executed the real exported function with
+**Why a contract and not a note**: executed against the real exported function with
 `runsVerifier` forced true — i.e. simulating the obvious one-line widening —
-and `continue-on-error` was caught while `|| true`, `| tee` and `set +e` were not.
-The masked-verifier rule has a *second* precondition, a per-line regex that no `run:`
-line invoking the new gate matches, and the mask regex itself contains neither `set +e`
-nor a pipe alternative. No workflow sets `shell:` or `defaults.run.shell`, so GitHub's
-default applies with **no `pipefail`** — a pipe really does discard the gate's status.
+`continue-on-error` is caught and `|| true`, `| tee` and `set +e` are **not**. The
+masked-verifier rule has a *second* precondition, a per-line regex that no `run:` line
+invoking the new gate matches, and the mask regex itself contains neither `set +e` nor a
+pipe alternative. No workflow sets `shell:` or `defaults.run.shell`, so GitHub's default
+applies with **no `pipefail`** — a pipe really does discard the gate's status.
 
-**This is a member set, not a predicate.** Widening one of three is how the correction
-reproduces the defect it corrects, one level down.
+**Revised after code review, and the revision is the point.** Round 1 escalated from a
+denylist of spellings to an allowlist: a verifier invocation had to be a "simple
+top-level command", and anything else was named. Round 2 measured that result to be
+**simultaneously too loose and too tight**. Too loose: seven constructs still masked the
+exit status unseen — an `if` spanning lines, a function body, a heredoc, `eval`, a name
+arriving through a variable, a backgrounded group, and a lowercase `err` trap (bash reads
+signal names case-insensitively; the rule enumerated one case). Too tight: five shapes
+that were *measured to exit 1 under `bash -e`* were rejected — `cd x && verifier`,
+`timeout N verifier`, `verifier; echo`, `env K=V verifier`, and a pipe under
+`set -o pipefail` that the rule twenty lines above deliberately exempts, so one function
+decided the same predicate two ways. It also false-red a step whose `name:` merely
+described the verifier.
 
-**Changes**: widen both the workflow-level flag and the per-line predicate, and extend
-the mask set with `set +e` and an unprotected pipe.
+Both rounds were attempts to out-regex bash's grammar, and both produced a control that
+was wrong in both directions. The same lesson is on record for this repo's SQL gates: a
+grammar needs a parser, not an accreted pattern list.
 
-**What revision 3 got wrong here, corrected**:
-- The deciding tie is **`.github/workflows/release.yml:215`**, not `:315`. `:315` is
-  `npm audit signatures --json --include-attestations > "$AUDIT_JSON"` — a redirect — and
-  no verifier line in the repo has a pipe. `:210`'s block contains
-  `echo "$VIEW" | node -e "…dist?.attestations…"` under `set -euo pipefail`, and it is
-  matched by the `dist.attestations` half of the per-line predicate.
-- The check joins `run: |` block scalars into **one logical line**, so a rule scoped to
-  "the verifier line" is in fact scoped to the whole block, and `pipefail` anywhere in
-  that joined line is the protection. Measured: a naive pipe alternative produces
-  **two false violations on `release.yml`** (`:210`, `:268`). The block-scalar header
-  and a JavaScript `||` inside the block are two further false-red surfaces in the same
-  joined text.
-- **The indirection rule is dropped.** Revision 3 proposed forbidding an `npm run` alias
-  for the gate so the flag could not be flipped off by a spelling. There are 18 real
-  `npm run` invocations in these workflows and no decidable predicate that separates an
-  alias for this gate from any other, short of resolving `package.json` scripts — which
-  is a second parser standing in for npm, the mistake N3 exists to prevent. The residual
-  is stated in SC-H instead of being closed badly.
+**So the claim is narrowed to what spelling rules can hold, and stated in the file.**
+
+- **Kept** (all decidable by a regex over one logical line): `|| true`, `; true`,
+  `|| exit 0`, `|| :`, `|| echo`, `set +e`, `set +o errexit`, an unprotected pipe with no
+  `pipefail` in the same block, a `trap … ERR` sharing a run block with a verifier (now
+  case-insensitive on the signal name), and `continue-on-error` on a verifier-running
+  workflow.
+- **Added**, because both are regex-decidable and both are holes the allowlist never
+  covered: a non-`bash`/`sh` `shell:` or `defaults.run.shell` on a verifier-running
+  workflow — `shell: bash {0}` is the custom-command form and runs **without** `-e`, which
+  every other rule here assumes — and an ambient-input `env:` key (`NODE_OPTIONS`,
+  `NODE_EXTRA_CA_CERTS`, `NODE_TLS_REJECT_UNAUTHORIZED`, the proxy set) on a
+  verifier-running workflow. The gate refuses those at runtime, but a loader named in
+  `NODE_OPTIONS` runs before its first line and can delete the variable it would have been
+  caught by, so the workflow is the only place that shape is decidable. The member set is
+  the gate's own `AMBIENT_ORIGIN_VARS`, kept identical so two adjudicators of one
+  predicate cannot drift.
+- **Removed**: the allowlist, `VERIFIER_INVOCATION_RE`, `verifierInvocationDefect`,
+  `firstControlOperator`, and `REFUSED_UNATTRIBUTED_VERIFIER_LINE`.
+- **Not attempted**: any construct that spans lines, indirects through a variable or
+  `eval`, or nests the verifier inside a compound command. The file says so.
+
+**Control class**: fail-closed verification gate over an enumerated set of spellings —
+**not** a boundary. The primary control for every shape above, caught or not, remains
+CODEOWNERS on `/.github/workflows/`, which the file's header already declared before this
+work began. Round 1's inversion overstated what the regex layer delivers; the correction
+is to make the claim match the mechanism rather than to keep growing the mechanism.
 
 **Invariants**:
 - **I-7.1** Additive to the member set — the existing anchors stay.
-- **I-7.2** Not a repo-wide ban: a workflow running no verifier keeps `continue-on-error`
-  on an unrelated step. The rule is whole-file scoped, so a workflow that *does* run the
-  gate and has an unrelated masked step **is** a violation — a deliberate consequence of
-  the existing scope, written down rather than discovered.
-- **I-7.3** `release.yml` and `dependency-signatures.yml` stay green **unedited**, and
-  the `.github/workflows/release.yml:215` allow case is asserted to match the per-line predicate first, so
-  the allow is not vacuous.
+- **I-7.2** Not a repo-wide ban: a workflow running no verifier keeps `continue-on-error`,
+  any `shell:`, and any `env:` key. The rules are scoped to verifier-running workflows.
+- **I-7.3** `release.yml` and `dependency-signatures.yml` stay green **unedited**. The
+  deciding shape is `release.yml`'s `echo "$VIEW" | node -e "…dist?.attestations…"` under
+  `set -euo pipefail` — a pipe that is safe because `pipefail` is in effect in the same
+  joined block. (Revision 4 cited `release.yml:315` for this; that line is a **redirect**,
+  and no verifier line in the repo has a pipe at all. The real instance is near `:215`.)
 
 **Acceptance criteria**:
-- **AC-7.1** New fixtures covering each of the four forms on the new gate, plus the two
-  allow cases: `.github/workflows/release.yml:215`'s real protected pipe, and an unrelated workflow's
-  `continue-on-error`.
-- **AC-7.2** One mutation per widened clause, each **observed** to red its own fixture
-  while `release.yml` stays green (O-10 applies).
-- **AC-7.3** `check-workflow-supply-chain.mjs` exits 0 against the real
-  `.github/workflows/`.
-- **AC-7.4** Residuals stated rather than implied: a non-literal
-  `continue-on-error: ${{ … }}` remains unmatched, and so does an aliased invocation
-  (SC-H).
+- **AC-7.1** Fixtures for each kept and each added form, plus the allow cases: the five
+  shapes the allowlist wrongly rejected, a step `name:` that merely mentions a verifier,
+  `release.yml`'s protected pipe, its `EXIT` cleanup trap, `shell: bash`, the token `env:`
+  the real workflows use, and an unrelated workflow's `continue-on-error`.
+- **AC-7.2** One mutation per rule, each **observed** to red its own fixture while the
+  real `.github/workflows/` stays green.
+- **AC-7.3** `check-workflow-supply-chain.mjs` exits 0 against the real workflows.
+- **AC-7.4** Residuals stated rather than implied, in the file and here: multi-line
+  constructs, `eval`/variable indirection, and a non-literal
+  `continue-on-error: ${{ … }}` are not caught.
 
 ## Go/No-Go Gate
 

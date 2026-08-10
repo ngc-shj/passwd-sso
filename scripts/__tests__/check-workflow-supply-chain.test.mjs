@@ -345,6 +345,81 @@ describe("findMaskedVerifierViolations — check-override-floor-staleness (C7)",
   });
 });
 
+// The two rules that replaced the "simple top-level command" allowlist. That
+// allowlist was measured to be both too loose (seven multi-line constructs
+// still masked the exit status) and too tight (five shapes that abort under
+// `bash -e` were rejected), so it was removed and the claim narrowed to what
+// spelling rules can hold. These two are what a regex CAN decide, and both are
+// holes the allowlist never covered.
+describe("findMaskedVerifierViolations — the premise rules (shell:, ambient env:)", () => {
+  const GATE = "node scripts/checks/check-override-floor-staleness.mjs";
+  const step = (extra) => `    steps:\n      - run: ${GATE}\n${extra}`;
+
+  it("DENY: shell: bash {0} removes the -e every other rule assumes", () => {
+    const v = findMaskedVerifierViolations(step("        shell: bash {0}\n"), "w.yml");
+    expect(v.some((m) => /shell: bash \{0\}/.test(m))).toBe(true);
+  });
+
+  it("ALLOW: the bare bash keyword form carries -e and is fine", () => {
+    expect(findMaskedVerifierViolations(step("        shell: bash\n"), "w.yml")).toEqual([]);
+    expect(findMaskedVerifierViolations(step("        shell: sh\n"), "w.yml")).toEqual([]);
+  });
+
+  it("ALLOW: a non-verifier workflow may use any shell it likes", () => {
+    const wf = `    steps:\n      - run: npm test\n        shell: python\n`;
+    expect(findMaskedVerifierViolations(wf, "w.yml")).toEqual([]);
+  });
+
+  it("DENY: an ambient-input env: key on a verifier-running workflow", () => {
+    // The gate refuses these at runtime, but a loader named in NODE_OPTIONS
+    // runs before its first line and can delete the variable it would have been
+    // caught by — so the workflow is the only place this shape is decidable.
+    for (const key of [
+      "NODE_OPTIONS: --import ./x.mjs",
+      "NODE_EXTRA_CA_CERTS: /tmp/ca.pem",
+      "NODE_TLS_REJECT_UNAUTHORIZED: \"0\"",
+      "HTTPS_PROXY: http://proxy.invalid:8080",
+    ]) {
+      const v = findMaskedVerifierViolations(step(`        env:\n          ${key}\n`), "w.yml");
+      expect(v.some((m) => /redirects, intercepts or instruments/.test(m))).toBe(true);
+    }
+  });
+
+  it("ALLOW: the token env: the real workflows use, and an ambient key on a non-verifier workflow", () => {
+    expect(
+      findMaskedVerifierViolations(step("        env:\n          GITHUB_TOKEN: x\n"), "w.yml"),
+    ).toEqual([]);
+    const noVerifier = `    steps:\n      - run: npm test\n        env:\n          NODE_OPTIONS: --max-old-space-size=4096\n`;
+    expect(findMaskedVerifierViolations(noVerifier, "w.yml")).toEqual([]);
+  });
+
+  it("DENY: a trap on ERR, in either case — bash reads signal names case-insensitively", () => {
+    for (const sig of ["ERR", "err", "Err"]) {
+      const wf = `    steps:\n      - run: |\n          trap "exit 0" ${sig}\n          ${GATE}\n`;
+      expect(findMaskedVerifierViolations(wf, "w.yml").some((m) => /trap/.test(m))).toBe(true);
+    }
+  });
+
+  it("ALLOW: release.yml's real EXIT cleanup trap in a verifier block", () => {
+    const wf = `    steps:\n      - run: |\n          trap 'rm -rf "$WORK"' EXIT\n          npm audit signatures\n`;
+    expect(findMaskedVerifierViolations(wf, "release.yml")).toEqual([]);
+  });
+
+  // The five shapes the removed allowlist rejected. Each was measured to exit 1
+  // under `bash -e`, so rejecting them was over-blocking — and over-blocking is
+  // what gets a gate deleted rather than fixed.
+  it("ALLOW: shapes that abort the step anyway are not violations", () => {
+    const shapes = [
+      `    steps:\n      - run: cd cli && ${GATE}\n`,
+      `    steps:\n      - run: timeout 300 ${GATE}\n`,
+      `    steps:\n      - run: |\n          ${GATE}\n          echo done\n`,
+      `    steps:\n      - run: env FORCE_COLOR=0 npm audit signatures\n`,
+      `    steps:\n      - name: npm audit signatures\n        run: npm audit signatures\n`,
+    ];
+    for (const wf of shapes) expect(findMaskedVerifierViolations(wf, "w.yml")).toEqual([]);
+  });
+});
+
 // I-5.3 — the PR job that runs the staleness gate must NOT be paths-filtered.
 // The gate walks all three manifests every run, so filtering on root
 // package.json would skip a cli/-only stale floor: M6's exact shape, and user

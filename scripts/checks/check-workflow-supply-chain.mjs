@@ -55,106 +55,6 @@ export function findAutoMergeViolation(content, name) {
 }
 
 /**
- * A supply-chain verifier INVOCATION: a command whose own exit status is the
- * verdict, matched only at a shell command position (start of line, or straight
- * after `!`, `;`, `&`, `|`, `(`, `)`, `{`, `}` or whitespace).
- *
- * The membership is deliberately narrower than `verifierLineRe` below. That
- * predicate also matches `dist.attestations`, which is a FIELD READ inside a
- * data-extraction expression — release.yml's real shape is
- * `PREDICATE=$(echo "$VIEW" | node -e "…j?.dist?.attestations…")`, whose exit
- * status is deliberately not the step's (the surrounding `if` compares the
- * extracted string). Subjecting a field read to a simple-command allowlist would
- * red the very workflow the allowlist exists to leave alone. So: field reads keep
- * the spelling-by-spelling mask rules, invocations get the allowlist.
- *
- * The command-position anchor is also what keeps a verifier NAME inside a string
- * from counting — release.yml's `console.log(\`npm audit signatures: …\`)` has a
- * backtick before `npm`, which is not a command position.
- */
-export const VERIFIER_INVOCATION_RE =
-  /(?:^|[;&|(){}!]|(?<=\s))\s*(npm\s+audit\s+signatures\b|(?:\S*node\S*\s+(?:-\S+\s+)*)?\S*check-override-floor-staleness\S*)/;
-
-/**
- * The first shell control operator in `text` that is not inside quotes, or null.
- * A redirection (`>`, `>>`, `2>&1`, `<`) is NOT one: it changes where output
- * goes and leaves the exit status alone. An unquoted `#` starts a comment, which
- * ends the command — everything after it is inert.
- * @param {string} text
- * @returns {string | null}
- */
-export function firstControlOperator(text) {
-  let quote = null;
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    if (quote) {
-      if (ch === "\\" && quote === '"') i += 1;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      continue;
-    }
-    if (ch === "\\") {
-      i += 1;
-      continue;
-    }
-    if (ch === "#" && (i === 0 || /\s/.test(text[i - 1]))) return null;
-    if (ch === ">" || ch === "<") {
-      if (text[i + 1] === "&") i += 1; // `2>&1` — still a redirection
-      continue;
-    }
-    if (ch === "|") return text[i + 1] === "|" ? "||" : "|";
-    if (ch === "&") return text[i + 1] === "&" ? "&&" : "&";
-    if (ch === ";") return ";";
-    if (ch === "`") return "`";
-    if (ch === "$" && text[i + 1] === "(") return "$(";
-  }
-  return null;
-}
-
-/**
- * Polarity inverted: instead of enumerating the shell spellings that mask an
- * exit status — a list that has had to be extended twice and still missed `!`,
- * `if`, `|| VAR=1`, a trailing `&` and `trap … ERR` — require the verifier
- * invocation to be a SIMPLE TOP-LEVEL COMMAND, and name whatever it is instead.
- *
- * Simple and top-level means: nothing but whitespace before it on its logical
- * line, and nothing after it except its own arguments, a redirection, or a
- * comment. Under GitHub's default `bash -e` that is exactly the condition under
- * which the verifier's non-zero exit aborts the step.
- *
- * Returns a description of the disqualifying construct, or null when the command
- * either carries no verifier invocation or carries one that is already simple.
- * @param {string} command
- * @returns {string | null}
- */
-export function verifierInvocationDefect(command) {
-  const match = VERIFIER_INVOCATION_RE.exec(command);
-  if (!match) return null;
-  const start = match.index + match[0].length - match[1].length;
-  const before = command.slice(0, start);
-  if (before.trim() !== "") {
-    const head = before.trim();
-    if (/!$/.test(head)) return "a '!' negation, which inverts the exit status";
-    const keyword = /\b(if|elif|while|until)$/.exec(head);
-    if (keyword) return `an '${keyword[1]}' condition, whose test consumes the exit status`;
-    if (/(\$\(|`)$/.test(head)) return "a command substitution, which captures output and drops the status";
-    if (/(&&|\|\||\||;)$/.test(head)) return `a '${/(&&|\|\||\||;)$/.exec(head)[1]}' chain`;
-    if (/=\s*$|=\S*$/.test(head)) return "a variable assignment, whose exit status is the assignment's";
-    return `'${head}' before it on the same logical line`;
-  }
-  const operator = firstControlOperator(command.slice(start + match[1].length));
-  if (operator) {
-    return operator === "&"
-      ? "a trailing '&', which backgrounds it and makes the step's status the shell's"
-      : `a '${operator}' after it, which discards or overrides its exit status`;
-  }
-  return null;
-}
-
-/**
  * Returns violation strings for any supply-chain verifier — `npm audit
  * signatures`, the post-publish provenance assertion (`npm view` reading
  * `dist.attestations`), or an invocation of `check-override-floor-staleness`
@@ -162,21 +62,37 @@ export function verifierInvocationDefect(command) {
  * step-level `continue-on-error: true` anywhere in a workflow that runs such a
  * verifier.
  *
- * Two INDEPENDENT layers, in this order:
+ * WHAT THIS CAN AND CANNOT DECIDE — read this before extending it.
  *
- *   1. The allowlist (`verifierInvocationDefect`): a verifier INVOCATION must be
- *      a simple top-level command. This decides the class rather than a list of
- *      spellings, which is what `!`, `if`, `|| VAR=1`, a trailing `&` and
- *      `trap … ERR` all escaped.
- *   2. The spelling rules below (`maskRe` / `pipeRe` / `continue-on-error`).
- *      They stay because they NAME the construct an operator wrote, which is the
- *      diagnostic; and because two of them — `set +e` and `trap … ERR` — are
- *      block-scoped rather than line-scoped, so no per-line allowlist sees them.
+ * These are SPELLING rules over shell text, and bash's grammar is not decidable
+ * by them. An earlier revision tried to escape that by inverting the polarity —
+ * requiring a verifier invocation to be a "simple top-level command" and naming
+ * anything else — and review measured the result to be simultaneously too loose
+ * and too tight: seven multi-line constructs still masked the exit status
+ * unseen (an `if` spanning lines, a function body, a heredoc, `eval`, a name
+ * arriving through a variable, a backgrounded group, a lowercase `err` trap),
+ * while five shapes that are provably fail-closed under `bash -e` were rejected
+ * (`cd x && verifier`, `timeout N verifier`, `verifier; echo`, `env K=V
+ * verifier`, and a pipe under `set -o pipefail` that the rule twenty lines
+ * below deliberately exempts). Writing a shell parser by accretion is how that
+ * happens; the same lesson is recorded for this repo's SQL gates.
  *
- * Tie: a line both layers fire on is a violation reported ONCE, in the spelling
- * layer's words, because that is the more specific diagnostic. A line only the
- * allowlist rejects is reported in its words. Neither layer can turn the other's
- * deny into a pass.
+ * So the claim here is deliberately narrow, and matches what the rules do:
+ *
+ *   - CAUGHT: the single-line masking spellings (`|| true`, `; true`,
+ *     `|| exit 0`, `|| :`, `|| echo`, `set +e`, `set +o errexit`), an
+ *     unprotected pipe, a `trap … ERR` sharing a run block with a verifier, a
+ *     `continue-on-error` on a verifier-running workflow, a non-`bash`/`sh`
+ *     `shell:` (which removes the `-e` every other rule assumes), and an
+ *     ambient-input `env:` key on a verifier-running workflow.
+ *   - NOT CAUGHT: any construct that spans lines, indirects through a variable
+ *     or `eval`, or nests the verifier inside a compound command. This gate does
+ *     not see those and does not claim to.
+ *
+ * The PRIMARY control for all of it remains CODEOWNERS on `/.github/workflows/`
+ * (see the file header): every shape above, caught or not, requires owner review
+ * to land. These rules are the fast, specific half — they name the construct an
+ * operator wrote — not the boundary.
  * @param {string} content
  * @param {string} name
  * @returns {string[]}
@@ -247,7 +163,7 @@ export function findMaskedVerifierViolations(content, name) {
   // joined block so that release.yml's real `trap 'rm -rf "$WORK"' EXIT` — a
   // cleanup handler on a different signal, in a block that does run a verifier —
   // is not swept up by a `\bERR\b` looked for anywhere in the same joined text.
-  const trapErrRe = /^\s*trap\b[^\n]*\bERR\b/;
+  const trapErrRe = /^\s*trap\b[^\n]*\berr\b/i;
   // An unprotected pipe: a LONE `|` — not `||` (shell OR / JS logical-or both use
   // adjacent pipe pairs, which the lookaround below excludes on both sides) — whose
   // exit status only `pipefail` preserves. No workflow here sets `shell:` or
@@ -279,45 +195,55 @@ export function findMaskedVerifierViolations(content, name) {
     }
   }
 
-  // --- layer 1: the allowlist over verifier INVOCATIONS ---------------------
+  // `trap … ERR` is block-scoped, so it is matched against one extracted COMMAND
+  // rather than the joined block: release.yml's real `trap 'rm -rf "$WORK"' EXIT`
+  // is a cleanup handler on a different signal in a block that does run a
+  // verifier, and a `\bERR\b` looked for anywhere in the joined text would sweep
+  // it up. Signal names are case-insensitive to bash, so `err` counts too — the
+  // previous spelling enumerated one case of a name the shell does not.
   const records = extractRunCommandRecords(content);
-  const attributed = new Set();
-  for (const record of records) {
-    for (let n = record.firstLine; n <= record.lastLine; n += 1) attributed.add(n);
-  }
-  for (let n = 0; n < rawLines.length; n += 1) {
-    if (/^(\s*)(?:-\s+)?run:/.test(rawLines[n])) attributed.add(n + 1);
-  }
-
-  const invocationBlocks = new Set(
-    records.filter((r) => VERIFIER_INVOCATION_RE.test(r.command)).map((r) => r.blockLine),
+  const verifierBlocks = new Set(
+    records.filter((r) => verifierLineRe.test(r.command)).map((r) => r.blockLine),
   );
   for (const record of records) {
-    if (invocationBlocks.has(record.blockLine) && trapErrRe.test(record.command)) {
+    if (verifierBlocks.has(record.blockLine) && trapErrRe.test(record.command)) {
       violations.push(
         `${name}:${record.firstLine}: a 'trap … ERR' handler shares a run block with a supply-chain verifier — an ERR trap that does not re-raise turns the verifier's non-zero exit into a clean step; remove it or move the verifier to its own step`,
       );
     }
-    const defect = verifierInvocationDefect(record.command);
-    if (defect && !spelled.has(record.blockLine)) {
+  }
+
+  // Every rule above reasons from GitHub's default shell, which is bash with
+  // `-e`. Only the `bash` and `sh` KEYWORD forms carry it: `shell: bash {0}` is
+  // the custom-command form and runs without `-e`, at which point a verifier's
+  // non-zero exit stops aborting the step and every rule here is deciding by a
+  // model the runner no longer uses. A one-token diff would otherwise convert a
+  // whole file's verifiers to theatre while this gate reported PASS.
+  if (runsVerifier) {
+    for (let n = 0; n < rawLines.length; n += 1) {
+      const shellMatch = rawLines[n].match(/^\s*(?:-\s+)?shell:\s*(\S.*?)\s*$/);
+      if (!shellMatch) continue;
+      const value = shellMatch[1].replace(/^["']|["']$/g, "");
+      if (value === "bash" || value === "sh") continue;
       violations.push(
-        `${name}:${record.firstLine}: supply-chain verifier invocation is not a simple top-level command — ${defect}. Under GitHub's default 'bash -e' only a plain, unwrapped invocation lets its non-zero exit abort the step.`,
+        `${name}:${n + 1}: a verifier-running workflow sets 'shell: ${value}' — only the bare 'bash'/'sh' keyword forms carry the '-e' that makes a verifier's non-zero exit abort the step`,
       );
     }
   }
 
-  // Fail loudly rather than skipping: a line that names a verifier invocation and
-  // that NO extracted run: command accounts for (a composite-action input, an
-  // unusual YAML shape) cannot be decided by the rules above, and an undecided
-  // line and a clean line produce identical output otherwise.
-  for (let n = 0; n < rawLines.length; n += 1) {
-    const raw = rawLines[n];
-    if (/^\s*#/.test(raw)) continue;
-    if (attributed.has(n + 1)) continue;
-    if (!VERIFIER_INVOCATION_RE.test(raw)) continue;
-    violations.push(
-      `${name}:${n + 1}: REFUSED_UNATTRIBUTED_VERIFIER_LINE: this line invokes a supply-chain verifier but no 'run:' command accounts for it, so whether its exit status is masked cannot be decided — express the invocation as a 'run:' step`,
-    );
+  // The staleness gate refuses these at runtime, but a loader named in
+  // NODE_OPTIONS runs before its first line and can delete the variable it would
+  // have been caught by — so the workflow is the only place that shape is
+  // decidable. The member set is the gate's own AMBIENT_ORIGIN_VARS, kept
+  // identical on purpose: two adjudicators of one predicate must not drift.
+  if (runsVerifier) {
+    for (let n = 0; n < rawLines.length; n += 1) {
+      const envMatch = rawLines[n].match(/^\s*(NODE_OPTIONS|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|NODE_USE_ENV_PROXY|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy):/);
+      if (!envMatch) continue;
+      violations.push(
+        `${name}:${n + 1}: a verifier-running workflow sets '${envMatch[1]}' — it redirects, intercepts or instruments the verifier's own process, which the verifier cannot refuse for itself once a loader is in play`,
+      );
+    }
   }
   // A workflow-level continue-on-error on a verifier-running workflow silently
   // downgrades a red verifier to a soft warning — including the `${{ true }}`
@@ -453,7 +379,7 @@ export function extractRunCommands(text) {
  * @param {string} text
  * @returns {{command: string, firstLine: number, lastLine: number, blockLine: number}[]}
  */
-export function extractRunCommandRecords(text) {
+function extractRunCommandRecords(text) {
   const lines = text.split("\n");
   const records = [];
   const indentOf = (s) => (s.match(/^\s*/)?.[0].length ?? 0);

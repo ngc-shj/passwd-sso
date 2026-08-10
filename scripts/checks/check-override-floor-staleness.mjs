@@ -58,6 +58,8 @@
  *                           errors and 5xx only (default 2)
  */
 import { existsSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import semver from "semver";
 import {
   DEPENDENCY_FIELDS,
@@ -1029,6 +1031,25 @@ export function exitCodeFor(rows, extraViolations = []) {
 // ---------------------------------------------------------------------------
 
 /**
+ * The repository this gate is responsible for, or null when git does not answer.
+ * Discovery and the on-disk baseline both resolve relative paths against the
+ * process's working directory, so without this the two shrink together and the
+ * coverage assertion proves nothing.
+ * @returns {string | null}
+ */
+function repositoryRoot() {
+  try {
+    const out = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return out === "" ? null : out;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * `named` records HOW each path reached this run — an operator's argument, or
  * manifest discovery. `collectEntries` needs it: a named path with no
  * `overrides` is a wrong-file refusal, a discovered one is an override-free
@@ -1109,6 +1130,22 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   let paths = args.paths;
   const named = paths.length > 0;
   if (!named) {
+    // Both `git ls-files` and `existsSync` resolve against the process's working
+    // directory, so from a subdirectory the subject and the baseline shrink
+    // TOGETHER and the subset assertion below is vacuous: run from `cli/`, the
+    // gate walked 3 of 27 entries — missing every pin in the root manifest — and
+    // printed its ordinary success line. Anchor to the repository first, so the
+    // two operands cannot move in step.
+    const root = repositoryRoot();
+    if (root === null) {
+      hardRefusals.push(
+        "REFUSED_REPOSITORY_ROOT_UNRESOLVED: `git rev-parse --show-toplevel` did not answer, so the set of manifests this gate is responsible for cannot be established. Run inside a git checkout, or name the manifests as arguments.",
+      );
+    } else if (resolve(root) !== resolve(process.cwd())) {
+      hardRefusals.push(
+        `REFUSED_NOT_REPOSITORY_ROOT: discovery resolves manifests against the working directory, which is ${process.cwd()} rather than the repository root ${root} — a subdirectory silently shrinks the walk to that subtree. Run from the root, or name the manifests as arguments.`,
+      );
+    }
     const discovered = discoverManifests();
     // The on-disk filter is the shell's job: `discoveryRefusal` is pure (P-1),
     // and asserting a baseline path that legitimately does not exist would red a
@@ -1128,7 +1165,24 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   }
 
   const entries = collectEntries(readManifestSources(paths, { named }));
-  if (entries.length === 0) {
+  // Judgeable, not total. Making an override-free manifest VISIBLE gave it a
+  // `not-judged` row, and that row counts toward `entries.length` — so a tree
+  // with zero override entries stopped refusing and started reporting "gate
+  // passed (1 override entry/entries)", which is both a green verdict on an
+  // unexamined tree and a false count. The guard has to ask what was judged.
+  const judgeable = entries.filter((entry) => entry.kind !== "manifest");
+  // ...but only when nothing more specific is already in hand. An unreadable
+  // named path and a named path with no `overrides` both yield manifest-level
+  // rows and no judgeable ones, and reporting EMPTY_WALK for either would
+  // collapse a precise refusal into a generic one — the thing I-3.5 forbids.
+  // The test is the OUTCOME, not the presence of a `refusal` string: a
+  // DISCOVERED override-free workspace also carries one, as the note that makes
+  // it visible, and letting that suppress EMPTY_WALK put the green verdict on an
+  // unexamined tree straight back.
+  const manifestRefusal = entries.some(
+    (entry) => entry.kind === "manifest" && entry.outcome === OUTCOME.REFUSED,
+  );
+  if (judgeable.length === 0 && !manifestRefusal) {
     emit(stderr, "override floor staleness gate refused to run:");
     emit(
       stderr,
@@ -1188,7 +1242,7 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   for (const row of rows) {
     if (row.outcome === OUTCOME.NOT_JUDGED && row.refusal) emit(stdout, `  note: ${describeEntry(row)} — ${row.refusal}`);
   }
-  emit(stdout, `override floor staleness gate passed (${rows.length} override entry/entries, ${advisoryCache.size} package(s) queried).`);
+  emit(stdout, `override floor staleness gate passed (${judgeable.length} override entry/entries, ${advisoryCache.size} package(s) queried).`);
   return 0;
 }
 
