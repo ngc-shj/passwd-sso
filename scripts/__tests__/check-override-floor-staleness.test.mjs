@@ -898,7 +898,10 @@ describe("a manifest that cannot be read is a refusal, not a skip", () => {
     // Two manifests were NAMED and one of them yields no override row; deriving
     // the count from `new Set(rows.map(r => r.manifest))` reported "1 manifest(s)".
     const sources = [
-      { path: "a.json", named: false, ok: true, json: { name: "a" } },
+      // `overrides: {}` and not a MISSING block: a missing one now yields a
+      // not-judged row, so both the source-derived and the row-derived count
+      // would say 2 and the case would measure nothing.
+      { path: "a.json", named: false, ok: true, json: { name: "a", overrides: {} } },
       { path: "b.json", named: false, ok: true, json: { name: "b", overrides: { postcss: ">=8.5.23" } } },
     ];
     const rows = judge(collectEntries(sources), okCache([["postcss", []]]));
@@ -1275,7 +1278,7 @@ describe("output sanitization", () => {
   });
 
   it("sanitizeUntrusted strips control characters, caps at the same bound, and coerces a non-string", () => {
-    expect(sanitizeUntrusted("ab cd")).toBe("abcd");
+    expect(sanitizeUntrusted("a\u0007b\u0000c\u007fd")).toBe("abcd");
     expect(sanitizeUntrusted("x".repeat(2001))).toBe(`${"x".repeat(2000)}…[truncated]`);
     expect(sanitizeUntrusted(undefined)).toBe("undefined");
   });
@@ -2303,5 +2306,123 @@ describe("the credential at the default origin", () => {
   it("DENY: with no token in the environment, NO authorization header is built at all", async () => {
     const { requests } = await runAtDefaultOrigin({});
     expect(Object.keys(requests[0].headers)).not.toContain("authorization");
+  });
+});
+
+
+// ===========================================================================
+// Round-2 review: behaviours the round-1 fixes added that survived deletion,
+// plus the two sanitizer members the class fix missed.
+// ===========================================================================
+
+describe("round-1 fixes, pinned", () => {
+  it("DENY: sanitizeLine neutralizes an INDENTED workflow command — the runner trims first", () => {
+    // Every report line this gate emits is indented, so testing the untrimmed
+    // string meant the guard could not fire on any line it actually prints.
+    expect(sanitizeLine("  ::error::pwn")).toBe("  [REFUSED_WORKFLOW_COMMAND]error::pwn");
+    // A TAB is a control character and is stripped before the `::` test runs,
+    // so nothing is left to preserve in front of the marker. Spaces survive.
+    expect(sanitizeLine("\t::add-mask::x")).toBe("[REFUSED_WORKFLOW_COMMAND]add-mask::x");
+    expect(sanitizeLine("    ::notice::x")).toBe("    [REFUSED_WORKFLOW_COMMAND]notice::x");
+  });
+
+  it("ALLOW: an indented legitimate report line is byte-identical", () => {
+    const line = "  [clean] package.json overrides: 'postcss' band '>= 2.0.0, < 2.1.4' -> 2.1.4";
+    expect(sanitizeLine(line)).toBe(line);
+  });
+
+  it("DENY: a scope opener whose parent query failed carries the failure, still not-judged", () => {
+    // The verdict stays with the children — the fix must surface the failure
+    // without turning a not-judged row into a failing one.
+    const entries = collectEntries([
+      {
+        path: "package.json",
+        named: false,
+        ok: true,
+        json: { overrides: { "@scope/parent": { child: "^1.0.0" } } },
+      },
+    ]);
+    const cache = new Map([
+      ["@scope/parent", { ok: false, token: "UNDECIDABLE_TRANSPORT", detail: "connect ECONNREFUSED" }],
+      ["child", { ok: true, advisories: [] }],
+    ]);
+    const rows = judge(entries, cache);
+    const opener = rows.find((r) => r.kind === "scope-opener");
+    expect(opener.outcome).toBe(OUTCOME.NOT_JUDGED);
+    expect(opener.refusal).toContain("UNDECIDABLE_TRANSPORT");
+    expect(opener.refusal).toContain("@scope/parent");
+  });
+
+  it("ALLOW: the same scope opener with a successful query carries no refusal", () => {
+    const entries = collectEntries([
+      {
+        path: "package.json",
+        named: false,
+        ok: true,
+        json: { overrides: { "@scope/parent": { child: "^1.0.0" } } },
+      },
+    ]);
+    const cache = okCache([
+      ["@scope/parent", []],
+      ["child", []],
+    ]);
+    const opener = judge(entries, cache).find((r) => r.kind === "scope-opener");
+    expect(opener.outcome).toBe(OUTCOME.NOT_JUDGED);
+    expect(opener.refusal).toBeUndefined();
+  });
+
+  it("DENY: an unparseable-selector refusal shows the object pin, not [object Object]", () => {
+    const rows = collectEntries([
+      {
+        path: "package.json",
+        named: false,
+        ok: true,
+        json: { overrides: { "pkg@latest": { child: "1.0.0" } } },
+      },
+    ]);
+    const refusal = rows.map((r) => r.refusal).filter(Boolean).join(" ");
+    expect(refusal).toContain('{"child":"1.0.0"}');
+    expect(refusal).not.toContain("[object Object]");
+  });
+
+  it("ALLOW: a string pin still renders with its quotes", () => {
+    const rows = collectEntries([
+      { path: "package.json", named: false, ok: true, json: { overrides: { "pkg@latest": "^1.0.0" } } },
+    ]);
+    expect(rows.map((r) => r.refusal).filter(Boolean).join(" ")).toContain("'^1.0.0'");
+  });
+
+  it("DENY: a band that no longer covers the pinned version is a stale CONSTANT, not a stale tree", () => {
+    // semver.satisfies returns false for an unparseable range and for an
+    // unparseable version alike — it does not throw — so this fixture lands on
+    // the constant-stale branch, which is the honest answer for it.
+    const stale = checkCanary({
+      ok: true,
+      advisories: [
+        {
+          ghsa_id: CANARY.ghsaId,
+          withdrawn_at: null,
+          severity: "high",
+          vulnerabilities: [
+            {
+              package: { ecosystem: "npm", name: CANARY.pkg },
+              vulnerable_version_range: "< 1.0.0",
+              first_patched_version: "1.0.0",
+            },
+          ],
+        },
+      ],
+    });
+    expect(stale.ok).toBe(false);
+    expect(stale.token).toBe("CANARY_CONSTANT_STALE");
+  });
+
+  it("the comparison-threw branch has a reachable trigger, and it is not the stale-constant one", () => {
+    // CANARY_COMPARISON_THREW is raised by run()'s catch, not by checkCanary.
+    // Its trigger is a response whose shape checkCanary cannot walk — which
+    // checkResponseShape would normally reject first, so this is the
+    // belt-and-braces layer. Asserting the throw is what proves the catch is
+    // not guarding an impossible state.
+    expect(() => checkCanary({ ok: true, advisories: "not-an-array" })).toThrow();
   });
 });

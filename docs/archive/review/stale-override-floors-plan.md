@@ -296,7 +296,7 @@ the functions and the compiler holds the shapes.
 - **P-4** The command line distinguishes **flags from manifest paths**, and every way
   it can go wrong is a named refusal rather than a skip: an unrecognized flag, a path
   that cannot be read, a discovery fallback, and a walk that yielded zero rows of any
-  kind. Revision 3 cited `scripts/checks/check-override-key-disjointness.mjs:305` as the precedent
+  kind. Revision 3 cited `scripts/checks/check-override-key-disjointness.mjs` as the precedent
   without stating this; that form treats every argument as a path and swallows
   `ENOENT`, so `--report` would become a path, be skipped, and a mistyped scratchpad
   path would report clean.
@@ -711,7 +711,7 @@ is to make the claim match the mechanism rather than to keep growing the mechani
 - **I-7.3** `release.yml` and `dependency-signatures.yml` stay green **unedited**. The
   deciding shape is `release.yml`'s `echo "$VIEW" | node -e "…dist?.attestations…"` under
   `set -euo pipefail` — a pipe that is safe because `pipefail` is in effect in the same
-  joined block. (Revision 4 cited `release.yml:315` for this; that line is a **redirect**,
+  joined block. (Revision 4 cited `.github/workflows/release.yml:315` for this; that line is a **redirect**,
   and no verifier line in the repo has a pipe at all. The real instance is near `:215`.)
 
 **Acceptance criteria**:
@@ -813,12 +813,18 @@ own sibling self-test that no contract owns, and AC-4.2 forbids a debt entry.
 
 | Symbol | Location | Use |
 |---|---|---|
-| `discoverManifests` | `scripts/checks/check-override-key-disjointness.mjs:60` | manifest discovery — but its `git ls-files` fallback is a **refusal** for C3, not a silent fallback (N4) |
-| `splitOverrideKey` | same, `:82` | package-name/selector split, including the scoped-name `lastIndexOf("@")` subtlety (I-2.4) |
-| `collectScopes` / `topLevelScope` | same, `:118` / `:168` | the walker C2 extends; a second copy in the new gate is the R1 defect |
+| `discoverManifests` | `scripts/checks/check-override-key-disjointness.mjs` | manifest discovery — but its `git ls-files` fallback is a **refusal** for C3, not a silent fallback (N4) |
+| `splitOverrideKey` | same file | package-name/selector split, including the scoped-name `lastIndexOf("@")` subtlety (I-2.4) |
+| `collectScopes` / `topLevelScope` | same file | the walker C2 extends; a second copy in the new gate is the R1 defect |
 | `semver.intersects` | `semver` (root devDependency) | the only range predicate (N3) |
-| `extractRunCommands` | `scripts/checks/check-workflow-supply-chain.mjs:270` | C7 binds the widened match to extracted `run:` commands, not raw file text |
-| `findMaskedVerifierViolations` | same, `:69` | C7 extends this function's member set rather than adding a parallel rule |
+| `extractRunCommands` | `scripts/checks/check-workflow-supply-chain.mjs` | C7's workflow-level verifier flag reads extracted `run:` commands, not raw file text, so a YAML comment naming the gate cannot flip it |
+| `findMaskedVerifierViolations` | same file | C7 extends this function's rule set rather than adding a parallel checker |
+
+
+> Symbols, not line numbers, in the table above: three consecutive rounds moved
+> these citations by editing the very files they point into, and a re-pointed line
+> that no longer supports its claim reads more authoritative than the vague version
+> it replaced.
 
 ### Gates that fire on files this change adds
 

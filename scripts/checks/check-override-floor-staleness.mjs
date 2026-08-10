@@ -802,7 +802,7 @@ export function judge(entries, advisoryCache) {
       if (advisoryCache.has(entry.pkg) && fetched?.ok !== true) {
         return {
           ...entry,
-          refusal: `${fetched?.token ?? "UNDECIDABLE_FETCH_FAILED"}: ${entry.pkg}: the advisory query for this scope opener's parent failed (${fetched?.detail ?? "no usable response"}); the scope's own children carry the verdict`,
+          refusal: `${fetched?.token ?? "UNDECIDABLE_FETCH_FAILED"}: ${entry.pkg}: the advisory query for this scope opener's parent failed (${sanitizeUntrusted(fetched?.detail ?? "no usable response")}); the scope's own children carry the verdict`,
         };
       }
     }
@@ -906,7 +906,13 @@ export function sanitizeLine(line) {
         if (code < 0x20 || code === 0x7f) continue;
         out += ch;
       }
-      if (out.startsWith("::")) out = `[REFUSED_WORKFLOW_COMMAND]${out.slice(2)}`;
+      // GitHub's runner calls TrimStart() before matching the `::` keyword, and
+      // every report line here is indented — testing the UNtrimmed string meant
+      // this guard could not fire on any line the gate actually emits.
+      const lead = out.length - out.trimStart().length;
+      if (out.trimStart().startsWith("::")) {
+        out = `${out.slice(0, lead)}[REFUSED_WORKFLOW_COMMAND]${out.slice(lead + 2)}`;
+      }
       if (out.length > MAX_LINE_LENGTH) out = `${out.slice(0, MAX_LINE_LENGTH)}…[truncated]`;
       return out;
     })
@@ -960,7 +966,7 @@ export function formatViolationLines(rows) {
     const detail = row.hits
       .map(
         (h) =>
-          `${sanitizeUntrusted(h.advisory.id)}${h.advisory.type === "unreviewed" ? " [unreviewed]" : ""} [${h.advisory.severity ?? "?"}] band '${sanitizeUntrusted(h.band.range)}'${h.band.firstPatched ? ` -> ${sanitizeUntrusted(h.band.firstPatched)}` : " -> NO_PATCHED_VERSION"} (${sanitizeUntrusted(h.advisory.summary)})`,
+          `${sanitizeUntrusted(h.advisory.id)}${h.advisory.type === "unreviewed" ? " [unreviewed]" : ""} [${sanitizeUntrusted(h.advisory.severity ?? "?")}] band '${sanitizeUntrusted(h.band.range)}'${h.band.firstPatched ? ` -> ${sanitizeUntrusted(h.band.firstPatched)}` : " -> NO_PATCHED_VERSION"} (${sanitizeUntrusted(h.advisory.summary)})`,
       )
       .join("; ");
     const floor = row.requiredFloor;
@@ -1225,6 +1231,16 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
   const violations = [...formatViolationLines(rows), ...extraViolations];
   const code = exitCodeFor(rows, extraViolations);
 
+  // Printed on BOTH paths, and above the verdict. A `not-judged` row carries no
+  // verdict of its own, so anything attached to it — a workspace with no
+  // `overrides`, or a scope opener whose advisory query failed — is invisible
+  // otherwise, and neither the PR job nor the `pre-pr` step passes --report.
+  // It sat below the `code !== 0` early return for one round, which dropped it
+  // on exactly the runs an operator is reading most closely.
+  for (const row of rows) {
+    if (row.outcome === OUTCOME.NOT_JUDGED && row.refusal) emit(stdout, `  note: ${describeEntry(row)} — ${row.refusal}`);
+  }
+
   if (code !== 0) {
     emit(stderr, "override floor staleness gate failed:");
     for (const v of violations) emit(stderr, `  - ${v}`);
@@ -1234,13 +1250,6 @@ export async function run(argv, env, { stdout = console.log, stderr = console.er
       "See docs/security/dependency-cve-response.md Step 4 — raise the pin's floor to at or above the highest first_patched_version over its intersecting bands, or bound the pin below them.",
     );
     return code;
-  }
-  // Printed on the PASS path too, not only under --report. A `not-judged` row
-  // carries no verdict of its own, so anything attached to it — a workspace with
-  // no `overrides`, or a scope opener whose advisory query failed — is invisible
-  // otherwise, and neither the PR job nor the `pre-pr` step passes --report.
-  for (const row of rows) {
-    if (row.outcome === OUTCOME.NOT_JUDGED && row.refusal) emit(stdout, `  note: ${describeEntry(row)} — ${row.refusal}`);
   }
   emit(stdout, `override floor staleness gate passed (${judgeable.length} override entry/entries, ${advisoryCache.size} package(s) queried).`);
   return 0;

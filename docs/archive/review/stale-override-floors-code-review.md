@@ -120,3 +120,116 @@ mutating the tracked file, and restoring it — rather than running the suite ag
 throwaway copy, which is the rule this project holds. The restore was verified
 (both sanitizers present, no residue, gate green, 217 cases passing), but the technique
 was wrong and is recorded rather than omitted.
+
+---
+
+# Round 2
+
+## Changes from Previous Round
+
+The round-1 fixes: two `js-yaml` floors and `nanoid` raised; a `git ls-files`
+coverage subset refusal; a named-vs-discovered split for an override-free manifest;
+the exit-mask detector's polarity inverted from a spelling denylist to a
+"simple top-level command" allowlist; and six test blind spots closed.
+
+## Result
+
+**1 Critical, 13 Major, 7 Minor.** The round's finding is that *the fixes introduced
+new defects* — which is what an incremental round exists to catch.
+
+### The fix that had to be reversed
+
+Round 1's headline was the polarity inversion in `check-workflow-supply-chain.mjs`.
+Round 2 measured it to be **wrong in both directions**:
+
+- **Too loose** — seven constructs still masked the exit status unseen: an `if`
+  spanning lines, a function body, a heredoc, `eval`, a name arriving through a
+  variable, a backgrounded group, and a lowercase `err` trap (bash reads signal names
+  case-insensitively; the rule enumerated one case).
+- **Too tight** — five shapes *measured to exit 1 under `bash -e`* were rejected:
+  `cd x && verifier`, `timeout N verifier`, `verifier; echo`, `env K=V verifier`, and
+  a pipe under `set -o pipefail` that the rule twenty lines above deliberately
+  exempts, so one function decided the same predicate two ways. It also red a step
+  whose `name:` merely described the verifier.
+- **Untested** — all four of its exports had zero test references. Deleting the whole
+  mechanism left the suite green.
+
+Two rounds had now tried to out-regex bash's grammar. **The user's call was to make
+the claim match the implementation**, so the allowlist was removed and C7 narrowed to
+what a spelling rule can hold, with the residual stated in the file: multi-line
+constructs, `eval` and variable indirection are not caught, and CODEOWNERS on
+`/.github/workflows/` remains the primary control — which the file's header had
+declared before any of this began.
+
+Two rules were *added*, because both are regex-decidable and both were holes the
+allowlist never covered: a non-`bash`/`sh` `shell:` (which removes the `-e` every
+other rule assumes — `shell: bash {0}` converted a whole file's verifiers to theatre
+while the gate reported PASS), and an ambient-input `env:` key on a verifier-running
+workflow (the only place a `NODE_OPTIONS` loader is decidable at all, since the loader
+runs before the gate's first line and can delete the variable it would be caught by).
+
+### Two fail-closed guards the round-1 fixes had disarmed
+
+| | after round 1 | after round 2 |
+|---|---|---|
+| a tree with zero override entries | `gate passed (1 override entry/entries)`, exit 0 | `REFUSED_EMPTY_WALK` |
+| run from `cli/` | 3 of 27 entries walked, exit 0 | `REFUSED_NOT_REPOSITORY_ROOT` |
+
+The first is R43 in its plainest form: making an override-free manifest *visible* gave
+it a row, and `REFUSED_EMPTY_WALK` counted rows. The second is the cwd half of the
+coverage finding — `git ls-files` and `existsSync` both resolve against the working
+directory, so subject and baseline shrank together and the subset assertion proved
+nothing. Both were reproduced before being fixed.
+
+### Other fixes
+
+The credential-scoping, sanitization and `parseArgs` fixes from round 1 were verified
+correct. Closed this round: `sanitizeLine`'s `::` anchor tested the untrimmed line
+while GitHub's runner calls `TrimStart()` first, so it could not fire on any line the
+gate emits; two fragments the sanitization class fix missed (`advisory.severity`,
+the fetch-failure `detail`); the `not-judged` note sat below the `code !== 0` early
+return, so it was dropped on exactly the runs an operator reads most closely; and the
+test gaps for three round-1 behaviours that survived deletion, the non-discriminating
+manifest-count fixture, and `CANARY_COMPARISON_THREW`.
+
+## Two defects the orchestrator introduced while fixing, recorded rather than hidden
+
+1. The first `REFUSED_EMPTY_WALK` fix keyed on a `refusal` string being present. A
+   *discovered* override-free row carries one as its visible note, so the guard
+   suppressed itself — and, in the other direction, briefly shadowed the more specific
+   `REFUSED_MANIFEST_UNREADABLE` and `REFUSED_MANIFEST_WITHOUT_OVERRIDES`. It now keys
+   on the outcome.
+2. An edit wrote **raw control bytes** (NUL, BEL) into the test source where escape
+   sequences were intended. A file carrying a NUL reads as binary to `ripgrep` and
+   `grep` — which is what made an audit earlier in this work report eleven false gaps.
+   Replaced with escapes.
+
+One check was corrected rather than worked around: the swallowed-comparison forbidden
+pattern was applied to the whole file and matched `repositoryRoot`'s `catch`, which
+returns null so the caller can emit a named refusal. The comparison it guards lives in
+the pure core, so that is where the pattern now looks.
+
+## Resolution Status — Round 2
+
+All 1 Critical and 13 Major are resolved. Of the 7 Minor, five are resolved and two
+are carried as stated residuals rather than fixed:
+
+### Residual 1 — the allowlist's coverage, deliberately not restored
+- **Anti-Deferral check**: acceptable risk, quantified.
+- **Worst case**: a workflow masks a verifier's exit status with a multi-line
+  construct, an `eval`, or variable indirection, and this gate does not see it.
+- **Likelihood**: low. It requires editing a CODEOWNERS-gated workflow, which is the
+  primary control and is unchanged.
+- **Cost to fix**: a real shell parser, i.e. a new dependency in a password manager's
+  supply chain for a CI gate — the decision the user weighed and declined.
+- **Recorded where it will be read**: the file's own header, contract C7, and the
+  playbook.
+
+### Residual 2 — `--report`'s per-package counts are emitted only by the weekly sweep
+- **Anti-Deferral check**: acceptable risk, quantified.
+- **Worst case**: on a PR run, a package the API answered nothing about is
+  indistinguishable from one with 44 advisories checked.
+- **Likelihood**: certain for that one signal; the canary and the per-package
+  integrity rule still run on every invocation, so a dead channel is still caught.
+- **Cost to fix**: adding `--report` to the PR job trades a quiet log for a noisy one
+  on every pull request.
