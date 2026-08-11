@@ -82,10 +82,22 @@ export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
  * not a Next page at all. `useRouter().push()` would keep the old heap alive,
  * so this is the one place allowed to assign `window.location.href`.
  *
+ * Being that one place is also why it refuses to leave the current origin: a
+ * string reaching this function IS a navigation, so `//evil.example` (which
+ * `withBasePath` leaves protocol-relative whenever BASE_PATH is empty) or a
+ * `javascript:` URL would be an open redirect here rather than a bug at the
+ * call site. Callers pass literal routes today; the guard is what keeps that
+ * from being load-bearing. The refusal names only the origin — a caller-supplied
+ * path can carry a token in its query string.
+ *
  * Client-side only.
  */
 export function hardNavigate(path: string): void {
-  window.location.href = withBasePath(path);
+  const target = new URL(withBasePath(path), window.location.origin);
+  if (target.origin !== window.location.origin) {
+    throw new Error(`hardNavigate: refusing to navigate to origin ${target.origin}`);
+  }
+  window.location.href = target.toString();
 }
 
 /**

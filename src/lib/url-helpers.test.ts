@@ -183,6 +183,86 @@ describe("url-helpers (basePath=/passwd-sso)", () => {
   });
 });
 
+// ─── hardNavigate ────────────────────────────────────────────
+
+describe("hardNavigate", () => {
+  const ORIGIN = "https://app.example.com";
+  let location: { origin: string; href: string };
+  let originalLocation: Location;
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    originalLocation = window.location;
+    // jsdom refuses a real navigation ("Not implemented"), so href is a plain
+    // writable property here — its value after the call IS the assertion.
+    location = { origin: ORIGIN, href: `${ORIGIN}/dashboard` };
+    Object.defineProperty(window, "location", {
+      value: location,
+      writable: true,
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", {
+      value: originalLocation,
+      writable: true,
+      configurable: true,
+    });
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("navigates to an absolute URL on the current origin", async () => {
+    const { hardNavigate } = await import("@/lib/url-helpers");
+
+    hardNavigate("/ja/dashboard");
+
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+  });
+
+  it("preserves a percent-encoded query", async () => {
+    const { hardNavigate } = await import("@/lib/url-helpers");
+
+    hardNavigate(`/ja/auth/signin?callbackUrl=${encodeURIComponent("/ja/dashboard")}`);
+
+    expect(location.href).toBe(`${ORIGIN}/ja/auth/signin?callbackUrl=%2Fja%2Fdashboard`);
+  });
+
+  it("prepends basePath before resolving", async () => {
+    vi.stubEnv("NEXT_PUBLIC_BASE_PATH", "/passwd-sso");
+    const { hardNavigate } = await import("@/lib/url-helpers");
+
+    hardNavigate("/ja/dashboard");
+
+    expect(location.href).toBe(`${ORIGIN}/passwd-sso/ja/dashboard`);
+  });
+
+  it("refuses a protocol-relative destination and does not navigate", async () => {
+    const { hardNavigate } = await import("@/lib/url-helpers");
+
+    // With BASE_PATH empty this reaches location.href verbatim, and the browser
+    // reads it as https://evil.example — an open redirect, not a broken path.
+    expect(() => hardNavigate("//evil.example/steal")).toThrow(/https:\/\/evil\.example/);
+    expect(location.href).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it("refuses a javascript: destination and does not navigate", async () => {
+    const { hardNavigate } = await import("@/lib/url-helpers");
+
+    expect(() => hardNavigate("javascript:alert(1)")).toThrow(/refusing to navigate/);
+    expect(location.href).toBe(`${ORIGIN}/dashboard`);
+  });
+
+  it("refuses an absolute URL to another origin", async () => {
+    const { hardNavigate } = await import("@/lib/url-helpers");
+
+    expect(() => hardNavigate("https://evil.example/steal")).toThrow(/refusing to navigate/);
+    expect(location.href).toBe(`${ORIGIN}/dashboard`);
+  });
+});
+
 // ─── getAppOrigin ────────────────────────────────────────────
 
 describe("getAppOrigin", () => {

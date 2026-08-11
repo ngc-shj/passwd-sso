@@ -158,6 +158,31 @@ function run(env = {}, { tocEntries } = {}) {
   });
 }
 
+/**
+ * Start `scriptPath` in the background with its output (and exit code) captured
+ * in `outPath`, then replace `rootPath` underneath the running script.
+ *
+ * A shell is unavoidable here — the sequence is background, sleep, swap, wait —
+ * but the three paths are POSITIONAL ARGUMENTS, never command text. All three
+ * derive from the environment (BACKUP_DB_SCRIPT, TMPDIR), so splicing them in
+ * would let a path carrying shell metacharacters execute instead of being read
+ * (CodeQL js/shell-command-injection-from-environment). The hostile-path case
+ * below drives this same function, so an interpolated rewrite fails there.
+ */
+function runRootSwap(scriptPath, outPath, rootPath, options = {}) {
+  return spawnSync("bash", ["-c", `
+      ("$1"; echo "EXIT=$?") > "$2" 2>&1 &
+      sleep 1
+      mv "$3" "$3.moved"
+      mkdir -m 700 "$3"
+      wait
+    `, "backup-db-swap", scriptPath, outPath, rootPath], {
+    encoding: "utf8",
+    timeout: 20000,
+    ...options,
+  });
+}
+
 function err(r) {
   const m = (r.stdout + r.stderr).match(/BACKUP_ERR:([A-Z_]+)/);
   return m ? m[1] : null;
@@ -3456,18 +3481,7 @@ exit 0`);
     // The wrapper's own status says nothing — it is the shell that performed
     // the swap, not the run under test. What the run did is in the redirected
     // output, which carries the script's exit code as a line.
-    // Paths reach the shell as positional arguments, never as interpolated
-    // text: SCRIPT, tmpDir and backupDir all derive from the environment
-    // (BACKUP_DB_SCRIPT, TMPDIR), so splicing them into the command string
-    // would make a path containing shell metacharacters execute.
-    const swap = spawnSync("bash", ["-c", `
-      ("$1"; echo "EXIT=$?") > "$2" 2>&1 &
-      sleep 1
-      mv "$3" "$3.moved"
-      mkdir -m 700 "$3"
-      wait
-    `, "backup-db-swap", SCRIPT, join(tmpDir, "out"), backupDir], {
-      encoding: "utf8", timeout: 20000,
+    const swap = runRootSwap(SCRIPT, join(tmpDir, "out"), backupDir, {
       env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
              BACKUP_DIR: backupDir, BACKUP_RETAIN: "1" },
     });
@@ -3476,6 +3490,33 @@ exit 0`);
     expect(out, "a replaced root must not yield a success").not.toMatch(/EXIT=0/);
     expect(generations(), "and must leave nothing published in the new root").toEqual([]);
     rmSync(`${backupDir}.moved`, { recursive: true, force: true });
+  });
+
+  it("runs the swap harness over paths carrying shell metacharacters without executing them", () => {
+    // The harness reads BACKUP_DB_SCRIPT and TMPDIR-derived paths, so neither is
+    // guaranteed to be a bare word. `$(…)` substitutes inside double quotes, so
+    // a path spliced into the command text runs — and the marker is how that is
+    // detected. Relative marker + cwd: the substitution would run with the
+    // harness's cwd, and a slash cannot appear in the directory name anyway.
+    const hostile = (label) => `${label};$(touch pwned-${label})`;
+    const scriptPath = join(tmpDir, `${hostile("script")}.sh`);
+    writeFileSync(scriptPath, "#!/usr/bin/env bash\nexit 7\n", "utf8");
+    chmodSync(scriptPath, 0o700);
+    const rootPath = join(tmpDir, hostile("root"));
+    mkdirSync(rootPath, { recursive: true, mode: 0o700 });
+
+    const swap = runRootSwap(scriptPath, join(tmpDir, "hostile-out"), rootPath, {
+      cwd: tmpDir,
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C" },
+    });
+
+    expect(swap.error, "the swap harness itself must have run").toBeUndefined();
+    expect(existsSync(join(tmpDir, "pwned-script")), "the script path must not be re-parsed as shell text").toBe(false);
+    expect(existsSync(join(tmpDir, "pwned-root")), "the root path must not be re-parsed as shell text").toBe(false);
+    // Not just "nothing executed" — the paths must still have been USED, or an
+    // arg-passing bug that silently addressed nothing would read as a pass.
+    expect(readFileSync(join(tmpDir, "hostile-out"), "utf8"), "the script at the hostile path must have run").toMatch(/EXIT=7/);
+    expect(existsSync(`${rootPath}.moved`), "the root at the hostile path must have been swapped").toBe(true);
   });
 
   it("writes no credential into any published artifact", () => {
