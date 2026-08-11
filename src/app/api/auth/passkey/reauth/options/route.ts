@@ -92,7 +92,7 @@ async function handlePOST(req: NextRequest) {
       action: AUDIT_ACTION.AUTH_PASSKEY_REAUTH_UNAVAILABLE,
       metadata: { reason: "provider" },
     });
-    return errorResponse(API_ERROR.SESSION_STEP_UP_REQUIRED, 403);
+    return errorResponse(API_ERROR.SESSION_STEP_UP_REQUIRED);
   }
 
   if (gate.row.authCredentialId === null) {
@@ -101,7 +101,7 @@ async function handlePOST(req: NextRequest) {
       action: AUDIT_ACTION.AUTH_PASSKEY_REAUTH_UNAVAILABLE,
       metadata: { reason: "no_binding" },
     });
-    return errorResponse(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE, 403);
+    return errorResponse(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE);
   }
 
   // Reachable, not defensive dead code: the session read and this lookup are
@@ -113,7 +113,7 @@ async function handlePOST(req: NextRequest) {
       action: AUDIT_ACTION.AUTH_PASSKEY_REAUTH_UNAVAILABLE,
       metadata: { reason: "credential_missing" },
     });
-    return errorResponse(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE, 403);
+    return errorResponse(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE);
   }
 
   const allowCredentials = [gate.credential];

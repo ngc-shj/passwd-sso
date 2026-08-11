@@ -319,7 +319,7 @@ async function handlePOST(req: NextRequest) {
           outcome.presentedCredentialId,
         ),
       });
-      return errorResponse(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE, 403);
+      return errorResponse(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE);
     }
 
     case "mismatch": {
@@ -333,7 +333,7 @@ async function handlePOST(req: NextRequest) {
         ),
       });
       if (outcome.auditReason === "presented_credential") {
-        return errorResponse(API_ERROR.PASSKEY_REAUTH_CREDENTIAL_MISMATCH, 403);
+        return errorResponse(API_ERROR.PASSKEY_REAUTH_CREDENTIAL_MISMATCH);
       }
       // signature_invalid / counter_mismatch: the verifier's own response is
       // unchanged — only the audit trail is new (findings P1/Q2).
