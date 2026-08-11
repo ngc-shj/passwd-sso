@@ -131,7 +131,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
     mockSessionFindUnique.mockResolvedValue({
       provider: "webauthn",
       authCredentialId: "cred-row-1",
-      authCredential: { credentialId: "cred-1" },
+      authCredential: { credentialId: "cred-1", userId: "user-1" },
     });
     mockVerifyAssertionForCredential.mockResolvedValue({
       ok: true,
@@ -293,6 +293,36 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
           metadata: expect.objectContaining({ reason: "no_binding" }),
         }),
       );
+    });
+
+    it("denies a binding that resolves to another user's credential, and records no id for it", async () => {
+      // The FK guarantees only that the row exists — referential integrity
+      // spans no user predicate — so a corrupt binding is not excluded by the
+      // schema. Without the userId check the relation read would put the other
+      // user's credentialId into this user's audit metadata.
+      mockSessionFindUnique.mockResolvedValue({
+        provider: "webauthn",
+        authCredentialId: "cred-row-other",
+        authCredential: { credentialId: "cred-belonging-to-user-2", userId: "user-2" },
+      });
+
+      const res = await POST(makeVerifyRequest());
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toEqual({ error: "PASSKEY_REAUTH_UNAVAILABLE" });
+      expect(mockVerifyAssertionForCredential).not.toHaveBeenCalled();
+      expect(mockSessionUpdate).not.toHaveBeenCalled();
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "AUTH_PASSKEY_REAUTH_UNAVAILABLE",
+          metadata: expect.objectContaining({
+            reason: "no_binding",
+            boundCredentialId: null,
+          }),
+        }),
+      );
+      // The whole point: the other user's identifier must not appear anywhere.
+      expect(JSON.stringify(mockLogAudit.mock.calls)).not.toContain("cred-belonging-to-user-2");
     });
   });
 
@@ -466,7 +496,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       mockSessionFindUnique.mockResolvedValue({
         provider: "webauthn",
         authCredentialId: "cred-row-1",
-        authCredential: { credentialId: longBoundId },
+        authCredential: { credentialId: longBoundId, userId: "user-1" },
       });
       mockVerifyAssertionForCredential.mockResolvedValue({
         ok: false,
@@ -495,7 +525,7 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       mockSessionFindUnique.mockResolvedValue({
         provider: "webauthn",
         authCredentialId: "cred-row-1",
-        authCredential: { credentialId: exactBoundId },
+        authCredential: { credentialId: exactBoundId, userId: "user-1" },
       });
       mockVerifyAssertionForCredential.mockResolvedValue({
         ok: false,

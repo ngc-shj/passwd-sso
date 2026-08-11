@@ -134,6 +134,17 @@ export const TEST_USERS = {
     email: "e2e-key-rotation@test.local",
     name: "E2E Key Rotation",
   },
+  /**
+   * Vault set up — dedicated to the step-up credential-binding dialog-
+   * selection test (state-incompatible: this spec puts the session's
+   * provider/auth_credential_id into webauthn states no other spec expects;
+   * sharing vaultReady would leak that state into the ~25 specs using it).
+   */
+  stepUpCredentialBinding: {
+    id: "00000000-0000-4000-e2e0-00000000000d",
+    email: "e2e-stepup-credential-binding@test.local",
+    name: "E2E Step-Up Credential Binding",
+  },
 } as const;
 
 export const TEST_PASSPHRASE = "E2ETestPassphrase!2026";
@@ -329,6 +340,54 @@ export async function makeSessionStale(sessionToken: string): Promise<void> {
   await p.query(
     `UPDATE sessions SET created_at = now() - interval '1 hour' WHERE session_token = $1`,
     [hashSessionToken(sessionToken)]
+  );
+}
+
+/**
+ * Seed a minimal webauthn_credentials row for a user. Returns its row id, the
+ * value a real passkey sign-in would write to sessions.auth_credential_id.
+ * Column values beyond the ones a dialog-selection test cares about (owner,
+ * credential id) are placeholders — no ceremony is ever run against this row.
+ */
+export async function seedWebauthnCredential(
+  userId: string,
+  credentialId: string
+): Promise<string> {
+  const p = getPool();
+  const id = crypto.randomUUID();
+  await p.query(
+    `INSERT INTO webauthn_credentials (
+       id, user_id, tenant_id, credential_id, public_key, device_type, created_at
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (credential_id) DO NOTHING`,
+    [id, userId, E2E_TENANT.id, credentialId, "e2e-test-public-key", "singleDevice", new Date().toISOString()]
+  );
+  return id;
+}
+
+export async function deleteWebauthnCredential(credentialRowId: string): Promise<void> {
+  const p = getPool();
+  await p.query(`DELETE FROM webauthn_credentials WHERE id = $1`, [credentialRowId]);
+}
+
+/**
+ * Put a session into the state a real passkey sign-in leaves
+ * (`provider='webauthn'`, `auth_credential_id` = the verified credential's
+ * row id) — or the unbound/legacy shape when `credentialRowId` is null.
+ * Which dialog a stale session opens (PasskeyReauthDialog vs
+ * RecentSessionRequiredDialog) depends only on this state, not on
+ * `passkey_verified_at`: a freshly-seeded session already has it NULL, which
+ * the webauthn branch of evaluateStepUpFreshness treats as stale regardless
+ * of the binding — so no timestamp manipulation is needed here.
+ */
+export async function bindSessionToWebauthnCredential(
+  sessionToken: string,
+  credentialRowId: string | null
+): Promise<void> {
+  const p = getPool();
+  await p.query(
+    `UPDATE sessions SET provider = 'webauthn', auth_credential_id = $2 WHERE session_token = $1`,
+    [hashSessionToken(sessionToken), credentialRowId]
   );
 }
 

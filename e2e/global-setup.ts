@@ -5,19 +5,22 @@
  * Extension build failure prints diagnostics but does NOT abort the suite —
  * extension-tagged tests skip themselves when the dist/ directory is absent.
  *
- * Creates twelve users:
- *  1. "vault-ready"      — vault fully set up, for general unlock/CRUD/lock tests
- *  2. "fresh"            — no vault setup, for setup wizard tests
- *  3. "lockout"          — vault set up, dedicated to lockout test (destructive)
- *  4. "reset"            — vault set up, dedicated to vault-reset test (destructive)
- *  5. "resetValidation"  — vault set up, dedicated to vault-reset validation (non-destructive)
- *  6. "teamOwner"        — vault set up, team owner for team tests
- *  7. "teamMember"       — vault set up, team member for invitation tests
- *  8. "eaGrantor"        — vault set up, emergency access grantor
- *  9. "eaGrantee"        — vault set up, emergency access grantee
- * 10. "tenantAdmin"      — vault set up, tenant admin (ADMIN role)
- * 11. "passphraseChange" — vault set up, dedicated to passphrase change test (destructive)
- * 12. "keyRotation"      — vault set up, dedicated to key rotation test (destructive)
+ * Creates thirteen users:
+ *  1. "vault-ready"           — vault fully set up, for general unlock/CRUD/lock tests
+ *  2. "fresh"                 — no vault setup, for setup wizard tests
+ *  3. "lockout"                — vault set up, dedicated to lockout test (destructive)
+ *  4. "reset"                  — vault set up, dedicated to vault-reset test (destructive)
+ *  5. "resetValidation"        — vault set up, dedicated to vault-reset validation (non-destructive)
+ *  6. "teamOwner"              — vault set up, team owner for team tests
+ *  7. "teamMember"             — vault set up, team member for invitation tests
+ *  8. "eaGrantor"              — vault set up, emergency access grantor
+ *  9. "eaGrantee"              — vault set up, emergency access grantee
+ * 10. "tenantAdmin"            — vault set up, tenant admin (ADMIN role)
+ * 11. "passphraseChange"       — vault set up, dedicated to passphrase change test (destructive)
+ * 12. "keyRotation"            — vault set up, dedicated to key rotation test (destructive)
+ * 13. "stepUpCredentialBinding" — vault set up, dedicated to the step-up
+ *     credential-binding dialog-selection test (state-incompatible: session
+ *     provider/auth_credential_id)
  *
  * Session tokens are written to .auth-state.json for test consumption.
  */
@@ -206,6 +209,10 @@ export default async function globalSetup(): Promise<void> {
   const { sessionToken: tenantAdminToken } = await seedVaultReadyUser(TEST_USERS.tenantAdmin, pepper);
   const { sessionToken: passphraseChangeToken } = await seedVaultReadyUser(TEST_USERS.passphraseChange, pepper);
   const { sessionToken: keyRotationToken } = await seedVaultReadyUser(TEST_USERS.keyRotation, pepper);
+  const { sessionToken: stepUpCredentialBindingToken } = await seedVaultReadyUser(
+    TEST_USERS.stepUpCredentialBinding,
+    pepper,
+  );
 
   // tenantAdmin requires an explicit ADMIN role in the tenant
   await seedTenantMember(TEST_USERS.tenantAdmin.id, "ADMIN");
@@ -321,6 +328,11 @@ export default async function globalSetup(): Promise<void> {
       sessionToken: keyRotationToken,
       passphrase: TEST_PASSPHRASE,
     },
+    stepUpCredentialBinding: {
+      ...TEST_USERS.stepUpCredentialBinding,
+      sessionToken: stepUpCredentialBindingToken,
+      passphrase: TEST_PASSPHRASE,
+    },
     shareLinkToken,
   };
 
@@ -328,5 +340,5 @@ export default async function globalSetup(): Promise<void> {
 
   await closePool();
 
-  console.log("[E2E Setup] Test users seeded successfully (12 users).");
+  console.log("[E2E Setup] Test users seeded successfully (13 users).");
 }

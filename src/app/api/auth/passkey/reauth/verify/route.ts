@@ -175,7 +175,14 @@ async function handlePOST(req: NextRequest) {
         select: {
           provider: true,
           authCredentialId: true,
-          authCredential: { select: { credentialId: true } },
+          // userId comes along so the binding can be checked to belong to this
+          // session's own user. The FK constrains only that the row exists —
+          // referential integrity runs outside RLS and spans no tenant or user
+          // predicate — so "the writer only ever binds this user's credential"
+          // is an assumption of C2's, not something the schema enforces. Left
+          // unchecked, a corrupt binding would put another user's credentialId
+          // into this user's audit metadata.
+          authCredential: { select: { credentialId: true, userId: true } },
         },
       });
 
@@ -193,6 +200,22 @@ async function handlePOST(req: NextRequest) {
       }
 
       if (sessionRow.authCredentialId === null) {
+        return {
+          kind: "unavailable",
+          auditReason: "no_binding",
+          boundCredentialId: null,
+          presentedCredentialId: responseCredentialId,
+        };
+      }
+
+      // A binding that resolves to another user's credential is not a binding.
+      // Fail closed as no_binding rather than credential_missing (the row is
+      // there, it is just not ours) and record no id — the whole point is to
+      // keep the other user's identifier out of this row.
+      if (
+        sessionRow.authCredential !== null &&
+        sessionRow.authCredential.userId !== userId
+      ) {
         return {
           kind: "unavailable",
           auditReason: "no_binding",
