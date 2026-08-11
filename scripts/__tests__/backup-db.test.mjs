@@ -165,13 +165,18 @@ function run(env = {}, { tocEntries } = {}) {
  * status in the captured output.
  *
  * Shell-free on purpose. Backgrounding, sleeping and waiting were the only
- * reasons a shell was here, and node does all three directly — while `bash -c`
- * reads its whole argument list as command text, positional arguments included,
- * so every one of these paths would be command text there. All three derive
- * from the environment (BACKUP_DB_SCRIPT, TMPDIR) and none is guaranteed to be
- * a bare word (CodeQL js/shell-command-injection-from-environment,
- * js/indirect-command-line-injection). The hostile-path case below drives this
- * same function, so reintroducing a shell fails there.
+ * reasons a shell was here, and node does all three directly.
+ *
+ * The positional-argument form this replaced was safe at runtime — only the
+ * string after `-c` is parsed as shell code, and the expansion of "$1" is not
+ * re-parsed — but CodeQL treats environment-derived values handed to a shell
+ * interpreter as command-line injection whichever slot they occupy
+ * (js/shell-command-injection-from-environment,
+ * js/indirect-command-line-injection), and all three paths here derive from the
+ * environment (BACKUP_DB_SCRIPT, TMPDIR). Dropping the interpreter removes the
+ * analyzer's ambiguity and the boundary itself. The hostile-path case below
+ * drives this same function, so interpolating a path back into shell text fails
+ * there.
  */
 async function runRootSwap(scriptPath, outPath, rootPath, env) {
   const out = openSync(outPath, "w");
@@ -3516,10 +3521,10 @@ exit 0`);
   it("runs the swap harness over paths carrying shell metacharacters without executing them", async () => {
     // The harness reads BACKUP_DB_SCRIPT and TMPDIR-derived paths, so neither is
     // guaranteed to be a bare word, and `$(…)` substitutes even inside double
-    // quotes. The marker is what a reintroduced shell would leave behind: it
-    // expands $HOME (which the harness passes) rather than naming a directory,
-    // because the literal cannot contain a slash and the run's cwd is not the
-    // harness's to assume.
+    // quotes. The marker is what interpolating one of those paths back into
+    // shell text would leave behind: it expands $HOME (which the harness passes)
+    // rather than naming a directory, because the literal cannot contain a slash
+    // and the run's cwd is not the harness's to assume.
     const marker = (label) => `${homeDir}-pwned-${label}`;
     const hostile = (label) => `${label};$(touch $HOME-pwned-${label})`;
     const scriptPath = join(tmpDir, `${hostile("script")}.sh`);
