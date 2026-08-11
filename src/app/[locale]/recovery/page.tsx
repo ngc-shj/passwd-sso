@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label";
 import { getStrength, STRENGTH_COLORS } from "@/components/vault/passphrase-strength";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
-import { fetchApi, withBasePath } from "@/lib/url-helpers";
+import { fetchApi, hardNavigate } from "@/lib/url-helpers";
 
 type Step = "input" | "new-passphrase";
 
@@ -197,7 +197,7 @@ export default function RecoveryPage() {
       setHasRecoveryKey(true);
 
       // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      window.location.href = withBasePath(`/${locale}/dashboard`);
+      hardNavigate(`/${locale}/dashboard`);
     } catch {
       setError(tApi("unknownError"));
     } finally {

@@ -74,6 +74,21 @@ export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
+ * Navigate by replacing the document, not by a client-side route change.
+ *
+ * The full reload is the point at every call site: after a vault reset or
+ * recovery the whole React tree — including the in-memory encryption key held
+ * by VaultProvider — must be rebuilt from scratch, and a download endpoint is
+ * not a Next page at all. `useRouter().push()` would keep the old heap alive,
+ * so this is the one place allowed to assign `window.location.href`.
+ *
+ * Client-side only.
+ */
+export function hardNavigate(path: string): void {
+  window.location.href = withBasePath(path);
+}
+
+/**
  * Build a full URL (origin + basePath + path) for clipboard / sharing.
  * Browser-only (references window.location.origin).
  */
