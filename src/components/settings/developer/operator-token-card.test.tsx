@@ -247,7 +247,7 @@ describe("OperatorTokenCard", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ canPasskeySignIn: true }),
+        json: async () => ({ canPasskeyReauth: true }),
       })
       .mockResolvedValueOnce({
         ok: true,
@@ -303,7 +303,7 @@ describe("OperatorTokenCard", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ canPasskeySignIn: true }),
+        json: async () => ({ canPasskeyReauth: true }),
       });
     mockReauthenticateWithPasskey.mockResolvedValueOnce({
       ok: false,
@@ -333,6 +333,50 @@ describe("OperatorTokenCard", () => {
     });
   });
 
+  it("routes to RecentSessionRequiredDialog when the ceremony reports PASSKEY_REAUTH_UNAVAILABLE", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeyReauth: true }),
+      });
+    // The ceremony itself succeeds in opening, but the session can never be
+    // re-proved (no binding, or the bound credential is gone) — this must
+    // escape the dialog rather than strand the user retrying forever.
+    mockReauthenticateWithPasskey.mockResolvedValueOnce({
+      ok: false,
+      error: "PASSKEY_REAUTH_UNAVAILABLE",
+    });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "stale-test" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    const createButton = createButtons[createButtons.length - 1];
+    fireEvent.click(createButton);
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthTitle")).toBeInTheDocument();
+    });
+
+    const reauthButtons = await screen.findAllByText("reauthAction");
+    fireEvent.click(reauthButtons[reauthButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("reauthTitle")).not.toBeInTheDocument();
+    expect(mockToastError).toHaveBeenCalledWith("reauthUnavailable");
+  });
+
   it("falls back to local networkError for an unrecognized API error code", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
@@ -357,7 +401,7 @@ describe("OperatorTokenCard", () => {
     });
   });
 
-  it("opens RecentSessionRequiredDialog when stale-session occurs and canPasskeySignIn is false", async () => {
+  it("opens RecentSessionRequiredDialog when stale-session occurs and canPasskeyReauth is false", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
       // first POST: stale
@@ -368,7 +412,7 @@ describe("OperatorTokenCard", () => {
       // canPasskeyRecovery probe: user has no passkey
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ canPasskeySignIn: false }),
+        json: async () => ({ canPasskeyReauth: false }),
       });
 
     render(<OperatorTokenCard />);
@@ -400,12 +444,19 @@ describe("OperatorTokenCard", () => {
       // canPasskeyRecovery probe
       .mockResolvedValueOnce({
         ok: true,
-        json: async () => ({ canPasskeySignIn: true }),
+        json: async () => ({ canPasskeyReauth: true }),
       })
       // retry POST after reauth: still stale (e.g. clock skew)
       .mockResolvedValueOnce({
         ok: false,
         json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      // second canPasskeyRecovery probe (handleReauthenticate's own
+      // retry-stale branch calls it again before choosing reauthStillRequired
+      // vs. the sign-in-again fallback)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeyReauth: true }),
       });
 
     render(<OperatorTokenCard />);

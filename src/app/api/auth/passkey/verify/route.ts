@@ -153,6 +153,7 @@ async function handlePOST(req: NextRequest) {
         userAgent: meta.userAgent?.slice(0, 512) ?? null,
         passkeyVerifiedAt: verifiedAt,
         provider: "webauthn",
+        authCredentialId: user.credentialRowId,
       },
     });
     return deleted.count;

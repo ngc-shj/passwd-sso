@@ -276,7 +276,7 @@ describe("generateAuthenticationOpts", () => {
   });
 
   it("requests userVerification 'required' to match the UV requirement of all verify paths", async () => {
-    // verifyAuthentication / verifyAuthenticationAssertion use
+    // verifyAuthentication / verifyAssertionForCredential / verifyAssertionAnyCredential use
     // requireUserVerification: true. Options must request UV up front rather
     // than letting a UV-incapable authenticator pass the ceremony then fail verify.
     const { generateAuthenticationOpts } = await import("./webauthn-server");

@@ -423,9 +423,14 @@ a gate stops auditing the one place the gate lives.
 - `pattern: tx.webAuthnCredential.findMany` in `reauth/options/route.ts` — reason: the
   ceremony must never enumerate the user's credentials again (I6).
 - `pattern: \?\? undefined` inside any `where` in `reauth/options/route.ts` and
-  `src/lib/auth/webauthn/webauthn-server.ts` — reason: an optional Prisma filter is the
-  fail-open form of the binding lookup (M2). The check must name itself and exit non-zero when
-  it cannot parse a target file: "examined nothing" must not be spelled like "found nothing".
+  `src/lib/auth/webauthn/webauthn-server.ts`, **matched on code lines only** (strip `//`, `*`
+  and `/*` lines first) — reason: an optional Prisma filter is the fail-open form of the binding
+  lookup (M2). The comment-line exclusion is not a loophole, it is what stops the pattern from
+  matching its own fix: both files explain *why* the optional filter is forbidden, and that
+  explanation necessarily contains the string. Rephrasing the documentation around the check's
+  blind spot would trade a real warning for the permanent loss of the reason. The check must name
+  itself and exit non-zero when it cannot parse a target file: "examined nothing" must not be
+  spelled like "found nothing".
 
 **Acceptance criteria**
 

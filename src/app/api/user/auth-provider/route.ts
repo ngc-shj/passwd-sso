@@ -1,16 +1,18 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { unauthorized, errorResponse } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { getSessionToken } from "@/app/api/sessions/helpers";
+import { canRecoverSessionWithPasskey } from "@/lib/auth/session/recent-current-auth-method";
 
 // Providers that do NOT support passkey-based sign-in
 const OIDC_SAML_PROVIDERS = new Set(["google", "saml-jackson"]);
 
-// GET /api/user/auth-provider — Check if user can use passkey sign-in
-async function handleGET() {
+// GET /api/user/auth-provider — Check if user can use passkey sign-in / reauth
+async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -32,7 +34,15 @@ async function handleGET() {
       accounts.length === 0 ||
       accounts.some((a) => !OIDC_SAML_PROVIDERS.has(a.provider));
 
-    return NextResponse.json({ canPasskeySignIn });
+    // C5 member 2: computed for THIS request's own session, not any session
+    // of the user — a stale-session probe must answer for the session that
+    // is actually stale.
+    const sessionToken = getSessionToken(req);
+    const canPasskeyReauth = sessionToken
+      ? await canRecoverSessionWithPasskey(sessionToken, session.user.id)
+      : false;
+
+    return NextResponse.json({ canPasskeySignIn, canPasskeyReauth });
   } catch {
     return errorResponse(API_ERROR.INTERNAL_ERROR);
   }

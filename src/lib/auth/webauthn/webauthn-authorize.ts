@@ -1,8 +1,8 @@
 /**
- * WebAuthn authorization for Auth.js Credentials provider.
+ * WebAuthn authorization for passkey sign-in.
  *
- * Called by the "webauthn" Credentials provider's authorize function
- * to verify a passkey authentication response and return a user object.
+ * Called by `src/app/api/auth/passkey/verify/route.ts` to verify a passkey
+ * authentication response and return a user object.
  *
  * Uses withBypassRls for cross-tenant credential lookup since the
  * user is not yet authenticated at this point.
@@ -72,6 +72,8 @@ export interface WebAuthnAuthResult {
   id: string;
   email: string;
   name: string | null;
+  /** DB row id (uuid) of the credential that produced the verified assertion. */
+  credentialRowId: string;
   prf?: {
     prfEncryptedSecretKey: string;
     prfSecretKeyIv: string;
@@ -230,6 +232,7 @@ export async function authorizeWebAuthn(
     id: storedCredential.user.id,
     email: storedCredential.user.email,
     name: storedCredential.user.name ?? null,
+    credentialRowId: storedCredential.id,
     prf,
   };
 }

@@ -45,12 +45,20 @@ model Session {
   /// Authentication method used to establish the session.
   /// Null for sessions created before the provenance migration.
   provider     String?  @db.VarChar(64)
+  /// DB row id of the WebAuthn credential that produced this session's
+  /// verified assertion. NULL means "no binding" (legacy row, non-webauthn
+  /// provider, or the bound credential was deleted). SetNull on credential
+  /// deletion so a session unbinds rather than silently falling back to
+  /// "any credential" for step-up.
+  authCredentialId String? @map("auth_credential_id") @db.Uuid
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  authCredential WebAuthnCredential? @relation(fields: [authCredentialId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
   @@index([userId, expires])
   @@index([tenantId])
+  @@index([authCredentialId])
   @@map("sessions")
 }
 
@@ -893,6 +901,8 @@ enum AuditAction {
   AUTH_LOGIN_FAILURE
   AUTH_LOGOUT
   AUTH_PASSKEY_REAUTH
+  AUTH_PASSKEY_REAUTH_CREDENTIAL_MISMATCH
+  AUTH_PASSKEY_REAUTH_UNAVAILABLE
   WEBAUTHN_COUNTER_ZERO_RAPID_REUSE
   ENTRY_BULK_ARCHIVE
   ENTRY_BULK_UNARCHIVE
@@ -1898,6 +1908,10 @@ model WebAuthnCredential {
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  // Sessions this credential established (Session.authCredentialId). SetNull
+  // on delete — see that field's comment.
+  boundSessions Session[]
 
   @@index([userId])
   @@index([tenantId])

@@ -43,6 +43,7 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { BRIDGE_CODE_TTL_MS, MS_PER_MINUTE } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
+import { BASE64URL_RE } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import {
@@ -68,7 +69,6 @@ const authorizeLimiter = createRateLimiter({
 // (base64url unpadded). Exact-length match is the shape gate; the semantic
 // binding is enforced at /api/mobile/token by comparing stored.deviceJkt to
 // the DPoP proof's own jwkThumbprint output (verify.ts:219).
-const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 const JWK_THUMBPRINT_RE = /^[A-Za-z0-9_-]{43}$/;
 
 // Fixed callback target — the iOS app's registered custom URL scheme. Never

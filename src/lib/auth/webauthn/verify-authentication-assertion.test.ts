@@ -1,13 +1,16 @@
 /**
- * Direct unit tests for verifyAuthenticationAssertion — the security-critical
- * helper that backs both sign-in (`/api/webauthn/authenticate/verify`) and PRF
- * re-bootstrap (`/api/webauthn/credentials/[id]/prf`).
+ * Direct unit tests for verifyAssertionForCredential / verifyAssertionAnyCredential
+ * — the security-critical shared body that backs both sign-in
+ * (`/api/webauthn/authenticate/verify`) and PRF re-bootstrap
+ * (`/api/webauthn/credentials/[id]/prf`), both via verifyAssertionAnyCredential,
+ * plus the step-up reauth ceremony via verifyAssertionForCredential.
  *
  * Consumer-route tests cover the helper indirectly, but the helper's
  * invariants (challenge consumption, counter CAS rollback safety, namespace
- * separation acceptance) are documented requirements that deserve direct
- * coverage so a future refactor cannot regress them through one consumer
- * while leaving the other passing (#433 / C5).
+ * separation acceptance, credential-row scoping) are documented requirements
+ * that deserve direct coverage so a future refactor cannot regress them
+ * through one consumer while leaving the others passing (#433 / C5;
+ * bind-stepup-to-session-credential plan / C4).
  */
 import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -58,7 +61,8 @@ vi.mock("@simplewebauthn/server", async (importOriginal) => {
   };
 });
 
-import { verifyAuthenticationAssertion } from "./webauthn-server";
+import type { TxOrPrisma } from "@/lib/prisma";
+import { verifyAssertionForCredential, verifyAssertionAnyCredential } from "./webauthn-server";
 
 // Migrated from direct process.env mutation to vi.stubEnv per pre-pr.sh
 // `check-test-hygiene` gate. The vitest setup wires afterEach unstubs so we
@@ -104,26 +108,39 @@ function makeTxStub(overrides: Partial<{
   // back to the default `storedCredential`.
   const credentialResult =
     "findFirstResult" in overrides ? overrides.findFirstResult : storedCredential;
-  const findFirst = vi.fn().mockResolvedValue(credentialResult);
+  // Argument-aware, mirroring what Postgres does for `WHERE id = ...`:
+  // verifyAssertionForCredential's lookup includes `where.id`, and a stub that
+  // returns credentialResult regardless of the filter would make any assertion
+  // about credential-row scoping vacuous (RT1) — a DENY test for a mismatched
+  // row id would pass even if the production `where` never carried `id` at all.
+  const findFirst = vi.fn().mockImplementation(
+    async ({ where }: { where: { id?: string; userId: string; credentialId: string } }) => {
+      if (credentialResult == null) return null;
+      if (where.id !== undefined && where.id !== credentialResult.id) return null;
+      return credentialResult;
+    },
+  );
   const $executeRaw =
     overrides.executeRawSpy ?? vi.fn().mockResolvedValue(overrides.executeRawResult ?? 1);
   return {
+    // Typed once here rather than cast at every call site: the stub carries only
+    // the two members the verifier touches, so it is not structurally a
+    // TransactionClient. Same convention as tenant-management.test.ts:45.
     tx: {
       webAuthnCredential: { findFirst },
       $executeRaw,
-    },
+    } as unknown as TxOrPrisma,
     findFirst,
     $executeRaw,
   };
 }
 
-describe("verifyAuthenticationAssertion", () => {
+describe("verifyAssertionAnyCredential (shared verifier body)", () => {
   it("returns 503 when Redis is unavailable", async () => {
     mockGetRedis.mockReturnValue(null);
     const { tx } = makeTxStub();
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -138,9 +155,8 @@ describe("verifyAuthenticationAssertion", () => {
   it("returns 400 when challenge is expired or already consumed", async () => {
     mockRedisGetdel.mockResolvedValue(null);
     const { tx } = makeTxStub();
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -156,9 +172,8 @@ describe("verifyAuthenticationAssertion", () => {
     // Critical: consumer routes pass per-flow keys (sign-in vs PRF rebootstrap).
     // The helper MUST consume only the supplied key, never a hard-coded one.
     const { tx } = makeTxStub();
-    await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:prf-rebootstrap:user-1",
@@ -170,9 +185,8 @@ describe("verifyAuthenticationAssertion", () => {
   it("returns 503 when WEBAUTHN_RP_ID is not configured", async () => {
     delete process.env.WEBAUTHN_RP_ID;
     const { tx } = makeTxStub();
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -183,12 +197,12 @@ describe("verifyAuthenticationAssertion", () => {
 
   it("returns 400 when assertion lacks credential ID", async () => {
     const { tx } = makeTxStub();
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { ...validAssertion, id: undefined } as any,
+      // Deliberately malformed: `id` is required by the type, and dropping it is
+      // the only way to reach the missing-credential-id branch.
+      { ...validAssertion, id: undefined } as unknown as AuthenticationResponseJSON,
       "webauthn:challenge:test:user-1",
     );
     expect(result.ok).toBe(false);
@@ -200,9 +214,8 @@ describe("verifyAuthenticationAssertion", () => {
 
   it("returns 404 when the credential does not exist for the user", async () => {
     const { tx } = makeTxStub({ findFirstResult: null });
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -216,9 +229,8 @@ describe("verifyAuthenticationAssertion", () => {
 
   it("looks up credential scoped to the supplied userId", async () => {
     const { tx, findFirst } = makeTxStub();
-    await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    await verifyAssertionAnyCredential(
+      tx,
       "user-42",
       validAssertion,
       "webauthn:challenge:test:user-42",
@@ -233,9 +245,8 @@ describe("verifyAuthenticationAssertion", () => {
   it("returns 400 when @simplewebauthn/server reports verification failure", async () => {
     mockVerifyAuthLib.mockResolvedValue(makeVerifiedAuth({ verified: false }));
     const { tx } = makeTxStub();
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -247,9 +258,8 @@ describe("verifyAuthenticationAssertion", () => {
   it("returns 400 when @simplewebauthn/server throws", async () => {
     mockVerifyAuthLib.mockRejectedValue(new Error("invalid signature"));
     const { tx } = makeTxStub();
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -267,9 +277,8 @@ describe("verifyAuthenticationAssertion", () => {
     // against the new endpoint could commit the counter advance even when
     // the keyVersion CAS rejects, breaking replay defense.
     const { tx, $executeRaw } = makeTxStub();
-    await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -284,9 +293,8 @@ describe("verifyAuthenticationAssertion", () => {
 
   it("returns 400 when counter CAS UPDATE matches 0 rows (clone / replay attempt)", async () => {
     const { tx } = makeTxStub({ executeRawResult: 0 });
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -306,9 +314,8 @@ describe("verifyAuthenticationAssertion", () => {
       prfSecretKeyAuthTag: "tag-hex",
     };
     const { tx } = makeTxStub({ findFirstResult: credentialWithPrf });
-    const result = await verifyAuthenticationAssertion(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      tx as any,
+    const result = await verifyAssertionAnyCredential(
+      tx,
       "user-1",
       validAssertion,
       "webauthn:challenge:test:user-1",
@@ -322,5 +329,72 @@ describe("verifyAuthenticationAssertion", () => {
         authTag: "tag-hex",
       });
     }
+  });
+});
+
+// C4: verifyAssertionForCredential restricts the lookup to a single named
+// credential row; verifyAssertionAnyCredential deliberately does not. A
+// forbidden-pattern grep for the literal `null` cannot catch a caller that
+// silently widens the bound lookup, so these are exercised directly against
+// the real verifier rather than trusted from the type signature alone.
+describe("verifyAssertionForCredential vs verifyAssertionAnyCredential — credential-row scoping", () => {
+  it("DENY: verifyAssertionForCredential rejects an assertion from the user's OTHER credential", async () => {
+    // Same userId, same asserted credentialId — but the row the caller expects
+    // (a different DB row id) does not match the row the mock stub is scoped
+    // to return. This is exactly the shape the bound function must refuse:
+    // the session is bound to credential A, but credential B produced the
+    // assertion.
+    const { tx } = makeTxStub();
+    const result = await verifyAssertionForCredential(
+      tx,
+      "user-1",
+      "some-other-row-id",
+      validAssertion,
+      "webauthn:challenge:test:user-1",
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(404);
+      expect(result.reason).toBe("credential_not_found");
+    }
+  });
+
+  it("ALLOW: verifyAssertionForCredential succeeds when the assertion's row id matches", async () => {
+    const { tx, findFirst } = makeTxStub();
+    const result = await verifyAssertionForCredential(
+      tx,
+      "user-1",
+      storedCredential.id,
+      validAssertion,
+      "webauthn:challenge:test:user-1",
+    );
+    expect(result.ok).toBe(true);
+    // The bound lookup's `where` must carry `id` as a literal filter — never
+    // an optional `id: x ?? undefined`, which Prisma reads as "no id filter"
+    // and would silently widen this to any credential of the user (M2).
+    expect(findFirst).toHaveBeenCalledWith({
+      where: {
+        id: storedCredential.id,
+        userId: "user-1",
+        credentialId: "credential-id-base64url",
+      },
+    });
+  });
+
+  it("ALLOW: verifyAssertionAnyCredential still accepts any credential of the user", async () => {
+    // Proves the split did not accidentally narrow the presence-ceremony path
+    // too: no `id` scoping at all, so a different row id than any caller
+    // expects still succeeds as long as it belongs to the user.
+    const { tx, findFirst } = makeTxStub();
+    const result = await verifyAssertionAnyCredential(
+      tx,
+      "user-1",
+      validAssertion,
+      "webauthn:challenge:test:user-1",
+    );
+    expect(result.ok).toBe(true);
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { userId: "user-1", credentialId: "credential-id-base64url" },
+    });
   });
 });

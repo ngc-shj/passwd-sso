@@ -190,7 +190,8 @@ export async function generateAuthenticationOpts(
     rpID: rpId,
     allowCredentials: allow,
     // All verify paths that consume these options (verifyAuthentication /
-    // verifyAuthenticationAssertion) require UV, so request it up front rather
+    // verifyAssertionForCredential / verifyAssertionAnyCredential) require UV,
+    // so request it up front rather
     // than letting a UV-incapable authenticator pass the ceremony and be
     // rejected at verify. Matches generateDiscoverableAuthOpts ("required").
     userVerification: "required",
@@ -401,12 +402,15 @@ export function uint8ArrayToBase64url(bytes: Uint8Array): string {
 // ── Shared assertion verification helper ────────────────────
 
 /**
- * Outcome of {@link verifyAuthenticationAssertion}.
+ * Outcome of {@link verifyAssertionForCredential} / {@link verifyAssertionAnyCredential}.
  *
  * On `ok: true`, callers receive the credential ID plus any stored PRF wrapping
  * fields (for sign-in to relay back to the client). On failure, callers receive
  * an HTTP-style status + an API_ERROR-compatible code so the route can produce
- * a uniform response shape.
+ * a uniform response shape, plus a structured `reason` — one member per `!ok`
+ * return site below — so callers can branch on a stable discriminator instead
+ * of the free-text `details` string (see bind-stepup-to-session-credential
+ * plan, C4).
  */
 export type VerifyAssertionResult =
   | {
@@ -422,16 +426,30 @@ export type VerifyAssertionResult =
       ok: false;
       status: 400 | 401 | 404 | 503;
       code: string;
+      reason:
+        | "redis_unavailable"
+        | "rp_id_unconfigured"
+        | "challenge_missing"
+        | "response_credential_id_missing"
+        | "credential_not_found"
+        | "signature_invalid"
+        | "counter_mismatch";
       details?: string;
     };
 
 /**
  * Verify a WebAuthn assertion AND advance the credential counter atomically.
  *
- * Shared by sign-in (`/api/webauthn/authenticate/verify`) and PRF re-bootstrap
- * (`/api/webauthn/credentials/[id]/prf`). The counter UPDATE runs on the
- * supplied `tx` so callers can roll it back atomically with their own work
- * (e.g., the PRF endpoint's keyVersion CAS).
+ * Shared body for {@link verifyAssertionForCredential} (freshness: only one
+ * named credential may satisfy it) and {@link verifyAssertionAnyCredential}
+ * (presence ceremonies: any credential of the user may satisfy it). The
+ * credential lookup's `where` is supplied by the caller via `buildWhere`, built
+ * as a literal object in each exported function's own body — never as an
+ * optional filter (`id: x ?? undefined`), which Prisma reads as "filter not
+ * supplied" and would silently widen the bound lookup to any credential of the
+ * user. The counter UPDATE runs on the supplied `tx` so callers can roll it
+ * back atomically with their own work (e.g., the PRF endpoint's keyVersion
+ * CAS).
  *
  * Caller obligations:
  * - Set RLS context (e.g., `withUserTenantRls(userId, ...)`) BEFORE invoking,
@@ -444,16 +462,19 @@ export type VerifyAssertionResult =
  *   counter advance rolls back if the surrounding tx aborts. Otherwise pass
  *   `prisma` directly.
  */
-export async function verifyAuthenticationAssertion(
+async function verifyAssertionCore(
   tx: TxOrPrisma,
   userId: string,
   response: AuthenticationResponseJSON,
   challengeKey: string,
-  userAgent: string | null = null,
+  userAgent: string | null,
+  buildWhere: (
+    responseCredentialId: string,
+  ) => { id: string; userId: string; credentialId: string } | { userId: string; credentialId: string },
 ): Promise<VerifyAssertionResult> {
   const redis = getRedis();
   if (!redis) {
-    return { ok: false, status: 503, code: "SERVICE_UNAVAILABLE" };
+    return { ok: false, status: 503, code: "SERVICE_UNAVAILABLE", reason: "redis_unavailable" };
   }
 
   const challenge = await redis.getdel(challengeKey);
@@ -462,13 +483,14 @@ export async function verifyAuthenticationAssertion(
       ok: false,
       status: 400,
       code: "VALIDATION_ERROR",
+      reason: "challenge_missing",
       details: "Challenge expired or already used",
     };
   }
 
   const rpId = process.env.WEBAUTHN_RP_ID;
   if (!rpId) {
-    return { ok: false, status: 503, code: "SERVICE_UNAVAILABLE" };
+    return { ok: false, status: 503, code: "SERVICE_UNAVAILABLE", reason: "rp_id_unconfigured" };
   }
 
   const responseCredentialId = (response as unknown as { id?: string }).id;
@@ -477,16 +499,23 @@ export async function verifyAuthenticationAssertion(
       ok: false,
       status: 400,
       code: "VALIDATION_ERROR",
+      reason: "response_credential_id_missing",
       details: "Missing credential ID in response",
     };
   }
 
   const storedCredential = await tx.webAuthnCredential.findFirst({
-    where: { userId, credentialId: responseCredentialId },
+    where: buildWhere(responseCredentialId),
   });
 
   if (!storedCredential) {
-    return { ok: false, status: 404, code: API_ERROR.NOT_FOUND, details: "Credential not found" };
+    return {
+      ok: false,
+      status: 404,
+      code: API_ERROR.NOT_FOUND,
+      reason: "credential_not_found",
+      details: "Credential not found",
+    };
   }
 
   // v11: WebAuthnCredential shape — string `id` (no Uint8Array conversion),
@@ -508,6 +537,7 @@ export async function verifyAuthenticationAssertion(
       ok: false,
       status: 400,
       code: "VALIDATION_ERROR",
+      reason: "signature_invalid",
       details: "Authentication verification failed",
     };
   }
@@ -517,6 +547,7 @@ export async function verifyAuthenticationAssertion(
       ok: false,
       status: 400,
       code: "VALIDATION_ERROR",
+      reason: "signature_invalid",
       details: "Authentication verification failed",
     };
   }
@@ -541,6 +572,7 @@ export async function verifyAuthenticationAssertion(
       ok: false,
       status: 400,
       code: "VALIDATION_ERROR",
+      reason: "counter_mismatch",
       details: "Counter mismatch — credential may be cloned. Re-register your passkey.",
     };
   }
@@ -554,4 +586,50 @@ export async function verifyAuthenticationAssertion(
       authTag: storedCredential.prfSecretKeyAuthTag,
     },
   };
+}
+
+/**
+ * Freshness path: only the credential identified by `credentialRowId` may
+ * satisfy this. Used by the step-up reauth ceremony, where the whole point is
+ * proving possession of the SAME authenticator that established the session —
+ * not merely one of the account's registered credentials.
+ */
+export async function verifyAssertionForCredential(
+  tx: TxOrPrisma,
+  userId: string,
+  credentialRowId: string,
+  response: AuthenticationResponseJSON,
+  challengeKey: string,
+  opts?: { userAgent?: string | null },
+): Promise<VerifyAssertionResult> {
+  return verifyAssertionCore(
+    tx,
+    userId,
+    response,
+    challengeKey,
+    opts?.userAgent ?? null,
+    (responseCredentialId) => ({ id: credentialRowId, userId, credentialId: responseCredentialId }),
+  );
+}
+
+/**
+ * Presence ceremonies: any credential of this user may satisfy this. Used by
+ * sign-in (`/api/webauthn/authenticate/verify`) and PRF re-bootstrap
+ * (`/api/webauthn/credentials/[id]/prf`), which are not freshness gates.
+ */
+export async function verifyAssertionAnyCredential(
+  tx: TxOrPrisma,
+  userId: string,
+  response: AuthenticationResponseJSON,
+  challengeKey: string,
+  opts?: { userAgent?: string | null },
+): Promise<VerifyAssertionResult> {
+  return verifyAssertionCore(
+    tx,
+    userId,
+    response,
+    challengeKey,
+    opts?.userAgent ?? null,
+    (responseCredentialId) => ({ userId, credentialId: responseCredentialId }),
+  );
 }
