@@ -235,15 +235,23 @@ describe.skipIf(!hasDatabase)("sessions.auth_credential_id binding (real DB)", (
   });
 
   it.skipIf(!redisAvailable)(
-    "a credential deleted while a ceremony is outstanding cannot be substituted by another credential (I9)",
+    "the FK cascade's effect reaches the route: an outstanding ceremony on a deleted binding denies at step 3, verifier never called",
     async () => {
-      // I9's claim: a deletion concurrent with a reauth cannot leave the session
-      // refreshed by a credential other than its binding. The genuine
-      // mid-transaction interleaving is not schedulable here (see D2), but the
-      // substance is: with the ceremony already admitted and the bound row then
-      // deleted, presenting a DIFFERENT live credential of the same user must
-      // still deny, and passkey_verified_at must not move. That is the exact
-      // "fallback to any-credential" the split verifier exists to prevent.
+      // What this proves, precisely: the ON DELETE SET NULL cascade is visible to
+      // reauth/verify through a real DB round-trip, so a ceremony admitted while
+      // the binding was live denies at step 3 once the credential is gone, and
+      // the verifier is never reached.
+      //
+      // What it does NOT prove, despite an earlier version of this test claiming
+      // it (finding C1): substitution resistance at the verifier. The deletion
+      // commits before the route runs, so the FK has already nulled the binding
+      // and step 3 denies first — swapping the route's call to
+      // verifyAssertionAnyCredential leaves this test green. That defense is
+      // proven where it actually lives: verify-authentication-assertion.test.ts's
+      // DENY case (real verifier, mismatched row id) and the "bound row present,
+      // wrong credential presented" case below. I9's true concurrent
+      // interleaving is not schedulable in this harness — see D9, same shape as
+      // D2's precedent for `credential_missing`.
       const boundRowId = await insertCredential(userId, tenantId, `bound-${randomUUID()}`);
       const otherCredId = `other-${randomUUID()}`;
       await insertCredential(userId, tenantId, otherCredId);
@@ -282,6 +290,19 @@ describe.skipIf(!hasDatabase)("sessions.auth_credential_id binding (real DB)", (
 
       expect(res.status).toBe(403);
       await expect(res.json()).resolves.toEqual({ error: "PASSKEY_REAUTH_UNAVAILABLE" });
+
+      // Pin the reason this denies, so the test cannot later be read as
+      // evidence of verifier-level scoping: it is the step-3 binding gate.
+      const denials = await outboxRowsFor(
+        AUDIT_ACTION.AUTH_PASSKEY_REAUTH_UNAVAILABLE,
+      );
+      expect(denials).toHaveLength(1);
+      expect((denials[0].metadata as Record<string, unknown>).reason).toBe("no_binding");
+      // The challenge is still outstanding: step 3 returns before the verifier,
+      // and redis.getdel lives inside the verifier (I9b).
+      await expect(
+        redis!.get(`webauthn:challenge:reauth:${userId}:${challengeId}`),
+      ).resolves.toBe("test-challenge");
 
       const after = await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
@@ -522,6 +543,57 @@ describe.skipIf(!hasDatabase)("sessions.auth_credential_id binding (real DB)", (
       expect(metadata.reason).toBe("presented_credential");
       expect(metadata.boundCredentialId).toBe(boundCredId);
       expect(metadata.presentedCredentialId).toBe(presentedCredId);
+    },
+  );
+
+  it.skipIf(!redisAvailable)(
+    "an oversized bound credential id is truncated and the audit row survives the real truncateMetadata",
+    async () => {
+      // C7's "the row survives" clause, proven through the REAL audit pipeline.
+      // The route-tier test only checks what buildDenialMetadata computes, with
+      // logAuditAsync mocked — it never exercises truncateMetadata's own byte
+      // budget, so it cannot show the row escaping the all-or-nothing collapse
+      // to `{_truncated, _originalSize}` that this bound exists to prevent.
+      const longBoundCredId = "a".repeat(600);
+      const credentialRowId = await insertCredential(
+        userId,
+        tenantId,
+        longBoundCredId,
+      );
+      const token = await insertSession({
+        provider: "webauthn",
+        authCredentialId: credentialRowId,
+        passkeyVerifiedAt: null,
+      });
+
+      const challengeId = generateChallengeId();
+      await redis!.set(
+        `webauthn:challenge:reauth:${userId}:${challengeId}`,
+        "test-challenge",
+        "EX",
+        60,
+      );
+
+      const res = await reauthVerifyPOST(
+        buildVerifyRequest(token, {
+          credentialResponse: JSON.stringify({ id: `presented-${randomUUID()}` }),
+          challengeId,
+        }),
+      );
+      expect(res.status).toBe(403);
+
+      const rows = await outboxRowsFor(
+        AUDIT_ACTION.AUTH_PASSKEY_REAUTH_CREDENTIAL_MISMATCH,
+      );
+      expect(rows).toHaveLength(1);
+      const metadata = rows[0].metadata as Record<string, unknown>;
+      // The row is intact: truncateMetadata did not fire.
+      expect(metadata._truncated).toBeUndefined();
+      expect(metadata._originalSize).toBeUndefined();
+      // …and the field carries the first 512 characters plus its marker.
+      expect(metadata.boundCredentialId).toBe("a".repeat(512));
+      expect(metadata.boundCredentialIdTruncated).toBe(true);
+      expect(metadata.reason).toBe("presented_credential");
     },
   );
 

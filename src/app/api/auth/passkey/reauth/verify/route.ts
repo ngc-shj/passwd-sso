@@ -98,9 +98,19 @@ function boundCredentialIdMetadata(
  */
 function presentedCredentialIdMetadata(
   responseCredentialId: string | undefined,
-): { presentedCredentialId: string | null; presentedCredentialIdRejected?: true } {
+): {
+  presentedCredentialId: string | null;
+  presentedCredentialIdRejected?: true;
+  presentedCredentialIdAbsent?: true;
+} {
+  // "The client sent nothing" and "the client sent something we refused" are
+  // different events to an investigator: the second is the suspicious one. An
+  // earlier version collapsed both into `rejected`, which is the ambiguity the
+  // flag exists to prevent, resolved the wrong way round (finding SEC-2).
+  if (responseCredentialId === undefined) {
+    return { presentedCredentialId: null, presentedCredentialIdAbsent: true };
+  }
   if (
-    responseCredentialId !== undefined &&
     responseCredentialId.length <= AUDIT_CREDENTIAL_ID_MAX_LENGTH &&
     BASE64URL_RE.test(responseCredentialId)
   ) {

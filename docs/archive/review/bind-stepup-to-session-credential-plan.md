@@ -1208,7 +1208,11 @@ roots (co-located, `__tests__/`, `e2e/`) adds three members the plan did not nam
 - `src/app/api/auth/passkey/reauth/options/route.ts`: `["webAuthnCredential"]` → **add `session`**
 - `src/lib/auth/session/recent-current-auth-method.ts`: `["session"]` → **add `webAuthnCredential`**.
   The file already calls `tx.webAuthnCredential.count` today and passes only because that call sits
-  outside the 10-line scan radius; `C5` member 1 moves it inside.
+  outside the 10-line scan radius. **Correction (Phase 3, security finding SEC-1):** the sentence
+  originally continued "`C5` member 1 moves it inside", which re-verification showed to be false —
+  the replacement `findFirst` landed 8 lines past the window, so the entry was still unenforced.
+  The scan was replaced with a balanced-delimiter walk of the call's actual extent, which is what
+  makes the entry enforced; see D10.
 - `src/lib/auth/webauthn/recent-passkey-verification.ts`: **remove the entry** once `C6` deletes the
   only `withBypassRls` call, matching the convention documented at `check-bypass-rls.mjs:45-50`.
 - `reauth/verify/route.ts` already allows both models; `passkey/verify` and `webauthn-authorize`

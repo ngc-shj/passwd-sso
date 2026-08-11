@@ -571,6 +571,63 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
       );
     });
 
+    it("keeps a presentedCredentialId of exactly 512 chars whole, with no rejected flag", async () => {
+      // The boundary-adjacent allow case for the same bound the test above
+      // denies at 600. Without it an off-by-one (`<` instead of `<=`) would
+      // reject every legitimately-sized id at exactly 512 and nothing would
+      // notice — the asymmetry finding SEC-4 named, since boundCredentialId
+      // already had its exact-512 pair.
+      const exactPresented = "a".repeat(512);
+      mockVerifyAssertionForCredential.mockResolvedValue({
+        ok: false,
+        status: 404,
+        code: "NOT_FOUND",
+        reason: "credential_not_found",
+        details: "Credential not found",
+      });
+      mockCredentialFindFirst.mockResolvedValue({ id: "cred-row-1" });
+
+      const res = await POST(makeVerifyRequest(exactPresented));
+
+      expect(res.status).toBe(403);
+      const metadata = mockLogAudit.mock.calls.at(-1)?.[0].metadata as Record<string, unknown>;
+      expect(metadata.presentedCredentialId).toBe(exactPresented);
+      expect(metadata.presentedCredentialIdRejected).toBeUndefined();
+      expect(metadata.presentedCredentialIdAbsent).toBeUndefined();
+    });
+
+    it("marks a legitimately absent presentedCredentialId as absent, not rejected", async () => {
+      // "The client sent nothing" must stay distinguishable from "the client
+      // sent something we refused" — the second is the suspicious one.
+      mockSessionFindUnique.mockResolvedValue({
+        provider: "webauthn",
+        authCredentialId: null,
+        authCredential: null,
+      });
+
+      // Built inline: makeVerifyRequest always supplies an id, and the point
+      // here is a response object that carries none.
+      const res = await POST(
+        createRequest("POST", ROUTE_URL, {
+          headers: {
+            origin: "http://localhost:3000",
+            cookie: "authjs.session-token=sess-1",
+            "Content-Type": "application/json",
+          },
+          body: {
+            credentialResponse: JSON.stringify({ type: "public-key" }),
+            challengeId: "a".repeat(32),
+          },
+        }),
+      );
+
+      expect(res.status).toBe(403);
+      const metadata = mockLogAudit.mock.calls.at(-1)?.[0].metadata as Record<string, unknown>;
+      expect(metadata.presentedCredentialId).toBeNull();
+      expect(metadata.presentedCredentialIdAbsent).toBe(true);
+      expect(metadata.presentedCredentialIdRejected).toBeUndefined();
+    });
+
     it("rejects a presentedCredentialId with a non-base64url character even under the length bound", async () => {
       mockVerifyAssertionForCredential.mockResolvedValue({
         ok: false,

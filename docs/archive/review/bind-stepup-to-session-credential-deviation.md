@@ -133,3 +133,113 @@ Process note on how this was diagnosed: the first reading of the gate's status w
 `| tail -8`, which reported exit 0 while the gate itself had exited 1 — the R44 trap, walked into
 and then corrected by re-running the gate unpiped. Every other gate result in Step 2-4 was captured
 from the command's own exit status.
+
+## D9 — The I9 integration test was renamed to what it actually proves
+
+**What changed**: `reauth-credential-binding.integration.test.ts`'s "I9" case was titled
+"a credential deleted while a ceremony is outstanding cannot be substituted by another credential"
+and its comment credited the split verifier's scoped lookup. Phase 3 review demonstrated that
+claim false by execution: an instrumented probe showed `verifyAssertionForCredential` is never
+called in that test, and swapping the route to `verifyAssertionAnyCredential` — the exact
+regression `C4` exists to prevent — left it green.
+
+**Why**: the deletion commits before the route runs, so `ON DELETE SET NULL` has already nulled
+the binding and step 3 denies first. The test is a genuine FK-cascade→route integration check; it
+is not evidence about the verifier.
+
+**Disposition**: renamed to name the step-3 gate, comment rewritten to say what it does and does
+not prove, and two assertions added so it cannot be re-read as verifier evidence — the audit
+`reason` is pinned to `no_binding` and the Redis challenge is asserted still present (I9b). The
+substitution defense is proven where it lives: `verify-authentication-assertion.test.ts`'s DENY
+case against the real verifier, and the "bound row present, wrong credential presented"
+integration case. I9's true concurrent interleaving is not schedulable in this harness, the same
+conclusion D2 reached for `credential_missing` and for the same reason.
+
+## D10 — `check-bypass-rls.mjs`'s fixed scan radius was replaced with an extent walk
+
+**What changed**: the gate scanned only 10 lines after each `withBypassRls(` call for
+`tx.<model>.` references. Phase 3 review showed by injection that the three callbacks this branch
+lengthened put their most security-relevant model access 8 to 67 lines past that window, so an
+unlisted model there still exited 0. The window is now a balanced-delimiter walk of the call's own
+extent, comment-only matches are skipped (`src/auth.ts:66` names the helper in prose), and a call
+whose extent cannot be determined now **fails** the gate by name instead of silently falling back.
+
+**Why it is in this branch rather than deferred**: the three files whose callbacks outgrew the
+window are this branch's own, and the entry the plan added for
+`recent-current-auth-method.ts` was unenforced without this — the allowlist edit and the gate that
+enforces it are one change.
+
+**Red-proof**: injecting `tx.someUnauthorizedModel.` at the previously-invisible line of each of
+the three files makes the gate exit 1 in all three cases; the real tree still exits 0. Mutations
+were applied to scratchpad-backed copies and the files verified byte-identical afterwards.
+
+**Two pre-existing members it surfaced**, both legitimate and both previously invisible:
+`src/app/api/user/mcp-tokens/route.ts` genuinely uses `mcpRefreshToken`, `delegationSession` and
+`auditLog` in its bulk-revoke callback — the sibling `[id]/route.ts` entry has listed exactly those
+for as long as it has existed — so the parent entry was extended to match. This is the expected
+shape of widening a verifier: the class is derived over the verifier's inputs, not its call sites,
+so members that were always in the class become visible at once.
+
+## D11 — Two Implementation-Checklist test files needed no edit
+
+`src/app/[locale]/auth/signin/page.test.ts` and `page.basepath.test.ts` are named under `C5` in the
+Implementation Checklist and are absent from the diff. Both mock
+`@/lib/auth/session/recent-current-auth-method` at the module boundary and neither changed
+function's signature changed, so they compile and pass unmodified — re-run this round, 25/25 pass.
+Their existing "passes `canUsePasskey=false` to the panel when the session cannot recover" case
+still covers the UI's half of the contract, and the predicate's own behaviour is covered at the
+unit and integration tiers. Recorded because the checklist is read as a change manifest: a file
+listed there and missing from the diff must be explained rather than left to look overlooked.
+
+## D12 — The migration's recorded checksum was re-synced after the file was wrapped
+
+Wrapping the migration in `BEGIN`/`COMMIT` changed the file's bytes after it had already been
+applied to the dev database, so `_prisma_migrations.checksum` (a SHA-256 of the file, recorded once
+at apply time) no longer matched: recorded `1842111f…`, file `c694b2ec…`. Phase 3 review measured
+both and flagged it. Left alone, the next `npm run db:migrate` on any database that applied the
+pre-wrap file is blocked.
+
+Re-synced with a targeted metadata update on the dev database and verified equal afterwards, and
+`prisma migrate status` reports the schema up to date. Fresh databases (CI, new clones, production)
+are unaffected — they apply the wrapped file and record the matching checksum on first apply.
+**Any other environment that applied the pre-wrap file needs the same one-line re-sync**; on the
+`mrx33` verification host that is:
+
+```sql
+UPDATE _prisma_migrations
+SET checksum = 'c694b2ec5dac801c8db3f5495a3b0327e99451aeb22147634abfe5c19eab4f3c'
+WHERE migration_name = '20260811120000_add_session_auth_credential_id';
+```
+
+## D13 — The E2E dialog-selection spec has not been executed; the blocker is pre-existing and environmental
+
+The plan puts `e2e/tests/step-up-credential-binding.spec.ts` **in scope, not deferred** (`SC5`
+covers only the virtual-authenticator work). Phase 3 review correctly refused to classify it as
+either verified or a legitimate deferral, so it was attempted rather than argued about.
+
+Attempted with a dedicated dev server (`NEXT_PUBLIC_BASE_PATH=""`, port 3099, the existing server on
+3000 untouched — `.env` sets a basePath and that server does not answer on localhost, both of which
+would make the default `E2E_BASE_URL` 404). Playwright's own exit status: 1. It never reached this
+branch's spec: `globalSetup` fails on the **first, pre-existing** fixture user with
+`new row violates row-level security policy for table "users"` at `e2e/helpers/db.ts:206`
+(`seedVaultReadyUser`, `global-setup.ts:68`) — the seeding role does not set the RLS bypass GUC, and
+`users` has forced row-level security. That blocks **every** E2E spec in this repo locally, not this
+one, and predates this branch.
+
+Not fixed here: making the E2E seeding harness work against a forced-RLS local database is its own
+change, it touches how tests bypass RLS (security-adjacent), and it belongs to no contract in this
+plan. Teardown ran cleanly — `select count(*) from users where email like 'e2e-%@test.local'` → 0,
+port 3099 released.
+
+**Where it will actually run**: the CI `e2e` job (`.github/workflows/ci.yml:491`) triggers on
+`e2e/**` changes and runs `npm run test:e2e`; this branch touches `e2e/**`, so the spec executes on
+the PR. That is the gate, and a red result there is blocking.
+
+**Anti-Deferral check**: acceptable risk, quantified. Worst case: a defect in the spec itself
+(selector, locale, timing) or in the dialog-selection wiring surfaces on the PR's own CI run rather
+than during review. Likelihood: moderate for the spec, low for the wiring — the wiring's decision is
+covered at the unit tier (all four `use-inline-reauth` outcomes, both `operator-token-card` codes)
+and the integration tier (the gate/predicate against a real DB). Cost to fix locally: repairing the
+E2E seed path for forced RLS, unbounded from here and unrelated to this branch.
+**Tracked**: `TODO(bind-stepup-to-session-credential): D13 — run step-up-credential-binding.spec.ts;
+local E2E seeding is blocked by forced RLS on users`.

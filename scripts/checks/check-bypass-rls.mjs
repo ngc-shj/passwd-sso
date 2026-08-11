@@ -166,7 +166,14 @@ const ALLOWED_USAGE = new Map([
   // SSH agent per-signature authorize: cross-tenant SSH_KEY lookup scoped by userId in WHERE
   ["src/app/api/vault/ssh/sign-authorize/route.ts", ["passwordEntry"]],
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)
-  ["src/app/api/user/mcp-tokens/route.ts", ["mcpAccessToken", "mcpClient"]],
+  // The last three were always used by the bulk-revoke callback (refresh-token
+  // families, delegation sessions, one summary audit row) but sat past the old
+  // fixed 10-line scan window, so the entry only listed what the window could
+  // see. The sibling [id]/route.ts entry below has carried the same four for as
+  // long as it has existed; this is the same operation, one level up.
+  ["src/app/api/user/mcp-tokens/route.ts", [
+    "mcpAccessToken", "mcpClient", "mcpRefreshToken", "delegationSession", "auditLog",
+  ]],
   ["src/app/api/user/mcp-tokens/[id]/route.ts", ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "auditLog"]],
   // Auth provider check: userId-scoped Account query for passkey sign-in capability
   ["src/app/api/user/auth-provider/route.ts", ["account"]],
@@ -221,6 +228,56 @@ function getSourceFiles() {
   return files;
 }
 
+/**
+ * End line (exclusive) of the `withBypassRls(...)` call that starts at `start`,
+ * found by balancing parentheses from the call's own opening paren. Strings,
+ * template literals and comments are skipped so a paren inside them cannot
+ * close the call early.
+ *
+ * Returns the fixed-radius end when the extent cannot be determined, and pushes
+ * the site onto `unresolvedExtents` so an undeterminable call is reported rather
+ * than silently scanned with a window that may be too short.
+ */
+function callExtentEnd(lines, start, file) {
+  const open = lines[start].indexOf("(", lines[start].search(BYPASS_CALL_RE));
+  if (open === -1) {
+    unresolvedExtents.push({ file, line: start + 1 });
+    return Math.min(start + SCAN_RADIUS, lines.length);
+  }
+  let depth = 0;
+  let inStr = null; // "'" | '"' | "`"
+  let inBlockComment = false;
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i];
+    const from = i === start ? open : 0;
+    for (let c = from; c < line.length; c++) {
+      const ch = line[c];
+      if (inBlockComment) {
+        if (ch === "*" && line[c + 1] === "/") { inBlockComment = false; c++; }
+        continue;
+      }
+      if (inStr) {
+        if (ch === "\\") { c++; continue; }
+        if (ch === inStr) inStr = null;
+        continue;
+      }
+      if (ch === "/" && line[c + 1] === "/") break;              // line comment
+      if (ch === "/" && line[c + 1] === "*") { inBlockComment = true; c++; continue; }
+      if (ch === "'" || ch === '"' || ch === "`") { inStr = ch; continue; }
+      if (ch === "(") depth++;
+      else if (ch === ")") {
+        depth--;
+        // Inclusive of the closing line: a call whose close lands exactly at
+        // the boundary must still be scanned.
+        if (depth === 0) return i + 1;
+      }
+    }
+  }
+  unresolvedExtents.push({ file, line: start + 1 });
+  return Math.min(start + SCAN_RADIUS, lines.length);
+}
+
+const unresolvedExtents = [];
 const fileViolations = [];
 const modelViolations = [];
 const purposeViolations = [];
@@ -253,13 +310,26 @@ for (const file of getSourceFiles()) {
 
   for (let i = 0; i < lines.length; i++) {
     if (!BYPASS_CALL_RE.test(lines[i])) continue;
+    // A comment that names the helper is not a call site. Harmless while the
+    // scan was a fixed radius (it found no models and passed silently); with an
+    // extent scan it has no balanced paren to close, so it would be reported as
+    // undeterminable. src/auth.ts:66 is the live example.
+    const beforeMatch = lines[i].slice(0, lines[i].search(BYPASS_CALL_RE));
+    if (/(^|\s)\/\//.test(beforeMatch) || /^\s*\*/.test(lines[i])) continue;
 
-    // Scan forward from the call site
-    const end = Math.min(i + SCAN_RADIUS, lines.length);
+    // Scan the call's ACTUAL extent, not a fixed number of lines. A fixed
+    // radius silently stops covering a callback the moment it grows past it:
+    // three callbacks lengthened by the step-up credential-binding change put
+    // their most security-relevant model access (the binding read, the
+    // existence re-check, the passkey_verified_at write) 8 to 67 lines past a
+    // 10-line window, so injecting an unlisted model there still exited 0.
+    // SCAN_RADIUS remains the fallback for a call whose extent cannot be
+    // determined — and that case is reported rather than passed over.
+    const end = callExtentEnd(lines, i, file);
 
     // Check 3a: tx-less callback (C2) — match the call site + a few lines
     // forward in case the `() =>` lands on the next line.
-    const window = lines.slice(i, end).join("\n");
+    const window = lines.slice(i, Math.min(i + SCAN_RADIUS, lines.length)).join("\n");
     if (TX_LESS_CALLBACK_RE.test(window)) {
       txLessViolations.push({ file, line: i + 1 });
     }
@@ -391,6 +461,24 @@ if (txLessViolations.length > 0) {
   );
   console.error("");
   for (const { file, line } of txLessViolations) {
+    console.error(`  ${file}:${line}`);
+  }
+}
+
+// An undeterminable call extent means this gate examined a window it cannot
+// justify. "Examined nothing" must not be spelled like "found nothing", so the
+// site is named and the gate fails rather than falling back silently.
+if (unresolvedExtents.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "withBypassRls call whose extent could not be determined (unbalanced parens?):",
+  );
+  console.error(
+    "the model scan fell back to a fixed line radius, which may not cover the call.",
+  );
+  console.error("");
+  for (const { file, line } of unresolvedExtents) {
     console.error(`  ${file}:${line}`);
   }
 }
