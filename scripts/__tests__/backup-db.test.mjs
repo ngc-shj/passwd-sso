@@ -26,7 +26,7 @@ import { spawnSync, spawn } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
   existsSync, readdirSync, statSync, lstatSync, symlinkSync, utimesSync, realpathSync,
-  openSync, closeSync, appendFileSync, renameSync,
+  openSync, closeSync, writeSync, renameSync,
 } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -179,34 +179,37 @@ function run(env = {}, { tocEntries } = {}) {
  * there.
  */
 async function runRootSwap(scriptPath, outPath, rootPath, env) {
-  const out = openSync(outPath, "w");
-  let child;
+  // Opened once, in append mode. The child writes through a duplicate of this
+  // descriptor and the exit line goes through the same one, so the path is
+  // resolved exactly once — re-opening it by path to append would be a
+  // file-system race (CodeQL js/file-system-race). O_APPEND is what lets both
+  // writers share it without depending on a shared file offset.
+  const out = openSync(outPath, "a");
   try {
-    child = spawn(BASH, [scriptPath], { env, stdio: ["ignore", out, out] });
+    const child = spawn(BASH, [scriptPath], { env, stdio: ["ignore", out, out] });
+    const kill = setTimeout(() => child.kill("SIGKILL"), 20000);
+    kill.unref();
+    const exited = new Promise((resolve) => {
+      child.once("error", (error) => resolve({ error }));
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+    });
+
+    // The swap has to land while the script is between its dumps.
+    spawnSync("sleep", ["1"]);
+    renameSync(rootPath, `${rootPath}.moved`);
+    mkdirSync(rootPath, { mode: 0o700 });
+    chmodSync(rootPath, 0o700);
+
+    const result = await exited;
+    clearTimeout(kill);
+    // The shell used to write this line itself, and the assertions read the
+    // script's status out of the captured output, so it still has to land there.
+    const status = result.error ? "spawn-error" : result.code ?? `signal:${result.signal}`;
+    writeSync(out, `EXIT=${status}\n`);
+    return result;
   } finally {
-    // The child holds its own duplicate of the descriptor.
     closeSync(out);
   }
-  const kill = setTimeout(() => child.kill("SIGKILL"), 20000);
-  kill.unref();
-  const exited = new Promise((resolve) => {
-    child.once("error", (error) => resolve({ error }));
-    child.once("exit", (code, signal) => resolve({ code, signal }));
-  });
-
-  // The swap has to land while the script is between its dumps.
-  spawnSync("sleep", ["1"]);
-  renameSync(rootPath, `${rootPath}.moved`);
-  mkdirSync(rootPath, { mode: 0o700 });
-  chmodSync(rootPath, 0o700);
-
-  const result = await exited;
-  clearTimeout(kill);
-  // The shell used to append this line itself, and the assertions read the
-  // script's status out of the captured output, so it still has to land there.
-  const status = result.error ? "spawn-error" : result.code ?? `signal:${result.signal}`;
-  appendFileSync(outPath, `EXIT=${status}\n`);
-  return result;
 }
 
 function err(r) {
