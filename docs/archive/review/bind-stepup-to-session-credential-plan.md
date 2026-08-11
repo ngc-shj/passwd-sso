@@ -1127,3 +1127,114 @@ keys `-a7H…` (discoverable) and `z2zT…` (`discoverable IS NULL`):
 | C5  | one predicate for "can recover via passkey" (3 members)        | pending |
 | C6  | remove the dormant parallel adjudicator                        | pending |
 | C7  | audit the mismatch denial                                      | pending |
+
+## Implementation Checklist
+
+Authored in Phase 2 Step 2-1 from the orchestrator's own impact analysis. Phase 3 reads this as
+the set of files that must appear in the diff.
+
+### R42 re-derivation — three member-set corrections the plan's own greps missed
+
+Per R42 clause ①b, a member-set that expands once means the anchor was a symptom. MS4's anchor was
+the symbol filtered by `grep -v '\.test\.'`; re-deriving with `grep -rl <symbol>` over **all** test
+roots (co-located, `__tests__/`, `e2e/`) adds three members the plan did not name:
+
+- `src/lib/auth/webauthn/webauthn-server.test.ts` — a **fourth** test caller of
+  `verifyAuthenticationAssertion`, additional to `verify-authentication-assertion.test.ts` and the
+  two route tests MS4 listed.
+- `src/app/[locale]/auth/signin/page.test.ts` and `page.basepath.test.ts` — both reference
+  `evaluateStepUpFreshness` **and** `canRecoverSessionWithPasskey`, so `C5` members 0 and 1 have
+  two test callers beyond `recent-current-auth-method.test.ts`.
+- `canUsePasskeyRecovery` / `reauthenticateWithPasskey` are referenced by ~35 test files each (the
+  full `use-inline-reauth` consumer fan-out). They mock the client helper rather than asserting its
+  error mapping, so `C3`'s new codes do not change their behaviour — but the full suite, not a
+  subset, is the only gate that proves it (R19).
+
+### Files to change
+
+**C1 — schema**
+- `prisma/schema.prisma` — `Session.authCredentialId` + relation + `@@index`; reciprocal field on `WebAuthnCredential`
+- `prisma/migrations/20260811120000_add_session_auth_credential_id/migration.sql` — additive only
+
+**C2 — provenance**
+- `src/lib/auth/webauthn/webauthn-authorize.ts` — `credentialRowId` required on the result; correct the stale docstring
+- `src/app/api/auth/passkey/verify/route.ts` — write `authCredentialId` in `session.create`
+- tests: `src/lib/auth/webauthn/webauthn-authorize.test.ts`, `src/app/api/auth/passkey/verify/route.test.ts` (mock must return the new required field)
+
+**C4 — verifier split**
+- `src/lib/auth/webauthn/webauthn-server.ts` — `verifyAssertionForCredential` / `verifyAssertionAnyCredential`, structured `reason` on the failure variant, literal `where` objects
+- `src/app/api/webauthn/authenticate/verify/route.ts`, `src/app/api/webauthn/credentials/[id]/prf/route.ts` — switch to the any-credential function
+- tests: `verify-authentication-assertion.test.ts` (12 call sites + argument-aware `findFirst` stub + ALLOW/DENY pair), `webauthn-server.test.ts`, `authenticate/verify/route.test.ts:148-153`, `prf/route.test.ts:230-237`
+
+**C3 / C4 — routes**
+- `src/app/api/auth/passkey/reauth/options/route.ts`, `src/app/api/auth/passkey/reauth/verify/route.ts`
+- tests: both route tests, incl. the `session.findUnique` and `webAuthnCredential.findFirst` mocks
+
+**C5 — one predicate**
+- `src/lib/auth/session/recent-current-auth-method.ts` (members 0 and 1)
+- `src/app/api/user/auth-provider/route.ts` (member 2, `handleGET(req)`)
+- `src/lib/auth/webauthn/can-use-passkey-recovery.ts` (member 3, `=== true`)
+- tests: `recent-current-auth-method.test.ts`, `auth-provider/route.test.ts` (8 zero-arg `GET()` calls), `signin/page.test.ts`, `signin/page.basepath.test.ts`
+
+**C6 — removal**
+- `src/lib/auth/webauthn/recent-passkey-verification.ts` (keep only the constant), delete `recent-passkey-verification.test.ts`
+
+**C7 — audit + error codes**
+- `prisma/schema.prisma` (`AuditAction` enum ×2) + `ALTER TYPE … ADD VALUE IF NOT EXISTS` in the same migration
+- `src/lib/constants/audit/audit.ts` ×3 sites; `messages/{en,ja}/AuditLog.json`
+- `src/lib/http/api-error-codes.ts` ×3 sites (`API_ERROR`, `API_ERROR_STATUS` → 403, `API_ERROR_I18N`); `messages/{en,ja}/ApiErrors.json`
+- `src/lib/validations/common.server.ts` — new `AUDIT_CREDENTIAL_ID_MAX_LENGTH = 512`
+
+**Clients**
+- `src/hooks/auth/use-inline-reauth.ts`, `src/components/settings/developer/operator-token-card.tsx`, `messages/{en,ja}/Auth.json`
+- tests: `use-inline-reauth.test.tsx`, `operator-token-card.test.tsx`
+
+### Shared assets to reuse, and one deliberate non-reuse
+
+- `getSessionToken` / `getSessionTokenDigest` (`src/app/api/sessions/helpers.ts`), `hashSessionToken`, `withBypassRls` + `BYPASS_PURPOSE`, `errorResponse` / `unauthorized`, `parseBody`, `logAuditAsync` + `personalAuditBase`, `truncateMetadata` — all existing; do not reimplement.
+- **`USER_AGENT_MAX_LENGTH = 512`** (`common.server.ts:25`) has the same *value* as `C7`'s bound and must **not** be reused for it: one is a `@db.VarChar(512)` column width, the other an audit-metadata budget. Same bytes, different concept — importing one for the other couples two things that will drift (R2's value-equality-is-not-meaning-equality clause). Add `AUDIT_CREDENTIAL_ID_MAX_LENGTH` instead.
+- No base64url validator exists anywhere in `src/lib` (`grep` for `base64url` finds only encode/decode helpers), so `C7`'s charset check is genuinely new. Put it beside the constant rather than inline at the call site.
+
+### Allowlist updates (R18 / the `check:bypass-rls` gate)
+
+`scripts/checks/check-bypass-rls.mjs` enforces a per-file map of allowed Prisma models within a
+10-line radius of each `withBypassRls(` call:
+
+- `src/app/api/auth/passkey/reauth/options/route.ts`: `["webAuthnCredential"]` → **add `session`**
+- `src/lib/auth/session/recent-current-auth-method.ts`: `["session"]` → **add `webAuthnCredential`**.
+  The file already calls `tx.webAuthnCredential.count` today and passes only because that call sits
+  outside the 10-line scan radius; `C5` member 1 moves it inside.
+- `src/lib/auth/webauthn/recent-passkey-verification.ts`: **remove the entry** once `C6` deletes the
+  only `withBypassRls` call, matching the convention documented at `check-bypass-rls.mjs:45-50`.
+- `reauth/verify/route.ts` already allows both models; `passkey/verify` and `webauthn-authorize`
+  need no change.
+
+### Storage verification performed (Step 2-1 item 6)
+
+Against the live dev database, not the ORM schema: `sessions` has **forced** row-level security
+with a tenant-isolation policy and a `trg_enforce_tenant_id_sessions` BEFORE INSERT/UPDATE trigger.
+Adding a nullable column is unaffected by both. PostgreSQL performs referential-integrity checks
+outside row security, so the new FK cannot be blocked by RLS — and, for the same reason, the FK
+alone does **not** constrain the referenced credential to the session's tenant. Considered and
+declined: a composite FK to `(id, tenant_id)` (needs a new unique index on
+`webauthn_credentials(id, tenant_id)`) would make same-tenant binding schema-enforced. Declined
+because the only writer reads the credential row from the verified assertion scoped to the
+session's own user, passkey sign-in is bootstrap-tenant-only, and the extra index is a schema cost
+for an invariant no code path can currently violate. Recorded so a future multi-tenant passkey
+change re-examines it rather than assuming the FK covers it.
+
+### CI gate parity (Step 2-1 item 7)
+
+`extract-ci-checks.sh` yields 15 CI gates; **7 have no equivalent in `scripts/pre-pr.sh`**:
+`npm run typecheck`, `npm run check:bypass-rls`, `npm run check:migration-drift`,
+`npm run check:crypto-domains`, `npm run check:team-auth-rls`,
+`bash scripts/check-state-mutation-centralization.sh`, and the three `licenses:check:*:strict`
+scripts. Four of them bear directly on this change (typecheck across the signature changes,
+migration drift for the new migration, bypass-rls for the allowlist edits above).
+
+**Disposition — deferred parity gap, with the gates run manually in Step 2-4.** Extending
+`pre-pr.sh` would mean adding seven entries to its bounded-parallel batch scheduler — a tooling
+change with its own review surface and no relation to this security fix, which this branch should
+not bundle. Every one of the seven is executed by hand in Step 2-4 and its result recorded.
+`TODO(bind-stepup-to-session-credential): 7 CI gates absent from scripts/pre-pr.sh — see
+Implementation Checklist`.
