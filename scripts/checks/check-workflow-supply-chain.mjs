@@ -8,10 +8,12 @@
  *     patch/minor bumps that passed tests). Human review must stay required, so
  *     no workflow may pair a `dependabot` context with an auto-merge command.
  *
- *  2. A supply-chain verifier (`npm audit signatures`, or the post-publish
- *     provenance assertion `npm view … dist.attestations`) must never be
- *     exit-masked. A verifier behind `|| true` / `; true` / `|| exit 0` /
- *     `continue-on-error` is theater — a real tamper would be swallowed.
+ *  2. A supply-chain verifier (`npm audit signatures`, the post-publish
+ *     provenance assertion `npm view … dist.attestations`, or an invocation of
+ *     the override-floor staleness gate, `check-override-floor-staleness`)
+ *     must never be exit-masked. A verifier behind `|| true` / `; true` /
+ *     `|| exit 0` / `continue-on-error` / `set +e` / an unprotected pipe is
+ *     theater — a real tamper (or a stale floor) would be swallowed.
  *
  * PRIMARY control note: `/.github/workflows/` is CODEOWNERS-gated to @ngc-shj,
  * so ANY new auto-merge or verifier-masking workflow — in any shape — already
@@ -54,10 +56,43 @@ export function findAutoMergeViolation(content, name) {
 
 /**
  * Returns violation strings for any supply-chain verifier — `npm audit
- * signatures` or the post-publish provenance assertion (`npm view` reading
- * `dist.attestations`) — whose exit status is masked (|| true / ; true /
- * || exit 0 / || : / || echo), or a step-level `continue-on-error: true`
- * anywhere in a workflow that runs such a verifier.
+ * signatures`, the post-publish provenance assertion (`npm view` reading
+ * `dist.attestations`), or an invocation of `check-override-floor-staleness`
+ * (the override-floor staleness gate) — whose exit status is masked, or a
+ * step-level `continue-on-error: true` anywhere in a workflow that runs such a
+ * verifier.
+ *
+ * WHAT THIS CAN AND CANNOT DECIDE — read this before extending it.
+ *
+ * These are SPELLING rules over shell text, and bash's grammar is not decidable
+ * by them. An earlier revision tried to escape that by inverting the polarity —
+ * requiring a verifier invocation to be a "simple top-level command" and naming
+ * anything else — and review measured the result to be simultaneously too loose
+ * and too tight: seven multi-line constructs still masked the exit status
+ * unseen (an `if` spanning lines, a function body, a heredoc, `eval`, a name
+ * arriving through a variable, a backgrounded group, a lowercase `err` trap),
+ * while five shapes that are provably fail-closed under `bash -e` were rejected
+ * (`cd x && verifier`, `timeout N verifier`, `verifier; echo`, `env K=V
+ * verifier`, and a pipe under `set -o pipefail` that the rule twenty lines
+ * below deliberately exempts). Writing a shell parser by accretion is how that
+ * happens; the same lesson is recorded for this repo's SQL gates.
+ *
+ * So the claim here is deliberately narrow, and matches what the rules do:
+ *
+ *   - CAUGHT: the single-line masking spellings (`|| true`, `; true`,
+ *     `|| exit 0`, `|| :`, `|| echo`, `set +e`, `set +o errexit`), an
+ *     unprotected pipe, a `trap … ERR` sharing a run block with a verifier, a
+ *     `continue-on-error` on a verifier-running workflow, a non-`bash`/`sh`
+ *     `shell:` (which removes the `-e` every other rule assumes), and an
+ *     ambient-input `env:` key on a verifier-running workflow.
+ *   - NOT CAUGHT: any construct that spans lines, indirects through a variable
+ *     or `eval`, or nests the verifier inside a compound command. This gate does
+ *     not see those and does not claim to.
+ *
+ * The PRIMARY control for all of it remains CODEOWNERS on `/.github/workflows/`
+ * (see the file header): every shape above, caught or not, requires owner review
+ * to land. These rules are the fast, specific half — they name the construct an
+ * operator wrote — not the boundary.
  * @param {string} content
  * @param {string} name
  * @returns {string[]}
@@ -67,6 +102,9 @@ export function findMaskedVerifierViolations(content, name) {
   // Join shell line-continuations (`… \` + newline) into one logical line BEFORE
   // scanning, so a mask split across lines (`npm audit signatures \` / `  || true`)
   // is caught. Track the original 1-based line number of each logical line's start.
+  // `body` mirrors `text` but, for a `run: |`/`run: >` block, omits the block-scalar
+  // HEADER line itself — the header's own `|`/`>` indicator would otherwise read as
+  // an unprotected shell pipe to the pipe rule below.
   const rawLines = content.split("\n");
   const logical = [];
   const indentOf = (s) => (s.match(/^\s*/)?.[0].length ?? 0);
@@ -78,36 +116,132 @@ export function findMaskedVerifierViolations(content, name) {
     const blockMatch = joined.match(/(^\s*)(?:-\s+)?run:\s*[>|][0-9+-]*\s*(#.*)?$/);
     if (blockMatch && i + 1 < rawLines.length) {
       const baseIndent = blockMatch[1].length;
+      let body = "";
       while (
         i + 1 < rawLines.length &&
         (rawLines[i + 1].trim() === "" || indentOf(rawLines[i + 1]) > baseIndent)
       ) {
         joined += " " + rawLines[i + 1].trim();
+        body += (body ? " " : "") + rawLines[i + 1].trim();
         i += 1;
       }
-      logical.push({ text: joined, line: start + 1 });
+      logical.push({ text: joined, body, line: start + 1 });
       continue;
     }
     while (/\\\s*$/.test(joined) && i + 1 < rawLines.length) {
       joined = joined.replace(/\\\s*$/, " ") + rawLines[i + 1];
       i += 1;
     }
-    logical.push({ text: joined, line: start + 1 });
+    logical.push({ text: joined, body: joined, line: start + 1 });
   }
   // `dist\??\.attestations` tolerates optional chaining (`j?.dist?.attestations`
-  // in the real release.yml assertion). `runsVerifier` is a WORKFLOW-level flag,
-  // not per-line, so a `npm view` and an `attestations` reference on separate
-  // lines still mark the workflow as verifier-running.
-  const verifierLineRe = /audit\s+signatures|dist\??\.attestations/;
+  // in the real release.yml assertion). `check-override-floor-staleness` names the
+  // new gate (C7 of stale-override-floors) as a verifier too. `runsVerifier` is a
+  // WORKFLOW-level flag, not per-line, so a `npm view` and an `attestations`
+  // reference on separate lines still mark the workflow as verifier-running.
+  const verifierLineRe =
+    /audit\s+signatures|dist\??\.attestations|check-override-floor-staleness/;
+  // The `check-override-floor-staleness` alternative is bound to actual `run:`
+  // COMMAND text via extractRunCommands, not raw file content — a YAML comment
+  // that merely mentions the gate must not flip this workflow-level flag, which
+  // would otherwise subject the whole file to the continue-on-error ban below.
   const runsVerifier =
     /audit\s+signatures/.test(content) ||
-    (/npm\s+view/.test(content) && /attestations/.test(content));
+    (/npm\s+view/.test(content) && /attestations/.test(content)) ||
+    extractRunCommands(content).some((cmd) => /check-override-floor-staleness/.test(cmd));
   // `:` needs a lookahead boundary (a trailing \b never matches after non-word `:`).
-  const maskRe = /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$))/;
-  for (const { text, line } of logical) {
+  // `set +e` disables errexit, so a verifier's non-zero exit stops aborting the
+  // rest of the script. Both spellings count: the `+`-cleared flag cluster
+  // (`set +e`, `set +ex`) and the long option (`set +o errexit`). `pipefailRe`
+  // below already had to handle `-o`'s long form, so covering only the cluster
+  // here left the two halves of one function disagreeing about shell syntax.
+  const maskRe =
+    /(\|\|\s*(true|exit\s+0|echo)|;\s*(true|exit\s+0)|\|\|\s*:(?=\s|$)|\bset\s+\+\S*e\S*\b|\bset\s+\+o\s+errexit\b)/;
+  // A `trap … ERR` handler is block-scoped like `set +e`, so no per-line rule can
+  // see it: `trap "exit 0" ERR` ahead of the verifier turns its non-zero exit into
+  // a clean step exit. Matched against a single extracted COMMAND rather than the
+  // joined block so that release.yml's real `trap 'rm -rf "$WORK"' EXIT` — a
+  // cleanup handler on a different signal, in a block that does run a verifier —
+  // is not swept up by a `\bERR\b` looked for anywhere in the same joined text.
+  const trapErrRe = /^\s*trap\b[^\n]*\berr\b/i;
+  // An unprotected pipe: a LONE `|` — not `||` (shell OR / JS logical-or both use
+  // adjacent pipe pairs, which the lookaround below excludes on both sides) — whose
+  // exit status only `pipefail` preserves. No workflow here sets `shell:` or
+  // `defaults.run.shell`, so GitHub's default (`bash --noprofile --norc -eo …`,
+  // WITHOUT `pipefail`) applies: a pipe really does discard an upstream verifier's
+  // exit code unless the script opts in itself. Scoped to the whole joined block
+  // (not just the verifier's own line) because the block-join above already
+  // flattens a `run: |` body into one logical line — e.g. release.yml's
+  // `echo "$VIEW" | node -e …` sits under a `set -euo pipefail` a few lines above
+  // it in the SAME block, which is what makes that particular pipe safe.
+  const pipeRe = /(?<!\|)\|(?!\|)/;
+  const pipefailRe = /\bset\s+-\S*o\S*\s+pipefail\b/;
+  // Logical lines the spelling layer already named. A line it named is not named
+  // a second time by the allowlist: the spelling is the better diagnostic, and
+  // reporting one construct twice reads as two defects.
+  const spelled = new Set();
+  for (const { text, body, line } of logical) {
     if (verifierLineRe.test(text) && maskRe.test(text)) {
+      spelled.add(line);
       violations.push(
-        `${name}:${line}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo) — it must fail closed`,
+        `${name}:${line}: supply-chain verifier exit status is masked (|| true / ; true / || exit 0 / || : / || echo / set +e) — it must fail closed`,
+      );
+    }
+    if (verifierLineRe.test(text) && pipeRe.test(body) && !pipefailRe.test(text)) {
+      spelled.add(line);
+      violations.push(
+        `${name}:${line}: supply-chain verifier's exit status can be discarded by a pipe with no 'pipefail' in effect in this run block — add 'set -euo pipefail' (or 'set -o pipefail'), or restructure to avoid piping the verifier`,
+      );
+    }
+  }
+
+  // `trap … ERR` is block-scoped, so it is matched against one extracted COMMAND
+  // rather than the joined block: release.yml's real `trap 'rm -rf "$WORK"' EXIT`
+  // is a cleanup handler on a different signal in a block that does run a
+  // verifier, and a `\bERR\b` looked for anywhere in the joined text would sweep
+  // it up. Signal names are case-insensitive to bash, so `err` counts too — the
+  // previous spelling enumerated one case of a name the shell does not.
+  const records = extractRunCommandRecords(content);
+  const verifierBlocks = new Set(
+    records.filter((r) => verifierLineRe.test(r.command)).map((r) => r.blockLine),
+  );
+  for (const record of records) {
+    if (verifierBlocks.has(record.blockLine) && trapErrRe.test(record.command)) {
+      violations.push(
+        `${name}:${record.firstLine}: a 'trap … ERR' handler shares a run block with a supply-chain verifier — an ERR trap that does not re-raise turns the verifier's non-zero exit into a clean step; remove it or move the verifier to its own step`,
+      );
+    }
+  }
+
+  // Every rule above reasons from GitHub's default shell, which is bash with
+  // `-e`. Only the `bash` and `sh` KEYWORD forms carry it: `shell: bash {0}` is
+  // the custom-command form and runs without `-e`, at which point a verifier's
+  // non-zero exit stops aborting the step and every rule here is deciding by a
+  // model the runner no longer uses. A one-token diff would otherwise convert a
+  // whole file's verifiers to theatre while this gate reported PASS.
+  if (runsVerifier) {
+    for (let n = 0; n < rawLines.length; n += 1) {
+      const shellMatch = rawLines[n].match(/^\s*(?:-\s+)?shell:\s*(\S.*?)\s*$/);
+      if (!shellMatch) continue;
+      const value = shellMatch[1].replace(/^["']|["']$/g, "");
+      if (value === "bash" || value === "sh") continue;
+      violations.push(
+        `${name}:${n + 1}: a verifier-running workflow sets 'shell: ${value}' — only the bare 'bash'/'sh' keyword forms carry the '-e' that makes a verifier's non-zero exit abort the step`,
+      );
+    }
+  }
+
+  // The staleness gate refuses these at runtime, but a loader named in
+  // NODE_OPTIONS runs before its first line and can delete the variable it would
+  // have been caught by — so the workflow is the only place that shape is
+  // decidable. The member set is the gate's own AMBIENT_ORIGIN_VARS, kept
+  // identical on purpose: two adjudicators of one predicate must not drift.
+  if (runsVerifier) {
+    for (let n = 0; n < rawLines.length; n += 1) {
+      const envMatch = rawLines[n].match(/^\s*(NODE_OPTIONS|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|NODE_USE_ENV_PROXY|HTTPS?_PROXY|ALL_PROXY|https?_proxy|all_proxy):/);
+      if (!envMatch) continue;
+      violations.push(
+        `${name}:${n + 1}: a verifier-running workflow sets '${envMatch[1]}' — it redirects, intercepts or instruments the verifier's own process, which the verifier cannot refuse for itself once a loader is in play`,
       );
     }
   }
@@ -232,15 +366,33 @@ export function findTrustedPublishNodeViolation(content, name) {
  * @returns {string[]}
  */
 export function extractRunCommands(text) {
+  return extractRunCommandRecords(text).map((r) => r.command);
+}
+
+/**
+ * The same extraction as `extractRunCommands`, but each command keeps where it
+ * came from: `firstLine`/`lastLine` are the 1-based raw lines it was built from,
+ * and `blockLine` is the 1-based line of the `run:` that owns it. The line
+ * numbers are what let a per-command rule report a location, and what lets a
+ * verifier mention that NO run: command accounts for be told apart from one that
+ * simply passes — a skip and a pass are the same output otherwise.
+ * @param {string} text
+ * @returns {{command: string, firstLine: number, lastLine: number, blockLine: number}[]}
+ */
+function extractRunCommandRecords(text) {
   const lines = text.split("\n");
-  const commands = [];
+  const records = [];
   const indentOf = (s) => (s.match(/^\s*/)?.[0].length ?? 0);
+  const keep = (record) => {
+    if (record.command && !/^#/.test(record.command)) records.push(record);
+  };
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     const runMatch = line.match(/^(\s*)(?:-\s+)?run:\s*(.*)$/);
     if (!runMatch) continue;
     const baseIndent = runMatch[1].length;
     const inline = runMatch[2];
+    const blockLine = i + 1;
     // Block scalar: `run: |` / `run: >` with optional indicators + comment.
     if (/^[>|][0-9+-]*\s*(#.*)?$/.test(inline)) {
       const body = [];
@@ -248,29 +400,34 @@ export function extractRunCommands(text) {
         i + 1 < lines.length &&
         (lines[i + 1].trim() === "" || indentOf(lines[i + 1]) > baseIndent)
       ) {
-        body.push(lines[i + 1]);
+        body.push({ text: lines[i + 1], line: i + 2 });
         i += 1;
       }
-      // Join shell line-continuations, then split into individual commands.
-      let joined = "";
+      // Join shell line-continuations; each unbroken run of them is one command.
+      let current = null;
       for (const b of body) {
-        if (/\\\s*$/.test(joined)) joined = joined.replace(/\\\s*$/, "").trimEnd() + " " + b.trim();
-        else joined += (joined ? "\n" : "") + b.trim();
+        if (current && /\\\s*$/.test(current.command)) {
+          current.command = current.command.replace(/\\\s*$/, "").trimEnd() + " " + b.text.trim();
+          current.lastLine = b.line;
+          continue;
+        }
+        if (current) keep(current);
+        current = { command: b.text.trim(), firstLine: b.line, lastLine: b.line, blockLine };
       }
-      for (const cmd of joined.split("\n")) {
-        if (cmd.trim() && !/^#/.test(cmd.trim())) commands.push(cmd.trim());
-      }
+      if (current) keep(current);
       continue;
     }
     // Inline single-line run. Fold a trailing `\` continuation into the next line.
     let joined = inline;
-    while (/\\\s*$/.test(joined) && i + 1 < lines.length) {
-      joined = joined.replace(/\\\s*$/, "").trimEnd() + " " + lines[i + 1].trim();
-      i += 1;
+    let last = i;
+    while (/\\\s*$/.test(joined) && last + 1 < lines.length) {
+      joined = joined.replace(/\\\s*$/, "").trimEnd() + " " + lines[last + 1].trim();
+      last += 1;
     }
-    if (joined.trim()) commands.push(joined.trim());
+    i = last;
+    keep({ command: joined.trim(), firstLine: blockLine, lastLine: last + 1, blockLine });
   }
-  return commands;
+  return records;
 }
 
 /**

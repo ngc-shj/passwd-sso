@@ -232,6 +232,89 @@ describe("scope depth", () => {
   });
 });
 
+describe("collectScopes — pin, selfPins, parentKey/parentName (C2)", () => {
+  it("carries the raw pin on a plain top-level key", () => {
+    const scopes = collectScopes({ "pkg@1": "^1.0.0" });
+    expect(topLevelScope(scopes).byPackage.get("pkg")).toEqual([
+      { key: "pkg@1", range: "1", pin: "^1.0.0" },
+    ]);
+  });
+
+  it("carries the raw pin on a nested key", () => {
+    const scopes = collectScopes({ parent: { "child@1": "^2.0.0" } });
+    const nested = scopes.find((s) => s.depth === 1);
+    expect(nested.byPackage.get("child")).toEqual([{ key: "child@1", range: "1", pin: "^2.0.0" }]);
+  });
+
+  it("carries the nested object itself as the pin on a scope-opening key", () => {
+    // The scope-opening key still lands in its own scope's byPackage (unchanged
+    // from before this change) — its pin is the object that opens the nested
+    // scope, not a range string.
+    const scopes = collectScopes({ "@crxjs/vite-plugin": { rollup: "^2.80.0" } });
+    expect(topLevelScope(scopes).byPackage.get("@crxjs/vite-plugin")).toEqual([
+      { key: "@crxjs/vite-plugin", range: "*", pin: { rollup: "^2.80.0" } },
+    ]);
+  });
+
+  it("routes a '.' key to selfPins, never to byPackage", () => {
+    const scopes = collectScopes({ parent: { ".": "^1.2.3", "child@1": "^2.0.0" } });
+    const nested = scopes.find((s) => s.depth === 1);
+    expect(nested.selfPins).toEqual([{ key: ".", pin: "^1.2.3" }]);
+    expect(nested.byPackage.has(".")).toBe(false);
+    expect([...nested.byPackage.keys()]).not.toContain(".");
+  });
+
+  it("derives parentName from the parent key's package name when the key carries a selector", () => {
+    // {"pkg@1": {".": "..."}} must be judged against `pkg`, not `pkg@1` — the
+    // advisory API answers 200 [] for the latter, a silent fail-open (S2, I-2.4).
+    const scopes = collectScopes({ "pkg@1": { ".": "^1.0.0" } });
+    const nested = scopes.find((s) => s.depth === 1);
+    expect(nested.parentKey).toBe("pkg@1");
+    expect(nested.parentName).toBe("pkg");
+  });
+
+  it("derives parentName from a scoped package name with no selector", () => {
+    const scopes = collectScopes({ "@scope/pkg": { x: "^1" } });
+    const nested = scopes.find((s) => s.depth === 1);
+    expect(nested.parentName).toBe("@scope/pkg");
+  });
+
+  it("leaves parentKey and parentName null at the top level", () => {
+    const scopes = collectScopes({ "pkg@1": "^1.0.0" });
+    expect(topLevelScope(scopes).parentKey).toBeNull();
+    expect(topLevelScope(scopes).parentName).toBeNull();
+  });
+
+  it("carries the pin on an unparseable-selector key, and never adds it to byPackage", () => {
+    const scopes = collectScopes({ "pkg@latest": "1.0.0" });
+    const top = topLevelScope(scopes);
+    expect(top.unparseable).toEqual([{ key: "pkg@latest", range: "latest", pin: "1.0.0" }]);
+    expect(top.byPackage.size).toBe(0);
+  });
+
+  it("treats an array value as a single pin, refusing to recurse into it", () => {
+    // Before this change, `value !== null && typeof value === "object"` matched
+    // an array too, so `{"pkg": []}` recursed into `[]` (yielding an empty
+    // child scope) AND fell through to the pin logic below — one key, two rows.
+    const scopes = collectScopes({ pkg: [] });
+    expect(scopes).toHaveLength(1); // no child scope
+    const top = topLevelScope(scopes);
+    expect(top.byPackage.get("pkg")).toEqual([{ key: "pkg", range: "*", pin: [] }]);
+  });
+
+  it("counts a '.'-only nested scope as having yielded children", () => {
+    // Before this change, a bare `if (key === ".") continue;` dropped the key
+    // with no trace, so this scope looked empty (byPackage.size === 0,
+    // unparseable === []) to anything checking "did this scope yield
+    // anything". selfPins now carries the evidence that it did.
+    const scopes = collectScopes({ parent: { ".": "^2.7.1" } });
+    const nested = scopes.find((s) => s.depth === 1);
+    expect(nested.byPackage.size).toBe(0);
+    expect(nested.selfPins).toHaveLength(1);
+    expect(nested.selfPins[0]).toEqual({ key: ".", pin: "^2.7.1" });
+  });
+});
+
 describe("discoverManifests", () => {
   it("finds every tracked package.json rather than a hardcoded list", () => {
     const found = discoverManifests();

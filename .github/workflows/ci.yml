@@ -240,6 +240,37 @@ jobs:
       - name: Run static check guards (PRE_PR_STATIC_ONLY)
         run: PRE_PR_STATIC_ONLY=1 bash scripts/pre-pr.sh
 
+  # ─── Override Floor Staleness ─────────────────────────────
+  # scripts/checks/check-override-floor-staleness.mjs: does any `overrides`
+  # pin's RANGE still intersect a live GitHub advisory band, regardless of
+  # what the lockfile currently resolves to. Deliberately NOT gated by
+  # `needs: changes` — the gate walks all three manifests every time, and
+  # filtering on root package.json (or any single workspace) would skip a
+  # cli/-only stale floor, which is exactly the shape one of the six original
+  # members took. Always runs (not gated on `changes`), same reasoning as
+  # secret-scan and static-checks above.
+  override-floor-staleness:
+    name: "Security: Override floor staleness"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".nvmrc"
+
+      # The gate imports `semver`, a root devDependency, so a bare checkout
+      # cannot resolve it. --ignore-scripts matches all four existing
+      # audit-family jobs (audit-app / audit-ext / audit-cli / dependency-signatures).
+      - run: npm ci --ignore-scripts
+
+      - run: node scripts/checks/check-override-floor-staleness.mjs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # ─── Main App: Lint → Test → Build ────────────────────────
   app-ci:
     name: "App: Lint → Test → Build"

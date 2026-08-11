@@ -34,10 +34,21 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import semver from "semver";
 
-/** Used only when `git ls-files` is unavailable (e.g. a source tarball). */
-const FALLBACK_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
+/**
+ * Used only when `git ls-files` is unavailable (e.g. a source tarball).
+ * Exported so a caller for which a silent fallback is a REFUSAL rather than a
+ * degraded pass can tell the two apart by reference identity — `discoverManifests`
+ * returns this exact array object on the fallback path and a fresh array
+ * otherwise, which a content comparison cannot distinguish.
+ */
+export const FALLBACK_MANIFESTS = ["package.json", "cli/package.json", "extension/package.json"];
 
-const DEPENDENCY_FIELDS = [
+/**
+ * The npm dependency fields a `$ref` override value (`"$rollup"`) can resolve
+ * against. Exported because the staleness gate resolves the same refs — two
+ * copies of this list would let one gate see a `$ref` the other does not.
+ */
+export const DEPENDENCY_FIELDS = [
   "dependencies",
   "devDependencies",
   "optionalDependencies",
@@ -79,10 +90,29 @@ export function splitOverrideKey(key) {
 }
 
 /**
+ * JSON.parse never produces a Date, RegExp, Map or class instance — only plain
+ * objects, arrays and primitives — but an array must still be told apart from a
+ * scope: npm treats `{"pkg": []}` as a broken override, not a nested one, and
+ * `Object.entries` on an array yields numeric-index keys that are not overrides
+ * keys at all.
+ */
+export function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
  * Group one overrides object's keys by package name.
  * Nested overrides (`{"parent": {"child": "1.2.3"}}`) are a separate scope — the
  * same package under two different parents cannot collide — so each object is
- * walked on its own and reported under its own `scopePath`.
+ * walked on its own and reported under its own `scopePath`. The key that opened
+ * a nested scope is threaded down as `parentKey`, and `parentName` is derived
+ * from it via `splitOverrideKey` — never by parsing `scopePath` back apart,
+ * which would read `{"pkg@1": {...}}`'s child as belonging to `pkg@1` rather
+ * than `pkg`. Both are null at the top level.
+ *
+ * Every entry — `byPackage`, `unparseable`, and a `"."` self-pin — carries the
+ * raw override value as `pin`, not just its range/selector, so a caller judging
+ * staleness can see what the key actually pins.
  *
  * A selector semver cannot parse is NOT skipped. npm errors on such a key only
  * when it actually evaluates it: `{"pkg@latest": "x"}` fails the install, but
@@ -90,23 +120,35 @@ export function splitOverrideKey(key) {
  * (verified, npm 11.17.0). Silently skipping it here would inherit that
  * order-dependence, so it is reported.
  */
-export function collectScopes(overrides, scopePath = "overrides", into = [], depth = 0) {
+export function collectScopes(overrides, scopePath = "overrides", into = [], depth = 0, parentKey = null) {
   const byPackage = new Map();
   const unparseable = [];
+  const selfPins = [];
 
   for (const [key, value] of Object.entries(overrides ?? {})) {
-    // "." addresses the parent package itself, not a dependency of it.
-    if (key === ".") continue;
-    if (value !== null && typeof value === "object") {
-      collectScopes(value, `${scopePath} > ${key}`, into, depth + 1);
+    // "." addresses the parent package itself, not a dependency of it, so it
+    // must never reach byPackage — this file's own overlap arithmetic pins that
+    // exclusion at `check-override-key-disjointness.test.mjs:116`. It still
+    // carries its pin, for a caller that judges the parent package's staleness.
+    if (key === ".") {
+      selfPins.push({ key, pin: value });
+      continue;
+    }
+    // Only a plain object opens a nested scope. An array (or any other
+    // non-plain-object value) is left as a pin below, not recursed into — the
+    // previous, looser `typeof value === "object"` test recursed into `[]` too,
+    // producing an empty child scope alongside this key's own pin entry: one
+    // key, two rows.
+    if (isPlainObject(value)) {
+      collectScopes(value, `${scopePath} > ${key}`, into, depth + 1, key);
     }
     const { name, range } = splitOverrideKey(key);
     if (!semver.validRange(range)) {
-      unparseable.push({ key, range });
+      unparseable.push({ key, range, pin: value });
       continue;
     }
     if (!byPackage.has(name)) byPackage.set(name, []);
-    byPackage.get(name).push({ key, range });
+    byPackage.get(name).push({ key, range, pin: value });
   }
 
   // `depth` is carried explicitly rather than inferred from position: the walk
@@ -115,7 +157,15 @@ export function collectScopes(overrides, scopePath = "overrides", into = [], dep
   // An earlier revision took `into[0]` as the top level and therefore skipped the
   // whole top-level edge check on any manifest with a nested override —
   // `extension/package.json` has one.
-  into.push({ scopePath, byPackage, unparseable, depth });
+  into.push({
+    scopePath,
+    byPackage,
+    unparseable,
+    selfPins,
+    depth,
+    parentKey,
+    parentName: parentKey ? splitOverrideKey(parentKey).name : null,
+  });
   return into;
 }
 

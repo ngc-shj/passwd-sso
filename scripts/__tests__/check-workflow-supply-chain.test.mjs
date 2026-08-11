@@ -4,6 +4,7 @@
  * verifier, so the live guard passes trivially; these synthetic-string cases
  * prove each detector fires on a planted violation and stays quiet on clean input.
  */
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "vitest";
 import {
   extractRunCommands,
@@ -215,6 +216,273 @@ describe("findMaskedVerifierViolations", () => {
         continue-on-error: true
 `;
     expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+});
+
+// C7 (stale-override-floors): check-override-floor-staleness must be recognized
+// as a verifier, and the four masking forms C5 forbids (continue-on-error, || true,
+// set +e, an unprotected pipe) must be caught for it — without false-reddening the
+// real release.yml/dependency-signatures.yml workflows, which the plan measured a
+// naive pipe rule to do (release.yml :210 and :268).
+describe("findMaskedVerifierViolations — check-override-floor-staleness (C7)", () => {
+  it("flags continue-on-error: true on a workflow invoking the new gate", () => {
+    const wf = [
+      "jobs:",
+      "  staleness:",
+      "    steps:",
+      "      - run: node scripts/checks/check-override-floor-staleness.mjs",
+      "        continue-on-error: true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /continue-on-error/.test(m))).toBe(true);
+  });
+
+  it("flags || true on an invocation of the new gate", () => {
+    const wf = [
+      "    steps:",
+      "      - run: node scripts/checks/check-override-floor-staleness.mjs || true",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags set +e ahead of the new gate in the same run block", () => {
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          set +e",
+      "          node scripts/checks/check-override-floor-staleness.mjs",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("flags set +o errexit, the long-option spelling of the same disable", () => {
+    // `pipefailRe` on these same lines already had to handle `-o`'s long form,
+    // so covering only the `+e` cluster left one function disagreeing with
+    // itself about shell syntax.
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          set +o errexit",
+      "          node scripts/checks/check-override-floor-staleness.mjs",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /masked/.test(m))).toBe(true);
+  });
+
+  it("does NOT flag set -o errexit, which is the opposite instruction", () => {
+    const wf = [
+      "    steps:",
+      "      - run: |",
+      "          set -o errexit",
+      "          node scripts/checks/check-override-floor-staleness.mjs",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "override-floor-staleness.yml")).toEqual([]);
+  });
+
+  it("flags an unprotected pipe on an invocation of the new gate", () => {
+    const wf = [
+      "    steps:",
+      "      - run: node scripts/checks/check-override-floor-staleness.mjs | tee output.log",
+    ].join("\n");
+    const v = findMaskedVerifierViolations(wf, "override-floor-staleness.yml");
+    expect(v.some((m) => /unprotected pipe|pipefail/.test(m))).toBe(true);
+  });
+
+  it("does NOT flag the real release.yml protected-pipe shape (set -euo pipefail, then echo | node -e)", () => {
+    const wf = [
+      "      - name: Assert published provenance",
+      "        run: |",
+      "          set -euo pipefail",
+      '          VIEW=$(npm view "pkg@1.0.0" --json)',
+      '          echo "$VIEW" | node -e "let d=\'\';process.stdin.on(\'data\',c=>d+=c).on(\'end\',()=>{try{const j=JSON.parse(d);process.stdout.write(j?.dist?.attestations?.provenance?.predicateType||\'\')}catch{process.stdout.write(\'\')}})"',
+    ].join("\n");
+    // Not vacuous: this shape must first match the verifier-line predicate.
+    expect(/dist\??\.attestations/.test(wf)).toBe(true);
+    expect(findMaskedVerifierViolations(wf, "release.yml")).toEqual([]);
+  });
+
+  it("does NOT flag the new workflow's unmasked, unpiped invocation", () => {
+    const wf = "      - run: node scripts/checks/check-override-floor-staleness.mjs\n";
+    expect(findMaskedVerifierViolations(wf, "override-floor-staleness.yml")).toEqual([]);
+  });
+
+  it("does NOT flag continue-on-error on an unrelated step in a workflow that runs no verifier (I-7.2)", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      - run: npm ci",
+      "        continue-on-error: true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+
+  it("does NOT flag a workflow that only mentions the gate in a comment and masks an unrelated step", () => {
+    const wf = [
+      "jobs:",
+      "  build:",
+      "    steps:",
+      "      # see scripts/checks/check-override-floor-staleness.mjs for the new gate",
+      "      - run: npm ci",
+      "        continue-on-error: true",
+    ].join("\n");
+    expect(findMaskedVerifierViolations(wf, "build.yml")).toEqual([]);
+  });
+
+  it("stays green on the real release.yml and dependency-signatures.yml (AC-7.3 unit-level echo)", () => {
+    const releaseYml = readFileSync(
+      new URL("../../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    );
+    const depSigYml = readFileSync(
+      new URL("../../.github/workflows/dependency-signatures.yml", import.meta.url),
+      "utf8",
+    );
+    expect(findMaskedVerifierViolations(releaseYml, "release.yml")).toEqual([]);
+    expect(findMaskedVerifierViolations(depSigYml, "dependency-signatures.yml")).toEqual([]);
+  });
+});
+
+// The two rules that replaced the "simple top-level command" allowlist. That
+// allowlist was measured to be both too loose (seven multi-line constructs
+// still masked the exit status) and too tight (five shapes that abort under
+// `bash -e` were rejected), so it was removed and the claim narrowed to what
+// spelling rules can hold. These two are what a regex CAN decide, and both are
+// holes the allowlist never covered.
+describe("findMaskedVerifierViolations — the premise rules (shell:, ambient env:)", () => {
+  const GATE = "node scripts/checks/check-override-floor-staleness.mjs";
+  const step = (extra) => `    steps:\n      - run: ${GATE}\n${extra}`;
+
+  it("DENY: shell: bash {0} removes the -e every other rule assumes", () => {
+    const v = findMaskedVerifierViolations(step("        shell: bash {0}\n"), "w.yml");
+    expect(v.some((m) => /shell: bash \{0\}/.test(m))).toBe(true);
+  });
+
+  it("ALLOW: the bare bash keyword form carries -e and is fine", () => {
+    expect(findMaskedVerifierViolations(step("        shell: bash\n"), "w.yml")).toEqual([]);
+    expect(findMaskedVerifierViolations(step("        shell: sh\n"), "w.yml")).toEqual([]);
+  });
+
+  it("ALLOW: a non-verifier workflow may use any shell it likes", () => {
+    const wf = `    steps:\n      - run: npm test\n        shell: python\n`;
+    expect(findMaskedVerifierViolations(wf, "w.yml")).toEqual([]);
+  });
+
+  it("DENY: an ambient-input env: key on a verifier-running workflow", () => {
+    // The gate refuses these at runtime, but a loader named in NODE_OPTIONS
+    // runs before its first line and can delete the variable it would have been
+    // caught by — so the workflow is the only place this shape is decidable.
+    for (const key of [
+      "NODE_OPTIONS: --import ./x.mjs",
+      "NODE_EXTRA_CA_CERTS: /tmp/ca.pem",
+      "NODE_TLS_REJECT_UNAUTHORIZED: \"0\"",
+      "HTTPS_PROXY: http://proxy.invalid:8080",
+    ]) {
+      const v = findMaskedVerifierViolations(step(`        env:\n          ${key}\n`), "w.yml");
+      expect(v.some((m) => /redirects, intercepts or instruments/.test(m))).toBe(true);
+    }
+  });
+
+  it("ALLOW: the token env: the real workflows use, and an ambient key on a non-verifier workflow", () => {
+    expect(
+      findMaskedVerifierViolations(step("        env:\n          GITHUB_TOKEN: x\n"), "w.yml"),
+    ).toEqual([]);
+    const noVerifier = `    steps:\n      - run: npm test\n        env:\n          NODE_OPTIONS: --max-old-space-size=4096\n`;
+    expect(findMaskedVerifierViolations(noVerifier, "w.yml")).toEqual([]);
+  });
+
+  it("DENY: a trap on ERR, in either case — bash reads signal names case-insensitively", () => {
+    for (const sig of ["ERR", "err", "Err"]) {
+      const wf = `    steps:\n      - run: |\n          trap "exit 0" ${sig}\n          ${GATE}\n`;
+      expect(findMaskedVerifierViolations(wf, "w.yml").some((m) => /trap/.test(m))).toBe(true);
+    }
+  });
+
+  it("ALLOW: release.yml's real EXIT cleanup trap in a verifier block", () => {
+    const wf = `    steps:\n      - run: |\n          trap 'rm -rf "$WORK"' EXIT\n          npm audit signatures\n`;
+    expect(findMaskedVerifierViolations(wf, "release.yml")).toEqual([]);
+  });
+
+  // The five shapes the removed allowlist rejected. Each was measured to exit 1
+  // under `bash -e`, so rejecting them was over-blocking — and over-blocking is
+  // what gets a gate deleted rather than fixed.
+  it("ALLOW: shapes that abort the step anyway are not violations", () => {
+    const shapes = [
+      `    steps:\n      - run: cd cli && ${GATE}\n`,
+      `    steps:\n      - run: timeout 300 ${GATE}\n`,
+      `    steps:\n      - run: |\n          ${GATE}\n          echo done\n`,
+      `    steps:\n      - run: env FORCE_COLOR=0 npm audit signatures\n`,
+      `    steps:\n      - name: npm audit signatures\n        run: npm audit signatures\n`,
+    ];
+    for (const wf of shapes) expect(findMaskedVerifierViolations(wf, "w.yml")).toEqual([]);
+  });
+});
+
+// I-5.3 — the PR job that runs the staleness gate must NOT be paths-filtered.
+// The gate walks all three manifests every run, so filtering on root
+// package.json would skip a cli/-only stale floor: M6's exact shape, and user
+// scenario 3. Today that is asserted by a nine-line comment in ci.yml and by
+// nothing else — adding `needs: changes` plus an `if:` is a two-line edit that
+// silently reinstates the blind spot one of the six original members occupied.
+describe("I-5.3 — the override-floor-staleness PR job carries no paths-filter", () => {
+  const CI = readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+  /**
+   * The narrowest structural extraction that answers this question. The repo
+   * declares no YAML parser (`js-yaml` resolves only as a transitive eslint /
+   * shadcn dependency, so importing it would bind this guard to somebody else's
+   * dependency tree), so the `jobs:` block is read by indentation instead: the
+   * named job's DIRECT child keys, and its body for the run-command extraction.
+   * That is a parse of the job, not a regex over the file.
+   */
+  function extractJob(workflowText, jobName) {
+    const lines = workflowText.split("\n");
+    const start = lines.indexOf(`  ${jobName}:`);
+    if (start === -1) return null;
+    const body = [];
+    for (let i = start + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === "" || /^\s*#/.test(line)) {
+        body.push(line);
+        continue;
+      }
+      if (!/^ {4}\S/.test(line) && !/^ {5,}/.test(line)) break; // dedented out of the job
+      body.push(line);
+    }
+    return {
+      keys: body.filter((l) => /^ {4}[A-Za-z_-]+:/.test(l)).map((l) => l.trim().split(":")[0]),
+      body: body.join("\n"),
+    };
+  }
+
+  const JOB = "override-floor-staleness";
+  const job = extractJob(CI, JOB);
+
+  it("the job exists and runs the gate", () => {
+    // Guarded with a message so a RENAME reds here, on a sentence that says
+    // what to do, rather than downstream on `Cannot read properties of null`.
+    expect(job, `no job named '${JOB}' under jobs: in .github/workflows/ci.yml — if it was renamed, move this guard with it`).toBeTruthy();
+    // extractRunCommands drops comments, so the nine-line rationale comment in
+    // ci.yml cannot satisfy this by mentioning the path.
+    expect(extractRunCommands(job.body)).toContain("node scripts/checks/check-override-floor-staleness.mjs");
+  });
+
+  it("DENY-shape: it declares neither `needs` nor `if`, so a cli/-only stale floor cannot skip it", () => {
+    expect(job.keys, `'${JOB}' gained a job-level key it must not have: ${job.keys.join(", ")}`).not.toContain("needs");
+    expect(job.keys).not.toContain("if");
+  });
+
+  it("ALLOW: a sibling job that IS legitimately paths-filtered keeps its needs/if", () => {
+    // Scoped to one named job on purpose. A repo-wide "no job may declare
+    // `needs: changes`" rule would catch app-ci, which is filtered by design —
+    // and the extractor must be shown to find those keys when they are present,
+    // or the DENY case above passes for the wrong reason.
+    const appCi = extractJob(CI, "app-ci");
+    expect(appCi, "no job named 'app-ci' in ci.yml").toBeTruthy();
+    expect(appCi.keys).toContain("needs");
+    expect(appCi.keys).toContain("if");
   });
 });
 
