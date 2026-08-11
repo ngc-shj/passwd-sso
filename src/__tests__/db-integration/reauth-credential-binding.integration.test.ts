@@ -234,6 +234,68 @@ describe.skipIf(!hasDatabase)("sessions.auth_credential_id binding (real DB)", (
     expect(row!.authCredentialId).toBeNull();
   });
 
+  it.skipIf(!redisAvailable)(
+    "a credential deleted while a ceremony is outstanding cannot be substituted by another credential (I9)",
+    async () => {
+      // I9's claim: a deletion concurrent with a reauth cannot leave the session
+      // refreshed by a credential other than its binding. The genuine
+      // mid-transaction interleaving is not schedulable here (see D2), but the
+      // substance is: with the ceremony already admitted and the bound row then
+      // deleted, presenting a DIFFERENT live credential of the same user must
+      // still deny, and passkey_verified_at must not move. That is the exact
+      // "fallback to any-credential" the split verifier exists to prevent.
+      const boundRowId = await insertCredential(userId, tenantId, `bound-${randomUUID()}`);
+      const otherCredId = `other-${randomUUID()}`;
+      await insertCredential(userId, tenantId, otherCredId);
+
+      const verifiedBefore = new Date(Date.now() - 60_000);
+      const token = await insertSession({
+        provider: "webauthn",
+        authCredentialId: boundRowId,
+        passkeyVerifiedAt: verifiedBefore,
+      });
+
+      // The ceremony was admitted while the binding was live.
+      const challengeId = generateChallengeId();
+      await redis!.set(
+        `webauthn:challenge:reauth:${userId}:${challengeId}`,
+        "test-challenge",
+        "EX",
+        60,
+      );
+
+      // …then the bound credential goes away. The FK nulls the binding.
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `DELETE FROM webauthn_credentials WHERE id = $1::uuid`,
+          boundRowId,
+        );
+      });
+
+      const res = await reauthVerifyPOST(
+        buildVerifyRequest(token, {
+          credentialResponse: JSON.stringify({ id: otherCredId }),
+          challengeId,
+        }),
+      );
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toEqual({ error: "PASSKEY_REAUTH_UNAVAILABLE" });
+
+      const after = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.session.findFirst({
+          where: { sessionToken: hashSessionToken(token) },
+          select: { passkeyVerifiedAt: true, authCredentialId: true },
+        });
+      });
+      expect(after!.authCredentialId).toBeNull();
+      // Byte-identical: the denial moved nothing.
+      expect(after!.passkeyVerifiedAt?.getTime()).toBe(verifiedBefore.getTime());
+    },
+  );
+
   it("rejects a session pointed at a nonexistent credential row (I1)", async () => {
     const token = await insertSession({
       provider: "webauthn",

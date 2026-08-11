@@ -377,6 +377,52 @@ describe("OperatorTokenCard", () => {
     expect(mockToastError).toHaveBeenCalledWith("reauthUnavailable");
   });
 
+  it("routes to RecentSessionRequiredDialog when the ceremony reports PASSKEY_REAUTH_CREDENTIAL_MISMATCH", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeyReauth: true }),
+      });
+    // The other new code, and the one a legitimate user is most likely to hit:
+    // they reached for a backup key. Same escape as the unavailable case — a
+    // retry with the same key cannot succeed, so re-offering the ceremony is
+    // the dead end this mapping exists to remove. The sibling hook covers both
+    // codes; this component implements the mapping separately, so it needs both
+    // too, or the asymmetry is exactly where the mapping rots.
+    mockReauthenticateWithPasskey.mockResolvedValueOnce({
+      ok: false,
+      error: "PASSKEY_REAUTH_CREDENTIAL_MISMATCH",
+    });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "mismatch-test" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthTitle")).toBeInTheDocument();
+    });
+
+    const reauthButtons = await screen.findAllByText("reauthAction");
+    fireEvent.click(reauthButtons[reauthButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("reauthTitle")).not.toBeInTheDocument();
+    expect(mockToastError).toHaveBeenCalledWith("reauthCredentialMismatch");
+  });
+
   it("falls back to local networkError for an unrecognized API error code", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })

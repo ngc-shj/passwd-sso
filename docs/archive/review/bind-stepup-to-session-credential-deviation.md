@@ -99,7 +99,7 @@ optional Prisma filter is forbidden. Per the Anti-Deferral rule on check false-p
 to make the check comment-aware rather than to rephrase the documentation around its blind spot —
 a forbidden pattern must not match its own fix. Code-line matches: zero.
 
-## D7 — `prisma migrate dev` could not be used; the migration was applied by `migrate deploy`
+## D7 — `prisma migrate dev` blocked after applying the migration; no reset was permitted
 
 `npm run db:migrate` (`prisma migrate dev`) blocked with no output in this non-interactive
 environment — the path where it can prompt to **reset** the database. It was not allowed to
@@ -108,3 +108,28 @@ continue. The migration had in fact already applied (`_prisma_migrations` shows
 was verified directly against the live database: the column exists, the FK
 `sessions_auth_credential_id_fkey` has `confdeltype = 'n'` (SET NULL), and both new `AuditAction`
 enum values are present. No reset was performed and no data was destroyed.
+
+## D8 — `refactor-phase-verify --force` fails locally on a stale, gitignored baseline; no rebase was needed
+
+Running the CI gate `node scripts/refactor-phase-verify.mjs --force` locally reports
+"Branch is stale vs origin/main — expected 88c8a859e…, current 3b4dd5284…, rebase and re-run".
+Investigated rather than obeyed:
+
+- `88c8a859e` comes from `.refactor-phase-verify-baseline`, which is **gitignored**
+  (`.gitignore:127`) and was last written on 2026-06-07 by an earlier refactor phase. It is a
+  local-environment artifact, not a repo fact.
+- This branch is **not** stale: `git ls-remote origin refs/heads/main` and `origin/main` both read
+  `3b4dd5284`, and `git log HEAD..origin/main` is empty. Nothing to rebase onto.
+- In CI the baseline file does not exist, so the gate takes its first-run branch, records the
+  current SHA and passes — the behaviour a previous piece of work already documented at
+  `docs/archive/review/stale-override-floors-deviation.md:93`.
+- The path `scripts/pre-pr.sh` actually invokes (`--skip-merge-queue-guards`) exits 0.
+
+**Disposition**: left untouched. Deleting or rewriting another developer's stale local baseline is
+an environment change with no bearing on this branch, and the gate is green on both the CI path and
+the pre-PR path. Recorded here so the red is not mistaken for a real staleness problem next time.
+
+Process note on how this was diagnosed: the first reading of the gate's status was taken through
+`| tail -8`, which reported exit 0 while the gate itself had exited 1 — the R44 trap, walked into
+and then corrected by re-running the gate unpiped. Every other gate result in Step 2-4 was captured
+from the command's own exit status.
