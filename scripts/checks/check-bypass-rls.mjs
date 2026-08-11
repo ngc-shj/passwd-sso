@@ -229,43 +229,75 @@ function getSourceFiles() {
 }
 
 /**
- * End line (exclusive) of the `withBypassRls(...)` call that starts at `start`,
- * found by balancing parentheses from the call's own opening paren. Strings,
- * template literals and comments are skipped so a paren inside them cannot
- * close the call early.
+ * Blank out every comment and string/template body, replacing their characters
+ * with spaces so byte offsets, line numbers and line count are preserved.
  *
- * Returns the fixed-radius end when the extent cannot be determined, and pushes
- * the site onto `unresolvedExtents` so an undeterminable call is reported rather
- * than silently scanned with a window that may be too short.
+ * Every predicate below then runs against code-only text. That matters more
+ * than it looks: deciding "is this a comment?" by re-matching raw text is a
+ * surface-form judgement about something only a lexer can answer (R47), and it
+ * fails in the direction that hides work — a real call preceded on the same
+ * line by a string containing `//` would be skipped entirely, scanned by
+ * nothing and reported by nothing. One pass, computed once, removes both that
+ * blind spot and its mirror (call-shaped text inside a string being walked as
+ * if it were code).
  */
-function callExtentEnd(lines, start, file) {
-  const open = lines[start].indexOf("(", lines[start].search(BYPASS_CALL_RE));
+function stripNonCode(content) {
+  const out = content.split("");
+  let i = 0;
+  const n = content.length;
+  let state = "code"; // code | line | block | sq | dq | tpl
+  const blank = (j) => {
+    if (out[j] !== "\n") out[j] = " ";
+  };
+  while (i < n) {
+    const c = content[i];
+    const c2 = content[i + 1];
+    if (state === "code") {
+      if (c === "/" && c2 === "/") { state = "line"; blank(i); blank(i + 1); i += 2; continue; }
+      if (c === "/" && c2 === "*") { state = "block"; blank(i); blank(i + 1); i += 2; continue; }
+      if (c === "'") { state = "sq"; i++; continue; }
+      if (c === '"') { state = "dq"; i++; continue; }
+      if (c === "`") { state = "tpl"; i++; continue; }
+      i++; continue;
+    }
+    if (state === "line") {
+      if (c === "\n") { state = "code"; i++; continue; }
+      blank(i); i++; continue;
+    }
+    if (state === "block") {
+      if (c === "*" && c2 === "/") { state = "code"; blank(i); blank(i + 1); i += 2; continue; }
+      blank(i); i++; continue;
+    }
+    // inside a string or template: blank the body, keep the delimiters
+    if (c === "\\") { blank(i); blank(i + 1); i += 2; continue; }
+    if ((state === "sq" && c === "'") || (state === "dq" && c === '"') || (state === "tpl" && c === "`")) {
+      state = "code"; i++; continue;
+    }
+    blank(i); i++; continue;
+  }
+  return out.join("");
+}
+
+/**
+ * End line (exclusive) of the `withBypassRls(...)` call starting at `start`,
+ * by balancing parentheses over CODE-ONLY lines (see stripNonCode), so a paren
+ * inside a string or comment can neither close the call early nor extend it.
+ *
+ * A call whose extent cannot be determined is pushed onto `unresolvedExtents`
+ * and reported: "examined nothing" must not be spelled like "found nothing".
+ */
+function callExtentEnd(codeLines, start, file) {
+  const open = codeLines[start].indexOf("(", codeLines[start].search(BYPASS_CALL_RE));
   if (open === -1) {
     unresolvedExtents.push({ file, line: start + 1 });
-    return Math.min(start + SCAN_RADIUS, lines.length);
+    return Math.min(start + SCAN_RADIUS, codeLines.length);
   }
   let depth = 0;
-  let inStr = null; // "'" | '"' | "`"
-  let inBlockComment = false;
-  for (let i = start; i < lines.length; i++) {
-    const line = lines[i];
-    const from = i === start ? open : 0;
-    for (let c = from; c < line.length; c++) {
-      const ch = line[c];
-      if (inBlockComment) {
-        if (ch === "*" && line[c + 1] === "/") { inBlockComment = false; c++; }
-        continue;
-      }
-      if (inStr) {
-        if (ch === "\\") { c++; continue; }
-        if (ch === inStr) inStr = null;
-        continue;
-      }
-      if (ch === "/" && line[c + 1] === "/") break;              // line comment
-      if (ch === "/" && line[c + 1] === "*") { inBlockComment = true; c++; continue; }
-      if (ch === "'" || ch === '"' || ch === "`") { inStr = ch; continue; }
-      if (ch === "(") depth++;
-      else if (ch === ")") {
+  for (let i = start; i < codeLines.length; i++) {
+    const line = codeLines[i];
+    for (let c = i === start ? open : 0; c < line.length; c++) {
+      if (line[c] === "(") depth++;
+      else if (line[c] === ")") {
         depth--;
         // Inclusive of the closing line: a call whose close lands exactly at
         // the boundary must still be scanned.
@@ -274,7 +306,7 @@ function callExtentEnd(lines, start, file) {
     }
   }
   unresolvedExtents.push({ file, line: start + 1 });
-  return Math.min(start + SCAN_RADIUS, lines.length);
+  return Math.min(start + SCAN_RADIUS, codeLines.length);
 }
 
 const unresolvedExtents = [];
@@ -304,18 +336,14 @@ for (const file of getSourceFiles()) {
     purposeViolations.push({ file, line: 0 });
   }
 
-  // Check 3: scan each call site for prisma model references and purpose constant
-  const lines = content.split("\n");
+  // Check 3: scan each call site for prisma model references and purpose constant.
+  // Code-only lines: comments and string bodies are blanked, so no predicate
+  // below can be fooled by, or blinded by, text that only looks like code.
+  const lines = stripNonCode(content).split("\n");
   const allowedSet = allowedModels.includes("*") ? null : new Set(allowedModels);
 
   for (let i = 0; i < lines.length; i++) {
     if (!BYPASS_CALL_RE.test(lines[i])) continue;
-    // A comment that names the helper is not a call site. Harmless while the
-    // scan was a fixed radius (it found no models and passed silently); with an
-    // extent scan it has no balanced paren to close, so it would be reported as
-    // undeterminable. src/auth.ts:66 is the live example.
-    const beforeMatch = lines[i].slice(0, lines[i].search(BYPASS_CALL_RE));
-    if (/(^|\s)\/\//.test(beforeMatch) || /^\s*\*/.test(lines[i])) continue;
 
     // Scan the call's ACTUAL extent, not a fixed number of lines. A fixed
     // radius silently stops covering a callback the moment it grows past it:

@@ -172,3 +172,61 @@ and reclaimed by `cleanup()`; no contamination of the ~25 specs sharing other us
 
 Seed unavailable — no dispositions to record. (Ollama seed generation exceeded its budget on the
 4759-line diff; all three experts performed full-diff review, the documented fallback.)
+
+---
+
+# Round 2 (incremental)
+
+## Changes from Previous Round
+
+All eight Round-1 findings were verified **resolved** by the three experts, each re-proving the
+claim by execution rather than reading the commit message: the migration checksum was recomputed by
+hand, the widened bypass-RLS scan was re-red-proved with independently chosen injections, the
+`mcp-tokens` allowlist change was adjudicated against the route's real code, and the renamed I9 test
+was re-run under the Round-1 mutation. Round 2's own findings are all against **the Round-1 fixes**.
+
+## Merged Findings
+
+| ID | Severity | Subject | Reported by | Status |
+|----|----------|---------|-------------|--------|
+| SEC-5 | **Major** | The comment-skip added for M2's remedy judged "is this a comment?" with a surface-form regex over raw text. A genuine `withBypassRls(` call preceded on the same line by a string containing `//` was skipped **entirely** — not scanned, not extent-walked, and not reported as an undeterminable extent, so it also escaped the fail-loud net the remedy was built to guarantee. Strictly worse than the defect M2 fixed. R47, proven by execution. | security | new |
+| T2 | **Major** | ~130 new lines of parsing logic in a gate that enforces a security invariant, with **zero** automated coverage: the Round-1 red-proof was manual and not persisted, and the gate's existing test file covers only the unrelated F3 check. RT7. | testing | new |
+| SEC-6 | Minor | The mirror direction: call-shaped text inside a string opened earlier on the same line was detected as a call site and its parens walked as code. Fails safe (over-scan or unresolved), but the same root cause. | security | new |
+| m5 | Minor | `callExtentEnd` treated a template literal as opaque, so a `${fn(x)}` interpolation's parens were not counted. No current occurrence; filed as a question per the Finding Floor. | functionality | new |
+| T1 | Minor | The regression C1 is about (route pointed at the any-credential verifier) *is* caught by the suite, but only as 13 unit tests failing with a downstream `503` — nothing asserts the call site, so a maintainer has to reconstruct the diagnosis. | testing | new |
+| R43 check | — | The `mcp-tokens` allowlist gaining three models was adjudicated by two experts independently against the route's real code and `git log`: the file is untouched by this branch, the callback has always used exactly those five models, and the sibling `[id]` route has listed the same four all along. **Surfacing of pre-existing class members, not a boundary widening.** | security + functionality | resolved, no defect |
+
+## Resolution Status — Round 2
+
+### SEC-5 + SEC-6 + m5 Major/Minor — one root cause, one fix
+- Action: the surface-form comment skip and the per-call lexer were both replaced by a single
+  whole-file pass (`stripNonCode`) that blanks comment and string/template bodies to spaces,
+  preserving offsets and line numbers. Every predicate — call-site detection, paren balancing, model
+  extraction — now runs on code-only text, so none of them can be fooled by, or blinded by, text
+  that only looks like code. This closes all three at once: the skipped-call blind spot (SEC-5), the
+  string-mention false call site (SEC-6), and the untracked `${…}` interpolation (m5).
+- **Red-proof, decisive**: a scratchpad copy of the checker with the old logic restored exits **0**
+  on the SEC-5 fixture (blind — the defect), while the current checker exits **1** and names
+  `prisma.tenantMember`. The real script was never mutated.
+- Modified: `scripts/checks/check-bypass-rls.mjs`
+
+### T2 Major — the gate's parsing logic had no tripwire
+- Action: seven cases added to `scripts/__tests__/check-bypass-rls.test.mjs`, using the harness the
+  F3 suite already proved fit: a model reference 30 lines past the old radius; the allow-side long
+  callback that must still pass; a real call on a line whose string contains `//` (SEC-5's exact
+  shape); a prose mention in a comment; a mention inside a string literal; a paren inside a string
+  plus a call inside a template interpolation; and an unbalanced call that must fail **by name**.
+  10/10 pass. The manual red-proofs of Rounds 1 and 2 are now persisted, which is the point — a gate
+  proven once by hand has no defence against its own next edit.
+- Modified: `scripts/__tests__/check-bypass-rls.test.mjs`
+
+### T1 Minor — the regression was caught, but not legibly
+- Action: `expect(mockVerifyAssertionForCredential).toHaveBeenCalledTimes(1)` moved ahead of the
+  status assertion in the happy-path test, so pointing the route at the any-credential verifier fails
+  on the call site rather than on a downstream 503.
+- Modified: `src/app/api/auth/passkey/reauth/verify/route.test.ts:156-163`
+
+### Verification after Round-2 fixes
+`npx tsc --noEmit` 0 · `npm run lint` 0 · `npx vitest run` 1008 files / **14537** passed ·
+`npm run test:integration` 98 files / 611 passed · `npx next build` 0 ·
+`check-pre-pr.sh run` 70/70 exit 0 · `npm run check:bypass-rls` 0.

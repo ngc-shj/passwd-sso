@@ -156,6 +156,12 @@ describe("POST /api/auth/passkey/reauth/verify", () => {
   it("updates passkey freshness on the current session", async () => {
     const res = await POST(makeVerifyRequest());
 
+    // Asserted before the status: if the route is ever pointed at the
+    // any-credential verifier, this fails on the call site — naming what
+    // regressed — instead of surfacing as a downstream 503 from the real
+    // implementation running against a test fixture (finding T1).
+    expect(mockVerifyAssertionForCredential).toHaveBeenCalledTimes(1);
+
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.ok).toBe(true);

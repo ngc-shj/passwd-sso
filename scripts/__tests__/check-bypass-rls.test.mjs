@@ -97,3 +97,118 @@ describe("check-bypass-rls F3 unused-tx anti-drift", () => {
     expect(r.stderr).toContain("src/app/api/y/route.ts");
   });
 });
+
+// ─── Call-extent scanning (the model-allowlist window) ────────────────────────
+//
+// These pin the scanner that decides WHICH lines a call site's model references
+// are read from. It used to be a fixed 10-line radius, which silently stopped
+// covering callbacks as they grew, and then briefly a same-line regex that
+// mistook a string containing "//" for a comment and skipped the call whole.
+// Both failures were found by hand-run mutations; these are those mutations,
+// persisted, because a gate proven once by hand has no tripwire against its own
+// next edit (RT7).
+//
+// audit-outbox.ts is used as the subject throughout: it is allowlisted for
+// `auditOutbox` only, so any other model inside its callback must be reported.
+
+describe("call-extent scanning", () => {
+  it("reads a model reference far past the old fixed 10-line radius", () => {
+    const filler = Array.from({ length: 30 }, (_, i) => `      const pad${i} = ${i};`).join("\n");
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+${filler}
+      return tx.tenantMember.findFirst({ where: { id: "x" } });
+  });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("still passes a long callback that only touches allowed models", () => {
+    // The allow side of the case above: widening the window must not turn every
+    // long callback into a violation.
+    const filler = Array.from({ length: 30 }, (_, i) => `      const pad${i} = ${i};`).join("\n");
+    const { code } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+${filler}
+      return tx.auditOutbox.findMany({ where: { status: "PENDING" } });
+  });
+}`);
+    expect(code).toBe(0);
+  });
+
+  it("scans a real call whose line also contains a string holding '//'", () => {
+    // The regression that made this suite necessary: judging "is this a
+    // comment?" from raw text let a string containing "//" hide a real call
+    // site, so it was scanned by nothing at all — worse than a short window,
+    // because it also escaped the undeterminable-extent report.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  log("fallback path // see runbook"); return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+      return tx.tenantMember.findFirst({ where: { id: "x" } });
+  });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("ignores a call-shaped mention inside a comment", () => {
+    // src/auth.ts carries exactly this in prose. It must not be treated as a
+    // call site — and must not be reported as an undeterminable extent either.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+// Emitting here would run logAuditAsync -> withBypassRls (nested), an R9 shape.
+export async function drain() {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => tx.auditOutbox.findMany());
+}`);
+    expect(code).toBe(0);
+    expect(stderr).not.toContain("could not be determined");
+  });
+
+  it("ignores a call-shaped mention inside a string literal", () => {
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const HELP = "see withBypassRls(prisma, purpose, cb) for the pattern";
+export async function drain() {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => tx.auditOutbox.findMany());
+}`);
+    expect(code).toBe(0);
+    expect(stderr).not.toContain("could not be determined");
+  });
+
+  it("is not fooled by a paren inside a string or a template interpolation", () => {
+    // A ")" in string text must not close the call early, and a call expression
+    // inside `${...}` must not be counted either — both would end the extent
+    // before the offending model reference below.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(id) {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+      log("closing paren ) inside a string");
+      log(\`key:\${hash(id)}\`);
+      return tx.tenantMember.findFirst({ where: { id } });
+  });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("fails by name when a call's extent cannot be determined", () => {
+    // Unbalanced source: the gate must say so rather than fall back to a window
+    // it cannot justify. "Examined nothing" must not read like "found nothing".
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+      return tx.auditOutbox.findMany();
+`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be determined");
+    expect(stderr).toContain("audit-outbox.ts");
+  });
+});
