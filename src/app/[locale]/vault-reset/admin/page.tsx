@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
-import { fetchApi, withBasePath } from "@/lib/url-helpers";
+import { fetchApi, hardNavigate } from "@/lib/url-helpers";
 
 const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
@@ -63,7 +63,7 @@ export default function AdminVaultResetPage() {
       }
 
       // Full reload to re-initialize VaultProvider
-      window.location.href = withBasePath(`/${locale}/dashboard`);
+      hardNavigate(`/${locale}/dashboard`);
     } catch {
       setError(tApi("unknownError"));
     } finally {

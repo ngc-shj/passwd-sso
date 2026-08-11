@@ -74,6 +74,33 @@ export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
 }
 
 /**
+ * Navigate by replacing the document, not by a client-side route change.
+ *
+ * The full reload is the point at every call site: after a vault reset or
+ * recovery the whole React tree — including the in-memory encryption key held
+ * by VaultProvider — must be rebuilt from scratch, and a download endpoint is
+ * not a Next page at all. `useRouter().push()` would keep the old heap alive,
+ * so this is the one place allowed to assign `window.location.href`.
+ *
+ * Being that one place is also why it refuses to leave the current origin: a
+ * string reaching this function IS a navigation, so `//evil.example` (which
+ * `withBasePath` leaves protocol-relative whenever BASE_PATH is empty) or a
+ * `javascript:` URL would be an open redirect here rather than a bug at the
+ * call site. Callers pass literal routes today; the guard is what keeps that
+ * from being load-bearing. The refusal names only the origin — a caller-supplied
+ * path can carry a token in its query string.
+ *
+ * Client-side only.
+ */
+export function hardNavigate(path: string): void {
+  const target = new URL(withBasePath(path), window.location.origin);
+  if (target.origin !== window.location.origin) {
+    throw new Error(`hardNavigate: refusing to navigate to origin ${target.origin}`);
+  }
+  window.location.href = target.toString();
+}
+
+/**
  * Build a full URL (origin + basePath + path) for clipboard / sharing.
  * Browser-only (references window.location.origin).
  */

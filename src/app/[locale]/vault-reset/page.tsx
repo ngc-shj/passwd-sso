@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Link } from "@/i18n/navigation";
 import { ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
-import { fetchApi, withBasePath } from "@/lib/url-helpers";
+import { fetchApi, hardNavigate, withBasePath } from "@/lib/url-helpers";
 
 const CONFIRMATION_TOKEN = VAULT_CONFIRMATION_PHRASE.DELETE_VAULT;
 
@@ -65,8 +65,7 @@ export default function VaultResetPage() {
       // navigate to signin. callbackUrl carries the user back to /dashboard
       // after re-auth, where the SETUP_REQUIRED state shows the setup form.
       const callbackUrl = withBasePath(`/${locale}/dashboard`);
-      const signinUrl = `${withBasePath(`/${locale}/auth/signin`)}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
-      window.location.href = signinUrl;
+      hardNavigate(`/${locale}/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`);
     } catch {
       setError(tApi("unknownError"));
     } finally {
