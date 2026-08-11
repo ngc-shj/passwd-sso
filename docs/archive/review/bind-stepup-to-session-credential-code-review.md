@@ -230,3 +230,153 @@ was re-run under the Round-1 mutation. Round 2's own findings are all against **
 `npx tsc --noEmit` 0 · `npm run lint` 0 · `npx vitest run` 1008 files / **14537** passed ·
 `npm run test:integration` 98 files / 611 passed · `npx next build` 0 ·
 `check-pre-pr.sh run` 70/70 exit 0 · `npm run check:bypass-rls` 0.
+
+---
+
+# Round 3 (incremental)
+
+## Changes from Previous Round
+
+Scope: `git show 72629ee14` only — the SEC-5/SEC-6/T2 remedy (`stripNonCode`, the whole-file
+comment/string-blanking pass) plus its seven persisted tests and one unrelated test-legibility tweak
+(T1's follow-through). Security attacked `stripNonCode` itself: does the blanking preserve what every
+caller assumes (offsets, line count, delimiters), and is there an input where blanking makes the gate
+**more** blind than the raw-text scan it replaced. Two were found, both execution-verified, both
+against the same function. Functionality and testing re-derived the seven tests' claims against the
+gate's own behavior; one test earns a Minor for not pinning what its own comment says it pins.
+
+## Merged Findings
+
+| ID | Severity | Subject | Reported by | Convergence |
+|----|----------|---------|-------------|-------------|
+| SEC-7 | **Major** | `stripNonCode` has no lexical category for regex literals — it decides comment-vs-code from two-character lookahead alone, with no concept of "this `/` opens a regex, skip its body." A `/` immediately followed by `*` or `/` *inside a regex character class* (where `/` needs no escaping — e.g. `` /[/*]/ ``) is misread as opening a real block/line comment. Once misdetected, everything after is blanked until an unrelated `*/` happens to occur — in the demonstrated case, to end of file. This erases the `withBypassRls(` call text itself, so the call is not scanned, not extent-walked, and not reported as unresolved either: the exact SEC-5 shape (a real access-control-relevant call escapes the fail-loud net) reopened via an unhandled lexical category, with a strictly wider blast radius (whole remainder of file, not one line). | security | new, execution-verified |
+| SEC-8 | **Major** | The same whole-file strip now backs *every* predicate in Check 3, including the Prisma-model-allowlist scan, which previously ran over raw (unstripped) `content.split("\n")`. `stripNonCode` blanks template-literal bodies unconditionally — it does not re-enter "code" state inside `${...}` — so a genuine Prisma call written inside a template interpolation (e.g. an inline log/error message) is now invisible to the allowlist check. Verified as a **regression introduced by this diff**: the identical fixture exits 1 (correctly names `prisma.tenantMember`) against the pre-commit checker (`72629ee14~1`) and exits 0 ("OK") against the current one. Round 2's m5 covered only `callExtentEnd`'s paren-counting inside interpolations (filed as "no current occurrence"); this is a distinct, demonstrated loss in the model-allowlist scan itself. | security | new, execution-verified |
+| T3 | Minor | The Round-2 test "still passes a long callback that only touches allowed models" (`check-bypass-rls.test.mjs:129`) is stated to guard against extent-scanning over-correction ("widening the window must not turn every long callback into a violation") but does not: its fixture has no code after the callback's closing brace, so a mutant `callExtentEnd` that always returns `codeLines.length` (scans to EOF unconditionally) passes this exact test unchanged (verified by mutation). The test only starts to distinguish bounded-vs-unbounded extent once an unrelated non-bypass `prisma.` call exists later in the same file — the true over-correction case is currently untested. | testing | new, execution-verified |
+
+## Verification (executed, scratchpad-isolated; production file confirmed byte-identical throughout)
+
+- `npx vitest run scripts/__tests__/check-bypass-rls.test.mjs` → 10/10 pass (matches the commit's claim).
+- **SEC-7 PoC**: fixture `src/lib/audit/audit-outbox.ts` (allowlisted for `auditOutbox` only) containing
+  `const GLOB_RE = /[/*]/;` before a `withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => { return
+  tx.tenantMember.findFirst(...) })`. Current gate: `check-bypass-rls: OK` (exit 0). Same fixture against
+  `72629ee14~1` (pre-Round-3 checker): exit 1, `prisma.tenantMember` named. Direct inspection of
+  `stripNonCode`'s output on this input confirms the entire `export async function drain() {...}` block —
+  including the real call and model reference — is blanked to spaces.
+- **SEC-8 PoC**: fixture with `` log(`processed batch, unlisted model access: ${await
+  tx.tenantMember.count()}`); `` inside an otherwise-`auditOutbox`-only callback. Current gate: exit 0
+  ("OK"). Same fixture against `72629ee14~1`: exit 1, `prisma.tenantMember` named at the correct line.
+- Backtick-toggle sanity checks: a same-line nested template (`` `${cond ? `a` : `b`}` ``) and a
+  double-quoted string containing a literal backtick inside an interpolation were also tried as
+  candidate desync vectors; both happened to end on an even backtick count and re-synced state before
+  reaching the real call, so neither reproduces a blind spot on its own — noted as a further latent risk
+  of the same design (any odd-count backtick imbalance within an interpolation desyncs the rest of the
+  file) but not filed as a separate finding since no concrete instance was demonstrated.
+- End-of-input edge cases (unterminated string/block-comment, trailing backslash at EOF): no crash, no
+  infinite loop; an unterminated block comment or string blanks to EOF (fails safe, consistent with
+  "examined nothing must not read as found nothing" *only* to the extent the call text itself survives
+  blanking — which SEC-7/SEC-8 show it does not always). A file ending mid-string with a trailing
+  backslash as its literal last character causes `blank(n)` to write one element past the `out` array's
+  end, growing the joined output by one trailing space; traced through and confirmed inconsequential
+  (the extra character lands after the last real newline, so no real line's content or number shifts) —
+  such a file is not valid TypeScript and would fail the build regardless, so not filed as a finding.
+- **T3 mutation**: a scratchpad copy of the checker with `callExtentEnd` forced to `return
+  codeLines.length` unconditionally reproduces the *stated* Round-2 test's exact fixture at exit 0
+  (indistinguishable from correct behavior) — confirming the test does not pin what it claims. Adding a
+  second, unrelated `prisma.user.findFirst(...)` call after the callback's closing brace makes the two
+  diverge: current gate exit 0, EOF-scanning mutant exit 1 naming `prisma.user`.
+
+## Status of Prior Findings
+
+| ID | Status |
+|----|--------|
+| SEC-5 | resolved — the same-line string-hides-a-real-call shape from Round 2 is fixed and pinned by test (`check-extent scanning › scans a real call whose line also contains a string holding '//'`), confirmed still exit 1 on that fixture. |
+| SEC-6 | resolved — call-shaped text inside a string is confirmed not treated as a call site, and not reported as unresolved (pinned by test). |
+| T2 | resolved — seven cases now exist and 10/10 pass; the manual red-proofs are persisted. |
+| m5 | resolved for its stated scope (`callExtentEnd` paren-counting inside `${...}`) — pinned by test 6 (`is not fooled by a paren inside a string or a template interpolation`). Note: this round's SEC-8 is a distinct, broader loss (model-*visibility*, not paren-*counting*) introduced by extending the same blanking to the allowlist scan; it is a new finding, not a reopening of m5. |
+| T1 | resolved — `mockVerifyAssertionForCredential` call-count assertion confirmed present ahead of the status assertion in `route.test.ts:163`; the added lines are correctly scoped and do not touch unrelated assertions. |
+
+## Recurring Issue Check
+
+R1–R57, RS1–RS6: reviewed incrementally against the four-file diff only.
+
+**R47 (surface-form judgement where only a lexer can answer) → recurs a third time, now as SEC-7/SEC-8.**
+This is the same rule Round 2 routed SEC-5/SEC-6 through. The remedy replaced one surface-form judgement
+(regex-over-raw-text) with a hand-rolled character automaton that is *itself* still a surface-form
+judgement one level down — it decides "comment vs. code" and "string vs. code" from local 1–2-character
+lookahead with no token-context (no notion of "previous significant token," which is what a real parser
+uses to disambiguate `/` as division vs. regex-literal start), and it has no representation at all for
+"currently inside a regex literal" or "currently inside a nested-code region of a template." Two rounds
+of hand-patching this class of bug in the same function is the threshold this project's own retrospective
+lessons name for "escalate the mechanism instead of adding another case": the sibling gates in the same
+`scripts/checks/` directory (`check-bound-unknown-ip.mjs`, `check-null-tenant-fail-closed.mjs`,
+`check-session-token-hashed.mjs`, `check-cli-shell-safety.mjs`, and others) already use `ts-morph` — an
+existing devDependency wrapping the real TypeScript scanner/parser — specifically to avoid this exact
+class of defect. `check-bypass-rls.mjs` is the outlier still reimplementing tokenization by hand.
+Recommended remedy (Major, both SEC-7 and SEC-8, one fix): replace `stripNonCode`'s character automaton
+with token/trivia classification from the TypeScript compiler API (directly, or via `ts-morph`'s
+`SourceFile`) for comment, string, regex-literal, and template-literal boundaries; keep call-site
+detection and model extraction as AST queries (`CallExpression` where the callee resolves to
+`withBypassRls`; `PropertyAccessExpression` chains rooted at `prisma`/`tx`) rather than regex-over-text
+matched line-by-line. This structurally closes the regex-literal and template-interpolation classes at
+once — a parser does not need a special case for "is this `/` a regex" or "did this `` ` `` close the
+outer template," it already knows. Remedy Floor: (1) allow side — the seven existing tests plus the
+F3 suite must still pass unmodified, and `npm run check:bypass-rls` must still exit 0 on the real tree;
+(2) red-prove each of SEC-7 and SEC-8 separately against the rewritten gate (the two PoCs above, reused
+as new persisted tests, must flip from exit-0 to exit-1 naming `prisma.tenantMember`); (3) a source file
+the TS scanner cannot tokenize (a genuine syntax error) must route to the existing unresolved-extent
+fail-loud path, not silently pass; (4) the fix must not drop the fail-loud unresolved-extent report path
+itself, and must not narrow SEC-5/SEC-6/T2's existing coverage to buy this; (5) boundary: a Prisma
+model access that is *genuinely* reachable code inside a template interpolation or inside a callback
+nested arbitrarily deep within `${...}` must be flagged exactly like any other call-site-scoped access —
+the AST approach makes this the default outcome rather than a case to special-case for.
+R42 (re-derive the member-set for anything class-shaped) applied here: the class is "any JS lexical
+category `stripNonCode` doesn't model" — regex literals and template re-entrancy are the two demonstrated
+members; JSX attribute text and tagged templates were checked and found to behave the same
+pre- and post-diff (not a regression, out of this round's scope).
+All other R-numbers: no new evidence contradicting Round 1/2's dispositions; not re-litigated.
+
+RT7 (a gate proven once by hand has no tripwire against its own next edit) — the stated purpose of
+T2's seven tests. **T3 shows one of the seven does not fully deliver on it**: the allow-side long-callback
+test cannot fail for the over-correction reason its own comment claims, because its fixture has nothing
+after the call site that a wider-than-correct window could wrongly ingest. Same rule Round 2 fired,
+now against Round 2's own remedy.
+RT1–RT6, RT8–RT11: no new evidence; not re-litigated (out of this round's diff).
+
+## Seed Finding Disposition
+
+Not applicable this round — targeted incremental review of one commit, not a fresh triangulate pass.
+
+```json
+[
+  {
+    "id": "SEC-7",
+    "severity": "Major",
+    "file": "scripts/checks/check-bypass-rls.mjs",
+    "line": 244,
+    "problem": "stripNonCode has no lexical category for regex literals; a '/' inside a regex character class immediately followed by '*' or '/' (e.g. /[/*]/) is misread as opening a real comment, blanking everything after it — up to end of file in the demonstrated case — including real withBypassRls call sites and prisma/tx model references, with no unresolved-extent report either.",
+    "failure_scenario": "A file allowlisted only for 'auditOutbox' contains `const GLOB_RE = /[/*]/;` before `withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => { return tx.tenantMember.findFirst(...) })`. The gate exits 0 ('OK'); the pre-Round-3 checker on the same input exits 1 and names prisma.tenantMember.",
+    "recommended_fix": "Replace the hand-rolled comment/string automaton with token classification from the TypeScript compiler API (directly or via the existing ts-morph dependency, already used by sibling gates in scripts/checks/), so regex-literal boundaries are determined by the real grammar instead of two-character lookahead. Red-prove against this exact fixture (must flip to exit 1 naming prisma.tenantMember) without regressing any of the seven existing tests or check:bypass-rls on the real tree.",
+    "escalate": false
+  },
+  {
+    "id": "SEC-8",
+    "severity": "Major",
+    "file": "scripts/checks/check-bypass-rls.mjs",
+    "line": 342,
+    "problem": "Check 3's Prisma-model-allowlist scan now runs exclusively over stripNonCode's output, which blanks template-literal bodies unconditionally (no re-entry to code state inside ${...}). A genuine Prisma call written inside a template interpolation is invisible to the allowlist check — a regression from the pre-diff behavior, which scanned raw unstripped lines and therefore still matched the literal substring.",
+    "failure_scenario": "A callback allowlisted only for 'auditOutbox' contains `log(`processed batch, unlisted model access: ${await tx.tenantMember.count()}`);`. The gate exits 0 ('OK'); the identical fixture against the pre-Round-3 checker (72629ee14~1) exits 1 and names prisma.tenantMember at the correct line.",
+    "recommended_fix": "Same remedy as SEC-7 (shared root cause): move model-reference extraction to an AST query (PropertyAccessExpression chains rooted at prisma/tx) over the real parse tree, which resolves expressions inside template interpolations by construction rather than needing template bodies to stay opaque. Add the demonstrated fixture as a persisted test; it must flip to exit 1 naming prisma.tenantMember.",
+    "escalate": false
+  },
+  {
+    "id": "T3",
+    "severity": "Minor",
+    "file": "scripts/__tests__/check-bypass-rls.test.mjs",
+    "line": 129,
+    "problem": "The 'still passes a long callback that only touches allowed models' test is stated to guard against extent-scanning over-correction but its fixture has no code after the callback's closing brace, so it cannot distinguish correct bounded extent from a mutant that always scans to end of file.",
+    "failure_scenario": "A mutant callExtentEnd forced to always return codeLines.length passes this exact test unchanged (exit 0). Only adding an unrelated prisma.user.findFirst(...) call after the callback's closing brace makes the mutant diverge (exit 1, false positive) from the correct implementation (exit 0).",
+    "recommended_fix": "Add an unrelated non-bypass prisma.<model> call after the withBypassRls callback's closing brace in this fixture (or a sibling test), asserting exit 0, so the test can actually fail if extent-bounding regresses to an unbounded scan.",
+    "escalate": false
+  }
+]
+```

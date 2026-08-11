@@ -243,3 +243,43 @@ and the integration tier (the gate/predicate against a real DB). Cost to fix loc
 E2E seed path for forced RLS, unbounded from here and unrelated to this branch.
 **Tracked**: `TODO(bind-stepup-to-session-credential): D13 — run step-up-credential-binding.spec.ts;
 local E2E seeding is blocked by forced RLS on users`.
+
+## D14 — Replacing the gate's scanner a third time, and one flaky pre-PR gate
+
+**The gate's mechanism was escalated, not patched again.** `check-bypass-rls.mjs`'s model scan has
+now been wrong three times, each time one level down from the last:
+
+1. a fixed 10-line radius — stopped covering callbacks as they grew (round-1 finding M2);
+2. a regex deciding "is this a comment?" — skipped a real call whose line held a string containing
+   `//`, and skipped it *entirely*, escaping even the fail-loud net (round-2 finding SEC-5);
+3. a hand-rolled character automaton — misread a `/` inside a regex character class (`/[/*]/`) as
+   opening a block comment and blanked the rest of the file, and blinded the model scan to code
+   inside a template interpolation that the original raw-text scan had seen (round-3 SEC-7, SEC-8).
+
+Each fix was a better guess about the grammar. Three escapes on the same predicate is the signal to
+change the mechanism rather than add another case, so the scan now reads the parse tree via
+`scripts/checks/lib/ast-project.mjs` — the ts-morph helper five sibling gates in this repo already
+use, and which documents its own no-Program rationale. A call is a call because the parser says so,
+its extent is `getStart()`..`getEnd()` with nothing to balance, and `tx.model` inside `${…}` is code
+because it is code. Comments, strings and regex literals are out of scope structurally.
+
+The fail-loud property was kept in a form the new mechanism can support: if the raw text calls the
+helper but no `withBypassRls` identifier survives in the tree, the parse lost the code and the file
+is named as unscanned. The old "extent could not be determined" case has no analogue — the parser
+recovers from truncation and still yields the call — so its test now asserts that stronger outcome
+instead. `PRISMA_MODEL_RE` and the extent walker were deleted rather than left unused.
+
+The gate now carries **13 tests** where it had none for this logic, including both round-3
+regressions as fixtures. Red-proof, run against the previous implementation: the round-2 lexer exits
+**0** (blind) on both the regex-literal and template-interpolation fixtures; the AST version exits
+**1** and names the model.
+
+**A flaky pre-PR gate, recorded rather than dismissed.** One `scripts/pre-pr.sh` run failed on
+"Extension: Test" with an unhandled `ReferenceError: window is not defined` at teardown. Evidence
+that it is not this branch's: `git diff --name-only main...HEAD | grep -c '^extension/'` → **0**; the
+extension suite passes 940/940 on three consecutive isolated runs; and the next full pre-PR run
+returned 70/70, exit 0. It looks like a teardown-time unhandled rejection that only surfaces under
+pre-pr's bounded-parallel scheduling. Not investigated further here — it is unrelated to this change
+and would be its own piece of work — but it is a real flake in an authoritative gate and should not
+be discovered again from scratch.
+`TODO(bind-stepup-to-session-credential): D14 — extension suite flake under pre-pr parallelism`

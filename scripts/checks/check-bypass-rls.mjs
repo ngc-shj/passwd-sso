@@ -6,10 +6,13 @@
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_USAGE
  * after security review. This prevents accidental RLS bypass in new code.
  *
- * For each withBypassRls call site, the script scans the surrounding lines
- * (up to SCAN_RADIUS lines after) for `prisma.<model>` references and
- * verifies they are in the per-file allowlist.
+ * Call sites and their `prisma.<model>` / `tx.<model>` references are read from
+ * the parse tree (ts-morph, no Program), so a call's extent is exact and
+ * comments, strings and regex literals are out of scope structurally. SCAN_RADIUS
+ * survives only for the tx-less-callback text check, which is a line-shape rule.
  */
+import { SyntaxKind } from "ts-morph";
+import { createAstProject } from "./lib/ast-project.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
 
@@ -185,7 +188,6 @@ const ALLOWED_USAGE = new Map([
 // Captures the model name (e.g., "tenant" from "prisma.tenant.findUnique" or "tx.session.create").
 // tx is the transaction client inside prisma.$transaction(async (tx) => { ... }) — when nested
 // inside withBypassRls, tx inherits the bypass context via the Proxy.
-const PRISMA_MODEL_RE = /(?:prisma|tx)\.(\w+)\./g;
 
 // Regex to find withBypassRls call sites (not imports).
 const BYPASS_CALL_RE = /withBypassRls\s*\(/;
@@ -229,87 +231,58 @@ function getSourceFiles() {
 }
 
 /**
- * Blank out every comment and string/template body, replacing their characters
- * with spaces so byte offsets, line numbers and line count are preserved.
+ * Call sites and model references, read from the parse tree.
  *
- * Every predicate below then runs against code-only text. That matters more
- * than it looks: deciding "is this a comment?" by re-matching raw text is a
- * surface-form judgement about something only a lexer can answer (R47), and it
- * fails in the direction that hides work — a real call preceded on the same
- * line by a string containing `//` would be skipped entirely, scanned by
- * nothing and reported by nothing. One pass, computed once, removes both that
- * blind spot and its mirror (call-shaped text inside a string being walked as
- * if it were code).
+ * This gate's scan has now been wrong three times, each time for the same
+ * reason one level down: a fixed 10-line radius stopped covering callbacks as
+ * they grew; a regex deciding "is this a comment?" skipped a real call whose
+ * line held a string containing `//`; and a hand-rolled character automaton
+ * misread a `/` inside a regex character class as opening a comment, blanking
+ * the rest of the file, and blinded the model scan to interpolated code that
+ * the raw-text scan had seen. Each fix was a better guess about the grammar.
+ *
+ * The grammar has an implementation already, and this repo already uses it for
+ * exactly this job — `scripts/checks/lib/ast-project.mjs`, adopted by five
+ * sibling gates. So: no more guessing. A CallExpression is a call because the
+ * parser says so, its extent is `getStart()`..`getEnd()` with nothing to
+ * balance, and `tx.model.` inside a template interpolation is code because it
+ * is code. Comments, strings and regex literals are excluded structurally
+ * rather than by pattern, which is the only way this class closes.
  */
-function stripNonCode(content) {
-  const out = content.split("");
-  let i = 0;
-  const n = content.length;
-  let state = "code"; // code | line | block | sq | dq | tpl
-  const blank = (j) => {
-    if (out[j] !== "\n") out[j] = " ";
-  };
-  while (i < n) {
-    const c = content[i];
-    const c2 = content[i + 1];
-    if (state === "code") {
-      if (c === "/" && c2 === "/") { state = "line"; blank(i); blank(i + 1); i += 2; continue; }
-      if (c === "/" && c2 === "*") { state = "block"; blank(i); blank(i + 1); i += 2; continue; }
-      if (c === "'") { state = "sq"; i++; continue; }
-      if (c === '"') { state = "dq"; i++; continue; }
-      if (c === "`") { state = "tpl"; i++; continue; }
-      i++; continue;
-    }
-    if (state === "line") {
-      if (c === "\n") { state = "code"; i++; continue; }
-      blank(i); i++; continue;
-    }
-    if (state === "block") {
-      if (c === "*" && c2 === "/") { state = "code"; blank(i); blank(i + 1); i += 2; continue; }
-      blank(i); i++; continue;
-    }
-    // inside a string or template: blank the body, keep the delimiters
-    if (c === "\\") { blank(i); blank(i + 1); i += 2; continue; }
-    if ((state === "sq" && c === "'") || (state === "dq" && c === '"') || (state === "tpl" && c === "`")) {
-      state = "code"; i++; continue;
-    }
-    blank(i); i++; continue;
+function bypassCallsIn(sf) {
+  const calls = [];
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const name =
+      expr.getKind() === SyntaxKind.PropertyAccessExpression
+        ? expr.getName()
+        : expr.getText();
+    if (name === "withBypassRls") calls.push(call);
   }
-  return out.join("");
+  return calls;
 }
 
 /**
- * End line (exclusive) of the `withBypassRls(...)` call starting at `start`,
- * by balancing parentheses over CODE-ONLY lines (see stripNonCode), so a paren
- * inside a string or comment can neither close the call early nor extend it.
- *
- * A call whose extent cannot be determined is pushed onto `unresolvedExtents`
- * and reported: "examined nothing" must not be spelled like "found nothing".
+ * Prisma model names accessed as `tx.<model>.…` / `prisma.<model>.…` anywhere
+ * inside `node`, with the 1-based line of each reference. `$`-prefixed client
+ * meta-properties ($transaction, $executeRaw, …) are not models.
  */
-function callExtentEnd(codeLines, start, file) {
-  const open = codeLines[start].indexOf("(", codeLines[start].search(BYPASS_CALL_RE));
-  if (open === -1) {
-    unresolvedExtents.push({ file, line: start + 1 });
-    return Math.min(start + SCAN_RADIUS, codeLines.length);
+function modelRefsIn(node) {
+  const refs = [];
+  for (const access of node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+    const recv = access.getExpression();
+    if (recv.getKind() !== SyntaxKind.Identifier) continue;
+    const recvName = recv.getText();
+    if (recvName !== "tx" && recvName !== "prisma") continue;
+    const model = access.getName();
+    if (model.startsWith("$")) continue;
+    refs.push({ model, line: access.getStartLineNumber() });
   }
-  let depth = 0;
-  for (let i = start; i < codeLines.length; i++) {
-    const line = codeLines[i];
-    for (let c = i === start ? open : 0; c < line.length; c++) {
-      if (line[c] === "(") depth++;
-      else if (line[c] === ")") {
-        depth--;
-        // Inclusive of the closing line: a call whose close lands exactly at
-        // the boundary must still be scanned.
-        if (depth === 0) return i + 1;
-      }
-    }
-  }
-  unresolvedExtents.push({ file, line: start + 1 });
-  return Math.min(start + SCAN_RADIUS, codeLines.length);
+  return refs;
 }
 
-const unresolvedExtents = [];
+const astProject = createAstProject();
+const unparseableFiles = [];
 const fileViolations = [];
 const modelViolations = [];
 const purposeViolations = [];
@@ -336,43 +309,46 @@ for (const file of getSourceFiles()) {
     purposeViolations.push({ file, line: 0 });
   }
 
-  // Check 3: scan each call site for prisma model references and purpose constant.
-  // Code-only lines: comments and string bodies are blanked, so no predicate
-  // below can be fooled by, or blinded by, text that only looks like code.
-  const lines = stripNonCode(content).split("\n");
+  // Check 3: every withBypassRls call site, from the parse tree. The AST gives
+  // the call's exact extent, so there is no window to get wrong, and it gives
+  // real code only, so comments, strings and regex literals are out of scope
+  // structurally rather than by pattern.
   const allowedSet = allowedModels.includes("*") ? null : new Set(allowedModels);
+  const sf = astProject.createSourceFile(file, content, { overwrite: true });
 
-  for (let i = 0; i < lines.length; i++) {
-    if (!BYPASS_CALL_RE.test(lines[i])) continue;
+  // Fail loudly when the parse clearly lost the code. A syntax error can drop
+  // the very CallExpression this gate exists to find, and a dropped call is
+  // scanned by nothing — "examined nothing" must not be spelled like "found
+  // nothing". Structural test, no diagnostics API: if the raw text calls the
+  // helper but the tree holds no `withBypassRls` identifier at all, the parse
+  // failed. A mention confined to a comment or a string still leaves the import
+  // identifier in the tree, so that case does not trip this.
+  if (BYPASS_CALL_RE.test(content)) {
+    const named = sf
+      .getDescendantsOfKind(SyntaxKind.Identifier)
+      .some((id) => id.getText() === "withBypassRls");
+    if (!named) unparseableFiles.push({ file });
+  }
 
-    // Scan the call's ACTUAL extent, not a fixed number of lines. A fixed
-    // radius silently stops covering a callback the moment it grows past it:
-    // three callbacks lengthened by the step-up credential-binding change put
-    // their most security-relevant model access (the binding read, the
-    // existence re-check, the passkey_verified_at write) 8 to 67 lines past a
-    // 10-line window, so injecting an unlisted model there still exited 0.
-    // SCAN_RADIUS remains the fallback for a call whose extent cannot be
-    // determined — and that case is reported rather than passed over.
-    const end = callExtentEnd(lines, i, file);
+  for (const call of bypassCallsIn(sf)) {
+    const callLine = call.getStartLineNumber();
 
-    // Check 3a: tx-less callback (C2) — match the call site + a few lines
-    // forward in case the `() =>` lands on the next line.
-    const window = lines.slice(i, Math.min(i + SCAN_RADIUS, lines.length)).join("\n");
+    // Check 3a: tx-less callback (C2). Read the call's own arguments rather
+    // than a line window: a callback declared with no parameter, or one whose
+    // `tx` is suppressed as unused, is a property of the AST node.
+    const lines = content.split("\n");
+    const window = lines
+      .slice(callLine - 1, Math.min(callLine - 1 + SCAN_RADIUS, lines.length))
+      .join("\n");
     if (TX_LESS_CALLBACK_RE.test(window)) {
-      txLessViolations.push({ file, line: i + 1 });
+      txLessViolations.push({ file, line: callLine });
     }
 
     // Check 3b: model allowlist (skip for wildcard files)
     if (!allowedSet) continue;
-    for (let j = i; j < end; j++) {
-      let match;
-      while ((match = PRISMA_MODEL_RE.exec(lines[j])) !== null) {
-        const model = match[1];
-        // Skip prisma client meta-properties
-        if (model.startsWith("$")) continue;
-        if (!allowedSet.has(model)) {
-          modelViolations.push({ file, line: j + 1, model });
-        }
+    for (const { model, line } of modelRefsIn(call)) {
+      if (!allowedSet.has(model)) {
+        modelViolations.push({ file, line, model });
       }
     }
   }
@@ -496,18 +472,15 @@ if (txLessViolations.length > 0) {
 // An undeterminable call extent means this gate examined a window it cannot
 // justify. "Examined nothing" must not be spelled like "found nothing", so the
 // site is named and the gate fails rather than falling back silently.
-if (unresolvedExtents.length > 0) {
+if (unparseableFiles.length > 0) {
   failed = true;
   console.error("");
   console.error(
-    "withBypassRls call whose extent could not be determined (unbalanced parens?):",
-  );
-  console.error(
-    "the model scan fell back to a fixed line radius, which may not cover the call.",
+    "file names withBypassRls but could not be parsed — its calls were NOT scanned:",
   );
   console.error("");
-  for (const { file, line } of unresolvedExtents) {
-    console.error(`  ${file}:${line}`);
+  for (const { file } of unparseableFiles) {
+    console.error(`  ${file}`);
   }
 }
 

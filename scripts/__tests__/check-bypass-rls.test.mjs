@@ -128,7 +128,9 @@ ${filler}
 
   it("still passes a long callback that only touches allowed models", () => {
     // The allow side of the case above: widening the window must not turn every
-    // long callback into a violation.
+    // long callback into a violation. The unrelated prisma.user call AFTER the
+    // callback is what gives this test teeth — without it, a scan that runs to
+    // end-of-file unconditionally passes too (finding T3).
     const filler = Array.from({ length: 30 }, (_, i) => `      const pad${i} = ${i};`).join("\n");
     const { code } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -137,6 +139,9 @@ export async function drain() {
 ${filler}
       return tx.auditOutbox.findMany({ where: { status: "PENDING" } });
   });
+}
+export async function unrelated() {
+  return prisma.user.findFirst({ where: { id: "x" } });
 }`);
     expect(code).toBe(0);
   });
@@ -198,17 +203,65 @@ export async function drain(id) {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
-  it("fails by name when a call's extent cannot be determined", () => {
-    // Unbalanced source: the gate must say so rather than fall back to a window
-    // it cannot justify. "Examined nothing" must not read like "found nothing".
+  it("is not blinded by a regex literal whose character class holds a slash", () => {
+    // `/[/*]/` — the `/` needs no escaping inside a character class. A
+    // lookahead-based comment detector reads the `/*` as opening a block
+    // comment and blanks the rest of the file, taking the call site with it.
+    // The parser knows a regex literal when it sees one.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const GLOB_RE = /[/*]/;
+export async function drain() {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+      return tx.tenantMember.findFirst({ where: { id: "x" } });
+  });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("sees a model reference inside a template interpolation", () => {
+    // `${await tx.model.count()}` is code, not string body. Blanking template
+    // literals wholesale hid it — a regression the raw-text scan did not have.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(id) {
+  return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
+      log(\`members=\${await tx.tenantMember.count()}\`);
+      return tx.auditOutbox.findMany();
+  });
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("still scans a truncated file, because the parser recovers", () => {
+    // This case used to assert the gate "fails by name when the extent cannot be
+    // determined" — a property the hand-rolled paren balancer needed because it
+    // could genuinely lose track. The parser does not have that failure mode: it
+    // recovers from the truncation and still yields the call, so the unlisted
+    // model inside the unclosed callback is caught outright. That is the
+    // stronger outcome, so the test asserts it instead of the old fallback.
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain() {
   return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => {
-      return tx.auditOutbox.findMany();
+      return tx.tenantMember.findFirst({ where: { id: "x" } });
 `);
     expect(code).toBe(1);
-    expect(stderr).toContain("could not be determined");
-    expect(stderr).toContain("audit-outbox.ts");
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("reports a file that names the helper but whose code the parse lost", () => {
+    // The fail-loud net, kept for the case the parser cannot recover from at
+    // all: text calls withBypassRls, yet no such identifier survives in the
+    // tree, so nothing was scanned. "Examined nothing" must not read like
+    // "found nothing".
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts",
+      "\u0000withBypassRls(prisma, p, async (tx) => tx.tenantMember.f());");
+    // Either the model is caught outright, or the file is named as unscanned —
+    // never a silent pass.
+    expect(code).toBe(1);
+    expect(stderr).toMatch(/prisma\.tenantMember|could not be parsed/);
   });
 });
