@@ -609,6 +609,106 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("follows a client aliased OUTSIDE the callback", () => {
+    // `prisma` is a Proxy that reads the bypass context out of
+    // AsyncLocalStorage, so a module-level alias of it is a bypassed client
+    // inside the callback too. Following assignments only within the callback
+    // misses it entirely.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const db = prisma;
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows a client assigned after its declaration", () => {
+    // `let db; db = tx;` — a binding is not a different value for having been
+    // filled in on the next line, so plain assignments count, not only
+    // initializers.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    let db;
+    db = tx;
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows a client through a conditional expression", () => {
+    // `cond ? tx : prisma` is a choice between clients, so the result is one.
+    // Note the deliberate limit this pairs with: an expression that merely
+    // MENTIONS a client is not a flow — `await tx.user.find()` yields a row.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(flag) {
+  return withBypassRls(prisma, async (tx) => {
+    const db = flag ? tx : prisma;
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("catches a delegate destructured in a nested $transaction parameter", () => {
+    // A nested transaction inherits the bypass, and its callback parameter gets
+    // the same treatment as the outer one — taking getName() there returns the
+    // pattern text and registers "{ tenantMember }" as a client name while the
+    // model itself goes unrecorded.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    return tx.$transaction(async ({ tenantMember }) => tenantMember.findMany());
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes an outer alias and a nested $transaction that stay within the allowlist", () => {
+    // The allow side for both of the above: following the value further must
+    // not turn a compliant callback into a violation.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const db = prisma;
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    await db.auditOutbox.findMany();
+    return tx.$transaction(async ({ auditOutbox }) => auditOutbox.count());
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("does not treat a query result as a client", () => {
+    // The boundary that makes the flow analysis usable: `await tx.user.find()`
+    // mentions a client and yields a row. 131 lines in this tree have that
+    // shape, so a mention-based rule would report every ordinary query — here
+    // `row.tenantMember` must NOT be read as a bypassed model access.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const row = await tx.auditOutbox.findFirst();
+    return row.tenantMember;
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("passes an alias and a destructured delegate that stay within the allowlist", () => {
     // The allow side for both: following the value must not turn every local
     // binding into a violation.

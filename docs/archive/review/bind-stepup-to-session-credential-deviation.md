@@ -506,3 +506,53 @@ both sides, nothing lost.
 
 The four D16 gaps remain open by the user's decision; this one is closed rather than declared
 because it was reachable by a one-line edit inside an already-allowlisted callback.
+
+## D19 — Two more client-flow escapes, and the boundary that makes the analysis usable
+
+**What changed**: `clientBindingsIn` follows the bypassed client through the whole file rather than
+only the callback, through plain assignments as well as initializers, and through a choice between
+clients; nested `$transaction` parameters get the same destructuring treatment as the outer one; and
+the file-wide collection is hoisted behind a lazy per-file index.
+
+**Why**: a second external review reproduced three more shapes, all exit 0 before:
+
+```ts
+const db = prisma;                       // module scope — prisma is the Proxy, so this
+withBypassRls(prisma, async (tx) => db.tenantMember.findMany(), P);   // is a bypassed client too
+
+withBypassRls(prisma, async (tx) => { let db; db = tx; return db.tenantMember.findMany(); }, P);
+
+withBypassRls(prisma, async (tx) =>
+  tx.$transaction(async ({ tenantMember }) => tenantMember.findMany()), P);
+```
+
+The first is the one that matters: the alias lived outside the callback, and the fixpoint only
+walked the callback. The third was my own inconsistency — `spreadPattern` was applied to the outer
+callback parameter and not to the nested one, so `"{ tenantMember }"` was registered as a *client
+name* and the model went unrecorded.
+
+**The suggestion I did not take, and why.** The review proposed failing closed on "expressions that
+contain a known client but cannot be analysed". Measured on this tree: **131** such initializers,
+essentially all of the shape `const user = await tx.user.findUnique(...)` — a query *result*, not a
+client. Implemented as proposed it would red the build on nearly every real callback. Proven rather
+than argued: a mention-based variant run against the real tree reports `prisma.map`,
+`prisma.ownerId`, `prisma.userId` — properties of result objects, named as Prisma models.
+
+So the decidable slice is implemented instead: a value is a client when it *is* one, or is a choice
+between them (`cond ? tx : prisma`, `maybe ?? tx`, through parens/casts). A client returned by a
+helper (`const db = wrap(tx)`) stays unfollowed — undecidable without type resolution, which this
+gate runs without by design — and is named in the header. The query-result boundary is pinned by its
+own test, because it is what keeps the analysis usable.
+
+**Evidence**: 51 tests (up from 45), 51/51; full suite 1008 files / 14578 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Five single-clause mutations, each reddening a different
+case: file-wide scan → callback-only (1→0 on the outer alias), assignment tracking off (1→0), nested
+`$transaction` pattern → `getName()` (1→0), conditional flow off (1→0), and `yieldsClient` widened to
+mention-based (the query-result allow case 0→1). Coverage differential with all 93 allowlist entries
+emptied: 279 pairs both sides, nothing lost.
+
+**Performance, measured rather than asserted** — the previous round shipped a false "unchanged" here,
+so: 0.68 s before this change, **0.73 s** after, with both the binding index and the new flow index
+built lazily and once per file. Collecting the flow index per *call* instead cost 0.83 s, and the
+~7% that remains is the tracking itself. The header carries the same numbers and the instruction to
+re-measure rather than re-copy.

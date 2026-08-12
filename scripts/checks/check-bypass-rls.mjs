@@ -246,9 +246,11 @@ const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 //     const c=readFileSync(f,"utf8");
 //     if(/with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/.test(c))n++;
 //     if(/withBypassRls\s*\(/.test(c))o++;}console.log(n,o)'
-// Whole gate measured at ~0.68 s, unchanged from before the widening — but only
-// because bindingIndex is built lazily. Building it per parsed file cost ~25%
-// (0.68 -> 0.85 s) for an index 3 of 238 files ever consult.
+// Whole gate measured at ~0.73 s: 0.68 s before client-flow tracking was added,
+// and that ~7% is the tracking itself, not waste — both the binding index and
+// the flow index are built lazily and once per file. Collecting them eagerly
+// per file cost ~25%, and per CALL another ~13%; if this number moves again,
+// re-measure before assuming which.
 const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
 const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
@@ -466,10 +468,31 @@ function callbackOf(call, bindingsFor) {
  * identifier (`cond ? tx : prisma`, a helper's return value) — is named in
  * this file's header rather than left to be rediscovered.
  */
-function clientBindingsIn(fn) {
+/**
+ * The file's variable declarations and plain assignments, collected once.
+ * `clientBindingsIn` runs per call site and needs the whole file (an alias may
+ * live outside the callback), so collecting them per call walked the tree once
+ * per call — measurably, ~20% of the gate's runtime.
+ */
+function flowIndex(sf) {
+  return {
+    decls: sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration),
+    assignments: sf
+      .getDescendantsOfKind(SyntaxKind.BinaryExpression)
+      .filter((b) => b.getOperatorToken().getKind() === SyntaxKind.EqualsToken),
+  };
+}
+
+function clientBindingsIn(fn, flow) {
   const clients = new Set(["prisma"]);
   const modelRefs = [];
   if (!fn) return { clients, modelRefs };
+
+  // A destructuring OUTSIDE the callback is not a bypassed access — it only
+  // tells us what the bound names carry. Model references are collected from
+  // inside the callback only; client aliases propagate from anywhere.
+  const insideCallback = (node) =>
+    node.getStart() >= fn.getStart() && node.getEnd() <= fn.getEnd();
 
   const addModel = (keyNode, line) => {
     if (keyNode.getKind() !== SyntaxKind.Identifier) return false;
@@ -480,18 +503,22 @@ function clientBindingsIn(fn) {
     return true;
   };
 
+  const addClient = (name) => {
+    if (!name || clients.has(name)) return false;
+    clients.add(name);
+    return true;
+  };
+
   // Destructuring a client binds its delegates: each property is a model
   // access, and a rest element carries what is left of the client.
-  const spreadPattern = (pattern) => {
+  const spreadPattern = (pattern, emitModels) => {
     let grew = false;
     for (const el of pattern.getElements()) {
       if (el.getDotDotDotToken()) {
-        if (!clients.has(el.getName())) {
-          clients.add(el.getName());
-          grew = true;
-        }
+        if (addClient(el.getName())) grew = true;
         continue;
       }
+      if (!emitModels) continue;
       if (addModel(el.getPropertyNameNode() ?? el.getNameNode(), el.getStartLineNumber())) {
         grew = true;
       }
@@ -499,9 +526,20 @@ function clientBindingsIn(fn) {
     return grew;
   };
 
-  const firstName = fn.getParameters()[0]?.getNameNode();
-  if (firstName?.getKind() === SyntaxKind.Identifier) clients.add(firstName.getText());
-  else if (firstName?.getKind() === SyntaxKind.ObjectBindingPattern) spreadPattern(firstName);
+  // A callback parameter, at any depth: the outer one, and every nested
+  // `$transaction` callback, which inherits the bypass through the Proxy. Both
+  // take the same treatment — an identifier is a client, a pattern destructures
+  // one — because a nested transaction is a client by a different route, not a
+  // different kind of thing.
+  const takeParameter = (param) => {
+    const nameNode = param?.getNameNode();
+    if (nameNode?.getKind() === SyntaxKind.Identifier) addClient(nameNode.getText());
+    else if (nameNode?.getKind() === SyntaxKind.ObjectBindingPattern) {
+      spreadPattern(nameNode, true);
+    }
+  };
+
+  takeParameter(fn.getParameters()[0]);
 
   for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = inner.getExpression();
@@ -509,30 +547,69 @@ function clientBindingsIn(fn) {
     if (expr.getName() !== "$transaction") continue;
     for (const arg of inner.getArguments()) {
       if (!FN_KINDS.has(arg.getKind())) continue;
-      const param = arg.getParameters()[0];
-      if (param) clients.add(param.getName());
+      takeParameter(arg.getParameters()[0]);
     }
   }
 
-  // Fixpoint: each pass can reveal a client that makes the next assignment
-  // relevant. Both sets only grow and are bounded by the declarations in `fn`,
-  // so this terminates.
-  const decls = fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration);
+  // Fixpoint over the WHOLE FILE, not just the callback: `prisma` is a Proxy
+  // that reads the bypass context out of AsyncLocalStorage, so a module-level
+  // `const db = prisma` is a bypassed client inside the callback too. Plain
+  // assignments (`let db; db = tx;`) count as well as initializers — a binding
+  // is not made a different value by being filled in on the next line.
+  //
+  // Each pass can reveal a client that makes the next assignment relevant, so
+  // this runs to a fixpoint; both sets only grow and are bounded by the file's
+  // declarations, so it terminates.
+  const { decls, assignments } = flow;
+
+  // Does this expression evaluate to a client? An identifier that is one, or a
+  // choice between them — `cond ? tx : prisma`, `maybe ?? tx`. Deliberately NOT
+  // "any expression mentioning a client": `const user = await tx.user.find()`
+  // mentions `tx` and yields a row, and 131 such lines exist in this tree, so
+  // treating a mention as a flow would report every ordinary query. A client
+  // returned by a helper (`const db = wrap(tx)`) is undecidable without type
+  // resolution, which this gate runs without by design — see the header.
+  const yieldsClient = (expr) => {
+    if (!expr) return false;
+    switch (expr.getKind()) {
+      case SyntaxKind.Identifier:
+        return clients.has(expr.getText());
+      case SyntaxKind.ParenthesizedExpression:
+      case SyntaxKind.AsExpression:
+      case SyntaxKind.NonNullExpression:
+      case SyntaxKind.SatisfiesExpression:
+        return yieldsClient(expr.getExpression());
+      case SyntaxKind.ConditionalExpression:
+        return yieldsClient(expr.getWhenTrue()) || yieldsClient(expr.getWhenFalse());
+      case SyntaxKind.BinaryExpression: {
+        const op = expr.getOperatorToken().getKind();
+        if (op !== SyntaxKind.QuestionQuestionToken && op !== SyntaxKind.BarBarToken) {
+          return false;
+        }
+        return yieldsClient(expr.getLeft()) || yieldsClient(expr.getRight());
+      }
+      default:
+        return false;
+    }
+  };
+
   for (let changed = true; changed; ) {
     changed = false;
     for (const decl of decls) {
       const init = decl.getInitializer();
-      if (init?.getKind() !== SyntaxKind.Identifier) continue;
-      if (!clients.has(init.getText())) continue;
+      if (!yieldsClient(init)) continue;
       const nameNode = decl.getNameNode();
       if (nameNode.getKind() === SyntaxKind.Identifier) {
-        if (!clients.has(nameNode.getText())) {
-          clients.add(nameNode.getText());
-          changed = true;
-        }
+        if (addClient(nameNode.getText())) changed = true;
       } else if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
-        if (spreadPattern(nameNode)) changed = true;
+        if (spreadPattern(nameNode, insideCallback(decl))) changed = true;
       }
+    }
+    for (const assignment of assignments) {
+      if (!yieldsClient(assignment.getRight())) continue;
+      const left = assignment.getLeft();
+      if (left.getKind() !== SyntaxKind.Identifier) continue;
+      if (addClient(left.getText())) changed = true;
     }
   }
 
@@ -657,6 +734,8 @@ for (const file of sourceFiles) {
   // an answer almost nobody asked for.
   let bindings = null;
   const bindingsFor = () => (bindings ??= bindingIndex(sf));
+  let flow = null;
+  const flowFor = () => (flow ??= flowIndex(sf));
 
   for (const { call, helper } of calls) {
     const line = call.getStartLineNumber();
@@ -693,7 +772,7 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs } = clientBindingsIn(fn);
+    const { clients, modelRefs } = clientBindingsIn(fn, flowFor());
     const seen = new Set();
     const scanNodes =
       fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd() ? [call] : [call, fn];
