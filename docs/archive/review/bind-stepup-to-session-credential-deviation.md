@@ -464,3 +464,45 @@ Seven single-clause mutations, each reddening a different case. One is stated as
 observable: a `Parameter` has no `getVariableStatement`, so the `const`-only refusal already excludes
 it and the explicit kind check is intent, not a second guard — recorded rather than claimed. Coverage
 differential against D16's gate, all 93 allowlist entries emptied: 279 pairs both sides, nothing lost.
+
+## D18 — An external security review found a fifth gap the header presented as a complete list
+
+**What changed**: `clientNamesIn` and `destructuredModelRefs` are replaced by `clientBindingsIn`,
+which follows the bypassed client through assignment to a fixpoint instead of recognising it only
+under the callback parameter's own name.
+
+**Why**: the client reaches a model under more than one spelling, and the gate followed only two of
+them. Reported and reproduced:
+
+```ts
+withBypassRls(prisma, async (tx) => {
+  const db = tx;
+  return db.tenantMember.findMany();   // exit 0 — unlisted model, not reported
+}, BYPASS_PURPOSE.AUDIT);
+```
+
+Three shapes, all exit 0 before, all exit 1 now: a plain alias (`const db = tx`), a chain
+(`const a = tx; const b = a;`), and a delegate lifted off the client in the body
+(`const { tenantMember } = tx`). The allow side — an alias and a destructured delegate that stay
+inside the allowlist — stays exit 0, which is what stops the fix being "report every local binding".
+
+**The part that matters more than the code.** D16 and this file's header presented four gaps as the
+complete set of what the gate does not cover, and this was a fifth. The enumeration was derived over
+*the shapes the previous rounds had found*, not over *the ways a value can reach a model access* —
+the same class-derivation error that has now produced findings in six consecutive rounds, this time
+in the prose that was supposed to compensate for it. The header no longer says "all four"; it names
+what is followed, names what is not (an initializer that is not a plain identifier — `cond ? tx :
+prisma`, a client returned by a helper), and says explicitly that the list is the current best
+enumeration rather than a closed one.
+
+**Evidence**: 45 tests (up from 40), 45/45; full suite 1008 files / 14572 passed; real tree exit 0;
+lint 0, typecheck 0, the four CI-only gates 0. Four single-clause mutations, each reddening a
+different case: alias tracking (1→0 on `const db = tx`), body destructuring (1→0 on
+`const { tenantMember } = tx`), the fixpoint (1→0 on an alias declared textually before the client it
+derives from — a forward chain resolves in one pass, so that ordering is what makes the loop
+observable), and the allow-side fixture held at 0 under the alias mutation. Runtime 0.67–0.70 s,
+unchanged. Coverage differential against D17's gate with all 93 allowlist entries emptied: 279 pairs
+both sides, nothing lost.
+
+The four D16 gaps remain open by the user's decision; this one is closed rather than declared
+because it was reachable by a one-line edit inside an already-allowlisted callback.

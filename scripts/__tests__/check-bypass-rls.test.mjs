@@ -542,6 +542,90 @@ export async function drain(flag) {
     expect(stderr).toContain("could not be resolved");
   });
 
+  it("follows a client aliased to another name", () => {
+    // `const db = tx` — the value is the bypassed client whatever it is called
+    // next. Tracking only the parameter's own name is the same
+    // decides-by-spelling habit, one assignment along.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const db = tx;
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows a chain of client aliases", () => {
+    // One hop is a special case; the resolution runs to a fixpoint so the
+    // chain's length cannot be the thing that hides an access.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const a = tx;
+    const b = a;
+    return b.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows an alias declared before the client it derives from", () => {
+    // Source order is not resolution order: `c = b` is read before `b = tx`
+    // exists, so one pass over the declarations misses it. This is what the
+    // fixpoint is for — a forward chain would resolve without it.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    function inner() {
+      const c = b;
+      return c.tenantMember.findMany();
+    }
+    const b = tx;
+    return inner();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("catches a delegate destructured off the client in the callback body", () => {
+    // `const { tenantMember } = tx` lifts the delegate out, so no
+    // `<client>.<model>` access ever appears for the property scan to find.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const { tenantMember } = tx;
+    return tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes an alias and a destructured delegate that stay within the allowlist", () => {
+    // The allow side for both: following the value must not turn every local
+    // binding into a violation.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const db = tx;
+    const { auditOutbox } = db;
+    const rows = await auditOutbox.findMany();
+    return db.auditOutbox.count({ where: { id: rows[0]?.id } });
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("reads models through a rest element rather than reporting the rest name", () => {
     // `...rest` binds the remaining client, so it is a receiver. Treating it as
     // a model both invents `prisma.rest` and hides everything reached through it.

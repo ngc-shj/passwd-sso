@@ -35,8 +35,14 @@
  *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
+ *   - A client reached through an initializer that is not a plain identifier
+ *     is not followed: `const db = cond ? tx : prisma`, or a client returned by
+ *     a helper. Plain aliases, alias chains and destructuring off a client ARE
+ *     followed (clientBindingsIn), which is what an external review found this
+ *     list missing — the four above were written as the complete set and were
+ *     not. Treat this list as the current best enumeration, not a closed one.
  *
- * All four are tracked as D16 in the branch's deviation log. The rule this file
+ * These are tracked as D16/D18 in the branch's deviation log. The rule this file
  * aims at is "no predicate decides a code question by surface form"; the list
  * above is where it does not hold yet, and it is written here rather than in a
  * commit message because the next editor reads this.
@@ -377,7 +383,7 @@ function bindingIndex(sf) {
       // equal — so indexing by it would leave `job` looking unbound, and an
       // unrelated `job` elsewhere would then resolve as the unique candidate.
       // That is the same getName()-on-a-pattern mistake this file already fixed
-      // in clientNamesIn and declaresUnusedTx.
+      // in clientBindingsIn and declaresUnusedTx.
       const nameNode = decl.getNameNode?.();
       if (nameNode && nameNode.getKind() !== SyntaxKind.Identifier) {
         for (const el of nameNode.getDescendantsOfKind(SyntaxKind.BindingElement)) {
@@ -440,31 +446,63 @@ function callbackOf(call, bindingsFor) {
 }
 
 /**
- * The identifiers that carry the bypassed client inside `fn`. Its own first
- * parameter, whatever it is named — the convention is `tx`, but a gate that
- * enforces the convention by relying on it stops seeing anything the moment
- * someone writes `db`. `prisma` is included because the bare client picks up
- * the bypass context through the Proxy's AsyncLocalStorage, and a nested
- * `$transaction` callback inherits it the same way.
+ * Everything inside `fn` that carries the bypassed client, and the model
+ * accesses that fall out of destructuring one.
+ *
+ * A client reaches a model by more than one spelling, and the gate has to
+ * follow the VALUE rather than the name it happens to wear at the access:
+ *
+ *   tx.model.findMany()                  the parameter itself
+ *   const db = tx;  db.model.findMany()  an alias — and aliases chain
+ *   const { model } = tx;                the delegate lifted out directly
+ *   ({ model }) => model.findMany()      the same, done in the signature
+ *   ({ ...rest }) => rest.model.f()      a rest element is still the client
+ *   tx.$transaction(async (t2) => …)     a nested tx inherits the bypass
+ *
+ * Assignments are followed to a fixpoint, so a chain of any length resolves.
+ * `let`/`var` aliases are followed too: unlike a callback binding, over-
+ * approximating a CLIENT can only report more models, which is the safe
+ * direction. What is not followed — an initializer that is not a plain
+ * identifier (`cond ? tx : prisma`, a helper's return value) — is named in
+ * this file's header rather than left to be rediscovered.
  */
-function clientNamesIn(fn) {
-  const names = new Set(["prisma"]);
-  if (!fn) return names;
-  const first = fn.getParameters()[0];
-  // A destructured client (`async ({ tenantMember }) => …`) binds no name that
-  // can be a receiver — the destructured properties ARE the model accesses, and
-  // `getName()` there returns the pattern text, which no identifier can equal.
-  // Those are collected by destructuredModelRefs instead.
-  const firstName = first?.getNameNode();
-  if (firstName?.getKind() === SyntaxKind.Identifier) {
-    names.add(first.getName());
-  } else if (firstName?.getKind() === SyntaxKind.ObjectBindingPattern) {
-    // `async ({ auditOutbox, ...rest }) => rest.user.f()` — the rest element
-    // carries the remaining client, so it IS a receiver.
-    for (const el of firstName.getElements()) {
-      if (el.getDotDotDotToken()) names.add(el.getName());
+function clientBindingsIn(fn) {
+  const clients = new Set(["prisma"]);
+  const modelRefs = [];
+  if (!fn) return { clients, modelRefs };
+
+  const addModel = (keyNode, line) => {
+    if (keyNode.getKind() !== SyntaxKind.Identifier) return false;
+    const model = keyNode.getText();
+    if (model.startsWith("$")) return false;
+    if (modelRefs.some((r) => r.model === model && r.line === line)) return false;
+    modelRefs.push({ model, line });
+    return true;
+  };
+
+  // Destructuring a client binds its delegates: each property is a model
+  // access, and a rest element carries what is left of the client.
+  const spreadPattern = (pattern) => {
+    let grew = false;
+    for (const el of pattern.getElements()) {
+      if (el.getDotDotDotToken()) {
+        if (!clients.has(el.getName())) {
+          clients.add(el.getName());
+          grew = true;
+        }
+        continue;
+      }
+      if (addModel(el.getPropertyNameNode() ?? el.getNameNode(), el.getStartLineNumber())) {
+        grew = true;
+      }
     }
-  }
+    return grew;
+  };
+
+  const firstName = fn.getParameters()[0]?.getNameNode();
+  if (firstName?.getKind() === SyntaxKind.Identifier) clients.add(firstName.getText());
+  else if (firstName?.getKind() === SyntaxKind.ObjectBindingPattern) spreadPattern(firstName);
+
   for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = inner.getExpression();
     if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
@@ -472,10 +510,33 @@ function clientNamesIn(fn) {
     for (const arg of inner.getArguments()) {
       if (!FN_KINDS.has(arg.getKind())) continue;
       const param = arg.getParameters()[0];
-      if (param) names.add(param.getName());
+      if (param) clients.add(param.getName());
     }
   }
-  return names;
+
+  // Fixpoint: each pass can reveal a client that makes the next assignment
+  // relevant. Both sets only grow and are bounded by the declarations in `fn`,
+  // so this terminates.
+  const decls = fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration);
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const decl of decls) {
+      const init = decl.getInitializer();
+      if (init?.getKind() !== SyntaxKind.Identifier) continue;
+      if (!clients.has(init.getText())) continue;
+      const nameNode = decl.getNameNode();
+      if (nameNode.getKind() === SyntaxKind.Identifier) {
+        if (!clients.has(nameNode.getText())) {
+          clients.add(nameNode.getText());
+          changed = true;
+        }
+      } else if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
+        if (spreadPattern(nameNode)) changed = true;
+      }
+    }
+  }
+
+  return { clients, modelRefs };
 }
 
 /**
@@ -496,31 +557,6 @@ function modelRefsIn(node, clientNames) {
   return refs;
 }
 
-/**
- * Model names a destructured client parameter reaches directly. `async
- * ({ tenantMember }) => tenantMember.findFirst(…)` never writes a receiver, so
- * the property-access scan cannot see it; the destructured property is itself
- * the model delegate.
- */
-function destructuredModelRefs(fn) {
-  const refs = [];
-  const nameNode = fn?.getParameters()[0]?.getNameNode();
-  if (nameNode?.getKind() !== SyntaxKind.ObjectBindingPattern) return refs;
-  // Only the pattern's OWN properties are model delegates. A rest element binds
-  // the remaining client, not a model — reporting it would name a model that
-  // does not exist, and would leave everything reached through it unscanned
-  // (clientNamesIn adds it as a receiver instead). Nested patterns destructure
-  // a delegate's methods, which are not models either.
-  for (const el of nameNode.getElements()) {
-    if (el.getDotDotDotToken()) continue;
-    const keyNode = el.getPropertyNameNode() ?? el.getNameNode();
-    if (keyNode.getKind() !== SyntaxKind.Identifier) continue;
-    const model = keyNode.getText();
-    if (model.startsWith("$")) continue;
-    refs.push({ model, line: el.getStartLineNumber() });
-  }
-  return refs;
-}
 
 /**
  * True when `fn` declares a client parameter and never references it (F3).
@@ -657,25 +693,21 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const clientNames = clientNamesIn(fn);
+    const { clients, modelRefs } = clientBindingsIn(fn);
     const seen = new Set();
     const scanNodes =
       fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd() ? [call] : [call, fn];
-    for (const ref of destructuredModelRefs(fn)) {
-      seen.add(`${ref.model}:${ref.line}`);
-      if (!allowedSet.has(ref.model)) {
-        modelViolations.push({ file, line: ref.line, model: ref.model });
-      }
-    }
+    const report = ({ model, line }) => {
+      const key = `${model}:${line}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (!allowedSet.has(model)) modelViolations.push({ file, line, model });
+    };
+    // Delegates lifted straight off a client by destructuring, then every
+    // `<client>.<model>` reached through any identifier that carries the client.
+    for (const ref of modelRefs) report(ref);
     for (const node of scanNodes) {
-      for (const ref of modelRefsIn(node, clientNames)) {
-        const key = `${ref.model}:${ref.line}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        if (!allowedSet.has(ref.model)) {
-          modelViolations.push({ file, line: ref.line, model: ref.model });
-        }
-      }
+      for (const ref of modelRefsIn(node, clients)) report(ref);
     }
   }
 }
