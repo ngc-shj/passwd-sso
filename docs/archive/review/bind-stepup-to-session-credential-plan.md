@@ -1213,6 +1213,12 @@ roots (co-located, `__tests__/`, `e2e/`) adds three members the plan did not nam
   the replacement `findFirst` landed 8 lines past the window, so the entry was still unenforced.
   The scan was replaced with a balanced-delimiter walk of the call's actual extent, which is what
   makes the entry enforced; see D10.
+  **Second correction (Phase 3 round 4, D15):** both the radius and the balanced-delimiter walk are
+  gone. Model references are read from the parse tree (`modelRefsIn` over the callback node), so
+  there is no window and nothing to balance, and the receiver is the callback's own declared
+  parameter rather than the literal name `tx`. What keeps this entry enforced is `modelRefsIn`;
+  re-verified by injecting `tx.someUnauthorizedModel.f()` into a scratchpad copy of the file, which
+  exits 1, while the real tree exits 0.
 - `src/lib/auth/webauthn/recent-passkey-verification.ts`: **remove the entry** once `C6` deletes the
   only `withBypassRls` call, matching the convention documented at `check-bypass-rls.mjs:45-50`.
 - `reauth/verify/route.ts` already allows both models; `passkey/verify` and `webauthn-authorize`

@@ -6,18 +6,28 @@
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_USAGE
  * after security review. This prevents accidental RLS bypass in new code.
  *
- * Call sites and their `prisma.<model>` / `tx.<model>` references are read from
- * the parse tree (ts-morph, no Program), so a call's extent is exact and
- * comments, strings and regex literals are out of scope structurally. SCAN_RADIUS
- * survives only for the tx-less-callback text check, which is a line-shape rule.
+ * EVERY code question this gate asks is answered by the parse tree (ts-morph, no
+ * Program): which calls exist, which local name the helper was imported under,
+ * which argument is the callback, which identifier is the transaction client,
+ * and which `<client>.<model>` references the callback reaches. Raw text is used
+ * only as a prefilter to decide which files are worth parsing, and that filter
+ * is deliberately a superset — see HELPER_MENTION_RE.
+ *
+ * Four rounds of review found four defects in this file, all the same one: a
+ * predicate that judged code by its spelling. A fixed 10-line radius stopped
+ * covering callbacks as they grew; a regex deciding "is this a comment?" skipped
+ * a real call whose line held a string containing `//`; a hand-rolled character
+ * automaton misread `/` inside a regex character class as opening a comment and
+ * blanked the rest of the file; and the AST rewrite that fixed the model scan
+ * left four sibling predicates behind on raw text or on name equality. So the
+ * rule here is not "use the AST for the scan" but "no predicate in this file
+ * decides a code question by surface form". Anything that must stay textual is
+ * named below with the reason it cannot be otherwise.
  */
 import { SyntaxKind } from "ts-morph";
 import { createAstProject } from "./lib/ast-project.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
-
-// Lines to scan after each withBypassRls call for prisma model references.
-const SCAN_RADIUS = 10;
 
 // Per-file allowlist: file path → allowed Prisma model names.
 // "*" means any model is allowed (use sparingly, only for definitions or
@@ -184,40 +194,55 @@ const ALLOWED_USAGE = new Map([
   ["src/workers/audit-anchor-publisher.ts", ["auditChainAnchor", "tenant", "systemSetting"]],
 ]);
 
-// Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)
-// Captures the model name (e.g., "tenant" from "prisma.tenant.findUnique" or "tx.session.create").
-// tx is the transaction client inside prisma.$transaction(async (tx) => { ... }) — when nested
-// inside withBypassRls, tx inherits the bypass context via the Proxy.
+// The RLS helpers. `withBypassRls` is the one the per-file model allowlist
+// governs; the others share the callback-shape discipline (C2 / F3) only.
+const HELPER_NAMES = new Set([
+  "withBypassRls",
+  "withTenantRls",
+  "withUserTenantRls",
+  "withTeamTenantRls",
+]);
+// The two whose callback receives a Prisma transaction client, and so are the
+// ones the `(tx) => tx.x` discipline applies to. withUserTenantRls /
+// withTeamTenantRls hand their callback a tenant id, not a client.
+const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 
-// Regex to find withBypassRls call sites (not imports).
-const BYPASS_CALL_RE = /withBypassRls\s*\(/;
+// The ONE remaining raw-text predicate, and it is a prefilter, not a verdict:
+// it only decides whether a file is worth parsing. Reaching any helper requires
+// naming it or importing the module that defines it, so a file matching neither
+// cannot contain a call — including through an alias, which still names the
+// symbol in the import clause. Deliberately a superset of the old
+// `withBypassRls\s*\(`: that one required the paren, so
+// `import { withBypassRls as wb }` … `wb(...)` skipped the file entirely and
+// escaped even the file allowlist. Widening it costs 154 parsed files instead
+// of 88, measured at ~0.7 s for the whole gate.
+const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
-// Regex to verify BYPASS_PURPOSE constant is used (not a string literal).
-const BYPASS_PURPOSE_RE = /BYPASS_PURPOSE\.\w+/;
+const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
 
-// C2 (per plan): production callsites of with(Bypass|Tenant)Rls MUST use
-// the (tx) => tx.x form, NOT () => prisma.x. The bare-prisma form works only
-// via the Prisma proxy's AsyncLocalStorage injection; it brittle-fails in
-// tests that inject a raw PrismaClient or use a DI wrapper.
-// Pattern matches the closing-paren-then-fat-arrow shape: `, () =>`.
-const TX_LESS_CALLBACK_RE =
-  /with(?:Bypass|Tenant)Rls\([\s\S]*?,\s*(?:async\s+)?\(\)\s*=>/m;
-
-// F3 anti-drift: the ONLY sanctioned `(tx) => ...` callbacks that leave `tx`
-// unused (suppressed with `eslint-disable-next-line ...no-unused-vars`) are the
-// two thin wrappers in tenant-context.ts that delegate to a caller-supplied
-// `fn(tenantId)` public contract (SC1 deferral — threading tx would change that
-// contract). Any NEW such disable elsewhere is a silent reintroduction of the
-// Proxy/ALS-dependent form the guard exists to prevent — it must instead use the
-// real (tx) => tx.x form, or be added here after review. Keyed by file only
-// (the two lines within tenant-context.ts are the accepted pair).
-const F3_UNUSED_TX_DISABLE_ALLOWLIST = new Set([
+// F3 anti-drift: the ONLY sanctioned with*Rls callbacks that declare `tx` and
+// never use it are the two thin wrappers in tenant-context.ts that delegate to
+// a caller-supplied `fn(tenantId)` public contract (SC1 deferral — threading tx
+// would change that contract). Any NEW one elsewhere is a silent reintroduction
+// of the Proxy/ALS-dependent form the guard exists to prevent — it must instead
+// use the real (tx) => tx.x form, or be added here after review. Keyed by file
+// only (the two callbacks within tenant-context.ts are the accepted pair).
+const F3_UNUSED_TX_ALLOWLIST = new Set([
   "src/lib/tenant-context.ts",
 ]);
-// An eslint-disable-next-line for no-unused-vars that guards a with*Rls (tx) =>
-// callback (i.e. suppresses an unused `tx` param on an RLS callback).
-const RLS_UNUSED_TX_DISABLE_RE =
-  /eslint-disable-next-line[^\n]*no-unused-vars[\s\S]{0,120}?with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls\([\s\S]*?,\s*(?:async\s+)?\(\s*tx\s*\)\s*=>/m;
+
+// Call sites that hand the helper a callback the gate cannot resolve to a
+// function in the same file — here, a wrapper passing its own `fn` parameter
+// straight through. Nothing about that callback's shape or its model access is
+// visible from this file, so the gate reports it rather than scanning an empty
+// node and calling that a pass. Both entries are the same `withVaultTenantRls`
+// wrapper shape, whose `fn: () => Promise<T>` contract is itself the tx-less
+// form C2 forbids one level up — a pre-existing issue this gate now names
+// instead of missing, tracked for the vault routes rather than fixed here.
+const INDIRECT_CALLBACK_ALLOWLIST = new Set([
+  "src/app/api/vault/status/route.ts",
+  "src/app/api/vault/unlock/data/route.ts",
+]);
 
 function getSourceFiles() {
   const files = [];
@@ -231,54 +256,122 @@ function getSourceFiles() {
 }
 
 /**
- * Call sites and model references, read from the parse tree.
- *
- * This gate's scan has now been wrong three times, each time for the same
- * reason one level down: a fixed 10-line radius stopped covering callbacks as
- * they grew; a regex deciding "is this a comment?" skipped a real call whose
- * line held a string containing `//`; and a hand-rolled character automaton
- * misread a `/` inside a regex character class as opening a comment, blanking
- * the rest of the file, and blinded the model scan to interpolated code that
- * the raw-text scan had seen. Each fix was a better guess about the grammar.
- *
- * The grammar has an implementation already, and this repo already uses it for
- * exactly this job — `scripts/checks/lib/ast-project.mjs`, adopted by five
- * sibling gates. So: no more guessing. A CallExpression is a call because the
- * parser says so, its extent is `getStart()`..`getEnd()` with nothing to
- * balance, and `tx.model.` inside a template interpolation is code because it
- * is code. Comments, strings and regex literals are excluded structurally
- * rather than by pattern, which is the only way this class closes.
+ * The local names each helper is reachable under in this file. A named import
+ * may be aliased (`withBypassRls as wb`) and a namespace import reaches it as
+ * `rls.withBypassRls`, so the call-site test cannot be name equality against
+ * the canonical spelling — that is how a call escapes not just the model scan
+ * but the file allowlist itself. The canonical names are seeded too, for the
+ * defining module and for any helper imported from elsewhere.
  */
-function bypassCallsIn(sf) {
+function localHelperNames(sf) {
+  const byLocalName = new Map([...HELPER_NAMES].map((n) => [n, n]));
+  for (const imp of sf.getImportDeclarations()) {
+    if (!/tenant-rls$/.test(imp.getModuleSpecifierValue())) continue;
+    for (const named of imp.getNamedImports()) {
+      const canonical = named.getName();
+      if (!HELPER_NAMES.has(canonical)) continue;
+      byLocalName.set(named.getAliasNode()?.getText() ?? canonical, canonical);
+    }
+  }
+  return byLocalName;
+}
+
+/** Every helper call in the file, paired with the canonical helper it resolves to. */
+function helperCallsIn(sf) {
+  const byLocalName = localHelperNames(sf);
   const calls = [];
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
-    const name =
+    // `rls.withBypassRls(...)` — the property name is the helper regardless of
+    // which object it is reached through, and over-matching here only means an
+    // extra call gets scanned, which is the safe direction.
+    const helper =
       expr.getKind() === SyntaxKind.PropertyAccessExpression
-        ? expr.getName()
-        : expr.getText();
-    if (name === "withBypassRls") calls.push(call);
+        ? (HELPER_NAMES.has(expr.getName()) ? expr.getName() : undefined)
+        : byLocalName.get(expr.getText());
+    if (helper) calls.push({ call, helper });
   }
   return calls;
 }
 
 /**
- * Prisma model names accessed as `tx.<model>.…` / `prisma.<model>.…` anywhere
- * inside `node`, with the 1-based line of each reference. `$`-prefixed client
- * meta-properties ($transaction, $executeRaw, …) are not models.
+ * The callback the helper will invoke. Its position differs per helper
+ * (`withBypassRls(prisma, fn, purpose)` vs `withTenantRls(prisma, tenantId, fn)`),
+ * so it is found by kind rather than by index. A callback passed by name is
+ * resolved to its declaration when exactly one function-valued binding of that
+ * name exists in the file; several would mean guessing which one runs, and
+ * guessing is what this file keeps being wrong about — so that returns null and
+ * the caller reports the site.
  */
-function modelRefsIn(node) {
+function callbackOf(call, sf) {
+  const args = call.getArguments();
+  const inline = args.find((a) => FN_KINDS.has(a.getKind()));
+  if (inline) return inline;
+
+  for (const arg of args) {
+    if (arg.getKind() !== SyntaxKind.Identifier) continue;
+    const bindings = sf
+      .getDescendantsOfKind(SyntaxKind.VariableDeclaration)
+      .filter((d) => d.getName() === arg.getText())
+      .map((d) => d.getInitializer())
+      .filter((init) => init && FN_KINDS.has(init.getKind()));
+    if (bindings.length === 1) return bindings[0];
+  }
+  return null;
+}
+
+/**
+ * The identifiers that carry the bypassed client inside `fn`. Its own first
+ * parameter, whatever it is named — the convention is `tx`, but a gate that
+ * enforces the convention by relying on it stops seeing anything the moment
+ * someone writes `db`. `prisma` is included because the bare client picks up
+ * the bypass context through the Proxy's AsyncLocalStorage, and a nested
+ * `$transaction` callback inherits it the same way.
+ */
+function clientNamesIn(fn) {
+  const names = new Set(["prisma"]);
+  if (!fn) return names;
+  const first = fn.getParameters()[0];
+  if (first) names.add(first.getName());
+  for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = inner.getExpression();
+    if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
+    if (expr.getName() !== "$transaction") continue;
+    for (const arg of inner.getArguments()) {
+      if (!FN_KINDS.has(arg.getKind())) continue;
+      const param = arg.getParameters()[0];
+      if (param) names.add(param.getName());
+    }
+  }
+  return names;
+}
+
+/**
+ * Prisma model names accessed as `<client>.<model>.…` anywhere inside `node`,
+ * with the 1-based line of each reference. `$`-prefixed client meta-properties
+ * ($transaction, $executeRaw, …) are not models.
+ */
+function modelRefsIn(node, clientNames) {
   const refs = [];
   for (const access of node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
     const recv = access.getExpression();
     if (recv.getKind() !== SyntaxKind.Identifier) continue;
-    const recvName = recv.getText();
-    if (recvName !== "tx" && recvName !== "prisma") continue;
+    if (!clientNames.has(recv.getText())) continue;
     const model = access.getName();
     if (model.startsWith("$")) continue;
     refs.push({ model, line: access.getStartLineNumber() });
   }
   return refs;
+}
+
+/** True when `fn` declares a `tx` parameter and never references it (F3). */
+function declaresUnusedTx(fn) {
+  const first = fn.getParameters()[0];
+  if (!first || first.getName() !== "tx") return false;
+  const nameNode = first.getNameNode();
+  return !fn
+    .getDescendantsOfKind(SyntaxKind.Identifier)
+    .some((id) => id.getText() === "tx" && id !== nameNode);
 }
 
 const astProject = createAstProject();
@@ -287,100 +380,106 @@ const fileViolations = [];
 const modelViolations = [];
 const purposeViolations = [];
 const txLessViolations = [];
+const indirectCallbacks = [];
+const f3DisableViolations = [];
 
 for (const file of getSourceFiles()) {
   // Skip test files — they mock withBypassRls, not call it for real
   if (file.includes(".test.") || file.includes("__tests__")) continue;
 
   const content = readFileSync(file, "utf8");
-  if (!BYPASS_CALL_RE.test(content)) continue;
+  if (!HELPER_MENTION_RE.test(content)) continue;
 
-  const allowedModels = ALLOWED_USAGE.get(file);
+  const sf = astProject.createSourceFile(file, content, { overwrite: true });
 
-  // Check 1: file must be in the allowlist
-  if (!allowedModels) {
-    fileViolations.push(file);
+  // Fail loudly when the parse lost the code. A syntax error can drop the very
+  // CallExpression this gate exists to find, and a dropped call is scanned by
+  // nothing — "examined nothing" must not be spelled like "found nothing". Ask
+  // the parser whether it is sure, rather than inferring it from the tree's
+  // contents: the previous structural test (does any `withBypassRls` identifier
+  // survive?) was satisfied by the import specifier alone, so it could never
+  // fire for a file that imports the helper — which is every real call site.
+  // An absent diagnostics array means the question could not be asked, which
+  // denies rather than passes.
+  const diagnostics = sf.compilerNode.parseDiagnostics;
+  if (diagnostics === undefined || diagnostics.length > 0) {
+    unparseableFiles.push({ file });
     continue;
   }
 
-  // Check 2: file must use BYPASS_PURPOSE constant (not string literals)
-  // The definition file (tenant-rls.ts) is exempt — it defines, not consumes.
-  if (file !== "src/lib/tenant-rls.ts" && !BYPASS_PURPOSE_RE.test(content)) {
-    purposeViolations.push({ file, line: 0 });
+  const calls = helperCallsIn(sf);
+  const bypassCalls = calls.filter(({ helper }) => helper === "withBypassRls");
+  const allowedModels = ALLOWED_USAGE.get(file);
+
+  // Check 1: a file that really calls withBypassRls must be on the allowlist.
+  // Keyed on a call in the tree, not on the text naming one, so prose and
+  // string literals that mention the helper no longer read as usage.
+  if (bypassCalls.length > 0 && !allowedModels) {
+    fileViolations.push(file);
   }
 
-  // Check 3: every withBypassRls call site, from the parse tree. The AST gives
-  // the call's exact extent, so there is no window to get wrong, and it gives
-  // real code only, so comments, strings and regex literals are out of scope
-  // structurally rather than by pattern.
-  const allowedSet = allowedModels.includes("*") ? null : new Set(allowedModels);
-  const sf = astProject.createSourceFile(file, content, { overwrite: true });
-
-  // Fail loudly when the parse clearly lost the code. A syntax error can drop
-  // the very CallExpression this gate exists to find, and a dropped call is
-  // scanned by nothing — "examined nothing" must not be spelled like "found
-  // nothing". Structural test, no diagnostics API: if the raw text calls the
-  // helper but the tree holds no `withBypassRls` identifier at all, the parse
-  // failed. A mention confined to a comment or a string still leaves the import
-  // identifier in the tree, so that case does not trip this.
-  if (BYPASS_CALL_RE.test(content)) {
-    const named = sf
-      .getDescendantsOfKind(SyntaxKind.Identifier)
-      .some((id) => id.getText() === "withBypassRls");
-    if (!named) unparseableFiles.push({ file });
+  // Check 2: withBypassRls call sites must name their purpose with the
+  // BYPASS_PURPOSE constant, not a string literal. The definition file
+  // (tenant-rls.ts) is exempt — it defines, not consumes.
+  if (bypassCalls.length > 0 && file !== "src/lib/tenant-rls.ts") {
+    const usesPurpose = sf
+      .getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)
+      .some((a) => a.getExpression().getText() === "BYPASS_PURPOSE");
+    if (!usesPurpose) purposeViolations.push({ file, line: 0 });
   }
 
-  for (const call of bypassCallsIn(sf)) {
-    const callLine = call.getStartLineNumber();
+  const allowedSet =
+    !allowedModels || allowedModels.includes("*") ? null : new Set(allowedModels);
 
-    // Check 3a: tx-less callback (C2). Read the call's own arguments rather
-    // than a line window: a callback declared with no parameter, or one whose
-    // `tx` is suppressed as unused, is a property of the AST node.
-    const lines = content.split("\n");
-    const window = lines
-      .slice(callLine - 1, Math.min(callLine - 1 + SCAN_RADIUS, lines.length))
-      .join("\n");
-    if (TX_LESS_CALLBACK_RE.test(window)) {
-      txLessViolations.push({ file, line: callLine });
+  for (const { call, helper } of calls) {
+    const line = call.getStartLineNumber();
+    const fn = callbackOf(call, sf);
+
+    if (!fn) {
+      // Only the tx-client helpers carry a discipline this gate can check, so
+      // only their unresolvable callbacks are worth reporting.
+      if (TX_CLIENT_HELPERS.has(helper) && !INDIRECT_CALLBACK_ALLOWLIST.has(file)) {
+        indirectCallbacks.push({ file, line, helper });
+      }
+      continue;
     }
 
-    // Check 3b: model allowlist (skip for wildcard files)
-    if (!allowedSet) continue;
-    for (const { model, line } of modelRefsIn(call)) {
-      if (!allowedSet.has(model)) {
-        modelViolations.push({ file, line, model });
+    if (TX_CLIENT_HELPERS.has(helper)) {
+      // C2: the callback must take the transaction client. The bare-prisma
+      // `() =>` form works only via the Prisma proxy's AsyncLocalStorage
+      // injection and brittle-fails under DI or a raw client. Read off the
+      // callback's declared parameters — the shape is a property of the node,
+      // not of the text near it.
+      if (fn.getParameters().length === 0) {
+        txLessViolations.push({ file, line });
+      } else if (declaresUnusedTx(fn) && !F3_UNUSED_TX_ALLOWLIST.has(file)) {
+        // F3: a declared-but-unused `tx` is the same bypass wearing the
+        // prescribed shape. Checking the parameter's actual use replaces
+        // looking for the eslint-disable comment that usually accompanies it —
+        // the comment is the symptom, and matching it in raw text also matched
+        // the same words inside a string.
+        f3DisableViolations.push({ file, line });
       }
     }
-  }
-}
 
-// Scan ALL production files (not just allowlisted ones) for withTenantRls
-// tx-less callbacks — withTenantRls has no per-file allowlist but the
-// signature discipline still applies.
-for (const file of getSourceFiles()) {
-  if (file.includes(".test.") || file.includes("__tests__")) continue;
-  const content = readFileSync(file, "utf8");
-  if (!/withTenantRls\s*\(/.test(content)) continue;
-  const lines = content.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    if (!/withTenantRls\s*\(/.test(lines[i])) continue;
-    const window = lines.slice(i, Math.min(i + SCAN_RADIUS, lines.length)).join("\n");
-    if (TX_LESS_CALLBACK_RE.test(window)) {
-      txLessViolations.push({ file, line: i + 1 });
+    // Check 3: model allowlist, for withBypassRls in a non-wildcard file. The
+    // callback is the scan node — which is the call's own subtree for an inline
+    // callback, and the resolved declaration for one passed by name.
+    if (helper !== "withBypassRls" || !allowedSet) continue;
+    const clientNames = clientNamesIn(fn);
+    const seen = new Set();
+    for (const node of fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd()
+      ? [call]
+      : [call, fn]) {
+      for (const ref of modelRefsIn(node, clientNames)) {
+        const key = `${ref.model}:${ref.line}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!allowedSet.has(ref.model)) {
+          modelViolations.push({ file, line: ref.line, model: ref.model });
+        }
+      }
     }
-  }
-}
-
-// F3 anti-drift scan: flag any file (outside the allowlist) that suppresses an
-// unused `tx` on a with*Rls callback with eslint-disable-next-line no-unused-vars.
-const f3DisableViolations = [];
-for (const file of getSourceFiles()) {
-  if (file.includes(".test.") || file.includes("__tests__")) continue;
-  const relFromRepo = file.replace(/\\/g, "/");
-  if ([...F3_UNUSED_TX_DISABLE_ALLOWLIST].some((a) => relFromRepo.endsWith(a))) continue;
-  const content = readFileSync(file, "utf8");
-  if (RLS_UNUSED_TX_DISABLE_RE.test(content)) {
-    f3DisableViolations.push(relFromRepo);
   }
 }
 
@@ -389,7 +488,7 @@ let failed = false;
 if (f3DisableViolations.length > 0) {
   failed = true;
   console.error(
-    "eslint-disable(no-unused-vars) on an unused `tx` in a with*Rls callback,",
+    "with*Rls callback declares `tx` and never uses it (no-unused-vars shape),",
   );
   console.error(
     "outside the F3 allowlist. Use the (tx) => tx.x form (the guard's prescribed",
@@ -398,10 +497,10 @@ if (f3DisableViolations.length > 0) {
     "shape), or — only if the callback delegates to a client-less fn(tenantId)",
   );
   console.error(
-    "public contract — add the file to F3_UNUSED_TX_DISABLE_ALLOWLIST after review.",
+    "public contract — add the file to F3_UNUSED_TX_ALLOWLIST after review.",
   );
   console.error("");
-  for (const v of f3DisableViolations) console.error(`  ${v}`);
+  for (const { file, line } of f3DisableViolations) console.error(`  ${file}:${line}`);
   console.error("");
 }
 
@@ -469,14 +568,36 @@ if (txLessViolations.length > 0) {
   }
 }
 
-// An undeterminable call extent means this gate examined a window it cannot
-// justify. "Examined nothing" must not be spelled like "found nothing", so the
-// site is named and the gate fails rather than falling back silently.
+// A callback the gate cannot resolve to a function in this file means its
+// shape and its model access were examined by nothing. Named rather than
+// skipped, for the same reason as the parse failures below.
+if (indirectCallbacks.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "with(Bypass|Tenant)Rls callback could not be resolved to a function in the",
+  );
+  console.error(
+    "same file, so its shape and its model access were NOT scanned. Pass the",
+  );
+  console.error(
+    "callback inline, or add the file to INDIRECT_CALLBACK_ALLOWLIST after review:",
+  );
+  console.error("");
+  for (const { file, line, helper } of indirectCallbacks) {
+    console.error(`  ${file}:${line}  ${helper}`);
+  }
+}
+
+// A file the parser reported diagnostics on was not scanned at all: the calls
+// this gate exists to find can be missing from a recovered tree, and a dropped
+// call is examined by nothing. "Examined nothing" must not be spelled like
+// "found nothing", so the file is named and the gate fails.
 if (unparseableFiles.length > 0) {
   failed = true;
   console.error("");
   console.error(
-    "file names withBypassRls but could not be parsed — its calls were NOT scanned:",
+    "file could not be parsed — its with*Rls calls were NOT scanned:",
   );
   console.error("");
   for (const { file } of unparseableFiles) {

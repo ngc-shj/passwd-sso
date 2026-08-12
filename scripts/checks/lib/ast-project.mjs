@@ -8,11 +8,24 @@
  * across gates drifted (one copy excluded only `.test.ts`, not `.test.tsx`,
  * silently including a test tree). This module is the single source of truth.
  *
- * Adopters: check-critical-audit-atomic, check-session-token-hashed,
+ * Adopters (re-derive with `grep -l ast-project ../*.mjs` rather than trusting
+ * this list to be current): check-critical-audit-atomic, check-session-token-hashed,
  * check-bound-unknown-ip (createAstProject + sourceFiles),
  * check-null-tenant-fail-closed (createAstProject + sourceFilesFrom — its scan
  * set mixes directories with a single-file target `src/auth.ts`, which
- * sourceFilesFrom handles).
+ * sourceFilesFrom handles), check-boot-diagnostic-shape, check-cli-shell-safety,
+ * check-operator-echo-escaped, check-runtime-image-assets,
+ * check-tenant-claim-event-coverage.
+ *
+ * Partial adopter — createAstProject only, walk deliberately NOT migrated:
+ *   - check-bypass-rls: keeps its own `getSourceFiles()` because walkSourceFiles
+ *     returns `[]` for a missing root, and that gate spells an empty file list
+ *     the same as "no violations" — it must fail loudly instead, which
+ *     readdirSync's throw gives it. Its exclusion predicate also differs
+ *     (`includes(".test.")` / `includes("__tests__")` vs the suffix and
+ *     directory tests here); the two agree on the tree as it stands, and
+ *     narrowing to match would newly admit src/lib/tenant-rls.test.ts, whose
+ *     five deliberately tx-less calls would all report as violations.
  *
  * Deliberately NOT adopted (scan intent / Project config genuinely differs —
  * migrating would change behavior, not just shape):

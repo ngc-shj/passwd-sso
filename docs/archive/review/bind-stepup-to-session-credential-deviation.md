@@ -71,23 +71,30 @@ on the stub factory, not an unavoidable type mismatch. The remaining deliberate 
 object with `id` removed, to reach the missing-credential-id branch — is now
 `as unknown as AuthenticationResponseJSON` with the reason stated inline.
 
-## D5 — Deferred parity gap: 7 CI gates have no local pre-PR equivalent
+## D5 — Deferred parity gap: 2 CI gates have no local pre-PR equivalent
 
-`npm run typecheck`, `npm run check:bypass-rls`, `npm run check:migration-drift`,
-`npm run check:crypto-domains`, `npm run check:team-auth-rls`,
-`bash scripts/check-state-mutation-centralization.sh`, and the three `licenses:check:*:strict`
-scripts are executed by CI but not by `scripts/pre-pr.sh`.
+> **Corrected in round 4 — this entry originally said seven, and five of them were wired all
+> along.** The claim was derived by grepping `pre-pr.sh` for the `npm run check:*` alias names;
+> `pre-pr.sh` invokes the checkers by script path instead, so the grep returned nothing and the
+> absence looked real. Deriving a member set from the spelling a caller happens to use is the same
+> mistake D15 is about, made in prose. Re-derived by reading both files: `check-team-auth-rls`
+> (`scripts/pre-pr.sh:332`), `check-bypass-rls` (`:333`), `check-crypto-domains` (`:338`),
+> `check-migration-drift` (`:339`) and `tsc --noEmit` (`:812`) are all in the pre-PR batch.
+
+`bash scripts/check-state-mutation-centralization.sh` (`.github/workflows/ci.yml:324`) and the three
+`licenses:check:*:strict` scripts (`.github/workflows/ci.yml:797-799`) are executed by CI but not by
+`scripts/pre-pr.sh` — grep for `state-mutation` or `licenses` in that file returns nothing.
 
 **Anti-Deferral check**: out of scope (different feature).
 **Justification** — worst case: a CI-only failure surfaces after push, costing one push round;
-likelihood: low for this branch specifically, because all seven were run by hand in Step 2-4 and
-passed; cost to fix: adding seven entries to `pre-pr.sh`'s bounded-parallel batch scheduler, which
-is a tooling change with its own review surface and no relation to this security fix — bundling it
-here would mix two unrelated diffs.
-**Tracked**: `TODO(bind-stepup-to-session-credential): 7 CI gates absent from scripts/pre-pr.sh`
+likelihood: low for this branch specifically, because both were run by hand in Step 2-4 and again in
+round 4, and passed; cost to fix: adding two entries to `pre-pr.sh`'s bounded-parallel batch
+scheduler, which is a tooling change with its own review surface and no relation to this security
+fix — bundling it here would mix two unrelated diffs.
+**Tracked**: `TODO(bind-stepup-to-session-credential): 2 CI gates absent from scripts/pre-pr.sh`
 in the plan's Implementation Checklist.
 **Orchestrator sign-off**: the "out of scope (different feature)" exception is satisfied, and the
-gap is neutralised for this branch by running every gate manually.
+gap is neutralised for this branch by running both gates manually.
 
 ## D6 — The plan's forbidden-pattern spec gained a comment-line exclusion
 
@@ -258,8 +265,9 @@ now been wrong three times, each time one level down from the last:
 
 Each fix was a better guess about the grammar. Three escapes on the same predicate is the signal to
 change the mechanism rather than add another case, so the scan now reads the parse tree via
-`scripts/checks/lib/ast-project.mjs` — the ts-morph helper five sibling gates in this repo already
-use, and which documents its own no-Program rationale. A call is a call because the parser says so,
+`scripts/checks/lib/ast-project.mjs` — the ts-morph helper the other AST gates in this repo already
+use (`grep -l ast-project scripts/checks/*.mjs` → nine siblings; the "five" this entry originally
+claimed was a derived number nobody re-ran), and which documents its own no-Program rationale. A call is a call because the parser says so,
 its extent is `getStart()`..`getEnd()` with nothing to balance, and `tx.model` inside `${…}` is code
 because it is code. Comments, strings and regex literals are out of scope structurally.
 
@@ -273,6 +281,67 @@ The gate now carries **13 tests** where it had none for this logic, including bo
 regressions as fixtures. Red-proof, run against the previous implementation: the round-2 lexer exits
 **0** (blind) on both the regex-literal and template-interpolation fixtures; the AST version exits
 **1** and names the model.
+
+> **Superseded by D15.** Two claims in the paragraphs above are false and were corrected in round 4,
+> both by execution. The fail-loud net could not fire for any file that imports the helper, because
+> the import specifier is itself a surviving `withBypassRls` identifier — so a syntax error that
+> swallowed a real call exited 0. And the parser does *not* always recover: an unterminated template
+> literal yields zero call expressions. The "13 tests" figure counted the whole file; 10 covered this
+> logic, 3 were the unrelated F3 scan.
+
+## D15 — The AST move was applied to one predicate; four siblings kept judging code by its spelling
+
+**What changed**: `scripts/checks/check-bypass-rls.mjs` now answers *every* code question from the
+parse tree. Previously D14 moved only the model scan, leaving the file filter, the call-site test,
+the client-identifier test, the tx-less (C2) check, the F3 unused-`tx` scan and the fail-loud net on
+raw text or on name equality.
+
+**Why**: round 4 reviewed D14's own commit and all three lanes converged on the same shape. Six
+inputs, each demonstrated against the shipped gate before anything was written:
+
+| Input | round-3 verdict | now |
+|---|---|---|
+| `import { withBypassRls as wb }` … `wb(prisma, …)` in a file **not** on the allowlist | exit 0 | exit 1 |
+| syntax error (unterminated template) swallowing a real call in an importing file | exit 0 — `OK` | exit 1, named unscanned |
+| callback parameter named `db` instead of `tx`, reaching an unlisted model | exit 0 | exit 1 |
+| unlisted model inside a nested `tx.$transaction(async (inner) => …)` | exit 0 | exit 1 |
+| unlisted model inside a callback passed by name (`withBypassRls(prisma, run, …)`) | exit 0 | exit 1 |
+| compliant `(tx) =>` call whose comment quotes the banned `() =>` form | exit 1 (**false**) | exit 0 |
+
+The first two are the serious pair. The alias case escaped the **file** allowlist, not just the model
+one — the filter required the literal text `withBypassRls(`, which an aliased import does not
+contain. The syntax-error case is D14's fail-loud net failing on exactly the population it was
+written for. The last row is a regression D14 introduced: it moved the C2 check from comment-blanked
+text to raw text, so documenting the banned shape beside a call — this repo's own comment style —
+reddened the build.
+
+**The rule this file now states, and the reason it is stated as a rule**: not "use the AST for the
+scan" but *no predicate in this file decides a code question by surface form*. Four defects in four
+rounds were all the same defect, and the round-3 fix closed the instance rather than the class —
+which is how the fifth arrived. One raw-text test remains, and is named in the header as a prefilter
+that only chooses which files to parse, never a verdict; it is deliberately a superset (154 files
+parsed instead of 88, whole gate ~0.7 s).
+
+**Two pre-existing issues this surfaced rather than fixed**, both recorded in `INDIRECT_CALLBACK_ALLOWLIST`
+with the reason: `src/app/api/vault/status/route.ts:25` and `src/app/api/vault/unlock/data/route.ts:57`
+pass `withTenantRls` a callback that is their own wrapper's `fn` parameter, so nothing about its
+shape or its model access is visible from those files. The wrapper's `fn: () => Promise<T>` contract
+is itself the tx-less form C2 forbids, one level up. Allowlisted so the gate is honest about what it
+did not examine and a *new* such site must be reviewed; fixing the routes is its own change.
+`TODO(bind-stepup-to-session-credential): D15 — vault route wrappers use the tx-less fn() contract`
+
+**Evidence**: 25 tests (up from 13), 25/25 pass. Eleven mutations were applied one at a time to a
+scratchpad copy, each reddening a different clause: prefilter, client-name set, nested-`$transaction`
+traversal, by-name callback resolution, the unresolvable-callback report, the tx-less check (both
+directions), the F3 predicate, the fail-loud net, and `.tsx` scanning. Where a mutant still exits 1
+for the wrong reason — dropping by-name resolution turns a model catch into an unresolved-callback
+report — the test discriminates on the message, not the status, which is why those assertions name
+the string. **Coverage differential over the real tree** (all 93 allowlist entries emptied, both
+implementations run, `(file, model)` pairs compared): nothing lost against round 3, two gains, both
+in `passkey-enforcement.ts`'s by-name callback. One pair present in the *round-2* raw-text scan is
+absent from both AST versions — `src/lib/notification.ts:78` (`prisma.notification`), which is
+`typeof tx.notification.create` inside a `Parameters<…>` type query. A type position is not a runtime
+access; the model is allowlisted regardless. Examined and accepted, not a loss.
 
 **A flaky pre-PR gate, recorded rather than dismissed.** One `scripts/pre-pr.sh` run failed on
 "Extension: Test" with an unhandled `ReferenceError: window is not defined` at teardown. Evidence

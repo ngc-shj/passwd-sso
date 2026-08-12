@@ -380,3 +380,166 @@ Not applicable this round — targeted incremental review of one commit, not a f
   }
 ]
 ```
+
+---
+
+# Round 4 (incremental)
+
+## Changes from Previous Round
+
+Scope: `git show d4085e076` only — the round-3 remedy that moved the model scan onto the parse tree,
+plus its tests. Three experts ran in parallel. Ollama seed generation was skipped: this is a targeted
+review of one commit, not a fresh triangulate pass.
+
+All three lanes converged on the same shape, independently: **the AST move was applied to one
+predicate, and its four siblings were left deciding code questions by spelling.** Security reached it
+from the threat model (SEC-9/10/11/12), functionality from reading the comments against the code
+(F1/F2/F3), testing from mutation coverage (T-4/5/6/7). SEC-7 and SEC-8 — the findings the round-3
+commit was written to close — are confirmed **resolved**, by re-running both proof-of-concept
+fixtures against the shipped gate and its parent. T3 is confirmed resolved by the mutation that
+originally exposed it.
+
+Two of the new findings are regressions **introduced by** d4085e076; two are pre-existing blind spots
+the AST rewrite made cheap to close and did not; one is a fail-loud control that could never fire.
+
+## Merged Findings
+
+| ID | Severity | Subject | Reported by | Convergence |
+|----|----------|---------|-------------|-------------|
+| **R4-1** | **Major** | The fail-loud "unparseable" net asks whether any `withBypassRls` **identifier** survives the parse. An `import { withBypassRls }` specifier is one, so the net could never fire for a file that imports the helper — which is every real call site. A syntax error that swallows a real call therefore exits **0** with `check-bypass-rls: OK`. Round 3's own Remedy Floor clause (3) declared this property kept; it was not. The mirror direction is a new false alarm: a healthy file mentioning the helper only in prose was reported as "could not be parsed". | security SEC-10, functionality F2, testing T-4/T-5 | **all three lanes**, execution-verified |
+| **R4-2** | **Major** | Check 3a (the C2 tx-less rule) is introduced by a comment saying it reads the call's arguments from the AST; the four lines under it re-split the **raw** file and regex a 10-line window. At `d4085e076~1` that window came from comment-blanked text, so this is a regression: a compliant `(tx) =>` call whose comment quotes the banned `() =>` form — this repo's own comment style — now reds the build. The 10-line blind spot the AST was supposed to remove also survives here. | security SEC-9, functionality F1, testing T-6/T-9 | **all three lanes**, execution-verified |
+| **R4-3** | **Major** | `modelRefsIn` identifies the bypassed client by name (`tx`/`prisma`) on a tree that holds the callback's actual parameter. Renaming the callback parameter to `db` removes the file from the model allowlist's view with a one-token edit; a nested `tx.$transaction(async (inner) => …)` client is invisible for the same reason. Not a regression — the deleted regex had the identical limitation — but the AST made closing it a two-line change and it was not taken. | security SEC-11, testing T-10 | security+testing |
+| **R4-4** | **Major** | The file filter `BYPASS_CALL_RE` requires the literal text `withBypassRls(`, which `import { withBypassRls as wb }` … `wb(prisma, …)` does not contain. The file is skipped whole, so an aliased call escapes the **file** allowlist, not merely the model allowlist. Raised as a question under the Finding Floor; promoted to Major after confirming no lint rule or sibling gate constrains the import form. | security SEC-12 (as question) | single-perspective, execution-verified |
+| **R4-5** | Major | Three predicates added or modified by this diff survive deletion with the suite green and the real tree green: the fail-loud net, the tx-less check, and `.tsx` scanning (dropping `.tsx` from the scan set silently unscans the two allowlisted `.tsx` call sites). RT7. | testing T-4/T-6/T-7 | single-perspective, mutation-verified |
+| R4-6 | Minor | Documentation rot around the rewrite: `ast-project.mjs`'s maintained adopter registry omits its newest adopter and lists 4 where the derivation gives 9; the gate's own comment said "five sibling gates"; `PRISMA_MODEL_RE`'s doc comment outlived the constant; the plan's "10-line radius" paragraph and its round-1 correction are both falsified; D14's "13 tests" counts 3 unrelated F3 tests. | functionality F3/F4/F5/F7/F8/F9 | single-perspective |
+| R4-7 | Minor | D5 states seven CI gates have no pre-PR equivalent. Five are wired — `pre-pr.sh` invokes them by script path, not by the `npm run check:*` alias the entry was derived from. | testing T-11 `[Adjacent]` | single-perspective |
+
+### Findings assessed and rejected
+
+The testing expert's evidence for R4-7 cited `scripts/pre-pr.sh:332` and its four siblings. A grep for the
+npm alias names returned nothing, which read as a hallucinated citation; re-checking by script path
+confirmed the line numbers exactly. Recorded because the *rejection* would have been the error — the
+claim was right and the first instrument was wrong.
+
+## Resolution — one mechanism, applied to the whole class
+
+R4-1 through R4-5 are one defect wearing five faces, and the branch has now paid for fixing the
+instance instead of the class three times. So the remedy is not five patches. Every code question in
+`check-bypass-rls.mjs` is now answered by the parse tree, and the file states that as its rule rather
+than as a description of what one function happens to do:
+
+| Predicate | Was | Now |
+|---|---|---|
+| which files to scan | raw text `withBypassRls\s*\(` — a **verdict** | raw text `with*Rls|tenant-rls` — a **prefilter** only, deliberately a superset (154 files parsed vs 88, ~0.7 s) |
+| which calls are calls | name equality on callee text | local binding names resolved from the `tenant-rls` import, aliases included |
+| which callback runs | inline function arguments only | found by kind (position differs per helper); an identifier resolves to its unique function-valued binding, else the site is **named** |
+| which identifier is the client | `=== "tx" \|\| === "prisma"` | the callback's own declared parameter, `prisma`, and nested `$transaction` parameters |
+| tx-less (C2) | raw-text 10-line window regex | the callback's declared parameter count |
+| F3 unused `tx` | raw-text regex for the eslint-disable words | the parameter's actual use in the callback body |
+| parse health | "does any `withBypassRls` identifier survive?" | `sf.compilerNode.parseDiagnostics`; absent ⇒ deny |
+
+Three full walks of `src/` collapse into one. `SCAN_RADIUS`, `TX_LESS_CALLBACK_RE`,
+`RLS_UNUSED_TX_DISABLE_RE`, `BYPASS_CALL_RE` and `PRISMA_MODEL_RE`'s orphaned comment are gone.
+
+**Two pre-existing production issues surfaced rather than fixed**, recorded in
+`INDIRECT_CALLBACK_ALLOWLIST` with the reason and a grep-able TODO (D15): the vault status and
+unlock/data routes pass `withTenantRls` their own wrapper's `fn` parameter, whose
+`fn: () => Promise<T>` contract is the tx-less form C2 forbids one level up. Allowlisting keeps the
+gate honest about what it did not examine and forces review of any *new* such site.
+
+### Verification
+
+**Allow side.** `node scripts/checks/check-bypass-rls.mjs` on the real tree → exit **0**. Unit suite
+1008 files / **14552** passed (was 14540; +12 new tests). `npm run lint` 0 · `npm run typecheck` 0 ·
+`check:migration-drift` 0 · `check:crypto-domains` 0 · `check:team-auth-rls` 0 ·
+`check-state-mutation-centralization` 0. Every status read from the command's own exit, never
+through a pipe (R44).
+
+**Deny side, per finding, each run against the shipped round-3 gate first.** Every row below is an
+observed exit status, not an expectation:
+
+| Input | `d4085e076~1` | `d4085e076` | now |
+|---|---|---|---|
+| R4-4 aliased import, non-allowlisted file | 0 | 0 | **1** — "not on the allowlist" |
+| R4-1 unterminated template swallowing a real call | 0 | 0 | **1** — named unscanned |
+| R4-1 healthy file, prose mention only | 0 | **1** (false) | **0** |
+| R4-2 compliant call, comment quotes banned form | 0 | **1** (false) | **0** |
+| R4-3 callback parameter named `db` | 0 | 0 | **1** — `prisma.tenantMember` |
+| R4-3 nested `$transaction` client | 0 | 0 | **1** |
+| callback passed by name | 0 | 0 | **1** |
+| callback unresolvable (wrapper's own parameter) | 0 | 0 | **1** — named, not silently passed |
+| SEC-7 regex character class | 0 | 1 | **1** (preserved) |
+| SEC-8 template interpolation | 0 | 1 | **1** (preserved) |
+| F3 eslint-disable words inside a string, `tx` used | **1** (false) | **1** (false) | **0** |
+
+**Mutation proof (R4-5, RT7, Remedy Floor clause 2).** Eleven mutations applied one at a time to a
+scratchpad copy, each reddening a *different* clause: prefilter, client-name set,
+nested-`$transaction` traversal, by-name callback resolution, the unresolvable-callback report, the
+tx-less check in both directions, the F3 predicate, the fail-loud net, and `.tsx` scanning. Where a
+mutant still exits 1 for the wrong reason — dropping by-name resolution turns a model catch into an
+unresolved-callback report — the test discriminates on the **message**, which is why those
+assertions name the string; a status-only assertion would have been vacuous there. The harness
+prints `MUTATION DID NOT APPLY` and refuses rather than reporting a pass, which it did four times on
+a first attempt with bad quoting (R50).
+
+**Coverage differential.** All 93 `ALLOWED_USAGE` entries emptied in all three implementations, run
+over the real `src/` tree, `(file, model)` pairs compared: **nothing lost** against round 3, two
+gains (`passkey-enforcement.ts`'s by-name callback). One pair present in the round-2 raw-text scan is
+absent from both AST versions — `src/lib/notification.ts:78` (`prisma.notification`), which is
+`typeof tx.notification.create` inside a `Parameters<…>` **type query**. A type position is not a
+runtime access and the model is allowlisted regardless: examined and accepted, not a loss.
+
+**Production files were never mutated.** All red-proofs ran on scratchpad copies; `git status
+--porcelain` names only the four intended files.
+
+## Status of Prior Findings
+
+| ID | Status |
+|----|--------|
+| SEC-7 | **resolved** — regex-literal fixture: parent exit 0, current exit 1 naming `prisma.tenantMember`; still exit 1 after this round's rewrite, and pinned by test. |
+| SEC-8 | **resolved** — template-interpolation fixture: same shape, same result, still pinned. |
+| T3 | **resolved** — `callExtentEnd` is gone; the equivalent over-correction mutant (`modelRefsIn(call)` → `modelRefsIn(sf)`) reds exactly the reworked test and no other, so it now fails for the reason its comment claims. |
+
+## Recurring Issue Check
+
+**R47 (surface-form adjudication where an interpreter defines the meaning) — fires a fourth time,
+and this round is the one that closes the class rather than an instance.** Rounds 1–3 each replaced
+one surface-form predicate with a better-informed surface-form predicate. Round 3 finally reached the
+parser but applied it to a single question, so the rule the file recorded was "the model scan uses the
+AST" — under which leaving the tx-less check on a raw-text window is consistent. The rule is now "no
+predicate in this file decides a code question by surface form", with the one survivor named as a
+prefilter and argued for. R42's convergence condition is met the same way: the class was re-derived
+from the mechanism (every predicate in the file), not from the prior rounds' finding list, and each
+member is pinned by a persisted, mutation-verified test in a gate wired into `scripts/pre-pr.sh:333` and
+`ci.yml`.
+
+**R29 (rationale accuracy) — fires six times, all corrected.** The costly one was D14's "the parser
+recovers from truncation and still yields the call", which is the reason given for deleting the old
+fail-loud path and is false in general. Next costliest: the Check 3a comment describing the correct
+implementation above code doing the rejected one. Also corrected: the adopter registry, the "five
+sibling gates" and "13 tests" counts, `PRISMA_MODEL_RE`'s orphaned comment, and the plan's radius
+paragraph. **My own R29 failure is recorded too** — see "Findings assessed and rejected": I derived
+D5's member set from the spelling `pre-pr.sh` does not use and nearly rejected a true finding.
+
+**R49 (claim stronger than implementation) → R4-1.** The fail-loud net was documented as a structural
+guarantee and was a tripwire that could not fire for its own population. **R50** → the same, plus the
+mutation harness's refusal path. **R46 (scope-blind binding resolution)** → R4-3, and the fix declines
+to guess: a name with several function-valued bindings resolves to none and the site is reported.
+**R43** → the two round-3 widenings were both fail-closed false positives; the coverage differential
+confirms no fail-open widening in either direction. **R45** → measured, ~0.7 s over 154 parsed files,
+bounded by the prefilter. **R1/R17** → `ast-project.mjs`'s registry now records this gate as a partial
+adopter *with the reason its walk is not migrated* (walkSourceFiles returns `[]` for a missing root;
+this gate must fail loudly there).
+
+**RT7/RT10** → R4-5, closed: every new deny case has a paired allow case, and both sides are
+mutation-proven. **RT11** → clean; fixtures live in `mkdtempSync` dirs removed by `afterEach`, which
+runs on the failure path.
+
+## Environment Verification Report
+
+Unchanged from Round 1 except as noted. The two paths still **not verified** are the same two, both
+predicted in Phase 1 and both carrying Anti-Deferral entries: the E2E dialog-selection spec (D13 —
+`globalSetup` fails seeding the first pre-existing fixture user with an RLS violation, a local-harness
+limit predating this branch; the CI `e2e` job runs it on the PR) and the manual two-authenticator
+scenarios 1–7 on `mrx33` (VE2 — no access from this session; outstanding for the human merge gate).
+This round touched neither path: its entire diff is a CI gate and its tests.

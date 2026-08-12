@@ -1,12 +1,20 @@
 /**
- * Regression tests for check-bypass-rls.mjs — specifically the F3 anti-drift
- * scan (scripts/checks/check-bypass-rls.mjs:300-333), which flags any file that
- * suppresses an unused `tx` on a with*Rls (tx) => callback with an
- * eslint-disable-next-line no-unused-vars, outside the F3 allowlist.
+ * Regression tests for check-bypass-rls.mjs.
  *
  * The guard reads its source tree from `src/` relative to the process cwd
  * (`readdirSync("src", ...)`), so each case runs the real CLI with cwd set to an
  * isolated fixture tree — mirroring the file layout the guard keys off of.
+ *
+ * Every case here is a mutation that was run by hand during review and found a
+ * real defect. They are persisted because this gate's predicates have been
+ * wrong four times, each time in a way the previous round's tests could not
+ * see: a gate proven once by hand has no tripwire against its own next edit
+ * (RT7). The `predicate resolution` block is the newest set — one case per
+ * predicate that used to decide a code question from raw text or from a name.
+ *
+ * Fixtures below write the helper's arguments in whichever order reads clearly;
+ * the real signature is `withBypassRls(prisma, fn, purpose)`, and the gate finds
+ * the callback by kind rather than by position, so both orders exercise it.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
@@ -235,13 +243,12 @@ export async function drain(id) {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
-  it("still scans a truncated file, because the parser recovers", () => {
-    // This case used to assert the gate "fails by name when the extent cannot be
-    // determined" — a property the hand-rolled paren balancer needed because it
-    // could genuinely lose track. The parser does not have that failure mode: it
-    // recovers from the truncation and still yields the call, so the unlisted
-    // model inside the unclosed callback is caught outright. That is the
-    // stronger outcome, so the test asserts it instead of the old fallback.
+  it("reports a truncated file as unscanned rather than trusting the recovered tree", () => {
+    // The parser recovers from truncation and yields *a* tree, but a recovered
+    // tree is not evidence: the same recovery can drop the call this gate exists
+    // to find — see "a syntax error that swallows a real call" below, where it
+    // drops exactly that. So the verdict comes from whether the parse reported
+    // diagnostics, not from what happened to survive it.
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export async function drain() {
@@ -249,7 +256,8 @@ export async function drain() {
       return tx.tenantMember.findFirst({ where: { id: "x" } });
 `);
     expect(code).toBe(1);
-    expect(stderr).toContain("prisma.tenantMember");
+    expect(stderr).toContain("could not be parsed");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts");
   });
 
   it("reports a file that names the helper but whose code the parse lost", () => {
@@ -259,9 +267,200 @@ export async function drain() {
     // "found nothing".
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts",
       "\u0000withBypassRls(prisma, p, async (tx) => tx.tenantMember.f());");
-    // Either the model is caught outright, or the file is named as unscanned —
-    // never a silent pass.
     expect(code).toBe(1);
-    expect(stderr).toMatch(/prisma\.tenantMember|could not be parsed/);
+    expect(stderr).toContain("could not be parsed");
+  });
+});
+
+// ─── Predicate resolution ─────────────────────────────────────────────────────
+//
+// The round-3 rewrite moved the model scan onto the parse tree but left four
+// sibling predicates deciding code questions from raw text or from a name:
+// which files to check, which calls are calls, which identifier is the client,
+// and whether a callback takes one. Each case below was demonstrated against
+// the shipped gate before it was written — the stated prior verdict is what the
+// round-3 implementation actually returned, not what it was expected to.
+//
+// The real signature is `withBypassRls(prisma, fn, purpose)`; the gate finds
+// the callback by kind rather than by position, which the mixed argument orders
+// across these fixtures and the ones above exercise.
+
+describe("predicate resolution", () => {
+  it("catches a call reached through an aliased import, in a file not on the allowlist", () => {
+    // The file filter required the literal text `withBypassRls(`, which
+    // `import { withBypassRls as wb }` … `wb(...)` does not contain. The file
+    // was skipped whole, so it escaped the FILE allowlist too, not just the
+    // model one. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/sneaky/route.ts", `
+import { withBypassRls as wb, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function sneaky() {
+  return wb(prisma, async (tx) => tx.tenantMember.findFirst({}), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("not on the allowlist");
+    expect(stderr).toContain("src/lib/sneaky/route.ts");
+  });
+
+  it("catches a model reached through a callback parameter not named tx", () => {
+    // The receiver test was `=== "tx" || === "prisma"`, so renaming the
+    // callback's parameter removed the file from the model allowlist's view
+    // with a one-token edit. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (db) => db.tenantMember.findFirst({}), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("catches a model reached through a nested $transaction client", () => {
+    // A nested $transaction inherits the bypass context through the Proxy, so
+    // its own callback parameter is a bypassed client too. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    return tx.$transaction(async (inner) => inner.tenantMember.findFirst({}));
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("catches a model inside a callback passed by name", () => {
+    // Scanning only the call's own subtree saw nothing when the callback was a
+    // local const passed by reference — the shape
+    // src/lib/auth/policy/passkey-enforcement.ts uses. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  const job = async (tx) => tx.tenantMember.findFirst({});
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("names a callback it cannot resolve instead of scanning nothing and passing", () => {
+    // A callback that is the enclosing function's own parameter is invisible
+    // from this file. Examining nothing must not be spelled like finding
+    // nothing. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(job) {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:4");
+  });
+
+  it("flags a genuinely tx-less callback, and names the call's own line", () => {
+    // The allow-side companions below are what stop this from being satisfied
+    // by a predicate that always fires.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async () => prisma.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("tx-less form");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts:4");
+  });
+
+  it("flags a tx-less withTenantRls callback in a file with no model allowlist", () => {
+    // withTenantRls has no per-file allowlist, so this check is the only one
+    // that reaches it — it used to run in a separate raw-text sweep of its own.
+    const { code, stderr } = run("src/app/api/y/route.ts", `
+import { withTenantRls } from "@/lib/tenant-rls";
+export async function GET(tenantId) {
+  return withTenantRls(prisma, tenantId, async () => prisma.user.findFirst({}));
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("tx-less form");
+  });
+
+  it("passes a compliant call whose comment quotes the banned tx-less form", () => {
+    // The allow side of the two tests above. Round 3 moved this check from
+    // comment-blanked text to raw text, so documenting the banned shape next to
+    // the call — which is this repo's own comment style — reddened the build.
+    // Prior verdict: exit 1.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    // legacy shape was withBypassRls(prisma, () => prisma.auditOutbox.findMany(), p)
+    return tx.auditOutbox.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("passes a healthy file that mentions the helper only in prose", () => {
+    // A file whose bypass call was removed but whose explanatory comment and
+    // allowlist entry remain — an ordinary cleanup. Round 3 reported it as
+    // unparseable, naming a file that parsed perfectly. Prior verdict: exit 1.
+    const { code, stdout, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+// This used to call withBypassRls(prisma, cb, BYPASS_PURPOSE.AUDIT) before the refactor.
+export const purpose = BYPASS_PURPOSE.AUDIT;`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+    expect(stderr).not.toContain("could not be parsed");
+  });
+
+  it("passes a compliant call in a file whose string quotes an eslint-disable", () => {
+    // The F3 scan matched its trigger words in raw text, so the same words
+    // inside a string literal counted — and it never checked whether `tx` was
+    // actually unused. Prior verdict: exit 1.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const DOC = "eslint-disable-next-line @typescript-eslint/no-unused-vars";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("reports a syntax error that swallows a real call, instead of passing", () => {
+    // The round-3 fail-loud net asked whether any `withBypassRls` identifier
+    // survived the parse. The import specifier is one, so the net could never
+    // fire for a file that imports the helper — which is every real call site.
+    // Here an unterminated template swallows the call: no call expression
+    // survives, and the unlisted model inside was never seen. Prior verdict:
+    // exit 0, "check-bypass-rls: OK".
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const banner = \`unterminated on purpose
+
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.tenantMember.findFirst({}), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be parsed");
+    expect(stderr).toContain("src/lib/audit/audit-outbox.ts");
+  });
+
+  it("scans .tsx call sites, and passes one that only touches allowed models", () => {
+    // Two allowlisted call sites are .tsx. Scanning became parse-dependent in
+    // round 3, so dropping .tsx from the scan set — or misparsing JSX — would
+    // silently unscan both, and neither the suite nor the real tree would say so.
+    const source = (model) => `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export default async function Page() {
+  const row = await withBypassRls(prisma, async (tx) => tx.${model}.findFirst({}), BYPASS_PURPOSE.SHARE);
+  return <div className="p">{row?.id}</div>;
+}`;
+    const denied = run("src/app/s/[token]/page.tsx", source("tenantMember"));
+    expect(denied.code).toBe(1);
+    expect(denied.stderr).toContain("page.tsx");
+    expect(denied.stderr).toContain("prisma.tenantMember");
+
+    const allowed = run("src/app/s/[token]/page.tsx", source("passwordShare"));
+    expect(allowed.code).toBe(0);
+    expect(allowed.stdout).toContain("check-bypass-rls: OK");
   });
 });
