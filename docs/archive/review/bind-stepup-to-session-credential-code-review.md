@@ -603,7 +603,7 @@ including the structural items, or fix the regressions and the false claims and 
 | success output | `OK` | `OK (parsed 238 of 2066 source files)` — the count cannot rot silently again |
 
 **Declared, not closed** — R5-4, R5-10, R5-11 and the re-export half of R5-3, each with its reason,
-its verification, and its non-occurrence in today's tree, recorded in **D16** *and in the gate's own
+its verification, and (for three of the four) its non-occurrence in today's tree, recorded in **D16** *and in the gate's own
 header* where the next editor reads it. R5-7's remaining untested clauses are covered by the same
 declaration: they guard the shapes named there.
 
@@ -671,7 +671,7 @@ the header carries the reproducing command beside it rather than the bare number
 
 **R49** → R5-2/R5-3/R5-4/R5-6: five statements broader than what executed. **R46** → R5-1, closed by
 scope-visibility rather than by a wider search. **R50** → the empty-corpus refusal and the published
-subject count. **R43** → clean; differential identical. **R45** → clean, 0.65–0.71 s, unchanged.
+subject count. **R43** → clean; differential identical. **R45** → see Round 6: the round-5 commit added ~25%, since corrected.
 **RT7/RT10** → the seven new fixes each carry a paired allow case and a single-clause mutation;
 R5-7's remaining survivors are the declared-gap clauses.
 
@@ -682,3 +682,115 @@ Anti-Deferral entries: the E2E dialog-selection spec (D13 — `globalSetup` RLS 
 branch; the CI `e2e` job runs it on the PR) and the manual two-authenticator scenarios 1–7 on
 `mrx33` (VE2 — no access from this session). This round's diff is a CI gate and its tests; it
 touches neither path.
+
+---
+
+# Round 6 (verification, scoped)
+
+## Changes from Previous Round
+
+The single scoped verification round the user's Round-5 decision called for. Scope: `git show
+ed3e2ec5c` only, with the four D16 gaps explicitly out of scope. Three experts, each asked three
+questions: do the Round-5 fixes work, did they create new defects, and are the declared gaps
+honestly declared.
+
+**Every Round-5 fix reproduced** — all nine rows of the prior-vs-now table, the 279-pair coverage
+differential, the declared-gap supporting facts (193 call sites with 0 missing purposes; `rg` for a
+re-export empty; 6+5=11 sites under `scripts/`), and the 33/33 suite. And the round found new
+defects in that same fix, which is the fifth time running.
+
+## Merged Findings
+
+| ID | Severity | Subject | Reported by | Convergence |
+|----|----------|---------|-------------|-------------|
+| **R6-1** | **Major** | **Fail-open I introduced.** `callbackOf` reached `decl.getInitializer?.()` for whatever single visible declaration it found. On a `Parameter` that returns the **default value** — one of the values a caller may supply, not the one supplied at any call that passes an argument. `drain(job = async (tx) => tx.auditOutbox.findMany())` called as `drain(async (tx) => tx.user.deleteMany())` exits **0**: a bypassed `deleteMany` never scanned. Verbatim the shape Round 5's own commit message says it fixed. | security R5V-1 | execution-verified |
+| **R6-2** | **Major** | **Fail-open I introduced.** `bindingIndex` indexed each declaration under `getName()`, which for a destructuring binding returns the *pattern text* (`"{ job }"`). So a destructured binding is indexed under a name no identifier can equal, the ambiguity count misses it, and an unrelated same-named `const` elsewhere resolves as unique — the gate scans a body the call never runs. The same `getName()`-on-a-pattern mistake Round 5 fixed in `clientNamesIn` and `declaresUnusedTx`, left in the function it added. | functionality F1 | execution-verified |
+| **R6-3** | **Major** | **False claim I wrote.** "~0.7 s, unchanged from before the widening", carried into four places including the R45 verification verdict. Measured 0.656 → 0.797 s (means over 8 runs each; distributions do not overlap), ~+21–25%. Cause measured, not inferred: `bindingIndex` ran for all 238 parsed files while only 3 ever consult it. | functionality F3 | execution-verified |
+| **R6-4** | **Major** | **False claim I wrote.** D16's justification says "each requires a code shape that does not occur today" for all four gaps — eleven lines after the same entry enumerates gap 3's live occurrences. Re-derived: `scripts/tenant-domain.ts` 6 + `scripts/manual-tests/share-access-audit.ts` 5 = **11** live unreviewed call sites. Gaps 1, 2 and 4 do genuinely not occur. | functionality F2 | execution-verified |
+| **R6-5** | **Major** | Two clauses Round 5 added — the scope-visibility filter and `bindingIndex`'s `Parameter` kind — survive removal with all 33 tests green. The test credited with covering the filter is satisfied by the *ambiguity count* instead: its fixture binds the name twice, so `visible.length !== 1` either way. RT7. | testing T5-1/T5-2 | mutation-verified |
+| **R6-6** | **Major** | `run()` returned `{ code: 0, stderr: "" }` on the success path — `execFileSync` surfaces stderr only when it throws. Every `expect(stderr).not.toContain(...)` paired with `code === 0` was asserting against a hardcoded empty string. Three sites, two of them the assertions Round 5 repointed off a dead message onto a live one — and onto a dead channel. Pre-existing harness defect. | testing T5-3 | execution-verified |
+| R6-7 | Minor | `destructuredModelRefs` walked every `BindingElement` descendant, so `...rest` was reported as `prisma.rest` — a model that does not exist — while `rest.user.deleteMany()` reached through it stayed invisible. A new false positive concealing a blind spot. Nested patterns emitted delegate methods as models. | security R5V-3 | execution-verified |
+| R6-8 | Minor | A reassignable (`let`/`var`) callback binding was resolved from its initializer, so a function reassigned before the call is scanned by nothing. Pre-existing (Round 4 identical), one line to refuse. | security R5V-2 | execution-verified |
+| R6-9 | Minor | A bodyless `FunctionDeclaration` (ambient/overload signature) resolved, and was then misreported as an F3 unused-`tx` violation whose printed remedy — allowlist the file — would unscan it entirely. | security R5V-4 | execution-verified |
+| R6-10 | Minor | The F3 message named `` `tx` `` although `declaresUnusedTx` is now parameter-name agnostic, so an author writing `async (db) => …` was told they declared `tx`. And `parsed 238 of 2066 source files` divided by the raw walk, 1055 of which are test files skipped unconditionally — reading as an 11.5% coverage ratio where the real one is 23.5%. | functionality F5/F6 | single-perspective |
+
+## Resolution
+
+All ten fixed. R6-1/R6-2/R6-7/R6-8/R6-9 are one function's worth of "refuse rather than guess":
+
+| Predicate | Was | Now |
+|---|---|---|
+| `bindingIndex` keying | `getName()` — pattern text for a destructuring binding | each `BindingElement`'s own bound name |
+| callback from a `Parameter` | its default value | refused — the caller decides |
+| callback from `let`/`var` | its initializer | refused — only `const` answers |
+| callback from a bodyless declaration | the signature | refused — the implementation is elsewhere |
+| `...rest` in a client pattern | reported as a model | a receiver (`clientNamesIn`), models read through it |
+| nested pattern elements | reported as models | skipped — delegate methods are not models |
+
+R6-3 is fixed by *making the claim true* rather than restating it: `bindingIndex` is now built
+lazily on first use, so the 235 files that never pass a callback by name never pay for it.
+Re-measured **0.67–0.69 s**, indistinguishable from Round 4's 0.68 — the sentence now reproduces.
+
+R6-6: `run()` uses `spawnSync`, returning both streams from the process on both paths, so the three
+`not.toContain` assertions can now fail. R6-4: the justification is per-gap — 1, 2 and 4 on
+non-occurrence, gap 3 explicitly **on scope, not on non-occurrence**, with its 11 live sites named.
+R6-10: the F3 message prints the offending parameter's real name; the success line divides by the
+**scannable** set (`parsed 238 of 1011 scannable source files`).
+
+### Verification
+
+**Allow side.** Real tree exit **0**, `check-bypass-rls: OK (parsed 238 of 1011 scannable source
+files)`. Suite **40/40** (was 33). Full unit suite 1008 files / **14567** passed. `lint` 0 ·
+`typecheck` 0 · `check:migration-drift` 0 · `check:crypto-domains` 0 · `check:team-auth-rls` 0 ·
+`check-state-mutation-centralization` 0. Every status from the command's own exit (R44).
+
+**Deny side, each against the Round-5 gate first:**
+
+| Input | Round 5 | now |
+|---|---|---|
+| callback = a parameter's default value (R6-1) | **0** | **1** — "could not be resolved" |
+| by-name callback shadowed by a destructured parameter (R6-2) | resolved the wrong body | **1** — "could not be resolved" |
+| by-name callback, single out-of-scope binding (R6-5) | 1 | **1**, now pinned by a test |
+| by-name callback shadowed by a plain parameter (R6-5) | 1 | **1**, now pinned by a test |
+| `let` callback reassigned before the call (R6-8) | **0** | **1** |
+| `...rest` reaching an unlisted model (R6-7) | `prisma.rest`, `user` hidden | **1** — `prisma.user`, no `prisma.rest` |
+| destructured client touching only allowed delegates (allow) | 0 | **0** |
+
+**Mutation proof.** Seven mutations applied singly to a scratchpad copy: the scope filter (1→0), the
+`Parameter` kind (1→0), pattern indexing (1→0), the `const`-only refusal (1→0), the rest-element skip
+(message: `prisma.rest` appears), the body requirement (message: unresolved → F3), and the
+parameter-default refusal. **Stated precisely**: the default-value refusal is not independently
+observable — a `Parameter` has no `getVariableStatement`, so the `const` clause already excludes it;
+removing *both* clauses flips the fixture 1→0. The kind check is kept as a statement of intent, not
+claimed as a second independent guard. The patcher aborts with `ANCHOR MATCHED n TIMES` rather than
+running, and did.
+
+**Coverage differential** vs Round 5, all 93 allowlist entries emptied: **279 pairs both sides,
+nothing lost, nothing gained.**
+
+**Performance**, 5 runs each, interleaved: Round 4 `0.68 0.67 0.68 0.68 0.69`; Round 5 (eager index)
+`0.85 0.85 0.85 0.83 0.86`; now (lazy) `0.69 0.67 0.69 0.67 0.69`.
+
+## Recurring Issue Check
+
+**R29 fires on my own prose for the second round running** — the performance figure and the
+universal non-occurrence claim, both mine, both repeated across multiple files. The pattern is
+specific and worth naming: I write a number or a scope claim while making a change, and it is true
+of the change I *intended* rather than the one I made. Both are now derived at runtime or stated
+per-item rather than asserted once and copied.
+
+**R47/R42** — the class "predicate that reads a binding pattern with `getName()`" was derived over
+`clientNamesIn` and `declaresUnusedTx` in Round 5 but not over `bindingIndex`, which the same commit
+introduced. Deriving a class over *the functions I was already editing* rather than over *every
+function with the shape* is the same error in a fourth costume.
+
+**RT7/RT10** → R6-5, closed: every clause added in Rounds 5–6 now has a case that fails when the
+clause is removed, and each deny case has a paired allow case. **R44** clean. **R50** — the mutation
+harness's refusal path fired again and was honoured. **R43** — differential identical, no widening.
+**R45** — now genuinely clean, and measured rather than asserted.
+
+## Environment Verification Report
+
+Unchanged. The two paths still not verified are the same two, both predicted in Phase 1 with
+Anti-Deferral entries: the E2E dialog-selection spec (D13) and the manual two-authenticator
+scenarios 1–7 on `mrx33` (VE2). This round's diff is a CI gate and its tests.

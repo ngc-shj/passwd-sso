@@ -406,7 +406,7 @@ make worse than `main`, each its own change):
 
 **Anti-Deferral check**: out of scope (different feature) for 1–4.
 **Justification** — worst case: an RLS bypass reaches main unreviewed through one of the four
-shapes; likelihood: low, because each requires a code shape that does not occur today and all four
+shapes; likelihood: low for gaps 1, 2 and 4, which require a code shape absent from the tree today (verified), and for gap 3 the 11 live call sites listed above are deferred on SCOPE, not on non-occurrence — they are unreviewed now and stay so until that work is done; all four
 are now named in the file's own header where the next editor reads them; cost to fix: (1) and (4)
 are contained but change the gate's verdict surface again, (2) needs a two-pass prefilter or a
 companion no-re-export gate, (3) surfaces 11+ pre-existing unreviewed call sites that need their own
@@ -427,3 +427,40 @@ model catch into an unresolved report), which is why those assertions name the s
 differential against round 4 over the real tree with all 93 allowlist entries emptied: **279 pairs
 both sides, nothing lost, nothing gained** — every fix addresses a shape the tree does not yet
 contain, which is the point of a gate.
+
+## D17 — Round 6 corrections to D15/D16, and what the perf claim actually cost
+
+**What changed**: `scripts/checks/check-bypass-rls.mjs` — `bindingIndex` keys each destructuring
+binding by the names it binds rather than by its pattern text, and is built lazily; `callbackOf`
+refuses a parameter's default value, a `let`/`var` binding and a bodyless declaration;
+`destructuredModelRefs` skips rest elements and nested patterns while `clientNamesIn` takes the rest
+binding as a receiver; the F3 message names the offending parameter; the success line divides by the
+scannable set. `scripts/__tests__/check-bypass-rls.test.mjs` uses `spawnSync` so stderr is real on
+both exit paths.
+
+**Why**: the scoped verification round found two fail-opens in D16's own fix. `getInitializer()` on
+a `Parameter` returns its **default**, so a callback with a default was scanned instead of the one
+the caller passes — `drain(async (tx) => tx.user.deleteMany())` exited 0. And `getName()` on a
+destructuring binding returns the pattern text, so `bindingIndex` filed it under a name nothing can
+match; an unrelated same-named `const` then resolved as unique. D16 fixed exactly this
+`getName()`-on-a-pattern mistake in two other functions and reintroduced it in the one it added.
+
+**Two claims corrected** (R29, second consecutive round on my own prose):
+
+1. *"~0.7 s, unchanged from before the widening"* — measured **0.656 → 0.797 s**, about +25%,
+   repeated in four places including the R45 verification verdict. Cause: `bindingIndex` ran for all
+   238 parsed files while only 3 consult it. Fixed by making the claim true — the index is now lazy
+   and the gate measures **0.67–0.69 s**, against Round 4's 0.68.
+2. *"each requires a code shape that does not occur today"* (D16's Anti-Deferral justification) —
+   true for gaps 1, 2 and 4, **false for gap 3**, whose 11 live call sites the same entry lists
+   eleven lines earlier. Re-derived: `scripts/tenant-domain.ts` 6 + `scripts/manual-tests/share-access-audit.ts`
+   5 = 11. The justification is now per-gap, and gap 3 is deferred on **scope**, not on
+   non-occurrence.
+
+The four D16 gaps are unchanged and still open by the user's decision.
+
+**Evidence**: 40 tests (up from 33), 40/40; full suite 1008 files / 14567 passed; real tree exit 0.
+Seven single-clause mutations, each reddening a different case. One is stated as not independently
+observable: a `Parameter` has no `getVariableStatement`, so the `const`-only refusal already excludes
+it and the explicit kind check is intent, not a second guard — recorded rather than claimed. Coverage
+differential against D16's gate, all 93 allowlist entries emptied: 279 pairs both sides, nothing lost.

@@ -240,7 +240,9 @@ const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 //     const c=readFileSync(f,"utf8");
 //     if(/with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/.test(c))n++;
 //     if(/withBypassRls\s*\(/.test(c))o++;}console.log(n,o)'
-// Whole gate measured at ~0.7 s, unchanged from before the widening.
+// Whole gate measured at ~0.68 s, unchanged from before the widening — but only
+// because bindingIndex is built lazily. Building it per parsed file cost ~25%
+// (0.68 -> 0.85 s) for an index 3 of 238 files ever consult.
 const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
 const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
@@ -358,6 +360,11 @@ function scopeOf(node) {
  */
 function bindingIndex(sf) {
   const index = new Map();
+  const add = (name, decl) => {
+    const bucket = index.get(name);
+    if (bucket) bucket.push(decl);
+    else index.set(name, [decl]);
+  };
   const kinds = [
     SyntaxKind.VariableDeclaration,
     SyntaxKind.FunctionDeclaration,
@@ -365,11 +372,21 @@ function bindingIndex(sf) {
   ];
   for (const kind of kinds) {
     for (const decl of sf.getDescendantsOfKind(kind)) {
+      // A destructuring declaration binds each element's name, not the pattern.
+      // `getName()` returns the pattern text ("{ job }"), which no identifier can
+      // equal — so indexing by it would leave `job` looking unbound, and an
+      // unrelated `job` elsewhere would then resolve as the unique candidate.
+      // That is the same getName()-on-a-pattern mistake this file already fixed
+      // in clientNamesIn and declaresUnusedTx.
+      const nameNode = decl.getNameNode?.();
+      if (nameNode && nameNode.getKind() !== SyntaxKind.Identifier) {
+        for (const el of nameNode.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+          add(el.getName(), decl);
+        }
+        continue;
+      }
       const name = decl.getName?.();
-      if (!name) continue;
-      const bucket = index.get(name);
-      if (bucket) bucket.push(decl);
-      else index.set(name, [decl]);
+      if (name) add(name, decl);
     }
   }
   return index;
@@ -387,21 +404,36 @@ function bindingIndex(sf) {
  * is not a function all return null, and the caller reports the site: this gate
  * has been wrong four times by guessing, so it no longer guesses.
  */
-function callbackOf(call, bindings) {
+function callbackOf(call, bindingsFor) {
   const args = call.getArguments();
   const inline = args.find((a) => FN_KINDS.has(a.getKind()));
   if (inline) return inline;
 
   for (const arg of args) {
     if (arg.getKind() !== SyntaxKind.Identifier) continue;
-    const visible = (bindings.get(arg.getText()) ?? []).filter((decl) => {
+    const visible = (bindingsFor().get(arg.getText()) ?? []).filter((decl) => {
       const scope = scopeOf(decl);
       return scope && scope.getStart() <= call.getStart() && call.getEnd() <= scope.getEnd();
     });
     if (visible.length !== 1) continue;
     const decl = visible[0];
-    if (decl.getKind() === SyntaxKind.FunctionDeclaration) return decl;
-    const init = decl.getInitializer?.();
+
+    // A declaration without a body (an ambient or overload signature) says the
+    // implementation is elsewhere, so this file cannot answer.
+    if (decl.getKind() === SyntaxKind.FunctionDeclaration) {
+      if (decl.getBody()) return decl;
+      continue;
+    }
+
+    // Only a `const` initializer answers "which function runs at this call".
+    // A parameter's initializer is its DEFAULT — one of the values a caller may
+    // supply, and not the one supplied at any call site that passes an argument.
+    // A `let`/`var` binding can hold a different function at the call than at
+    // its declaration. Both are the "scanned a body the call never runs" shape,
+    // and the gate refuses rather than guessing at either.
+    if (decl.getKind() !== SyntaxKind.VariableDeclaration) continue;
+    if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") continue;
+    const init = decl.getInitializer();
     if (init && FN_KINDS.has(init.getKind())) return init;
   }
   return null;
@@ -423,8 +455,15 @@ function clientNamesIn(fn) {
   // can be a receiver — the destructured properties ARE the model accesses, and
   // `getName()` there returns the pattern text, which no identifier can equal.
   // Those are collected by destructuredModelRefs instead.
-  if (first && first.getNameNode().getKind() === SyntaxKind.Identifier) {
+  const firstName = first?.getNameNode();
+  if (firstName?.getKind() === SyntaxKind.Identifier) {
     names.add(first.getName());
+  } else if (firstName?.getKind() === SyntaxKind.ObjectBindingPattern) {
+    // `async ({ auditOutbox, ...rest }) => rest.user.f()` — the rest element
+    // carries the remaining client, so it IS a receiver.
+    for (const el of firstName.getElements()) {
+      if (el.getDotDotDotToken()) names.add(el.getName());
+    }
   }
   for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = inner.getExpression();
@@ -466,9 +505,17 @@ function modelRefsIn(node, clientNames) {
 function destructuredModelRefs(fn) {
   const refs = [];
   const nameNode = fn?.getParameters()[0]?.getNameNode();
-  if (!nameNode || nameNode.getKind() === SyntaxKind.Identifier) return refs;
-  for (const el of nameNode.getDescendantsOfKind(SyntaxKind.BindingElement)) {
-    const model = (el.getPropertyNameNode() ?? el.getNameNode()).getText();
+  if (nameNode?.getKind() !== SyntaxKind.ObjectBindingPattern) return refs;
+  // Only the pattern's OWN properties are model delegates. A rest element binds
+  // the remaining client, not a model — reporting it would name a model that
+  // does not exist, and would leave everything reached through it unscanned
+  // (clientNamesIn adds it as a receiver instead). Nested patterns destructure
+  // a delegate's methods, which are not models either.
+  for (const el of nameNode.getElements()) {
+    if (el.getDotDotDotToken()) continue;
+    const keyNode = el.getPropertyNameNode() ?? el.getNameNode();
+    if (keyNode.getKind() !== SyntaxKind.Identifier) continue;
+    const model = keyNode.getText();
     if (model.startsWith("$")) continue;
     refs.push({ model, line: el.getStartLineNumber() });
   }
@@ -568,11 +615,16 @@ for (const file of sourceFiles) {
   const allowedSet =
     !allowedModels || allowedModels.includes("*") ? null : new Set(allowedModels);
 
-  const bindings = bindingIndex(sf);
+  // Built on first use, not per file: only a call that passes its callback by
+  // NAME needs it, which is 3 of the 238 parsed files. Building it eagerly cost
+  // three whole-file descendant walks per file — ~25% of the gate's runtime for
+  // an answer almost nobody asked for.
+  let bindings = null;
+  const bindingsFor = () => (bindings ??= bindingIndex(sf));
 
   for (const { call, helper } of calls) {
     const line = call.getStartLineNumber();
-    const fn = callbackOf(call, bindings);
+    const fn = callbackOf(call, bindingsFor);
 
     if (!fn) {
       // Only the tx-client helpers carry a discipline this gate can check, so
@@ -597,7 +649,7 @@ for (const file of sourceFiles) {
         // looking for the eslint-disable comment that usually accompanies it —
         // the comment is the symptom, and matching it in raw text also matched
         // the same words inside a string.
-        f3UnusedTxViolations.push({ file, line });
+        f3UnusedTxViolations.push({ file, line, param: fn.getParameters()[0].getName() });
       }
     }
 
@@ -633,7 +685,7 @@ let failed = false;
 if (f3UnusedTxViolations.length > 0) {
   failed = true;
   console.error(
-    "with*Rls callback declares `tx` and never uses it (no-unused-vars shape),",
+    "with*Rls callback declares the transaction client and never uses it,",
   );
   console.error(
     "outside the F3 allowlist. Use the (tx) => tx.x form (the guard's prescribed",
@@ -645,7 +697,7 @@ if (f3UnusedTxViolations.length > 0) {
     "public contract — add the file to F3_UNUSED_TX_ALLOWLIST after review.",
   );
   console.error("");
-  for (const { file, line } of f3UnusedTxViolations) console.error(`  ${file}:${line}`);
+  for (const { file, line, param } of f3UnusedTxViolations) console.error(`  ${file}:${line}  (${param})`);
   console.error("");
 }
 
@@ -757,6 +809,12 @@ if (failed) {
 // Name the subject count on the success path: "OK" alone cannot distinguish a
 // clean tree from a scan that examined almost nothing, and a silent collapse of
 // this number is the shape a wrong cwd or a broken prefilter takes in CI logs.
+// The denominator is the SCANNABLE set, not the raw walk: test files are
+// skipped unconditionally, so dividing by the walk would read as a coverage
+// ratio that half the corpus was never a candidate for.
+const scannableCount = sourceFiles.filter(
+  (f) => !f.includes(".test.") && !f.includes("__tests__"),
+).length;
 console.log(
-  `check-bypass-rls: OK (parsed ${parsedCount} of ${sourceFiles.length} source files)`,
+  `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files)`,
 );

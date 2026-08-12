@@ -17,7 +17,7 @@
  * the callback by kind rather than by position, so both orders exercise it.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,16 +34,17 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 function run(relPath, source) {
   mkdirSync(join(dir, relPath.split("/").slice(0, -1).join("/")), { recursive: true });
   writeFileSync(join(dir, relPath), source, "utf8");
-  try {
-    const stdout = execFileSync("node", [CHECKER], {
-      cwd: dir,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    return { code: 0, stderr: "", stdout };
-  } catch (e) {
-    return { code: e.status, stderr: e.stderr?.toString() ?? "", stdout: e.stdout?.toString() ?? "" };
-  }
+  // spawnSync, not execFileSync: the latter surfaces stderr only on the throw
+  // path, so a `expect(stderr).not.toContain(...)` paired with `code === 0` was
+  // asserting against a hardcoded "" and could never fail. Both streams come
+  // from the process on both paths.
+  const r = spawnSync("node", [CHECKER], {
+    cwd: dir,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (r.error) throw r.error;
+  return { code: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
 // F3 violation, isolated: the file IS on the model allowlist (audit-outbox.ts,
@@ -88,7 +89,7 @@ describe("check-bypass-rls F3 unused-tx anti-drift", () => {
   it("fails an allowlisted file that suppresses an unused tx on a with*Rls callback", () => {
     const r = run("src/lib/audit/audit-outbox.ts", F3_UNUSED_TX_ON_ALLOWLISTED_FILE);
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain("no-unused-vars");
+    expect(r.stderr).toContain("never uses it");
     expect(r.stderr).toContain("src/lib/audit/audit-outbox.ts");
   });
 
@@ -101,7 +102,7 @@ describe("check-bypass-rls F3 unused-tx anti-drift", () => {
   it("flags a new non-allowlisted file that suppresses an unused tx", () => {
     const r = run("src/app/api/y/route.ts", F3_UNUSED_TX_ON_NEW_FILE);
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain("no-unused-vars");
+    expect(r.stderr).toContain("never uses it");
     expect(r.stderr).toContain("src/app/api/y/route.ts");
   });
 });
@@ -464,6 +465,108 @@ function unrelated() {
     expect(stderr).toContain("could not be resolved");
   });
 
+  it("reports a by-name callback whose only same-named binding is out of scope", () => {
+    // The scope-visibility filter alone, with nothing else to make the name
+    // ambiguous: one binding, in a sibling function, touching an ALLOWED model
+    // so the model check cannot supply the verdict. Without the filter the gate
+    // resolves a body this call never runs and exits 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function bad() {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}
+function unrelated() {
+  const job = async (tx) => tx.auditOutbox.findMany();
+  return job;
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+  });
+
+  it("reports a by-name callback shadowed by a parameter of the calling function", () => {
+    // Indexing parameters is what makes this ambiguous. Index only the
+    // function-valued bindings and the module-level const looks unique, so the
+    // gate scans it — though the name at the call refers to the parameter.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const job = async (tx) => tx.auditOutbox.findMany();
+export async function bad(job) {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+  });
+
+  it("reports a by-name callback shadowed by a DESTRUCTURED parameter", () => {
+    // `getName()` on a binding pattern returns the pattern text ("{ job }"), so
+    // indexing by it leaves `job` looking unbound and the module-level const
+    // resolves as unique — the same getName()-on-a-pattern mistake this file
+    // fixed in two other predicates.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const job = async (tx) => tx.auditOutbox.findMany();
+export async function bad({ job }) {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+  });
+
+  it("refuses a callback parameter's default value, which no caller need supply", () => {
+    // `getInitializer()` on a Parameter is its DEFAULT. Scanning it answers a
+    // question nobody asked: every call that passes an argument runs something
+    // else — here a `prisma.user.deleteMany()` the gate would never see.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(job = async (tx) => tx.auditOutbox.findMany()) {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}
+export async function caller() {
+  return drain(async (tx) => tx.user.deleteMany());
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+  });
+
+  it("refuses a reassignable callback binding", () => {
+    // A `let` can hold a different function at the call than at its
+    // declaration, so the initializer is not the answer.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(flag) {
+  let job = async (tx) => tx.auditOutbox.findMany();
+  if (flag) job = async (tx) => tx.user.deleteMany();
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+  });
+
+  it("reads models through a rest element rather than reporting the rest name", () => {
+    // `...rest` binds the remaining client, so it is a receiver. Treating it as
+    // a model both invents `prisma.rest` and hides everything reached through it.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async ({ auditOutbox, ...rest }) => rest.user.deleteMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.user");
+    expect(stderr).not.toContain("prisma.rest");
+  });
+
+  it("passes a destructured client that only takes allowed delegates", () => {
+    // The allow side for both destructuring paths: the named property is an
+    // allowed model and the rest binding reaches nothing.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async ({ auditOutbox, ...rest }) => auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("resolves a callback declared as a function declaration", () => {
     // `async function job(tx)` is a FunctionDeclaration, not a VariableDeclaration,
     // so round 4's by-name lookup missed it and reported the site as unresolvable
@@ -549,17 +652,13 @@ export async function sneaky() {
     // readdirSync throws for a MISSING src/; this is the present-but-empty case
     // it cannot see. Prior verdict: exit 0, "check-bypass-rls: OK".
     mkdirSync(join(dir, "src"), { recursive: true });
-    let code, stderr;
-    try {
-      execFileSync("node", [CHECKER], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-      code = 0;
-      stderr = "";
-    } catch (e) {
-      code = e.status;
-      stderr = e.stderr?.toString() ?? "";
-    }
-    expect(code).toBe(1);
-    expect(stderr).toContain("no .ts/.tsx source files found");
+    const r = spawnSync("node", [CHECKER], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("no .ts/.tsx source files found");
   });
 
   it("scans .tsx call sites, and passes one that only touches allowed models", () => {
