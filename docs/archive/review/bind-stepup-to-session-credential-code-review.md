@@ -430,7 +430,7 @@ than as a description of what one function happens to do:
 
 | Predicate | Was | Now |
 |---|---|---|
-| which files to scan | raw text `withBypassRls\s*\(` — a **verdict** | raw text `with*Rls|tenant-rls` — a **prefilter** only, deliberately a superset (154 files parsed vs 88, ~0.7 s) |
+| which files to scan | raw text `withBypassRls\s*\(` — a **verdict** | raw text `with*Rls|tenant-rls` — a **prefilter** only, deliberately a superset (238 files parsed vs 88, ~0.7 s) |
 | which calls are calls | name equality on callee text | local binding names resolved from the `tenant-rls` import, aliases included |
 | which callback runs | inline function arguments only | found by kind (position differs per helper); an identifier resolves to its unique function-valued binding, else the site is **named** |
 | which identifier is the client | `=== "tx" \|\| === "prisma"` | the callback's own declared parameter, `prisma`, and nested `$transaction` parameters |
@@ -526,7 +526,7 @@ guarantee and was a tripwire that could not fire for its own population. **R50**
 mutation harness's refusal path. **R46 (scope-blind binding resolution)** → R4-3, and the fix declines
 to guess: a name with several function-valued bindings resolves to none and the site is reported.
 **R43** → the two round-3 widenings were both fail-closed false positives; the coverage differential
-confirms no fail-open widening in either direction. **R45** → measured, ~0.7 s over 154 parsed files,
+confirms no fail-open widening in either direction. **R45** → measured, ~0.7 s over 238 parsed files,
 bounded by the prefilter. **R1/R17** → `ast-project.mjs`'s registry now records this gate as a partial
 adopter *with the reason its walk is not migrated* (walkSourceFiles returns `[]` for a missing root;
 this gate must fail loudly there).
@@ -543,3 +543,142 @@ predicted in Phase 1 and both carrying Anti-Deferral entries: the E2E dialog-sel
 limit predating this branch; the CI `e2e` job runs it on the PR) and the manual two-authenticator
 scenarios 1–7 on `mrx33` (VE2 — no access from this session; outstanding for the human merge gate).
 This round touched neither path: its entire diff is a CI gate and its tests.
+
+---
+
+# Round 5 (incremental)
+
+## Changes from Previous Round
+
+Scope: `git show e535bb16f` only — the Round-4 remedy. Three experts in parallel, each told to
+assume nothing about it and to re-prove Round 4's own claimed prior-vs-now table by execution.
+
+All three re-derived that table independently and **every row reproduced**, as did the coverage
+differential, the `src/lib/notification.ts:78` type-query exception, the adopter count, and all nine
+prior-verdict comments in the new tests. What they also found is that Round 4 closed the class it
+enumerated and then declared the class closed — and the enumeration was of *the predicates Round 4
+changed*, not of every predicate in the file. R47 therefore fires for a **fifth** consecutive round.
+
+## Merged Findings
+
+| ID | Severity | Subject | Reported by | Convergence |
+|----|----------|---------|-------------|-------------|
+| **R5-1** | **Major** | **A regression Round 4 introduced.** `callbackOf` accepted a by-name callback when exactly one *function-valued* binding of that name existed anywhere in the file. So an unrelated `const job = async (tx) => …` in a sibling function resolved a `job` that actually referred to the enclosing function's own parameter: the gate scanned a body the call never runs and printed OK — **in place of** the "could not be resolved" report Round 4 had just added. Adding six lines of unrelated code turns a fail-loud report into a silent pass. | security S5-1 | execution-verified, both directions |
+| **R5-2** | **Major** | Round 4's header states "no predicate in this file decides a code question by surface form". False when written: `declaresUnusedTx` compared `getName() !== "tx"`, so renaming the unused parameter to `db` defeats F3 entirely; and `clientNamesIn` used `getName()` on the first parameter, which returns pattern text for a destructuring binding, so `async ({ tenantMember }) => tenantMember.findFirst()` hides the model. Both are the exact shape R4-3 fixed one function earlier. | security S5-4/S5-5, functionality F1 | **security+functionality** |
+| **R5-3** | **Major** | The prefilter's stated closure argument — "a file matching neither cannot contain a call" — is false for a **renaming re-export**: the caller's text names neither the helper nor the module, so the file is never parsed and escapes the *file* allowlist, R4-4's outcome by a spelling Round 4 did not enumerate. Also `localHelperNames` keys aliases on `/tenant-rls$/`, so `@/lib/tenant-rls.js` resolves no aliases. | security S5-2/S5-3, functionality F5 | **security+functionality** |
+| **R5-4** | **Major** | Check 2 (`BYPASS_PURPOSE`) was rewritten by Round 4 from a text regex to an AST scan, kept file-level granularity, and gained a comment claiming *call-site* enforcement. It has **zero** tests: its push, its report block and its definition-file exemption are each deletable with the suite and the real tree green. A file whose only call site passes a string literal exits 0 if any `BYPASS_PURPOSE.X` sits elsewhere. | testing R5-T1, functionality F2 | **testing+functionality** |
+| **R5-5** | **Major** | "154 files parsed instead of 88" does not reproduce — measured **238**, repeated across the gate header, D15 and this document. 154 was the count of files importing `@/lib/tenant-rls`, not the regex's match count. The `~0.7 s` half of the same sentence does reproduce. R29. | all three lanes | **all three lanes** |
+| **R5-6** | **Major** | `ast-project.mjs`'s new "Partial adopter" note is wrong on both load-bearing claims: `isScannableSourceFile` already excludes `src/lib/tenant-rls.test.ts`, and the two exclusion predicates select the **same** 1011 files out of 2066 — the differential is empty. "Five tx-less calls" is 15. And the property the note justifies is not delivered: a present-but-empty `src/` printed OK. | functionality F3 | single-perspective, execution-verified |
+| **R5-7** | Major | 15 of 50 single mutations survive the suite; 13 survive the real tree too. Untested clauses include `callbackOf`'s uniqueness rule, `helperCallsIn`'s property-access branch, `localHelperNames`' canonical seed, `clientNamesIn`'s `"prisma"` seed, `modelRefsIn`'s `$`-prefix skip (allow side), and `INDIRECT_CALLBACK_ALLOWLIST` (allow side). | testing R5-T2/T3/T4/T5 | single-perspective, mutation-verified |
+| R5-8 | Minor | `callbackOf` cannot resolve a `FunctionDeclaration` (only `VariableDeclaration`), contradicting its own doc — and the remedy it prints ("add the file to `INDIRECT_CALLBACK_ALLOWLIST`") would unscan the whole file. Fail-closed, but its prescribed resolution is fail-open. | functionality F6, security S5-9 | security+functionality |
+| R5-9 | Minor | `f3DisableViolations` no longer holds eslint-disable findings; two test assertions pin `"could not be determined"`, a message removed in Round 3, so neither can fail; the test file still cites the renamed `F3_UNUSED_TX_DISABLE_ALLOWLIST`. | functionality F7, testing R5-T10 | functionality+testing |
+| R5-10 | Minor | `INDIRECT_CALLBACK_ALLOWLIST` is keyed by file, so a new unresolvable call site inside an already-listed file is excused without review — the review doc's "forces review of any new such site" is stronger than the code. | security S5-6, functionality F8 | security+functionality |
+| R5-11 | Major | The scan root is `src/` only. `scripts/tenant-domain.ts` (6 call sites, runs against a live database) and `scripts/manual-tests/share-access-audit.ts` (5 tx-less `withBypassRls`) have no file entry, no model constraint and no C2 verdict. The class was re-derived over *predicates in a file*, not over *files that can call the helper*. | security S5-8 | single-perspective |
+
+### Findings assessed and not adopted
+
+None rejected as wrong. The security lane's `escalate: true` on R5-1/R5-2/R5-3/R5-11 was assessed:
+each is a CI-gate blind spot for a code shape that does not occur in the tree today, not a live
+bypass, so none was escalated to Critical.
+
+## Resolution — scope decision, taken with the user
+
+This is the fifth consecutive round whose findings are in the previous round's fix, all inside one
+CI gate. The branch's actual subject — contracts C1–C7, the step-up credential binding across 45
+routes — has been clean in all three lanes for **four** consecutive rounds; the gate is here only
+because contract `C5`'s two new allowlist entries needed enforcing. Three options were put to the
+user: narrow the branch by reverting the gate (costing the enforcement `C5` needs), fix everything
+including the structural items, or fix the regressions and the false claims and declare the rest.
+**The user chose the third.**
+
+**Fixed** — R5-1, R5-2, R5-3 (both halves), R5-5, R5-6, R5-8, R5-9, and the empty-corpus hole:
+
+| Predicate | Was | Now |
+|---|---|---|
+| by-name callback resolution | one function-valued binding **anywhere in the file** | the bindings **visible from the call** — scope-enclosing, all binding kinds counted for ambiguity, `FunctionDeclaration` included |
+| F3 unused client | `getName() !== "tx"` | the parameter's own binding; a same-named **property access** is not a use |
+| client identifier | `getName()` on a destructuring pattern (matches nothing) | destructured properties read as model accesses directly |
+| import specifier | `/tenant-rls$/` | `/(^\|\/)tenant-rls(\.[cm]?[jt]sx?)?$/` |
+| empty `src/` | `check-bypass-rls: OK`, exit 0 | refuses, naming the working directory |
+| success output | `OK` | `OK (parsed 238 of 2066 source files)` — the count cannot rot silently again |
+
+**Declared, not closed** — R5-4, R5-10, R5-11 and the re-export half of R5-3, each with its reason,
+its verification, and its non-occurrence in today's tree, recorded in **D16** *and in the gate's own
+header* where the next editor reads it. R5-7's remaining untested clauses are covered by the same
+declaration: they guard the shapes named there.
+
+The header no longer claims the class is closed. Declaring closure is precisely what made this round
+necessary — Round 4 enumerated the predicates it changed, called that the class, and wrote the claim
+into the file.
+
+### Verification
+
+**Allow side.** Real tree exit **0**, `check-bypass-rls: OK (parsed 238 of 2066 source files)`.
+Suite 33/33. Full unit suite 1008 files / **14560** passed. `npm run lint` 0 · `npm run typecheck` 0 ·
+`check:migration-drift` 0 · `check:crypto-domains` 0 · `check:team-auth-rls` 0 ·
+`check-state-mutation-centralization` 0. Every status read from the command's own exit (R44).
+
+**Deny side, each run against the Round-4 gate first** — observed statuses, not expectations:
+
+| Input | Round 4 | now |
+|---|---|---|
+| by-name callback + unrelated same-named binding (R5-1) | 0 | **1** — "could not be resolved" |
+| the same without the decoy (control) | 1 | **1** |
+| unused client parameter renamed `db` (R5-2) | 0 | **1** — "never uses it" |
+| `tx` used only as `cfg.tx` (property position) | 0 | **1** |
+| destructured client `({ tenantMember })` (R5-2) | 0 | **1** — `prisma.tenantMember` |
+| aliased import from `@/lib/tenant-rls.js` (R5-3) | 0 | **1** — "not on the allowlist" |
+| callback as `async function job(tx)` (R5-8) | 1, "could not be resolved" | **1**, `prisma.tenantMember` |
+| present-but-empty `src/` (R5-6) | 0, "OK" | **1** |
+| Check 2 string-literal purpose (R5-4) | 0 | **0** — declared, D16 |
+
+**Mutation proof.** Seven mutations applied singly to a scratchpad copy, each reddening a different
+clause: the scope filter, `FunctionDeclaration` indexing, destructured-model extraction, the `tx`
+name gate, the property-name exclusion, the specifier regex, and the empty-corpus refusal. Two still
+exit 1 under mutation and are discriminated by **message** — dropping `FunctionDeclaration` turns a
+model catch into an unresolved report — which is why those assertions name the string rather than
+the status. The patcher aborts with `ANCHOR MATCHED n TIMES — MUTATION DID NOT APPLY` rather than
+running, and did so once (R50).
+
+**Coverage differential** against Round 4, all 93 allowlist entries emptied, real tree:
+**279 pairs both sides — nothing lost, nothing gained.** Every fix addresses a shape the tree does
+not yet contain, which is what a gate is for.
+
+**Production files were never mutated**; all red-proofs ran on scratchpad copies.
+
+## Status of Prior Findings
+
+Round 4's R4-1 … R4-7 all confirmed **resolved** by independent re-execution of the full
+prior-vs-now table; no row failed to reproduce. R5-1 is a *new* defect in R4-4's remedy, not a
+reopening.
+
+## Recurring Issue Check
+
+**R47 — fires a fifth consecutive round, and this round stops claiming otherwise.** The lesson is
+not about parsers. Each round derived the class as "the predicates I just touched", fixed those, and
+wrote a closure claim into the file; the next round then found the siblings. What changes here is
+the *claim*, not just the code: the header now enumerates what is known **not** to be covered, so
+the next editor inherits the gaps rather than the assurance.
+
+**R42** — the member set was re-derived twice more this round: over *every* predicate in the file
+(finding `declaresUnusedTx` and Check 2, which Round 4's eleven-clause enumeration missed), and over
+*files that can call the helper* (finding the `scripts/` tree, R5-11). Both derivations are recorded
+in D16 so a sixth round does not have to rediscover them.
+
+**R29 — fires on my own prose.** "154 parsed files" was wrong and repeated in three places; the
+`ast-project.mjs` note was wrong on both its claims. The gate now prints the count at runtime, and
+the header carries the reproducing command beside it rather than the bare number.
+
+**R49** → R5-2/R5-3/R5-4/R5-6: five statements broader than what executed. **R46** → R5-1, closed by
+scope-visibility rather than by a wider search. **R50** → the empty-corpus refusal and the published
+subject count. **R43** → clean; differential identical. **R45** → clean, 0.65–0.71 s, unchanged.
+**RT7/RT10** → the seven new fixes each carry a paired allow case and a single-clause mutation;
+R5-7's remaining survivors are the declared-gap clauses.
+
+## Environment Verification Report
+
+Unchanged. The two paths still **not verified** are the same two, both predicted in Phase 1 with
+Anti-Deferral entries: the E2E dialog-selection spec (D13 — `globalSetup` RLS failure predating this
+branch; the CI `e2e` job runs it on the PR) and the manual two-authenticator scenarios 1–7 on
+`mrx33` (VE2 — no access from this session). This round's diff is a CI gate and its tests; it
+touches neither path.

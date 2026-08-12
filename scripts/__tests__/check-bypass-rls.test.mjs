@@ -58,7 +58,7 @@ async function h() {
   return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => drain());
 }`;
 
-// The sanctioned shape: tenant-context.ts is in F3_UNUSED_TX_DISABLE_ALLOWLIST,
+// The sanctioned shape: tenant-context.ts is in F3_UNUSED_TX_ALLOWLIST,
 // so its unused-tx delegating wrapper (fn(tenantId) public contract) is allowed.
 // A sibling real (tx) => tx.x callback confirms the file still passes the model
 // allowlist (tenantMember, team).
@@ -180,7 +180,7 @@ export async function drain() {
   return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => tx.auditOutbox.findMany());
 }`);
     expect(code).toBe(0);
-    expect(stderr).not.toContain("could not be determined");
+    expect(stderr).not.toContain("could not be parsed");
   });
 
   it("ignores a call-shaped mention inside a string literal", () => {
@@ -191,7 +191,7 @@ export async function drain() {
   return withBypassRls(prisma, BYPASS_PURPOSE.AUDIT, async (tx) => tx.auditOutbox.findMany());
 }`);
     expect(code).toBe(0);
-    expect(stderr).not.toContain("could not be determined");
+    expect(stderr).not.toContain("could not be parsed");
   });
 
   it("is not fooled by a paren inside a string or a template interpolation", () => {
@@ -442,6 +442,124 @@ export async function drain() {
     expect(code).toBe(1);
     expect(stderr).toContain("could not be parsed");
     expect(stderr).toContain("src/lib/audit/audit-outbox.ts");
+  });
+
+  it("reports a by-name callback it cannot resolve even when the file holds a same-named function", () => {
+    // Round 4 resolved a by-name callback against every function-valued binding
+    // in the FILE. Here `job` is the enclosing function's own parameter, and an
+    // unrelated `job` in a sibling function made the whole-file lookup succeed:
+    // the gate scanned a body this call never runs and printed OK. The decoy is
+    // what this test turns on — remove the `unrelated` function and round 4
+    // reports correctly. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function bad(job) {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}
+function unrelated() {
+  const job = async (tx) => tx.auditOutbox.findMany();
+  return job;
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("could not be resolved");
+  });
+
+  it("resolves a callback declared as a function declaration", () => {
+    // `async function job(tx)` is a FunctionDeclaration, not a VariableDeclaration,
+    // so round 4's by-name lookup missed it and reported the site as unresolvable
+    // — and the remedy it printed (allowlist the file) would have unscanned the
+    // whole file. Prior verdict: exit 1, "could not be resolved".
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function job(tx) { return tx.tenantMember.findFirst({}); }
+export async function drain() {
+  return withBypassRls(prisma, job, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+    expect(stderr).not.toContain("could not be resolved");
+  });
+
+  it("catches a model reached through a destructured client parameter", () => {
+    // `async ({ tenantMember }) => …` writes no receiver, so the property-access
+    // scan sees nothing, and getName() on a binding pattern returns the pattern
+    // text, which no identifier can equal. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async ({ tenantMember }) => tenantMember.findFirst({}), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("flags an unused client parameter whatever it is named", () => {
+    // F3 keyed on the spelling `tx`, so renaming the unused parameter defeated
+    // the rule that exists to enforce the naming convention. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (db) => legacy(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("never uses it");
+  });
+
+  it("does not count a same-named property access as a use of the parameter", () => {
+    // `cfg.tx` is a property name, not a reference to the binding, so this
+    // callback's `tx` is unused and must still be flagged. Counting identifier
+    // text alone would read `cfg.tx` as a use and let the violation through —
+    // the fail-open direction of the same text-equality habit.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(cfg) {
+  return withBypassRls(prisma, async (tx) => legacy(cfg.tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("never uses it");
+  });
+
+  it("passes a client parameter that is genuinely used", () => {
+    // The allow side for the whole F3 predicate: a used binding must never be
+    // reported, whatever it is named.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (db) => db.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("catches an aliased import written with a file extension", () => {
+    // The alias table keyed on a module-specifier text tail (/tenant-rls$/), so
+    // '@/lib/tenant-rls.js' — the same module — resolved no aliases and the call
+    // escaped the file allowlist. Prior verdict: exit 0.
+    const { code, stderr } = run("src/lib/sneaky/route.ts", `
+import { withBypassRls as wb, BYPASS_PURPOSE } from "@/lib/tenant-rls.js";
+export async function sneaky() {
+  return wb(prisma, async (tx) => tx.tenantMember.findFirst({}), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("not on the allowlist");
+  });
+
+  it("refuses to report OK when src/ exists but holds no source files", () => {
+    // Corpus-level "examined nothing must not be spelled found nothing".
+    // readdirSync throws for a MISSING src/; this is the present-but-empty case
+    // it cannot see. Prior verdict: exit 0, "check-bypass-rls: OK".
+    mkdirSync(join(dir, "src"), { recursive: true });
+    let code, stderr;
+    try {
+      execFileSync("node", [CHECKER], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      code = 0;
+      stderr = "";
+    } catch (e) {
+      code = e.status;
+      stderr = e.stderr?.toString() ?? "";
+    }
+    expect(code).toBe(1);
+    expect(stderr).toContain("no .ts/.tsx source files found");
   });
 
   it("scans .tsx call sites, and passes one that only touches allowed models", () => {

@@ -17,15 +17,18 @@
  * check-operator-echo-escaped, check-runtime-image-assets,
  * check-tenant-claim-event-coverage.
  *
- * Partial adopter — createAstProject only, walk deliberately NOT migrated:
- *   - check-bypass-rls: keeps its own `getSourceFiles()` because walkSourceFiles
- *     returns `[]` for a missing root, and that gate spells an empty file list
- *     the same as "no violations" — it must fail loudly instead, which
- *     readdirSync's throw gives it. Its exclusion predicate also differs
- *     (`includes(".test.")` / `includes("__tests__")` vs the suffix and
- *     directory tests here); the two agree on the tree as it stands, and
- *     narrowing to match would newly admit src/lib/tenant-rls.test.ts, whose
- *     five deliberately tx-less calls would all report as violations.
+ * Partial adopter — createAstProject only, walk NOT migrated:
+ *   - check-bypass-rls keeps its own `getSourceFiles()`. The only behavioural
+ *     difference is the missing-root case: walkSourceFiles returns `[]`, while
+ *     that gate needs readdirSync's throw, because an empty file list there
+ *     would otherwise read as "no violations". (It now also refuses a
+ *     present-but-empty root explicitly, which no walker can decide for it.)
+ *     The exclusion predicates differ in form — `includes(".test.")` /
+ *     `includes("__tests__")` there versus the suffix and directory tests here
+ *     — but not in effect: over all 2066 files under src/ the two select the
+ *     same 1011, and `isScannableSourceFile` already excludes
+ *     src/lib/tenant-rls.test.ts. Migrating the walk would be safe on today's
+ *     tree and is declined only for the missing-root behaviour.
  *
  * Deliberately NOT adopted (scan intent / Project config genuinely differs —
  * migrating would change behavior, not just shape):

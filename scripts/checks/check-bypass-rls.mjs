@@ -6,23 +6,40 @@
  * Any new usage of withBypassRls must be explicitly added to ALLOWED_USAGE
  * after security review. This prevents accidental RLS bypass in new code.
  *
- * EVERY code question this gate asks is answered by the parse tree (ts-morph, no
- * Program): which calls exist, which local name the helper was imported under,
- * which argument is the callback, which identifier is the transaction client,
- * and which `<client>.<model>` references the callback reaches. Raw text is used
- * only as a prefilter to decide which files are worth parsing, and that filter
- * is deliberately a superset — see HELPER_MENTION_RE.
+ * Call sites, callbacks, client identifiers and `<client>.<model>` references are
+ * all read from the parse tree (ts-morph, no Program). Raw text decides only
+ * which files are worth parsing — see HELPER_MENTION_RE.
  *
- * Four rounds of review found four defects in this file, all the same one: a
+ * Five rounds of review found defects here, every one the same defect: a
  * predicate that judged code by its spelling. A fixed 10-line radius stopped
  * covering callbacks as they grew; a regex deciding "is this a comment?" skipped
  * a real call whose line held a string containing `//`; a hand-rolled character
  * automaton misread `/` inside a regex character class as opening a comment and
- * blanked the rest of the file; and the AST rewrite that fixed the model scan
- * left four sibling predicates behind on raw text or on name equality. So the
- * rule here is not "use the AST for the scan" but "no predicate in this file
- * decides a code question by surface form". Anything that must stay textual is
- * named below with the reason it cannot be otherwise.
+ * blanked the rest of the file; the AST rewrite that fixed the model scan left
+ * four sibling predicates on raw text or name equality; and the rewrite that
+ * fixed THOSE resolved a callback name against the whole file, so an unrelated
+ * same-named binding elsewhere silently resolved a name that did not refer to
+ * it. Round 4's header claimed the class was closed. It was not, and claiming it
+ * was is why round 5 had to find the rest — so this header no longer makes that
+ * claim, and states instead what is known not to be covered:
+ *
+ *   - Check 2 (BYPASS_PURPOSE) is FILE-scoped, not call-scoped: one
+ *     `BYPASS_PURPOSE.X` anywhere satisfies it for every call in the file, and
+ *     its receiver test is name equality, so an aliased import is a false
+ *     positive. Pre-existing granularity, unchanged by the AST move.
+ *   - The prefilter cannot see a call reached through a RENAMING re-export
+ *     (`export { withBypassRls as wb } from "@/lib/tenant-rls"`), because the
+ *     caller's text names neither the helper nor the module. No such re-export
+ *     exists today (`rg 'export .*from.*tenant-rls' src/` is empty).
+ *   - The scan root is `src/` only. `scripts/tenant-domain.ts` and
+ *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
+ *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
+ *     site inside an already-listed file is excused without review.
+ *
+ * All four are tracked as D16 in the branch's deviation log. The rule this file
+ * aims at is "no predicate decides a code question by surface form"; the list
+ * above is where it does not hold yet, and it is written here rather than in a
+ * commit message because the next editor reads this.
  */
 import { SyntaxKind } from "ts-morph";
 import { createAstProject } from "./lib/ast-project.mjs";
@@ -207,15 +224,23 @@ const HELPER_NAMES = new Set([
 // withTeamTenantRls hand their callback a tenant id, not a client.
 const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 
-// The ONE remaining raw-text predicate, and it is a prefilter, not a verdict:
-// it only decides whether a file is worth parsing. Reaching any helper requires
-// naming it or importing the module that defines it, so a file matching neither
-// cannot contain a call — including through an alias, which still names the
-// symbol in the import clause. Deliberately a superset of the old
-// `withBypassRls\s*\(`: that one required the paren, so
-// `import { withBypassRls as wb }` … `wb(...)` skipped the file entirely and
-// escaped even the file allowlist. Widening it costs 154 parsed files instead
-// of 88, measured at ~0.7 s for the whole gate.
+// A prefilter, not a verdict: it only decides whether a file is worth parsing.
+// It covers a direct import, an aliased import and a namespace import, each of
+// which names the symbol or the module in the caller's own text. It does NOT
+// cover a renaming re-export — see the header's list of known gaps.
+//
+// Deliberately a superset of the old `withBypassRls\s*\(`: that one required the
+// paren, so `import { withBypassRls as wb }` … `wb(...)` skipped the file
+// entirely and escaped even the file allowlist. The widening costs 238 parsed
+// files instead of 88 — re-derive both rather than trusting these numbers:
+//   node -e 'const{readdirSync,readFileSync}=require("fs"),{join,extname}=require("path");
+//     let n=0,o=0;for(const e of readdirSync("src",{recursive:true,withFileTypes:true})){
+//     if(!e.isFile()||![".ts",".tsx"].includes(extname(e.name)))continue;
+//     const f=join(e.parentPath??e.path,e.name);if(f.includes(".test.")||f.includes("__tests__"))continue;
+//     const c=readFileSync(f,"utf8");
+//     if(/with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/.test(c))n++;
+//     if(/withBypassRls\s*\(/.test(c))o++;}console.log(n,o)'
+// Whole gate measured at ~0.7 s, unchanged from before the widening.
 const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
 const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
@@ -266,7 +291,10 @@ function getSourceFiles() {
 function localHelperNames(sf) {
   const byLocalName = new Map([...HELPER_NAMES].map((n) => [n, n]));
   for (const imp of sf.getImportDeclarations()) {
-    if (!/tenant-rls$/.test(imp.getModuleSpecifierValue())) continue;
+    // Match the module, not a text tail: `@/lib/tenant-rls.js` and a relative
+    // `../../lib/tenant-rls` are the same module as `@/lib/tenant-rls`, and an
+    // aliased import from a spelling this misses escapes the file allowlist.
+    if (!/(^|\/)tenant-rls(\.[cm]?[jt]sx?)?$/.test(imp.getModuleSpecifierValue())) continue;
     for (const named of imp.getNamedImports()) {
       const canonical = named.getName();
       if (!HELPER_NAMES.has(canonical)) continue;
@@ -294,28 +322,87 @@ function helperCallsIn(sf) {
   return calls;
 }
 
+// Node kinds that open a scope, for deciding whether a declaration is visible
+// from a call site.
+const SCOPE_KINDS = new Set([
+  SyntaxKind.SourceFile,
+  SyntaxKind.Block,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.FunctionExpression,
+  SyntaxKind.ArrowFunction,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.Constructor,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.ModuleDeclaration,
+]);
+
+/** The nearest ancestor of `node` that introduces a scope. */
+function scopeOf(node) {
+  for (let p = node.getParent(); p; p = p.getParent()) {
+    if (SCOPE_KINDS.has(p.getKind())) return p;
+  }
+  return null;
+}
+
+/**
+ * Every declaration in the file that binds a name, indexed by that name.
+ * Built once per source file: `callbackOf` consults it per argument, and
+ * rebuilding it per lookup would walk the whole tree ~950 times per run.
+ *
+ * All binding kinds are indexed, not only the function-valued ones. Counting
+ * only functions is what let an unrelated `const job = async (tx) => …` in a
+ * sibling function satisfy a `job` that actually refers to the enclosing
+ * function's own parameter — the gate then scanned a body the call never runs
+ * and reported OK, in place of the "could not be resolved" report.
+ */
+function bindingIndex(sf) {
+  const index = new Map();
+  const kinds = [
+    SyntaxKind.VariableDeclaration,
+    SyntaxKind.FunctionDeclaration,
+    SyntaxKind.Parameter,
+  ];
+  for (const kind of kinds) {
+    for (const decl of sf.getDescendantsOfKind(kind)) {
+      const name = decl.getName?.();
+      if (!name) continue;
+      const bucket = index.get(name);
+      if (bucket) bucket.push(decl);
+      else index.set(name, [decl]);
+    }
+  }
+  return index;
+}
+
 /**
  * The callback the helper will invoke. Its position differs per helper
  * (`withBypassRls(prisma, fn, purpose)` vs `withTenantRls(prisma, tenantId, fn)`),
- * so it is found by kind rather than by index. A callback passed by name is
- * resolved to its declaration when exactly one function-valued binding of that
- * name exists in the file; several would mean guessing which one runs, and
- * guessing is what this file keeps being wrong about — so that returns null and
- * the caller reports the site.
+ * so it is found by kind rather than by index.
+ *
+ * A callback passed by name resolves only when exactly one declaration of that
+ * name is visible from the call — visible meaning its own scope encloses the
+ * call site, which is what makes the answer about the name at THIS call rather
+ * than about the file's vocabulary. Ambiguity, invisibility, or a binding that
+ * is not a function all return null, and the caller reports the site: this gate
+ * has been wrong four times by guessing, so it no longer guesses.
  */
-function callbackOf(call, sf) {
+function callbackOf(call, bindings) {
   const args = call.getArguments();
   const inline = args.find((a) => FN_KINDS.has(a.getKind()));
   if (inline) return inline;
 
   for (const arg of args) {
     if (arg.getKind() !== SyntaxKind.Identifier) continue;
-    const bindings = sf
-      .getDescendantsOfKind(SyntaxKind.VariableDeclaration)
-      .filter((d) => d.getName() === arg.getText())
-      .map((d) => d.getInitializer())
-      .filter((init) => init && FN_KINDS.has(init.getKind()));
-    if (bindings.length === 1) return bindings[0];
+    const visible = (bindings.get(arg.getText()) ?? []).filter((decl) => {
+      const scope = scopeOf(decl);
+      return scope && scope.getStart() <= call.getStart() && call.getEnd() <= scope.getEnd();
+    });
+    if (visible.length !== 1) continue;
+    const decl = visible[0];
+    if (decl.getKind() === SyntaxKind.FunctionDeclaration) return decl;
+    const init = decl.getInitializer?.();
+    if (init && FN_KINDS.has(init.getKind())) return init;
   }
   return null;
 }
@@ -332,7 +419,13 @@ function clientNamesIn(fn) {
   const names = new Set(["prisma"]);
   if (!fn) return names;
   const first = fn.getParameters()[0];
-  if (first) names.add(first.getName());
+  // A destructured client (`async ({ tenantMember }) => …`) binds no name that
+  // can be a receiver — the destructured properties ARE the model accesses, and
+  // `getName()` there returns the pattern text, which no identifier can equal.
+  // Those are collected by destructuredModelRefs instead.
+  if (first && first.getNameNode().getKind() === SyntaxKind.Identifier) {
+    names.add(first.getName());
+  }
   for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = inner.getExpression();
     if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
@@ -364,14 +457,44 @@ function modelRefsIn(node, clientNames) {
   return refs;
 }
 
-/** True when `fn` declares a `tx` parameter and never references it (F3). */
+/**
+ * Model names a destructured client parameter reaches directly. `async
+ * ({ tenantMember }) => tenantMember.findFirst(…)` never writes a receiver, so
+ * the property-access scan cannot see it; the destructured property is itself
+ * the model delegate.
+ */
+function destructuredModelRefs(fn) {
+  const refs = [];
+  const nameNode = fn?.getParameters()[0]?.getNameNode();
+  if (!nameNode || nameNode.getKind() === SyntaxKind.Identifier) return refs;
+  for (const el of nameNode.getDescendantsOfKind(SyntaxKind.BindingElement)) {
+    const model = (el.getPropertyNameNode() ?? el.getNameNode()).getText();
+    if (model.startsWith("$")) continue;
+    refs.push({ model, line: el.getStartLineNumber() });
+  }
+  return refs;
+}
+
+/**
+ * True when `fn` declares a client parameter and never references it (F3).
+ *
+ * Keyed on the parameter's own name, not on the spelling `tx`: the convention
+ * is what this rule enforces, so a rule that only fires when the convention is
+ * already followed enforces nothing. References in property-name position
+ * (`cfg.tx`) are not uses of the binding.
+ */
 function declaresUnusedTx(fn) {
-  const first = fn.getParameters()[0];
-  if (!first || first.getName() !== "tx") return false;
-  const nameNode = first.getNameNode();
-  return !fn
-    .getDescendantsOfKind(SyntaxKind.Identifier)
-    .some((id) => id.getText() === "tx" && id !== nameNode);
+  const nameNode = fn.getParameters()[0]?.getNameNode();
+  if (!nameNode || nameNode.getKind() !== SyntaxKind.Identifier) return false;
+  const name = nameNode.getText();
+  return !fn.getDescendantsOfKind(SyntaxKind.Identifier).some((id) => {
+    if (id === nameNode || id.getText() !== name) return false;
+    const parent = id.getParent();
+    const isPropertyName =
+      parent.getKind() === SyntaxKind.PropertyAccessExpression &&
+      parent.getNameNode() === id;
+    return !isPropertyName;
+  });
 }
 
 const astProject = createAstProject();
@@ -381,15 +504,29 @@ const modelViolations = [];
 const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
-const f3DisableViolations = [];
+const f3UnusedTxViolations = [];
 
-for (const file of getSourceFiles()) {
+// "Examined nothing" must not be spelled like "found nothing" at the corpus
+// level either: a wrong cwd, a moved tree or a broken walk would otherwise
+// print OK after scanning zero files. readdirSync throws when `src/` is absent;
+// this covers the present-but-empty case it cannot.
+const sourceFiles = getSourceFiles();
+if (sourceFiles.length === 0) {
+  console.error("check-bypass-rls: no .ts/.tsx source files found under src/.");
+  console.error("Nothing was examined, so this is not a pass. Check the working directory.");
+  process.exit(1);
+}
+
+let parsedCount = 0;
+
+for (const file of sourceFiles) {
   // Skip test files — they mock withBypassRls, not call it for real
   if (file.includes(".test.") || file.includes("__tests__")) continue;
 
   const content = readFileSync(file, "utf8");
   if (!HELPER_MENTION_RE.test(content)) continue;
 
+  parsedCount++;
   const sf = astProject.createSourceFile(file, content, { overwrite: true });
 
   // Fail loudly when the parse lost the code. A syntax error can drop the very
@@ -431,9 +568,11 @@ for (const file of getSourceFiles()) {
   const allowedSet =
     !allowedModels || allowedModels.includes("*") ? null : new Set(allowedModels);
 
+  const bindings = bindingIndex(sf);
+
   for (const { call, helper } of calls) {
     const line = call.getStartLineNumber();
-    const fn = callbackOf(call, sf);
+    const fn = callbackOf(call, bindings);
 
     if (!fn) {
       // Only the tx-client helpers carry a discipline this gate can check, so
@@ -458,7 +597,7 @@ for (const file of getSourceFiles()) {
         // looking for the eslint-disable comment that usually accompanies it —
         // the comment is the symptom, and matching it in raw text also matched
         // the same words inside a string.
-        f3DisableViolations.push({ file, line });
+        f3UnusedTxViolations.push({ file, line });
       }
     }
 
@@ -468,9 +607,15 @@ for (const file of getSourceFiles()) {
     if (helper !== "withBypassRls" || !allowedSet) continue;
     const clientNames = clientNamesIn(fn);
     const seen = new Set();
-    for (const node of fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd()
-      ? [call]
-      : [call, fn]) {
+    const scanNodes =
+      fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd() ? [call] : [call, fn];
+    for (const ref of destructuredModelRefs(fn)) {
+      seen.add(`${ref.model}:${ref.line}`);
+      if (!allowedSet.has(ref.model)) {
+        modelViolations.push({ file, line: ref.line, model: ref.model });
+      }
+    }
+    for (const node of scanNodes) {
       for (const ref of modelRefsIn(node, clientNames)) {
         const key = `${ref.model}:${ref.line}`;
         if (seen.has(key)) continue;
@@ -485,7 +630,7 @@ for (const file of getSourceFiles()) {
 
 let failed = false;
 
-if (f3DisableViolations.length > 0) {
+if (f3UnusedTxViolations.length > 0) {
   failed = true;
   console.error(
     "with*Rls callback declares `tx` and never uses it (no-unused-vars shape),",
@@ -500,7 +645,7 @@ if (f3DisableViolations.length > 0) {
     "public contract — add the file to F3_UNUSED_TX_ALLOWLIST after review.",
   );
   console.error("");
-  for (const { file, line } of f3DisableViolations) console.error(`  ${file}:${line}`);
+  for (const { file, line } of f3UnusedTxViolations) console.error(`  ${file}:${line}`);
   console.error("");
 }
 
@@ -609,4 +754,9 @@ if (failed) {
   process.exit(1);
 }
 
-console.log("check-bypass-rls: OK");
+// Name the subject count on the success path: "OK" alone cannot distinguish a
+// clean tree from a scan that examined almost nothing, and a silent collapse of
+// this number is the shape a wrong cwd or a broken prefilter takes in CI logs.
+console.log(
+  `check-bypass-rls: OK (parsed ${parsedCount} of ${sourceFiles.length} source files)`,
+);

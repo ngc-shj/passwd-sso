@@ -319,7 +319,7 @@ reddened the build.
 scan" but *no predicate in this file decides a code question by surface form*. Four defects in four
 rounds were all the same defect, and the round-3 fix closed the instance rather than the class —
 which is how the fifth arrived. One raw-text test remains, and is named in the header as a prefilter
-that only chooses which files to parse, never a verdict; it is deliberately a superset (154 files
+that only chooses which files to parse, never a verdict; it is deliberately a superset (238 files
 parsed instead of 88, whole gate ~0.7 s).
 
 **Two pre-existing issues this surfaced rather than fixed**, both recorded in `INDIRECT_CALLBACK_ALLOWLIST`
@@ -352,3 +352,78 @@ pre-pr's bounded-parallel scheduling. Not investigated further here — it is un
 and would be its own piece of work — but it is a real flake in an authoritative gate and should not
 be discovered again from scratch.
 `TODO(bind-stepup-to-session-credential): D14 — extension suite flake under pre-pr parallelism`
+
+## D16 — Round 4's fix repeated the failure it diagnosed, and this entry names what is still open
+
+**What changed**: `scripts/checks/check-bypass-rls.mjs` — `callbackOf` now resolves a by-name
+callback against the bindings *visible from the call* rather than against the whole file;
+`declaresUnusedTx` and `clientNamesIn` read the parameter's own binding instead of the spelling
+`tx`; the import-specifier test matches the module rather than a text tail; a destructured client's
+bound properties are read as model accesses; a present-but-empty `src/` refuses to report OK; and
+the gate prints its parsed-file count on the success path.
+
+**Why**: round 5 reviewed round 4's commit and found the same defect class one level down — plus
+one regression round 4 introduced. `callbackOf` accepted a name when exactly one *function-valued*
+binding of it existed anywhere in the file, so an unrelated `const job = async (tx) => …` in a
+sibling function resolved a `job` that actually referred to the enclosing function's own parameter.
+The gate then scanned a body the call never runs and printed OK, **in place of** the "could not be
+resolved" report round 4 had just added. Adding six lines of unrelated code turned a fail-loud
+report into a silent pass. Executed both ways: with the decoy exit 0, without it exit 1.
+
+Round 4's header declared "no predicate in this file decides a code question by surface form" while
+`declaresUnusedTx` compared `getName() !== "tx"` and Check 2 compared `getText() === "BYPASS_PURPOSE"`.
+Declaring the class closed is what made round 5 necessary to find the rest, so the header now
+carries the list of known gaps instead of the claim.
+
+**Numbers corrected** (R29): the prefilter parses **238** files, not the 154 stated in the header,
+D15 and the round-4 review record — 154 was the count of files importing `@/lib/tenant-rls`, not the
+regex's match count. The gate now prints the figure at runtime so it cannot rot again. The
+`ast-project.mjs` adopter note was wrong on both its load-bearing claims: `isScannableSourceFile`
+already excludes `src/lib/tenant-rls.test.ts`, and the two exclusion predicates select the *same*
+1011 files out of 2066 — the only real difference is missing-root behaviour, which is now the sole
+recorded reason.
+
+**Deliberately left open, with the reason** (all four are pre-existing classes the gate does not
+make worse than `main`, each its own change):
+
+1. **Check 2 (`BYPASS_PURPOSE`) is file-scoped, not call-scoped.** One `BYPASS_PURPOSE.X` anywhere
+   satisfies it for every call in the file, and its receiver test is name equality, so an aliased
+   import is a false positive. Verified: a file whose only call site passes `"audit-drain"` exits 0
+   when an unrelated `BYPASS_PURPOSE.AUDIT` sits elsewhere. Audited the real tree — 193 call sites,
+   0 without a `BYPASS_PURPOSE.*` argument, so nothing is live.
+2. **A renaming re-export defeats the prefilter.** `export { withBypassRls as wb } from "@/lib/tenant-rls"`
+   leaves the caller's text naming neither the helper nor the module, so the file is never parsed and
+   escapes the file allowlist. Verified exit 0. No such re-export exists today
+   (`rg 'export .*from.*tenant-rls' src/` is empty).
+3. **The scan root is `src/` only.** `scripts/tenant-domain.ts` (6 call sites, runs against a live
+   database) and `scripts/manual-tests/share-access-audit.ts` (5 tx-less `withBypassRls`) are
+   examined by nothing. Extending the root would surface 11+ unreviewed bypasses — real work, and
+   not this branch's.
+4. **`INDIRECT_CALLBACK_ALLOWLIST` is keyed by file**, so a new unresolvable call site inside an
+   already-listed file is excused without review.
+
+`TODO(bind-stepup-to-session-credential): D16 — four declared gaps in check-bypass-rls.mjs`
+
+**Anti-Deferral check**: out of scope (different feature) for 1–4.
+**Justification** — worst case: an RLS bypass reaches main unreviewed through one of the four
+shapes; likelihood: low, because each requires a code shape that does not occur today and all four
+are now named in the file's own header where the next editor reads them; cost to fix: (1) and (4)
+are contained but change the gate's verdict surface again, (2) needs a two-pass prefilter or a
+companion no-re-export gate, (3) surfaces 11+ pre-existing unreviewed call sites that need their own
+security review — none belongs in a branch whose subject is step-up credential binding.
+**Orchestrator sign-off**: this is the fifth consecutive round whose findings were in the previous
+round's fix, all inside one CI gate that this branch touched only because contract `C5`'s allowlist
+entries needed enforcing. The branch's actual subject — contracts C1–C7 across 45 routes — has been
+clean in all three lanes for four consecutive rounds. Continuing to rewrite this gate inside this
+branch trades a converging security fix for a diverging tooling change, so the remaining gaps are
+declared rather than closed, on the user's explicit decision.
+
+**Evidence**: 33 tests (up from 25), 33/33 pass; full suite 1008 files / 14560 passed. Seven
+mutations applied singly to a scratchpad copy, each reddening a different clause — scope filter,
+`FunctionDeclaration` indexing, destructured-model extraction, the `tx` name gate, the
+property-name exclusion, the specifier regex, and the empty-corpus refusal. Two of them still exit 1
+under mutation and are discriminated by message rather than status (`FunctionDeclaration` turns a
+model catch into an unresolved report), which is why those assertions name the string. Coverage
+differential against round 4 over the real tree with all 93 allowlist entries emptied: **279 pairs
+both sides, nothing lost, nothing gained** — every fix addresses a shape the tree does not yet
+contain, which is the point of a gate.
