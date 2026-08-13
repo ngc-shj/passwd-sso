@@ -794,3 +794,71 @@ harness's refusal path fired again and was honoured. **R43** — differential id
 Unchanged. The two paths still not verified are the same two, both predicted in Phase 1 with
 Anti-Deferral entries: the E2E dialog-selection spec (D13) and the manual two-authenticator
 scenarios 1–7 on `mrx33` (VE2). This round's diff is a CI gate and its tests.
+
+---
+
+# Closing record
+
+## What this branch delivers
+
+Contracts **C1–C7** — the step-up gate bound to the credential that established the session, across
+45 routes (`sessions.auth_credential_id` + FK `ON DELETE SET NULL`, the shared verifier split into
+`verifyAssertionForCredential` / `verifyAssertionAnyCredential`, structured failure reasons, the
+gate, the recovery predicate, the probe and the client dialog selection moved together, two audit
+actions, two error codes, one dormant adjudicator removed).
+
+**The contracts were clean in all three lanes for eleven consecutive rounds.** Every finding from
+Round 2 onward was in `scripts/checks/check-bypass-rls.mjs` — a CI gate this branch touched only
+because contract `C5` added two allowlist entries that the gate's then-current 10-line scan radius
+could not reach (Round 1, finding M2).
+
+## The gate: eleven rounds, and why they did not converge
+
+| Rounds | What was found |
+|---|---|
+| 1–3 | The scan window, then a comment-detecting regex, then a hand-rolled lexer — each fix a better guess at the grammar |
+| 4 | The AST rewrite applied to one predicate; four siblings left on raw text or name equality |
+| 5–6 | The fix for those; a fail-open I introduced, and two false claims I wrote |
+| 7 onward (external) | Client aliasing, member spellings, destructuring forms, callback depth, helper propagation, binding resolution — each round real, each decidable, each a different spelling |
+
+The diagnosis is recorded in **D28**: this file became a hand-written points-to analysis for
+JavaScript, and the ways a value reaches a call are not enumerable by patching. Adding recognised
+shapes to an infinite space is why there was always one more.
+
+**Measured exit**: inverting the gate to fail-closed — report any call inside a bypass callback that
+is handed a client and whose callee cannot be resolved — would report **38 call sites across 29
+files** today, all imported helpers (`logAuditInTx`, `resolveTenantByClaim`,
+`collectAttachmentRefsByCreator`, …). That is the only change that ends the sequence, and it is its
+own piece of work: 38 review items plus a decision on allowlist granularity.
+
+**Decision (user, recorded)**: end this branch here. The fail-closed inversion is tracked in D28 for
+a separate branch.
+
+## Where the gate stands versus `main`
+
+| | `main` | now |
+|---|---|---|
+| Scan | fixed 10-line radius | parse tree, client followed through aliases, assignments, destructuring, defaults, conditionals, helper calls and nested transactions at any depth |
+| Model spellings | `tx.model` | `tx.model`, `tx["model"]`, template-literal index, destructured delegates, rest elements |
+| Unreadable input | silent pass | reported: unparseable file, unresolvable callback, unnameable client, unreadable index or destructuring key, empty corpus |
+| Tests | 2 (unrelated F3 check) | 92, every clause mutation-proven and parse-checked |
+| Known gaps | undocumented | five, named in the module header with counts and reproducing commands |
+
+Coverage differential across the whole sequence, with all 93 allowlist entries emptied: **nothing
+lost at any step**; three genuine accesses gained that were invisible on `main`
+(`src/auth.ts:48`, `src/lib/mcp/oauth-server.ts:758`, `src/lib/tenant-context.ts:8`).
+
+## Outstanding for the human merge gate
+
+1. **E2E spec** (D13) — `e2e/tests/step-up-credential-binding.spec.ts` has never executed locally;
+   `globalSetup` fails seeding the first pre-existing fixture user with an RLS violation, a
+   local-harness limit predating this branch. The CI `e2e` job runs it on the PR
+   (`.github/workflows/ci.yml:491`, path filter `e2e/**`).
+2. **Manual two-authenticator scenarios 1–7 on `mrx33`** (VE2) — no access from these sessions.
+3. **D16 gaps** (4) and **D28** (the fail-closed inversion) — declared, tracked, not this branch.
+
+## Final verification
+
+`npm run lint` 0 · `npm run typecheck` 0 · `npx vitest run` 1008 files / **14619 passed**, 1 skipped ·
+`npx next build` 0 · `check-pre-pr.sh run` **70/70, exit 0** · `npm run check:bypass-rls` 0 ·
+the four CI-only gates each 0. Every status read from the command's own exit (R44).
