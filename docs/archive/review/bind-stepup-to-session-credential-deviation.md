@@ -556,3 +556,48 @@ so: 0.68 s before this change, **0.73 s** after, with both the binding index and
 built lazily and once per file. Collecting the flow index per *call* instead cost 0.83 s, and the
 ~7% that remains is the tracking itself. The header carries the same numbers and the instruction to
 re-measure rather than re-copy.
+
+## D20 — Two client ORIGINS, and the header contradicting its own implementation
+
+**What changed**: `clientBindingsIn` seeds the client set from the call's own first argument, and
+`flowIndex` collects `Parameter` nodes so a parameter default is evaluated by the existing
+`yieldsClient`. The header's known-limitations list is corrected.
+
+**Why**: a third external review found the flow analysis correct but its *origins* incomplete. Both
+shapes are decidable from the tree — neither needs the type resolution the header cites as the
+reason for the remaining limit:
+
+```ts
+import { prisma as db } from "@/lib/prisma";
+withBypassRls(db, async (tx) => db.tenantMember.findMany(), P);   // exit 0 before
+
+async function drain(db = prisma) {
+  return withBypassRls(prisma, async (tx) => db.tenantMember.findMany(), P);   // exit 0 before
+}
+```
+
+The first is the cleaner miss: the client set was seeded from the literal string `"prisma"`, so a
+client imported under any other name was invisible — while the helper's own signature says the
+**first argument is the client**, which needs no inference at all. The second required adding
+`Parameter` to the flow index.
+
+**A deliberate asymmetry, recorded so it does not read as a contradiction**: `callbackOf` REFUSES a
+parameter's default (guessing which function runs is fail-open), while client tracking ACCEPTS one
+(over-approximating a client only reports more models, which is fail-closed). Same construct,
+opposite direction, because the questions differ.
+
+**The header was wrong about its own implementation** (R29, and the fourth round in which the
+correction lands in prose rather than code): it still listed `const db = cond ? tx : prisma` as not
+followed after D19 implemented exactly that, and cited "D16/D18" after D19 existed. A stale
+limitation is worse than none — the next editor reads it as a designed boundary and builds on it.
+The list now names only the genuine remaining limit (a client returned by a call, which needs types),
+enumerates what IS followed, and says outright that three successive reviews each found a member
+missing from it — the same class-derivation failure as the code defects, committed in the prose
+written to compensate for them.
+
+**Evidence**: 54 tests (up from 51), 54/54; full suite 1008 files / 14581 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0; runtime 0.74 s, unchanged from D19's measurement. Two
+single-clause mutations, each reddening its own case: client-argument seeding off (1→0 on the
+aliased import), parameter-default tracking off (1→0). Both allow siblings — an aliased-import client
+and a parameter default that stay inside the allowlist — hold at exit 0. Coverage differential with
+all 93 allowlist entries emptied: 279 pairs both sides, nothing lost.

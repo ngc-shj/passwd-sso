@@ -692,6 +692,56 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
+  it("takes the client from the call's own first argument", () => {
+    // `import { prisma as db }` hands the helper a client under a name this
+    // file has never seen. Seeding the client set from the literal string
+    // "prisma" alone misses it — but the helper's signature says the first
+    // argument IS the client, so no inference is needed.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { prisma as db } from "@/lib/prisma";
+export async function drain() {
+  return withBypassRls(db, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows a client supplied as a parameter default", () => {
+    // `function drain(db = prisma)` — the binding may carry the client, and for
+    // a CLIENT over-approximating only reports more models. (callbackOf refuses
+    // a parameter default for the opposite reason: guessing which function runs
+    // is fail-open. Same construct, different question, different answer.)
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(db = prisma) {
+  return withBypassRls(prisma, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes an aliased-import client and a parameter default within the allowlist", () => {
+    // The allow side for both of the above.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { prisma as db } from "@/lib/prisma";
+export async function drain(alt = db) {
+  return withBypassRls(db, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return alt.auditOutbox.count();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("does not treat a query result as a client", () => {
     // The boundary that makes the flow analysis usable: `await tx.user.find()`
     // mentions a client and yields a row. 131 lines in this tree have that

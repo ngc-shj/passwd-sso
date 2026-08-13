@@ -35,17 +35,20 @@
  *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
- *   - A client reached through an initializer that is not a plain identifier
- *     is not followed: `const db = cond ? tx : prisma`, or a client returned by
- *     a helper. Plain aliases, alias chains and destructuring off a client ARE
- *     followed (clientBindingsIn), which is what an external review found this
- *     list missing — the four above were written as the complete set and were
- *     not. Treat this list as the current best enumeration, not a closed one.
+ *   - A client returned by a call is not followed: `const db = wrap(tx)`. That
+ *     needs type resolution, which this gate runs without by design. Everything
+ *     decidable from the tree IS followed — see clientBindingsIn: the helper's
+ *     own first argument, aliases and their chains, plain assignments,
+ *     destructuring, parameter defaults, and a choice between clients.
  *
- * These are tracked as D16/D18 in the branch's deviation log. The rule this file
- * aims at is "no predicate decides a code question by surface form"; the list
- * above is where it does not hold yet, and it is written here rather than in a
- * commit message because the next editor reads this.
+ * Treat this list as the current best enumeration, not a closed one: three
+ * successive external reviews each found a member missing from it, which is the
+ * same class-derivation failure as the code defects above, committed in the
+ * prose written to compensate for them. These are tracked as D16/D18/D19/D20 in
+ * the branch's deviation log. The rule this file aims at is "no predicate
+ * decides a code question by surface form"; the list above is where it does not
+ * hold yet, and it is written here rather than in a commit message because the
+ * next editor reads this.
  */
 import { SyntaxKind } from "ts-morph";
 import { createAstProject } from "./lib/ast-project.mjs";
@@ -477,14 +480,25 @@ function callbackOf(call, bindingsFor) {
 function flowIndex(sf) {
   return {
     decls: sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration),
+    // A parameter's default is a value the binding may carry. For the CALLBACK
+    // this gate refuses to read a default (see callbackOf: guessing which
+    // function runs is fail-open). For a CLIENT the answer is the opposite —
+    // `function drain(db = prisma)` means `db` may be the client, and treating
+    // it as one can only report more models, which is the safe direction.
+    params: sf.getDescendantsOfKind(SyntaxKind.Parameter),
     assignments: sf
       .getDescendantsOfKind(SyntaxKind.BinaryExpression)
       .filter((b) => b.getOperatorToken().getKind() === SyntaxKind.EqualsToken),
   };
 }
 
-function clientBindingsIn(fn, flow) {
+function clientBindingsIn(fn, flow, clientArg) {
+  // `prisma` by its conventional name, plus whatever the call actually handed
+  // the helper — `withBypassRls(db, …)` after `import { prisma as db }` passes
+  // the client under a name this file has never seen. The argument is the
+  // client by the helper's own signature, so it needs no inference.
   const clients = new Set(["prisma"]);
+  if (clientArg?.getKind() === SyntaxKind.Identifier) clients.add(clientArg.getText());
   const modelRefs = [];
   if (!fn) return { clients, modelRefs };
 
@@ -560,7 +574,7 @@ function clientBindingsIn(fn, flow) {
   // Each pass can reveal a client that makes the next assignment relevant, so
   // this runs to a fixpoint; both sets only grow and are bounded by the file's
   // declarations, so it terminates.
-  const { decls, assignments } = flow;
+  const { decls, params, assignments } = flow;
 
   // Does this expression evaluate to a client? An identifier that is one, or a
   // choice between them — `cond ? tx : prisma`, `maybe ?? tx`. Deliberately NOT
@@ -603,6 +617,15 @@ function clientBindingsIn(fn, flow) {
         if (addClient(nameNode.getText())) changed = true;
       } else if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
         if (spreadPattern(nameNode, insideCallback(decl))) changed = true;
+      }
+    }
+    for (const param of params) {
+      if (!yieldsClient(param.getInitializer())) continue;
+      const nameNode = param.getNameNode();
+      if (nameNode.getKind() === SyntaxKind.Identifier) {
+        if (addClient(nameNode.getText())) changed = true;
+      } else if (nameNode.getKind() === SyntaxKind.ObjectBindingPattern) {
+        if (spreadPattern(nameNode, insideCallback(param))) changed = true;
       }
     }
     for (const assignment of assignments) {
@@ -772,7 +795,7 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs } = clientBindingsIn(fn, flowFor());
+    const { clients, modelRefs } = clientBindingsIn(fn, flowFor(), call.getArguments()[0]);
     const seen = new Set();
     const scanNodes =
       fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd() ? [call] : [call, fn];
