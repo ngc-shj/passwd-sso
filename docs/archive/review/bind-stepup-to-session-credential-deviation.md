@@ -645,3 +645,45 @@ fail-loud path, so they exit 1 for a different reason, which is the correct degr
 unresolved-client report off (1→0); and the allow-side namespace fixture under the member-access
 mutation (0→1). Coverage differential with all 93 allowlist entries emptied: 279 pairs both sides,
 nothing lost.
+
+## D22 — One reduction for both sides, and a crash the real tree could not reach
+
+**What changed**: `clientExprText` became `clientKey` — a **structural** key built from the parse
+tree instead of the expression's source text — and the model-reference side now uses it too.
+`modelRefsIn` reads `tx["model"]` as well as `tx.model`, and a destructuring **assignment**
+(`({ model } = tx)`) is unpacked like its declaration form.
+
+**Why**: a fifth external review found three escapes, all one defect — the client argument and the
+model receiver reduced the same expression differently:
+
+```ts
+withBypassRls(clients . prisma, …)   // arg key "clients . prisma" vs receiver "clients.prisma"
+(tx as typeof tx).tenantMember       // wrappers reduced on the argument, not the receiver
+tx["tenantMember"]                   // the receiver scan read property access only
+({ tenantMember } = tx)              // assignment unpacking handled the name form only
+```
+
+The first is the sharpest: `getText()` carries the trivia between tokens, so **one space** defeated
+the comparison, and the tests did not catch it because both sides of every fixture were written
+identically. The key is now built from the tree — `${base}.${nameNode}` — so spacing and comments
+cannot enter it, and a static string index reduces to the same key as the property it is.
+
+The exact answer would be binding identity from the type checker. This gate runs without a Program
+by design, so a trivia-free structural key is the strongest available, and it is now used by **both**
+sides for exactly the reason the last three defects existed.
+
+**A crash I shipped into a green gate, caught by writing the allow-side test.** The
+destructuring-assignment branch called a helper whose insertion had silently failed — an anchor that
+did not match. The real tree contains no destructuring assignment, so `check:bypass-rls` stayed exit
+0 while the gate would have thrown `ReferenceError` on any file that had one. The deny fixture would
+not have caught it either (a crash exits non-zero, which reads as "reported"). What caught it was the
+allow-side fixture, where a crash and a pass are distinguishable — the pairing RT10 asks for, earning
+its keep on a defect it was not aimed at. That case is now a test, with the reason in its comment.
+
+**Evidence**: 64 tests (up from 58), 64/64; full suite 1008 files / 14591 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Five single-clause mutations, each reddening its own case:
+structural key → `getText()` (1→0 on the spaced fixture), receiver reduction → identifier-only (1→0),
+element-access scan off (1→0), destructuring-assignment unpack off (1→0), and the allow-side fixture
+held at 0 under the element-access mutation. Coverage differential with all 93 allowlist entries
+emptied: 279 pairs both sides, nothing lost. Runtime compared **interleaved** with the previous
+commit, per D21: 1.02–1.11 s against 1.03–1.06 s — indistinguishable.

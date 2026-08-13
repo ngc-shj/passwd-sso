@@ -41,10 +41,10 @@
  *     own first argument, aliases and their chains, plain assignments,
  *     destructuring, parameter defaults, and a choice between clients.
  *
- * Treat this list as the current best enumeration, not a closed one: four
+ * Treat this list as the current best enumeration, not a closed one: five
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18–D21 in
+ * prose written to compensate for them. These are tracked as D16/D18–D22 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -482,26 +482,49 @@ function callbackOf(call, bindingsFor) {
  * the site is REPORTED rather than scanned with an incomplete client set.
  */
 /**
- * The expression text by which a value is named, with type-level wrappers
- * removed — `db as typeof db`, `(db)`, `db!`, `db satisfies X` all name `db`.
- * An identifier or a member access reduces to its text; anything else (a call,
- * an object literal) reduces to null, because there is no name to track it by.
+ * A structural key for the expression by which a value is named, or null when
+ * it has no such name.
+ *
+ * Built from the parse tree rather than taken as source text: `getText()`
+ * carries the trivia between tokens, so `clients . prisma` and `clients.prisma`
+ * are the same value under two different strings — and a gate that compares
+ * those strings is defeated by a space. Type-level wrappers reduce away
+ * (`db as typeof db`, `(db)`, `db!`, `db satisfies X`), and a static string
+ * index is the same thing as a property (`tx["model"]` is `tx.model`).
+ *
+ * The exact answer would be binding identity from the type checker; this gate
+ * runs without a Program by design, and a trivia-free structural key is what
+ * that leaves. It is used by BOTH sides — the client argument and the model
+ * receiver — because the last three defects here were all the two sides
+ * reducing an expression differently.
  */
-function clientExprText(expr) {
+function clientKey(expr) {
   if (!expr) return null;
   switch (expr.getKind()) {
     case SyntaxKind.Identifier:
-    case SyntaxKind.PropertyAccessExpression:
       return expr.getText();
+    case SyntaxKind.ThisKeyword:
+      return "this";
+    case SyntaxKind.PropertyAccessExpression: {
+      const base = clientKey(expr.getExpression());
+      return base === null ? null : `${base}.${expr.getNameNode().getText()}`;
+    }
+    case SyntaxKind.ElementAccessExpression: {
+      const arg = expr.getArgumentExpression();
+      if (arg?.getKind() !== SyntaxKind.StringLiteral) return null;
+      const base = clientKey(expr.getExpression());
+      return base === null ? null : `${base}.${arg.getLiteralValue()}`;
+    }
     case SyntaxKind.ParenthesizedExpression:
     case SyntaxKind.AsExpression:
     case SyntaxKind.NonNullExpression:
     case SyntaxKind.SatisfiesExpression:
-      return clientExprText(expr.getExpression());
+      return clientKey(expr.getExpression());
     default:
       return null;
   }
 }
+
 
 /**
  * The file's variable declarations and plain assignments, collected once.
@@ -532,7 +555,7 @@ function clientBindingsIn(fn, flow, clientArg) {
   // by the helper's own signature, so it needs no inference — only reducing to
   // the expression that names it.
   const clients = new Set(["prisma"]);
-  const argText = clientExprText(clientArg);
+  const argText = clientKey(clientArg);
   if (argText) clients.add(argText);
   const modelRefs = [];
   // A first argument that reduces to neither a name nor a member access (a
@@ -575,6 +598,29 @@ function clientBindingsIn(fn, flow, clientArg) {
       if (!emitModels) continue;
       if (addModel(el.getPropertyNameNode() ?? el.getNameNode(), el.getStartLineNumber())) {
         grew = true;
+      }
+    }
+    return grew;
+  };
+
+  // The assignment form of the same thing: `({ model, ...rest } = tx)`. Its
+  // left side is an object LITERAL, not a binding pattern, so the elements come
+  // back as property assignments rather than binding elements.
+  const spreadObjectLiteral = (literal, emitModels) => {
+    let grew = false;
+    for (const prop of literal.getProperties()) {
+      const kind = prop.getKind();
+      if (kind === SyntaxKind.SpreadAssignment) {
+        const key = clientKey(prop.getExpression());
+        if (key && addClient(key)) grew = true;
+        continue;
+      }
+      if (!emitModels) continue;
+      if (
+        kind === SyntaxKind.ShorthandPropertyAssignment ||
+        kind === SyntaxKind.PropertyAssignment
+      ) {
+        if (addModel(prop.getNameNode(), prop.getStartLineNumber())) grew = true;
       }
     }
     return grew;
@@ -625,7 +671,7 @@ function clientBindingsIn(fn, flow, clientArg) {
   // resolution, which this gate runs without by design — see the header.
   const yieldsClient = (expr) => {
     if (!expr) return false;
-    const named = clientExprText(expr);
+    const named = clientKey(expr);
     if (named !== null) return clients.has(named);
     switch (expr.getKind()) {
       case SyntaxKind.ConditionalExpression:
@@ -665,7 +711,15 @@ function clientBindingsIn(fn, flow, clientArg) {
     }
     for (const assignment of assignments) {
       if (!yieldsClient(assignment.getRight())) continue;
-      const leftText = clientExprText(assignment.getLeft());
+      const left = assignment.getLeft();
+      // `({ model } = tx)` — a destructuring assignment lifts delegates out
+      // exactly as `const { model } = tx` does, but its left side is an object
+      // LITERAL, not a binding pattern, so it needs its own unpacking.
+      if (left.getKind() === SyntaxKind.ObjectLiteralExpression) {
+        if (spreadObjectLiteral(left, insideCallback(assignment))) changed = true;
+        continue;
+      }
+      const leftText = clientKey(left);
       if (leftText && addClient(leftText)) changed = true;
     }
   }
@@ -679,26 +733,29 @@ function clientBindingsIn(fn, flow, clientArg) {
  * ($transaction, $executeRaw, …) are not models.
  */
 function modelRefsIn(node, clientNames) {
-  // A client is usually a bare name, and `getText()` on an arbitrary receiver
-  // walks its whole subtree, so the identifier case is answered without it.
-  // (Measured under load this made no difference; kept because it is a single
-  // guard on the hot path, not a second copy of the reduction logic.)
-  const hasDottedClient = [...clientNames].some((name) => name.includes("."));
   const refs = [];
-  for (const access of node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
-    // A client may be `tx`, `db`, or `clients.prisma` from a namespace import;
-    // only the last needs more than an identifier to name it.
-    const recv = access.getExpression();
-    const recvKind = recv.getKind();
-    if (recvKind === SyntaxKind.Identifier) {
-      if (!clientNames.has(recv.getText())) continue;
-    } else if (!hasDottedClient || recvKind !== SyntaxKind.PropertyAccessExpression) {
-      continue;
-    } else if (!clientNames.has(recv.getText())) {
-      continue;
+  // Both spellings of a member access: `tx.model` and `tx["model"]`. The
+  // receiver goes through clientKey, the same reduction the client argument
+  // uses — a cast on one side and a bare name on the other was how the last
+  // escape got through.
+  const accesses = [
+    ...node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression),
+    ...node.getDescendantsOfKind(SyntaxKind.ElementAccessExpression),
+  ];
+  for (const access of accesses) {
+    let model;
+    if (access.getKind() === SyntaxKind.PropertyAccessExpression) {
+      model = access.getName();
+    } else {
+      const arg = access.getArgumentExpression();
+      // A computed index names no model this gate can read; a client indexed by
+      // a variable is out of reach either way, so there is nothing to report.
+      if (arg?.getKind() !== SyntaxKind.StringLiteral) continue;
+      model = arg.getLiteralValue();
     }
-    const model = access.getName();
     if (model.startsWith("$")) continue;
+    const recvKey = clientKey(access.getExpression());
+    if (recvKey === null || !clientNames.has(recvKey)) continue;
     refs.push({ model, line: access.getStartLineNumber() });
   }
   return refs;

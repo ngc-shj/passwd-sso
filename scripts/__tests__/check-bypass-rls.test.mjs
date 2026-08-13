@@ -758,6 +758,98 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
+  it("names a client the same way however it is spaced", () => {
+    // `clients . prisma` and `clients.prisma` are one value under two source
+    // strings. Comparing `getText()` carries the trivia between tokens, so a
+    // single space defeated the match — the client argument and the model
+    // receiver disagreed about the same expression.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import * as clients from "@/lib/prisma";
+export async function drain() {
+  return withBypassRls(clients . prisma, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return clients.prisma.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("reduces a type wrapper on the model RECEIVER, not only on the argument", () => {
+    // The reduction has to run on both sides. Applying it to the client
+    // argument alone left `(tx as typeof tx).model` unseen.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => (tx as typeof tx).tenantMember.findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("reads a model indexed by a static string", () => {
+    // `tx["tenantMember"]` is `tx.tenantMember` written the other way.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx["tenantMember"].findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("catches a delegate lifted by a destructuring ASSIGNMENT", () => {
+    // `({ model } = tx)` does what `const { model } = tx` does, but its left
+    // side is an object literal rather than a binding pattern.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    let tenantMember;
+    ({ tenantMember } = tx);
+    return tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes all three access spellings when they stay within the allowlist", () => {
+    // The allow side for the cast receiver, the static index and the
+    // destructuring assignment at once. This case also runs the assignment
+    // branch at all — an earlier edit left it calling an undefined helper, and
+    // the real tree never takes that branch, so the gate stayed green while
+    // crashing on any file that did.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    let auditOutbox;
+    ({ auditOutbox } = tx);
+    await (tx as typeof tx).auditOutbox.findMany();
+    return tx["auditOutbox"].count();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("ignores an index computed from a variable", () => {
+    // A client indexed by a non-literal names no model this gate can read, and
+    // `row[key]` on a query result must not be invented as one.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain(key: string) {
+  return withBypassRls(prisma, async (tx) => {
+    const row = await tx.auditOutbox.findFirst();
+    return row[key];
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("reports a client argument it cannot name instead of scanning without it", () => {
     // `getClient()` reduces to no name, so the client set is incomplete and any
     // access through the returned value is invisible. Scanning anyway would
