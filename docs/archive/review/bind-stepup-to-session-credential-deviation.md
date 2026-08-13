@@ -830,3 +830,46 @@ first fixture named both `db` and the collision masked the mutation), parameter 
 fail-loud (0→1), and the allow-side helper held at 0. Coverage differential against D25: **+3 pairs,
 all genuine, nothing lost, no phantoms**. Runtime interleaved per D21: 0.72–0.81 s against
 0.70–0.79 s — indistinguishable.
+
+## D27 — One fixpoint instead of two phases, and enrolment keyed by parameter position
+
+**What changed**: the callback/helper graph walk and the client flow analysis are now **one loop**
+rather than a graph phase followed by a flow phase. A helper argument is tested with `yieldsClient`,
+the same predicate the flow pass uses. `calleeFunctionOf` resolves an inline callee (an IIFE) and
+follows `const aliasedQuery = query` to the function it names. Enrolment is keyed by **(function,
+parameter index)**, so a function used both as a helper and as a `$transaction` callback binds each
+position.
+
+**Why**: a tenth review found three escapes with one root — the two phases did not feed each other,
+and the visited key was coarser than the fact it guarded:
+
+```ts
+const alias = tx; queryMember(alias);       // alias learned by the flow phase, which ran after
+queryMember(flag ? tx : prisma);            // argument tested by name, not by yieldsClient
+const aliasedQuery = query; aliasedQuery(tx);  // callee named a function without being one
+(async (db) => db.tenantMember.findMany())(tx);// callee already was the function
+```
+
+and the order-dependent one, which is the sharpest:
+
+```ts
+await job(meta, tx);          // job enrolled as a helper, client at position 1
+return tx.$transaction(job);  // same job as a callback, client at position 0 — ignored
+```
+
+Reversing those two lines changed the verdict. A gate whose answer depends on statement order is not
+a gate; keying enrolment by position makes it order-independent, and both orderings are now tests.
+
+**What each fixture actually pins** — recorded because a mutation that reddens for the wrong reason
+proves nothing: the alias case is pinned by alias learning inside the loop (disable it → exit 0); the
+conditional argument by `yieldsClient` (revert to a bare-name test → exit 0); the alias chain and the
+inline callee by their own clauses; the order-dependence by the position key (drop the index → exit
+0); and the *loop itself* by the two-hop positional helper from D26 (single iteration → exit 0). One
+first attempt spliced a two-phase mutant that did not parse, and the harness reported its crash exit
+as a verdict — every mutation here is now parse-checked before its result is believed.
+
+**Evidence**: 87 tests (up from 83), 87/87; full suite 1008 files / 14614 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Coverage differential against D26 with all 93 allowlist
+entries emptied: **282 pairs both sides, nothing lost, nothing gained** — the new reach is over
+shapes the tree does not contain, which is what a gate is for. Runtime interleaved per D21:
+0.72–0.74 s against 0.73–0.75 s — indistinguishable.

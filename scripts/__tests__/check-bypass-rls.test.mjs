@@ -1017,6 +1017,84 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("recognises an aliased client as a helper argument", () => {
+    // The graph walk and the client flow used to be two phases: the alias was
+    // learned by the flow pass, which ran after the only scan that could have
+    // used it. They are one fixpoint now.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function queryMember(db) { return db.tenantMember.findMany(); }
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const alias = tx;
+    return queryMember(alias);
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("recognises a choice between clients as a helper argument", () => {
+    // The argument test is the same predicate the flow pass uses, so
+    // `flag ? tx : prisma` counts here exactly as it does in an assignment.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function queryMember(db) { return db.tenantMember.findMany(); }
+export async function drain(flag) {
+  return withBypassRls(prisma, async (tx) => queryMember(flag ? tx : prisma), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows a function alias and an inline callee", () => {
+    // `const aliasedQuery = query` names a function without being one, and an
+    // IIFE is a callee that is already the function. Both resolve from the tree.
+    for (const source of [
+      `const aliasedQuery = query;
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => aliasedQuery(tx), BYPASS_PURPOSE.AUDIT);
+}`,
+      `export async function drain() {
+  return withBypassRls(prisma, async (tx) => (async (db) => db.tenantMember.findMany())(tx), BYPASS_PURPOSE.AUDIT);
+}`,
+    ]) {
+      const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function query(db) { return db.tenantMember.findMany(); }
+${source}`);
+      expect(code).toBe(1);
+      expect(stderr).toContain("prisma.tenantMember");
+    }
+  });
+
+  it("does not let the order of two calls decide a function's client position", () => {
+    // The same function used as an ordinary helper and as a transaction
+    // callback binds a different parameter each time. Keying the visited set by
+    // function alone let whichever call was seen first settle it, so this
+    // reported or not depending on the order the two calls appear in.
+    const body = (first, second) => `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function job(first, second) {
+  if (second) return second.auditOutbox.count();
+  return first.tenantMember.findMany();
+}
+export async function drain(meta) {
+  return withBypassRls(prisma, async (tx) => {
+    ${first}
+    ${second}
+  }, BYPASS_PURPOSE.AUDIT);
+}`;
+    for (const source of [
+      body("await job(meta, tx);", "return tx.$transaction(job);"),
+      body("await tx.$transaction(job);", "return job(meta, tx);"),
+    ]) {
+      const { code, stderr } = run("src/lib/audit/audit-outbox.ts", source);
+      expect(code).toBe(1);
+      expect(stderr).toContain("prisma.tenantMember");
+    }
+  });
+
   it("does not treat a helper's unrelated first parameter as a client", () => {
     // A `$transaction` callback takes the client as parameter 0; a helper does
     // not. Binding parameter 0 blindly made `pick(meta, tx)` register `meta` as
