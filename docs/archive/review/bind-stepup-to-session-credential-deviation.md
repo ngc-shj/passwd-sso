@@ -601,3 +601,47 @@ single-clause mutations, each reddening its own case: client-argument seeding of
 aliased import), parameter-default tracking off (1→0). Both allow siblings — an aliased-import client
 and a parameter default that stay inside the allowlist — hold at exit 0. Coverage differential with
 all 93 allowlist entries emptied: 279 pairs both sides, nothing lost.
+
+## D21 — Generalising the client argument, and a phantom performance regression
+
+**What changed**: a client is now identified by its **expression text** rather than by a bare name.
+`clientExprText` reduces type-level wrappers (`db as typeof db`, `(db)`, `db!`, `db satisfies X`) and
+accepts a member access, so `clients.prisma` from a namespace import is tracked like any other
+client. A first argument that reduces to neither — `withBypassRls(getClient(), …)` — is now
+**reported** rather than scanned with an incomplete client set. The internal comment that still
+listed `cond ? tx : prisma` as unfollowed is corrected.
+
+**Why**: a fourth external review found the flow analysis and its origins correct but the argument's
+*form* over-restricted. Both shapes exit 0 before, exit 1 now, and neither needs type resolution:
+
+```ts
+withBypassRls(db as typeof db, async (tx) => db.tenantMember.findMany(), P);
+withBypassRls(clients.prisma, async (tx) => clients.prisma.tenantMember.findMany(), P);
+```
+
+The real tree's first arguments are 314 `prisma` and 2 `dbClient`, all bare identifiers, so the
+generalisation and the new fail-loud path both cost nothing today. The `dbClient` pair is the
+aliased-import shape D20 closed — this codebase already does it.
+
+**A comment contradicting the implementation, for the second round running.** D20 corrected the file
+header; the doc comment on `clientBindingsIn` still said conditionals were not followed. Same defect,
+adjacent lines, one round later. Both now describe what the code does, and the header says plainly
+that four successive reviews each found a member missing from its list.
+
+**The phantom regression, recorded because it nearly cost a wrong fix.** The gate measured 0.74 s
+before this change and 1.10 s after, so a fast path was added to `modelRefsIn` and a second reduction
+helper written to avoid `getText()` on member accesses. Neither moved the number. Measured properly —
+the previous commit and this one **interleaved** — both run 0.98–1.15 s: the machine was under load,
+and there was no regression at all. The second helper was reverted (two reduction functions that must
+agree is the drift shape this file keeps suffering); the single kind guard in `modelRefsIn` stayed.
+The comment now refuses to state an absolute figure and says to compare interleaved builds, because
+this file has now produced a false "unchanged" in one direction and a phantom regression in the other,
+both from trusting a number written down earlier.
+
+**Evidence**: 58 tests (up from 54), 58/58; full suite 1008 files / 14585 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Four single-clause mutations: wrapper unwrapping off and
+member-access clients off both redden their tests **by message** — the mutants fall into the new
+fail-loud path, so they exit 1 for a different reason, which is the correct degradation; the
+unresolved-client report off (1→0); and the allow-side namespace fixture under the member-access
+mutation (0→1). Coverage differential with all 93 allowlist entries emptied: 279 pairs both sides,
+nothing lost.

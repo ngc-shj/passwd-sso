@@ -710,6 +710,67 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("sees through a type-level wrapper on the client argument", () => {
+    // `db as typeof db` is the same value wearing a cast. Requiring a bare
+    // Identifier there loses the client origin to a no-op annotation.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { prisma as db } from "@/lib/prisma";
+export async function drain() {
+  return withBypassRls(db as typeof db, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return db.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("tracks a client reached through a namespace import", () => {
+    // `clients.prisma` is a member access, so a client set of bare names cannot
+    // hold it. Clients are identified by expression text for exactly this.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import * as clients from "@/lib/prisma";
+export async function drain() {
+  return withBypassRls(clients.prisma, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return clients.prisma.tenantMember.findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes a namespace-import client that stays within the allowlist", () => {
+    // The allow side: a member-access client must not make every access through
+    // it a violation.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import * as clients from "@/lib/prisma";
+export async function drain() {
+  return withBypassRls(clients.prisma, async (tx) => {
+    await tx.auditOutbox.findMany();
+    return clients.prisma.auditOutbox.count();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("reports a client argument it cannot name instead of scanning without it", () => {
+    // `getClient()` reduces to no name, so the client set is incomplete and any
+    // access through the returned value is invisible. Scanning anyway would
+    // spell "could not read this callback" as "no violations".
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(getClient(), async (tx) => tx.auditOutbox.findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("cannot name");
+  });
+
   it("follows a client supplied as a parameter default", () => {
     // `function drain(db = prisma)` — the binding may carry the client, and for
     // a CLIENT over-approximating only reports more models. (callbackOf refuses

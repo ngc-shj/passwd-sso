@@ -41,10 +41,10 @@
  *     own first argument, aliases and their chains, plain assignments,
  *     destructuring, parameter defaults, and a choice between clients.
  *
- * Treat this list as the current best enumeration, not a closed one: three
+ * Treat this list as the current best enumeration, not a closed one: four
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18/D19/D20 in
+ * prose written to compensate for them. These are tracked as D16/D18–D21 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -249,11 +249,16 @@ const TX_CLIENT_HELPERS = new Set(["withBypassRls", "withTenantRls"]);
 //     const c=readFileSync(f,"utf8");
 //     if(/with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/.test(c))n++;
 //     if(/withBypassRls\s*\(/.test(c))o++;}console.log(n,o)'
-// Whole gate measured at ~0.73 s: 0.68 s before client-flow tracking was added,
-// and that ~7% is the tracking itself, not waste — both the binding index and
-// the flow index are built lazily and once per file. Collecting them eagerly
-// per file cost ~25%, and per CALL another ~13%; if this number moves again,
-// re-measure before assuming which.
+// On cost: the binding index and the flow index are both built lazily and once
+// per file, which is what keeps this affordable — collecting them eagerly per
+// file measured ~25% slower, and per CALL another ~13%.
+//
+// Compare RUNS OF TWO BUILDS INTERLEAVED, never an absolute number against one
+// written here earlier. This gate has measured 0.68 s and 1.10 s on the same
+// machine on the same day under different load, and a round was nearly spent
+// "fixing" a regression that was background noise — after an earlier round had
+// shipped a false "unchanged" in the other direction. An absolute figure in
+// this comment would rot the same way twice over.
 const HELPER_MENTION_RE = /with(?:Bypass|Tenant|UserTenant|TeamTenant)Rls|tenant-rls/;
 
 const FN_KINDS = new Set([SyntaxKind.ArrowFunction, SyntaxKind.FunctionExpression]);
@@ -464,13 +469,40 @@ function callbackOf(call, bindingsFor) {
  *   ({ ...rest }) => rest.model.f()      a rest element is still the client
  *   tx.$transaction(async (t2) => …)     a nested tx inherits the bypass
  *
- * Assignments are followed to a fixpoint, so a chain of any length resolves.
+ * Assignments are followed to a fixpoint, so a chain of any length resolves,
+ * as are parameter defaults and a choice between clients (`cond ? tx : prisma`).
  * `let`/`var` aliases are followed too: unlike a callback binding, over-
  * approximating a CLIENT can only report more models, which is the safe
- * direction. What is not followed — an initializer that is not a plain
- * identifier (`cond ? tx : prisma`, a helper's return value) — is named in
- * this file's header rather than left to be rediscovered.
+ * direction.
+ *
+ * A client is identified by its expression text, not by a bare name, so
+ * `clients.prisma` from a namespace import is tracked like any other. What
+ * cannot be reduced to a name or a member access — a client returned by a call
+ * — is not followed, and where that appears as the helper's own first argument
+ * the site is REPORTED rather than scanned with an incomplete client set.
  */
+/**
+ * The expression text by which a value is named, with type-level wrappers
+ * removed — `db as typeof db`, `(db)`, `db!`, `db satisfies X` all name `db`.
+ * An identifier or a member access reduces to its text; anything else (a call,
+ * an object literal) reduces to null, because there is no name to track it by.
+ */
+function clientExprText(expr) {
+  if (!expr) return null;
+  switch (expr.getKind()) {
+    case SyntaxKind.Identifier:
+    case SyntaxKind.PropertyAccessExpression:
+      return expr.getText();
+    case SyntaxKind.ParenthesizedExpression:
+    case SyntaxKind.AsExpression:
+    case SyntaxKind.NonNullExpression:
+    case SyntaxKind.SatisfiesExpression:
+      return clientExprText(expr.getExpression());
+    default:
+      return null;
+  }
+}
+
 /**
  * The file's variable declarations and plain assignments, collected once.
  * `clientBindingsIn` runs per call site and needs the whole file (an alias may
@@ -494,13 +526,21 @@ function flowIndex(sf) {
 
 function clientBindingsIn(fn, flow, clientArg) {
   // `prisma` by its conventional name, plus whatever the call actually handed
-  // the helper — `withBypassRls(db, …)` after `import { prisma as db }` passes
-  // the client under a name this file has never seen. The argument is the
-  // client by the helper's own signature, so it needs no inference.
+  // the helper — `withBypassRls(db, …)` after `import { prisma as db }`, or
+  // `withBypassRls(clients.prisma, …)` from a namespace import, passes the
+  // client under something this file has never seen. The argument is the client
+  // by the helper's own signature, so it needs no inference — only reducing to
+  // the expression that names it.
   const clients = new Set(["prisma"]);
-  if (clientArg?.getKind() === SyntaxKind.Identifier) clients.add(clientArg.getText());
+  const argText = clientExprText(clientArg);
+  if (argText) clients.add(argText);
   const modelRefs = [];
-  if (!fn) return { clients, modelRefs };
+  // A first argument that reduces to neither a name nor a member access (a
+  // client returned by a call) leaves the client set incomplete, and scanning
+  // with an incomplete client set reports "no violations" for a callback it
+  // could not read. The caller turns this into a named violation.
+  const clientUnresolved = Boolean(clientArg) && !argText;
+  if (!fn) return { clients, modelRefs, clientUnresolved };
 
   // A destructuring OUTSIDE the callback is not a bypassed access — it only
   // tells us what the bound names carry. Model references are collected from
@@ -585,14 +625,9 @@ function clientBindingsIn(fn, flow, clientArg) {
   // resolution, which this gate runs without by design — see the header.
   const yieldsClient = (expr) => {
     if (!expr) return false;
+    const named = clientExprText(expr);
+    if (named !== null) return clients.has(named);
     switch (expr.getKind()) {
-      case SyntaxKind.Identifier:
-        return clients.has(expr.getText());
-      case SyntaxKind.ParenthesizedExpression:
-      case SyntaxKind.AsExpression:
-      case SyntaxKind.NonNullExpression:
-      case SyntaxKind.SatisfiesExpression:
-        return yieldsClient(expr.getExpression());
       case SyntaxKind.ConditionalExpression:
         return yieldsClient(expr.getWhenTrue()) || yieldsClient(expr.getWhenFalse());
       case SyntaxKind.BinaryExpression: {
@@ -630,13 +665,12 @@ function clientBindingsIn(fn, flow, clientArg) {
     }
     for (const assignment of assignments) {
       if (!yieldsClient(assignment.getRight())) continue;
-      const left = assignment.getLeft();
-      if (left.getKind() !== SyntaxKind.Identifier) continue;
-      if (addClient(left.getText())) changed = true;
+      const leftText = clientExprText(assignment.getLeft());
+      if (leftText && addClient(leftText)) changed = true;
     }
   }
 
-  return { clients, modelRefs };
+  return { clients, modelRefs, clientUnresolved };
 }
 
 /**
@@ -645,11 +679,24 @@ function clientBindingsIn(fn, flow, clientArg) {
  * ($transaction, $executeRaw, …) are not models.
  */
 function modelRefsIn(node, clientNames) {
+  // A client is usually a bare name, and `getText()` on an arbitrary receiver
+  // walks its whole subtree, so the identifier case is answered without it.
+  // (Measured under load this made no difference; kept because it is a single
+  // guard on the hot path, not a second copy of the reduction logic.)
+  const hasDottedClient = [...clientNames].some((name) => name.includes("."));
   const refs = [];
   for (const access of node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression)) {
+    // A client may be `tx`, `db`, or `clients.prisma` from a namespace import;
+    // only the last needs more than an identifier to name it.
     const recv = access.getExpression();
-    if (recv.getKind() !== SyntaxKind.Identifier) continue;
-    if (!clientNames.has(recv.getText())) continue;
+    const recvKind = recv.getKind();
+    if (recvKind === SyntaxKind.Identifier) {
+      if (!clientNames.has(recv.getText())) continue;
+    } else if (!hasDottedClient || recvKind !== SyntaxKind.PropertyAccessExpression) {
+      continue;
+    } else if (!clientNames.has(recv.getText())) {
+      continue;
+    }
     const model = access.getName();
     if (model.startsWith("$")) continue;
     refs.push({ model, line: access.getStartLineNumber() });
@@ -687,6 +734,7 @@ const modelViolations = [];
 const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
+const unresolvedClients = [];
 const f3UnusedTxViolations = [];
 
 // "Examined nothing" must not be spelled like "found nothing" at the corpus
@@ -795,7 +843,12 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs } = clientBindingsIn(fn, flowFor(), call.getArguments()[0]);
+    const { clients, modelRefs, clientUnresolved } = clientBindingsIn(
+      fn,
+      flowFor(),
+      call.getArguments()[0],
+    );
+    if (clientUnresolved) unresolvedClients.push({ file, line });
     const seen = new Set();
     const scanNodes =
       fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd() ? [call] : [call, fn];
@@ -902,6 +955,22 @@ if (txLessViolations.length > 0) {
 // A callback the gate cannot resolve to a function in this file means its
 // shape and its model access were examined by nothing. Named rather than
 // skipped, for the same reason as the parse failures below.
+if (unresolvedClients.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "withBypassRls was handed a client this gate cannot name — it reduces to",
+  );
+  console.error(
+    "neither an identifier nor a member access, so the callback's model access",
+  );
+  console.error(
+    "was NOT scanned against a complete client set. Pass the client directly:",
+  );
+  console.error("");
+  for (const { file, line } of unresolvedClients) console.error(`  ${file}:${line}`);
+}
+
 if (indirectCallbacks.length > 0) {
   failed = true;
   console.error("");
