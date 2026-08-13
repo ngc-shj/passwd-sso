@@ -35,16 +35,26 @@
  *     `scripts/manual-tests/*.ts` call these helpers and are examined by nothing.
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
- *   - A client returned by a call is not followed: `const db = wrap(tx)`. That
- *     needs type resolution, which this gate runs without by design. Everything
- *     decidable from the tree IS followed — see clientBindingsIn: the helper's
- *     own first argument, aliases and their chains, plain assignments,
- *     destructuring, parameter defaults, and a choice between clients.
+ *   - A client returned by a call is not followed: `const db = wrap(tx)`.
+ *   - **A client PASSED to a helper is not followed** — `withBypassRls(prisma,
+ *     async (tx) => resolveThing(tx, id))`, where `resolveThing`'s body reaches
+ *     models under the bypass. This is the largest live gap: 44 such call sites
+ *     exist today (`rg` for a client identifier passed as an argument to a
+ *     non-`$transaction` call inside a bypass callback). The callback graph
+ *     reachable through `$transaction` IS followed to any depth; an arbitrary
+ *     call is not, because the callee is usually imported and resolving it
+ *     needs a Program, which this gate deliberately runs without.
  *
- * Treat this list as the current best enumeration, not a closed one: seven
+ *     Everything else decidable from the tree IS followed — see
+ *     clientBindingsIn: the helper's own first argument, aliases and their
+ *     chains, plain assignments, destructuring, parameter defaults, a choice
+ *     between clients, and nested `$transaction` callbacks at any depth
+ *     including mutually recursive ones.
+ *
+ * Treat this list as the current best enumeration, not a closed one: eight
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18–D24 in
+ * prose written to compensate for them. These are tracked as D16/D18–D25 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -603,19 +613,26 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
   // Both are "the client goes somewhere and the gate cannot follow", which must
   // be said rather than skipped — the same reason `tx[model]` is reported.
   const unresolved = [];
-  const extraScanNodes = [];
+  // Every callback reached from this call site: the outer one, and each nested
+  // `$transaction` callback, at any depth. Filled by the worklist below.
+  const callbackNodes = [];
   // A first argument that reduces to neither a name nor a member access (a
   // client returned by a call) leaves the client set incomplete, and scanning
   // with an incomplete client set reports "no violations" for a callback it
   // could not read. The caller turns this into a named violation.
   const clientUnresolved = Boolean(clientArg) && !argText;
-  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, extraScanNodes };
+  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes };
 
   // A destructuring OUTSIDE the callback is not a bypassed access — it only
   // tells us what the bound names carry. Model references are collected from
   // inside the callback only; client aliases propagate from anywhere.
+  // Inside ANY callback this call reaches, not just the outermost. Testing only
+  // the outer one treated a destructuring in a named nested callback as
+  // "outside the callback", so its delegates were never read as model access.
   const insideCallback = (node) =>
-    node.getStart() >= fn.getStart() && node.getEnd() <= fn.getEnd();
+    callbackNodes.some(
+      (cb) => node.getStart() >= cb.getStart() && node.getEnd() <= cb.getEnd(),
+    );
 
   const addModel = (keyNode, line) => {
     const model = staticMemberName(keyNode);
@@ -700,31 +717,44 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
     }
   };
 
-  takeParameter(fn.getParameters()[0]);
+  // Walk the callbacks as a graph, not as one level with a patch bolted on.
+  // A nested `$transaction` callback is itself a callback: it binds a client,
+  // its body may destructure delegates out of it, and it may nest again. Each
+  // of the last several defects here was that structure handled to depth one,
+  // so it is a worklist — depth-N by construction — with a visited set that
+  // also makes a self-referential callback terminate.
+  const analysed = new Set();
+  const queue = [fn];
+  while (queue.length > 0) {
+    const callback = queue.shift();
+    if (!callback) continue;
+    const id = `${callback.getStart()}:${callback.getEnd()}`;
+    if (analysed.has(id)) continue;
+    analysed.add(id);
+    callbackNodes.push(callback);
 
-  for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const expr = inner.getExpression();
-    const member =
-      expr.getKind() === SyntaxKind.PropertyAccessExpression
-        ? expr.getNameNode().getText()
-        : expr.getKind() === SyntaxKind.ElementAccessExpression
-          ? literalMemberName(expr.getArgumentExpression())
-          : null;
-    if (member !== "$transaction") continue;
-    // The batch form `$transaction([...])` takes no callback, so there is no
-    // inner client to inherit and nothing to resolve.
-    if (inner.getArguments()[0]?.getKind() === SyntaxKind.ArrayLiteralExpression) continue;
-    // Otherwise resolve the callback the same way the outer one is resolved —
-    // inline, or by name through the visible bindings. A nested transaction
-    // inherits the bypass, so its body is scanned too, wherever it is declared.
-    const nested = callbackOf(inner, bindingsFor);
-    if (!nested) {
-      noteUnresolved(inner);
-      continue;
-    }
-    takeParameter(nested.getParameters()[0]);
-    if (nested.getStart() < fn.getStart() || nested.getEnd() > fn.getEnd()) {
-      extraScanNodes.push(nested);
+    takeParameter(callback.getParameters()[0]);
+
+    for (const inner of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      const expr = inner.getExpression();
+      const member =
+        expr.getKind() === SyntaxKind.PropertyAccessExpression
+          ? expr.getNameNode().getText()
+          : expr.getKind() === SyntaxKind.ElementAccessExpression
+            ? literalMemberName(expr.getArgumentExpression())
+            : null;
+      if (member !== "$transaction") continue;
+      // The batch form `$transaction([...])` takes no callback, so there is no
+      // inner client to inherit and nothing to resolve.
+      if (inner.getArguments()[0]?.getKind() === SyntaxKind.ArrayLiteralExpression) continue;
+      // Resolve it the same way the outer callback is resolved — inline, or by
+      // name through the visible bindings — and analyse it in turn.
+      const nested = callbackOf(inner, bindingsFor);
+      if (!nested) {
+        noteUnresolved(inner);
+        continue;
+      }
+      queue.push(nested);
     }
   }
 
@@ -801,7 +831,7 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
     }
   }
 
-  return { clients, modelRefs, clientUnresolved, unresolved, extraScanNodes };
+  return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes };
 }
 
 /**
@@ -981,16 +1011,14 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs, clientUnresolved, unresolved, extraScanNodes } =
+    const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes } =
       clientBindingsIn(fn, flowFor(), call.getArguments()[0], bindingsFor);
     if (clientUnresolved) unresolvedClients.push({ file, line });
     const seen = new Set();
-    const scanNodes = [
-      ...(fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd()
-        ? [call]
-        : [call, fn]),
-      ...extraScanNodes,
-    ];
+    // The call itself (its other arguments can hold model access) plus every
+    // callback the analyser reached, wherever each is declared. Overlap is
+    // harmless: reports are deduplicated by model and line.
+    const scanNodes = [call, ...callbackNodes];
     const report = ({ model, line }) => {
       const key = `${model}:${line}`;
       if (seen.has(key)) return;

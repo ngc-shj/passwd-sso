@@ -754,3 +754,37 @@ treated as a missing callback (0→1, the false-positive direction), and the all
 under the resolution mutation (0→1). Coverage differential with all 93 allowlist entries emptied: 279
 pairs both sides, nothing lost. Runtime interleaved per D21: 1.04–1.10 s against 0.98–1.14 s —
 indistinguishable.
+
+## D25 — The callback analysis became a graph walk, and the largest live gap is now named
+
+**What changed**: `clientBindingsIn` walks the callbacks it reaches as a **worklist with a visited
+set** instead of analysing the outer one and bolting the resolved nested one onto the scan list.
+`insideCallback` now means "inside any callback reached", not "inside the outermost".
+
+**Why**: an eighth review pointed at the structure rather than another instance, and was right. D24
+resolved a named nested callback and added it to `extraScanNodes` — a patch, not a recursion. So its
+own body was still judged *outside the callback* (its destructuring was never read as model access),
+and its own nested `$transaction` was never looked for. Every round since D22 has been the same
+sentence with a different noun: *the analysis handles depth one*. A worklist is depth-N by
+construction, which is why this one has a structural reason to end that sequence rather than a hope.
+
+Proven at depth 3, through a named→named→named chain, and on mutually recursive callbacks where the
+visited set is what makes it terminate: removing it does not fail the fixture, it **hangs** (exit 124
+under `timeout`), which is the mutation that proves the set earns its place.
+
+**The largest live gap, now named in the header**: a client PASSED to a helper —
+`withBypassRls(prisma, async (tx) => resolveThing(tx, id))` — is not followed. **44 such call sites
+exist today**, including `src/auth.ts:293`, `src/lib/tenant-context.ts:24` and
+`src/lib/mcp/oauth-server.ts:551`. Unlike everything else fixed in D18–D24, this one is not decidable
+from the tree: the callee is usually imported, so resolving it needs a Program, which this gate runs
+without by design. It was not in the header's list, and leaving members off that list is the failure
+this whole sequence has been made of — so it is there now, marked as the largest one and with the
+count and the reproducing search beside it.
+
+**Evidence**: 77 tests (up from 73), 77/77; full suite 1008 files / 14604 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Four single-clause mutations: the worklist reduced to one
+level (1→0 on the depth-3 chain), `insideCallback` narrowed to the outer callback (1→0 on a named
+callback's own destructuring), the visited set removed (the cycle fixture goes from exit 1 to a
+**hang**), and the allow-side deep chain held at 0 under the single-level mutation. Coverage
+differential with all 93 allowlist entries emptied: 279 pairs both sides, nothing lost. Runtime
+interleaved per D21: 0.76–0.79 s against 0.72–0.79 s — indistinguishable.

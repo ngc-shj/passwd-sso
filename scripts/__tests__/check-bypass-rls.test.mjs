@@ -896,6 +896,77 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("analyses a named nested callback's own body, not just its parameter", () => {
+    // Depth one was handled by adding the resolved callback to the scan; its
+    // OWN destructuring was still judged "outside the callback", because the
+    // inside-test looked only at the outermost one.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function job(inner) {
+  const { tenantMember } = inner;
+  return tenantMember.findMany();
+}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction(job), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("follows nested $transaction callbacks to any depth", () => {
+    // Three levels, each resolved by name. A worklist is depth-N by
+    // construction; the previous shape handled exactly one level, which is why
+    // every round found the next one.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function l3(d) { return d.tenantMember.findMany(); }
+async function l2(c) { return c.$transaction(l3); }
+async function l1(b) { return b.$transaction(l2); }
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction(l1), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("terminates on mutually recursive callbacks and still reports", () => {
+    // The visited set has to make a cycle finish, and finishing must not mean
+    // giving up: the disallowed model is reached on the way round.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function ping(a) {
+  return a.$transaction(pong);
+}
+async function pong(b) {
+  await b.$transaction(ping);
+  return b.tenantMember.findMany();
+}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction(ping), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes a deep callback chain that stays within the allowlist", () => {
+    // The allow side at depth: following further must not make every nested
+    // transaction a violation.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function deepJob(deep) {
+  const { auditOutbox } = deep;
+  return auditOutbox.count();
+}
+async function job(inner) {
+  return inner.$transaction(deepJob);
+}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction(job), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("passes a named nested $transaction callback within the allowlist", () => {
     // The allow side: resolving the nested callback must not make every one of
     // them a violation.
