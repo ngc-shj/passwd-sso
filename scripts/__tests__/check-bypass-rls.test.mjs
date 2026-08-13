@@ -982,6 +982,103 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
+  it("follows a client passed to a same-file helper", () => {
+    // The header used to excuse this as "helpers are usually imported, which
+    // needs a Program". True of imported ones; a same-file function resolves
+    // through the binding index the gate already has.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function queryMember(db) {
+  return db.tenantMember.findMany();
+}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => queryMember(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("binds the helper parameter in the position the client was passed", () => {
+    // The client is argument 0 at one call and argument 1 at the next, so a
+    // fixed position would lose it. Also two hops, which the worklist handles.
+    //
+    // The parameter names differ deliberately: a first version called both
+    // `db`, and since clients are tracked by name the collision made a
+    // wrong-position binding land on the right name anyway — the fixture
+    // passed under the mutation it was written to catch.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function inner2(id, client) { return client.tenantMember.findMany({ where: { id } }); }
+async function inner1(db, id) { return inner2(id, db); }
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => inner1(tx, "x"), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("does not treat a helper's unrelated first parameter as a client", () => {
+    // A `$transaction` callback takes the client as parameter 0; a helper does
+    // not. Binding parameter 0 blindly made `pick(meta, tx)` register `meta` as
+    // a client, and every `meta.<prop>` in the file then read as a model
+    // access. Caught by the coverage differential — the real tree grew phantom
+    // `prisma.kind` and `prisma.id` entries — not by any deny fixture, because
+    // a false positive is invisible to a test that only asserts exit 1.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function pick(meta, db) {
+  if (meta.kind === "x") return null;
+  return db.auditOutbox.count();
+}
+export async function drain(meta) {
+  return withBypassRls(prisma, async (tx) => pick(meta, tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("passes a same-file helper that stays within the allowlist", () => {
+    // The allow side: following the client into helpers must not make every
+    // helper call a violation.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function queryOutbox(db) { return db.auditOutbox.findMany(); }
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => queryOutbox(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("does not fail loud on an imported helper, which is the declared gap", () => {
+    // The boundary of the case above. An imported callee cannot be resolved
+    // without a Program, and 38 such call sites exist today — reporting them
+    // would red the build on the shape the header documents as uncovered.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { queryMember } from "@/lib/elsewhere";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => queryMember(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("accepts a parenthesised batch $transaction", () => {
+    // `$transaction(([...]))` is the batch form wearing parentheses. Testing
+    // the argument's kind without unwrapping read it as a missing callback and
+    // reported a compliant call — the false-positive direction.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction((
+    [tx.auditOutbox.findMany(), tx.auditOutbox.count()]
+  )), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("does not demand a callback from the batch form of $transaction", () => {
     // `$transaction([...])` takes an array of promises, not a callback. The
     // boundary for the fail-loud above: no callback expected, so nothing is

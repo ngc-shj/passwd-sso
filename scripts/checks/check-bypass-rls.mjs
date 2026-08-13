@@ -36,25 +36,24 @@
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
  *   - A client returned by a call is not followed: `const db = wrap(tx)`.
- *   - **A client PASSED to a helper is not followed** — `withBypassRls(prisma,
- *     async (tx) => resolveThing(tx, id))`, where `resolveThing`'s body reaches
- *     models under the bypass. This is the largest live gap: 44 such call sites
- *     exist today (`rg` for a client identifier passed as an argument to a
- *     non-`$transaction` call inside a bypass callback). The callback graph
- *     reachable through `$transaction` IS followed to any depth; an arbitrary
- *     call is not, because the callee is usually imported and resolving it
- *     needs a Program, which this gate deliberately runs without.
+ *   - A client passed to an IMPORTED helper is not followed —
+ *     `withBypassRls(prisma, async (tx) => resolveThing(tx, id))` where
+ *     `resolveThing` comes from another module. Resolving the callee needs a
+ *     Program, which this gate deliberately runs without. 38 such call sites
+ *     exist today; the 6 whose callee is in the same file ARE followed, so the
+ *     limit is the module boundary, not the call.
  *
  *     Everything else decidable from the tree IS followed — see
  *     clientBindingsIn: the helper's own first argument, aliases and their
  *     chains, plain assignments, destructuring, parameter defaults, a choice
- *     between clients, and nested `$transaction` callbacks at any depth
- *     including mutually recursive ones.
+ *     between clients, same-file callees taking the client at any argument
+ *     position, and nested `$transaction` callbacks at any depth including
+ *     mutually recursive ones.
  *
- * Treat this list as the current best enumeration, not a closed one: eight
+ * Treat this list as the current best enumeration, not a closed one: nine
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18–D25 in
+ * prose written to compensate for them. These are tracked as D16/D18–D26 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -430,6 +429,32 @@ function bindingIndex(sf) {
  * is not a function all return null, and the caller reports the site: this gate
  * has been wrong four times by guessing, so it no longer guesses.
  */
+function resolveLocalFunction(name, at, bindingsFor) {
+  const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
+    const scope = scopeOf(decl);
+    return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
+  });
+  if (visible.length !== 1) return null;
+  const decl = visible[0];
+
+  // A declaration without a body (an ambient or overload signature) says the
+  // implementation is elsewhere, so this file cannot answer.
+  if (decl.getKind() === SyntaxKind.FunctionDeclaration) {
+    return decl.getBody() ? decl : null;
+  }
+
+  // Only a `const` initializer answers "which function runs here". A
+  // parameter's initializer is its DEFAULT — one of the values a caller may
+  // supply, not the one supplied at any call that passes an argument. A
+  // `let`/`var` binding can hold a different function by the time it runs.
+  // Both are the "scanned a body that never runs" shape, and the gate refuses
+  // rather than guessing at either.
+  if (decl.getKind() !== SyntaxKind.VariableDeclaration) return null;
+  if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
+  const init = decl.getInitializer();
+  return init && FN_KINDS.has(init.getKind()) ? init : null;
+}
+
 function callbackOf(call, bindingsFor) {
   const args = call.getArguments();
   const inline = args.find((a) => FN_KINDS.has(a.getKind()));
@@ -437,30 +462,8 @@ function callbackOf(call, bindingsFor) {
 
   for (const arg of args) {
     if (arg.getKind() !== SyntaxKind.Identifier) continue;
-    const visible = (bindingsFor().get(arg.getText()) ?? []).filter((decl) => {
-      const scope = scopeOf(decl);
-      return scope && scope.getStart() <= call.getStart() && call.getEnd() <= scope.getEnd();
-    });
-    if (visible.length !== 1) continue;
-    const decl = visible[0];
-
-    // A declaration without a body (an ambient or overload signature) says the
-    // implementation is elsewhere, so this file cannot answer.
-    if (decl.getKind() === SyntaxKind.FunctionDeclaration) {
-      if (decl.getBody()) return decl;
-      continue;
-    }
-
-    // Only a `const` initializer answers "which function runs at this call".
-    // A parameter's initializer is its DEFAULT — one of the values a caller may
-    // supply, and not the one supplied at any call site that passes an argument.
-    // A `let`/`var` binding can hold a different function at the call than at
-    // its declaration. Both are the "scanned a body the call never runs" shape,
-    // and the gate refuses rather than guessing at either.
-    if (decl.getKind() !== SyntaxKind.VariableDeclaration) continue;
-    if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") continue;
-    const init = decl.getInitializer();
-    if (init && FN_KINDS.has(init.getKind())) return init;
+    const fn = resolveLocalFunction(arg.getText(), call, bindingsFor);
+    if (fn) return fn;
   }
   return null;
 }
@@ -549,6 +552,19 @@ function staticMemberName(node) {
  * receiver — because the last three defects here were all the two sides
  * reducing an expression differently.
  */
+/** An expression with its type-level wrappers removed. */
+function unwrapExpression(expr) {
+  switch (expr?.getKind()) {
+    case SyntaxKind.ParenthesizedExpression:
+    case SyntaxKind.AsExpression:
+    case SyntaxKind.NonNullExpression:
+    case SyntaxKind.SatisfiesExpression:
+      return unwrapExpression(expr.getExpression());
+    default:
+      return expr;
+  }
+}
+
 function clientKey(expr) {
   if (!expr) return null;
   switch (expr.getKind()) {
@@ -724,38 +740,91 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
   // so it is a worklist — depth-N by construction — with a visited set that
   // also makes a self-referential callback terminate.
   const analysed = new Set();
-  const queue = [fn];
-  while (queue.length > 0) {
-    const callback = queue.shift();
-    if (!callback) continue;
-    const id = `${callback.getStart()}:${callback.getEnd()}`;
-    if (analysed.has(id)) continue;
-    analysed.add(id);
-    callbackNodes.push(callback);
+  // Each entry says whether the function's FIRST parameter is the client. That
+  // holds for a `$transaction` callback and for the outer one — the helper's
+  // signature puts the client there. It does NOT hold for a resolved helper,
+  // whose client sits at whichever position it was passed; binding parameter 0
+  // there made `resolveTargetTenant(lookup, claim, tx)` treat `lookup` as a
+  // client, and every `lookup.kind` in the file then read as a model access.
+  const queue = [{ node: fn, clientIsFirstParameter: true }];
+  // Outer loop because the two discoveries feed each other: analysing a
+  // callback can add a client, and a new client can make a call that was
+  // uninteresting a moment ago into one that propagates. Both sets only grow
+  // and are bounded by the file, so this settles.
+  for (let discovered = true; discovered; ) {
+    discovered = false;
+    const beforeClients = clients.size;
 
-    takeParameter(callback.getParameters()[0]);
-
-    for (const inner of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-      const expr = inner.getExpression();
-      const member =
-        expr.getKind() === SyntaxKind.PropertyAccessExpression
-          ? expr.getNameNode().getText()
-          : expr.getKind() === SyntaxKind.ElementAccessExpression
-            ? literalMemberName(expr.getArgumentExpression())
-            : null;
-      if (member !== "$transaction") continue;
-      // The batch form `$transaction([...])` takes no callback, so there is no
-      // inner client to inherit and nothing to resolve.
-      if (inner.getArguments()[0]?.getKind() === SyntaxKind.ArrayLiteralExpression) continue;
-      // Resolve it the same way the outer callback is resolved — inline, or by
-      // name through the visible bindings — and analyse it in turn.
-      const nested = callbackOf(inner, bindingsFor);
-      if (!nested) {
-        noteUnresolved(inner);
-        continue;
-      }
-      queue.push(nested);
+    while (queue.length > 0) {
+      const entry = queue.shift();
+      if (!entry?.node) continue;
+      const id = `${entry.node.getStart()}:${entry.node.getEnd()}`;
+      if (analysed.has(id)) continue;
+      analysed.add(id);
+      callbackNodes.push(entry.node);
+      if (entry.clientIsFirstParameter) takeParameter(entry.node.getParameters()[0]);
     }
+
+    for (const callback of callbackNodes) {
+      for (const inner of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+        const expr = inner.getExpression();
+        const member =
+          expr.getKind() === SyntaxKind.PropertyAccessExpression
+            ? expr.getNameNode().getText()
+            : expr.getKind() === SyntaxKind.ElementAccessExpression
+              ? literalMemberName(expr.getArgumentExpression())
+              : null;
+
+        if (member === "$transaction") {
+          // The batch form `$transaction([...])` takes no callback, so there is
+          // no inner client to inherit and nothing to resolve.
+          if (
+            unwrapExpression(inner.getArguments()[0])?.getKind() ===
+            SyntaxKind.ArrayLiteralExpression
+          ) {
+            continue;
+          }
+          // Resolve it the same way the outer callback is resolved — inline, or
+          // by name through the visible bindings — and analyse it in turn.
+          const nested = callbackOf(inner, bindingsFor);
+          if (!nested) {
+            noteUnresolved(inner);
+            continue;
+          }
+          if (!analysed.has(`${nested.getStart()}:${nested.getEnd()}`)) {
+            queue.push({ node: nested, clientIsFirstParameter: true });
+            discovered = true;
+          }
+          continue;
+        }
+
+        // An ordinary call that is HANDED a client: the callee's parameter in
+        // that position becomes a client inside it. Only same-file callees are
+        // resolvable without a Program — an imported one is the gap named in
+        // this file's header — but "usually imported" was never a reason to
+        // miss the local ones.
+        const positions = inner
+          .getArguments()
+          .map((arg, index) => {
+            const key = clientKey(arg);
+            return key !== null && clients.has(key) ? index : -1;
+          })
+          .filter((index) => index >= 0);
+        if (positions.length === 0) continue;
+        if (expr.getKind() !== SyntaxKind.Identifier) continue;
+        const callee = resolveLocalFunction(expr.getText(), inner, bindingsFor);
+        if (!callee) continue;
+
+        const params = callee.getParameters();
+        for (const index of positions) takeParameter(params[index]);
+        if (!analysed.has(`${callee.getStart()}:${callee.getEnd()}`)) {
+          queue.push({ node: callee, clientIsFirstParameter: false });
+          discovered = true;
+        }
+      }
+    }
+
+    if (clients.size !== beforeClients) discovered = true;
   }
 
   // Fixpoint over the WHOLE FILE, not just the callback: `prisma` is a Proxy

@@ -788,3 +788,45 @@ callback's own destructuring), the visited set removed (the cycle fixture goes f
 **hang**), and the allow-side deep chain held at 0 under the single-level mutation. Coverage
 differential with all 93 allowlist entries emptied: 279 pairs both sides, nothing lost. Runtime
 interleaved per D21: 0.76–0.79 s against 0.72–0.79 s — indistinguishable.
+
+## D26 — Same-file helpers are followed, and the limitation that excused them was wrong
+
+**What changed**: the worklist now also follows an ordinary call that is HANDED a client, when the
+callee resolves to a function in the same file — binding the callee's parameter at whichever
+position the client was passed. The parenthesised batch form `$transaction(([...]))` is recognised
+as a batch. `resolveLocalFunction` is extracted so the callee and the callback resolve by one rule.
+
+**Why**: the header excused this whole class with "helpers are usually imported, which needs a
+Program". True of imported ones — and false of the local ones, which resolve through the binding
+index the gate already has. Measured on the real tree: of the 44 helper-passing call sites, **6 have
+a same-file callee** and 38 do not. The limitation was stated over the wrong boundary; it is the
+module boundary, not the call.
+
+The coverage differential confirms the 6 are real: `src/auth.ts:48`
+(`assertBootstrapSingleMember`), `src/lib/mcp/oauth-server.ts:758` (`checkTenantMembership`) and
+`src/lib/tenant-context.ts:8` (`resolveUserTenantIdFromClient`) all reach `tenantMember` under the
+bypass and were invisible before. All three are within their files' existing allowlist entries, so
+the real tree stays green — the gate now *knows* that rather than not looking.
+
+**A false-positive generator I shipped into the first attempt, caught by the differential.** The
+worklist bound parameter 0 of every function it queued. That is right for a `$transaction` callback
+— the signature puts the client there — and wrong for a helper, whose client sits wherever it was
+passed. So `resolveTargetTenant(lookup, claim, tx)` registered `lookup` as a client, and every
+`lookup.kind` / `lookup.id` in `src/auth.ts` became a "model": the differential grew 15 pairs, of
+which 12 were phantoms named `prisma.kind` and `prisma.id`.
+
+No deny fixture would have caught it — a false positive is invisible to a test asserting exit 1 —
+and the real tree stayed green only because `src/auth.ts` is wildcard-allowlisted, which suppressed
+the symptom exactly where it occurred. What caught it was diffing the reported `(file, model)` pairs
+with the allowlists emptied, then instrumenting *which call bound each name* rather than reasoning
+about it. Each queue entry now carries whether its first parameter is the client, and the case is a
+test.
+
+**Evidence**: 83 tests (up from 77), 83/83; full suite 1008 files / 14610 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Six single-clause mutations: helper propagation off (1→0),
+positional binding forced to parameter 0 (1→0 — with parameter names deliberately distinct, since a
+first fixture named both `db` and the collision masked the mutation), parameter 0 bound blindly
+(0→1, the phantom-client direction), the batch-form unwrap off (0→1), an imported callee wrongly
+fail-loud (0→1), and the allow-side helper held at 0. Coverage differential against D25: **+3 pairs,
+all genuine, nothing lost, no phantoms**. Runtime interleaved per D21: 0.72–0.81 s against
+0.70–0.79 s — indistinguishable.
