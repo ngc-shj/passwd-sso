@@ -50,10 +50,10 @@
  *     position, and nested `$transaction` callbacks at any depth including
  *     mutually recursive ones.
  *
- * Treat this list as the current best enumeration, not a closed one: ten
+ * Treat this list as the current best enumeration, not a closed one: eleven
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18–D27 in
+ * prose written to compensate for them. These are tracked as D16/D18–D28 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -429,13 +429,31 @@ function bindingIndex(sf) {
  * is not a function all return null, and the caller reports the site: this gate
  * has been wrong four times by guessing, so it no longer guesses.
  */
-function resolveLocalFunction(name, at, bindingsFor, depth = 0) {
+function resolveLocalFunction(name, at, bindingsFor, seen = new Set()) {
   const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
     const scope = scopeOf(decl);
     return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
   });
-  if (visible.length !== 1) return null;
-  const decl = visible[0];
+  if (visible.length === 0) return null;
+
+  // JavaScript picks the INNERMOST binding, so the gate does too: the visible
+  // declaration whose scope is smallest. Requiring exactly one meant a local
+  // `query` shadowing a module-level `query` resolved to neither, and the call
+  // was skipped in silence.
+  let decl = visible[0];
+  let best = scopeOf(decl).getEnd() - scopeOf(decl).getStart();
+  for (const candidate of visible.slice(1)) {
+    const scope = scopeOf(candidate);
+    const span = scope.getEnd() - scope.getStart();
+    if (span < best) {
+      best = span;
+      decl = candidate;
+    }
+  }
+
+  const id = `${decl.getStart()}:${decl.getEnd()}`;
+  if (seen.has(id)) return null;
+  seen.add(id);
 
   // A declaration without a body (an ambient or overload signature) says the
   // implementation is elsewhere, so this file cannot answer.
@@ -447,16 +465,16 @@ function resolveLocalFunction(name, at, bindingsFor, depth = 0) {
   // parameter's initializer is its DEFAULT — one of the values a caller may
   // supply, not the one supplied at any call that passes an argument. A
   // `let`/`var` binding can hold a different function by the time it runs.
-  // Both are the "scanned a body that never runs" shape, and the gate refuses
-  // rather than guessing at either.
   if (decl.getKind() !== SyntaxKind.VariableDeclaration) return null;
   if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
   const init = unwrapExpression(decl.getInitializer());
   if (init && FN_KINDS.has(init.getKind())) return init;
-  // `const aliasedQuery = query` names a function without being one. Follow it,
-  // bounded so a `const a = b; const b = a` pair cannot spin.
-  if (init?.getKind() === SyntaxKind.Identifier && depth < 8) {
-    return resolveLocalFunction(init.getText(), at, bindingsFor, depth + 1);
+  // `const aliasedQuery = query` names a function without being one. Follow it
+  // from the ALIAS's own position, not the call's — that is where the name it
+  // mentions is resolved — and stop on a declaration already visited, which
+  // ends a cycle without a depth limit a longer chain could step over.
+  if (init?.getKind() === SyntaxKind.Identifier) {
+    return resolveLocalFunction(init.getText(), init, bindingsFor, seen);
   }
   return null;
 }
@@ -471,9 +489,61 @@ function resolveLocalFunction(name, at, bindingsFor, depth = 0) {
 function calleeFunctionOf(call, bindingsFor) {
   const callee = unwrapExpression(call.getExpression());
   if (!callee) return null;
-  if (FN_KINDS.has(callee.getKind())) return callee;
-  if (callee.getKind() !== SyntaxKind.Identifier) return null;
-  return resolveLocalFunction(callee.getText(), call, bindingsFor);
+  if (FN_KINDS.has(callee.getKind())) return { fn: callee, argOffset: 0 };
+  if (callee.getKind() === SyntaxKind.Identifier) {
+    const fn = resolveLocalFunction(callee.getText(), call, bindingsFor);
+    return fn ? { fn, argOffset: 0 } : null;
+  }
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
+
+  const member = callee.getNameNode().getText();
+  const receiver = unwrapExpression(callee.getExpression());
+
+  // `query.call(thisArg, a, b)` invokes the receiver with its arguments shifted
+  // by one — resolving the function without that offset binds the wrong
+  // parameter, which is a wrong answer rather than a missing one. `.apply`
+  // passes an array, so positions cannot be mapped at all and it stays
+  // unresolved.
+  if (member === "call") {
+    if (receiver?.getKind() !== SyntaxKind.Identifier) return null;
+    const fn = resolveLocalFunction(receiver.getText(), call, bindingsFor);
+    return fn ? { fn, argOffset: 1 } : null;
+  }
+
+  // `helpers.query(...)` where `helpers` is a local object literal: the method
+  // is a function this file declares, so the tree can answer.
+  if (receiver?.getKind() !== SyntaxKind.Identifier) return null;
+  const owner = resolveLocalObjectLiteral(receiver.getText(), call, bindingsFor);
+  if (!owner) return null;
+  for (const prop of owner.getProperties()) {
+    const kind = prop.getKind();
+    if (kind !== SyntaxKind.MethodDeclaration && kind !== SyntaxKind.PropertyAssignment) {
+      continue;
+    }
+    if (staticMemberName(prop.getNameNode()) !== member) continue;
+    if (kind === SyntaxKind.MethodDeclaration) return { fn: prop, argOffset: 0 };
+    const value = unwrapExpression(prop.getInitializer());
+    if (value && FN_KINDS.has(value.getKind())) return { fn: value, argOffset: 0 };
+    if (value?.getKind() === SyntaxKind.Identifier) {
+      const fn = resolveLocalFunction(value.getText(), value, bindingsFor);
+      return fn ? { fn, argOffset: 0 } : null;
+    }
+  }
+  return null;
+}
+
+/** The object literal a local `const` name is bound to, if any. */
+function resolveLocalObjectLiteral(name, at, bindingsFor) {
+  const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
+    const scope = scopeOf(decl);
+    return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
+  });
+  for (const decl of visible) {
+    if (decl.getKind() !== SyntaxKind.VariableDeclaration) continue;
+    const init = unwrapExpression(decl.getInitializer());
+    if (init?.getKind() === SyntaxKind.ObjectLiteralExpression) return init;
+  }
+  return null;
 }
 
 function callbackOf(call, bindingsFor) {
@@ -778,6 +848,9 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
         return yieldsClient(expr.getWhenTrue()) || yieldsClient(expr.getWhenFalse());
       case SyntaxKind.BinaryExpression: {
         const op = expr.getOperatorToken().getKind();
+        // `a ?? tx` / `a || tx` can yield either side; `a && tx` yields the
+        // RIGHT side when it yields at all, so only that operand is a client.
+        if (op === SyntaxKind.AmpersandAmpersandToken) return yieldsClient(expr.getRight());
         if (op !== SyntaxKind.QuestionQuestionToken && op !== SyntaxKind.BarBarToken) {
           return false;
         }
@@ -813,7 +886,7 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
       callbackNodes.push(node);
       progressed = true;
     }
-    if (index === null || positions.has(index)) return;
+    if (index === null || index < 0 || positions.has(index)) return;
     positions.add(index);
     takeParameter(node.getParameters()[index]);
     progressed = true;
@@ -897,9 +970,9 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
           .map((arg, index) => (yieldsClient(arg) ? index : -1))
           .filter((index) => index >= 0);
         if (positions.length === 0) continue;
-        const callee = calleeFunctionOf(inner, bindingsFor);
-        if (!callee) continue;
-        for (const index of positions) enrol(callee, index);
+        const resolved = calleeFunctionOf(inner, bindingsFor);
+        if (!resolved) continue;
+        for (const index of positions) enrol(resolved.fn, index - resolved.argOffset);
       }
     }
   }

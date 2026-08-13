@@ -1017,6 +1017,97 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("resolves the innermost binding when a local function shadows a module one", () => {
+    // JavaScript picks the innermost binding. Requiring "exactly one visible
+    // declaration" resolved to neither and skipped the call in silence — the
+    // shadowed outer function reaches only allowed models, so nothing else
+    // would have noticed.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function query(db) { return db.auditOutbox.findMany(); }
+export function drain() {
+  async function query(db) { return db.tenantMember.findMany(); }
+  return withBypassRls(prisma, (tx) => query(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("picks the shadowing binding rather than reporting the shadowed one", () => {
+    // The mirror: the INNER function is the compliant one, so resolving the
+    // outer would be a false positive. Both directions pin the same rule.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function query(db) { return db.tenantMember.findMany(); }
+export function drain() {
+  async function query(db) { return db.auditOutbox.findMany(); }
+  return withBypassRls(prisma, (tx) => query(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("resolves an object-literal method and a .call invocation", () => {
+    // Neither is the declared imported-helper gap: both bind locally. `.call`
+    // also shifts its arguments by one, so resolving the function without that
+    // offset binds the wrong parameter — a wrong answer, not a missing one.
+    for (const source of [
+      `const helpers = { query: async (db) => db.tenantMember.findMany() };
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => helpers.query(tx), BYPASS_PURPOSE.AUDIT);
+}`,
+      `async function query(db) { return db.tenantMember.findMany(); }
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => query.call(null, tx), BYPASS_PURPOSE.AUDIT);
+}`,
+    ]) {
+      const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+${source}`);
+      expect(code).toBe(1);
+      expect(stderr).toContain("prisma.tenantMember");
+    }
+  });
+
+  it("follows an alias chain longer than any fixed depth, and stops on a cycle", () => {
+    // A depth limit is a number an attacker can exceed; a visited set of
+    // declarations is not. The cycle case must terminate rather than recurse.
+    const chain = Array.from({ length: 9 }, (_, i) => `const f${i} = ${i === 0 ? "query" : `f${i - 1}`};`).join("\n");
+    const deep = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function query(db) { return db.tenantMember.findMany(); }
+${chain}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => f8(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(deep.code).toBe(1);
+    expect(deep.stderr).toContain("prisma.tenantMember");
+
+    const cyclic = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const a = b;
+const b = a;
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => a(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(cyclic.code).toBe(0);
+  });
+
+  it("treats the right operand of && as the client it yields", () => {
+    // `a ?? tx` and `a || tx` can yield either side; `a && tx` yields the right
+    // one when it yields at all.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function query(db) {
+  if (db) return db.tenantMember.findMany();
+}
+export async function drain(enabled) {
+  return withBypassRls(prisma, async (tx) => query(enabled && tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
   it("recognises an aliased client as a helper argument", () => {
     // The graph walk and the client flow used to be two phases: the alias was
     // learned by the flow pass, which ran after the only scan that could have

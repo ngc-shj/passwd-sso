@@ -873,3 +873,39 @@ lint 0, typecheck 0, four CI-only gates 0. Coverage differential against D26 wit
 entries emptied: **282 pairs both sides, nothing lost, nothing gained** — the new reach is over
 shapes the tree does not contain, which is what a gate is for. Runtime interleaved per D21:
 0.72–0.74 s against 0.73–0.75 s — indistinguishable.
+
+## D28 — Four resolver defects, and the measurement that says this approach cannot be finished
+
+**What changed**: `resolveLocalFunction` picks the **innermost** visible binding (JavaScript's rule)
+instead of demanding exactly one, follows an alias from the alias's own position, and bounds
+recursion with a visited set of declarations rather than a depth limit. `calleeFunctionOf` resolves a
+local object-literal method and `query.call(thisArg, …)` — with an **argument offset of 1**, since
+resolving `.call` without it binds the wrong parameter, a wrong answer rather than a missing one.
+`yieldsClient` treats `a && tx` as yielding its right operand.
+
+Five fixtures, all exit 0 before and exit 1 after; the shadowing case is pinned in both directions,
+because resolving the outer binding instead of the inner would be a false positive.
+
+**And the part that matters more.** Eleven reviews have each found real, decidable bypasses in this
+one predicate. That is not bad luck: what this file has become is a hand-written points-to analysis
+for JavaScript, and the set of ways a value can reach a call is not enumerable by patching. Each
+round adds recognised shapes to an infinite space, which is why the next round always has one more.
+
+The measurement that decides it: with the gate inverted to **fail-closed** — report any call inside a
+bypass callback that is handed a client and whose callee this file cannot resolve — **38 call sites
+across 29 files** would be reported today. Those are the imported helpers (`logAuditInTx`,
+`resolveTenantByClaim`, `collectAttachmentRefsByCreator`, …). Under the current design each is a
+silent pass; under a fail-closed design each is a review item, once, and every FUTURE unrecognised
+spelling reds the build instead of slipping through.
+
+That inversion is the only change that ends the sequence, and it is a different piece of work from
+this branch — 38 sites to review, and a decision about whether an allowlist of reviewed
+client-consuming helpers is acceptable. It is recorded here rather than attempted, because the
+branch's subject is the step-up credential binding, and its contracts C1–C7 have been clean in all
+three lanes for eleven consecutive rounds.
+
+**Evidence**: 92 tests (up from 87), 92/92; full suite 1008 files / 14619 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Six single-clause mutations, each parse-checked before its
+result was believed: innermost→exactly-one (1→0), object-literal callee off (1→0), `.call` offset
+dropped (1→0), visited-set→depth-8 (1→0), `&&` unhandled (1→0), and the shadowing allow side held at
+0. Coverage differential against D27: 282 pairs both sides, nothing lost, nothing gained.
