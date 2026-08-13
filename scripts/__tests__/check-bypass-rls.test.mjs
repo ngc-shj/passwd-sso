@@ -856,6 +856,75 @@ export async function drain() {
     expect(stderr).not.toContain("prisma.model");
   });
 
+  it("reports a computed destructuring key it cannot resolve", () => {
+    // `const { [key]: tm } = tx` lifts SOME delegate out of a bypassed client
+    // and the gate cannot say which — the same situation as `tx[model]`, which
+    // is reported, so this must be too rather than quietly yielding nothing.
+    for (const source of [
+      `const { [key]: tm } = tx;
+    return tm.findMany();`,
+      `let tm;
+    ({ [key]: tm } = tx);
+    return tm.findMany();`,
+    ]) {
+      const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const key = "tenantMember" as const;
+    ${source}
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+      expect(code).toBe(1);
+      expect(stderr).toContain("cannot resolve");
+    }
+  });
+
+  it("scans a nested $transaction callback passed by name", () => {
+    // The outer callback is resolved by name when it has to be; the nested one
+    // was not, so a `$transaction(innerJob)` lost both the inner client and the
+    // body it runs. Same resolution, same visibility rule, same fallback.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function innerJob(inner) {
+  return inner.tenantMember.findMany();
+}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction(innerJob), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes a named nested $transaction callback within the allowlist", () => {
+    // The allow side: resolving the nested callback must not make every one of
+    // them a violation.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+async function innerJob(inner) {
+  return inner.auditOutbox.count();
+}
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx.$transaction(innerJob), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("does not demand a callback from the batch form of $transaction", () => {
+    // `$transaction([...])` takes an array of promises, not a callback. The
+    // boundary for the fail-loud above: no callback expected, so nothing is
+    // unresolved and the allowed models inside must simply pass.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) =>
+    tx.$transaction([tx.auditOutbox.findMany(), tx.auditOutbox.count()]), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("reads a model indexed by an untagged template literal", () => {
     // `` tx[`tenantMember`] `` is a static name in a third spelling.
     const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `

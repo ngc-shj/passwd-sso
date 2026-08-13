@@ -718,3 +718,39 @@ at 0 under that narrowing, and index-position accepting identifiers (reports `pr
 of `tx[model]` — the phantom-answer mutation). Coverage differential with all 93 allowlist entries
 emptied: 279 pairs both sides, nothing lost. Runtime interleaved per D21: 1.03–1.08 s against
 1.05–1.14 s — indistinguishable.
+
+## D24 — Two give-up paths that stayed silent, and a resolver used at one call site out of two
+
+**What changed**: a destructuring key the gate cannot read (`const { [key]: tm } = tx`, and its
+assignment form) is now **reported** instead of yielding nothing. And a nested `$transaction`
+callback passed by name is resolved through `callbackOf` — the same resolver the outer callback
+already uses — with its body added to the scan, an unresolvable one reported, and the batch form
+`$transaction([...])` recognised as taking no callback at all.
+
+**Why**: a seventh review found both. They are the two failure modes this file keeps producing, one
+each:
+
+- *Silence where the honest answer is "unknown".* D23 made `tx[model]` report, because a bypassed
+  client indexed by anything reaches some model. `const { [key]: tm } = tx` is the same statement in
+  destructuring form, and it returned `false` from `addModel` and moved on.
+- *A solved problem not reused.* `callbackOf` resolves a by-name callback against the bindings
+  visible from the call, refusing when ambiguous — written for the outer callback in D16/D17. The
+  nested `$transaction` handler looked for an inline function and gave up otherwise, so
+  `tx.$transaction(innerJob)` lost the inner client *and* the body it runs.
+
+Real tree: the only two `$transaction` calls inside bypass callbacks pass inline arrow functions, so
+neither the resolution nor the new report changes anything today.
+
+**The boundary that keeps the fail-loud usable**: `$transaction([...])` takes an array of promises,
+not a callback. Demanding one there would red every batch call, so the array form is recognised
+before the callback is required — and that is its own test, because a fail-loud with no boundary is
+just a broken gate.
+
+**Evidence**: 73 tests (up from 69), 73/73; full suite 1008 files / 14600 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Six single-clause mutations: the unreadable-key report off
+in each of the two destructuring forms (1→0 each), by-name nested resolution off (message flips to
+the unresolvable report), the resolved nested body not added to the scan (1→0), the array form
+treated as a missing callback (0→1, the false-positive direction), and the allow-side named callback
+under the resolution mutation (0→1). Coverage differential with all 93 allowlist entries emptied: 279
+pairs both sides, nothing lost. Runtime interleaved per D21: 1.04–1.10 s against 0.98–1.14 s —
+indistinguishable.

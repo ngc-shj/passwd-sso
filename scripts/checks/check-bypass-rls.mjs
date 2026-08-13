@@ -41,10 +41,10 @@
  *     own first argument, aliases and their chains, plain assignments,
  *     destructuring, parameter defaults, and a choice between clients.
  *
- * Treat this list as the current best enumeration, not a closed one: six
+ * Treat this list as the current best enumeration, not a closed one: seven
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18–D23 in
+ * prose written to compensate for them. These are tracked as D16/D18–D24 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -588,7 +588,7 @@ function flowIndex(sf) {
   };
 }
 
-function clientBindingsIn(fn, flow, clientArg) {
+function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
   // `prisma` by its conventional name, plus whatever the call actually handed
   // the helper — `withBypassRls(db, …)` after `import { prisma as db }`, or
   // `withBypassRls(clients.prisma, …)` from a namespace import, passes the
@@ -599,12 +599,17 @@ function clientBindingsIn(fn, flow, clientArg) {
   const argText = clientKey(clientArg);
   if (argText) clients.add(argText);
   const modelRefs = [];
+  // Destructuring keys and nested-transaction callbacks this file cannot read.
+  // Both are "the client goes somewhere and the gate cannot follow", which must
+  // be said rather than skipped — the same reason `tx[model]` is reported.
+  const unresolved = [];
+  const extraScanNodes = [];
   // A first argument that reduces to neither a name nor a member access (a
   // client returned by a call) leaves the client set incomplete, and scanning
   // with an incomplete client set reports "no violations" for a callback it
   // could not read. The caller turns this into a named violation.
   const clientUnresolved = Boolean(clientArg) && !argText;
-  if (!fn) return { clients, modelRefs, clientUnresolved };
+  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, extraScanNodes };
 
   // A destructuring OUTSIDE the callback is not a bypassed access — it only
   // tells us what the bound names carry. Model references are collected from
@@ -619,6 +624,14 @@ function clientBindingsIn(fn, flow, clientArg) {
     if (modelRefs.some((r) => r.model === model && r.line === line)) return false;
     modelRefs.push({ model, line });
     return true;
+  };
+
+  const noteUnresolved = (node) => {
+    const line = node.getStartLineNumber();
+    const text = node.getText();
+    if (!unresolved.some((u) => u.line === line && u.text === text)) {
+      unresolved.push({ line, text });
+    }
   };
 
   const addClient = (name) => {
@@ -637,9 +650,12 @@ function clientBindingsIn(fn, flow, clientArg) {
         continue;
       }
       if (!emitModels) continue;
-      if (addModel(el.getPropertyNameNode() ?? el.getNameNode(), el.getStartLineNumber())) {
-        grew = true;
+      const keyNode = el.getPropertyNameNode() ?? el.getNameNode();
+      if (staticMemberName(keyNode) === null) {
+        noteUnresolved(el);
+        continue;
       }
+      if (addModel(keyNode, el.getStartLineNumber())) grew = true;
     }
     return grew;
   };
@@ -661,6 +677,10 @@ function clientBindingsIn(fn, flow, clientArg) {
         kind === SyntaxKind.ShorthandPropertyAssignment ||
         kind === SyntaxKind.PropertyAssignment
       ) {
+        if (staticMemberName(prop.getNameNode()) === null) {
+          noteUnresolved(prop);
+          continue;
+        }
         if (addModel(prop.getNameNode(), prop.getStartLineNumber())) grew = true;
       }
     }
@@ -691,9 +711,20 @@ function clientBindingsIn(fn, flow, clientArg) {
           ? literalMemberName(expr.getArgumentExpression())
           : null;
     if (member !== "$transaction") continue;
-    for (const arg of inner.getArguments()) {
-      if (!FN_KINDS.has(arg.getKind())) continue;
-      takeParameter(arg.getParameters()[0]);
+    // The batch form `$transaction([...])` takes no callback, so there is no
+    // inner client to inherit and nothing to resolve.
+    if (inner.getArguments()[0]?.getKind() === SyntaxKind.ArrayLiteralExpression) continue;
+    // Otherwise resolve the callback the same way the outer one is resolved —
+    // inline, or by name through the visible bindings. A nested transaction
+    // inherits the bypass, so its body is scanned too, wherever it is declared.
+    const nested = callbackOf(inner, bindingsFor);
+    if (!nested) {
+      noteUnresolved(inner);
+      continue;
+    }
+    takeParameter(nested.getParameters()[0]);
+    if (nested.getStart() < fn.getStart() || nested.getEnd() > fn.getEnd()) {
+      extraScanNodes.push(nested);
     }
   }
 
@@ -770,7 +801,7 @@ function clientBindingsIn(fn, flow, clientArg) {
     }
   }
 
-  return { clients, modelRefs, clientUnresolved };
+  return { clients, modelRefs, clientUnresolved, unresolved, extraScanNodes };
 }
 
 /**
@@ -950,15 +981,16 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs, clientUnresolved } = clientBindingsIn(
-      fn,
-      flowFor(),
-      call.getArguments()[0],
-    );
+    const { clients, modelRefs, clientUnresolved, unresolved, extraScanNodes } =
+      clientBindingsIn(fn, flowFor(), call.getArguments()[0], bindingsFor);
     if (clientUnresolved) unresolvedClients.push({ file, line });
     const seen = new Set();
-    const scanNodes =
-      fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd() ? [call] : [call, fn];
+    const scanNodes = [
+      ...(fn.getStart() >= call.getStart() && fn.getEnd() <= call.getEnd()
+        ? [call]
+        : [call, fn]),
+      ...extraScanNodes,
+    ];
     const report = ({ model, line }) => {
       const key = `${model}:${line}`;
       if (seen.has(key)) return;
@@ -968,6 +1000,9 @@ for (const file of sourceFiles) {
     // Delegates lifted straight off a client by destructuring, then every
     // `<client>.<model>` reached through any identifier that carries the client.
     for (const ref of modelRefs) report(ref);
+    for (const u of unresolved) {
+      unresolvedModels.push({ file, line: u.line, text: u.text });
+    }
     for (const node of scanNodes) {
       const { refs, unresolved } = modelRefsIn(node, clients);
       for (const ref of refs) report(ref);
