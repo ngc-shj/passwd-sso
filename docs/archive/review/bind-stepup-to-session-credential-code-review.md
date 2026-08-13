@@ -825,11 +825,14 @@ The diagnosis is recorded in **D28**: this file became a hand-written points-to 
 JavaScript, and the ways a value reaches a call are not enumerable by patching. Adding recognised
 shapes to an infinite space is why there was always one more.
 
-**Measured exit**: inverting the gate to fail-closed — report any call inside a bypass callback that
-is handed a client and whose callee cannot be resolved — would report **38 call sites across 29
-files** today, all imported helpers (`logAuditInTx`, `resolveTenantByClaim`,
-`collectAttachmentRefsByCreator`, …). That is the only change that ends the sequence, and it is its
-own piece of work: 38 review items plus a decision on allowlist granularity.
+**Measured exit**: inverting the gate to fail-closed. The rule must be **any client propagation
+whose callee, argument position, `this` and spread mapping cannot all be proven** — not "the callee
+is unresolved", which an earlier draft of this section said and which is wrong: three known shapes
+resolve a callee and then map it incorrectly (`this` via `.call(tx)`, a spread before the client,
+and — until D29 — a shadowed object literal). The unresolved-callee half alone accounts for **38 call
+sites across 29 files** today, all imported helpers (`logAuditInTx`, `resolveTenantByClaim`,
+`collectAttachmentRefsByCreator`, …). It is its own piece of work: 38 review items plus a decision on
+allowlist granularity.
 
 **Decision (user, recorded)**: end this branch here. The fail-closed inversion is tracked in D28 for
 a separate branch.
@@ -855,7 +858,8 @@ lost at any step**; three genuine accesses gained that were invisible on `main`
    local-harness limit predating this branch. The CI `e2e` job runs it on the PR
    (`.github/workflows/ci.yml:491`, path filter `e2e/**`).
 2. **Manual two-authenticator scenarios 1–7 on `mrx33`** (VE2) — no access from these sessions.
-3. **D16 gaps** (4) and **D28** (the fail-closed inversion) — declared, tracked, not this branch.
+3. **D16 gaps** (4), **D28/D29** (the fail-closed inversion over the corrected class, including
+   `this` and spread mapping) — declared, tracked, not this branch.
 
 ## Final verification
 

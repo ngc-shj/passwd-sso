@@ -1017,6 +1017,33 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("resolves the innermost object literal when a local one shadows a module one", () => {
+    // The sibling of the function-shadowing rule, and it was fixed for
+    // functions only. Taking the first visible declaration analysed the OUTER
+    // object: it missed the shadowing object's models, and reported the
+    // shadowed one's — a miss and a false positive from the same line, which is
+    // why both directions are asserted here.
+    const forbiddenInner = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const helpers = { query: async (db) => db.auditOutbox.findMany() };
+export function drain() {
+  const helpers = { query: async (db) => db.tenantMember.findMany() };
+  return withBypassRls(prisma, (tx) => helpers.query(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(forbiddenInner.code).toBe(1);
+    expect(forbiddenInner.stderr).toContain("prisma.tenantMember");
+
+    const allowedInner = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const helpers = { query: async (db) => db.tenantMember.findMany() };
+export function drain() {
+  const helpers = { query: async (db) => db.auditOutbox.findMany() };
+  return withBypassRls(prisma, (tx) => helpers.query(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(allowedInner.code).toBe(0);
+    expect(allowedInner.stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("resolves the innermost binding when a local function shadows a module one", () => {
     // JavaScript picks the innermost binding. Requiring "exactly one visible
     // declaration" resolved to neither and skipped the call in silence — the

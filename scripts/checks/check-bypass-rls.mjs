@@ -36,12 +36,22 @@
  *   - INDIRECT_CALLBACK_ALLOWLIST is keyed by file, so a NEW unresolvable call
  *     site inside an already-listed file is excused without review.
  *   - A client returned by a call is not followed: `const db = wrap(tx)`.
- *   - A client passed to an IMPORTED helper is not followed —
- *     `withBypassRls(prisma, async (tx) => resolveThing(tx, id))` where
- *     `resolveThing` comes from another module. Resolving the callee needs a
- *     Program, which this gate deliberately runs without. 38 such call sites
- *     exist today; the 6 whose callee is in the same file ARE followed, so the
- *     limit is the module boundary, not the call.
+ *   - The client's propagation into a callee is followed only where the tree
+ *     proves the mapping. Where it cannot, the call is SKIPPED, not reported —
+ *     which is this gate's remaining fail-open class, and it is wider than
+ *     "the callee is imported":
+ *       · an imported callee (38 call sites today; resolving it needs a Program)
+ *       · `this` — `query.call(tx)` where the body uses `this.model`. Binding it
+ *         would mean adding `this` to a client set that is keyed by NAME with no
+ *         per-function scope, so every `this.x` in every analysed function would
+ *         read as a model access. The flat client set is the real limit here.
+ *       · a spread before the client (`query(...rest, tx)`) — the argument's
+ *         real position depends on `rest.length`, so the syntactic index binds
+ *         the wrong parameter.
+ *     Each of these RESOLVES a callee and then maps it wrongly or incompletely,
+ *     so a fail-closed rule keyed on "callee unresolved" would not catch any of
+ *     them. Closing the class means reporting any client propagation whose
+ *     callee, argument position, `this` and spread mapping cannot all be proven.
  *
  *     Everything else decidable from the tree IS followed — see
  *     clientBindingsIn: the helper's own first argument, aliases and their
@@ -535,15 +545,29 @@ function calleeFunctionOf(call, bindingsFor) {
 /** The object literal a local `const` name is bound to, if any. */
 function resolveLocalObjectLiteral(name, at, bindingsFor) {
   const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
+    if (decl.getKind() !== SyntaxKind.VariableDeclaration) return false;
+    if (unwrapExpression(decl.getInitializer())?.getKind() !== SyntaxKind.ObjectLiteralExpression) {
+      return false;
+    }
     const scope = scopeOf(decl);
     return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
   });
-  for (const decl of visible) {
-    if (decl.getKind() !== SyntaxKind.VariableDeclaration) continue;
-    const init = unwrapExpression(decl.getInitializer());
-    if (init?.getKind() === SyntaxKind.ObjectLiteralExpression) return init;
+  if (visible.length === 0) return null;
+  // Innermost wins, exactly as in resolveLocalFunction — taking the first
+  // visible declaration analysed the OUTER object when a local one shadowed it,
+  // which both missed the shadowing object's models and reported the shadowed
+  // one's. The same rule was fixed for functions and not for their sibling here.
+  let best = visible[0];
+  let span = scopeOf(best).getEnd() - scopeOf(best).getStart();
+  for (const candidate of visible.slice(1)) {
+    const scope = scopeOf(candidate);
+    const width = scope.getEnd() - scope.getStart();
+    if (width < span) {
+      span = width;
+      best = candidate;
+    }
   }
-  return null;
+  return unwrapExpression(best.getInitializer());
 }
 
 function callbackOf(call, bindingsFor) {

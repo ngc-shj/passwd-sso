@@ -891,15 +891,21 @@ one predicate. That is not bad luck: what this file has become is a hand-written
 for JavaScript, and the set of ways a value can reach a call is not enumerable by patching. Each
 round adds recognised shapes to an infinite space, which is why the next round always has one more.
 
-The measurement that decides it: with the gate inverted to **fail-closed** — report any call inside a
-bypass callback that is handed a client and whose callee this file cannot resolve — **38 call sites
-across 29 files** would be reported today. Those are the imported helpers (`logAuditInTx`,
+**Corrected by D29 — this paragraph understated the residual class.** "Whose callee cannot be
+resolved" is only half of it: three shapes RESOLVE a callee and then map it wrongly, so that rule
+catches none of them (a shadowed object literal, fixed in D29; `this` via `query.call(tx)`; a spread
+before the client). The class to close is **any client propagation whose callee, argument position,
+`this` and spread mapping cannot all be proven**.
+
+The measurement, for the unresolved-callee half: with the gate inverted to **fail-closed** — report
+any call inside a bypass callback that is handed a client and whose callee this file cannot resolve
+— **38 call sites across 29 files** would be reported today. Those are the imported helpers (`logAuditInTx`,
 `resolveTenantByClaim`, `collectAttachmentRefsByCreator`, …). Under the current design each is a
 silent pass; under a fail-closed design each is a review item, once, and every FUTURE unrecognised
 spelling reds the build instead of slipping through.
 
-That inversion is the only change that ends the sequence, and it is a different piece of work from
-this branch — 38 sites to review, and a decision about whether an allowlist of reviewed
+That inversion, stated over the corrected class above, is what ends the sequence, and it is a
+different piece of work from this branch — 38 sites to review, and a decision about whether an allowlist of reviewed
 client-consuming helpers is acceptable. It is recorded here rather than attempted, because the
 branch's subject is the step-up credential binding, and its contracts C1–C7 have been clean in all
 three lanes for eleven consecutive rounds.
@@ -909,3 +915,36 @@ lint 0, typecheck 0, four CI-only gates 0. Six single-clause mutations, each par
 result was believed: innermost→exactly-one (1→0), object-literal callee off (1→0), `.call` offset
 dropped (1→0), visited-set→depth-8 (1→0), `&&` unhandled (1→0), and the shadowing allow side held at
 0. Coverage differential against D27: 282 pairs both sides, nothing lost, nothing gained.
+
+## D29 — Object-literal shadowing, and the residual class stated correctly
+
+**What changed**: `resolveLocalObjectLiteral` picks the **innermost** visible binding, the rule
+already applied to `resolveLocalFunction` and not to its sibling. The module header and D28's
+"measured exit" paragraph are corrected.
+
+**Why**: a review after the branch was declared closed found the shadowing rule fixed for functions
+only. `const helpers = {…}` shadowed by a local `const helpers = {…}` analysed the OUTER object,
+which is a miss and a false positive from one line: with the inner object reaching a forbidden model
+the gate exited **0**, and with the inner one compliant it exited **1** on a compliant call. Both
+directions are now tests, and both are mutation-proven.
+
+**Two that are declared, not fixed, with the reason**:
+
+- `query.call(tx)` where the body uses `this.model`. Binding it means putting `this` into a client
+  set that is keyed by NAME and has no per-function scope, so every `this.x` in every analysed
+  function would read as a model access. The flat client set is the real limitation, and replacing
+  it is a redesign, not a patch.
+- `query(...rest, tx)` — the client's real parameter index depends on `rest.length`, so the
+  syntactic index binds the wrong parameter. Verified: with `query(a, b, db)` the access through
+  `db` is missed entirely.
+
+**And the correction that matters most.** D28 said the fail-closed inversion should report calls
+"whose callee cannot be resolved". All three shapes above RESOLVE their callee and then map it
+wrongly, so that rule catches none of them — the entry understated the residual risk in exactly the
+document a later reader would use to scope the follow-up. The class is stated correctly above and in
+the module header now.
+
+**Evidence**: 93 tests (up from 92), 93/93; full suite 1008 files / **14620 passed**; real tree
+exit 0; lint 0, typecheck 0, four CI-only gates 0. Two mutations, parse-checked: innermost→first
+visible reddens the miss fixture (1→0) and the false-positive fixture (0→1). Coverage differential
+against D28 with all 93 allowlist entries emptied: 282 pairs both sides, nothing lost.
