@@ -41,10 +41,10 @@
  *     own first argument, aliases and their chains, plain assignments,
  *     destructuring, parameter defaults, and a choice between clients.
  *
- * Treat this list as the current best enumeration, not a closed one: five
+ * Treat this list as the current best enumeration, not a closed one: six
  * successive external reviews each found a member missing from it, which is the
  * same class-derivation failure as the code defects above, committed in the
- * prose written to compensate for them. These are tracked as D16/D18–D22 in
+ * prose written to compensate for them. These are tracked as D16/D18–D23 in
  * the branch's deviation log. The rule this file aims at is "no predicate
  * decides a code question by surface form"; the list above is where it does not
  * hold yet, and it is written here rather than in a commit message because the
@@ -482,6 +482,47 @@ function callbackOf(call, bindingsFor) {
  * the site is REPORTED rather than scanned with an incomplete client set.
  */
 /**
+ * A literal member name: a string, or an untagged template with no
+ * substitutions. Used where the node sits in an INDEX position (`tx["model"]`),
+ * because an identifier there is a variable reference, not a name — `tx[model]`
+ * names whatever `model` holds, which this file cannot say.
+ */
+function literalMemberName(node) {
+  if (!node) return null;
+  switch (node.getKind()) {
+    case SyntaxKind.StringLiteral:
+    case SyntaxKind.NoSubstitutionTemplateLiteral:
+      return node.getLiteralValue();
+    case SyntaxKind.ParenthesizedExpression:
+      return literalMemberName(node.getExpression());
+    default:
+      return null;
+  }
+}
+
+/**
+ * The member name a node denotes in a NAME position — a destructuring property
+ * key, a property assignment. An identifier there IS the name, unlike in an
+ * index; a computed key reduces to its literal when it has one.
+ *
+ * The pair exists so every place a member name is read goes through one of
+ * them: the model receiver and the `$transaction` detector use the index form,
+ * destructuring uses this one. Teaching only one site about `tx["model"]` is
+ * what the previous escapes were.
+ */
+function staticMemberName(node) {
+  if (!node) return null;
+  switch (node.getKind()) {
+    case SyntaxKind.Identifier:
+      return node.getText();
+    case SyntaxKind.ComputedPropertyName:
+      return literalMemberName(node.getExpression());
+    default:
+      return literalMemberName(node);
+  }
+}
+
+/**
  * A structural key for the expression by which a value is named, or null when
  * it has no such name.
  *
@@ -510,10 +551,10 @@ function clientKey(expr) {
       return base === null ? null : `${base}.${expr.getNameNode().getText()}`;
     }
     case SyntaxKind.ElementAccessExpression: {
-      const arg = expr.getArgumentExpression();
-      if (arg?.getKind() !== SyntaxKind.StringLiteral) return null;
+      const member = literalMemberName(expr.getArgumentExpression());
+      if (member === null) return null;
       const base = clientKey(expr.getExpression());
-      return base === null ? null : `${base}.${arg.getLiteralValue()}`;
+      return base === null ? null : `${base}.${member}`;
     }
     case SyntaxKind.ParenthesizedExpression:
     case SyntaxKind.AsExpression:
@@ -572,8 +613,8 @@ function clientBindingsIn(fn, flow, clientArg) {
     node.getStart() >= fn.getStart() && node.getEnd() <= fn.getEnd();
 
   const addModel = (keyNode, line) => {
-    if (keyNode.getKind() !== SyntaxKind.Identifier) return false;
-    const model = keyNode.getText();
+    const model = staticMemberName(keyNode);
+    if (model === null) return false;
     if (model.startsWith("$")) return false;
     if (modelRefs.some((r) => r.model === model && r.line === line)) return false;
     modelRefs.push({ model, line });
@@ -643,8 +684,13 @@ function clientBindingsIn(fn, flow, clientArg) {
 
   for (const inner of fn.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = inner.getExpression();
-    if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
-    if (expr.getName() !== "$transaction") continue;
+    const member =
+      expr.getKind() === SyntaxKind.PropertyAccessExpression
+        ? expr.getNameNode().getText()
+        : expr.getKind() === SyntaxKind.ElementAccessExpression
+          ? literalMemberName(expr.getArgumentExpression())
+          : null;
+    if (member !== "$transaction") continue;
     for (const arg of inner.getArguments()) {
       if (!FN_KINDS.has(arg.getKind())) continue;
       takeParameter(arg.getParameters()[0]);
@@ -742,23 +788,26 @@ function modelRefsIn(node, clientNames) {
     ...node.getDescendantsOfKind(SyntaxKind.PropertyAccessExpression),
     ...node.getDescendantsOfKind(SyntaxKind.ElementAccessExpression),
   ];
+  const unresolved = [];
   for (const access of accesses) {
-    let model;
-    if (access.getKind() === SyntaxKind.PropertyAccessExpression) {
-      model = access.getName();
-    } else {
-      const arg = access.getArgumentExpression();
-      // A computed index names no model this gate can read; a client indexed by
-      // a variable is out of reach either way, so there is nothing to report.
-      if (arg?.getKind() !== SyntaxKind.StringLiteral) continue;
-      model = arg.getLiteralValue();
-    }
-    if (model.startsWith("$")) continue;
+    // Resolve the RECEIVER first. Dropping an unreadable index before knowing
+    // whose index it is discards exactly the case that matters: `tx[model]` on
+    // a bypassed client reaches some model, and which one is precisely what
+    // this gate cannot say — so it must say that, not stay silent.
     const recvKey = clientKey(access.getExpression());
     if (recvKey === null || !clientNames.has(recvKey)) continue;
+    const model =
+      access.getKind() === SyntaxKind.PropertyAccessExpression
+        ? access.getName()
+        : literalMemberName(access.getArgumentExpression());
+    if (model === null) {
+      unresolved.push({ line: access.getStartLineNumber(), text: access.getText() });
+      continue;
+    }
+    if (model.startsWith("$")) continue;
     refs.push({ model, line: access.getStartLineNumber() });
   }
-  return refs;
+  return { refs, unresolved };
 }
 
 
@@ -792,6 +841,7 @@ const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
 const unresolvedClients = [];
+const unresolvedModels = [];
 const f3UnusedTxViolations = [];
 
 // "Examined nothing" must not be spelled like "found nothing" at the corpus
@@ -919,7 +969,14 @@ for (const file of sourceFiles) {
     // `<client>.<model>` reached through any identifier that carries the client.
     for (const ref of modelRefs) report(ref);
     for (const node of scanNodes) {
-      for (const ref of modelRefsIn(node, clients)) report(ref);
+      const { refs, unresolved } = modelRefsIn(node, clients);
+      for (const ref of refs) report(ref);
+      for (const u of unresolved) {
+        const key = `?:${u.line}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unresolvedModels.push({ file, line: u.line, text: u.text });
+      }
     }
   }
 }
@@ -1012,6 +1069,24 @@ if (txLessViolations.length > 0) {
 // A callback the gate cannot resolve to a function in this file means its
 // shape and its model access were examined by nothing. Named rather than
 // skipped, for the same reason as the parse failures below.
+if (unresolvedModels.length > 0) {
+  failed = true;
+  console.error("");
+  console.error(
+    "a bypassed client is indexed by a name this gate cannot resolve, so which",
+  );
+  console.error(
+    "model it reaches is unknown and the allowlist could not be applied to it.",
+  );
+  console.error(
+    "Use `<client>.<model>` (or a literal index) so the model is readable:",
+  );
+  console.error("");
+  for (const { file, line, text } of unresolvedModels) {
+    console.error(`  ${file}:${line}  ${text}`);
+  }
+}
+
 if (unresolvedClients.length > 0) {
   failed = true;
   console.error("");

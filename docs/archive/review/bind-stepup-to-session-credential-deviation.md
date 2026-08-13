@@ -687,3 +687,34 @@ element-access scan off (1→0), destructuring-assignment unpack off (1→0), an
 held at 0 under the element-access mutation. Coverage differential with all 93 allowlist entries
 emptied: 279 pairs both sides, nothing lost. Runtime compared **interleaved** with the previous
 commit, per D21: 1.02–1.11 s against 1.03–1.06 s — indistinguishable.
+
+## D23 — Static member names, read the same way everywhere, and a fail-loud for the ones that aren't
+
+**What changed**: two reducers replace the ad-hoc name reads — `literalMemberName` for INDEX
+positions (`tx["model"]`) and `staticMemberName` for NAME positions (a destructuring key) — and both
+are used at every site that reads a member name: the model receiver, the `$transaction` detector, and
+destructuring in its declaration and assignment forms. A bypassed client indexed by a name the gate
+cannot resolve is now **reported** instead of skipped.
+
+**Why**: D22 taught `tx["model"]` to the model receiver only. A sixth review found the three sites
+that had not been told: a template-literal index, a string destructuring key (both forms), and a
+bracket-spelled nested `$transaction` whose inner client was therefore lost. And one worse:
+`tx[model]` was **dropped before checking whose index it was**. A bypassed client indexed by anything
+reaches some model, and which one is exactly what this file cannot say — so it must say that. Real
+tree: zero element accesses on a client inside a bypass callback, so the new report costs nothing.
+
+**A wrong answer caught before shipping, and made a test.** The first attempt used one reducer for
+both positions. An identifier in a NAME position is the name; in an INDEX position it is a variable.
+So `tx[model]` reported a model literally called `model` — a confident wrong answer where the honest
+one is "unknown", and it would have satisfied a naive `expect(code).toBe(1)`. The test now asserts
+both `cannot resolve` and NOT `prisma.model`, and the reducers are split with the reason in their
+docs.
+
+**Evidence**: 69 tests (up from 64), 69/69; full suite 1008 files / 14596 passed; real tree exit 0;
+lint 0, typecheck 0, four CI-only gates 0. Six single-clause mutations: unresolved-model report off
+(1→0), template literal not static (message flips to the unresolved report), property-name reducer
+narrowed to identifiers (1→0), `$transaction` bracket spelling off (1→0), the allow-side fixture held
+at 0 under that narrowing, and index-position accepting identifiers (reports `prisma.model` instead
+of `tx[model]` — the phantom-answer mutation). Coverage differential with all 93 allowlist entries
+emptied: 279 pairs both sides, nothing lost. Runtime interleaved per D21: 1.03–1.08 s against
+1.05–1.14 s — indistinguishable.

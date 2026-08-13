@@ -835,6 +835,89 @@ export async function drain() {
     expect(stdout).toContain("check-bypass-rls: OK");
   });
 
+  it("reports a bypassed client indexed by a name it cannot resolve", () => {
+    // `tx[model]` reaches SOME model and the gate cannot say which, so it must
+    // say that. Dropping an unreadable index before checking whose index it is
+    // discarded exactly this case. Note what it must NOT do: an identifier in
+    // an index position is a variable, not a name — a first attempt reported a
+    // model literally called "model", which is a confident wrong answer where
+    // the honest one is "unknown".
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const model = "tenantMember" as const;
+    return tx[model].findMany();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("cannot resolve");
+    expect(stderr).toContain("tx[model]");
+    expect(stderr).not.toContain("prisma.model");
+  });
+
+  it("reads a model indexed by an untagged template literal", () => {
+    // `` tx[`tenantMember`] `` is a static name in a third spelling.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => tx[\`tenantMember\`].findMany(), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("catches a delegate destructured under a string key", () => {
+    // `{ "tenantMember": tm }` renames through a string, in both the assignment
+    // and the declaration form — the property-name reducer has to accept it.
+    for (const source of [
+      `let tm;
+    ({ "tenantMember": tm } = tx);
+    return tm.findMany();`,
+      `const { "tenantMember": tm } = tx;
+    return tm.findMany();`,
+    ]) {
+      const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    ${source}
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+      expect(code).toBe(1);
+      expect(stderr).toContain("prisma.tenantMember");
+    }
+  });
+
+  it("inherits the client through a bracket-spelled nested $transaction", () => {
+    // `tx["$transaction"]` is `tx.$transaction`. Recognising only the dotted
+    // form loses the inner callback's client.
+    const { code, stderr } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) =>
+    tx["$transaction"](async (inner) => inner.tenantMember.findMany()), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("prisma.tenantMember");
+  });
+
+  it("passes every static member spelling when it stays within the allowlist", () => {
+    // The allow side for all four above at once: string-key destructuring, a
+    // template index, and a bracket-spelled nested transaction.
+    const { code, stdout } = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function drain() {
+  return withBypassRls(prisma, async (tx) => {
+    const { "auditOutbox": ao } = tx;
+    await tx[\`auditOutbox\`].findMany();
+    return tx["$transaction"](async (inner) => inner.auditOutbox.count()) && ao.count();
+  }, BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("ignores an index computed from a variable", () => {
     // A client indexed by a non-literal names no model this gate can read, and
     // `row[key]` on a query result must not be invented as one.
