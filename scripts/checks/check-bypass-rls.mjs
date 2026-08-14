@@ -53,10 +53,13 @@
  *         chosen first and then checked, so an unprovable one yields null
  *         rather than falling back to an outer declaration and analysing the
  *         wrong object.
- *     Each of these RESOLVES a callee and then maps it wrongly or incompletely,
- *     so a fail-closed rule keyed on "callee unresolved" would not catch any of
- *     them. Closing the class means reporting any client propagation whose
- *     callee, argument position, `this` and spread mapping cannot all be proven.
+ *     Some of these resolve a callee and then map it wrongly — `this` and the
+ *     spread, where the function is known and the binding is not. Others are
+ *     never resolved at all: an imported callee, and an unprovable receiver,
+ *     which yields null by design. So a fail-closed rule keyed on either half
+ *     alone leaves the other open. Closing the class means reporting any client
+ *     propagation whose callee, argument position, `this` and spread mapping
+ *     cannot ALL be proven.
  *
  *     Everything else decidable from the tree IS followed — see
  *     clientBindingsIn: the helper's own first argument, aliases and their

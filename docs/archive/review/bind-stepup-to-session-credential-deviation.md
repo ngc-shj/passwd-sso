@@ -892,9 +892,9 @@ for JavaScript, and the set of ways a value can reach a call is not enumerable b
 round adds recognised shapes to an infinite space, which is why the next round always has one more.
 
 **Corrected by D29 — this paragraph understated the residual class.** "Whose callee cannot be
-resolved" is only half of it: three shapes RESOLVE a callee and then map it wrongly, so that rule
-catches none of them (a shadowed object literal, fixed in D29; `this` via `query.call(tx)`; a spread
-before the client). The class to close is **any client propagation whose callee, argument position,
+resolved" is only half of it: two shapes resolve a callee and then map it wrongly (`this` via
+`query.call(tx)`, and a spread before the client), while an imported callee and an unprovable
+receiver are never resolved at all — so a rule keyed on either half alone leaves the other open. The class to close is **any client propagation whose callee, argument position,
 `this` and spread mapping cannot all be proven**.
 
 The measurement, for the unresolved-callee half: with the gate inverted to **fail-closed** — report
@@ -939,10 +939,13 @@ directions are now tests, and both are mutation-proven.
   `db` is missed entirely.
 
 **And the correction that matters most.** D28 said the fail-closed inversion should report calls
-"whose callee cannot be resolved". All three shapes above RESOLVE their callee and then map it
-wrongly, so that rule catches none of them — the entry understated the residual risk in exactly the
-document a later reader would use to scope the follow-up. The class is stated correctly above and in
-the module header now.
+"whose callee cannot be resolved". Two of the shapes above resolve their callee and then map it
+wrongly (`this`, and a spread before the client), so that rule catches neither — the entry
+understated the residual risk in exactly the document a later reader would use to scope the
+follow-up. (The third, the unprovable object receiver, was still mis-resolving when this entry was
+written; D30 made it return null, which moves it to the other half of the class. A rule keyed on
+either half alone leaves the other open.) The class is stated correctly above and in the module
+header now.
 
 **Evidence**: 93 tests (up from 92), 93/93; full suite 1008 files / **14620 passed**; real tree
 exit 0; lint 0, typecheck 0, four CI-only gates 0. Two mutations, parse-checked: innermost→first

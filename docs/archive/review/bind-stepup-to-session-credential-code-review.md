@@ -827,9 +827,10 @@ shapes to an infinite space is why there was always one more.
 
 **Measured exit**: inverting the gate to fail-closed. The rule must be **any client propagation
 whose callee, argument position, `this` and spread mapping cannot all be proven** — not "the callee
-is unresolved", which an earlier draft of this section said and which is wrong: three known shapes
-resolve a callee and then map it incorrectly (`this` via `.call(tx)`, a spread before the client,
-and — until D29 — a shadowed object literal). The unresolved-callee half alone accounts for **38 call
+is unresolved", which an earlier draft of this section said and which is wrong: two known shapes
+resolve a callee and then map it incorrectly (`this` via `.call(tx)`, and a spread before the
+client), while an imported callee and an unprovable receiver are never resolved — a rule keyed on
+either half alone leaves the other open. The unresolved-callee half alone accounts for **38 call
 sites across 29 files** today, all imported helpers (`logAuditInTx`, `resolveTenantByClaim`,
 `collectAttachmentRefsByCreator`, …). It is its own piece of work: 38 review items plus a decision on
 allowlist granularity.
