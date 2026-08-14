@@ -48,6 +48,11 @@
  *       · a spread before the client (`query(...rest, tx)`) — the argument's
  *         real position depends on `rest.length`, so the syntactic index binds
  *         the wrong parameter.
+ *       · a receiver whose object this file cannot prove — `const helpers =
+ *         actual`, or a `let` reassigned after its initializer. The binding is
+ *         chosen first and then checked, so an unprovable one yields null
+ *         rather than falling back to an outer declaration and analysing the
+ *         wrong object.
  *     Each of these RESOLVES a callee and then maps it wrongly or incompletely,
  *     so a fail-closed rule keyed on "callee unresolved" would not catch any of
  *     them. Closing the class means reporting any client propagation whose
@@ -544,19 +549,20 @@ function calleeFunctionOf(call, bindingsFor) {
 
 /** The object literal a local `const` name is bound to, if any. */
 function resolveLocalObjectLiteral(name, at, bindingsFor) {
+  // Pick the binding FIRST, then ask what it holds. Filtering candidates to
+  // object literals before choosing dropped an inner `const helpers = actual`
+  // from candidacy — its initializer is an identifier — so the OUTER object
+  // won, which is the "analysed a different binding" defect one filter-order
+  // away from the one D29 fixed. There is no fallback to an outer declaration:
+  // a binding this file cannot prove holds an object literal returns null, and
+  // null is the D28 class (a propagation whose mapping is unproven), not a
+  // licence to analyse something else.
   const visible = (bindingsFor().get(name) ?? []).filter((decl) => {
-    if (decl.getKind() !== SyntaxKind.VariableDeclaration) return false;
-    if (unwrapExpression(decl.getInitializer())?.getKind() !== SyntaxKind.ObjectLiteralExpression) {
-      return false;
-    }
     const scope = scopeOf(decl);
     return scope && scope.getStart() <= at.getStart() && at.getEnd() <= scope.getEnd();
   });
   if (visible.length === 0) return null;
-  // Innermost wins, exactly as in resolveLocalFunction — taking the first
-  // visible declaration analysed the OUTER object when a local one shadowed it,
-  // which both missed the shadowing object's models and reported the shadowed
-  // one's. The same rule was fixed for functions and not for their sibling here.
+
   let best = visible[0];
   let span = scopeOf(best).getEnd() - scopeOf(best).getStart();
   for (const candidate of visible.slice(1)) {
@@ -567,7 +573,13 @@ function resolveLocalObjectLiteral(name, at, bindingsFor) {
       best = candidate;
     }
   }
-  return unwrapExpression(best.getInitializer());
+
+  if (best.getKind() !== SyntaxKind.VariableDeclaration) return null;
+  // `let`/`var` can hold a different object by the time the call runs, so only
+  // a `const` initializer answers what this name holds.
+  if (best.getVariableStatement?.()?.getDeclarationKind() !== "const") return null;
+  const init = unwrapExpression(best.getInitializer());
+  return init?.getKind() === SyntaxKind.ObjectLiteralExpression ? init : null;
 }
 
 function callbackOf(call, bindingsFor) {

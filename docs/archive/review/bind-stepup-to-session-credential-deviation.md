@@ -948,3 +948,37 @@ the module header now.
 exit 0; lint 0, typecheck 0, four CI-only gates 0. Two mutations, parse-checked: innermost→first
 visible reddens the miss fixture (1→0) and the false-positive fixture (0→1). Coverage differential
 against D28 with all 93 allowlist entries emptied: 282 pairs both sides, nothing lost.
+
+## D30 — Choose the binding, then ask what it holds
+
+**What changed**: `resolveLocalObjectLiteral` selects the innermost visible binding **before**
+testing what it is, and requires a `const` declaration whose initializer is an object literal. A
+binding that fails either test returns null with **no fallback to an outer declaration**.
+
+**Why**: D29 fixed the innermost rule but left the candidate filter ahead of the selection, so a
+declaration that shadows without being an object literal was dropped from candidacy and the outer
+object was analysed anyway. Both directions were wrong, and one of them was a false positive:
+
+| | before | now |
+|---|---|---|
+| inner `const helpers = actual` → forbidden model, outer allowed | exit 0 | exit 0 (unproven, D28 class) |
+| inner `const helpers = actual` → allowed model, outer forbidden | **exit 1 (false positive)** | exit 0 |
+| `let helpers = …` reassigned to a forbidden object | exit 0 | exit 0 (unproven) |
+| `let helpers = …` reassigned to an allowed object | **exit 1 (false positive)** | exit 0 |
+
+The `let` cases were unchecked entirely — the initializer was analysed however the binding was
+later reassigned.
+
+**What null buys**: not detection. These calls are now the D28 class — a propagation whose mapping
+this file cannot prove — which is what the follow-up fail-closed rule is defined over. The change
+that matters is that the gate stopped giving a **wrong** answer where it could not give a right one;
+the miss direction is declared, the false-positive direction is fixed and tested.
+
+This is the third time the same ordering defect appeared in a sibling of a function already fixed
+(`resolveLocalFunction` had the right order throughout). The module header now lists the unprovable
+object receiver alongside `this` and spread, so the class is enumerated rather than discovered again.
+
+**Evidence**: 94 tests (up from 93), 94/94; full suite 1008 files / **14621 passed**; real tree
+exit 0; lint 0, typecheck 0, four CI-only gates 0. Two mutations, parse-checked, both in the
+false-positive direction (0→1): restoring the filter-before-select order, and dropping the `const`
+check. Coverage differential with all 93 allowlist entries emptied: 282 pairs, unchanged.

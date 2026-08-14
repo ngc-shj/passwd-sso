@@ -1017,6 +1017,40 @@ export async function drain() {
     expect(stderr).toContain("prisma.tenantMember");
   });
 
+  it("refuses an object binding it cannot prove, rather than analysing another one", () => {
+    // Choosing the binding must come BEFORE asking what it holds. Filtering
+    // candidates to object literals first dropped an inner `const helpers =
+    // actual` — its initializer is an identifier — so the OUTER object was
+    // analysed: a wrong answer in both directions. Same for a `let` reassigned
+    // after its initializer.
+    //
+    // The fix returns null for a binding this file cannot prove. That is not
+    // detection — these calls are the D28 class, "a propagation whose mapping
+    // is unproven" — but it is the difference between saying nothing and saying
+    // something false, and it is the false-positive direction that is asserted
+    // here because that is what a wrong answer looks like from outside.
+    const aliasedShadow = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+const helpers = { query: (db) => db.tenantMember.findMany() };
+const actual = { query: (db) => db.auditOutbox.findMany() };
+export function drain() {
+  const helpers = actual;
+  return withBypassRls(prisma, (tx) => helpers.query(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(aliasedShadow.code).toBe(0);
+    expect(aliasedShadow.stdout).toContain("check-bypass-rls: OK");
+
+    const reassigned = run("src/lib/audit/audit-outbox.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export function drain() {
+  let helpers = { query: (db) => db.tenantMember.findMany() };
+  helpers = { query: (db) => db.auditOutbox.findMany() };
+  return withBypassRls(prisma, (tx) => helpers.query(tx), BYPASS_PURPOSE.AUDIT);
+}`);
+    expect(reassigned.code).toBe(0);
+    expect(reassigned.stdout).toContain("check-bypass-rls: OK");
+  });
+
   it("resolves the innermost object literal when a local one shadows a module one", () => {
     // The sibling of the function-shadowing rule, and it was fixed for
     // functions only. Taking the first visible declaration analysed the OUTER
