@@ -51,7 +51,12 @@ export async function evaluateStepUpFreshness(
     async (tx) =>
       tx.session.findUnique({
         where: { sessionToken: sessionTokenDigest },
-        select: { provider: true, createdAt: true, passkeyVerifiedAt: true },
+        select: {
+          provider: true,
+          createdAt: true,
+          passkeyVerifiedAt: true,
+          authCredentialId: true,
+        },
       }),
     BYPASS_PURPOSE.AUTH_FLOW,
   );
@@ -59,6 +64,10 @@ export async function evaluateStepUpFreshness(
   if (!sessionRow) return STEP_UP_FRESHNESS.INVALID;
 
   if (sessionRow.provider === "webauthn") {
+    // C5 member 0: an unbound session (legacy row, or the bound credential
+    // was deleted) can never move to fresh via the ceremony — stale, not
+    // invalid, so the caller offers sign-in-again rather than a 401 (FR4).
+    if (sessionRow.authCredentialId === null) return STEP_UP_FRESHNESS.STALE;
     // A live webauthn session with no verification timestamp is stale (needs
     // a ceremony), NOT invalid — matches the pre-refactor 403 semantics.
     if (!sessionRow.passkeyVerifiedAt) return STEP_UP_FRESHNESS.STALE;
@@ -76,9 +85,10 @@ export async function evaluateStepUpFreshness(
 
 /**
  * Whether a stale session can be recovered with an in-place passkey ceremony
- * (webauthn-established session AND the user still has at least one
- * registered credential — credentials may have been deleted after sign-in).
- * Non-recoverable sessions fall back to sign-out + fresh sign-in.
+ * (webauthn-established session AND its bound credential row still exists —
+ * "the account has some credential" is the wrong question; C5 member 1
+ * replaces that test rather than augmenting it). Non-recoverable sessions
+ * fall back to sign-out + fresh sign-in.
  */
 export async function canRecoverSessionWithPasskey(
   sessionToken: string,
@@ -90,15 +100,22 @@ export async function canRecoverSessionWithPasskey(
       const row = await tx.session.findUnique({
         // H4: raw cookie token → digest keyed row.
         where: { sessionToken: hashSessionToken(sessionToken) },
-        select: { provider: true, userId: true },
+        select: { provider: true, userId: true, authCredentialId: true },
       });
       // Bind the two parameters: a caller passing a userId that does not own
-      // this session must not learn whether that user has credentials.
-      if (row?.provider !== "webauthn" || row.userId !== userId) return false;
-      const credentialCount = await tx.webAuthnCredential.count({
-        where: { userId },
+      // this session must not learn whether its binding is still live.
+      if (
+        row?.provider !== "webauthn" ||
+        row.userId !== userId ||
+        row.authCredentialId === null
+      ) {
+        return false;
+      }
+      const boundCredential = await tx.webAuthnCredential.findFirst({
+        where: { id: row.authCredentialId, userId },
+        select: { id: true },
       });
-      return credentialCount > 0;
+      return boundCredential !== null;
     },
     BYPASS_PURPOSE.AUTH_FLOW,
   );

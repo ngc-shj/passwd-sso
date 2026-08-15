@@ -2,8 +2,10 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 interface InlineReauthDialogProps {
   open: boolean;
@@ -95,6 +97,23 @@ export function useInlineReauth<T = void>(
     try {
       const result = await reauthenticateWithPasskey();
       if (!result.ok) {
+        // Neither code can ever be resolved by retrying the ceremony (no
+        // binding, the bound credential is gone, or the wrong key was
+        // presented) — staying in this dialog would strand the user, so
+        // route them to a fresh sign-in instead.
+        if (
+          result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE ||
+          result.error === API_ERROR.PASSKEY_REAUTH_CREDENTIAL_MISMATCH
+        ) {
+          toast.error(
+            result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE
+              ? tAuth("reauthUnavailable")
+              : tAuth("reauthCredentialMismatch"),
+          );
+          setReauthOpen(false);
+          setRecentSessionOpen(true);
+          return;
+        }
         setReauthError(
           result.error === "AUTHENTICATION_CANCELLED"
             ? tAuth("reauthCancelled")

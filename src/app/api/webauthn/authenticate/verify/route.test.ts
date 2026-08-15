@@ -8,7 +8,7 @@ const {
   mockRateLimiterCheck,
   mockCreateRateLimiter,
   mockWithUserTenantRls,
-  mockVerifyAuthenticationAssertion,
+  mockVerifyAssertionAnyCredential,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
   return {
@@ -18,7 +18,7 @@ const {
     // back to the failClosedOnRedisError option it was constructed with.
     mockCreateRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
     mockWithUserTenantRls: vi.fn(),
-    mockVerifyAuthenticationAssertion: vi.fn(),
+    mockVerifyAssertionAnyCredential: vi.fn(),
   };
 });
 
@@ -38,7 +38,7 @@ vi.mock("@/lib/tenant-context", () => ({
 
 vi.mock("@/lib/auth/webauthn/webauthn-server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth/webauthn/webauthn-server")>()),
-  verifyAuthenticationAssertion: mockVerifyAuthenticationAssertion,
+  verifyAssertionAnyCredential: mockVerifyAssertionAnyCredential,
 }));
 
 vi.mock("@/lib/http/with-request-log", () => ({
@@ -123,7 +123,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
     const { status, json: body } = await parseResponse(res);
     expect(status).toBe(401);
     expect(body.error).toBe("UNAUTHORIZED");
-    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+    expect(mockVerifyAssertionAnyCredential).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {
@@ -131,7 +131,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
     const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
     const { status } = await parseResponse(res);
     expect(status).toBe(429);
-    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+    expect(mockVerifyAssertionAnyCredential).not.toHaveBeenCalled();
   });
 
   it("returns 400 for invalid body (missing response field)", async () => {
@@ -139,18 +139,18 @@ describe("POST /api/webauthn/authenticate/verify", () => {
     const { status, json: body } = await parseResponse(res);
     expect(status).toBe(400);
     expect(body.error).toBe("VALIDATION_ERROR");
-    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+    expect(mockVerifyAssertionAnyCredential).not.toHaveBeenCalled();
   });
 
-  it("delegates assertion verification to verifyAuthenticationAssertion with sign-in challenge key", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue(successResult(false));
+  it("delegates assertion verification to verifyAssertionAnyCredential with sign-in challenge key", async () => {
+    mockVerifyAssertionAnyCredential.mockResolvedValue(successResult(false));
     await POST(createRequest("POST", ROUTE_URL, { body: validBody, headers: { "user-agent": "Test/1.0" } }));
-    expect(mockVerifyAuthenticationAssertion).toHaveBeenCalledWith(
+    expect(mockVerifyAssertionAnyCredential).toHaveBeenCalledWith(
       expect.anything(), // prisma instance
       "user-1",
       validBody.response,
       `webauthn:challenge:authenticate:user-1:${CHALLENGE_ID}`,
-      "Test/1.0",
+      { userAgent: "Test/1.0" },
     );
     // The route MUST run the helper inside withUserTenantRls so RLS context covers
     // the credential lookup and counter CAS — see helper's caller obligations.
@@ -158,7 +158,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
   });
 
   it("propagates helper failure status + code (e.g., 404 NOT_FOUND)", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue({
+    mockVerifyAssertionAnyCredential.mockResolvedValue({
       ok: false,
       status: 404,
       code: "NOT_FOUND",
@@ -172,7 +172,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
   });
 
   it("propagates helper 503 (e.g., Redis unavailable)", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue({
+    mockVerifyAssertionAnyCredential.mockResolvedValue({
       ok: false,
       status: 503,
       code: "SERVICE_UNAVAILABLE",
@@ -184,7 +184,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
   });
 
   it("falls back to VALIDATION_ERROR when helper code is unknown", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue({
+    mockVerifyAssertionAnyCredential.mockResolvedValue({
       ok: false,
       status: 400,
       code: "SOME_UNKNOWN_CODE",
@@ -196,7 +196,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
   });
 
   it("returns { verified: true, credentialId } on success without PRF", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue(successResult(false));
+    mockVerifyAssertionAnyCredential.mockResolvedValue(successResult(false));
     const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
     const { status, json: body } = await parseResponse(res);
     expect(status).toBe(200);
@@ -206,7 +206,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
   });
 
   it("returns PRF data when credential has PRF fields", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue(successResult(true));
+    mockVerifyAssertionAnyCredential.mockResolvedValue(successResult(true));
     const res = await POST(createRequest("POST", ROUTE_URL, { body: validBody }));
     const { status, json: body } = await parseResponse(res);
     expect(status).toBe(200);
@@ -221,7 +221,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
   it("fails closed (503, no mutation) when Redis is unavailable", async () => {
     const req = createRequest("POST", ROUTE_URL, { body: validBody });
 
-    // verifyAuthenticationAssertion is the assertion-verify/session write
+    // verifyAssertionAnyCredential is the assertion-verify/session write
     // primitive for this route (it performs the credential lookup + counter
     // CAS write internally; the route itself holds no DB mock of its own —
     // see vi.mock("@/lib/prisma", () => ({ prisma: {} })) above).
@@ -229,7 +229,7 @@ describe("POST /api/webauthn/authenticate/verify", () => {
       invoke: () => POST(req),
       limiter: rateLimiterInstance,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockVerifyAuthenticationAssertion],
+      assertNoMutation: [mockVerifyAssertionAnyCredential],
       limiterFactory: rateLimiterFactorySnapshot.replay(),
       failure: { allowed: false, redisErrored: true },
     });

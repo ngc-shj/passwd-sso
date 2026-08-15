@@ -3,10 +3,10 @@ import { NextRequest } from "next/server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const { mockSessionFindUnique, mockCredentialCount, mockWithBypassRls } =
+const { mockSessionFindUnique, mockCredentialFindFirst, mockWithBypassRls } =
   vi.hoisted(() => ({
     mockSessionFindUnique: vi.fn(),
-    mockCredentialCount: vi.fn(),
+    mockCredentialFindFirst: vi.fn(),
     mockWithBypassRls: vi.fn(),
   }));
 
@@ -16,7 +16,7 @@ vi.mock("@/lib/prisma", () => ({
       findUnique: mockSessionFindUnique,
     },
     webAuthnCredential: {
-      count: mockCredentialCount,
+      findFirst: mockCredentialFindFirst,
     },
   },
 }));
@@ -62,6 +62,7 @@ describe("evaluateStepUpFreshness", () => {
       provider: "webauthn",
       createdAt: minutesAgo(120),
       passkeyVerifiedAt: minutesAgo(5),
+      authCredentialId: "cred-row-1",
     });
 
     // Load-bearing security case: fresh passkeyVerifiedAt + OLD createdAt is
@@ -74,6 +75,7 @@ describe("evaluateStepUpFreshness", () => {
       provider: "webauthn",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: minutesAgo(20),
+      authCredentialId: "cred-row-1",
     });
 
     await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
@@ -84,8 +86,22 @@ describe("evaluateStepUpFreshness", () => {
       provider: "webauthn",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: null,
+      authCredentialId: "cred-row-1",
     });
 
+    await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
+  });
+
+  it("C5 member 0: maps webauthn with NULL authCredentialId to stale, even with a fresh timestamp", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      provider: "webauthn",
+      createdAt: minutesAgo(120),
+      passkeyVerifiedAt: minutesAgo(5),
+      authCredentialId: null,
+    });
+
+    // The criterion the previous revision could not fail (finding M4):
+    // nulling ONLY the binding on an otherwise-fresh row must flip the verdict.
     await expect(evaluateStepUpFreshness("sess-1")).resolves.toBe("stale");
   });
 
@@ -136,6 +152,7 @@ describe("evaluateStepUpFreshness", () => {
       provider: "webauthn",
       createdAt: minutesAgo(120),
       passkeyVerifiedAt: minutesAgo(20),
+      authCredentialId: "cred-row-1",
     });
 
     await expect(
@@ -191,6 +208,7 @@ describe("requireRecentCurrentAuthMethod", () => {
       provider: "webauthn",
       createdAt: minutesAgo(5),
       passkeyVerifiedAt: minutesAgo(20),
+      authCredentialId: "cred-row-1",
     });
 
     const result = await requireRecentCurrentAuthMethod(makeRequest(), {
@@ -204,53 +222,76 @@ describe("requireRecentCurrentAuthMethod", () => {
 });
 
 describe("canRecoverSessionWithPasskey", () => {
-  it("returns true for a webauthn session with at least one credential", async () => {
+  it("returns true for a webauthn session whose bound credential row still exists", async () => {
     mockSessionFindUnique.mockResolvedValue({
       provider: "webauthn",
       userId: "user-1",
+      authCredentialId: "cred-row-1",
     });
-    mockCredentialCount.mockResolvedValue(2);
+    mockCredentialFindFirst.mockResolvedValue({ id: "cred-row-1" });
 
     await expect(
       canRecoverSessionWithPasskey("sess-1", "user-1"),
     ).resolves.toBe(true);
+    expect(mockCredentialFindFirst).toHaveBeenCalledWith({
+      where: { id: "cred-row-1", userId: "user-1" },
+      select: { id: true },
+    });
   });
 
-  it("returns false for a webauthn session whose credentials were all deleted", async () => {
+  // C5 member 1: "the account has some credential" is the wrong question —
+  // the bound row specifically must still exist, even if the user has other
+  // registered credentials.
+  it("returns false when the bound credential row was deleted", async () => {
     mockSessionFindUnique.mockResolvedValue({
       provider: "webauthn",
       userId: "user-1",
+      authCredentialId: "cred-row-deleted",
     });
-    mockCredentialCount.mockResolvedValue(0);
+    mockCredentialFindFirst.mockResolvedValue(null);
 
     await expect(
       canRecoverSessionWithPasskey("sess-1", "user-1"),
     ).resolves.toBe(false);
+  });
+
+  it("returns false for an unbound webauthn session without querying credentials", async () => {
+    mockSessionFindUnique.mockResolvedValue({
+      provider: "webauthn",
+      userId: "user-1",
+      authCredentialId: null,
+    });
+
+    await expect(
+      canRecoverSessionWithPasskey("sess-1", "user-1"),
+    ).resolves.toBe(false);
+    expect(mockCredentialFindFirst).not.toHaveBeenCalled();
   });
 
   it("returns false when the session row belongs to a different user (parameter binding)", async () => {
     mockSessionFindUnique.mockResolvedValue({
       provider: "webauthn",
       userId: "someone-else",
+      authCredentialId: "cred-row-1",
     });
-    mockCredentialCount.mockResolvedValue(2);
 
     await expect(
       canRecoverSessionWithPasskey("sess-1", "user-1"),
     ).resolves.toBe(false);
-    expect(mockCredentialCount).not.toHaveBeenCalled();
+    expect(mockCredentialFindFirst).not.toHaveBeenCalled();
   });
 
-  it("returns false for a non-webauthn session without counting credentials", async () => {
+  it("returns false for a non-webauthn session without querying credentials", async () => {
     mockSessionFindUnique.mockResolvedValue({
       provider: "google",
       userId: "user-1",
+      authCredentialId: null,
     });
 
     await expect(
       canRecoverSessionWithPasskey("sess-1", "user-1"),
     ).resolves.toBe(false);
-    expect(mockCredentialCount).not.toHaveBeenCalled();
+    expect(mockCredentialFindFirst).not.toHaveBeenCalled();
   });
 
   it("returns false when the session row is missing", async () => {

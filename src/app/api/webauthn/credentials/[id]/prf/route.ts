@@ -12,7 +12,7 @@ import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { verifyAuthenticationAssertion } from "@/lib/auth/webauthn/webauthn-server";
+import { verifyAssertionAnyCredential } from "@/lib/auth/webauthn/webauthn-server";
 import {
   hexIv,
   hexAuthTag,
@@ -63,7 +63,7 @@ const rebootstrapSchema = z.object({
  *   - keyVersion CAS (S4): the UPDATE rejects when user.keyVersion has moved
  *     since the wrapping was derived, preventing a stale rebootstrap from
  *     committing across a concurrent rotation.
- *   - Counter rollback (S-N4): verifyAuthenticationAssertion runs the counter
+ *   - Counter rollback (S-N4): verifyAssertionAnyCredential runs the counter
  *     CAS on the supplied tx, so it rolls back atomically with the keyVersion
  *     check when the latter rejects. Without this, a captured assertion
  *     replayed against this endpoint could commit the counter advance even
@@ -127,12 +127,12 @@ async function handlePOST(
         // Step-up auth + counter CAS. Helper reads challenge from the
         // PRF-dedicated Redis key, performs verifyAuthentication, and runs the
         // counter CAS on this tx so it rolls back if any subsequent step fails.
-        const verifyResult = await verifyAuthenticationAssertion(
+        const verifyResult = await verifyAssertionAnyCredential(
           tx,
           userId,
           body.assertionResponse as unknown as AuthenticationResponseJSON,
           `webauthn:challenge:prf-rebootstrap:${userId}`,
-          request.headers.get("user-agent"),
+          { userAgent: request.headers.get("user-agent") },
         );
 
         if (!verifyResult.ok) {

@@ -12,7 +12,7 @@ const {
   mockTxUserFindUnique,
   mockTxCredentialUpdate,
   mockWithUserTenantRls,
-  mockVerifyAuthenticationAssertion,
+  mockVerifyAssertionAnyCredential,
   mockLogAuditAsync,
 } = vi.hoisted(() => {
   const mockRateLimiterCheck = vi.fn();
@@ -28,7 +28,7 @@ const {
     mockTxUserFindUnique: vi.fn(),
     mockTxCredentialUpdate: vi.fn(),
     mockWithUserTenantRls: vi.fn(),
-    mockVerifyAuthenticationAssertion: vi.fn(),
+    mockVerifyAssertionAnyCredential: vi.fn(),
     mockLogAuditAsync: vi.fn(),
   };
 });
@@ -53,7 +53,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
-  verifyAuthenticationAssertion: mockVerifyAuthenticationAssertion,
+  verifyAssertionAnyCredential: mockVerifyAssertionAnyCredential,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAuditAsync,
@@ -103,7 +103,7 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
     mockTxExecuteRaw.mockResolvedValue(undefined);
     mockTxUserFindUnique.mockResolvedValue({ keyVersion: 5 });
     mockTxCredentialUpdate.mockResolvedValue({});
-    mockVerifyAuthenticationAssertion.mockResolvedValue({
+    mockVerifyAssertionAnyCredential.mockResolvedValue({
       ok: true,
       credentialId: "credential-id-base64url",
       storedPrf: { encryptedSecretKey: null, iv: null, authTag: null },
@@ -114,14 +114,14 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(createRequest("POST", URL, { body: validBody }), params);
     expect(res.status).toBe(401);
-    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+    expect(mockVerifyAssertionAnyCredential).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await POST(createRequest("POST", URL, { body: validBody }), params);
     expect(res.status).toBe(429);
-    expect(mockVerifyAuthenticationAssertion).not.toHaveBeenCalled();
+    expect(mockVerifyAssertionAnyCredential).not.toHaveBeenCalled();
   });
 
   it("fails closed (503, no mutation) when Redis is unavailable", async () => {
@@ -147,7 +147,7 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
   });
 
   it("returns 400 when assertion verification fails", async () => {
-    mockVerifyAuthenticationAssertion.mockResolvedValue({
+    mockVerifyAssertionAnyCredential.mockResolvedValue({
       ok: false,
       status: 400,
       code: "VALIDATION_ERROR",
@@ -168,7 +168,7 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
   it("returns 403 when asserted credentialId differs from URL [id]'s credential", async () => {
     // Owned credential is "cred-A", but the assertion was for "cred-B".
     mockPrismaCredentialFindFirst.mockResolvedValue({ credentialId: "cred-A" });
-    mockVerifyAuthenticationAssertion.mockResolvedValue({
+    mockVerifyAssertionAnyCredential.mockResolvedValue({
       ok: true,
       credentialId: "cred-B",
       storedPrf: { encryptedSecretKey: null, iv: null, authTag: null },
@@ -226,14 +226,14 @@ describe("POST /api/webauthn/credentials/[id]/prf", () => {
     );
   });
 
-  it("calls verifyAuthenticationAssertion with the DEDICATED PRF challenge key (#433/S-N1)", async () => {
+  it("calls verifyAssertionAnyCredential with the DEDICATED PRF challenge key (#433/S-N1)", async () => {
     await POST(createRequest("POST", URL, { body: validBody }), params);
-    expect(mockVerifyAuthenticationAssertion).toHaveBeenCalledWith(
+    expect(mockVerifyAssertionAnyCredential).toHaveBeenCalledWith(
       txMock, // tx, NOT prisma — counter CAS rolls back with this tx
       "user-1",
       validBody.assertionResponse,
       "webauthn:challenge:prf-rebootstrap:user-1",
-      null, // no user-agent in test request
+      { userAgent: null }, // no user-agent in test request
     );
   });
 

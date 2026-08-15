@@ -3,13 +3,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
-  mockCanUsePasskeyRecovery: vi.fn(),
-  mockReauthenticateWithPasskey: vi.fn(),
-}));
+const { mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey, mockToastError } =
+  vi.hoisted(() => ({
+    mockCanUsePasskeyRecovery: vi.fn(),
+    mockReauthenticateWithPasskey: vi.fn(),
+    mockToastError: vi.fn(),
+  }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: mockToastError },
 }));
 
 vi.mock("@/lib/auth/webauthn/can-use-passkey-recovery", () => ({
@@ -34,6 +40,10 @@ function Harness({ onSuccess }: { onSuccess: (arg: string) => Promise<void> }) {
       <button onClick={() => void reauth.reauthDialogProps.onAction()}>confirm</button>
       <button onClick={() => reauth.reauthDialogProps.onOpenChange(false)}>dismiss</button>
       <span data-testid="reauth-open">{String(reauth.reauthDialogProps.open)}</span>
+      <span data-testid="recent-session-open">
+        {String(reauth.recentSessionDialogProps.open)}
+      </span>
+      <span data-testid="reauth-error">{reauth.reauthDialogProps.errorMessage ?? ""}</span>
     </div>
   );
 }
@@ -95,5 +105,92 @@ describe("useInlineReauth retry argument", () => {
     });
     // onSuccess fires with the cleared arg (undefined), never the stale "target-A".
     expect(onSuccess).not.toHaveBeenCalledWith("target-A");
+  });
+});
+
+describe("useInlineReauth reauth failure mapping", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
+  });
+
+  async function openReauthDialog(onSuccess: (arg: string) => Promise<void>) {
+    render(<Harness onSuccess={onSuccess} />);
+    fireEvent.click(screen.getByText("trigger-A"));
+    await waitFor(() => {
+      expect(screen.getByTestId("reauth-open")).toHaveTextContent("true");
+    });
+  }
+
+  it("routes PASSKEY_REAUTH_UNAVAILABLE to the recent-session dialog", async () => {
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REAUTH_UNAVAILABLE",
+    });
+    const onSuccess = vi.fn(async () => {});
+    await openReauthDialog(onSuccess);
+
+    fireEvent.click(screen.getByText("confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reauth-open")).toHaveTextContent("false");
+    });
+    expect(screen.getByTestId("recent-session-open")).toHaveTextContent("true");
+    expect(mockToastError).toHaveBeenCalledWith("reauthUnavailable");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("routes PASSKEY_REAUTH_CREDENTIAL_MISMATCH to the recent-session dialog", async () => {
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REAUTH_CREDENTIAL_MISMATCH",
+    });
+    const onSuccess = vi.fn(async () => {});
+    await openReauthDialog(onSuccess);
+
+    fireEvent.click(screen.getByText("confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reauth-open")).toHaveTextContent("false");
+    });
+    expect(screen.getByTestId("recent-session-open")).toHaveTextContent("true");
+    expect(mockToastError).toHaveBeenCalledWith("reauthCredentialMismatch");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ceremony dialog open and shows reauthCancelled on cancellation", async () => {
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "AUTHENTICATION_CANCELLED",
+    });
+    const onSuccess = vi.fn(async () => {});
+    await openReauthDialog(onSuccess);
+
+    fireEvent.click(screen.getByText("confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reauth-error")).toHaveTextContent("reauthCancelled");
+    });
+    expect(screen.getByTestId("reauth-open")).toHaveTextContent("true");
+    expect(screen.getByTestId("recent-session-open")).toHaveTextContent("false");
+    expect(mockToastError).not.toHaveBeenCalled();
+  });
+
+  it("keeps the ceremony dialog open and shows reauthFailed on a generic failure", async () => {
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "PASSKEY_REAUTH_FAILED",
+    });
+    const onSuccess = vi.fn(async () => {});
+    await openReauthDialog(onSuccess);
+
+    fireEvent.click(screen.getByText("confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reauth-error")).toHaveTextContent("reauthFailed");
+    });
+    expect(screen.getByTestId("reauth-open")).toHaveTextContent("true");
+    expect(screen.getByTestId("recent-session-open")).toHaveTextContent("false");
+    expect(mockToastError).not.toHaveBeenCalled();
   });
 });

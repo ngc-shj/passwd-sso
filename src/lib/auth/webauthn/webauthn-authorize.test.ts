@@ -143,6 +143,7 @@ describe("authorizeWebAuthn", () => {
       id: "user-1",
       email: "test@example.com",
       name: "Test User",
+      credentialRowId: "cred-uuid-1",
     });
     // T4 (v11 shape regression guard): verify the WebAuthnCredential
     // passed to verifyAuthentication has v11 shape — string `id` (base64url),
@@ -307,6 +308,7 @@ describe("authorizeWebAuthn", () => {
       id: "user-1",
       email: "test@example.com",
       name: null,
+      credentialRowId: "cred-uuid-1",
     });
   });
 
@@ -317,6 +319,7 @@ describe("authorizeWebAuthn", () => {
       id: "user-1",
       email: "test@example.com",
       name: "Test User",
+      credentialRowId: "cred-uuid-1",
       prf: {
         prfEncryptedSecretKey: "encrypted-key-hex",
         prfSecretKeyIv: "iv-hex",

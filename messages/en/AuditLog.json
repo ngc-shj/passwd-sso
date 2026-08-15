@@ -20,6 +20,8 @@
   "AUTH_LOGIN_FAILURE": "Sign-in failed",
   "AUTH_LOGOUT": "Logged out",
   "AUTH_PASSKEY_REAUTH": "Passkey re-verified for sensitive action",
+  "AUTH_PASSKEY_REAUTH_CREDENTIAL_MISMATCH": "Passkey re-verification denied: wrong credential",
+  "AUTH_PASSKEY_REAUTH_UNAVAILABLE": "Passkey re-verification unavailable for this session",
   "ENTRY_CREATE": "Created entry",
   "ENTRY_IMPORT": "Import executed",
   "ENTRY_BULK_IMPORT": "Bulk imported entries",

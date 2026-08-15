@@ -24,6 +24,15 @@ export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB
 export const USER_AGENT_MAX_LENGTH = 512;      // matches @db.VarChar(512)
 export const MAX_JSON_BODY_BYTES = 1_048_576;  // 1 MB default stream cap for parseBody
+// Bound for WebAuthn credential ids recorded in audit metadata (e.g. the
+// step-up reauth mismatch/unavailable events). Deliberately NOT
+// USER_AGENT_MAX_LENGTH: that constant is a @db.VarChar(512) column width,
+// this is an audit-metadata budget — same number today, different concept,
+// and reusing one for the other would make them drift silently.
+export const AUDIT_CREDENTIAL_ID_MAX_LENGTH = 512;
+// base64url (RFC 4648 §5), no padding. One-or-more: an empty string is not a
+// credential id, and `*` would let one through the charset check.
+export const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 
 // ─── Rate Limits ─────────────────────────────────────────────
 export const CSP_REPORT_RATE_MAX = 60;

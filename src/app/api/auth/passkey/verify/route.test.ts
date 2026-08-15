@@ -162,6 +162,7 @@ const mockUser = {
   id: "user-1",
   email: "test@example.com",
   name: "Test User",
+  credentialRowId: "cred-uuid-1",
 };
 
 // ── Setup ────────────────────────────────────────────────────
@@ -264,6 +265,7 @@ describe("POST /api/auth/passkey/verify", () => {
         tenantId: "tenant-1",
         expires: expect.any(Date),
         passkeyVerifiedAt: expect.any(Date),
+        authCredentialId: "cred-uuid-1",
       }),
     });
 

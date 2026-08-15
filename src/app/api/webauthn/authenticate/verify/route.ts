@@ -10,7 +10,7 @@ import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
-  verifyAuthenticationAssertion,
+  verifyAssertionAnyCredential,
   CHALLENGE_ID_RE,
 } from "@/lib/auth/webauthn/webauthn-server";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -52,12 +52,12 @@ async function handlePOST(req: NextRequest) {
   const { response, challengeId } = result.data;
 
   const verifyResult = await withUserTenantRls(userId, async () =>
-    verifyAuthenticationAssertion(
+    verifyAssertionAnyCredential(
       prisma,
       userId,
       response as unknown as AuthenticationResponseJSON,
       `webauthn:challenge:authenticate:${userId}:${challengeId}`,
-      req.headers.get("user-agent"),
+      { userAgent: req.headers.get("user-agent") },
     ),
   );
 
