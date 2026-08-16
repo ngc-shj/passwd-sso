@@ -176,6 +176,9 @@
     "invalidEntry": "このエントリを読み取れませんでした。古い形式で保存されている可能性があります。",
     "originMismatch": "この認証情報は別のサイト用です。メニューを開いてからページが変わった可能性があります。",
     "unknownOrigin": "このページを確認できなかったため、入力を中止しました。",
-    "autofillInjectFailed": "このページでは自動入力を実行できませんでした。"
+    "autofillInjectFailed": "このページでは自動入力を実行できませんでした。",
+    "copyTotpFailed": "TOTP コードをコピーできませんでした。",
+    "unlockFailed": "保管庫をアンロックできませんでした。",
+    "noToken": "未接続です。先に passwd-sso にサインインしてください。"
   }
 }

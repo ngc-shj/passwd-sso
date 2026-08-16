@@ -22,6 +22,9 @@ const ERROR_KEY_MAP: Record<string, string> = {
   FILL_FAILED: "errors.autofillFailed",
   NO_CARD_NUMBER: "errors.noCardNumber",
   AUTOFILL_INJECT_FAILED: "errors.autofillInjectFailed",
+  COPY_TOTP_FAILED: "errors.copyTotpFailed",
+  UNLOCK_FAILED: "errors.unlockFailed",
+  NO_TOKEN: "errors.noToken",
 };
 
 export function humanizeError(code: string): string {
