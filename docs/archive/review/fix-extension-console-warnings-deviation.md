@@ -145,38 +145,6 @@ root suite is not green on `main` today, so this PR neither improves nor worsens
 signal. **Mitigation**: recorded here with the reproducing command so the next reader
 does not attribute them to this branch.
 
-## Verification summary
-
-| Gate | Result |
-|---|---|
-| `tsc --noEmit` (extension) | pass |
-| `vitest run` (extension) | **59 files / 953 tests pass** (was 940 — 13 added) |
-| `npm run build` (extension, incl. C3 gate) | pass — "3 HTML file(s) scanned, no modulepreload links" |
-| `eslint -c eslint.extension.config.mjs` | pass |
-| `npm run lint` (root) | pass |
-| `npx next build` (root) | pass |
-| `npx vitest run` (root) | 16 pre-existing failures, verified against base commit |
-| Contract conformance (6 forbidden patterns) | all clean |
-
-### Prove-red executed (each mutation on a scratch copy, production never mutated)
-
-| # | Mutation | Result |
-|---|---|---|
-| M1 | generation guard always returns true | 1 test reddens |
-| M2 | `disableContextMenu` no longer cancels the debounce | 1 test reddens |
-| M3 | `doUpdateMenu` skips `isContextMenuEnabled` | 1 test reddens |
-| M4 | drop the `enforceSenderHost` pass-through | 7 tests redden |
-| M5 | bind to `tab.url` instead of `frameUrl` | 7 tests redden |
-| M6 | unresolvable host falls through instead of denying | 2 tests redden |
-| M7 | discard the `{ok,error}` result | 1 test reddens |
-| C3-a | `modulePreload: true` | gate exits 1 |
-| C3-b | `dist/` deleted | gate exits 1 |
-| C3-c | `dist/` present, zero HTML files | gate exits 1 |
-| C3-d | injected throw in the walk | gate exits 1 |
-
-Restored state after every mutation: 32/32 green.
-
-
 ## D7 — Phase 3 findings addressed (T2, T4, T5)
 
 **T2 (Major) — `classifyLastError` had no test.** It is the mechanism AD1's
@@ -219,32 +187,105 @@ plan clause with the evidence.
 
 **T3 (Major) — deferred, see below.**
 
-## Anti-Deferral: T3 (C5 layer-2 tests) — deferred to a follow-up
+## T3 — C5 layer-2 tests: IMPLEMENTED (was deferred, now closed)
 
-**Finding**: AC5.1/AC5.2/AC5.4 specify tests in `background.test.ts` driving
-`handleContextMenuClick` through the **real** `performAutofillForEntry`, so the six-positional-
-parameter adapter at `index.ts:717` is covered by something other than a stub. They were not
-written. The C5 tests in `context-menu.test.ts` assert against `deps.performAutofill`, which is
-a stub, and would stay green if `frameId` and `enforceSenderHost` were transposed at that call
-site.
+Initially recorded as an Anti-Deferral entry on fixture-cost grounds. Reconsidered and
+built: the cost argument was real but the exposure it accepted — a silent argument
+transposition releasing a credential — is not the kind of thing to leave to a manual test.
 
-**Cost of doing it now**: `background.test.ts` boots the whole service worker
-(`await import("../background/index")`) with ~140 lines of chrome-API scaffolding, and the
-context-menu click path additionally needs a live vault key, a decryptable entry fixture, and a
-mocked `swFetch` — the fixture surface is a multiple of the assertion. It is a genuine gap, not
-a cheap one.
+**What was added** to `extension/src/__tests__/background.test.ts` (10 tests), driving the
+real `handleContextMenuClick` through the real `performAutofillForEntry` rather than a
+`ContextMenuDeps` stub:
 
-**Cost of deferring**: the adapter's argument order is currently correct (verified by reading,
-and by the Phase-3 security reviewer tracing the parameter path). A future edit that transposes
-two of the six positional arguments would not be caught by the unit suite. The type system helps
-— `enforceSenderHost` is `string | undefined` and `frameId` is `number | undefined`, so swapping
-*those two* is a compile error — but `teamId` and `enforceSenderHost` are both
-`string | undefined` and would transpose silently.
+- **Allow, pinned**: a matching frame host produces exactly one `AUTOFILL_FILL`, asserted on
+  the payload (`username`) and the frame addressing (`{ frameId: 0 }`) — not `ok: true`.
+- **Deny, three shapes**: a cross-origin subframe click whose *top tab* matches the entry
+  (the vector Round-2 S6 identified); a tab navigated away from the entry host; and a click
+  where no URL yields a host. Each asserts the **absent** `AUTOFILL_FILL` mutation.
+- **AC5.4's five-row subdomain oracle**, expectations hand-written, never computed from
+  `isHostMatch`: `example.com`/`app.example.com` → fill; `app.example.com`/`example.com` →
+  refuse (the argument-order oracle); `notexample.com` → refuse;
+  `example.com.evil.com` → refuse; exact match → fill. Two allows, three denies, so an
+  always-deny implementation fails.
+- **C5 invariant 6's accepted residual, pinned as an explicit allow**: a CC entry still fills
+  on a navigated page, and does so **frame-scoped**. Written deliberately with *no* `frameId`,
+  because that is the only case where `sendFillMessage` and `sendSensitiveFillMessage` diverge
+  — with a frameId present both address the same frame and the test could not tell them apart.
 
-**Mitigation**: the type-level protection above covers the frameId/host pair. M4 (manual test)
-exercises the real path in a browser before merge. The remaining exposure is a
-teamId/enforceSenderHost transposition, which M4 would also surface (a team entry would fail to
-fill, or a fill would be refused on a matching host).
+**Harness change**: `chrome.contextMenus.onClicked.addListener` was a bare `vi.fn()`, so the
+click handler was uncapturable. It now pushes into `contextMenuClickHandlers`, matching the
+file's existing pattern for message/alarm/tab handlers. Menu IDs must be UUID-shaped
+(`parseMenuEntryId`), so these tests cannot reuse the content path's `pw-1` convention.
 
-**What would settle it**: the layer-2 tests as specified in AC5.1/AC5.2/AC5.4, in a follow-up
-that can also absorb the `background.test.ts` fixture cost for the other click-path cases.
+**Prove-red — the result that justifies the layer split.** Three mutations of the adapter at
+`index.ts`:
+
+| Mutation | `background.test.ts` | `context-menu.test.ts` (stub layer) |
+|---|---|---|
+| transpose `teamId` ↔ `enforceSenderHost` | **3 fail** | **34 pass — blind** |
+| drop the `enforceSenderHost` pass-through | **5 fail** | — |
+| drop the `frameId` pass-through | **1 fail** | — |
+
+The first row is the one that matters. Both parameters are `string | undefined`, so the type
+system cannot catch the swap, and the stub-layer suite stays entirely green while a credential
+would be released to an unverified host. That is precisely the hazard plan.md:392 named, and
+it is now caught.
+
+**Residual after this work**: none for the adapter. The CC/Identity origin residual (C5
+invariant 6) remains by design, now with its delivery bound under test.
+
+## Verification summary
+
+| Gate | Result |
+|---|---|
+| `tsc --noEmit` (extension) | pass |
+| `vitest run` (extension) | **60 files / 973 tests pass** (was 940 — 33 added) |
+| `npm run build` (extension, incl. C3 gate) | pass — "3 HTML file(s) scanned, no modulepreload links" |
+| `eslint -c eslint.extension.config.mjs` | pass |
+| `npm run lint` (root) | pass |
+| `npx next build` (root) | pass |
+| `npx vitest run` (root) | 16 pre-existing failures, verified against base commit |
+| Contract conformance (6 forbidden patterns) | all clean |
+
+### Prove-red executed (each mutation on a scratch copy, production never mutated)
+
+| # | Mutation | Result |
+|---|---|---|
+| M1 | generation guard always returns true | 1 test reddens |
+| M2 | `disableContextMenu` no longer cancels the debounce | 1 test reddens |
+| M3 | `doUpdateMenu` skips `isContextMenuEnabled` | 1 test reddens |
+| M4 | drop the `enforceSenderHost` pass-through | 7 tests redden |
+| M5 | bind to `tab.url` instead of `frameUrl` | 7 tests redden |
+| M6 | unresolvable host falls through instead of denying | 2 tests redden |
+| M7 | discard the `{ok,error}` result | 1 test reddens |
+| C3-a | `modulePreload: true` | gate exits 1 |
+| C3-b | `dist/` deleted | gate exits 1 |
+| C3-c | `dist/` present, zero HTML files | gate exits 1 |
+| C3-d | injected throw in the walk | gate exits 1 |
+| L1 | `classifyLastError` precedence swapped | 1 test reddens |
+| L2 | empty message treated as absent | 1 test reddens |
+| L3 | absent-error guard dropped | 2 tests redden |
+| L4 | duplicate-id literal altered | 3 tests redden |
+| W1 | `createMenuItem` discards `lastError` (NFR1 regression) | 1 test reddens |
+| F1 | old raw-`hostname` fixture restored | 1 test reddens |
+| P1 | **transpose `teamId` ↔ `enforceSenderHost`** | **3 layer-2 tests redden; stub layer 34/34 green** |
+| P2 | drop `enforceSenderHost` at the adapter | 5 layer-2 tests redden |
+| P3 | drop `frameId` at the adapter | 1 layer-2 test reddens |
+| R1 | route CC through the tab-wide sender | 1 test reddens |
+
+Restored to green after every mutation. **P1 is the load-bearing one**: both parameters are
+`string | undefined`, so the type checker cannot see the swap, and the stub-layer suite stays
+fully green while a credential would be released to an unverified host.
+
+### Mutations that did NOT redden — recorded, not hidden
+
+| Mutation | Result | Disposition |
+|---|---|---|
+| `serializeMenuTask` → `return task()` | all green | D3a — serialization is redundant with the generation token for this defect; kept as defence in depth, claim corrected |
+| drop the stored handle's `.catch()` | all green | either rejection safeguard alone keeps the chain moving; annotated on the test |
+| `then(task, task)` → `then(task)` | all green | same — only removing **both** reddens `does not wedge the chain` |
+
+Three tests were drafted and **deleted** rather than shipped after mutation showed they could
+not fail: a contiguity oracle, a second non-wedge test, and an earlier CC residual test that
+supplied a `frameId` (which makes the two senders indistinguishable). An assertion that cannot
+fail is worse than a missing one, because it reads as coverage.

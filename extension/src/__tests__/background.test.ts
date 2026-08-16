@@ -66,6 +66,9 @@ let storageChangeHandlers: Array<
 let commandHandlers: Array<(command: string) => void | Promise<void>> = [];
 let tabActivatedHandlers: Array<(activeInfo: { tabId: number; windowId: number }) => void> = [];
 let tabUpdatedHandlers: Array<(tabId: number, changeInfo: { status?: string }, tab: { id?: number; url?: string }) => void> = [];
+let contextMenuClickHandlers: Array<
+  (info: Record<string, unknown>, tab: Record<string, unknown> | undefined) => void
+> = [];
 
 function installChromeMock() {
   messageHandlers = [];
@@ -74,6 +77,7 @@ function installChromeMock() {
   commandHandlers = [];
   tabActivatedHandlers = [];
   tabUpdatedHandlers = [];
+  contextMenuClickHandlers = [];
 
   const chromeMock = {
     runtime: {
@@ -129,7 +133,13 @@ function installChromeMock() {
     contextMenus: {
       create: vi.fn((_props: unknown, cb?: () => void) => cb?.()),
       removeAll: vi.fn((cb?: () => void) => cb?.()),
-      onClicked: { addListener: vi.fn() },
+      onClicked: {
+        addListener: (
+          fn: (info: Record<string, unknown>, tab: Record<string, unknown> | undefined) => void,
+        ) => {
+          contextMenuClickHandlers.push(fn);
+        },
+      },
     },
     permissions: {
       contains: vi.fn().mockResolvedValue(true),
@@ -1177,6 +1187,188 @@ describe("background message flow", () => {
       (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
     );
     expect(fillCall).toBeUndefined();
+  });
+
+  // ── C5 layer 2: context-menu clicks reach the real origin gate ──
+  //
+  // The context-menu suite asserts against a ContextMenuDeps stub, which cannot
+  // observe the fill mutation and would stay green if the adapter transposed two
+  // of performAutofillForEntry's six positional arguments. These drive the real
+  // click handler through the real guard, so the wiring itself is under test.
+
+  const clickMenuItem = async (
+    info: Record<string, unknown>,
+    tab: Record<string, unknown> | undefined = { id: 1 },
+  ) => {
+    const handler = contextMenuClickHandlers[0];
+    expect(typeof handler).toBe("function");
+    handler(info, tab);
+    // The handler is void-returning and fires the fill without awaiting it.
+    await new Promise((r) => setTimeout(r, 30));
+  };
+
+  // parseMenuEntryId only accepts a UUID-shaped suffix, so the menu id cannot
+  // reuse the content path's "pw-1" convention. The fetch stub matches any id.
+  const MENU_ENTRY_UUID = "a0000000-0000-0000-0000-000000000001";
+
+  const fillMessages = () =>
+    (chromeMock?.tabs.sendMessage.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_FILL",
+    );
+
+  it("releases the password when the clicked frame host matches the entry", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    await clickMenuItem({
+      menuItemId: `psso-login-${MENU_ENTRY_UUID}`,
+      frameUrl: "https://example.com/login",
+      frameId: 0,
+    });
+
+    // Allow side, pinned: the payload and the frame addressing, not `ok: true`.
+    // Without this a fix that always denies would satisfy every deny test below.
+    const calls = fillMessages();
+    expect(calls.length).toBe(1);
+    expect(calls[0][1]).toEqual(
+      expect.objectContaining({ type: "AUTOFILL_FILL", username: "alice" }),
+    );
+    expect(calls[0][2]).toEqual({ frameId: 0 });
+  });
+
+  it("refuses the password when the clicked frame is a cross-origin subframe", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // The top tab matches the entry; the clicked frame does not. Binding to the
+    // tab would release here, which is the defect this contract exists to close.
+    await clickMenuItem(
+      {
+        menuItemId: `psso-login-${MENU_ENTRY_UUID}`,
+        frameUrl: "https://attacker.example/iframe",
+        pageUrl: "https://example.com/login",
+        frameId: 9,
+      },
+      { id: 1, url: "https://example.com/login" },
+    );
+
+    expect(fillMessages()).toEqual([]);
+  });
+
+  it("refuses the password when the tab navigated away from the entry host", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    await clickMenuItem(
+      { menuItemId: `psso-login-${MENU_ENTRY_UUID}`, pageUrl: "https://elsewhere.example/x" },
+      { id: 1, url: "https://elsewhere.example/x" },
+    );
+
+    expect(fillMessages()).toEqual([]);
+  });
+
+  it("refuses the password when no click URL yields a host", async () => {
+    stubLoginFetch({ username: "alice", urlHost: "example.com" });
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    await clickMenuItem({ menuItemId: `psso-login-${MENU_ENTRY_UUID}` }, { id: 1 });
+
+    expect(fillMessages()).toEqual([]);
+  });
+
+  // AC5.4 — the subdomain oracle. Expected values are hand-written, never
+  // computed from isHostMatch: comparing the predicate against itself is an
+  // identity that holds for any implementation, including a broken one.
+  // isHostMatch is asymmetric (t.endsWith("." + e)), so argument order is
+  // load-bearing and row 2 is what detects a transposition.
+  const subdomainOracle: Array<{ entry: string; frame: string; fills: boolean }> = [
+    { entry: "example.com", frame: "app.example.com", fills: true },
+    { entry: "app.example.com", frame: "example.com", fills: false },
+    { entry: "example.com", frame: "notexample.com", fills: false },
+    { entry: "example.com", frame: "example.com.evil.com", fills: false },
+    { entry: "example.com", frame: "example.com", fills: true },
+  ];
+
+  for (const { entry, frame, fills } of subdomainOracle) {
+    it(`${fills ? "fills" : "refuses"} for entry ${entry} clicked on ${frame}`, async () => {
+      stubLoginFetch({ username: "alice", urlHost: entry });
+      applyToken("t", Date.now() + 60_000, "");
+      await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+      await clickMenuItem({
+        menuItemId: `psso-login-${MENU_ENTRY_UUID}`,
+        frameUrl: `https://${frame}/login`,
+        frameId: 0,
+      });
+
+      expect(fillMessages().length).toBe(fills ? 1 : 0);
+    });
+  }
+
+  it("still fills a CREDIT_CARD on a navigated page, top-frame only (accepted residual)", async () => {
+    // C5 invariant 6, pinned as an explicit ALLOW rather than left implied.
+    // CC/Identity entries carry no host by design, so the origin gate — which is
+    // scoped to LOGIN — cannot adjudicate them, and a stale item stays fillable
+    // after the tab navigates. What BOUNDS that residual is the delivery path:
+    // sendSensitiveFillMessage pins { frameId: frameId ?? 0 }, so the card never
+    // broadcasts tab-wide. If a future change routes CC through sendFillMessage,
+    // this test is what fails.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(PASSWORD_BY_ID_PREFIX)) {
+          return {
+            ok: true,
+            json: async () => ({
+              id: "cc-1",
+              encryptedBlob: { ciphertext: "aa", iv: "bb", authTag: "cc" },
+              encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+              entryType: EXT_ENTRY_TYPE.CREDIT_CARD,
+              aadVersion: 1,
+            }),
+          };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    applyToken("t", Date.now() + 60_000, "");
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    cryptoMocks.decryptData.mockResolvedValue(
+      JSON.stringify({ title: "Card", cardNumber: "4111111111111111", cvv: "123" }),
+    );
+
+    // Deliberately NO frameId: this is the case where the two senders diverge.
+    // sendFillMessage would broadcast tab-wide; sendSensitiveFillMessage pins
+    // frameId 0. With a frameId present both behave alike, so a test that
+    // supplied one could not tell them apart.
+    await clickMenuItem({
+      menuItemId: `psso-cc-${MENU_ENTRY_UUID}`,
+      pageUrl: "https://unrelated.example/checkout",
+    });
+
+    const ccCalls = (chromeMock?.tabs.sendMessage.mock.calls ?? []).filter(
+      (c: unknown[]) => (c[1] as { type?: string })?.type === "AUTOFILL_CC_FILL",
+    );
+    expect(ccCalls.length).toBe(1);
+    // The bound: frame-scoped, never a tab-wide broadcast.
+    expect(ccCalls[0][2]).toEqual({ frameId: 0 });
   });
 
   it("rejects a LOGIN fill when the entry overview has no host at all (fail closed)", async () => {
