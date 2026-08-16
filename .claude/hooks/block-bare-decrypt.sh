@@ -1,30 +1,46 @@
 #!/usr/bin/env bash
-# Pre-tool-use hook for Bash tool: blocks bare `passwd-sso decrypt` commands
-# that would expose credentials in Claude's conversation context.
+# Pre-tool-use hook for the Bash tool: refuses vault decrypt commands, whose
+# stdout is captured into Claude's conversation context.
 #
-# Allowed patterns:
-#   - Inside subshell: ( _CRED=$(...decrypt...) && ... )
-#   - Piped: ...decrypt... | curl ...
-#   - Variable assignment inside subshell: $(...decrypt...)
+# Deny by default. There is no "safe shape" of decrypt-via-Bash to allow: where a
+# process's stdout ends up depends on redirections, the pipeline's last stage,
+# command substitution and the surrounding shell — none of which can be
+# recovered by matching the command string. An earlier version allowed a leading
+# "(" or a "|" after the subcommand, and both a bare subshell and a pipe into
+# `cat` satisfied those checks while printing the credential to stdout.
 #
-# Blocked patterns:
-#   - Bare execution: passwd-sso decrypt ... (stdout visible to Claude)
-#   - Echo after decrypt: PASS=$(...decrypt...); echo $PASS
+# The two failure modes this must not have, both of which it did have:
+#   - allowing on a heuristic that proves nothing. Fixed by removing the
+#     heuristics, not by refining them: a wrong "allowed" is read as
+#     "checked and safe".
+#   - allowing because the guard could not evaluate its own input or matcher.
+#     Both now route to a refusal.
+#
+# Credential use goes through the /use-credential skill instead, which consumes
+# the value without routing it through a shell whose output is transcribed.
 
 set -euo pipefail
 
 # Read tool input from stdin
 INPUT=$(cat)
 
-# Extract the command from the Bash tool input
-COMMAND=$(echo "$INPUT" | python3 -c "
+# Extract the command from the Bash tool input.
+#
+# Parse failure is NOT "no command". Swallowing a JSON error into an empty
+# string made every malformed payload — `{bad json`, a missing tool_input, a
+# non-string command — take the "not a decrypt command" path and exit 0. A guard
+# that cannot read its input has not cleared the input; it has failed to look.
+COMMAND=$(printf '%s' "$INPUT" | python3 -c "
 import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(data.get('tool_input', {}).get('command', ''))
-except:
-    print('')
-" 2>/dev/null)
+data = json.load(sys.stdin)                      # raises on malformed JSON
+cmd = data.get('tool_input', {}).get('command')
+if not isinstance(cmd, str):                     # missing, null, or non-string
+    raise SystemExit(3)
+print(cmd)
+" 2>/dev/null) || {
+  echo '{"error": "BLOCKED: credential guard could not read tool_input.command (malformed JSON, missing key, or non-string value). Refusing rather than allowing."}' >&2
+  exit 2
+}
 
 # Patterns are POSIX ERE, not PCRE. `grep -P` does not exist on BSD grep, which
 # is what macOS ships: it exits 2, and `! grep -qP ...` turned that failure into
@@ -53,22 +69,25 @@ if ! matches 'passwd-sso[[:space:]]+decrypt\b|index\.ts[[:space:]]+decrypt\b'; t
   exit 0
 fi
 
-# Block if the command is not wrapped in a safe pattern
-# Safe patterns: starts with '(' (subshell) or has pipe '|' after decrypt
-if matches '^[[:space:]]*\('; then
-  # Subshell — check it doesn't echo/print the credential
-  if matches 'echo[[:space:]]+.*\$_CRED|printf.*\$_CRED|cat.*\$_CRED'; then
-    echo '{"error": "BLOCKED: Do not echo/print credential variables. Use the /use-credential skill instead."}' >&2
-    exit 2
-  fi
-  exit 0
-fi
-
-if matches 'decrypt.*\|'; then
-  # Piped to another command — OK
-  exit 0
-fi
-
-# Not a safe pattern — block
-echo '{"error": "BLOCKED: passwd-sso decrypt must be wrapped in a subshell to prevent credential exposure. Use the /use-credential skill instead."}' >&2
+# It is a decrypt command: refuse.
+#
+# This used to allow two "safe" shapes — a leading `(` (subshell) or a `|` after
+# `decrypt`. Neither proves anything about where the plaintext ends up, and both
+# are trivially satisfied by a command that dumps it straight to stdout:
+#
+#   (passwd-sso decrypt item)        <- subshell, output still goes to stdout
+#   passwd-sso decrypt item | cat    <- piped, `cat` writes it to stdout
+#
+# Both were accepted by the old heuristics and both put the credential in the
+# transcript. A regex over shell text cannot decide where a process's stdout
+# lands: that depends on redirections, the pipeline's last stage, command
+# substitution, and the surrounding shell — none of which are recoverable from
+# the string. Deciding it wrongly is worse than not deciding, because a guard
+# that says "allowed" is read as "checked and safe".
+#
+# So the answer is not a better pattern; it is to stop adjudicating. Every
+# Bash-issued decrypt is refused, and credential use goes through the
+# /use-credential skill, which consumes the value without routing it through a
+# shell whose output is captured into the conversation.
+echo '{"error": "BLOCKED: passwd-sso decrypt must not run via the Bash tool — its stdout is captured into the conversation. A subshell or a pipe does not change that. Use the /use-credential skill, which consumes the credential without exposing it."}' >&2
 exit 2

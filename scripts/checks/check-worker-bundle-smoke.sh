@@ -66,6 +66,23 @@ fi
 # opening a connection.
 FAKE_DB_URL="postgresql://app:app@127.0.0.1:5432/passwd_sso"
 
+# `timeout` is GNU coreutils and is NOT present on stock macOS; Homebrew installs
+# it as `gtimeout` (and as `timeout` when coreutils is linked). Resolve it, and
+# refuse if neither exists rather than letting the boot run unbounded — or, worse,
+# letting a missing binary surface as exit 127, which this gate would report as
+# "the shipped artifact does not boot". A missing tool is a gate that could not
+# run, not a failing subject.
+TIMEOUT_BIN=""
+for candidate in timeout gtimeout; do
+  if command -v "$candidate" >/dev/null 2>&1; then TIMEOUT_BIN="$candidate"; break; fi
+done
+if [ -z "$TIMEOUT_BIN" ]; then
+  echo "ERROR: neither 'timeout' nor 'gtimeout' is on PATH."
+  echo "This gate bounds each worker boot so a hang cannot stall the run."
+  echo "Install GNU coreutils (macOS: brew install coreutils) and re-run."
+  exit 1
+fi
+
 fail=0
 for raw in "${ESBUILD_CMDS[@]}"; do
   # Normalise whitespace and strip the leading `npx ` so we invoke the repo-local
@@ -104,7 +121,7 @@ for raw in "${ESBUILD_CMDS[@]}"; do
   # COPYed alongside the bundle; NODE_PATH reproduces that reachability here.
   echo "  booting $(basename "$bundle") --validate-env-only"
   set +e
-  out="$(timeout 30 env \
+  out="$("$TIMEOUT_BIN" 30 env \
     NODE_ENV=production \
     NODE_PATH="$REPO_ROOT/node_modules" \
     RETENTION_GC_DATABASE_URL="$FAKE_DB_URL" \

@@ -234,7 +234,7 @@ printf "${BOLD}▸ Checking aria-label changes vs E2E selectors${RESET}\n"
 
 # Extract aria-label values used in E2E (from { name: "..." } or { name: /.../ })
 e2e_aria_names=$(grep -rohE 'name:[[:space:]]*["'"'"'/][^"'"'"'/]+["'"'"'/]' "$E2E_DIR/" \
-  | sed -E "s/name:\s*[\"'/]//; s/[\"'/]$//" \
+  | sed -E "s/name:[[:space:]]*[\"'/]//; s/[\"'/]$//" \
   | grep -v '|' \
   | sort -u || true)
 
@@ -335,7 +335,7 @@ printf "${BOLD}▸ Checking i18n value changes vs E2E regex selectors${RESET}\n"
 i18n_removed_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
   | grep -E '^\-\s*"[^"]+"\s*:\s*"' \
   | grep -v '^\-\-\-' \
-  | sed -E 's/^\-\s*"[^"]+"\s*:\s*"([^"]+)".*/\1/' \
+  | sed -E 's/^\-[[:space:]]*"[^"]+"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
   | sort -u || true)
 
 if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
