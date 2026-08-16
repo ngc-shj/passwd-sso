@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.73](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.72...passwd-sso-v0.4.73) (2026-08-15)
+
+
+### Features
+
+* **checks:** gate npm override floors that no longer bound their advisory band ([#761](https://github.com/ngc-shj/passwd-sso/issues/761)) ([57c33e2](https://github.com/ngc-shj/passwd-sso/commit/57c33e23850796302499511d1bff6daeb134afbf))
+* **ops:** take-only database backup for the self-hosted deployment ([#755](https://github.com/ngc-shj/passwd-sso/issues/755)) ([16a663c](https://github.com/ngc-shj/passwd-sso/commit/16a663c28ff86d5b2fd8f744a4f84f543753e12b))
+* **sso:** record tenant-claim routing changes in an append-only history ([#746](https://github.com/ngc-shj/passwd-sso/issues/746)) ([9e59ccd](https://github.com/ngc-shj/passwd-sso/commit/9e59ccda44b5e15e3d95eed56c25e6d8efbd4357))
+
+
+### Bug Fixes
+
+* **auth:** make an IdP claim change survivable, and give the lockout a recovery path ([#740](https://github.com/ngc-shj/passwd-sso/issues/740)) ([d8b74f7](https://github.com/ngc-shj/passwd-sso/commit/d8b74f7f7d118b7d4e2765ebf1b33dacfcc663de))
+* **security:** clear the container scan's HIGH findings (brace-expansion, ip-address) ([#759](https://github.com/ngc-shj/passwd-sso/issues/759)) ([e02efb4](https://github.com/ngc-shj/passwd-sso/commit/e02efb4a7ba72c02db7a1c736dab58f4df63fc7a))
+* **security:** close the 2026-07-31 review findings as classes ([#747](https://github.com/ngc-shj/passwd-sso/issues/747)) ([dd7f744](https://github.com/ngc-shj/passwd-sso/commit/dd7f744057c2ce45b6bc33e5aaa4eedd546e9d44))
+* **security:** close two audit-chain fail-opens and unbind the MCP revoke cascade ([#748](https://github.com/ngc-shj/passwd-sso/issues/748)) ([d50018f](https://github.com/ngc-shj/passwd-sso/commit/d50018f6174f92b9de99273080a60f551a325c37))
+* **security:** raise the nanoid override floor to 3.3.18 ([#769](https://github.com/ngc-shj/passwd-sso/issues/769)) ([7ce4a3a](https://github.com/ngc-shj/passwd-sso/commit/7ce4a3a8fecb16be5bfd4d1d0ed79464c344f453))
+* **security:** stop the audit-log immutability REVOKE being undone by role bootstrap ([#745](https://github.com/ngc-shj/passwd-sso/issues/745)) ([b59fbe4](https://github.com/ngc-shj/passwd-sso/commit/b59fbe4ec18199b2a5caf8b95db3827a2273870a))
+* unblock the next 16.3.0 lint rule and close the CodeQL shell-injection alerts ([#766](https://github.com/ngc-shj/passwd-sso/issues/766)) ([fe01618](https://github.com/ngc-shj/passwd-sso/commit/fe0161830a02ab551892bcaf70e970c70d7b6ecb))
+
 ## [0.4.72](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.71...passwd-sso-v0.4.72) (2026-07-29)
 
 
