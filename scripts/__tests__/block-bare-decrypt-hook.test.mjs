@@ -60,6 +60,25 @@ describe("block-bare-decrypt hook", () => {
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  curl -s -H "Authorization: Bearer \${_CRED}" https://example.test\n) 2>/dev/null`;
       expect(runHook(cmd)).toBe(ALLOW);
     });
+
+    it("allows the generic consuming-command variant (Pattern C)", () => {
+      const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID --field password)\n  some-tool --token "\${_CRED}"\n) 2>/dev/null`;
+      expect(runHook(cmd)).toBe(ALLOW);
+    });
+
+    // Patterns D and E do NOT use _CRED — they pipe straight into a clipboard
+    // sink. An earlier revision keyed the allow on "_CRED=$(" being present
+    // anywhere, so both were refused and the documented macOS/Linux clipboard
+    // flows could not run.
+    it("allows the macOS clipboard pattern (Pattern D)", () => {
+      const cmd = `(\n  ${CLI} ${SUB} ID --field password | pbcopy\n  echo "Copied to clipboard"\n) 2>/dev/null`;
+      expect(runHook(cmd)).toBe(ALLOW);
+    });
+
+    it("allows the Linux clipboard pattern (Pattern E)", () => {
+      const cmd = `(\n  ${CLI} ${SUB} ID --field password | xclip -selection clipboard\n  echo "Copied to clipboard"\n) 2>/dev/null`;
+      expect(runHook(cmd)).toBe(ALLOW);
+    });
   });
 
   describe("blocks shapes that put the credential on stdout", () => {
@@ -81,6 +100,24 @@ describe("block-bare-decrypt hook", () => {
     it("blocks a sanctioned subshell that echoes the credential", () => {
       const cmd = `(\n  _CRED=$(${CLI} ${SUB} ID)\n  echo $_CRED\n)`;
       expect(runHook(cmd)).toBe(BLOCK);
+    });
+
+    it("blocks a decoy _CRED that captures something else", () => {
+      // The allow must be anchored on the decrypt OCCURRENCE. Testing "starts
+      // with (" and "contains _CRED=$(" independently accepted this: the
+      // assignment captured `true` while the real decrypt ran bare beside it.
+      expect(runHook(`(_CRED=$(true); passwd-sso ${SUB} item)`)).toBe(BLOCK);
+    });
+
+    it("blocks a pipe into a sink that prints", () => {
+      // The clipboard allow is a closed set. `tee` writes to stdout, so it is
+      // not a consuming sink even though it looks like one.
+      expect(runHook(`${CLI} ${SUB} ID | tee /tmp/x`)).toBe(BLOCK);
+    });
+
+    it("blocks a pipe into an unknown command", () => {
+      // A decrypt piped into something this lint cannot vouch for.
+      expect(runHook(`${CLI} ${SUB} ID | some-unknown-tool`)).toBe(BLOCK);
     });
   });
 

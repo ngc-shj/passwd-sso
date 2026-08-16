@@ -75,30 +75,32 @@ if ! matches 'passwd-sso[[:space:]]+decrypt\b|index\.ts[[:space:]]+decrypt\b'; t
   exit 0
 fi
 
-# It looks like a decrypt command. Decide by the SHAPE the skill documents.
+# It looks like a decrypt command. Decide on the ONE property that matters:
+# is that command's stdout consumed, or does it reach the transcript?
 #
-# What this hook is: a lint against the common accident — running a decrypt whose
-# stdout lands in the transcript. What it is NOT: a security boundary. It matches
-# the pre-execution command STRING, and a shell string does not determine the
-# argv the process will see. All three of these reach the same program and this
-# matcher does not see any of them:
+# What this hook is: a lint against the common accident. What it is NOT: a
+# security boundary. It matches the pre-execution command STRING, and a shell
+# string does not determine the argv the process will see — a quoted, split, or
+# variable-passed subcommand reaches the same program unseen. Closing that needs
+# the decrypt to stop being a Bash command at all: a tool or MCP surface that
+# consumes the credential and never returns plaintext to the model.
 #
-#   <cli> \'"'"'<sub>\'"'"' item          quoted subcommand
-#   <cli> <su>"<b>" item        split across quotes
-#   s=<sub>; <cli> "$s" item    variable expansion
+# The check is anchored on the decrypt OCCURRENCE, not on unrelated features of
+# the line. Two independent tests ("starts with (" AND "contains _CRED=$(")
+# accepted a decoy:
 #
-# Closing that gap needs the decrypt to stop being a Bash command at all — a
-# dedicated tool or MCP surface that consumes the credential and never returns
-# plaintext to the model. Until then this catches the accident, not the evasion,
-# and it should not be read as more than that.
+#   (_CRED=$(true); <cli> <sub> item)
 #
-# The allowed shape is the one .claude/skills/use-credential/SKILL.md specifies:
-# assignment to _CRED inside a subshell, so the value is consumed by the command
-# that needs it and never printed. An earlier revision of this hook refused that
-# shape too, which broke the workflow its own error message recommends.
-if matches '_CRED=\$\(' && matches '^[[:space:]]*\('; then
-  # Inside the sanctioned subshell. Still refuse if it prints the credential —
-  # that is the accident the skill's own rules forbid.
+# — the assignment captured something else entirely while the real decrypt ran
+# bare. Requiring the decrypt itself to sit inside the capture, or inside a pipe
+# into a consuming sink, is what makes the allow mean anything.
+DECRYPT_RE='(passwd-sso|index\.ts)[[:space:]]+decrypt\b'
+
+# Shape 1 — captured: _CRED=$( ... decrypt ... ). The value lands in a variable
+# and is consumed in place. This is /use-credential Patterns A, B and C.
+if matches "_CRED=\\\$\\([^)]*${DECRYPT_RE}"; then
+  # Still refuse if the captured value is then printed — the accident the
+  # skill's own rules forbid.
   if matches 'echo[[:space:]]+[^|]*\$_CRED|printf[^|]*\$_CRED|cat[^|]*\$_CRED'; then
     echo '{"error": "BLOCKED: do not echo/print the credential variable. Pass $_CRED directly to the command that consumes it."}' >&2
     exit 2
@@ -106,5 +108,13 @@ if matches '_CRED=\$\(' && matches '^[[:space:]]*\('; then
   exit 0
 fi
 
-echo '{"error": "BLOCKED: a vault decrypt run this way puts its stdout in the conversation. Use the /use-credential skill pattern: assign to _CRED inside a subshell and pass it straight to the consuming command."}' >&2
+# Shape 2 — piped into a sink that consumes without printing. This is
+# /use-credential Patterns D and E (clipboard). The sink list is deliberately a
+# closed set: `| cat`, `| tee`, `| head` all print, and a decrypt piped into an
+# unknown command is not something this lint can vouch for.
+if matches "${DECRYPT_RE}[^|]*\\|[[:space:]]*(pbcopy|xclip|xsel|wl-copy)\\b"; then
+  exit 0
+fi
+
+echo '{"error": "BLOCKED: this decrypt puts its stdout in the conversation. Use a /use-credential pattern: capture it with _CRED=$(...) and pass $_CRED to the consuming command, or pipe it straight into a clipboard sink (pbcopy/xclip/xsel/wl-copy)."}' >&2
 exit 2

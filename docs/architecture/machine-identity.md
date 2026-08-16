@@ -290,7 +290,7 @@ sequenceDiagram
 | Human (Delegation UI) | Decides which entries to allow, for how long | Full vault access | — |
 | Server (DelegationSession) | Answers "is this request authorized?" | Metadata + entryIds allowlist | Vault key, plaintext passwords |
 | Agent daemon (CLI) | Decrypts when authorized | Vault key in memory | Authorization decisions |
-| AI (Claude Code) | Uses credentials via Skill/hook | Metadata + operation results | Plaintext passwords |
+| AI (Claude Code) | Uses credentials via Skill/hook | Metadata + operation results | Plaintext passwords *(by convention — see the caveat below; not enforced against the AI itself)* |
 
 #### Credential Usage Flow (Claude Code)
 
@@ -300,14 +300,38 @@ sequenceDiagram
 4. `passwd-sso decrypt --mcp-client mcpc_xxx` → connects to agent daemon via Unix socket
 5. Agent checks authorization with server (`GET /api/vault/delegation/check?clientId=mcpc_xxx&entryId=...`)
 6. If authorized: agent fetches encrypted blob → decrypts locally with vault key + AAD
-7. Credential is consumed in pipe (e.g., `| curl --config -`) → **never appears in Claude's context**
+7. Credential is consumed in pipe (e.g., `| curl --config -`) → does not appear in Claude's context **when the documented pattern is followed**
 8. Claude sees only the operation result (e.g., "HTTP 200")
+
+> **What this flow does and does not guarantee.** Steps 1-6 are enforced
+> server-side and by the agent daemon: the authorization decision, the entryId
+> allowlist, and the vault key's confinement to the daemon are real boundaries,
+> and no prompt talks its way past them.
+>
+> Step 7 is not in that category. It holds because the caller follows the
+> `/use-credential` pattern, and the `block-bare-decrypt` hook is a **lint that
+> catches the common accident, not a boundary**. The hook matches the Bash
+> command string before execution, and a shell string does not determine the
+> argv a process will see — a quoted, split, or variable-passed subcommand
+> reaches the same program unseen. The model the hook constrains is also the
+> party that writes the command, so it can evade the hook by construction.
+> `scripts/__tests__/block-bare-decrypt-hook.test.mjs` pins those evasions as
+> known limitations rather than leaving them implied.
+>
+> The honest statement: **this design keeps plaintext out of the transcript in
+> the cooperative case, and shrinks the blast radius in the hostile one** — the
+> daemon still enforces per-entry authorization, so a misbehaving caller reaches
+> only entries a human already allowed, for as long as the delegation lasts. It
+> is not a defence against prompt injection or a deliberately hostile model.
+> That would require the decrypt to stop being a Bash command at all: a tool or
+> MCP surface that consumes the credential and returns only the operation
+> result, never plaintext, to the model.
 
 #### Protection Mechanisms
 
 | Mechanism | Purpose |
 |-----------|---------|
-| `block-bare-decrypt` hook | Blocks direct `passwd-sso decrypt` in Bash (must use Skill subshell pattern) |
+| `block-bare-decrypt` hook | **Lint, not a boundary.** Catches the common accident of a decrypt whose stdout is transcribed; evadable by quoting or variable expansion (see the caveat above) |
 | `/use-credential` Skill | Generates safe subshell commands that consume credentials in pipe |
 | `credentials:list` scope | Grants metadata access only — no decrypt capability |
 | `credentials:use` scope | Authorizes agent to respond to decrypt requests |
@@ -319,7 +343,7 @@ sequenceDiagram
 
 | Client | Metadata (list/search) | Credential Usage | Notes |
 |--------|:---------------------:|:----------------:|-------|
-| Claude Code (CLI) | Yes | Yes (Skill + agent) | Full zero-knowledge flow via `/use-credential` Skill and `block-bare-decrypt` hook |
+| Claude Code (CLI) | Yes | Yes (Skill + agent) | Decrypt happens in the agent daemon, never server-side. Plaintext stays out of the transcript when the `/use-credential` pattern is followed; the `block-bare-decrypt` hook lints for the common accident but is not a boundary |
 | Claude Desktop | Yes | No | No Skill/hook mechanism; metadata-only access |
 | Other MCP clients | Yes | No | Standard MCP protocol — no agent socket integration |
 
@@ -333,7 +357,9 @@ Credential usage requires the CLI agent daemon running on the same machine as th
 | Phase 5 | Delegated Decryption — browser relays metadata to MCP session | Implemented |
 | Phase 7 | Zero-Knowledge CLI Decrypt — agent daemon, no plaintext to server or AI | Implemented |
 
-**Why not decrypt server-side?** The server has never had access to plaintext passwords — that's the core security guarantee. Phase 7 extends this: even the MCP client (AI) never sees plaintext. Decryption happens in the CLI agent daemon process, and credentials are consumed in Unix pipes without reaching the LLM context.
+**Why not decrypt server-side?** The server has never had access to plaintext passwords — that is the core security guarantee, and it is cryptographic: the server holds only wrapped keys and ciphertext, so no server-side bug or operator can recover a password.
+
+Phase 7 extends the *shape* of that to the AI: decryption happens in the CLI agent daemon, and credentials are consumed in Unix pipes rather than returned to the model. But the two guarantees are not the same strength, and it is worth being precise about which is which. Zero-knowledge against the **server** is enforced by cryptography. Keeping plaintext out of the **model's** context is enforced by convention plus a lint the model itself can bypass (see the caveat under "Credential Usage Flow"). Treat the first as a property of the system and the second as a property of cooperative use.
 
 ## Unified Audit
 
