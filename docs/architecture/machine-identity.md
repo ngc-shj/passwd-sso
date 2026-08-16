@@ -269,12 +269,12 @@ sequenceDiagram
 
     Agent ->> AI: 9. Credential consumed in pipe (pipe to curl)
 
-    Note over AI: 10. Only result reaches AI<br/>"HTTP 200" (no password)
+    Note over AI: 10. Only result reaches AI<br/>"HTTP 200" (no password)<br/>— cooperative use only
 
     Note over Human: Sees: everything (owner)
     Note over Server: Sees: metadata, entryIds<br/>NO passwords, NO vault key
     Note over Agent: Sees: plaintext<br/>(in memory only)
-    Note over AI: Sees: metadata, HTTP results<br/>NO passwords
+    Note over AI: Sees: metadata, HTTP results<br/>NO passwords — cooperative use only<br/>(lint, not a boundary — see below)
 ```
 
 > **Security boundaries:**
@@ -355,7 +355,7 @@ Credential usage requires the CLI agent daemon running on the same machine as th
 |-------|----------|--------|
 | Phase 3 | Encrypted data only — AI agents receive ciphertext | Implemented |
 | Phase 5 | Delegated Decryption — browser relays metadata to MCP session | Implemented |
-| Phase 7 | Zero-Knowledge CLI Decrypt — agent daemon, no plaintext to server or AI | Implemented |
+| Phase 7 | Zero-Knowledge CLI Decrypt — agent daemon; no plaintext to the server (cryptographic), none to the AI under cooperative use (convention + lint) | Implemented |
 
 **Why not decrypt server-side?** The server has never had access to plaintext passwords — that is the core security guarantee, and it is cryptographic: the server holds only wrapped keys and ciphertext, so no server-side bug or operator can recover a password.
 

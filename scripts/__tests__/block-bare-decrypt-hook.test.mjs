@@ -121,6 +121,54 @@ describe("block-bare-decrypt hook", () => {
     });
   });
 
+  describe("requires EVERY decrypt in the command to be safe, not just one", () => {
+    // The allow once answered "does a safe form exist?", which a command holding
+    // one safe and one unsafe decrypt satisfies with the safe one alone. Grep
+    // cannot ask "is every occurrence safe?", so the hook requires exactly one
+    // occurrence and judges that. Every documented pattern has exactly one.
+    it("blocks a capture followed by a bare decrypt", () => {
+      expect(runHook(`_CRED=$(passwd-sso ${SUB} safe); passwd-sso ${SUB} exposed`)).toBe(BLOCK);
+    });
+
+    it("blocks a clipboard sink followed by a bare decrypt", () => {
+      expect(runHook(`passwd-sso ${SUB} safe | pbcopy; passwd-sso ${SUB} exposed`)).toBe(BLOCK);
+    });
+
+    it("blocks a quoted decoy used to justify a bare decrypt", () => {
+      // The decoy is inside a string literal and never runs, but it was enough
+      // to satisfy the existence check for the real one beside it.
+      const cmd = `echo 'passwd-sso ${SUB} x | pbcopy'; passwd-sso ${SUB} exposed`;
+      expect(runHook(cmd)).toBe(BLOCK);
+    });
+  });
+
+  describe("pins the clipboard sink's argument shape, not just its name", () => {
+    // Several clipboard tools have flags that turn them back into filters, so
+    // matching the sink by NAME let the credential through a sanctioned-looking
+    // pipe. xclip -filter and xsel --output both write stdin to stdout.
+    it("blocks xclip -filter after a selection argument", () => {
+      expect(runHook(`passwd-sso ${SUB} item | xclip -selection clipboard -filter`)).toBe(BLOCK);
+    });
+
+    it("blocks a bare xclip -filter", () => {
+      expect(runHook(`passwd-sso ${SUB} item | xclip -filter`)).toBe(BLOCK);
+    });
+
+    it("blocks xsel --output", () => {
+      expect(runHook(`passwd-sso ${SUB} item | xsel --output`)).toBe(BLOCK);
+    });
+
+    it("still allows xsel in its documented input form", () => {
+      // The allow side of the same clause: pinning the shape must not break the
+      // legitimate one.
+      expect(runHook(`${CLI} ${SUB} ID | xsel --clipboard --input`)).toBe(ALLOW);
+    });
+
+    it("still allows wl-copy", () => {
+      expect(runHook(`${CLI} ${SUB} ID | wl-copy`)).toBe(ALLOW);
+    });
+  });
+
   describe("refuses rather than allowing when it cannot read its input", () => {
     // A guard that cannot parse its input has not cleared that input. Each of
     // these once mapped to an empty command and took the "not a decrypt" path.
