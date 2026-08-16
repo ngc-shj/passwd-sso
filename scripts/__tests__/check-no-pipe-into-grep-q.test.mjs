@@ -87,10 +87,29 @@ describe("the defect this guard exists for", () => {
     },
   );
 
-  it("does NOT invert for grep -l, which is why the gate leaves it alone", () => {
-    const r = runShape(`printf '%s' "$big" | grep -l '${NEEDLE}'`);
-    expect(r.stdout.trim()).toBe("FOUND");
-  });
+  // -l was once asserted NOT to invert, measured on GNU grep, which keeps
+  // draining stdin. BSD grep (macOS) exits on first match and takes SIGPIPE
+  // exactly like -q, so the claim was platform-specific and the gate that rested
+  // on it under-covered on macOS. Asserted as a member on both platforms: the
+  // gate runs in CI and locally, so the union is the only safe member set.
+  it.each([["-q"], ["--quiet"], ["--silent"], ["-m1"], ["-l"]])(
+    "reports a SUCCESSFUL match as failure when piped into grep %s (member)",
+    (flag) => {
+      const r = runShape(`printf '%s' "$big" | grep ${flag} '${NEEDLE}'`);
+      expect(r.stdout.trim()).toMatch(/^MISSED\(rc=\d+\)$/);
+    },
+  );
+
+  // The non-members, measured on the same haystack: these consume their input,
+  // so the writer never takes SIGPIPE. They bound the widening — without them a
+  // later edit could keep adding flags with nothing to say it had gone too far.
+  it.each([["-c"], ["-o"], ["-n"]])(
+    "does NOT invert for grep %s, which is why the gate leaves it alone",
+    (flag) => {
+      const r = runShape(`printf '%s' "$big" | grep ${flag} '${NEEDLE}' >/dev/null`);
+      expect(r.stdout.trim()).toBe("FOUND");
+    },
+  );
 
   it("reports the same match correctly through a herestring", () => {
     const r = runShape(`grep -qxF '${NEEDLE}' <<<"$big"`);
@@ -169,13 +188,23 @@ describe("check-no-pipe-into-grep-q.sh", () => {
     },
   );
 
-  it("PASSES `grep -l`, which measurement shows does not invert", () => {
+  it("FAILS on `grep -l`, which inverts on BSD grep", () => {
     // Pinning the derivation: the member set is "flags that make grep exit
-    // before draining stdin", and -l is not one of them. If that ever changes,
-    // this test is where the claim gets revisited.
+    // before draining stdin". -l does on BSD (macOS) though not on GNU, and the
+    // gate runs on both, so it is a member.
+    writeScript(
+      "offender",
+      '#!/usr/bin/env bash\nset -euo pipefail\ncat f | grep -l needle\n',
+    );
+    expect(runGuard().exitCode).toBe(1);
+  });
+
+  it("PASSES `grep -c`, a measured non-member", () => {
+    // The over-blocking direction: widening the class must not sweep in flags
+    // that were measured as safe, or the gate starts flagging correct code.
     writeScript(
       "clean",
-      '#!/usr/bin/env bash\nset -euo pipefail\ncat f | grep -l needle\n',
+      '#!/usr/bin/env bash\nset -euo pipefail\ncat f | grep -c needle\n',
     );
     expect(runGuard().exitCode).toBe(0);
   });

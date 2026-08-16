@@ -157,11 +157,13 @@ exit 0`,
         .join("\n")
     : "";
 
+  // Assign rather than echo: these arms are no longer inside a $( ) capture
+  // (see the stub body — bash 3.2 cannot parse `;;` in command substitution).
   const oldTdCases = Object.entries(OLD_TD_FOR_SERVICE)
-    .map(([svc, td]) => `    ${svc}) echo "${td}";;`)
+    .map(([svc, td]) => `    ${svc}) CURRENT_TD="${td}";;`)
     .join("\n");
   const newTdCases = Object.entries(NEW_TD_FOR_SERVICE)
-    .map(([svc, td]) => `    ${svc}) echo "${td}";;`)
+    .map(([svc, td]) => `    ${svc}) CURRENT_TD="${td}";;`)
     .join("\n");
 
   stub(
@@ -240,14 +242,19 @@ case "$1 $2" in
       esac
       shift
     done
+    # The case statements assign directly instead of being captured with $( ):
+    # bash 3.2 (what macOS ships) cannot parse \`;;\` inside command
+    # substitution, so \`CURRENT_TD=$(case ... esac)\` is a syntax error there and
+    # the whole stub fails to run. Assigning inside the case is equivalent and
+    # parses on 3.2 and 5.x alike.
     if [ -f "${tmpDir}/updated_\${SVC}" ]; then
-      CURRENT_TD=$(case "$SVC" in
+      case "$SVC" in
 ${newTdCases}
-      esac)
+      esac
     else
-      CURRENT_TD=$(case "$SVC" in
+      case "$SVC" in
 ${oldTdCases}
-      esac)
+      esac
     fi
     case "$QUERY" in
       *deployments*)
@@ -431,6 +438,18 @@ describe("deploy.sh --rollback-to validation", () => {
     // Nothing may have been deployed or even queried.
     expect(logLines("ecs update-service")).toHaveLength(0);
     expect(logLines("terraform").filter((l) => l.includes("apply"))).toHaveLength(0);
+    // The three assertions above are all negative, and a suite whose every
+    // assertion is an absence cannot tell "rejected correctly" from "never ran".
+    // This one is positive: the rejection message quotes the offending image, so
+    // it only appears if deploy.sh actually parsed the argument.
+    //
+    // Note what this does and does not prove. deploy.sh rejects a foreign
+    // registry at the argument-shape `case` (deploy.sh:166), before any aws
+    // call, so this test legitimately does not exercise the stub and stays green
+    // even when the stub is unparseable — verified by mutation. It is a test of
+    // the pre-AWS validation path, not a canary for stub health; the other ten
+    // tests are what depend on the stub working.
+    expect(result.stderr).toContain("evil.example/image:git-abc123def456");
   });
 
   it("accepts a rollback image in the configured ECR repo and skips the migration", () => {
