@@ -113,6 +113,9 @@ infra/terraform/envs/*/terraform.tfvars
 # Extension
 extension/dist/
 extension/node_modules/
+# Packaged extension archives (built from dist/, never committed)
+passwd-sso-extension*.zip
+extension/*.zip
 
 # Temporary docs (review notes, scratch)
 docs/temp/
