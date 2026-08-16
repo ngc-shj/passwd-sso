@@ -500,11 +500,20 @@ run_step "Static: no-authjs-builtin-webauthn-provider" bash -c '
   # Anchor the match with a closing string-delimiter so future siblings like
   # @auth/core/providers/webauthn-safe (or webauthn2) do not get caught by a
   # prefix-loose pattern. The two literal provider paths below are exactly
-  # the v9-shape ones we keep dead-coded. Delimiters in the character class
-  # are spelled as hex escapes so the regex survives nested bash -c quoting:
-  # \x22 = ", \x27 = single quote, \x60 = backtick.
-  if grep -rPn --include="*.ts" --include="*.tsx" \
-    "@auth/core/providers/(passkey|webauthn)[\x22\x27\x60]" \
+  # the v9-shape ones we keep dead-coded.
+  #
+  # POSIX ERE, not PCRE: grep -P does not exist on BSD grep (macOS), where it
+  # exits 2 — and the "if grep ...; then <fail>; fi" shape reads that as
+  # "no match", so this gate printed PASS while never running.
+  #
+  # ERE has no hex escape, so \x22/\x27/\x60 would match the LETTERS x,2,7,6,0 and
+  # the anchor would silently become a no-op. The delimiters must be real
+  # characters — and because this whole block is inside bash -c with a
+  # single-quoted body, a literal single quote cannot appear anywhere in it,
+  # comments included. Q carries the quote in via printf \047.
+  Q=$(printf "\047")
+  if grep -rEn --include="*.ts" --include="*.tsx" \
+    "@auth/core/providers/(passkey|webauthn)[\"${Q}\`]" \
     src/; then
     echo "ERROR: @auth/core builtin WebAuthn provider imports are forbidden (C21/C10)."
     echo "These providers still pin @simplewebauthn/server@^9 and are incompatible"
