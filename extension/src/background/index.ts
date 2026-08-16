@@ -1615,10 +1615,12 @@ async function performAutofillForEntry(
   ].filter((h): h is string => typeof h === "string" && h.length > 0);
 
   // Origin re-binding for content-driven fills: when the caller does not trust
-  // the entryId's origin (content-script path), a LOGIN password must only be
-  // released to a page whose host matches the entry's own host(s). This mirrors
-  // the passkey path's isSenderAuthorizedForRpId defense-in-depth and closes the
-  // gap where host filtering lived only in the untrusted content-side dropdown.
+  // the entryId's origin — the content-script path, and the context menu, whose
+  // items are persisted browser state that outlives the navigation they were
+  // built for — a LOGIN password must only be released to a page whose host
+  // matches the entry's own host(s). This mirrors the passkey path's
+  // isSenderAuthorizedForRpId defense-in-depth and closes the gap where host
+  // filtering lived only in the untrusted content-side dropdown.
   // CC/Identity are user-picked and hostless by design, so scope to LOGIN.
   if (
     typeof enforceSenderHost === "string" &&
