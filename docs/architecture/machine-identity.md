@@ -277,11 +277,16 @@ sequenceDiagram
     Note over AI: Sees: metadata, HTTP results<br/>NO passwords — cooperative use only<br/>(lint, not a boundary — see below)
 ```
 
-> **Security boundaries:**
+> **Security boundaries** — enforced independently of how the caller behaves:
 > - Server ↔ AI: HTTPS + MCP OAuth 2.1 (metadata only)
 > - Agent ↔ Server: HTTPS + Bearer token (auth check, encrypted blob)
 > - Agent ↔ Hook: Unix socket 0600 (plaintext, same-user only)
-> - Hook ↔ AI: stdout pipe (result only, credential consumed in subshell)
+>
+> **Cooperative-use control** — depends on the caller following the pattern:
+> - Hook ↔ AI: stdout pipe (result only, credential consumed in subshell). The
+>   `block-bare-decrypt` hook lints for the common accident here; it is not a
+>   boundary, because the model it constrains is also the party writing the
+>   command. See the caveat under "Credential Usage Flow".
 
 #### Actor Responsibility Matrix
 
@@ -347,7 +352,9 @@ sequenceDiagram
 | Claude Desktop | Yes | No | No Skill/hook mechanism; metadata-only access |
 | Other MCP clients | Yes | No | Standard MCP protocol — no agent socket integration |
 
-Credential usage requires the CLI agent daemon running on the same machine as the MCP client. Claude Desktop and other MCP clients can browse entry metadata but cannot decrypt or use credentials. This is a deliberate security boundary — extending credential usage to other clients would require equivalent Skill/hook protections to prevent plaintext exposure to the LLM context.
+Credential usage requires the CLI agent daemon running on the same machine as the MCP client. Claude Desktop and other MCP clients can browse entry metadata but cannot decrypt or use credentials.
+
+That restriction *is* a boundary, and a real one: it rests on the agent's 0600 Unix socket, which a client on another machine simply cannot reach. What it does not rest on is the Skill/hook pair — those are cooperative-use controls, so extending credential usage to another client would need a way to consume the credential without returning plaintext to the model (a dedicated tool or MCP surface), not a port of the hook.
 
 ### E2E Encryption Strategy
 
