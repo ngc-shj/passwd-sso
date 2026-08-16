@@ -31,6 +31,7 @@ import {
 } from "../lib/crypto-team";
 import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
+import { humanizeError } from "../lib/error-messages";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
   persistSession,
@@ -79,6 +80,7 @@ import {
   updateContextMenuForTab,
   handleContextMenuClick,
   invalidateContextMenu,
+  disableContextMenu,
 } from "./context-menu";
 import {
   initLoginSave,
@@ -441,6 +443,38 @@ async function updateBadge(): Promise<void> {
   await chrome.action.setBadgeText({ text: "" });
 }
 
+/**
+ * Surface a failed context-menu fill on the toolbar badge.
+ *
+ * The context menu is the one fill path with no UI of its own: the popup and the
+ * content dropdown both return {ok, error} to a view that renders it, so a
+ * refused fill there is visible. Without this the menu would simply do nothing —
+ * indistinguishable, from the user's side, from a broken extension. The badge is
+ * used rather than chrome.notifications because the latter would require a new
+ * permission for a message this brief.
+ *
+ * The marker is transient and self-clearing; updateBadgeForTab overwrites it on
+ * the next navigation or tab switch regardless.
+ */
+const FILL_FAILURE_BADGE_MS = 4000;
+
+async function notifyAutofillFailure(error: string): Promise<void> {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabId = tab?.id;
+    if (tabId === undefined) return;
+    await chrome.action.setBadgeText({ text: "!", tabId });
+    await chrome.action.setBadgeBackgroundColor({ color: "#EF4444", tabId });
+    await chrome.action.setTitle({ title: humanizeError(error), tabId });
+    setTimeout(() => {
+      void chrome.action.setTitle({ title: "", tabId }).catch(() => {});
+      void updateBadgeForTab(tabId, tab?.url);
+    }, FILL_FAILURE_BADGE_MS);
+  } catch {
+    // Badge is best-effort feedback; never let it break the click path.
+  }
+}
+
 // ── Session persistence & token refresh ──────────────────────
 
 /** Fire-and-forget persist of token state to chrome.storage.session */
@@ -680,8 +714,10 @@ initContextMenu({
   isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
   isContextMenuEnabled: async () => cachedEnableContextMenu,
-  performAutofill: async (entryId, tabId, teamId) => {
-    await performAutofillForEntry(entryId, tabId, undefined, teamId);
+  performAutofill: (entryId, tabId, teamId, enforceSenderHost, frameId) =>
+    performAutofillForEntry(entryId, tabId, undefined, teamId, frameId, enforceSenderHost),
+  notifyFillFailure: (error) => {
+    void notifyAutofillFailure(error);
   },
 });
 
@@ -864,7 +900,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   // Context menu toggle
   if (changes.enableContextMenu) {
     if (!cachedEnableContextMenu) {
-      chrome.contextMenus.removeAll().catch(() => {});
+      // Routed through the menu module so the teardown joins the same
+      // serialization chain as every rebuild; a bare removeAll here would wipe
+      // the parent out from under an in-flight create batch.
+      disableContextMenu().catch(() => {});
     } else {
       setupContextMenu();
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -1424,8 +1463,10 @@ async function performAutofillForEntry(
   // When set (non-null), the caller does not trust the entryId's origin binding
   // and requires a LOGIN entry's host to match this host before releasing the
   // password. Passed by the content-message path (AUTOFILL_FROM_CONTENT), where
-  // the entryId originates from an untrusted content script; popup/context-menu
-  // callers pass undefined because the user picked the entry in trusted UI.
+  // the entryId originates from an untrusted content script, and by the context
+  // menu, whose items are persisted browser state built for a host the tab may
+  // since have navigated away from. Only the popup passes undefined: its list is
+  // rendered live from the current tab at click time.
   enforceSenderHost?: string | null,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
@@ -1433,9 +1474,10 @@ async function performAutofillForEntry(
   }
 
   // executeScript target for direct injection (CC/Identity file injection and
-  // the LOGIN fallback). When the originating frame is known (content-driven),
-  // scope to it. When it is unknown (popup/context-menu), inject into the TOP
-  // FRAME ONLY — `{ tabId }` with neither `frameIds` nor `allFrames` targets
+  // the LOGIN fallback). When the originating frame is known — content-driven,
+  // or a context-menu click, which carries OnClickData.frameId — scope to it.
+  // When it is unknown (popup), inject into the TOP FRAME ONLY —
+  // `{ tabId }` with neither `frameIds` nor `allFrames` targets
   // frame 0, not the whole tab. Do NOT "restore" `allFrames: true` here: that
   // would inject the decrypted credential into every frame, including a
   // cross-origin third-party iframe, where its page JS could read the filled
@@ -1445,8 +1487,8 @@ async function performAutofillForEntry(
   const executeTarget = hasFrameTarget
     ? { tabId, frameIds: [frameId] }
     : { tabId };
-  // AUTOFILL_FILL message target. Frame-scoped when the frame is known; for
-  // popup/context-menu (no frameId) it broadcasts tab-wide — safe FOR LOGIN
+  // AUTOFILL_FILL message target. Frame-scoped when the frame is known; for the
+  // popup (no frameId) it broadcasts tab-wide — safe FOR LOGIN
   // because each frame self-verifies its origin against allowedHosts before
   // filling (isFrameAllowedToFill). chrome.tabs.sendMessage's options overload
   // rejects `undefined`, so only pass frame-targeting options when an

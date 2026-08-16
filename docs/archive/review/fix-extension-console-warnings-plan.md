@@ -354,7 +354,11 @@ legitimate subdomain fill.
 
 **Preconditions to establish before implementation** (recorded rather than assumed):
 
-- `PC5.1` — **Is `tab.url` / `info.pageUrl` populated without host permissions?** The manifest declares no `tabs` permission and only `optional_host_permissions` (`manifest.config.ts:16-17`), granted per-origin at runtime. Under MV3, `Tab.url` is populated only with `tabs` or a matching host permission; `activeTab` grants it after a qualifying gesture. If these are empty on a default install, invariant 3 would deny **every** click for users who have not granted broad permissions — a fail-closed control whose latent precondition denies a whole class of principals (R52). **Resolve by probe on a profile with no optional host permissions granted, and record the observed result here as C4 records the toolchain probe.** If unpopulated, specify the fallback (`chrome.tabs.get(tab.id)` re-read, or requesting permission for the entry's host at click time) before locking.
+- `PC5.1` — **RESOLVED.** The question was whether `tab.url` / `info.pageUrl` is populated without host permissions: the manifest declares no `tabs` permission and only `optional_host_permissions` (`manifest.config.ts:16-17`), so if the gate's inputs were empty on a default install, invariant 3 would deny **every** click — a fail-closed control denying a whole class of principals (R52).
+
+  **Resolution, from the API contract rather than a probe** (`@types/chrome`, `OnClickData`): `frameUrl` is *"The URL of the frame of the element where the context menu was clicked"* and `pageUrl` is *"The URL of the page where the menu item was clicked"*. Both are **properties of the click event**, delivered by Chrome to the listener — they are not read from the `Tab` object and carry no `tabs`-permission precondition. `Tab.url` is the field that requires `tabs` or a matching host permission; it is last in C5's precedence and is therefore only a fallback.
+
+  Consequence: `info.frameUrl ?? info.pageUrl ?? tab.url` resolves a host from event-supplied data on every ordinary click, regardless of granted permissions, so the R52 failure mode does not arise. `pageUrl`'s documented exception — *"not set if the click occurred in a context where there is no current page, such as in a launcher context menu"* — cannot occur here: these items are registered with `contexts: ["editable"]`, which requires an editable element in a page. The deny branch (invariant 3) therefore covers a genuinely unresolvable click rather than the common case. M4 confirms in a real browser as defense in depth, but the contract no longer rests on it.
 
 **Forbidden patterns**:
 
@@ -387,7 +391,7 @@ legitimate subdomain fill.
 - *Consumer 3 — `injectDirectAutofill` (`index.ts:1741-1745`)* — reads `executeTarget`, which is `{ tabId }` (top frame) for context-menu fills today. Once invariant 2 threads `frameId`, `executeTarget` becomes `{ tabId, frameIds: [frameId] }` so the fallback follows the click. **Named explicitly** so a host-only fix cannot be read as complete: without it the fallback writes into a frame the gate never adjudicated.
 - *Consumer 4 — the test tree* — `context-menu.test.ts` stubs `performAutofill` as `vi.fn().mockResolvedValue(undefined)` (line 56), which never reaches `index.ts`. An assertion there is about *arguments passed to a stub*, not a suppressed side effect, and it would stay green if the implementation passed the host in the wrong positional slot — `performAutofillForEntry` takes six positional parameters and the adapter already passes `undefined` for `targetHint`. AC5.1/AC5.2 therefore live in `background.test.ts`, which imports the real module (RT5/RT8).
 
-**Status**: pending — **PC5.1 must be resolved before this contract locks.**
+**Status**: **locked** — PC5.1 resolved from the `OnClickData` API contract (see Preconditions).
 
 ### C2 — `vite.config.ts`: disable modulepreload link emission
 
@@ -654,10 +658,10 @@ C3 per AC3.1-AC3.5.
 | C2 | `vite.config.ts` `modulePreload: false` | **locked** |
 | C3 | Build-output assertion that no modulepreload link is emitted | **locked** |
 | C4 | Dependency-tree reconciliation | **locked** |
-| C5 | Credential release bound to the clicked **frame's** host | **pending — PC5.1** |
+| C5 | Credential release bound to the clicked **frame's** host | **locked** |
 | C6 | Test-mock contract for the awaited create callback (6-file member set) | **locked** |
 
-C1/C2/C3/C4/C6 are locked after two review rounds. C2 and C4 rest on executed probes rather than
+All six contracts are locked after two review rounds. C2 and C4 rest on executed probes rather than
 inference; C1's race is reproduced (see below); C6's member set was re-derived independently by two
 reviewers and agrees.
 

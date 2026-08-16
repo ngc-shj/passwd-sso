@@ -173,6 +173,8 @@
     "noTotpConfigured": "No TOTP configured for this entry",
     "invalidTotp": "TOTP configuration is invalid for this entry",
     "networkError": "Cannot connect to server. If using a self-signed certificate, open the server URL in a browser tab and accept the certificate first.",
-    "invalidEntry": "This entry could not be read. It may have been saved in an older format."
+    "invalidEntry": "This entry could not be read. It may have been saved in an older format.",
+    "originMismatch": "This credential is for a different site. The page may have changed since the menu was opened.",
+    "unknownOrigin": "Could not verify this page, so the credential was not filled."
   }
 }

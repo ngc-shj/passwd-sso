@@ -17,6 +17,9 @@ const ERROR_KEY_MAP: Record<string, string> = {
   INVALID_TOTP: "errors.invalidTotp",
   NETWORK_ERROR: "errors.networkError",
   INVALID_ENTRY: "errors.invalidEntry",
+  ORIGIN_MISMATCH: "errors.originMismatch",
+  UNKNOWN_ORIGIN: "errors.unknownOrigin",
+  FILL_FAILED: "errors.autofillFailed",
 };
 
 export function humanizeError(code: string): string {
