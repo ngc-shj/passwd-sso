@@ -73,7 +73,7 @@ function installChromeMock() {
       setBadgeBackgroundColor: vi.fn().mockResolvedValue(undefined),
     },
     contextMenus: {
-      create: vi.fn(),
+      create: vi.fn((_props: unknown, cb?: () => void) => cb?.()),
       removeAll: vi.fn((cb?: () => void) => cb?.()),
       onClicked: { addListener: vi.fn() },
     },
