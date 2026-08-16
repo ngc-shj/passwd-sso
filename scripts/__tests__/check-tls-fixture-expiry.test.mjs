@@ -52,7 +52,16 @@ const OPENSSL = (() => {
       const help = execFileSync("bash", ["-c", `${bin} pkcs12 -help 2>&1`], {
         encoding: "utf8",
       });
-      if (help.includes("-legacy")) return bin;
+      if (!help.includes("-legacy")) continue;
+      // Resolve to an ABSOLUTE path before returning. On Linux the first
+      // candidate is the bare name `openssl`, and the stub below delegates with
+      // `exec "${OPENSSL}" "$@"` while the stub's own directory is first on
+      // PATH — so a bare name would resolve back to the stub and recurse until
+      // the process dies. macOS hides this: the resolver lands on the Homebrew
+      // absolute path instead.
+      return execFileSync("bash", ["-c", `command -v ${bin}`], {
+        encoding: "utf8",
+      }).trim();
     } catch {
       // candidate absent or unusable — try the next
     }

@@ -51,14 +51,20 @@ export TLS_FIXTURE_PASS="${TLS_FIXTURE_PASS:-passwd-sso-test}"
 # on PATH so a GNU/CI environment (OpenSSL 3 as `openssl`) is unaffected.
 OPENSSL_BIN=""
 for candidate in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
-  command -v "$candidate" >/dev/null 2>&1 || continue
+  # Store the ABSOLUTE path, not the candidate as written. The first candidate is
+  # a bare name, and the self-test drives this gate with a stub `openssl` first on
+  # PATH — a bare name would resolve back to that stub when the stub delegates,
+  # recursing until the process dies. Linux hits it (bare name wins there);
+  # macOS does not (resolution lands on the Homebrew absolute path).
+  candidate_path="$(command -v "$candidate" 2>/dev/null)" || continue
+  [ -n "$candidate_path" ] || continue
   # Capture first, then match on the variable. Piping into `grep -q` is the
   # SIGPIPE-under-pipefail shape check-no-pipe-into-grep-q.sh forbids: grep exits
   # on the first match while the writer is still writing, and the writer's 141
   # becomes the pipeline's status.
-  help_out="$("$candidate" pkcs12 -help 2>&1 || true)"
+  help_out="$("$candidate_path" pkcs12 -help 2>&1 || true)"
   if grep -q -- '-legacy' <<<"$help_out"; then
-    OPENSSL_BIN="$candidate"
+    OPENSSL_BIN="$candidate_path"
     break
   fi
 done
