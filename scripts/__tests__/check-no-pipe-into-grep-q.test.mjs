@@ -76,24 +76,21 @@ describe("the defect this guard exists for", () => {
     );
   }
 
-  // The needle IS on the first line — "MISSED" here is the inversion itself,
-  // not a matching failure. These four flags are the gate's member set, and
-  // this is the measurement it was derived from; `-l` is excluded below.
-  it.each([["-q"], ["--quiet"], ["--silent"], ["-m1"]])(
-    "reports a SUCCESSFUL match as failure when piped into grep %s",
-    (flag) => {
-      const r = runShape(`printf '%s' "$big" | grep ${flag} '${NEEDLE}'`);
-      expect(r.stdout.trim()).toMatch(/^MISSED\(rc=\d+\)$/);
-    },
-  );
+  // 128 + SIGPIPE(13). Pinned exactly rather than as /rc=\d+/: a loose pattern
+  // also accepts rc=1 (needle genuinely absent), rc=2 (grep rejected its own
+  // arguments) and rc=127 (grep not found) — three ways for this test to pass
+  // while measuring something other than the inversion it exists to measure.
+  const SIGPIPE = "MISSED(rc=141)";
 
-  // These four invert on BOTH platforms — they stop reading as soon as the
-  // verdict is known, so the writer takes SIGPIPE regardless of implementation.
+  // The needle IS on the first line, so "MISSED" here is the inversion itself,
+  // not a matching failure. These four invert on BOTH platforms — they stop
+  // reading as soon as the verdict is known, so the writer takes SIGPIPE
+  // regardless of implementation. `-l` is the platform-dependent one, below.
   it.each([["-q"], ["--quiet"], ["--silent"], ["-m1"]])(
     "reports a SUCCESSFUL match as failure when piped into grep %s (member)",
     (flag) => {
       const r = runShape(`printf '%s' "$big" | grep ${flag} '${NEEDLE}'`);
-      expect(r.stdout.trim()).toMatch(/^MISSED\(rc=\d+\)$/);
+      expect(r.stdout.trim()).toBe(SIGPIPE);
     },
   );
 
@@ -117,7 +114,7 @@ describe("the defect this guard exists for", () => {
     const r = runShape(`printf '%s' "$big" | grep -l '${NEEDLE}'`);
     const out = r.stdout.trim();
     expect(
-      out === "FOUND" || /^MISSED\(rc=\d+\)$/.test(out),
+      out === "FOUND" || out === SIGPIPE,
       `grep -l produced an unexpected outcome: ${out}`,
     ).toBe(true);
   });
