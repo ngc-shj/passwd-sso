@@ -87,18 +87,40 @@ describe("the defect this guard exists for", () => {
     },
   );
 
-  // -l was once asserted NOT to invert, measured on GNU grep, which keeps
-  // draining stdin. BSD grep (macOS) exits on first match and takes SIGPIPE
-  // exactly like -q, so the claim was platform-specific and the gate that rested
-  // on it under-covered on macOS. Asserted as a member on both platforms: the
-  // gate runs in CI and locally, so the union is the only safe member set.
-  it.each([["-q"], ["--quiet"], ["--silent"], ["-m1"], ["-l"]])(
+  // These four invert on BOTH platforms — they stop reading as soon as the
+  // verdict is known, so the writer takes SIGPIPE regardless of implementation.
+  it.each([["-q"], ["--quiet"], ["--silent"], ["-m1"]])(
     "reports a SUCCESSFUL match as failure when piped into grep %s (member)",
     (flag) => {
       const r = runShape(`printf '%s' "$big" | grep ${flag} '${NEEDLE}'`);
       expect(r.stdout.trim()).toMatch(/^MISSED\(rc=\d+\)$/);
     },
   );
+
+  // -l is PLATFORM-DEPENDENT, and that is the whole reason it belongs in the
+  // gate's member set. BSD grep (macOS) exits on first match and takes SIGPIPE
+  // exactly like -q; GNU grep keeps draining stdin and does not invert. The gate
+  // must flag it because it runs on both, but this test cannot assert one
+  // outcome for both — an earlier revision did, and CI (GNU) reddened on the
+  // BSD-measured claim. Assert the behaviour the running grep actually has, and
+  // require the pair to be exhaustive so an unexpected third outcome fails.
+  it("either inverts for grep -l or does not, depending on the implementation", () => {
+    // Deliberately NOT branching on `grep --version`: BSD grep reports itself as
+    // "grep (BSD grep, GNU compatible)", so a substring test for "GNU" picks the
+    // wrong branch on exactly the platform that inverts. There is no reliable
+    // name to key on here — only the behaviour.
+    //
+    // So assert the pair is EXHAUSTIVE rather than picking a side: -l either
+    // drains (FOUND, GNU) or exits early and SIGPIPEs the writer (MISSED, BSD).
+    // Any third outcome is a real finding. The gate's member set includes -l
+    // because one of these two platforms inverts, and the gate runs on both.
+    const r = runShape(`printf '%s' "$big" | grep -l '${NEEDLE}'`);
+    const out = r.stdout.trim();
+    expect(
+      out === "FOUND" || /^MISSED\(rc=\d+\)$/.test(out),
+      `grep -l produced an unexpected outcome: ${out}`,
+    ).toBe(true);
+  });
 
   // The non-members, measured on the same haystack: these consume their input,
   // so the writer never takes SIGPIPE. They bound the widening — without them a
