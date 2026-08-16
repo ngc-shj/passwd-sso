@@ -32,7 +32,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # invocation from the Dockerfile, joining its backslash-continued lines into one.
 # Using the Dockerfile as the source of truth means a change to the bundle format
 # (e.g. adding --format=esm) is re-smoke-tested automatically.
-mapfile -t ESBUILD_CMDS < <(
+# Collected with `while read` rather than `mapfile`: macOS ships bash 3.2, where
+# mapfile/readarray do not exist, and this gate runs from the local pre-PR hook as
+# well as from CI. An esbuild invocation cannot contain a newline (it is one
+# logical line, already joined by the awk below), so IFS= read -r round-trips it
+# without loss.
+ESBUILD_CMDS=()
+while IFS= read -r _cmd; do
+  [ -z "$_cmd" ] && continue
+  ESBUILD_CMDS+=("$_cmd")
+done < <(
   awk '
     /npx esbuild scripts\/.*-worker\.ts/ { collecting=1; line="" }
     collecting {
@@ -56,6 +65,23 @@ fi
 # supply a syntactically-valid URL so the at-least-one-URL refine passes without
 # opening a connection.
 FAKE_DB_URL="postgresql://app:app@127.0.0.1:5432/passwd_sso"
+
+# `timeout` is GNU coreutils and is NOT present on stock macOS; Homebrew installs
+# it as `gtimeout` (and as `timeout` when coreutils is linked). Resolve it, and
+# refuse if neither exists rather than letting the boot run unbounded — or, worse,
+# letting a missing binary surface as exit 127, which this gate would report as
+# "the shipped artifact does not boot". A missing tool is a gate that could not
+# run, not a failing subject.
+TIMEOUT_BIN=""
+for candidate in timeout gtimeout; do
+  if command -v "$candidate" >/dev/null 2>&1; then TIMEOUT_BIN="$candidate"; break; fi
+done
+if [ -z "$TIMEOUT_BIN" ]; then
+  echo "ERROR: neither 'timeout' nor 'gtimeout' is on PATH."
+  echo "This gate bounds each worker boot so a hang cannot stall the run."
+  echo "Install GNU coreutils (macOS: brew install coreutils) and re-run."
+  exit 1
+fi
 
 fail=0
 for raw in "${ESBUILD_CMDS[@]}"; do
@@ -95,7 +121,7 @@ for raw in "${ESBUILD_CMDS[@]}"; do
   # COPYed alongside the bundle; NODE_PATH reproduces that reachability here.
   echo "  booting $(basename "$bundle") --validate-env-only"
   set +e
-  out="$(timeout 30 env \
+  out="$("$TIMEOUT_BIN" 30 env \
     NODE_ENV=production \
     NODE_PATH="$REPO_ROOT/node_modules" \
     RETENTION_GC_DATABASE_URL="$FAKE_DB_URL" \

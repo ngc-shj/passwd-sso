@@ -58,14 +58,25 @@ fi
 #     would reject `… | grep x | sort -m`, where -m is sort's and drains.
 #
 # The flag set was derived by measurement, not from the man page: with the
-# needle on line 1 and a body past the pipe buffer, `-q`, `--quiet`, `--silent`
-# and `-m1` all report the match as rc=141, while `-l` does not — so `-l` is
-# not a member and is deliberately absent.
+# needle on line 1 and a body past the pipe buffer, `-q`, `--quiet`, `--silent`,
+# `-m1` AND `-l` all report the match as rc=141.
+#
+# `-l` was previously excluded on a GNU-grep measurement, where it keeps draining
+# stdin and so does not invert. BSD grep (macOS) exits on first match and takes
+# SIGPIPE exactly like `-q` — re-measured at rc=141 on a 3 MB haystack. Since the
+# gate runs on both platforms, the member set is the UNION: excluding `-l` left
+# the guard under-covering on every macOS developer's machine.
+#
+# Non-members, also measured, so the widening stops here: `-c`, `-o`, `-n` all
+# return rc=0 on both platforms — they consume their input.
 detect_awk='
 function has_quiet(seg) {
   # Trailing digits so `-m1` (and `-im1`) match as well as `-m 1`.
-  return (seg ~ /(^|[ \t])-[A-Za-z]*[qm][A-Za-z]*[0-9]*([ \t]|=|$)/ ||
-          seg ~ /(^|[ \t])--(quiet|silent|max-count)([ \t]|=|$)/)
+  # `l` is in the cluster class alongside `q`/`m`, so `-ql`, `-il`, `-rl` match
+  # too. Case-sensitive by construction: `-L` (files-WITHOUT-match) is a
+  # different flag and is deliberately not a member.
+  return (seg ~ /(^|[ \t])-[A-Za-z]*[qml][A-Za-z]*[0-9]*([ \t]|=|$)/ ||
+          seg ~ /(^|[ \t])--(quiet|silent|max-count|files-with-matches)([ \t]|=|$)/)
 }
 # Walks the logical line once, tracking quote state, and splits it into
 # commands at UNQUOTED operators. Each grep that a single pipe feeds is then

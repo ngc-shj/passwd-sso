@@ -36,8 +36,50 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+// These fixtures are generated with `openssl pkcs12 -legacy`, and macOS ships
+// LibreSSL as /usr/bin/openssl, which has no `-legacy` flag at all. Resolve an
+// openssl whose pkcs12 accepts it and run every generation command through that
+// one, so the self-test does not depend on how a developer ordered their PATH.
+// (The gate under test resolves its own openssl the same way.)
+const OPENSSL = (() => {
+  const candidates = [
+    "openssl",
+    "/opt/homebrew/opt/openssl@3/bin/openssl",
+    "/usr/local/opt/openssl@3/bin/openssl",
+  ];
+  for (const bin of candidates) {
+    try {
+      const help = execFileSync("bash", ["-c", `${bin} pkcs12 -help 2>&1`], {
+        encoding: "utf8",
+      });
+      if (!help.includes("-legacy")) continue;
+      // Resolve to an ABSOLUTE path before returning. On Linux the first
+      // candidate is the bare name `openssl`, and the stub below delegates with
+      // `exec "${OPENSSL}" "$@"` while the stub's own directory is first on
+      // PATH — so a bare name would resolve back to the stub and recurse until
+      // the process dies. macOS hides this: the resolver lands on the Homebrew
+      // absolute path instead.
+      return execFileSync("bash", ["-c", `command -v ${bin}`], {
+        encoding: "utf8",
+      }).trim();
+    } catch {
+      // candidate absent or unusable — try the next
+    }
+  }
+  return null;
+})();
+
 function sh(cmd) {
-  execFileSync("bash", ["-c", cmd], { stdio: ["ignore", "ignore", "ignore"] });
+  if (!OPENSSL) {
+    throw new Error(
+      "no openssl with `pkcs12 -legacy` found — install OpenSSL 3 (brew install openssl@3)",
+    );
+  }
+  // PATH-prefix the resolved binary's directory so the bare `openssl` tokens in
+  // the generation commands below resolve to it.
+  const dirOf = OPENSSL.includes("/") ? OPENSSL.slice(0, OPENSSL.lastIndexOf("/")) : null;
+  const env = dirOf ? { ...process.env, PATH: `${dirOf}:${process.env.PATH}` } : process.env;
+  execFileSync("bash", ["-c", cmd], { stdio: ["ignore", "ignore", "ignore"], env });
 }
 
 // Build a CA + one leaf p12 (`tlsLeaf<label>.p12`) into `dir`.
@@ -154,7 +196,7 @@ describe("check-tls-fixture-expiry", () => {
       "bash",
       [
         "-c",
-        `openssl pkcs12 -in "${join(dir, "tlsLeafA.p12")}" -nokeys -clcerts ` +
+        `"${OPENSSL}" pkcs12 -in "${join(dir, "tlsLeafA.p12")}" -nokeys -clcerts ` +
           `-passin pass:${PASS} -legacy 2>/dev/null`,
       ],
       { encoding: "utf8" },
@@ -167,8 +209,12 @@ describe("check-tls-fixture-expiry", () => {
     writeFileSync(
       join(stubDir, "openssl"),
       `#!/usr/bin/env bash
+# The gate probes \`pkcs12 -help\` to find an openssl that supports -legacy, so
+# the stub must answer that probe truthfully or the gate skips it and resolves a
+# real binary instead — which would silently defeat this test.
+if [ "$1" = "pkcs12" ] && [ "$2" = "-help" ]; then exec "${OPENSSL}" pkcs12 -help; fi
 if [ "$1" = "pkcs12" ]; then cat "${pemFile}"; exit 1; fi
-exec /usr/bin/openssl "$@"
+exec "${OPENSSL}" "$@"
 `,
       { mode: 0o755 },
     );

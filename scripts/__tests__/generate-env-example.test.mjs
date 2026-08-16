@@ -18,6 +18,8 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeEnvKeyCollator } from "../lib/env-sort.ts";
 
+
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const SCRIPT = resolve(REPO_ROOT, "scripts", "generate-env-example.ts");

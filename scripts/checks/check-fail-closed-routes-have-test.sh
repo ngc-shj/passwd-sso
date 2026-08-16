@@ -724,11 +724,17 @@ EOF
       # the offending `TOKEN<TAB>relpath` lines; the bash loop below then
       # iterates findings (usually zero), not every file. `FROZEN_STUB_EXEMPTIONS`
       # and `SETUP_FILE_SET` are passed in as newline sets for O(1) membership.
-      STUB_FINDINGS="$(awk -F'\t' \
-        -v root="$FIXTURE_ROOT/" \
-        -v exempt="$FROZEN_STUB_EXEMPTIONS" \
-        -v setups="$SETUP_FILE_SET" '
+      # `exempt` and `setups` are newline-separated sets. They are passed through
+      # the ENVIRONMENT rather than `-v`: POSIX awk processes escape sequences in
+      # a -v value, and BSD awk (macOS) rejects a raw newline there outright with
+      # "awk: newline in string", which surfaces as a non-zero exit under the
+      # pre-PR harness's `set -o pipefail`. gawk happens to tolerate it, so this
+      # only ever failed on macOS. ENVIRON is POSIX and does no such processing.
+      STUB_FINDINGS="$(AWK_EXEMPT="$FROZEN_STUB_EXEMPTIONS" AWK_SETUPS="$SETUP_FILE_SET" \
+        awk -F'\t' \
+        -v root="$FIXTURE_ROOT/" '
         BEGIN {
+          exempt = ENVIRON["AWK_EXEMPT"]; setups = ENVIRON["AWK_SETUPS"]
           n = split(exempt, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") EX[a[i]] = 1
           m = split(setups, b, "\n"); for (i = 1; i <= m; i++) if (b[i] != "") SU[b[i]] = 1
         }

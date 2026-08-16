@@ -32,6 +32,8 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir, hostname, homedir } from "node:os";
 
+
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 // Read only by the test — the script never looks at it. It exists so a mutation

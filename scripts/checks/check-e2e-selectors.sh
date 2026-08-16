@@ -98,8 +98,8 @@ printf "${BOLD}▸ Checking CSS class selectors in E2E vs source changes${RESET}
 
 # Extract unique CSS class patterns from E2E locator() calls
 # Matches patterns like: .locator(".px-4.py-3") or .locator('.border.rounded-md')
-e2e_class_selectors=$(grep -roPhE '\.locator\(\s*["\x27](\.[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)["\x27]' "$E2E_DIR/" 2>/dev/null \
-  | sed -E "s/.*\.locator\([\"']//; s/[\"']\)$//" \
+e2e_class_selectors=$(grep -rohE '\.locator\([[:space:]]*["'"'"'](\.[a-zA-Z0-9_-]+)+["'"'"']' "$E2E_DIR/" \
+  | sed -E "s/.*\.locator\([[:space:]]*[\"']//; s/[\"']$//" \
   | sort -u || true)
 
 # Get the full list of changed .tsx source files (reused by checks 2, 5, 6)
@@ -143,7 +143,7 @@ fi
 
 printf "${BOLD}▸ Checking data-testid attributes vs source changes${RESET}\n"
 
-e2e_testids=$(grep -roPhE "data-testid=[\"'][^\"']+[\"']" "$E2E_DIR/" 2>/dev/null \
+e2e_testids=$(grep -rohE "data-testid=[\"'][^\"']+[\"']" "$E2E_DIR/" \
   | sed -E "s/data-testid=[\"']//; s/[\"']$//" \
   | sort -u || true)
 
@@ -233,8 +233,8 @@ done
 printf "${BOLD}▸ Checking aria-label changes vs E2E selectors${RESET}\n"
 
 # Extract aria-label values used in E2E (from { name: "..." } or { name: /.../ })
-e2e_aria_names=$(grep -roPhE 'name:\s*["\x27/]([^"\x27/]+)["\x27/]' "$E2E_DIR/" 2>/dev/null \
-  | sed -E "s/name:\s*[\"'/]//; s/[\"'/]$//" \
+e2e_aria_names=$(grep -rohE 'name:[[:space:]]*["'"'"'/][^"'"'"'/]+["'"'"'/]' "$E2E_DIR/" \
+  | sed -E "s/name:[[:space:]]*[\"'/]//; s/[\"'/]$//" \
   | grep -v '|' \
   | sort -u || true)
 
@@ -267,7 +267,7 @@ fi
 printf "${BOLD}▸ Checking id attribute changes vs E2E selectors${RESET}\n"
 
 # Extract #id selectors from E2E (from locator("#foo") or page.locator("#foo"))
-e2e_ids=$(grep -roPhE '#[a-zA-Z][a-zA-Z0-9_-]+' "$E2E_DIR/" 2>/dev/null \
+e2e_ids=$(grep -rohE '#[a-zA-Z][a-zA-Z0-9_-]+' "$E2E_DIR/" \
   | sed 's/^#//' \
   | sort -u || true)
 
@@ -299,7 +299,7 @@ fi
 
 printf "${BOLD}▸ Checking data-slot attribute changes vs E2E selectors${RESET}\n"
 
-e2e_slots=$(grep -roPhE "data-slot=[\"'][^\"']+[\"']" "$E2E_DIR/" 2>/dev/null \
+e2e_slots=$(grep -rohE "data-slot=[\"'][^\"']+[\"']" "$E2E_DIR/" \
   | sed -E "s/data-slot=[\"']//; s/[\"']$//" \
   | sort -u || true)
 
@@ -335,7 +335,7 @@ printf "${BOLD}▸ Checking i18n value changes vs E2E regex selectors${RESET}\n"
 i18n_removed_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
   | grep -E '^\-\s*"[^"]+"\s*:\s*"' \
   | grep -v '^\-\-\-' \
-  | sed -E 's/^\-\s*"[^"]+"\s*:\s*"([^"]+)".*/\1/' \
+  | sed -E 's/^\-[[:space:]]*"[^"]+"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
   | sort -u || true)
 
 if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then

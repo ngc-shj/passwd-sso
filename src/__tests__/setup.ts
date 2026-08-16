@@ -1,5 +1,19 @@
-import { vi, beforeEach, afterEach } from "vitest";
+import { vi, beforeEach, afterEach, expect } from "vitest";
 import { _resetKeyProvider, getKeyProvider } from "@/lib/key-provider";
+
+// Gate self-tests under scripts/__tests__/ shell out to real processes — node,
+// bash, npx tsx, eslint, openssl — so their cost is subprocess startup, not
+// assertion work. Measured in isolation they run 1-3s against the 10s default,
+// which is ample alone and not under the full suite, where ~1000 test files
+// compete for CPU. The symptom is a contention flake that picks a different
+// file each run, so budgeting them one at a time only moves the failure.
+//
+// Scoped to that directory rather than raised globally: the src/ suites are
+// in-process and a hang there is a real defect that should surface as a
+// timeout, which a global bump would mask.
+if (expect.getState().testPath?.includes("/scripts/__tests__/")) {
+  vi.setConfig({ testTimeout: 60_000 });
+}
 
 // Passthrough mock for withRequestLog — prevents wrapper from accessing
 // request.headers when tests call handlers without arguments.
