@@ -2,9 +2,16 @@
 // Rendered inside a closed Shadow DOM to isolate styles.
 
 import type { DecryptedEntry } from "../../types/messages";
+import { MS_PER_SECOND } from "../../lib/time";
 import { getShadowHost } from "./shadow-host";
 import { DROPDOWN_STYLES } from "./styles";
 import { KEY_ICON, LOCK_ICON, USER_ICON, DISCONNECT_ICON, CARD_ICON, ID_ICON } from "./icons";
+
+// Message-only states (disconnected / locked / no matches) carry nothing to pick,
+// so they linger over the page text under the field until the user clicks away.
+// Dismiss them on a timer; the entries list has no timer, since it would expire
+// while the user is still choosing a credential.
+export const MESSAGE_AUTO_DISMISS_MS = 5 * MS_PER_SECOND;
 
 export type DropdownEntryType = "LOGIN" | "CREDIT_CARD" | "IDENTITY";
 
@@ -41,6 +48,7 @@ let itemElements: HTMLDivElement[] = [];
 let currentOnDismiss: (() => void) | null = null;
 let currentOnSelect: ((entryId: string, teamId?: string) => void) | null = null;
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
+let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
 function isSafeSelectClick(e: MouseEvent, item: HTMLDivElement): boolean {
   if (!e.isTrusted) return false;
@@ -59,26 +67,35 @@ export function showDropdown(opts: DropdownOptions): void {
   style.textContent = DROPDOWN_STYLES;
   root.appendChild(style);
 
+  // Set by the three message-only branches below; drives the auto-dismiss arm.
+  let isMessageOnly = false;
+
   const dropdown = document.createElement("div");
   dropdown.className = "psso-dropdown";
   dropdown.style.pointerEvents = "auto";
   dropdown.setAttribute("role", "listbox");
 
+  // Armed per message-only branch rather than from a single length check after the
+  // fact, so a future fourth message state cannot miss the timer by forgetting to
+  // update a separate predicate.
   if (opts.disconnected) {
     const disconnected = document.createElement("div");
     disconnected.className = "psso-disconnected";
     disconnected.innerHTML = `${DISCONNECT_ICON}<span>${escapeHtml(opts.disconnectedMessage || opts.lockedMessage)}</span>`;
     dropdown.appendChild(disconnected);
+    isMessageOnly = true;
   } else if (opts.vaultLocked) {
     const locked = document.createElement("div");
     locked.className = "psso-locked";
     locked.innerHTML = `${LOCK_ICON}<span>${escapeHtml(opts.lockedMessage)}</span>`;
     dropdown.appendChild(locked);
+    isMessageOnly = true;
   } else if (opts.entries.length === 0) {
     const empty = document.createElement("div");
     empty.className = "psso-empty";
     empty.textContent = opts.noMatchesMessage;
     dropdown.appendChild(empty);
+    isMessageOnly = true;
   } else {
     const header = document.createElement("div");
     header.className = "psso-dropdown-header";
@@ -131,6 +148,13 @@ export function showDropdown(opts: DropdownOptions): void {
   currentOnDismiss = opts.onDismiss;
   currentOnSelect = opts.onSelect;
 
+  // Armed only after the dropdown is live, so a throw above cannot leave a timer
+  // running against a dropdown that was never shown. hideDropdown() at the top of
+  // this function has already cleared any previous timer.
+  if (isMessageOnly) {
+    autoDismissTimer = setTimeout(hideDropdown, MESSAGE_AUTO_DISMISS_MS);
+  }
+
   // Click outside to dismiss (delayed to avoid triggering on the same click)
   requestAnimationFrame(() => {
     outsideClickHandler = (e: MouseEvent) => {
@@ -144,6 +168,13 @@ export function showDropdown(opts: DropdownOptions): void {
 }
 
 export function hideDropdown(): void {
+  // Cleared unconditionally and before fn() below: that call runs detector-supplied
+  // code, and a callback that re-shows the dropdown would arm a timer this clear has
+  // already passed — orphaning it onto whatever dropdown comes next.
+  if (autoDismissTimer !== null) {
+    clearTimeout(autoDismissTimer);
+    autoDismissTimer = null;
+  }
   if (outsideClickHandler) {
     document.removeEventListener("mousedown", outsideClickHandler, true);
     outsideClickHandler = null;
@@ -171,15 +202,20 @@ export function isDropdownVisible(): boolean {
 }
 
 export function handleDropdownKeydown(e: KeyboardEvent): boolean {
-  if (!currentDropdown || itemElements.length === 0) return false;
+  // Presence-only. The item-list requirement belongs to the navigation cases, which
+  // index itemElements; Escape does not, and gating it here made Escape a no-op in
+  // the three message-only states — the states with nothing to navigate.
+  if (!currentDropdown) return false;
 
   switch (e.key) {
     case "ArrowDown": {
+      if (itemElements.length === 0) return false;
       e.preventDefault();
       setActiveItem(activeIndex < itemElements.length - 1 ? activeIndex + 1 : 0);
       return true;
     }
     case "ArrowUp": {
+      if (itemElements.length === 0) return false;
       e.preventDefault();
       setActiveItem(activeIndex > 0 ? activeIndex - 1 : itemElements.length - 1);
       return true;
@@ -207,6 +243,12 @@ export function handleDropdownKeydown(e: KeyboardEvent): boolean {
       return false;
     }
     case "Escape": {
+      // Trusted-only, matching the Enter case and isSafeSelectClick. A synthetic
+      // Escape would otherwise let a page suppress the locked / no-match notice on
+      // demand — the user's only in-page signal that a dropdown is really ours —
+      // and the resulting defaultPrevented would tell the page whether a message
+      // state is showing. Returning early leaves defaultPrevented false.
+      if (!e.isTrusted) return false;
       e.preventDefault();
       hideDropdown();
       return true;

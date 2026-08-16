@@ -781,6 +781,56 @@ the unpacked build loaded in Chrome.
 7. **Credit-card and address forms.** Same as 1-2 on a checkout page — covered by
    the singleton, verified by M4.
 
+## Implementation Checklist
+
+Authored in Phase 2 Step 2-1 from impact analysis. Phase 3 reads this as the list of
+files that must appear in the diff.
+
+### Files to modify
+
+| File | Change |
+| --- | --- |
+| `extension/src/content/ui/suggestion-dropdown.ts` | Both production changes: per-case guard split with I1.4 untrusted-Escape denial; exported interval constant + timer arm/clear |
+| `extension/src/__tests__/content/ui/suggestion-dropdown.test.ts` | T1-T15; `disconnectedMessage` added to `makeOptions()` (`:39-54`); `isTrusted` assert inside `trustedKeydown()` (`:136-145`); `vi.useRealTimers()` into the file-level `afterEach` (`:60-63`) |
+
+**No detector file changes** — FR6's member-set derivation confirms the three
+detectors reach the fix through the singleton. **No message-file changes** (NFR2).
+**No `.js` mirror** (NFR1).
+
+### Shared utilities to reuse (R1 / R2)
+
+- `MS_PER_SECOND` from `extension/src/lib/time.ts:2` — the interval is
+  `5 * MS_PER_SECOND`, **not** a bare `5000`. This is the same idiom
+  `save-banner.ts:7,11` uses (`15 * MS_PER_SECOND`). Verified present.
+- `getShadowHost()` from `./shadow-host` — already imported; timer teardown routes
+  through the existing `hideDropdown()`, which already uses it. No new helper.
+- The existing `trustedKeydown()` Proxy helper in the test file — extend it with the
+  `isTrusted` self-assert rather than writing a second one.
+
+### Patterns to follow consistently
+
+- Timer handle typed `ReturnType<typeof setTimeout>`, bare `setTimeout`/`clearTimeout`
+  — matching `save-banner.ts:24,84,92`, the auto-dismiss sibling.
+- Clear-then-arm ordering, and clear before the `fn()` re-entrancy point (I2.2).
+- Every dismissal routes through `hideDropdown()`; no hand-rolled teardown (I2.3).
+
+### Test-tree enumeration (R19)
+
+`grep -rl` across all test roots for the four exported symbols returns four files:
+`suggestion-dropdown.test.ts`, `suggestion-dropdown-entrytype.test.ts`,
+`form-detector-inline.test.ts`, `cc-identity-detector.test.ts`. Only the first is
+modified; the other three mock the module wholesale and must be re-run unchanged to
+confirm no break. There is no co-located `*.test.ts` beside `src/content/ui/` and no
+e2e tree for the extension.
+
+### CI gate parity (Step 2-1 item 7)
+
+15 gates extracted from CI. Relevant to this diff: `npm run lint`, `npm run typecheck`,
+and the extension's own vitest suite. The remaining 12 gate server-side concerns
+(RLS, crypto domains, env docs, migration drift, TLS fixtures, licenses) that this
+extension-only diff cannot affect — no parity gap, no deferred-parity entry needed.
+`scripts/pre-pr.sh` exists and is the aggregate gate; run it before completion.
+
 ## Recurring-rule notes (pre-flagged for review)
 
 Raised proactively so reviewers can confirm rather than rediscover:
