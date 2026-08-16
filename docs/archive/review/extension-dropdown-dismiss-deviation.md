@@ -98,13 +98,44 @@ the dropdown module wholesale (R19 parallel-test-tree check).
 
 ## Verification
 
+All rows below were re-run against clean HEAD (`11fdca80`) after the mutation pass
+finished, not inferred from a run taken during it. See D6 for why that distinction is
+recorded rather than assumed.
+
 | Gate | Result |
 | --- | --- |
 | `npx vitest run` (extension) | 1007 passed / 61 files |
+| `npx vitest run` (repo root) | 14650 passed, 6 skipped / 1009 files |
 | `npx tsc --noEmit` (extension) | clean |
 | `npm run lint` (repo, `--max-warnings 0`) | clean |
+| `npm run build` (extension) | clean, dist hygiene check passed |
+| `npx next build` (repo) | Compiled successfully, 243/243 static pages |
 | Contract conformance greps (4 forbidden patterns) | all absent |
-| Files changed | 2 code + 2 docs — matches the Implementation Checklist exactly |
+| Files changed | 2 code + 2 docs in the implementation commit (plan, deviation); the review artifact landed in the plan commit |
+
+## D6 — A self-check agent observed a live mutation; recorded rather than dismissed
+
+The Phase 2-5 functionality self-check filed an R21 Major: it ran the extension suite
+and saw 3 failures with `MESSAGE_AUTO_DISMISS_MS = 5 * MS_PER_SECOND - 1` live in the
+tree — mutation D, mid-flight.
+
+**Assessment: a true observation of a transient state, not residue.** The agent was
+launched while the prove-red pass was still running, so its suite run fell inside a
+mutation's apply→restore window. The committed state was never affected:
+`git show HEAD:…/suggestion-dropdown.ts` reads `5 * MS_PER_SECOND`, and
+`git diff HEAD -- extension/` is empty. The agent itself observed the tree return to
+green at HEAD minutes later and said so.
+
+**The part that was a real defect**: gate rows were added to the table above while
+that window was open, and a "3 docs" file count was wrong. Both are corrected — every
+row re-run against clean HEAD, and the count fixed. The agent was right that a
+verification record must state what was observed at a known-clean revision rather than
+what was expected to be true.
+
+**Process lesson, since this is the second time the same shape appeared in this
+change**: do not run verification agents concurrently with a mutation pass that edits
+the tree they read. The prove-red pass is destructive by design and must own the
+worktree exclusively for its duration.
 
 No detector file was modified, no message file, no `.js` mirror — as FR6/NFR1/NFR2
 predicted.

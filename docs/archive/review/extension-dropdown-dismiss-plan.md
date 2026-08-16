@@ -40,6 +40,15 @@ clicks elsewhere, blurs the field, or navigates. They obscure page content direc
 beneath the focused input, and the ESC key — the reflex every user reaches for — does
 nothing. Make them dismissible by ESC and self-dismissing after 5 s.
 
+## Citation baseline
+
+**Every `file:line` reference in this plan is against `main` (pre-implementation).**
+The plan was written before the fix existed, and the fix moves the very lines it
+cites — `suggestion-dropdown.ts:174`, the guard this document is about, is now a
+different statement. Resolve citations with
+`git show main:extension/src/content/ui/suggestion-dropdown.ts`, not against HEAD.
+The deviation log cites post-implementation lines and says so at its own head.
+
 ## Problem statement (root cause, verified in source)
 
 `extension/src/content/ui/suggestion-dropdown.ts:174`:
@@ -479,11 +488,11 @@ complete.
 
 ## Go/No-Go Gate
 
-| ID  | Subject | Status |
+| ID | Subject | Status |
 | --- | --- | --- |
-| C1  | Escape dismisses in every render state (trusted events only); navigation guards preserved | locked |
-| C2  | 5 s auto-dismiss for message-only states; entries state exempt | locked |
-| C3  | Consumer-flow walkthrough for all seven consumers | locked |
+| C1 | Escape dismisses in every render state (trusted events only); navigation guards preserved | locked |
+| C2 | 5 s auto-dismiss for message-only states; entries state exempt | locked |
+| C3 | Consumer-flow walkthrough for all seven consumers | locked |
 
 All three were revised during Round 1 and re-locked: C1 gained I1.4 (untrusted-Escape
 denial), C2 gained the `fn()`-landmark restatement of I2.2 plus three new acceptance
