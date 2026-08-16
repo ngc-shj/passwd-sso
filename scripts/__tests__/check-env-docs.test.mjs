@@ -4,20 +4,11 @@
  * Each case uses a fixture directory under scripts/__tests__/fixtures/env-drift/.
  * The drift-checker accepts --root <path> to resolve all files relative to the fixture.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// These tests shell out to real processes (npx tsx, eslint, bash), so their cost
-// is subprocess startup, not assertion work — 1-3s each measured in isolation.
-// That fits the 10s default alone but not under the full suite, where ~1000 test
-// files compete for CPU and the slowest of these crosses the line; which one
-// crosses varies per run, so it presents as an unattributable flake.
-//
-// Raised for this file only. A global testTimeout bump would buy the same green
-// by hiding genuinely-hung tests everywhere else.
-vi.setConfig({ testTimeout: 60_000 });
 
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
