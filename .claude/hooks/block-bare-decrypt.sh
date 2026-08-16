@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
-# Pre-tool-use hook for the Bash tool: refuses vault decrypt commands, whose
-# stdout is captured into Claude's conversation context.
+# Pre-tool-use hook for the Bash tool: a LINT against the common way a vault
+# credential ends up in the conversation — a decrypt whose stdout is transcribed.
 #
-# Deny by default. There is no "safe shape" of decrypt-via-Bash to allow: where a
-# process's stdout ends up depends on redirections, the pipeline's last stage,
-# command substitution and the surrounding shell — none of which can be
-# recovered by matching the command string. An earlier version allowed a leading
-# "(" or a "|" after the subcommand, and both a bare subshell and a pipe into
-# `cat` satisfied those checks while printing the credential to stdout.
+# Scope, stated plainly because an overstated guard is worse than none:
 #
-# The two failure modes this must not have, both of which it did have:
-#   - allowing on a heuristic that proves nothing. Fixed by removing the
-#     heuristics, not by refining them: a wrong "allowed" is read as
-#     "checked and safe".
-#   - allowing because the guard could not evaluate its own input or matcher.
-#     Both now route to a refusal.
+#   This is not a security boundary. It matches the command STRING before
+#   execution, and a shell string does not determine the argv the process sees.
+#   Quoting the subcommand, splitting it across quotes, or passing it through a
+#   variable all reach the same program unseen by this matcher. A determined
+#   caller — including the model — evades it trivially.
 #
-# Credential use goes through the /use-credential skill instead, which consumes
-# the value without routing it through a shell whose output is transcribed.
+#   The boundary would be a decrypt that is not a Bash command at all: a tool or
+#   MCP surface that consumes the credential and never returns plaintext to the
+#   model. This hook is the stopgap for accidents until that exists.
+#
+# It allows the shape .claude/skills/use-credential/SKILL.md documents (_CRED
+# assigned inside a subshell, consumed in place, never printed) and refuses the
+# shapes that put plaintext on stdout. Two failure modes it must not have, both
+# of which earlier revisions did:
+#
+#   - allowing on a heuristic that proves nothing. A leading "(" or a trailing
+#     pipe say nothing about where stdout lands; `(<cli> <sub> x)` and
+#     `<cli> <sub> x | cat` both satisfied those and both printed the value.
+#   - refusing the sanctioned pattern, which made the workflow its own error
+#     message recommends impossible to run.
 
 set -euo pipefail
 
@@ -69,25 +75,36 @@ if ! matches 'passwd-sso[[:space:]]+decrypt\b|index\.ts[[:space:]]+decrypt\b'; t
   exit 0
 fi
 
-# It is a decrypt command: refuse.
+# It looks like a decrypt command. Decide by the SHAPE the skill documents.
 #
-# This used to allow two "safe" shapes — a leading `(` (subshell) or a `|` after
-# `decrypt`. Neither proves anything about where the plaintext ends up, and both
-# are trivially satisfied by a command that dumps it straight to stdout:
+# What this hook is: a lint against the common accident — running a decrypt whose
+# stdout lands in the transcript. What it is NOT: a security boundary. It matches
+# the pre-execution command STRING, and a shell string does not determine the
+# argv the process will see. All three of these reach the same program and this
+# matcher does not see any of them:
 #
-#   (passwd-sso decrypt item)        <- subshell, output still goes to stdout
-#   passwd-sso decrypt item | cat    <- piped, `cat` writes it to stdout
+#   <cli> \'"'"'<sub>\'"'"' item          quoted subcommand
+#   <cli> <su>"<b>" item        split across quotes
+#   s=<sub>; <cli> "$s" item    variable expansion
 #
-# Both were accepted by the old heuristics and both put the credential in the
-# transcript. A regex over shell text cannot decide where a process's stdout
-# lands: that depends on redirections, the pipeline's last stage, command
-# substitution, and the surrounding shell — none of which are recoverable from
-# the string. Deciding it wrongly is worse than not deciding, because a guard
-# that says "allowed" is read as "checked and safe".
+# Closing that gap needs the decrypt to stop being a Bash command at all — a
+# dedicated tool or MCP surface that consumes the credential and never returns
+# plaintext to the model. Until then this catches the accident, not the evasion,
+# and it should not be read as more than that.
 #
-# So the answer is not a better pattern; it is to stop adjudicating. Every
-# Bash-issued decrypt is refused, and credential use goes through the
-# /use-credential skill, which consumes the value without routing it through a
-# shell whose output is captured into the conversation.
-echo '{"error": "BLOCKED: passwd-sso decrypt must not run via the Bash tool — its stdout is captured into the conversation. A subshell or a pipe does not change that. Use the /use-credential skill, which consumes the credential without exposing it."}' >&2
+# The allowed shape is the one .claude/skills/use-credential/SKILL.md specifies:
+# assignment to _CRED inside a subshell, so the value is consumed by the command
+# that needs it and never printed. An earlier revision of this hook refused that
+# shape too, which broke the workflow its own error message recommends.
+if matches '_CRED=\$\(' && matches '^[[:space:]]*\('; then
+  # Inside the sanctioned subshell. Still refuse if it prints the credential —
+  # that is the accident the skill's own rules forbid.
+  if matches 'echo[[:space:]]+[^|]*\$_CRED|printf[^|]*\$_CRED|cat[^|]*\$_CRED'; then
+    echo '{"error": "BLOCKED: do not echo/print the credential variable. Pass $_CRED directly to the command that consumes it."}' >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+echo '{"error": "BLOCKED: a vault decrypt run this way puts its stdout in the conversation. Use the /use-credential skill pattern: assign to _CRED inside a subshell and pass it straight to the consuming command."}' >&2
 exit 2
