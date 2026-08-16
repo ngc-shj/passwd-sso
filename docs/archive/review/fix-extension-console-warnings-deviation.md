@@ -285,7 +285,7 @@ of defect. Measured unpiped, it exits 1 correctly.
 | Gate | Result |
 |---|---|
 | `tsc --noEmit` (extension) | pass |
-| `vitest run` (extension) | **60 files / 973 tests pass** (was 940 — 33 added) |
+| `vitest run` (extension) | **61 files / 979 tests pass** (was 59 / 940 — 2 files, 39 tests added) |
 | `npm run build` (extension, incl. C3 gate) | pass — "3 HTML file(s) scanned, no modulepreload links, no junk files" |
 | `eslint -c eslint.extension.config.mjs` | pass |
 | `npm run lint` (root) | pass |
