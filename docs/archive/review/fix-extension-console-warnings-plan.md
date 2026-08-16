@@ -422,19 +422,28 @@ build: { outDir: "dist", emptyOutDir: true, modulePreload: false }
 
 ### C3 — Build-output assertion for C2
 
-`extension/scripts/check-no-modulepreload.mjs` (note: `extension/scripts/` does not exist yet — this contract creates it), wired as:
+> **Revised after implementation.** This contract was locked as
+> `check-no-modulepreload.mjs`, a single-purpose gate. During the simplify pass a
+> second defect surfaced on the same subject — `public/.DS_Store` was being copied
+> into `dist/` by every `vite build`, and `emptyOutDir` does not clear dotfiles, so
+> it reached a hand-built extension archive. There is no packaging script to fix
+> instead, so the check belongs on the directory the build owns. The script was
+> widened and renamed accordingly; the text below describes what shipped.
+
+`extension/scripts/check-dist-hygiene.mjs` (this contract creates `extension/scripts/`), wired as:
 
 ```json
-"build": "tsc && vite build && node scripts/check-no-modulepreload.mjs"
+"build": "tsc && vite build && node scripts/check-dist-hygiene.mjs"
 ```
 
-**Control class**: `fail-closed verification gate`. Missing `dist/`, zero HTML files found, or an internal throw must **exit non-zero** — "examined nothing" must not be spelled the same as "found nothing" (R55). **Adjudication authority**: the filesystem, via a directory walk of `dist/`.
+**Control class**: `fail-closed verification gate`. Missing `dist/`, zero HTML files found, or an internal throw must **exit non-zero** — "examined nothing" must not be spelled the same as "found nothing" (R55). **Adjudication authority**: the filesystem, via a single directory walk of `dist/` serving both checks.
 
 **Invariants**:
 
 1. *(app-enforced)* Exits non-zero when `dist/` is absent, when the walk finds zero HTML files, or when any HTML file contains a preload link.
 2. *(app-enforced)* The script's own failure (throw, bad path, rejected promise) exits non-zero. No `catch { process.exit(0) }`; an `unhandledRejection` handler or a top-level try/catch that re-exits non-zero is required.
 3. *(app-enforced)* The script prints the count of HTML files scanned, so a reviewer can distinguish "clean" from "scanned nothing".
+4. *(app-enforced, added post-lock)* Exits non-zero when the walk finds an OS/editor junk file (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `.AppleDouble`) at any depth. Matched on basename, recursively — a junk file nested under `dist/assets/` is packaged exactly like one at the top level.
 
 **Forbidden patterns**:
 
@@ -447,6 +456,10 @@ build: { outDir: "dist", emptyOutDir: true, modulePreload: false }
 - AC3.3 — On the fixed build, exits zero **and** reports a non-zero scanned count (the count is what distinguishes this from a broken glob).
 - AC3.4 — `dist/` present with `.js` chunks but zero `.html` files (`rm dist/**/*.html`) → exits non-zero. AC3.2's whole-directory deletion does not reach this case.
 - AC3.5 — An injected throw in the walk → exits non-zero. This executes invariant 2 rather than grepping the script's own source for it.
+- AC3.6 *(added post-lock)* — A junk file at the top level of `dist/` → exits non-zero. **Verified against the real defect, not a synthetic fixture**: the check failed on the actual `.DS_Store` on its first run.
+- AC3.7 *(added post-lock)* — A junk file nested under `dist/assets/` → exits non-zero, proving the walk recurses rather than scanning one level.
+
+**Source-side fix, recorded because the gate alone would not have been enough**: `public/.DS_Store` was deleted. The gate catches the symptom in `dist/`, but `vite build` copies `public/` verbatim, so leaving the source in place would have reddened the build on every run rather than preventing the defect. Both were needed; a future Finder visit to `public/` recreates the source and the gate is what will catch it.
 
 **CI wiring** *(recorded, since the gate's reach is part of the contract)*: the check rides `extension-ci`'s `npm run build` (`.github/workflows/ci.yml:363`), which is gated by the `extension/**` path filter (`ci.yml:59-60`). A root-tooling or dependency change that alters emitted HTML without touching `extension/**` therefore skips this gate. Accepted with that scope stated; widening the filter is out of scope (SC6).
 

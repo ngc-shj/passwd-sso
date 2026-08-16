@@ -243,13 +243,50 @@ it is now caught.
 **Residual after this work**: none for the adapter. The CC/Identity origin residual (C5
 invariant 6) remains by design, now with its delivery bound under test.
 
+## D8 — C3 widened to `check-dist-hygiene`, and the `.DS_Store` source removed
+
+**Not in the plan.** Raised by an external review of the branch: a hand-built
+`passwd-sso-extension.zip` in the worktree contained `.DS_Store`.
+
+**Root cause, which the report's framing did not reach**: the file was not merely
+*in the zip* — its source is `public/.DS_Store`. That path is gitignored, so it never
+appears in `git status`, but `vite build` copies `public/` verbatim into `dist/`, and
+`emptyOutDir` does **not** clear dotfiles (Vite preserves them). Deleting
+`dist/.DS_Store` alone was proven insufficient: it reappeared on the very next
+`vite build`.
+
+**Fix, on both ends**:
+
+1. Deleted `public/.DS_Store` — the source. Without this the gate below would redden
+   every build rather than prevent the defect.
+2. Widened C3's script to reject OS/editor junk anywhere under `dist/`, and renamed it
+   `check-dist-hygiene.mjs` since it now serves two checks on one walk. There is no
+   packaging script to fix instead, so the check belongs on the directory the build
+   owns; a future Finder visit to `public/` recreates the source and this is what
+   catches it.
+3. Gitignored `passwd-sso-extension*.zip` / `extension/*.zip`.
+
+**On the zip itself**: left in place. It is a stale local artifact predating the
+toolchain reconciliation — it carries `index-B2Kp_COK.css`, which no current build
+emits — not a release. It is not mine to delete, and it can no longer be committed by
+accident.
+
+**Prove-red**: five criteria, each exiting non-zero on its own (C3-a through C3-f in the
+table below, minus the shared green case). The junk check needed no synthetic fixture —
+it failed against the real `.DS_Store` on its first run.
+
+**Process note**: while checking the gate I read `npm run build 2>&1 | tail -6; echo $?`
+as exit 0 and briefly concluded it was fail-open. That was `tail`'s status, not the
+build's — the R44 lossy-channel trap, hit while inspecting a gate for exactly that class
+of defect. Measured unpiped, it exits 1 correctly.
+
 ## Verification summary
 
 | Gate | Result |
 |---|---|
 | `tsc --noEmit` (extension) | pass |
 | `vitest run` (extension) | **60 files / 973 tests pass** (was 940 — 33 added) |
-| `npm run build` (extension, incl. C3 gate) | pass — "3 HTML file(s) scanned, no modulepreload links" |
+| `npm run build` (extension, incl. C3 gate) | pass — "3 HTML file(s) scanned, no modulepreload links, no junk files" |
 | `eslint -c eslint.extension.config.mjs` | pass |
 | `npm run lint` (root) | pass |
 | `npx next build` (root) | pass |
@@ -271,6 +308,8 @@ invariant 6) remains by design, now with its delivery bound under test.
 | C3-b | `dist/` deleted | gate exits 1 |
 | C3-c | `dist/` present, zero HTML files | gate exits 1 |
 | C3-d | injected throw in the walk | gate exits 1 |
+| C3-e | junk file at the top level of `dist/` | gate exits 1 |
+| C3-f | junk file nested under `dist/assets/` | gate exits 1 |
 | L1 | `classifyLastError` precedence swapped | 1 test reddens |
 | L2 | empty message treated as absent | 1 test reddens |
 | L3 | absent-error guard dropped | 2 tests redden |
