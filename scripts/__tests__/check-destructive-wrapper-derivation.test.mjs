@@ -11,12 +11,20 @@
  * executeVaultReset/deleteTeamPassword wrapper functions just to avoid a
  * spurious STALE_DELETE_SIGNAL_NAME.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// Shells out to the real guard over the whole repo source tree, so its cost is
+// subprocess startup rather than assertion work — ~1.1s measured in isolation.
+// That fits the 10s default alone but not under the full suite, where ~1000 test
+// files compete for CPU. Raised for this file only; a global testTimeout bump
+// would buy the same green by hiding genuinely-hung tests everywhere else.
+vi.setConfig({ testTimeout: 60_000 });
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
