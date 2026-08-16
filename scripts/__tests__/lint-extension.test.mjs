@@ -13,12 +13,23 @@
  * nothing and a run that linted and found nothing are otherwise indistinguishable,
  * which is the exact vacuity this self-test exists to rule out.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// These tests shell out to real processes (npx tsx, eslint, bash), so their cost
+// is subprocess startup, not assertion work — 1-3s each measured in isolation.
+// That fits the 10s default alone but not under the full suite, where ~1000 test
+// files compete for CPU and the slowest of these crosses the line; which one
+// crosses varies per run, so it presents as an unattributable flake.
+//
+// Raised for this file only. A global testTimeout bump would buy the same green
+// by hiding genuinely-hung tests everywhere else.
+vi.setConfig({ testTimeout: 60_000 });
+
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CONFIG = "eslint.extension.config.mjs";
