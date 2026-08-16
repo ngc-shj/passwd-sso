@@ -37,6 +37,39 @@ CHECKEND_DAYS="${TLS_FIXTURE_CHECKEND_DAYS:-30}"
 # wrong-passphrase (unreadable) branch.
 export TLS_FIXTURE_PASS="${TLS_FIXTURE_PASS:-passwd-sso-test}"
 
+# Resolve an openssl that can read these fixtures.
+#
+# macOS ships LibreSSL as /usr/bin/openssl, and LibreSSL has no `-legacy` flag —
+# which these p12 files need, because they use the RC2 encryption OpenSSL 3
+# moved to the legacy provider. With LibreSSL first on PATH the extraction below
+# fails and the gate reports TLS_FIXTURE_UNREADABLE against perfectly healthy
+# fixtures. That is a false alarm on the developer's PATH, not a fixture
+# problem, and it should not depend on each developer having ordered their PATH
+# a particular way.
+#
+# Prefer an openssl whose `pkcs12` accepts `-legacy`; fall back to whatever is
+# on PATH so a GNU/CI environment (OpenSSL 3 as `openssl`) is unaffected.
+OPENSSL_BIN=""
+for candidate in openssl /opt/homebrew/opt/openssl@3/bin/openssl /usr/local/opt/openssl@3/bin/openssl; do
+  command -v "$candidate" >/dev/null 2>&1 || continue
+  # Capture first, then match on the variable. Piping into `grep -q` is the
+  # SIGPIPE-under-pipefail shape check-no-pipe-into-grep-q.sh forbids: grep exits
+  # on the first match while the writer is still writing, and the writer's 141
+  # becomes the pipeline's status.
+  help_out="$("$candidate" pkcs12 -help 2>&1 || true)"
+  if grep -q -- '-legacy' <<<"$help_out"; then
+    OPENSSL_BIN="$candidate"
+    break
+  fi
+done
+if [ -z "$OPENSSL_BIN" ]; then
+  echo "ERROR: no openssl with pkcs12 -legacy support found." >&2
+  echo "  These fixtures use RC2, which OpenSSL 3 gates behind the legacy provider" >&2
+  echo "  and LibreSSL (macOS /usr/bin/openssl) does not implement at all." >&2
+  echo "  Install OpenSSL 3 (macOS: brew install openssl@3) and re-run." >&2
+  exit 1
+fi
+
 checkend_secs=$(( CHECKEND_DAYS * 86400 ))
 fail=0
 found=0
@@ -52,7 +85,7 @@ for p12 in "$FIXTURE_ROOT"/tlsLeaf*.p12; do
   # as healthy. `|| true` here would re-hide exactly that, so the exit status is
   # captured explicitly instead.
   extract_ok=1
-  leaf_pem="$(openssl pkcs12 -in "$p12" -nokeys -clcerts \
+  leaf_pem="$("$OPENSSL_BIN" pkcs12 -in "$p12" -nokeys -clcerts \
     -passin env:TLS_FIXTURE_PASS -legacy 2>/dev/null)" || extract_ok=0
 
   if [ "$extract_ok" -eq 0 ] || [ -z "$leaf_pem" ]; then
@@ -62,11 +95,11 @@ for p12 in "$FIXTURE_ROOT"/tlsLeaf*.p12; do
     continue
   fi
 
-  if printf '%s\n' "$leaf_pem" | openssl x509 -checkend "$checkend_secs" -noout >/dev/null 2>&1; then
-    enddate="$(printf '%s\n' "$leaf_pem" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+  if printf '%s\n' "$leaf_pem" | "$OPENSSL_BIN" x509 -checkend "$checkend_secs" -noout >/dev/null 2>&1; then
+    enddate="$(printf '%s\n' "$leaf_pem" | "$OPENSSL_BIN" x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
     echo "TLS_FIXTURE_OK: $name valid past ${CHECKEND_DAYS}d (until ${enddate})"
   else
-    enddate="$(printf '%s\n' "$leaf_pem" | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+    enddate="$(printf '%s\n' "$leaf_pem" | "$OPENSSL_BIN" x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
     echo "TLS_FIXTURE_EXPIRING: $name expires within ${CHECKEND_DAYS}d (at ${enddate:-unknown})" >&2
     echo "    Regenerate with: ios/scripts/generate-tls-test-fixtures.sh" >&2
     fail=1
