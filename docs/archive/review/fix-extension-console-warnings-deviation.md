@@ -136,7 +136,16 @@ next wrong edit).
 worker-bundle / shell-gate tests with no import path to `extension/`, which this change
 does not touch.
 
-**Anti-Deferral**: *Skipped — pre-existing, out of scope.* **Cost of fixing now**: these
+**Diagnosis (not merely "pre-existing")**: verified on a clean `main` checkout with zero
+changes applied — the same failures reproduce. `check-no-pipe-into-grep-q` fails with
+`MISSED(rc=141)`, i.e. SIGPIPE: the test builds a ~3 MB haystack and asserts `grep -l`'s exit
+status under `set -o pipefail`, so the result depends on this machine's pipe buffering rather
+than on any repository code. The deploy and worker-bundle suites are in the same class —
+infrastructure gates exercising ECS rollout, cosign signature verification, and worker boot,
+none of which this branch's files can reach.
+
+**Anti-Deferral**: *Not fixable from this branch — environment-dependent, surfaced to the user.*
+**Cost of fixing now**: these
 are infrastructure gates (ECS deploy rollback, cosign signature enforcement, worker
 bundle boot smoke) whose failures are unrelated in both subject and cause to a browser-
 extension console-warning fix; diagnosing them means loading an entirely separate
@@ -185,7 +194,7 @@ reads as coverage.
 **T1 (Major) — see D3a above.** Not fixable by a better test; recorded as an unsatisfiable
 plan clause with the evidence.
 
-**T3 (Major) — deferred, see below.**
+**T3 (Major) — implemented, see below.**
 
 ## T3 — C5 layer-2 tests: IMPLEMENTED (was deferred, now closed)
 

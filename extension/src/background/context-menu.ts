@@ -67,13 +67,17 @@ function isCurrent(generation: number): boolean {
   return generation === menuGeneration;
 }
 
-function createMenuItem(props: chrome.contextMenus.CreateProperties): Promise<void> {
+/**
+ * Run a callback-style contextMenus call as a promise, reporting any failure.
+ *
+ * Reading lastError is required by the API to avoid "unchecked
+ * runtime.lastError" noise, but the value is classified into a fixed code
+ * rather than discarded: a duplicate id here means the serialization above
+ * regressed, and that has to stay visible in the field.
+ */
+function menuCall(invoke: (done: () => void) => void): Promise<void> {
   return new Promise((resolve) => {
-    chrome.contextMenus.create(props, () => {
-      // Reading lastError is required by the API to avoid "unchecked
-      // runtime.lastError" noise, but the value is classified into a fixed code
-      // rather than discarded: a duplicate id here means the serialization above
-      // regressed, and that has to stay visible in the field.
+    invoke(() => {
       const code = classifyLastError(chrome.runtime.lastError);
       if (code) warnBackground("context-menu-create-failed", code);
       resolve();
@@ -81,14 +85,12 @@ function createMenuItem(props: chrome.contextMenus.CreateProperties): Promise<vo
   });
 }
 
+function createMenuItem(props: chrome.contextMenus.CreateProperties): Promise<void> {
+  return menuCall((done) => chrome.contextMenus.create(props, done));
+}
+
 function removeAllMenuItems(): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.contextMenus.removeAll(() => {
-      const code = classifyLastError(chrome.runtime.lastError);
-      if (code) warnBackground("context-menu-create-failed", code);
-      resolve();
-    });
-  });
+  return menuCall((done) => chrome.contextMenus.removeAll(done));
 }
 
 /**

@@ -20,6 +20,8 @@ const ERROR_KEY_MAP: Record<string, string> = {
   ORIGIN_MISMATCH: "errors.originMismatch",
   UNKNOWN_ORIGIN: "errors.unknownOrigin",
   FILL_FAILED: "errors.autofillFailed",
+  NO_CARD_NUMBER: "errors.noCardNumber",
+  AUTOFILL_INJECT_FAILED: "errors.autofillInjectFailed",
 };
 
 export function humanizeError(code: string): string {
