@@ -32,7 +32,16 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # invocation from the Dockerfile, joining its backslash-continued lines into one.
 # Using the Dockerfile as the source of truth means a change to the bundle format
 # (e.g. adding --format=esm) is re-smoke-tested automatically.
-mapfile -t ESBUILD_CMDS < <(
+# Collected with `while read` rather than `mapfile`: macOS ships bash 3.2, where
+# mapfile/readarray do not exist, and this gate runs from the local pre-PR hook as
+# well as from CI. An esbuild invocation cannot contain a newline (it is one
+# logical line, already joined by the awk below), so IFS= read -r round-trips it
+# without loss.
+ESBUILD_CMDS=()
+while IFS= read -r _cmd; do
+  [ -z "$_cmd" ] && continue
+  ESBUILD_CMDS+=("$_cmd")
+done < <(
   awk '
     /npx esbuild scripts\/.*-worker\.ts/ { collecting=1; line="" }
     collecting {
