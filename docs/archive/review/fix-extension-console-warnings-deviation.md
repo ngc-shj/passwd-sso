@@ -57,6 +57,43 @@ behaviour the generation token provides *is* pinned by
 `keeps the newest host's items when an older rebuild resolves last`, which reddens
 when the guard is disabled (prove-red M1).
 
+### D3a — follow-up: serialization is not observably load-bearing (Phase 3 finding T1)
+
+Phase 3's testing reviewer raised this as a Major: the branch ships two mechanisms and
+only one of them is pinned by any test. Confirmed independently, and then investigated
+further. **Three separate experiments, all agreeing:**
+
+1. **Reviewer's**: deferring the mock callback (`queueMicrotask`, `setTimeout`) against
+   serialization-removed code — traces byte-identical to the fixed code.
+2. **Mine, contiguity oracle**: added an assertion that no `removeAll` may fall between
+   a rebuild's first and last `create` (ordering, which per-segment uniqueness discards).
+   Green with serialization removed. The merged event log is identical either way:
+   `["RESET","psso-parent","RESET","psso-parent","psso-login-e2","psso-login-sep","psso-open-popup"]`.
+   The test was **reverted rather than shipped** — a second assertion that cannot fail is
+   worse than none.
+3. **Mine, realistic registry**: a probe modelling Chrome's actual behaviour — async
+   `create` callbacks plus a live `Set` of registered IDs that raises
+   `Cannot create item with duplicate id …` on collision. Zero duplicate rejections both
+   with and without the chain.
+
+**Why**: the generation token supersedes the older rebuild *before* it reaches its create
+batch, so there is never a second batch to collide with. Serialization is therefore
+**redundant with the generation token** for the duplicate-ID defect, on every path the
+tests can reach. It is not dead code — it still guarantees `removeAll`/create ordering
+across tasks, which is what makes RK2's self-correction argument well-founded, and it is
+what allows `disableContextMenu` to run as one atomic teardown. But the plan's claim that
+it is one of *two independently necessary* mechanisms for FR1 is not supported by
+evidence.
+
+**Disposition**: kept, with the claim corrected rather than the code changed. Removing it
+would make the correctness of the whole design rest on the generation token alone, whose
+own resume-point enumeration was a Round-2 finding — a fragile place to put a single point
+of failure for a security-adjacent control. The plan's T1 per-mechanism prove-red clause
+(plan.md:529, "revert only `serializeMenuTask`'s chaining → the duplicate-ID assertion must
+redden") is recorded here as **unsatisfiable as specified**, not as satisfied. What would
+settle it: a real-browser harness (blocked, VC1/AD1) or an ordering assertion at a seam the
+mock does not flatten.
+
 ## D4 — test `extractHost` fixture tightened to mirror production
 
 **Not in the plan.** The existing `createDeps` fixture used
@@ -138,3 +175,76 @@ does not attribute them to this branch.
 | C3-d | injected throw in the walk | gate exits 1 |
 
 Restored state after every mutation: 32/32 green.
+
+
+## D7 — Phase 3 findings addressed (T2, T4, T5)
+
+**T2 (Major) — `classifyLastError` had no test.** It is the mechanism AD1's
+cost-justification names as its mitigation, so shipping it untested would have made that
+Anti-Deferral entry hollow. Added `extension/src/__tests__/log.test.ts` (8 cases) covering
+every clause of C1 invariant 5, plus an integration case in `context-menu.test.ts` proving
+`createMenuItem`'s callback actually reaches the classifier (RT5 — a log.ts unit test alone
+would not).
+
+Prove-red, four separate mutations of the classifier, each reddening a different case:
+swap the precedence order; treat empty-string as absent; drop the absent-error guard; alter
+the duplicate literal. Plus one on the call site: reverting `createMenuItem` to
+`void chrome.runtime.lastError` (the NFR1 regression) reddens the integration case — so the
+no-suppression invariant is now enforced by a test rather than only by a grep.
+
+**T4 (Minor) — the test `extractHost` fixture still diverged from production.** D4 tightened
+it for schemes but kept `parsed.hostname` raw, while production applies `normalizeHost`
+(strips a leading `www.`, lowercases). The fixture's comment claimed to mirror production
+and did not. Replaced the hand-written double with the **real** `extractHost` import, and
+added a `https://WWW.GitHub.com/login` case. Prove-red: restoring the old fixture reddens
+it. This also removes the class of defect rather than the instance — the fixture can no
+longer drift from the predicate it stands in for.
+
+**T5 (Minor, QUESTION) — AC6.5's module-state reset.** Answered by experiment rather than
+argument. There is no reset hook for `menuChain`/`menuGeneration`; the non-wedge property
+comes from two redundant mechanisms — `menuChain.then(task, task)` runs the next task on the
+rejection path, and the stored handle's `.catch()` stops a rejection becoming the chain's
+terminal state. **Either alone suffices**, which is why removing just one leaves the existing
+`does not wedge the chain` test green; removing **both** makes it fail. That is belt-and-braces,
+not redundancy to strip. Recorded in a comment on the test so the next reader does not mutate
+one, see green, and conclude the test is decorative.
+
+I drafted two further tests during this pass and **deleted both** rather than ship them: a
+contiguity oracle for T1 (see D3a) and a separate non-wedge test that turned out not to pin
+its mechanism either. An assertion that cannot fail is worse than a missing one, because it
+reads as coverage.
+
+**T1 (Major) — see D3a above.** Not fixable by a better test; recorded as an unsatisfiable
+plan clause with the evidence.
+
+**T3 (Major) — deferred, see below.**
+
+## Anti-Deferral: T3 (C5 layer-2 tests) — deferred to a follow-up
+
+**Finding**: AC5.1/AC5.2/AC5.4 specify tests in `background.test.ts` driving
+`handleContextMenuClick` through the **real** `performAutofillForEntry`, so the six-positional-
+parameter adapter at `index.ts:717` is covered by something other than a stub. They were not
+written. The C5 tests in `context-menu.test.ts` assert against `deps.performAutofill`, which is
+a stub, and would stay green if `frameId` and `enforceSenderHost` were transposed at that call
+site.
+
+**Cost of doing it now**: `background.test.ts` boots the whole service worker
+(`await import("../background/index")`) with ~140 lines of chrome-API scaffolding, and the
+context-menu click path additionally needs a live vault key, a decryptable entry fixture, and a
+mocked `swFetch` — the fixture surface is a multiple of the assertion. It is a genuine gap, not
+a cheap one.
+
+**Cost of deferring**: the adapter's argument order is currently correct (verified by reading,
+and by the Phase-3 security reviewer tracing the parameter path). A future edit that transposes
+two of the six positional arguments would not be caught by the unit suite. The type system helps
+— `enforceSenderHost` is `string | undefined` and `frameId` is `number | undefined`, so swapping
+*those two* is a compile error — but `teamId` and `enforceSenderHost` are both
+`string | undefined` and would transpose silently.
+
+**Mitigation**: the type-level protection above covers the frameId/host pair. M4 (manual test)
+exercises the real path in a browser before merge. The remaining exposure is a
+teamId/enforceSenderHost transposition, which M4 would also surface (a team entry would fail to
+fill, or a fill would be refused on a matching host).
+
+**What would settle it**: the layer-2 tests as specified in AC5.1/AC5.2/AC5.4, in a follow-up
+that can also absorb the `background.test.ts` fixture cost for the other click-path cases.

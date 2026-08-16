@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { DecryptedEntry } from "../types/messages";
+import { extractHost } from "../lib/url-matching";
 
 // Mock chrome API before importing
 // Override navigator.language for consistent i18n
@@ -49,15 +50,10 @@ function createDeps(overrides?: Partial<ContextMenuDeps>): ContextMenuDeps {
   return {
     getCachedEntries: vi.fn().mockResolvedValue(mockEntries),
     isHostMatch: vi.fn((entryHost: string, tabHost: string) => entryHost === tabHost),
-    // Mirrors src/lib/url-matching.ts: non-http(s) schemes yield no host, which
-    // is what routes chrome:// and file:// clicks into the deny branch.
-    extractHost: vi.fn((url: string) => {
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-        return parsed.hostname;
-      } catch { return null; }
-    }),
+    // The production predicate, not a lookalike: a fixture that accepted
+    // chrome:// URLs or skipped www.-stripping would let the deny-path tests
+    // pass for the wrong reason.
+    extractHost: vi.fn(extractHost),
     isConnected: vi.fn().mockReturnValue(true),
     isVaultUnlocked: vi.fn().mockReturnValue(true),
     isContextMenuEnabled: vi.fn().mockResolvedValue(true),
@@ -338,6 +334,26 @@ describe("context-menu", () => {
     });
   });
 
+  describe("create failure reporting", () => {
+    it("classifies and logs a duplicate-id rejection from the create callback", async () => {
+      // The wiring, not the classifier: proves createMenuItem actually reads
+      // lastError and routes it to warnBackground. AD1 leans on this path being
+      // live in the field, since no browser harness covers it.
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const chromeGlobal = globalThis.chrome as unknown as { runtime: { lastError?: { message?: string } } };
+      chromeMock.contextMenus.create.mockImplementation((_props: unknown, cb?: () => void) => {
+        chromeGlobal.runtime.lastError = { message: "Cannot create item with duplicate id psso-parent" };
+        cb?.();
+        chromeGlobal.runtime.lastError = undefined;
+      });
+
+      await setupContextMenu();
+
+      expect(warn).toHaveBeenCalledWith("[passwd-sso] context-menu-create-failed: duplicate-id");
+      warn.mockRestore();
+    });
+  });
+
   // ── C5: credential release bound to the clicked frame's host ──
   describe("click host binding (C5)", () => {
     const entryUuid = "a0000000-0000-0000-0000-000000000001";
@@ -377,6 +393,23 @@ describe("context-menu", () => {
       handleContextMenuClick(
         { menuItemId: `psso-login-${entryUuid}` } as chrome.contextMenus.OnClickData,
         { id: 1, url: "https://github.com/login" } as chrome.tabs.Tab,
+      );
+
+      expect(deps.performAutofill).toHaveBeenCalledWith(
+        entryUuid, 1, undefined, "github.com", undefined,
+      );
+    });
+
+    it("normalizes the resolved host the same way production does", () => {
+      // extractHost strips a leading www. and lowercases; a fixture that
+      // returned URL.hostname raw would pass "www.github.com" here and quietly
+      // disagree with the host the entries were matched against.
+      handleContextMenuClick(
+        {
+          menuItemId: `psso-login-${entryUuid}`,
+          frameUrl: "https://WWW.GitHub.com/login",
+        } as chrome.contextMenus.OnClickData,
+        { id: 1 } as chrome.tabs.Tab,
       );
 
       expect(deps.performAutofill).toHaveBeenCalledWith(
@@ -564,6 +597,13 @@ describe("context-menu", () => {
       await new Promise((r) => setTimeout(r, DEBOUNCE_MS + 60));
 
       // The guarded side effect, not merely a settled promise.
+      //
+      // Two mechanisms keep the chain moving past a rejection and either alone
+      // suffices, so this reddens only when both are removed: `then(task, task)`
+      // runs the next task on the rejection path, and the stored handle's
+      // `.catch()` keeps a rejected promise from becoming the chain's terminal
+      // state. Verified by mutation — dropping either one leaves this green,
+      // dropping both makes it fail.
       expect(idsCreated()).toContain("psso-login-e2");
     });
 
