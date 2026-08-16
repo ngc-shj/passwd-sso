@@ -55,7 +55,20 @@ to kill it would have been the vacuous-test defect this plan exists to avoid.
 Two speculative tests written during this investigation were reverted for exactly that
 reason. One was kept, on its own merit rather than as a mutation-killer: *"does not
 dismiss an entries dropdown put up by an onDismiss callback"* — it pins real behaviour
-(FR3 across the re-entrancy path) and passes honestly.
+(FR3 across the re-entrancy path) and passes honestly. Phase 3 confirmed it earns its
+place independently: it is one of the three tests mutation E reddens.
+
+**Completing the reachability argument.** The two facts above — one null-assignment
+site, arming only after `currentDropdown` is set — are not sufficient on their own,
+because `hideDropdown()` is re-entrant through `fn()` at `:195`, and that inner entry
+happens *after* `:188` has already nulled `currentDropdown`. So the state D4 calls
+unreachable is in fact reached, on that path. What closes the argument is one step
+further in: at that inner entry no timer is armed either, since the outer clear has
+already fired and `showDropdown`'s own arm cannot have run yet. Verified by probe in
+Phase 2 and independently in Phase 3. Recorded because the re-entrancy step is the one
+a future edit would break — an `onDismiss` that arms a timer by some route other than
+`showDropdown` would make the nested form leak while the unconditional form stays
+correct, which is the second reason to keep the unconditional placement.
 
 The unconditional placement is retained regardless: it is the form that stays correct if
 a future edit arms a timer on a path where `currentDropdown` is null, and I2.2's real
@@ -87,7 +100,7 @@ by `git diff --stat` after each.
 | C: drop the `ArrowDown` per-case length guard | 3 tests (T5 ×3 states) | PASS |
 | D: interval `− 1` (before D3's fix) | **nothing — gap found** | fixed, see D3 |
 | D2: interval `− 1` (after D3's fix) | 1 test (constant value) | PASS |
-| E: arm the timer unconditionally | 2 tests (T10, T14) | PASS |
+| E: arm the timer unconditionally | 3 tests (T10, T14, and the onDismiss-reshow case) | PASS |
 | F: move the clear after the `fn()` re-entrancy point | 2 tests (T11, T14) | PASS |
 | G: nest the clear inside `if (currentDropdown)` | **nothing — equivalent mutant** | see D4 |
 | H: hand-rolled teardown in the timer callback | 1 test (T13) | PASS |

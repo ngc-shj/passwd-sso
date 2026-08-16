@@ -10,6 +10,7 @@ import {
   MESSAGE_AUTO_DISMISS_MS,
   type DropdownOptions,
 } from "../../../content/ui/suggestion-dropdown";
+import { getShadowHost } from "../../../content/ui/shadow-host";
 import { EXT_ENTRY_TYPE } from "../../../lib/constants";
 
 // Mock chrome.runtime
@@ -273,6 +274,24 @@ describe("message-only auto-dismiss", () => {
   const useTimeoutOnlyFakeTimers = () =>
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
+  // Pins the toFake list above. With a bare useFakeTimers(), vitest also fakes rAF,
+  // so advancing the clock would run showDropdown's pending frame and install the
+  // outside-click listener mid-test — leaving these tests exercising a dismissal
+  // path they never meant to involve.
+  it("does not install the outside-click listener while the clock advances", () => {
+    useTimeoutOnlyFakeTimers();
+    const addSpy = vi.spyOn(document, "addEventListener");
+
+    showDropdown(makeOptions({ vaultLocked: true }));
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS);
+
+    const mousedownInstalls = addSpy.mock.calls.filter(
+      ([type, , capture]) => type === "mousedown" && capture === true,
+    );
+    expect(mousedownInstalls).toHaveLength(0);
+    addSpy.mockRestore();
+  });
+
   // T8.
   it.each(MESSAGE_STATES)("dismisses %s after the interval", (_label, overrides) => {
     useTimeoutOnlyFakeTimers();
@@ -307,6 +326,29 @@ describe("message-only auto-dismiss", () => {
 
     expect(isDropdownVisible()).toBe(true);
     expect(opts.onDismiss).not.toHaveBeenCalled();
+  });
+
+  // `isDropdownVisible()` only reads a module variable, so nothing above notices if
+  // the shadow root is never drained. That matters: showDropdown appends a fresh
+  // <style> and dropdown every call, so a teardown that skips the drain stacks one
+  // stale dropdown per show — the reported bug, made worse.
+  it("empties the shadow root, identically to a manual dismiss", () => {
+    useTimeoutOnlyFakeTimers();
+    const { root } = getShadowHost();
+
+    showDropdown(makeOptions({ vaultLocked: true }));
+    expect(root.children.length).toBeGreaterThan(0);
+
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS);
+
+    expect(root.children.length).toBe(0);
+
+    showDropdown(makeOptions({ vaultLocked: true }));
+    expect(root.children.length).toBeGreaterThan(0);
+
+    hideDropdown();
+
+    expect(root.children.length).toBe(0);
   });
 
   // T13. Visibility and onDismiss alone would also pass for a hand-rolled teardown;

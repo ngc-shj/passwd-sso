@@ -96,8 +96,12 @@ kind. See `RT10` in §Recurring-rule notes.
   the outside-click listener is removed, shadow-root children are removed, and the
   `onDismiss` callback fires so each detector clears its per-detector state
   (`currentContext` for LOGIN; `activeInput` for CC and IDENTITY — see C3
-  Consumers 4a/4b). All four clauses are pinned: the first by T13, the rest by
-  T8/T11/T12.
+  Consumers 4a/4b). Clause-by-clause pinning: listener removal by T13; shadow-root
+  drain by T16; visibility flip and `onDismiss` by T8/T11/T12. **T16 was added in
+  Phase 3** — the first revision claimed T8/T11/T12 covered the drain, which was
+  false: `isDropdownVisible()` reads a module variable and never inspects the shadow
+  root, so deleting the drain loop left all 1007 tests green. See the Phase 3 code
+  review, F-Func-1.
 - **FR5** — Re-showing the dropdown (a new `showDropdown()` call) cancels any timer
   from the previous invocation. No orphaned timer may fire against a later dropdown.
 - **FR6** — The fix applies to all three detectors (LOGIN, CREDIT_CARD, IDENTITY)
@@ -741,7 +745,7 @@ the unpacked build loaded in Chrome.
   that alters screen-reader announcement behavior and needs its own manual
   verification with a screen reader, which VC1's constraint class also blocks. Cost
   of excluding = a pre-existing, unchanged a11y wart; this PR neither introduces nor
-  worsens it. Owner: a future a11y pass. Noted here rather than silently, per `R34`.
+  worsens it. Owner: a future a11y pass. Noted here rather than silently, per `R34`. **Widened in Phase 3 (F-Sec-3)**: a `listbox` that vanishes after 5 s with no user action is also a WCAG 2.2.1 (Timing Adjustable) concern on the screen-reader path. Unlike the static `role` wart, that dimension *is* introduced by FR2, so it is recorded here rather than carried silently; same owner, same cost-justification — the fix is an ARIA semantics change needing screen-reader verification, which VC1's constraint class also blocks.
 
 - **SC6 — `try`/`catch` around the `onDismiss` invocation.** Out of scope.
   `hideDropdown()` calls `fn()` at `:161-165` unwrapped, while the module's other two
@@ -755,6 +759,24 @@ the unpacked build loaded in Chrome.
   in a page event handler; all three current callbacks are single assignments that
   cannot throw, so the exposure is latent, not live. Owner: a future error-handling
   pass over the module. Verified: all three `onDismiss` bodies are bare assignments.
+
+- **SC7 — The rAF window that can strand the outside-click listener.** Out of scope.
+  `outsideClickHandler` is assigned inside a `requestAnimationFrame` callback, but
+  `hideDropdown()` removes it only `if (outsideClickHandler)`. A dismissal landing
+  between `showDropdown()` returning and the rAF firing therefore skips removal, and
+  the rAF then installs a capture-phase `mousedown` listener that no later
+  `hideDropdown()` will remove. **Pre-existing on `main`** — identical rAF, identical
+  guard — and raised here only because this change adds a fourth dismissal source to
+  that teardown (R52's shape). **Anti-Deferral**: worst case is unbounded accumulation
+  of `document` listeners on an SPA that navigates repeatedly with an input focused,
+  each adding a `composedPath()` call per `mousedown`; no credential exposure, since
+  the stranded closure only calls `hideDropdown()`. Likelihood from the path this PR
+  adds is nil — 5000 ms is three orders of magnitude beyond a ~16 ms frame — and the
+  reachable paths (`suppressInline`, SPA navigation) are unchanged from `main`. Cost of
+  including: `cancelAnimationFrame` plus a module-level frame handle changes teardown
+  semantics on all 18 external `hideDropdown()` call sites and needs its own test
+  matrix — wider than the defect being fixed. Owner: a future teardown-lifecycle pass.
+  Found in Phase 3 review (F-Sec-1).
 
 ### Risks
 

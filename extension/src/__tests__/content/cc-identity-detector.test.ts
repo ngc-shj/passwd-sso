@@ -13,6 +13,7 @@ vi.mock("../../content/ui/suggestion-dropdown", () => ({
   hideDropdown: (...a: unknown[]) => hideDropdownMock(...a),
   isDropdownVisible: () => false,
   handleDropdownKeydown: () => false,
+  MESSAGE_AUTO_DISMISS_MS: 5000,
 }));
 
 vi.mock("../../lib/i18n", () => ({ t: (key: string) => key }));

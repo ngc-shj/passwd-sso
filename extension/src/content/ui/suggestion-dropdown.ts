@@ -152,7 +152,7 @@ export function showDropdown(opts: DropdownOptions): void {
   // running against a dropdown that was never shown. hideDropdown() at the top of
   // this function has already cleared any previous timer.
   if (isMessageOnly) {
-    autoDismissTimer = setTimeout(hideDropdown, MESSAGE_AUTO_DISMISS_MS);
+    autoDismissTimer = setTimeout(() => hideDropdown(), MESSAGE_AUTO_DISMISS_MS);
   }
 
   // Click outside to dismiss (delayed to avoid triggering on the same click)
