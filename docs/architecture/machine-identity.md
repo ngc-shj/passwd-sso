@@ -280,7 +280,12 @@ sequenceDiagram
 > **Security boundaries** — enforced independently of how the caller behaves:
 > - Server ↔ AI: HTTPS + MCP OAuth 2.1 (metadata only)
 > - Agent ↔ Server: HTTPS + Bearer token (auth check, encrypted blob)
-> - Agent ↔ Hook: Unix socket 0600 (plaintext, same-user only)
+> - Agent daemon ↔ local CLI process: Unix socket 0600 (plaintext, same-user
+>   only). The connecting party is the CLI's decrypt command, not the hook — the
+>   hook never opens the socket. Note what this separates and what it does not:
+>   it excludes other machines and other OS users, but any process running as the
+>   same user can speak the protocol, since the handler authorizes on the
+>   request's `clientId` rather than authenticating the caller.
 >
 > **Cooperative-use control** — depends on the caller following the pattern:
 > - Hook ↔ AI: stdout pipe (result only, credential consumed in subshell). The
@@ -354,7 +359,13 @@ sequenceDiagram
 
 Credential usage requires the CLI agent daemon running on the same machine as the MCP client. Claude Desktop and other MCP clients can browse entry metadata but cannot decrypt or use credentials.
 
-That restriction *is* a boundary, and a real one: it rests on the agent's 0600 Unix socket, which a client on another machine simply cannot reach. What it does not rest on is the Skill/hook pair — those are cooperative-use controls, so extending credential usage to another client would need a way to consume the credential without returning plaintext to the model (a dedicated tool or MCP surface), not a port of the hook.
+Three separate things are worth keeping apart here, because the restriction is real but narrower than "other clients cannot decrypt":
+
+- **Enforced boundary.** The agent socket is `0600` on the local filesystem, so it is reachable only from the same machine and only by the same OS user. A remote host or another user cannot connect at all.
+- **Product status, not a guarantee.** Claude Desktop and other MCP clients cannot use credentials today because none of them implements the agent protocol — not because anything stops them. That is a matter of what has been built.
+- **Not guaranteed.** The socket does not distinguish *which* client is calling. `handleConnection` reads a `clientId` from the request and checks authorization with the server; it does not authenticate the connecting process or bind a Unix peer credential to a particular MCP client. Any process running as the same OS user can speak the protocol.
+
+So extending credential usage to another client is a product decision, and the thing it would need is a way to consume the credential without returning plaintext to the model (a dedicated tool or MCP surface) — not a port of the Skill/hook pair, which are cooperative-use controls.
 
 ### E2E Encryption Strategy
 
