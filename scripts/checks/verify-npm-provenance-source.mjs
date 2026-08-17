@@ -66,8 +66,8 @@ export function verifyProvenanceSource(auditOutput, expected) {
     // package was never in it — which is a different failure from "the audit
     // found the package and rejected it", and the bare reason code cannot tell
     // them apart. Both 0.4.73 and 0.4.74 failed here reporting only
-    // PACKAGE_NOT_VERIFIED while the audit had happily verified the CLI's eight
-    // dependencies; the audited list is what identifies that immediately.
+    // PACKAGE_NOT_VERIFIED while the audit had happily verified a tree of signed
+    // dependencies; printing that list is what identifies the cause immediately.
     const audited = verified
       .map((v) => (v?.name ? `${v.name}@${v.version ?? "?"}` : null))
       .filter(Boolean);

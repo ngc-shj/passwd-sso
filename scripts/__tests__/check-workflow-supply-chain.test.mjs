@@ -944,6 +944,28 @@ jobs:
     expect(v).toHaveLength(1);
   });
 
+  // A guard that recognises one spelling of what it forbids is a tripwire, not a
+  // boundary: every alias below reintroduces the identical defect, so each needs
+  // its own fixture or the guard is bypassable by a routine refactor.
+  it.each([
+    ['npm i --no-save "passwd-sso-cli@1.0.0"', "install alias `i`"],
+    ['npm add --no-save "passwd-sso-cli@1.0.0"', "install alias `add`"],
+    ['npm install --save=false "passwd-sso-cli@1.0.0"', "--save=false"],
+    ['npm i --save=false "passwd-sso-cli@${VERSION}"', "alias + --save=false"],
+  ])("flags the equivalent form: %s", (install) => {
+    expect(findUnsavedAuditSubjectViolations(withAudit(install), "release.yml")).toHaveLength(1);
+  });
+
+  // The allow side of the same axis: --no-save is only a problem when it applies
+  // to a versioned package the audit is meant to cover.
+  it.each([
+    ["npm ci", "no install of a versioned spec"],
+    ["npm install --no-save", "unversioned — installs the manifest, not a subject"],
+    ["npm i --no-save eslint", "unversioned package name"],
+  ])("stays silent for: %s", (install) => {
+    expect(findUnsavedAuditSubjectViolations(withAudit(install), "release.yml")).toEqual([]);
+  });
+
   // The allow side: this is the shape the fix ships, and it must stay silent.
   it("accepts the saved install the verification job now uses", () => {
     expect(

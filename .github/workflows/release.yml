@@ -281,10 +281,15 @@ jobs:
             # NOT --no-save: `npm audit signatures` walks the dependency graph, and
             # an unsaved install leaves the package in neither the manifest nor the
             # lockfile's root deps, so it has no edge to reach. The audit then
-            # covers only the CLI's own 8 dependencies and reports "8 verified"
-            # while never touching the package this job exists to verify — which is
-            # how both 0.4.73 and 0.4.74 failed the identity check below with
+            # covers only the installed dependencies that carry registry signatures
+            # and never the package this job exists to verify — which is how both
+            # 0.4.73 and 0.4.74 failed the identity check below with
             # PACKAGE_NOT_VERIFIED despite publishing correctly.
+            #
+            # Those runs reported "8 verified", and the CLI happens to declare 8
+            # direct dependencies — the match is a coincidence. The audited set is
+            # "signed packages in the tree", mostly transitive, so the count is not
+            # a completeness signal and must not be used as one when checking this.
             if npm install --ignore-scripts "passwd-sso-cli@${VERSION}" >/dev/null 2>&1; then
               installed=true
               break

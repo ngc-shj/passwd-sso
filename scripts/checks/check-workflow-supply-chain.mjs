@@ -527,12 +527,15 @@ export function findUnsavedAuditSubjectViolations(content, name) {
   if (!/npm\s+audit\s+signatures/.test(content)) return [];
   const violations = [];
   for (const command of extractRunCommands(content)) {
-    // `npm install … --no-save … <pkg>@<version>` in any flag order. The version
-    // spec is what distinguishes "fetch this exact published artifact to verify
-    // it" from an ordinary throwaway install.
-    const install = command.match(/\bnpm\s+install\b[^\n;&|]*/g) || [];
+    // Every npm alias that installs from the registry, and both spellings of the
+    // don't-record-it flag. Matching only `npm install --no-save` would leave
+    // `npm i --no-save`, `npm add --no-save`, and `--save=false` as equivalent
+    // ways to reintroduce exactly the defect this guard exists to prevent —
+    // a guard that recognises one spelling of what it forbids is a tripwire, not
+    // a boundary. `--save=false` is npm's config form of the same flag.
+    const install = command.match(/\bnpm\s+(?:install|i|add)\b[^\n;&|]*/g) || [];
     for (const inv of install) {
-      if (!/--no-save\b/.test(inv)) continue;
+      if (!/--no-save\b|--save[=\s]+false\b/.test(inv)) continue;
       if (!/[\w@/.-]+@\$?\{?[\w.$-]/.test(inv.replace(/--[\w-]+/g, ""))) continue;
       violations.push(
         `${name}: '${inv.trim()}' installs a versioned package with --no-save in a workflow that runs 'npm audit signatures'. An unsaved install leaves the package out of the dependency graph, so the audit silently covers only its dependencies and never the package itself — the subject of the verification is skipped while the audit still reports success. Drop --no-save so the package is part of the audited graph.`,
