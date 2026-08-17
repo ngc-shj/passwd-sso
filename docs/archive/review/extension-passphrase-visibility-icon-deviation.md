@@ -144,3 +144,18 @@ parallel while telling one of them to mutate. The lesson was recorded and not ap
 The concrete cost is not a shipped defect but a reviewer-hours defect: one Major finding
 and one transient failure both spent on an artifact of my own scheduling. Next time,
 either serialize the mutating reviewer or give it an isolated worktree.
+
+## D5 — Phase 3 narrowed what the icon tests actually pin
+
+Two test changes came out of code review, both prove-red executed:
+
+- **T3 deleted.** The reviewer proved it reddened under no mutation that T4 and T7 did not
+  also catch — all three route through `iconFor`, whose null guard does the work T3's
+  `toContain("<svg")` appeared to do.
+- **T7 tightened.** A meaningless square glyph in the hidden state **passed all 13 tests**:
+  T7 pinned "the visible state has a slash", not "the hidden state is an eye", while the
+  plan described it as pinning the icon direction. T7 now also asserts the hidden glyph's
+  pupil `<circle>`. Re-run: the square mutation reddens T7 alone, where it was green before.
+
+What remains unpinnable is unchanged and honest: jsdom cannot judge whether a path *looks*
+like an eye. T7 pins the two elements that carry the meaning; M2 covers the rest.

@@ -121,15 +121,6 @@ describe("VaultUnlock", () => {
       expect(screen.getByRole("button", { name: /show/i })).toBeInTheDocument();
     });
 
-    // T3. Distinguishes "no icon" from T4's "same icon".
-    it("renders an icon in both states", () => {
-      render(<VaultUnlock onUnlocked={vi.fn()} />);
-
-      expect(iconFor(/show/i)).toContain("<svg");
-      fireEvent.click(screen.getByRole("button", { name: /show/i }));
-      expect(iconFor(/hide/i)).toContain("<svg");
-    });
-
     // T4. outerHTML, not innerHTML: strokeWidth and viewBox live on the element
     // itself, so innerHTML would miss an icon that changed only its attributes.
     it("renders a different icon in each state", () => {
@@ -169,12 +160,22 @@ describe("VaultUnlock", () => {
 
     // T7. Pins which glyph goes with which state. T4 only proves they differ —
     // a swapped pairing renders two different icons too, and passes it.
-    it("shows the slashed eye only while the passphrase is visible", () => {
+    //
+    // The pupil circle is asserted as well as the slash: without it, any glyph
+    // without a <line> satisfies the hidden state, and a meaningless square
+    // passes. jsdom cannot judge whether a path looks like an eye, so this pins
+    // the two elements that carry the meaning and leaves the rest to M2.
+    it("shows a plain eye while hidden and a slashed eye while visible", () => {
       render(<VaultUnlock onUnlocked={vi.fn()} />);
 
-      expect(iconFor(/show/i)).not.toContain("<line");
+      const hidden = iconFor(/show/i);
+      expect(hidden).toContain("<circle");
+      expect(hidden).not.toContain("<line");
+
       fireEvent.click(screen.getByRole("button", { name: /show/i }));
-      expect(iconFor(/hide/i)).toContain("<line");
+
+      const visible = iconFor(/hide/i);
+      expect(visible).toContain("<line");
     });
   });
 
