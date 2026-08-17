@@ -278,7 +278,14 @@ jobs:
           # report the published package as verified when it was never fetched).
           installed=false
           for attempt in 1 2 3 4 5; do
-            if npm install --no-save --ignore-scripts "passwd-sso-cli@${VERSION}" >/dev/null 2>&1; then
+            # NOT --no-save: `npm audit signatures` walks the dependency graph, and
+            # an unsaved install leaves the package in neither the manifest nor the
+            # lockfile's root deps, so it has no edge to reach. The audit then
+            # covers only the CLI's own 8 dependencies and reports "8 verified"
+            # while never touching the package this job exists to verify — which is
+            # how both 0.4.73 and 0.4.74 failed the identity check below with
+            # PACKAGE_NOT_VERIFIED despite publishing correctly.
+            if npm install --ignore-scripts "passwd-sso-cli@${VERSION}" >/dev/null 2>&1; then
               installed=true
               break
             fi
@@ -315,9 +322,23 @@ jobs:
           npm audit signatures --json --include-attestations > "$AUDIT_JSON"
           node -e '
             const j = require(process.argv[1]);
-            const v = (j.verified || []).length, m = (j.missing || []).length, i = (j.invalid || []).length;
+            const verified = j.verified || [];
+            const v = verified.length, m = (j.missing || []).length, i = (j.invalid || []).length;
             console.log(`npm audit signatures: ${v} verified, ${m} missing, ${i} invalid`);
             if (i > 0 || m > 0) { console.error("::error::signature verification reported missing/invalid entries"); process.exit(1); }
+            // The subject of this whole job must be IN the audited set. Counting
+            // only verified/missing/invalid cannot tell "verified the package"
+            // from "verified everything except the package" — the latter is what
+            // shipped twice, reporting a healthy "8 verified" that was entirely
+            // the CLI dependencies. Assert presence explicitly so a future change
+            // that drops the package out of the graph reds here, naming the cause,
+            // rather than further down with an opaque PACKAGE_NOT_VERIFIED.
+            const pkg = "passwd-sso-cli", ver = process.env.VERSION;
+            if (!verified.some((e) => e && e.name === pkg && e.version === ver)) {
+              console.error(`::error::${pkg}@${ver} is absent from the audited set (${v} verified) — the audit did not cover the published package`);
+              console.error(`::error::audited: ${verified.map((e) => e && e.name).join(", ") || "(none)"}`);
+              process.exit(1);
+            }
           ' "$AUDIT_JSON"
           # Bind the published bytes to the bytes build-cli produced: compare the
           # registry's dist.integrity for this version against the integrity we
