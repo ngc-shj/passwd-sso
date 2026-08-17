@@ -152,3 +152,26 @@ worktree exclusively for its duration.
 
 No detector file was modified, no message file, no `.js` mirror — as FR6/NFR1/NFR2
 predicted.
+
+## D7 — SC7 reopened and fixed after an external security review refuted its premise
+
+Phase 3 deferred the rAF listener-stranding window as SC7, reasoning that the timer path
+could not reach it because 5000 ms ≫ one frame. A follow-up security review pointed out
+that this holds only while rAF is running: **Chrome pauses `requestAnimationFrame` in a
+background tab while timers keep running**, so the auto-dismiss becomes the *expected*
+winner of that race, not an impossible one.
+
+Reproduced by probe (fake `setTimeout`, real rAF — the hidden-tab ordering):
+`installed=1, removed=0`. Fixed by retaining the frame handle and cancelling it in
+`hideDropdown()`. The same review found the countdown ignored `visibilityState`, letting
+a "Vault locked" notice expire unread behind a switched-away tab — fixed by measuring
+visible time only.
+
+Six tests added, three mutations run (K: drop `cancelAnimationFrame`; L: revert to a
+plain timer; M: leak the visibility watcher), each reddening its own tests. Mutation K
+reddens the allow-side test too, confirming the pair brackets the behaviour rather than
+only tightening.
+
+**The lesson worth keeping**: SC7's cost line was right and its likelihood line rested on
+an assumption nobody measured. Three expert reviews passed over it. When a deferral turns
+on "this path is unreachable", the reachability claim needs a probe, not an argument.

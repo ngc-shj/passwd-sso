@@ -55,16 +55,19 @@ the step a future edit would break.
 
 ## Security Findings
 
-**F-Sec-1 — Minor (question) — ANSWERED, deferred as SC7.** `outsideClickHandler` is
-assigned inside a `requestAnimationFrame` callback, but `hideDropdown()` removes it only
+**F-Sec-1 — Minor (question) — deferred as SC7 in this round, then FIXED in Round 2 after
+its premise was refuted. See R2-F2 below.** `outsideClickHandler` is assigned inside a
+`requestAnimationFrame` callback, but `hideDropdown()` removes it only
 `if (outsideClickHandler)`. A dismissal landing between `showDropdown()` returning and
 the rAF firing strands a capture-phase `mousedown` listener on `document` forever.
-**Pre-existing on `main`** (identical rAF and identical guard), and unreachable from the
-timer path — 5000 ms is three orders of magnitude beyond a frame. The reachable paths
-(`suppressInline`, SPA `navigationHandler`) are unchanged from `main`. Recorded as SC7
-with cost-justification rather than fixed, because the fix (`cancelAnimationFrame` plus a
-module-level handle) changes teardown semantics on all 18 external `hideDropdown()` call
-sites — wider than the defect being fixed, in a PR the user framed around three messages.
+**Pre-existing on `main`** (identical rAF and identical guard).
+
+This round deferred it on the argument that the timer path could not reach the window,
+"since 5000 ms is three orders of magnitude beyond a frame". **That argument was wrong** —
+it holds only while rAF is running, and Chrome pauses rAF in background tabs while timers
+keep running. Round 2 reproduced the stranding by probe and fixed it. The reasoning is
+left standing here rather than edited away, because the failure was in the reasoning, and
+hiding it would remove the only evidence of how the deferral got through.
 
 **F-Sec-2 — Minor — RESOLVED.** `hideDropdown` was passed bare to `setTimeout`, so it
 receives whatever arguments the host supplies. Harmless today (`hideDropdown(): void`
@@ -189,6 +192,7 @@ mutation count.
 ## Resolution Status
 
 ### F-Func-1 · Major · FR4's shadow-root-drain clause unpinned
+
 - Action: added T16 (`empties the shadow root, identically to a manual dismiss`), pinning
   auto-dismiss and manual paths against each other with an allow-side assertion. Corrected
   the plan's false FR4 claim.
@@ -197,10 +201,12 @@ mutation count.
 - Red-proof: mutation I (delete the `while (root.firstChild)` loop) ⇒ T16 fails, alone.
 
 ### F-Func-2 · Minor · D4 rationale omits the re-entrancy step
+
 - Action: deviation log D4 now names the `fn()` re-entrancy path as the deciding step.
 - Modified: `docs/archive/review/extension-dropdown-dismiss-deviation.md` (D4)
 
 ### F-Sec-1 · Minor · rAF listener-stranding window
+
 - Action: **Skipped — deferred as SC7** with Anti-Deferral cost-justification.
   Worst case: unbounded accumulation of capture-phase `document` listeners on an SPA that
   navigates repeatedly with an input focused; each adds one `composedPath()` per
@@ -211,11 +217,13 @@ mutation count.
   than the defect this PR fixes. Owner: a future teardown-lifecycle pass.
 
 ### F-Sec-2 · Minor · bare `hideDropdown` as `setTimeout` callback
+
 - Action: wrapped in an arrow, matching `save-banner.ts:84`.
 - Modified: `extension/src/content/ui/suggestion-dropdown.ts:155`
 - Red-proof: mutation E re-run after the change still reddens 3 tests (unchanged).
 
 ### F-Sec-3 · Minor `[Adjacent]` · `role="listbox"` auto-removal (WCAG 2.2.1)
+
 - Action: **Skipped — SC5 scope widened** to name the timing dimension. Worst case: a
   screen-reader user may still be hearing the message announced when it is removed at 5 s;
   affects the three message states only (the entries state arms no timer). Likelihood:
@@ -225,15 +233,18 @@ mutation count.
   a11y pass SC5 already names.
 
 ### F-Test-1 · Minor · `toFake` scoping unpinned
+
 - Action: added `does not install the outside-click listener while the clock advances`.
 - Modified: `extension/src/__tests__/content/ui/suggestion-dropdown.test.ts:277-292`
 - Red-proof: mutation J (bare `vi.useFakeTimers()`) ⇒ that test fails, alone.
 
 ### F-Test-2 · Minor · prove-red table understated mutation E
+
 - Action: corrected 2 → 3 and named the third test.
 - Modified: `docs/archive/review/extension-dropdown-dismiss-deviation.md` (prove-red table)
 
 ### F-Test-3 · Minor · constant absent from wholesale mocks
+
 - Action: added `MESSAGE_AUTO_DISMISS_MS` to both `vi.mock` factories.
 - Modified: `extension/src/__tests__/content/form-detector-inline.test.ts:14`,
   `extension/src/__tests__/content/cc-identity-detector.test.ts:16`
@@ -248,6 +259,79 @@ mutation count.
 | `npm run build` (extension) | clean, dist hygiene passed |
 | Contract greps | combined guard absent; 2 per-case guards; 3 `isTrusted` boundaries |
 | Worktree | clean — every mutation restored and verified |
+
+## Round 2 — external security review
+
+A follow-up security review of `origin/main...HEAD` raised two findings. It confirmed no
+credential leak, XSS, or authorization bypass. **Both findings were valid, and the second
+refuted a claim this review had made.**
+
+### R2-F1 — Medium — RESOLVED: a security notice could expire unseen
+
+The 5 s countdown ran regardless of `document.visibilityState`. A user who switched tabs
+immediately after the notice appeared would return to find "Vault locked" or "Not
+connected" already gone, never having read it. That matters more than ordinary UX here
+for the reason this change's own code comments give: these three messages are the only
+in-page signal that a dropdown is genuinely the extension's. Auto-expiring a genuine
+warning behind a background tab lowers the bar for a look-alike overlay.
+
+*Resolution:* the countdown now measures **visible time only**. `startVisibleCountdown()`
+disarms on `visibilitychange` → hidden, debits the elapsed visible span from `remaining`,
+and re-arms on return. The watcher is removed in `hideDropdown()` so a later visibility
+change cannot resurrect a timer for a dismissed dropdown.
+
+*Tests:* three (one per message state) asserting the notice survives an arbitrarily long
+hidden period and then expires on the *remaining* balance — with the boundary pinned on
+both sides — plus one asserting watcher removal. **Prove-red executed:** mutation L
+(revert to a plain `setTimeout`) reddens all four; mutation M (never remove the watcher)
+reddens all four.
+
+### R2-F2 — Low/Medium — RESOLVED: rAF-vs-timer inversion strands a document listener
+
+`outsideClickHandler` is assigned inside a `requestAnimationFrame` callback, while
+`hideDropdown()` removes it only `if (outsideClickHandler)`. Phase 3 had filed this as
+**SC7, deferred**, on the argument that the timer path could not reach the window because
+"5000 ms is three orders of magnitude beyond a ~16 ms frame."
+
+**That argument was wrong.** The frame-duration comparison only holds while rAF is
+running; Chrome pauses rAF in background tabs while timers keep running. So the ordering
+inverts, and the auto-dismiss is not merely *able* to beat the pending frame — it is the
+*expected* winner whenever a user tabs away from a message state, which is precisely the
+scenario R2-F1 is also about. The two findings compound.
+
+*Reproduced by probe* (fake `setTimeout`, real rAF — the hidden-tab ordering):
+`installed=1, removed=0`. A capture-phase `mousedown` listener survives on `document`
+with nothing able to remove it; on repeat shows they accumulate, and each one calls
+`hideDropdown()` — so a stale listener can dismiss a *later, legitimate* candidate list.
+
+*Resolution:* the frame handle is retained and `cancelAnimationFrame`d in
+`hideDropdown()`. SC7 is corrected from "deferred" to "resolved", with the refuted
+reasoning recorded rather than quietly replaced.
+
+*Tests:* the deny case (dismissal beats the frame ⇒ zero listeners installed) **and** the
+allow case (frame runs first ⇒ listener still installed — the cancellation must not
+disable outside-click). **Prove-red executed:** mutation K (drop the
+`cancelAnimationFrame`) reddens both, confirming the pair brackets the behaviour rather
+than only tightening it.
+
+### What this round changes about the record
+
+The Phase 3 SC7 deferral had a sound *cost* line and an unmeasured *likelihood* line. The
+cost of fixing was correctly assessed as touching teardown across all 18 external
+`hideDropdown()` call sites; what was wrong was the claim that the defect could not be
+reached. This is the same class of defect the plan documents elsewhere — a true
+conclusion resting on a false reason — and it is worth noting that it survived three
+expert reviews before an external one caught it.
+
+### Verification after Round 2
+
+| Gate | Result |
+| --- | --- |
+| `npx vitest run` (extension) | **1015 passed / 61 files** (+6 tests) |
+| `npx tsc --noEmit` | clean |
+| `npm run lint` (repo, `--max-warnings 0`) | clean |
+| `npm run build` (extension) | clean |
+| Prove-red | mutations K, L, M each redden their own tests, executed and observed |
 
 ## Round 2 assessment
 

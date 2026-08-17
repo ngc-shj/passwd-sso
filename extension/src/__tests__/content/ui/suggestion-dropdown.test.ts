@@ -272,7 +272,7 @@ describe("message-only auto-dismiss", () => {
   // advanceTimersByTime install the real outside-click handler mid-test. Faking only
   // the timeout pair keeps these tests exercising the timer path and nothing else.
   const useTimeoutOnlyFakeTimers = () =>
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
 
   // Pins the toFake list above. With a bare useFakeTimers(), vitest also fakes rAF,
   // so advancing the clock would run showDropdown's pending frame and install the
@@ -292,6 +292,42 @@ describe("message-only auto-dismiss", () => {
     addSpy.mockRestore();
   });
 
+  // Chrome pauses rAF in a background tab but keeps timers running, so the
+  // auto-dismiss routinely beats the pending frame. Faking setTimeout while leaving
+  // rAF real reproduces exactly that ordering.
+  it("does not strand a document listener when the dismissal beats the pending frame", () => {
+    useTimeoutOnlyFakeTimers();
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const mousedownInstalls = () =>
+      addSpy.mock.calls.filter(([type, , capture]) => type === "mousedown" && capture === true);
+
+    showDropdown(makeOptions({ vaultLocked: true }));
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS);
+    expect(isDropdownVisible()).toBe(false);
+
+    // Tab becomes visible again: any surviving frame callback would run here.
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve())).then(() => {
+      expect(mousedownInstalls()).toHaveLength(0);
+      addSpy.mockRestore();
+    });
+  });
+
+  // The allow side of the same guard: when the frame does run first, the listener
+  // must still be installed — the cancellation must not disable outside-click.
+  it("still installs the outside-click listener when the frame runs first", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+
+    showDropdown(makeOptions({ vaultLocked: true }));
+
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve())).then(() => {
+      const installs = addSpy.mock.calls.filter(
+        ([type, , capture]) => type === "mousedown" && capture === true,
+      );
+      expect(installs).toHaveLength(1);
+      addSpy.mockRestore();
+    });
+  });
+
   // T8.
   it.each(MESSAGE_STATES)("dismisses %s after the interval", (_label, overrides) => {
     useTimeoutOnlyFakeTimers();
@@ -302,6 +338,61 @@ describe("message-only auto-dismiss", () => {
 
     expect(isDropdownVisible()).toBe(false);
     expect(opts.onDismiss).toHaveBeenCalledOnce();
+  });
+
+  // A notice the user never saw has not been read. These three states are the only
+  // in-page signal that a dropdown is genuinely ours, so expiring one behind a
+  // background tab would silently remove the warning a look-alike has to compete with.
+  const setVisibility = (state: "visible" | "hidden") => {
+    Object.defineProperty(document, "visibilityState", {
+      value: state,
+      configurable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  it.each(MESSAGE_STATES)("does not expire %s while the tab is hidden", (_label, overrides) => {
+    useTimeoutOnlyFakeTimers();
+    const opts = makeOptions(overrides);
+    showDropdown(opts);
+
+    vi.advanceTimersByTime(1000);
+    setVisibility("hidden");
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS * 10);
+
+    expect(isDropdownVisible()).toBe(true);
+    expect(opts.onDismiss).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    expect(isDropdownVisible()).toBe(true);
+
+    // Only the 1000 ms seen before hiding counts, so the remainder is still owed.
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS - 1000 - 1);
+    expect(isDropdownVisible()).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    expect(isDropdownVisible()).toBe(false);
+    expect(opts.onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it("stops watching visibility once dismissed", () => {
+    useTimeoutOnlyFakeTimers();
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    showDropdown(makeOptions({ vaultLocked: true }));
+    hideDropdown();
+
+    expect(
+      removeSpy.mock.calls.filter(([type]) => type === "visibilitychange"),
+    ).toHaveLength(1);
+
+    // A later visibility change must not resurrect a timer for a gone dropdown.
+    setVisibility("hidden");
+    setVisibility("visible");
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS * 2);
+
+    expect(isDropdownVisible()).toBe(false);
+    removeSpy.mockRestore();
   });
 
   // T9. Lower bound only — meaningful as a pair with T8, which supplies the upper.

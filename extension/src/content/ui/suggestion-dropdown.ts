@@ -49,6 +49,8 @@ let currentOnDismiss: (() => void) | null = null;
 let currentOnSelect: ((entryId: string, teamId?: string) => void) | null = null;
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
+let outsideClickFrame: ReturnType<typeof requestAnimationFrame> | null = null;
+let visibilityWatcher: (() => void) | null = null;
 
 function isSafeSelectClick(e: MouseEvent, item: HTMLDivElement): boolean {
   if (!e.isTrusted) return false;
@@ -152,11 +154,16 @@ export function showDropdown(opts: DropdownOptions): void {
   // running against a dropdown that was never shown. hideDropdown() at the top of
   // this function has already cleared any previous timer.
   if (isMessageOnly) {
-    autoDismissTimer = setTimeout(() => hideDropdown(), MESSAGE_AUTO_DISMISS_MS);
+    startVisibleCountdown();
   }
 
-  // Click outside to dismiss (delayed to avoid triggering on the same click)
-  requestAnimationFrame(() => {
+  // Click outside to dismiss (delayed to avoid triggering on the same click).
+  // The frame handle is kept so hideDropdown() can cancel a still-pending callback:
+  // a hidden tab pauses rAF while timers keep running, so the auto-dismiss can
+  // easily land first and this callback would otherwise install a listener onto an
+  // already-torn-down dropdown, with nothing left to remove it.
+  outsideClickFrame = requestAnimationFrame(() => {
+    outsideClickFrame = null;
     outsideClickHandler = (e: MouseEvent) => {
       const path = e.composedPath();
       if (!path.includes(dropdown)) {
@@ -167,6 +174,35 @@ export function showDropdown(opts: DropdownOptions): void {
   });
 }
 
+// The countdown measures VISIBLE time. A notice the user never saw has not been
+// read, and these three states are the only in-page signal that a dropdown is
+// really ours — expiring one behind a background tab would quietly remove the
+// warning a look-alike overlay has to compete with.
+function startVisibleCountdown(): void {
+  let remaining = MESSAGE_AUTO_DISMISS_MS;
+  let startedAt = performance.now();
+
+  const arm = () => {
+    startedAt = performance.now();
+    autoDismissTimer = setTimeout(() => hideDropdown(), remaining);
+  };
+
+  visibilityWatcher = () => {
+    if (document.visibilityState === "hidden") {
+      if (autoDismissTimer !== null) {
+        clearTimeout(autoDismissTimer);
+        autoDismissTimer = null;
+        remaining = Math.max(0, remaining - (performance.now() - startedAt));
+      }
+    } else if (autoDismissTimer === null) {
+      arm();
+    }
+  };
+  document.addEventListener("visibilitychange", visibilityWatcher);
+
+  if (document.visibilityState !== "hidden") arm();
+}
+
 export function hideDropdown(): void {
   // Cleared unconditionally and before fn() below: that call runs detector-supplied
   // code, and a callback that re-shows the dropdown would arm a timer this clear has
@@ -174,6 +210,17 @@ export function hideDropdown(): void {
   if (autoDismissTimer !== null) {
     clearTimeout(autoDismissTimer);
     autoDismissTimer = null;
+  }
+  if (visibilityWatcher) {
+    document.removeEventListener("visibilitychange", visibilityWatcher);
+    visibilityWatcher = null;
+  }
+  // Cancel before the callback can run. Without this, a dismissal that beats the
+  // frame — routine in a background tab, where rAF is paused and timers are not —
+  // leaves the callback to install a document listener that nothing removes.
+  if (outsideClickFrame !== null) {
+    cancelAnimationFrame(outsideClickFrame);
+    outsideClickFrame = null;
   }
   if (outsideClickHandler) {
     document.removeEventListener("mousedown", outsideClickHandler, true);

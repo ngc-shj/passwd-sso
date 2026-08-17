@@ -760,23 +760,22 @@ the unpacked build loaded in Chrome.
   cannot throw, so the exposure is latent, not live. Owner: a future error-handling
   pass over the module. Verified: all three `onDismiss` bodies are bare assignments.
 
-- **SC7 — The rAF window that can strand the outside-click listener.** Out of scope.
-  `outsideClickHandler` is assigned inside a `requestAnimationFrame` callback, but
-  `hideDropdown()` removes it only `if (outsideClickHandler)`. A dismissal landing
-  between `showDropdown()` returning and the rAF firing therefore skips removal, and
-  the rAF then installs a capture-phase `mousedown` listener that no later
-  `hideDropdown()` will remove. **Pre-existing on `main`** — identical rAF, identical
-  guard — and raised here only because this change adds a fourth dismissal source to
-  that teardown (R52's shape). **Anti-Deferral**: worst case is unbounded accumulation
-  of `document` listeners on an SPA that navigates repeatedly with an input focused,
-  each adding a `composedPath()` call per `mousedown`; no credential exposure, since
-  the stranded closure only calls `hideDropdown()`. Likelihood from the path this PR
-  adds is nil — 5000 ms is three orders of magnitude beyond a ~16 ms frame — and the
-  reachable paths (`suppressInline`, SPA navigation) are unchanged from `main`. Cost of
-  including: `cancelAnimationFrame` plus a module-level frame handle changes teardown
-  semantics on all 18 external `hideDropdown()` call sites and needs its own test
-  matrix — wider than the defect being fixed. Owner: a future teardown-lifecycle pass.
-  Found in Phase 3 review (F-Sec-1).
+- **SC7 — RESOLVED, not deferred (was: the rAF listener-stranding window).** Phase 3
+  filed this as a deferral on the argument that the window was unreachable from the
+  timer path, "since 5000 ms is three orders of magnitude beyond a ~16 ms frame". **A
+  later security review refuted that reasoning, and it was wrong in the direction that
+  matters**: the frame-duration comparison only holds while rAF is *running*. Chrome
+  pauses `requestAnimationFrame` in a background tab while continuing to run timers
+  (throttled), so the ordering inverts — the auto-dismiss is not merely able to beat
+  the frame, it is the *expected* winner whenever the user switches tabs on a message
+  state. Reproduced by probe: dismissal first ⇒ `mousedown` capture listener installed
+  once, removed zero times.
+
+  Fixed rather than deferred: the frame handle is now retained and
+  `cancelAnimationFrame`d in `hideDropdown()`. Recorded here rather than silently
+  corrected, because the deferral's *cost* line was sound while its *likelihood* line
+  rested on an assumption nobody had measured — the same class of defect this plan
+  documents elsewhere (a true conclusion resting on a false reason).
 
 ### Risks
 
