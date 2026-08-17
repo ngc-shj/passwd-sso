@@ -505,12 +505,50 @@ export function findPublishJobIsolationViolation(content, name) {
   return null;
 }
 
+/**
+ * `npm audit signatures` walks the dependency graph, so a package installed with
+ * `--no-save` — absent from both the manifest and the lockfile's root deps — is
+ * never reached. The audit then covers only that package's own dependencies and
+ * reports a healthy-looking count while never touching the subject it was run to
+ * verify. Releases 0.4.73 and 0.4.74 both failed the downstream identity check
+ * this way, and nothing caught it before the release itself, because the
+ * verifying job only runs when a publish actually happens.
+ *
+ * Flags an install whose target is a versioned package spec (the shape used to
+ * fetch a just-published artifact for verification) combined with `--no-save`,
+ * but only in a workflow that also runs `npm audit signatures` — elsewhere
+ * `--no-save` is unremarkable.
+ *
+ * @param {string} content  workflow file text
+ * @param {string} name     file name for the message
+ * @returns {string[]} violation messages
+ */
+export function findUnsavedAuditSubjectViolations(content, name) {
+  if (!/npm\s+audit\s+signatures/.test(content)) return [];
+  const violations = [];
+  for (const command of extractRunCommands(content)) {
+    // `npm install … --no-save … <pkg>@<version>` in any flag order. The version
+    // spec is what distinguishes "fetch this exact published artifact to verify
+    // it" from an ordinary throwaway install.
+    const install = command.match(/\bnpm\s+install\b[^\n;&|]*/g) || [];
+    for (const inv of install) {
+      if (!/--no-save\b/.test(inv)) continue;
+      if (!/[\w@/.-]+@\$?\{?[\w.$-]/.test(inv.replace(/--[\w-]+/g, ""))) continue;
+      violations.push(
+        `${name}: '${inv.trim()}' installs a versioned package with --no-save in a workflow that runs 'npm audit signatures'. An unsaved install leaves the package out of the dependency graph, so the audit silently covers only its dependencies and never the package itself — the subject of the verification is skipped while the audit still reports success. Drop --no-save so the package is part of the audited graph.`,
+      );
+    }
+  }
+  return violations;
+}
+
 function main() {
   const violations = [];
   for (const file of listWorkflowFiles()) {
     const content = readFileSync(file, "utf8");
     const autoMerge = findAutoMergeViolation(content, file);
     if (autoMerge) violations.push(autoMerge);
+    violations.push(...findUnsavedAuditSubjectViolations(content, file));
     const nodePin = findTrustedPublishNodeViolation(content, file);
     if (nodePin) violations.push(nodePin);
     const publishIsolation = findPublishJobIsolationViolation(content, file);

@@ -12,6 +12,7 @@ import {
   findMaskedVerifierViolations,
   findPublishJobIsolationViolation,
   findTrustedPublishNodeViolation,
+  findUnsavedAuditSubjectViolations,
   isTrustedPublishingNodeVersion,
   parseTopLevelEnv,
 } from "../checks/check-workflow-supply-chain.mjs";
@@ -905,5 +906,67 @@ describe("isTrustedPublishingNodeVersion", () => {
     for (const v of ["20", "18.19.0"]) {
       expect(isTrustedPublishingNodeVersion(v), v).toBe(false);
     }
+  });
+});
+
+describe("findUnsavedAuditSubjectViolations", () => {
+  // Releases 0.4.73 and 0.4.74 both failed the provenance identity check because
+  // `npm install --no-save` kept the published package out of the dependency
+  // graph, so `npm audit signatures` covered only its 8 dependencies. The gate
+  // that would have caught it only runs on a real publish, so the regression was
+  // invisible in PR CI — which is what this guard fixes.
+  const withAudit = (install) => `
+jobs:
+  verify:
+    steps:
+      - name: Verify published package signature
+        run: |
+          npm init -y
+          ${install}
+          npm audit signatures --json --include-attestations > "$AUDIT_JSON"
+`;
+
+  it("flags a versioned install with --no-save alongside npm audit signatures", () => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit('npm install --no-save --ignore-scripts "passwd-sso-cli@${VERSION}"'),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain("--no-save");
+    expect(v[0]).toContain("never the package itself");
+  });
+
+  it("flags it regardless of flag order", () => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit('npm install --ignore-scripts --no-save "passwd-sso-cli@1.2.3"'),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // The allow side: this is the shape the fix ships, and it must stay silent.
+  it("accepts the saved install the verification job now uses", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --ignore-scripts "passwd-sso-cli@${VERSION}"'),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  // --no-save is unremarkable outside a verification context; only an install
+  // whose package the audit is supposed to cover matters.
+  it("ignores --no-save in a workflow that does not audit signatures", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        `jobs:\n  x:\n    steps:\n      - run: npm install --no-save "some-pkg@1.0.0"\n`,
+        "ci.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  it("passes against the real release.yml", () => {
+    const content = readFileSync(".github/workflows/release.yml", "utf8");
+    expect(findUnsavedAuditSubjectViolations(content, "release.yml")).toEqual([]);
   });
 });
