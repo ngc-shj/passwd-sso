@@ -543,24 +543,43 @@ const INSTALL_INVOCATION_RE = new RegExp(
  */
 export function resolveSaveFlag(invocation) {
   let save = true;
-  // `=`-attached values bind unconditionally; a SPACE-separated value binds only
-  // when the next token is literally true/false (quoted or not). Consuming any
-  // next token would let `--save --no-save` read `--no-save` as `--save`'s value
-  // and return true, where npm returns false — npm takes the LAST flag, and the
-  // loop below reproduces that by simply overwriting `save` each time.
-  const flag = /--(no-)?save(?:=("[^"]*"|'[^']*'|[^\s]*)|\s+(?:"(true|false)"|'(true|false)'|(true|false))\b)?/g;
-  for (const m of invocation.matchAll(flag)) {
-    const negated = Boolean(m[1]);
-    const raw = m[2] ?? m[3] ?? m[4] ?? m[5];
-    if (raw === undefined) {
-      // Bare `--save` / `--no-save`: the prefix alone decides.
-      save = !negated;
+  // Tokenise instead of matching flag text in place. Two things repeatedly broke
+  // the in-place regex: `--no-save-exact` is a DIFFERENT option whose prefix
+  // reads as `--no-save`, and a quoted space-separated value (`--save "false"`)
+  // has no word boundary between the closing quote and the space. Splitting on
+  // whitespace (respecting quotes) makes both fall out of the token shape rather
+  // than needing another lookaround.
+  const tokens = invocation.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  const unquote = (s) => s.replace(/^(['"])(.*)\1$/s, "$2");
+  const isBool = (s) => s === "true" || s === "false";
+  // `-S` is npm's short form of `--save`. There is no short form of `--no-save`.
+  const SAVE_TOKEN = /^(?:--(no-)?save|-S)$/;
+  const SAVE_WITH_VALUE = /^(?:--(no-)?save|-S)=(.*)$/s;
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = unquote(tokens[i]);
+    const withValue = token.match(SAVE_WITH_VALUE);
+    if (withValue) {
+      // `--no-save=false` is save=TRUE: the explicit value is what npm reads and
+      // the `no-` prefix inverts it. An empty value (`--save=`) is falsy to npm.
+      const value = unquote(withValue[2]) !== "false";
+      save = withValue[1] ? !value : value;
       continue;
     }
-    const value = raw.replace(/^['"]|['"]$/g, "") !== "false";
-    // `--no-save=false` is save=true: the explicit value is what npm reads, and
-    // the `no-` prefix inverts it.
-    save = negated ? !value : value;
+    const bare = token.match(SAVE_TOKEN);
+    if (!bare) continue; // includes --save-exact / --no-save-exact: other options
+    const negated = Boolean(bare[1]);
+    const next = tokens[i + 1] === undefined ? undefined : unquote(tokens[i + 1]);
+    if (next !== undefined && isBool(next)) {
+      // A space-separated value binds only when it is literally true/false —
+      // anything else is the next option, so `--save --no-save` must not read
+      // `--no-save` as a value (npm takes the last flag: save=false).
+      const value = next !== "false";
+      save = negated ? !value : value;
+      i += 1;
+      continue;
+    }
+    save = !negated;
   }
   return save;
 }

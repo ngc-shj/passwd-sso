@@ -1010,6 +1010,50 @@ jobs:
     expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
   });
 
+  // Quoted space-separated values, npm's `-S` short form, and the neighbouring
+  // `--save-exact` family. Each value measured with `npm config get save`; the
+  // last two rows are the FALSE-POSITIVE direction, where flagging a correct
+  // command is what gets a gate switched off.
+  it.each([
+    ['--save "false"', false],
+    ["--save 'false'", false],
+    ["-S=false", false],
+    ["-S false", false],
+    ["-S", true],
+    ['--no-save "false"', true],
+    ["--no-save-exact", true],
+    ["--save-exact", true],
+  ])("resolveSaveFlag(%s) === %s, matching real npm", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
+  it.each([
+    '--save "false"',
+    "-S=false",
+    "-S false",
+  ])("flags the unsaved form: %s", (flag) => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit(`npm install ${flag} "passwd-sso-cli@1.0.0"`),
+        "release.yml",
+      ),
+    ).toHaveLength(1);
+  });
+
+  // --no-save-exact is a DIFFERENT option; its prefix must not read as --no-save.
+  it.each([
+    "--no-save-exact",
+    '--no-save "false"',
+    "-S",
+  ])("stays silent for the saving form: %s", (flag) => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit(`npm install ${flag} "passwd-sso-cli@1.0.0"`),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
   it("flags a conflicting-flag install whose last flag is --no-save", () => {
     expect(
       findUnsavedAuditSubjectViolations(
