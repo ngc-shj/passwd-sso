@@ -375,6 +375,56 @@ describe("message-only auto-dismiss", () => {
     expect(opts.onDismiss).toHaveBeenCalledOnce();
   });
 
+  // Shown while the tab is already hidden: arm() is skipped entirely, so the first
+  // reveal is what starts the clock — and the user gets the full interval, having
+  // seen none of it yet.
+  it("starts the countdown on first reveal when shown while already hidden", () => {
+    useTimeoutOnlyFakeTimers();
+    setVisibility("hidden");
+    const opts = makeOptions({ vaultLocked: true });
+
+    showDropdown(opts);
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS * 3);
+
+    expect(isDropdownVisible()).toBe(true);
+    expect(opts.onDismiss).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS - 1);
+    expect(isDropdownVisible()).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    expect(isDropdownVisible()).toBe(false);
+    expect(opts.onDismiss).toHaveBeenCalledOnce();
+  });
+
+  // Several round-trips: the visible spans must sum, so no span is double-counted
+  // (which would expire early) or dropped (which would never expire).
+  it("sums visible time across repeated hide/show cycles", () => {
+    useTimeoutOnlyFakeTimers();
+    const opts = makeOptions({ vaultLocked: true });
+    showDropdown(opts);
+
+    // Four 1000 ms visible spans, each separated by a long hidden stretch.
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(1000);
+      setVisibility("hidden");
+      vi.advanceTimersByTime(MESSAGE_AUTO_DISMISS_MS * 2);
+      setVisibility("visible");
+    }
+
+    // 4000 ms of visible time spent; 1000 ms still owed.
+    expect(isDropdownVisible()).toBe(true);
+    expect(opts.onDismiss).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(999);
+    expect(isDropdownVisible()).toBe(true);
+
+    vi.advanceTimersByTime(1);
+    expect(isDropdownVisible()).toBe(false);
+    expect(opts.onDismiss).toHaveBeenCalledOnce();
+  });
+
   it("stops watching visibility once dismissed", () => {
     useTimeoutOnlyFakeTimers();
     const removeSpy = vi.spyOn(document, "removeEventListener");

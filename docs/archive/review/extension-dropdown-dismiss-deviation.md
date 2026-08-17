@@ -175,3 +175,25 @@ only tightening.
 **The lesson worth keeping**: SC7's cost line was right and its likelihood line rested on
 an assumption nobody measured. Three expert reviews passed over it. When a deferral turns
 on "this path is unreachable", the reachability claim needs a probe, not an argument.
+
+## D8 — Two optional visibility tests added after Round 2 approval
+
+The Round 2 security review approved the fix and noted two further cases as optional:
+"already hidden at show time" and "repeated hidden/visible round-trips". Both were added
+rather than skipped — the second in particular, because `remaining` is an accumulator and
+nothing else pinned its arithmetic across more than one cycle.
+
+Neither was accepted on the strength of passing. Prove-red:
+
+| Mutation | Reddens |
+| --- | --- |
+| N: `arm()` unconditionally, ignoring initial hidden state | the "already hidden" test, alone |
+| O: re-arm with the full interval instead of `remaining` | 4 tests incl. the existing hidden-state trio |
+| P: never debit elapsed visible time when hiding | 4 tests incl. the new round-trip test |
+
+The review's assessment that "the current implementation handles both correctly by
+construction" was right — the tests found no defect. They were still worth writing: the
+structure that makes both cases correct (`arm()` skipped when initially hidden; the
+`else if (autoDismissTimer === null)` branch starting the clock on first reveal) is
+exactly the kind of thing a later edit silently breaks, and mutation N shows the gap it
+would leave.
