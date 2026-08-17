@@ -576,41 +576,30 @@ popup with the vault locked.
   caught only if someone writes a test for it. Owner: a future a11y tooling pass.
   Recorded per R34 rather than silently.
 
-- **SC4 — Re-masking the passphrase after a failed unlock. RESOLVED, not deferred.**, and the
-  question is answered rather than left open. `VaultUnlock.tsx:37-42` clears the
-  passphrase only on the success branch; on failure the value stays in React state
-  and, if revealed, stays readable in the DOM for the rest of the popup session.
-  **Verified mitigation**: the popup is a fresh document per open
-  (`src/popup/main.tsx` calls `createRoot(...).render()` each load) and
-  `showPassphrase` is component-local `useState` with no `chrome.storage` backing —
-  so neither the reveal state nor the passphrase survives closing the popup. There
-  is no cross-session exposure.
+- **SC4 — Re-masking the passphrase after a failed unlock. RESOLVED — implemented,
+  not deferred.** Originally scoped out. On failure the passphrase stayed in state
+  and, if revealed, stayed readable until the popup closed.
 
-  **Anti-Deferral**: worst case = a wrong, revealed master passphrase stays on
-  screen until the user closes the popup or retypes. Likelihood = only after a
-  failed unlock *with* reveal already toggled on. Cost of including = turns a
-  purely presentational change into a behavioural one, cutting against C1's own
-  "signature unchanged" framing and requiring its own test matrix for the
-  error path. Cost of excluding = the pre-existing window stays open, unchanged
-  by this PR either way. Owner: a future unlock-flow hardening pass. Recorded so a
-  later round does not re-litigate it as if undecided.
+  **Implemented**: every exit from `handleSubmit` that is not a successful unlock
+  re-masks the field, via a `finally` clause guarded on an `unlocked` flag. The
+  passphrase *value* is deliberately kept so the user can fix a typo. A follow-up
+  review then found the first attempt still missed the three `await`s rejecting —
+  where an early return stranded both the reveal and the `loading` state, leaving
+  the button stuck on "Unlocking" with the secret on screen. `try/catch/finally`
+  covers all of it, and the `catch` surfaces `UNLOCK_FAILED` (an existing mapped
+  code — no new i18n keys).
 
-- **SC5 — Input hardening (`autoComplete` / `spellCheck`). RESOLVED, not deferred.**, and pre-existing: `VaultUnlock.tsx:57-64` sets neither, and grep
-  confirms neither appears anywhere in `src/popup/`. This matters *adjacent* to
-  this change because `type="text"` (the revealed state) is where browser
-  save-prompt and spellcheck heuristics differ from `type="password"` — but that
-  flip already exists on `main` and I1.3 pins it unchanged, so this change neither
-  introduces nor widens the exposure (R43: no widening).
+- **SC5 — Input hardening (`autoComplete` / `spellCheck`). RESOLVED — implemented,
+  not deferred.** The field now declares `autoComplete="current-password"`,
+  matching the web app's five passphrase inputs, plus `spellCheck`, `autoCorrect`
+  and `autoCapitalize` off — the last three because revealing the field flips it
+  to `type="text"`, where a browser would otherwise apply them to a secret.
 
-  Worth noting the web app's analogue **does** set `autoComplete` —
-  `vault-lock-screen.tsx:241` uses `autoComplete="current-password"` — so there is
-  an in-repo precedent for hardening this input, which strengthens the case for a
-  follow-up. **Anti-Deferral**: cost of including = a behavioural change to
-  autofill on a component this PR is otherwise only restyling, with no test able
-  to verify browser heuristics (VC1's constraint class). Cost of excluding = an
-  unchanged pre-existing gap. Owner: the same unlock-flow hardening pass as SC4.
-  Recorded explicitly so a Phase-3 reviewer does not rediscover the `type="text"`
-  concern and mistake it for fix-induced.
+  Noted for the record: `current-password` permits a browser password manager to
+  store and offer the master passphrase. That is a trade the project has already
+  made deliberately in five web-app components, and following it beats inventing
+  an extension-only policy — but it is a choice, not a hardening, and is recorded
+  as such rather than claimed as one.
 
 ### SC4 / SC5 reopened after a second independent signal
 

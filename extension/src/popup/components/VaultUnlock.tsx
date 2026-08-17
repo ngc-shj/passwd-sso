@@ -24,26 +24,33 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
     setLoading(true);
     setError("");
 
-    const { serverUrl } = await getSettings();
-    const granted = await ensureHostPermission(serverUrl);
-    if (!granted) {
-      setError("PERMISSION_DENIED");
-      setLoading(false);
-      // Re-mask on failure: the passphrase stays in the field so the user can
-      // retry, and leaving it legible until the popup closes is a longer
-      // exposure than the retry needs.
-      setShowPassphrase(false);
-      return;
-    }
+    // Any exit from here that is not a successful unlock re-masks the field: the
+    // passphrase stays so the user can fix a typo, but leaving it legible until
+    // the popup closes is a longer exposure than a retry needs. The finally
+    // clause covers the awaits below rejecting — where an early return would
+    // otherwise strand both the reveal and the loading state.
+    let unlocked = false;
+    try {
+      const { serverUrl } = await getSettings();
+      const granted = await ensureHostPermission(serverUrl);
+      if (!granted) {
+        setError("PERMISSION_DENIED");
+        return;
+      }
 
-    const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase });
-    setLoading(false);
-    if (res.ok) {
-      setPassphrase("");
-      onUnlocked();
-    } else {
-      setError(res.error || "INVALID_PASSPHRASE");
-      setShowPassphrase(false);
+      const res = await sendMessage({ type: "UNLOCK_VAULT", passphrase });
+      if (res.ok) {
+        unlocked = true;
+        setPassphrase("");
+        onUnlocked();
+      } else {
+        setError(res.error || "INVALID_PASSPHRASE");
+      }
+    } catch {
+      setError("UNLOCK_FAILED");
+    } finally {
+      setLoading(false);
+      if (!unlocked) setShowPassphrase(false);
     }
   };
 

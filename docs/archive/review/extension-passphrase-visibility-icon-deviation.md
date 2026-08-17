@@ -185,3 +185,33 @@ rather than sharing one assertion, so removing either is visible.
 
 Gates after: 1025 extension tests, tsc clean, lint clean, build clean, `git diff --check`
 clean.
+
+## D7 — The re-mask missed the rejection paths, and two of its clauses were unpinned
+
+A follow-up security review found the D6 fix incomplete: `getSettings`, the permission
+check, and `sendMessage` can all *reject*, and an early return then skipped
+`setShowPassphrase(false)` **and** `setLoading(false)`. Probed against the then-current
+code: on a `sendMessage` rejection the field stayed `type="text"` and the button stayed
+disabled on "Unlocking" — the secret on screen with no way to retry short of closing the
+popup. Worse than the returned-failure case D6 did handle.
+
+Replaced with `try/catch/finally`, re-masking in `finally` under an `unlocked` guard. The
+`catch` sets `UNLOCK_FAILED`, an already-mapped error code with translations in both
+locales — no new i18n keys.
+
+**Two clauses initially had no test able to fail for them**, found by running the
+mutations rather than assuming:
+
+| Mutation | First run | After adding tests |
+| --- | --- | --- |
+| L: drop the `catch` clause | **18 passed — nothing red** | 3 red (all rejection tests) |
+| M: re-mask only on returned failure | 5 red | 5 red |
+| N: drop the `unlocked` guard | **18 passed — nothing red** | 1 red (success test) |
+
+L passed because `finally` still re-masked, so no test observed the missing error message;
+N passed because nothing covered the success path's visibility. Added an error-message
+assertion to the rejection tests and a success-path test. Both mutations now redden.
+
+This is the same lesson as D1 and D5, on its third occurrence in this change: a fix can be
+correct while one of its clauses is unmeasured, and only running the mutation separates
+the two.

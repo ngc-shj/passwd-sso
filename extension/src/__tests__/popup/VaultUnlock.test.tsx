@@ -142,6 +142,47 @@ describe("VaultUnlock", () => {
       expect(input).toHaveValue("wrong-passphrase");
     });
 
+    // A rejection is the worse case: an early return would strand the reveal AND
+    // leave the button stuck in "Unlocking", so the user cannot even retry.
+    it.each([
+      ["getSettings", () => mockGetSettings.mockRejectedValue(new Error("boom"))],
+      ["the permission check", () => mockEnsureHostPermission.mockRejectedValue(new Error("boom"))],
+      ["sendMessage", () => mockSendMessage.mockRejectedValue(new Error("boom"))],
+    ])("re-masks and clears loading when %s rejects", async (_label, arrangeRejection) => {
+      arrangeRejection();
+      render(<VaultUnlock onUnlocked={vi.fn()} />);
+      const input = screen.getByPlaceholderText("Passphrase");
+
+      fireEvent.change(input, { target: { value: "secret" } });
+      fireEvent.click(screen.getByRole("button", { name: /show/i }));
+      fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
+
+      await waitFor(() => expect(input).toHaveAttribute("type", "password"));
+      // Not stuck on "Unlocking" — the user can try again.
+      expect(screen.getByRole("button", { name: /^unlock$/i })).toBeEnabled();
+      expect(input).toHaveValue("secret");
+      // Without the catch, the rejection escapes and the user is told nothing.
+      expect(screen.getByText("Could not unlock the vault.")).toBeInTheDocument();
+    });
+
+    // The success path must NOT re-mask: onUnlocked swaps this screen out, and
+    // resetting visibility on the way is state churn on a component being
+    // unmounted. Pins the `unlocked` guard in the finally clause.
+    it("leaves visibility alone on a successful unlock", async () => {
+      mockSendMessage.mockResolvedValue({ ok: true });
+      const onUnlocked = vi.fn();
+      render(<VaultUnlock onUnlocked={onUnlocked} />);
+      const input = screen.getByPlaceholderText("Passphrase");
+
+      fireEvent.change(input, { target: { value: "right" } });
+      fireEvent.click(screen.getByRole("button", { name: /show/i }));
+      fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
+
+      await waitFor(() => expect(onUnlocked).toHaveBeenCalled());
+      expect(screen.getByRole("button", { name: /hide/i })).toBeInTheDocument();
+      expect(input).toHaveValue("");
+    });
+
     // type="text" (the revealed state) is where a browser would otherwise
     // spellcheck and autocorrect a secret.
     it("opts the passphrase field out of spellcheck and autocorrect", () => {
