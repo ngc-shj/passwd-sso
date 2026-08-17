@@ -560,8 +560,12 @@ export function resolveSaveFlag(invocation) {
     const token = unquote(tokens[i]);
     const withValue = token.match(SAVE_WITH_VALUE);
     if (withValue) {
-      // `--no-save=false` is save=TRUE: the explicit value is what npm reads and
-      // the `no-` prefix inverts it. An empty value (`--save=`) is falsy to npm.
+      // Only the literal string "false" is falsy here; the `no-` prefix then
+      // inverts it. That gives npm's answers for both edge cases, measured by
+      // installing with each flag and checking whether package.json gained a
+      // dependency: `--no-save=false` saves (the explicit value beats the
+      // prefix), and `--save=` saves while `--no-save=` does not (an empty value
+      // is not "false", so each behaves like its bare form).
       const value = unquote(withValue[2]) !== "false";
       save = withValue[1] ? !value : value;
       continue;

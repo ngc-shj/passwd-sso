@@ -1027,6 +1027,16 @@ jobs:
     expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
   });
 
+  // Empty values. Measured by actually installing with each flag and checking
+  // whether package.json gained a dependency, not by `npm config get` — which
+  // reports undefined for both and so cannot distinguish them.
+  it.each([
+    ["--save=", true],
+    ["--no-save=", false],
+  ])("resolveSaveFlag(%s) === %s, matching a real install", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
   it.each([
     '--save "false"',
     "-S=false",
