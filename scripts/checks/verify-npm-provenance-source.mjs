@@ -60,7 +60,26 @@ export function verifyProvenanceSource(auditOutput, expected) {
   const entry = verified.find(
     (v) => v?.name === expected.package && v?.version === expected.version,
   );
-  if (!entry) return { ok: false, reason: "PACKAGE_NOT_VERIFIED" };
+  if (!entry) {
+    // Name what was audited instead. A non-empty verified[] that excludes the
+    // subject means the audit ran against the wrong dependency graph — the
+    // package was never in it — which is a different failure from "the audit
+    // found the package and rejected it", and the bare reason code cannot tell
+    // them apart. Both 0.4.73 and 0.4.74 failed here reporting only
+    // PACKAGE_NOT_VERIFIED while the audit had happily verified the CLI's eight
+    // dependencies; the audited list is what identifies that immediately.
+    const audited = verified
+      .map((v) => (v?.name ? `${v.name}@${v.version ?? "?"}` : null))
+      .filter(Boolean);
+    return {
+      ok: false,
+      reason: "PACKAGE_NOT_VERIFIED",
+      detail:
+        audited.length === 0
+          ? "verified[] is empty — the audit covered no packages at all"
+          : `verified[] has ${audited.length} entries but not ${expected.package}@${expected.version}: ${audited.join(", ")}`,
+    };
+  }
 
   const bundles = Array.isArray(entry.attestationBundles) ? entry.attestationBundles : [];
   const provBundles = bundles.filter((b) => b?.predicateType === PROVENANCE_PREDICATE);
@@ -229,6 +248,7 @@ async function main() {
     process.exit(0);
   }
   console.error(`::error::provenance source identity check failed: ${result.reason}`);
+  if (result.detail) console.error(`::error::${result.detail}`);
   process.exit(1);
 }
 
