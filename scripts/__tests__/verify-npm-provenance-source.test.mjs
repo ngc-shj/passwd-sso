@@ -78,6 +78,31 @@ describe("verifyProvenanceSource", () => {
     expect(r).toMatchObject({ ok: false, reason: "PACKAGE_NOT_VERIFIED" });
   });
 
+  // Releases 0.4.73 and 0.4.74 both failed here, and the bare reason code could
+  // not say why: `npm install --no-save` had kept the package out of the
+  // dependency graph, so the audit covered only the CLI's own dependencies and
+  // reported a healthy-looking "8 verified" that contained none of the subject.
+  // The detail line is what turns that into an immediately diagnosable failure,
+  // so it gets a fixture per shape.
+  it("names the audited packages when the audit covered the wrong dependency graph", () => {
+    const wrongGraph = {
+      verified: ["chalk", "commander", "zod"].map((name) => ({ name, version: "1.0.0" })),
+    };
+    const r = verifyProvenanceSource(wrongGraph, EXPECTED);
+    expect(r).toMatchObject({ ok: false, reason: "PACKAGE_NOT_VERIFIED" });
+    expect(r.detail).toContain("3 entries");
+    expect(r.detail).toContain("chalk@1.0.0");
+    // The subject the audit was supposed to cover is named, so the log says what
+    // was looked for as well as what was found.
+    expect(r.detail).toContain(`${EXPECTED.package}@${EXPECTED.version}`);
+  });
+
+  it("distinguishes an empty audit from one that covered the wrong packages", () => {
+    const r = verifyProvenanceSource({ verified: [] }, EXPECTED);
+    expect(r).toMatchObject({ ok: false, reason: "PACKAGE_NOT_VERIFIED" });
+    expect(r.detail).toContain("empty");
+  });
+
   it("rejects a commit-SHA mismatch (same repo)", () => {
     const r = verifyProvenanceSource(audit([{ payload: payload({ sha: "0".repeat(40) }) }]), EXPECTED);
     expect(r).toMatchObject({ ok: false, reason: "SHA_MISMATCH" });

@@ -12,6 +12,8 @@ import {
   findMaskedVerifierViolations,
   findPublishJobIsolationViolation,
   findTrustedPublishNodeViolation,
+  findUnsavedAuditSubjectViolations,
+  resolveSaveFlag,
   isTrustedPublishingNodeVersion,
   parseTopLevelEnv,
 } from "../checks/check-workflow-supply-chain.mjs";
@@ -905,5 +907,226 @@ describe("isTrustedPublishingNodeVersion", () => {
     for (const v of ["20", "18.19.0"]) {
       expect(isTrustedPublishingNodeVersion(v), v).toBe(false);
     }
+  });
+});
+
+describe("findUnsavedAuditSubjectViolations", () => {
+  // Releases 0.4.73 and 0.4.74 both failed the provenance identity check because
+  // `npm install --no-save` kept the published package out of the dependency
+  // graph, so `npm audit signatures` covered only its 8 dependencies. The gate
+  // that would have caught it only runs on a real publish, so the regression was
+  // invisible in PR CI — which is what this guard fixes.
+  const withAudit = (install) => `
+jobs:
+  verify:
+    steps:
+      - name: Verify published package signature
+        run: |
+          npm init -y
+          ${install}
+          npm audit signatures --json --include-attestations > "$AUDIT_JSON"
+`;
+
+  it("flags a versioned install with --no-save alongside npm audit signatures", () => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit('npm install --no-save --ignore-scripts "passwd-sso-cli@${VERSION}"'),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain("--no-save");
+    expect(v[0]).toContain("never the package itself");
+  });
+
+  it("flags it regardless of flag order", () => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit('npm install --ignore-scripts --no-save "passwd-sso-cli@1.2.3"'),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // A guard that recognises one spelling of what it forbids is a tripwire, not a
+  // boundary. npm resolves ELEVEN aliases to `install` (its own cmd-list.js,
+  // typo-tolerant ones included), and each installs identically — so every one
+  // gets a fixture rather than a representative sample.
+  it.each([
+    "install",
+    "add",
+    "i",
+    "in",
+    "ins",
+    "inst",
+    "insta",
+    "instal",
+    "isnt",
+    "isnta",
+    "isntal",
+    "isntall",
+  ])("flags the install alias: npm %s", (alias) => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit(`npm ${alias} --no-save "passwd-sso-cli@1.0.0"`),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // Quoted booleans survive into the workflow text unshelled, so a bare
+  // `--save=false` match misses them. Values measured against real npm 11.
+  it.each([
+    "--save=false",
+    "--save='false'",
+    '--save="false"',
+  ])("flags the quoted boolean form: %s", (flag) => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit(`npm install ${flag} "passwd-sso-cli@1.0.0"`),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // The false-positive direction, and the one that matters most: npm reads
+  // `--no-save=false` as save=TRUE — the explicit value negates the prefix. A
+  // guard that blocks a correct command is how a gate ends up switched off.
+  it("does not flag --no-save=false, which npm resolves to save=true", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --no-save=false "passwd-sso-cli@1.0.0"'),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  // npm takes the LAST save flag. A parser that lets a space-separated value
+  // swallow the following token reads `--save --no-save` as `--save=--no-save`
+  // and reports true, where npm reports false — so a conflicting-flag install
+  // would walk past the guard. Values measured with `npm config get save`.
+  it.each([
+    ["--save --no-save", false],
+    ["--no-save --save", true],
+    ["--no-save --save=true", true],
+    ["--save false", false],
+    ["--save true", true],
+  ])("resolveSaveFlag(%s) === %s — last flag wins, as npm does", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
+  // Quoted space-separated values, npm's `-S` short form, and the neighbouring
+  // `--save-exact` family. Each value measured with `npm config get save`; the
+  // last two rows are the FALSE-POSITIVE direction, where flagging a correct
+  // command is what gets a gate switched off.
+  it.each([
+    ['--save "false"', false],
+    ["--save 'false'", false],
+    ["-S=false", false],
+    ["-S false", false],
+    ["-S", true],
+    ['--no-save "false"', true],
+    ["--no-save-exact", true],
+    ["--save-exact", true],
+  ])("resolveSaveFlag(%s) === %s, matching real npm", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
+  // Empty values. Measured by actually installing with each flag and checking
+  // whether package.json gained a dependency, not by `npm config get` — which
+  // reports undefined for both and so cannot distinguish them.
+  it.each([
+    ["--save=", true],
+    ["--no-save=", false],
+  ])("resolveSaveFlag(%s) === %s, matching a real install", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
+  it.each([
+    '--save "false"',
+    "-S=false",
+    "-S false",
+  ])("flags the unsaved form: %s", (flag) => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit(`npm install ${flag} "passwd-sso-cli@1.0.0"`),
+        "release.yml",
+      ),
+    ).toHaveLength(1);
+  });
+
+  // --no-save-exact is a DIFFERENT option; its prefix must not read as --no-save.
+  it.each([
+    "--no-save-exact",
+    '--no-save "false"',
+    "-S",
+  ])("stays silent for the saving form: %s", (flag) => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit(`npm install ${flag} "passwd-sso-cli@1.0.0"`),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a conflicting-flag install whose last flag is --no-save", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --save --no-save "passwd-sso-cli@1.0.0"'),
+        "release.yml",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("stays silent when the last flag re-enables saving", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --no-save --save "passwd-sso-cli@1.0.0"'),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["--no-save", false],
+    ["--save=false", false],
+    ["--save='false'", false],
+    ['--save="false"', false],
+    ["--no-save=false", true],
+    ["--save", true],
+    ["", true],
+  ])("resolveSaveFlag(%s) === %s, matching real npm", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
+  // The allow side of the same axis: --no-save is only a problem when it applies
+  // to a versioned package the audit is meant to cover.
+  it.each([
+    ["npm ci", "no install of a versioned spec"],
+    ["npm install --no-save", "unversioned — installs the manifest, not a subject"],
+    ["npm i --no-save eslint", "unversioned package name"],
+  ])("stays silent for: %s", (install) => {
+    expect(findUnsavedAuditSubjectViolations(withAudit(install), "release.yml")).toEqual([]);
+  });
+
+  // The allow side: this is the shape the fix ships, and it must stay silent.
+  it("accepts the saved install the verification job now uses", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --ignore-scripts "passwd-sso-cli@${VERSION}"'),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  // --no-save is unremarkable outside a verification context; only an install
+  // whose package the audit is supposed to cover matters.
+  it("ignores --no-save in a workflow that does not audit signatures", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        `jobs:\n  x:\n    steps:\n      - run: npm install --no-save "some-pkg@1.0.0"\n`,
+        "ci.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  it("passes against the real release.yml", () => {
+    const content = readFileSync(".github/workflows/release.yml", "utf8");
+    expect(findUnsavedAuditSubjectViolations(content, "release.yml")).toEqual([]);
   });
 });

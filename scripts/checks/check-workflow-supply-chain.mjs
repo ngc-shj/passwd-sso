@@ -505,12 +505,130 @@ export function findPublishJobIsolationViolation(content, name) {
   return null;
 }
 
+// Every alias npm resolves to `install`, taken from npm 11's own
+// lib/utils/cmd-list.js rather than guessed — the typo-tolerant ones (`isntall`)
+// are real and install just as well as the canonical spelling.
+const NPM_INSTALL_ALIASES = [
+  "install",
+  "add",
+  "i",
+  "in",
+  "ins",
+  "inst",
+  "insta",
+  "instal",
+  "isnt",
+  "isnta",
+  "isntal",
+  "isntall",
+];
+// Longest-first so `i` cannot shadow `install` in the alternation.
+const INSTALL_INVOCATION_RE = new RegExp(
+  `\\bnpm\\s+(?:${[...NPM_INSTALL_ALIASES].sort((a, b) => b.length - a.length).join("|")})\\b[^\\n;&|]*`,
+  "g",
+);
+
+/**
+ * Resolve npm's `save` config for one install invocation the way npm itself
+ * does, rather than pattern-matching flag text. Two cases make the naive regex
+ * wrong in BOTH directions, and both are verified against real npm 11:
+ *   `--save='false'` / `--save="false"` → save=false (a miss: quotes survive
+ *       shell-less matching, so a `--save=false` regex does not see them)
+ *   `--no-save=false`                   → save=true  (a FALSE POSITIVE: the
+ *       explicit value negates the `no-` prefix, so flagging it would block a
+ *       correct command — the way a gate earns being switched off)
+ *
+ * @param {string} invocation  a single `npm install …` command string
+ * @returns {boolean} the effective `save` setting (npm's default is true)
+ */
+export function resolveSaveFlag(invocation) {
+  let save = true;
+  // Tokenise instead of matching flag text in place. Two things repeatedly broke
+  // the in-place regex: `--no-save-exact` is a DIFFERENT option whose prefix
+  // reads as `--no-save`, and a quoted space-separated value (`--save "false"`)
+  // has no word boundary between the closing quote and the space. Splitting on
+  // whitespace (respecting quotes) makes both fall out of the token shape rather
+  // than needing another lookaround.
+  const tokens = invocation.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  const unquote = (s) => s.replace(/^(['"])(.*)\1$/s, "$2");
+  const isBool = (s) => s === "true" || s === "false";
+  // `-S` is npm's short form of `--save`. There is no short form of `--no-save`.
+  const SAVE_TOKEN = /^(?:--(no-)?save|-S)$/;
+  const SAVE_WITH_VALUE = /^(?:--(no-)?save|-S)=(.*)$/s;
+
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = unquote(tokens[i]);
+    const withValue = token.match(SAVE_WITH_VALUE);
+    if (withValue) {
+      // Only the literal string "false" is falsy here; the `no-` prefix then
+      // inverts it. That gives npm's answers for both edge cases, measured by
+      // installing with each flag and checking whether package.json gained a
+      // dependency: `--no-save=false` saves (the explicit value beats the
+      // prefix), and `--save=` saves while `--no-save=` does not (an empty value
+      // is not "false", so each behaves like its bare form).
+      const value = unquote(withValue[2]) !== "false";
+      save = withValue[1] ? !value : value;
+      continue;
+    }
+    const bare = token.match(SAVE_TOKEN);
+    if (!bare) continue; // includes --save-exact / --no-save-exact: other options
+    const negated = Boolean(bare[1]);
+    const next = tokens[i + 1] === undefined ? undefined : unquote(tokens[i + 1]);
+    if (next !== undefined && isBool(next)) {
+      // A space-separated value binds only when it is literally true/false —
+      // anything else is the next option, so `--save --no-save` must not read
+      // `--no-save` as a value (npm takes the last flag: save=false).
+      const value = next !== "false";
+      save = negated ? !value : value;
+      i += 1;
+      continue;
+    }
+    save = !negated;
+  }
+  return save;
+}
+
+/**
+ * `npm audit signatures` walks the dependency graph, so a package installed with
+ * `--no-save` — absent from both the manifest and the lockfile's root deps — is
+ * never reached. The audit then covers only that package's own dependencies and
+ * reports a healthy-looking count while never touching the subject it was run to
+ * verify. Releases 0.4.73 and 0.4.74 both failed the downstream identity check
+ * this way, and nothing caught it before the release itself, because the
+ * verifying job only runs when a publish actually happens.
+ *
+ * Flags an install whose target is a versioned package spec (the shape used to
+ * fetch a just-published artifact for verification) combined with `--no-save`,
+ * but only in a workflow that also runs `npm audit signatures` — elsewhere
+ * `--no-save` is unremarkable.
+ *
+ * @param {string} content  workflow file text
+ * @param {string} name     file name for the message
+ * @returns {string[]} violation messages
+ */
+export function findUnsavedAuditSubjectViolations(content, name) {
+  if (!/npm\s+audit\s+signatures/.test(content)) return [];
+  const violations = [];
+  for (const command of extractRunCommands(content)) {
+    const install = command.match(INSTALL_INVOCATION_RE) || [];
+    for (const inv of install) {
+      if (resolveSaveFlag(inv) !== false) continue;
+      if (!/[\w@/.-]+@\$?\{?[\w.$-]/.test(inv.replace(/--[\w-]+/g, ""))) continue;
+      violations.push(
+        `${name}: '${inv.trim()}' installs a versioned package with --no-save in a workflow that runs 'npm audit signatures'. An unsaved install leaves the package out of the dependency graph, so the audit silently covers only its dependencies and never the package itself — the subject of the verification is skipped while the audit still reports success. Drop --no-save so the package is part of the audited graph.`,
+      );
+    }
+  }
+  return violations;
+}
+
 function main() {
   const violations = [];
   for (const file of listWorkflowFiles()) {
     const content = readFileSync(file, "utf8");
     const autoMerge = findAutoMergeViolation(content, file);
     if (autoMerge) violations.push(autoMerge);
+    violations.push(...findUnsavedAuditSubjectViolations(content, file));
     const nodePin = findTrustedPublishNodeViolation(content, file);
     if (nodePin) violations.push(nodePin);
     const publishIsolation = findPublishJobIsolationViolation(content, file);
