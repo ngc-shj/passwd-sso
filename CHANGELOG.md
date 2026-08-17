@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.74](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.73...passwd-sso-v0.4.74) (2026-08-17)
+
+
+### Features
+
+* **extension:** show the passphrase toggle as an eye icon ([#774](https://github.com/ngc-shj/passwd-sso/issues/774)) ([2c01e8b](https://github.com/ngc-shj/passwd-sso/commit/2c01e8be1a0fd634e66dab64eb393f03431faed4))
+
+
+### Bug Fixes
+
+* **extension:** make the inline suggestion messages dismissible ([#773](https://github.com/ngc-shj/passwd-sso/issues/773)) ([d22f252](https://github.com/ngc-shj/passwd-sso/commit/d22f252c4cfed43e34afdd5d55c131788b38ebb1))
+* **extension:** serialize context-menu rebuilds and bind credential fills to the clicked frame ([#770](https://github.com/ngc-shj/passwd-sso/issues/770)) ([b5e3b1e](https://github.com/ngc-shj/passwd-sso/commit/b5e3b1e75eeda7e3aaf7371397675dab7ac6813a))
+* **scripts,hooks:** repair macOS-inert security gates and the credential guard ([#772](https://github.com/ngc-shj/passwd-sso/issues/772)) ([4aac156](https://github.com/ngc-shj/passwd-sso/commit/4aac15680e98d8336952fa64eb36ed425b136950))
+
 ## [0.4.73](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.72...passwd-sso-v0.4.73) (2026-08-15)
 
 
