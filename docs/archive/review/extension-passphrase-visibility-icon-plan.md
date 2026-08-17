@@ -576,7 +576,7 @@ popup with the vault locked.
   caught only if someone writes a test for it. Owner: a future a11y tooling pass.
   Recorded per R34 rather than silently.
 
-- **SC4 — Re-masking the passphrase after a failed unlock.** Out of scope, and the
+- **SC4 — Re-masking the passphrase after a failed unlock. RESOLVED, not deferred.**, and the
   question is answered rather than left open. `VaultUnlock.tsx:37-42` clears the
   passphrase only on the success branch; on failure the value stays in React state
   and, if revealed, stays readable in the DOM for the rest of the popup session.
@@ -595,8 +595,7 @@ popup with the vault locked.
   by this PR either way. Owner: a future unlock-flow hardening pass. Recorded so a
   later round does not re-litigate it as if undecided.
 
-- **SC5 — `autoComplete="off"` / `spellCheck={false}` on the passphrase input.**
-  Out of scope, and pre-existing: `VaultUnlock.tsx:57-64` sets neither, and grep
+- **SC5 — Input hardening (`autoComplete` / `spellCheck`). RESOLVED, not deferred.**, and pre-existing: `VaultUnlock.tsx:57-64` sets neither, and grep
   confirms neither appears anywhere in `src/popup/`. This matters *adjacent* to
   this change because `type="text"` (the revealed state) is where browser
   save-prompt and spellcheck heuristics differ from `type="password"` — but that
@@ -612,6 +611,27 @@ popup with the vault locked.
   unchanged pre-existing gap. Owner: the same unlock-flow hardening pass as SC4.
   Recorded explicitly so a Phase-3 reviewer does not rediscover the `type="text"`
   concern and mistake it for fix-induced.
+
+### SC4 / SC5 reopened after a second independent signal
+
+Both were deferred with Anti-Deferral entries, then raised again by a follow-up security
+review that reached them independently of the plan. Two things changed the calculus:
+
+1. **A second, independent signal on the same point.** Plan review surfaced them from the
+   code; the follow-up review surfaced them from the diff without having read the
+   deferrals. Convergence from two directions is evidence the cost estimate was wrong,
+   not that the reviewers repeated each other.
+2. **The measured cost was smaller than the deferral assumed.** SC4's entry argued it
+   "turns a purely presentational change into a behavioural one, requiring its own test
+   matrix for the error path". Reading the handler, it is two failure branches, one line
+   each, no new state and no new i18n — and the two branches turned out to be
+   independently pinnable, which the mutation pass confirmed.
+
+SC5 follows the web app's convention rather than inventing an extension-specific policy:
+five components there declare `autoComplete="current-password"`, a deliberate trade the
+project has already made. `spellCheck` / `autoCorrect` / `autoCapitalize` are set off
+because revealing the field flips it to `type="text"`, where a browser would otherwise
+apply them to a secret.
 
 ### Risks
 

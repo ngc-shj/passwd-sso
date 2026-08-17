@@ -159,3 +159,29 @@ Two test changes came out of code review, both prove-red executed:
 
 What remains unpinnable is unchanged and honest: jsdom cannot judge whether a path *looks*
 like an eye. T7 pins the two elements that carry the meaning; M2 covers the rest.
+
+## D6 — SC4 and SC5 implemented after a follow-up security review
+
+Both were deferred in Phase 1 and re-raised by a follow-up review that arrived at them
+independently. Implemented rather than re-deferred; see the plan's addendum for why the
+original cost estimate was wrong.
+
+- **SC4**: `setShowPassphrase(false)` on both failure branches. The passphrase *value* is
+  deliberately kept so the user can fix a typo — only visibility resets.
+- **SC5**: `autoComplete="current-password"` (matching the web app's five passphrase
+  inputs), plus `spellCheck` / `autoCorrect` / `autoCapitalize` off.
+
+Three tests added, four mutations run:
+
+| Mutation | Reddens |
+| --- | --- |
+| H: drop re-mask on the invalid-passphrase branch | that branch's test alone |
+| I: drop re-mask on the permission-denied branch | that branch's test alone |
+| J: also clear the value on failure | the "value survives" assertion |
+| K: drop `spellCheck` | the attribute test |
+
+H and I reddening separately is the point: the two failure paths are independently pinned
+rather than sharing one assertion, so removing either is visible.
+
+Gates after: 1025 extension tests, tsc clean, lint clean, build clean, `git diff --check`
+clean.

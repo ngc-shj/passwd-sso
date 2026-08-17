@@ -29,6 +29,10 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
     if (!granted) {
       setError("PERMISSION_DENIED");
       setLoading(false);
+      // Re-mask on failure: the passphrase stays in the field so the user can
+      // retry, and leaving it legible until the popup closes is a longer
+      // exposure than the retry needs.
+      setShowPassphrase(false);
       return;
     }
 
@@ -39,6 +43,7 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
       onUnlocked();
     } else {
       setError(res.error || "INVALID_PASSPHRASE");
+      setShowPassphrase(false);
     }
   };
 
@@ -59,6 +64,14 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           placeholder={t("popup.passphrasePlaceholder")}
+          // Matches the web app's five passphrase inputs, which all declare
+          // current-password. Revealing the field flips it to type="text", where
+          // a browser would otherwise apply spellcheck and autocorrect to a
+          // secret — hence the explicit opt-outs.
+          autoComplete="current-password"
+          spellCheck={false}
+          autoCorrect="off"
+          autoCapitalize="off"
           className="h-10 flex-1 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow"
           autoFocus
         />

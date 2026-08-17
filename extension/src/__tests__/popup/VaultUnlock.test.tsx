@@ -121,6 +121,39 @@ describe("VaultUnlock", () => {
       expect(screen.getByRole("button", { name: /show/i })).toBeInTheDocument();
     });
 
+    // A revealed passphrase must not stay legible after a failed attempt. The
+    // value is kept so the user can correct it; only the visibility resets.
+    it.each([
+      ["the unlock is rejected", () => mockSendMessage.mockResolvedValue({ ok: false, error: "INVALID_PASSPHRASE" })],
+      ["host permission is denied", () => mockEnsureHostPermission.mockResolvedValue(false)],
+    ])("re-masks the passphrase when %s", async (_label, arrangeFailure) => {
+      arrangeFailure();
+      render(<VaultUnlock onUnlocked={vi.fn()} />);
+      const input = screen.getByPlaceholderText("Passphrase");
+
+      fireEvent.change(input, { target: { value: "wrong-passphrase" } });
+      fireEvent.click(screen.getByRole("button", { name: /show/i }));
+      expect(input).toHaveAttribute("type", "text");
+
+      fireEvent.click(screen.getByRole("button", { name: /unlock/i }));
+
+      await waitFor(() => expect(input).toHaveAttribute("type", "password"));
+      // The value survives so the user can fix a typo rather than retype it.
+      expect(input).toHaveValue("wrong-passphrase");
+    });
+
+    // type="text" (the revealed state) is where a browser would otherwise
+    // spellcheck and autocorrect a secret.
+    it("opts the passphrase field out of spellcheck and autocorrect", () => {
+      render(<VaultUnlock onUnlocked={vi.fn()} />);
+      const input = screen.getByPlaceholderText("Passphrase");
+
+      expect(input).toHaveAttribute("spellcheck", "false");
+      expect(input).toHaveAttribute("autocorrect", "off");
+      expect(input).toHaveAttribute("autocapitalize", "off");
+      expect(input).toHaveAttribute("autocomplete", "current-password");
+    });
+
     // T4. outerHTML, not innerHTML: strokeWidth and viewBox live on the element
     // itself, so innerHTML would miss an icon that changed only its attributes.
     it("renders a different icon in each state", () => {
