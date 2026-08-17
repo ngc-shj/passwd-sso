@@ -996,6 +996,38 @@ jobs:
     ).toEqual([]);
   });
 
+  // npm takes the LAST save flag. A parser that lets a space-separated value
+  // swallow the following token reads `--save --no-save` as `--save=--no-save`
+  // and reports true, where npm reports false — so a conflicting-flag install
+  // would walk past the guard. Values measured with `npm config get save`.
+  it.each([
+    ["--save --no-save", false],
+    ["--no-save --save", true],
+    ["--no-save --save=true", true],
+    ["--save false", false],
+    ["--save true", true],
+  ])("resolveSaveFlag(%s) === %s — last flag wins, as npm does", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
+  });
+
+  it("flags a conflicting-flag install whose last flag is --no-save", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --save --no-save "passwd-sso-cli@1.0.0"'),
+        "release.yml",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("stays silent when the last flag re-enables saving", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --no-save --save "passwd-sso-cli@1.0.0"'),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
   it.each([
     ["--no-save", false],
     ["--save=false", false],

@@ -543,10 +543,15 @@ const INSTALL_INVOCATION_RE = new RegExp(
  */
 export function resolveSaveFlag(invocation) {
   let save = true;
-  const flag = /--(no-)?save(?:[=\s]+("[^"]*"|'[^']*'|[^\s]+))?/g;
+  // `=`-attached values bind unconditionally; a SPACE-separated value binds only
+  // when the next token is literally true/false (quoted or not). Consuming any
+  // next token would let `--save --no-save` read `--no-save` as `--save`'s value
+  // and return true, where npm returns false — npm takes the LAST flag, and the
+  // loop below reproduces that by simply overwriting `save` each time.
+  const flag = /--(no-)?save(?:=("[^"]*"|'[^']*'|[^\s]*)|\s+(?:"(true|false)"|'(true|false)'|(true|false))\b)?/g;
   for (const m of invocation.matchAll(flag)) {
     const negated = Boolean(m[1]);
-    const raw = m[2];
+    const raw = m[2] ?? m[3] ?? m[4] ?? m[5];
     if (raw === undefined) {
       // Bare `--save` / `--no-save`: the prefix alone decides.
       save = !negated;
