@@ -430,10 +430,16 @@ this table, not a passing test.
 | Test | Mutation | Expected |
 | --- | --- | --- |
 | T1, T2 | hardcode **both** `aria-label` and `title` to a constant | must fail |
-| T6 | hardcode `aria-label` only, leaving `title` state-dependent | **T6 must fail; T1/T2/T5 must stay green** |
+| T6 | **delete** `aria-label`, leaving `title` to supply the name | **T6 must fail; T1/T2/T5 must stay green** |
 | T4 | render the same icon in both states | must fail |
 | T5 | remove the `type={...}` ternary from the input | must fail |
 | T7 | swap the icon/label pairing (eye shown while visible) | must fail |
+
+**Corrected during Phase 2.** This row originally said "hardcode `aria-label` only".
+Run as written it reddened six tests, not one — because `aria-label` *overrides*
+`title`, so freezing it freezes the accessible name in both states and every
+name-based query collapses. Deleting the attribute is the mutation that isolates
+the clause. See deviation log D1.
 
 The T6 row is the one that matters most and is the one the first revision lacked:
 it is the *only* clause that proves `aria-label` is load-bearing rather than
