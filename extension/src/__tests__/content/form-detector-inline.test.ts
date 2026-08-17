@@ -11,6 +11,7 @@ vi.mock("../../content/ui/suggestion-dropdown", () => ({
   hideDropdown: (...args: unknown[]) => hideDropdownMock(...args),
   isDropdownVisible: () => false,
   handleDropdownKeydown: () => false,
+  MESSAGE_AUTO_DISMISS_MS: 5000,
 }));
 
 vi.mock("../../lib/i18n", () => ({
