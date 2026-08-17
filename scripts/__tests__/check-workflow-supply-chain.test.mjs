@@ -13,6 +13,7 @@ import {
   findPublishJobIsolationViolation,
   findTrustedPublishNodeViolation,
   findUnsavedAuditSubjectViolations,
+  resolveSaveFlag,
   isTrustedPublishingNodeVersion,
   parseTopLevelEnv,
 } from "../checks/check-workflow-supply-chain.mjs";
@@ -945,15 +946,66 @@ jobs:
   });
 
   // A guard that recognises one spelling of what it forbids is a tripwire, not a
-  // boundary: every alias below reintroduces the identical defect, so each needs
-  // its own fixture or the guard is bypassable by a routine refactor.
+  // boundary. npm resolves ELEVEN aliases to `install` (its own cmd-list.js,
+  // typo-tolerant ones included), and each installs identically — so every one
+  // gets a fixture rather than a representative sample.
   it.each([
-    ['npm i --no-save "passwd-sso-cli@1.0.0"', "install alias `i`"],
-    ['npm add --no-save "passwd-sso-cli@1.0.0"', "install alias `add`"],
-    ['npm install --save=false "passwd-sso-cli@1.0.0"', "--save=false"],
-    ['npm i --save=false "passwd-sso-cli@${VERSION}"', "alias + --save=false"],
-  ])("flags the equivalent form: %s", (install) => {
-    expect(findUnsavedAuditSubjectViolations(withAudit(install), "release.yml")).toHaveLength(1);
+    "install",
+    "add",
+    "i",
+    "in",
+    "ins",
+    "inst",
+    "insta",
+    "instal",
+    "isnt",
+    "isnta",
+    "isntal",
+    "isntall",
+  ])("flags the install alias: npm %s", (alias) => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit(`npm ${alias} --no-save "passwd-sso-cli@1.0.0"`),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // Quoted booleans survive into the workflow text unshelled, so a bare
+  // `--save=false` match misses them. Values measured against real npm 11.
+  it.each([
+    "--save=false",
+    "--save='false'",
+    '--save="false"',
+  ])("flags the quoted boolean form: %s", (flag) => {
+    const v = findUnsavedAuditSubjectViolations(
+      withAudit(`npm install ${flag} "passwd-sso-cli@1.0.0"`),
+      "release.yml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // The false-positive direction, and the one that matters most: npm reads
+  // `--no-save=false` as save=TRUE — the explicit value negates the prefix. A
+  // guard that blocks a correct command is how a gate ends up switched off.
+  it("does not flag --no-save=false, which npm resolves to save=true", () => {
+    expect(
+      findUnsavedAuditSubjectViolations(
+        withAudit('npm install --no-save=false "passwd-sso-cli@1.0.0"'),
+        "release.yml",
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["--no-save", false],
+    ["--save=false", false],
+    ["--save='false'", false],
+    ['--save="false"', false],
+    ["--no-save=false", true],
+    ["--save", true],
+    ["", true],
+  ])("resolveSaveFlag(%s) === %s, matching real npm", (flag, expected) => {
+    expect(resolveSaveFlag(`npm install ${flag} pkg@1.0.0`)).toBe(expected);
   });
 
   // The allow side of the same axis: --no-save is only a problem when it applies

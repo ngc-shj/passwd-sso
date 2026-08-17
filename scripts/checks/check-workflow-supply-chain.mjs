@@ -505,6 +505,61 @@ export function findPublishJobIsolationViolation(content, name) {
   return null;
 }
 
+// Every alias npm resolves to `install`, taken from npm 11's own
+// lib/utils/cmd-list.js rather than guessed — the typo-tolerant ones (`isntall`)
+// are real and install just as well as the canonical spelling.
+const NPM_INSTALL_ALIASES = [
+  "install",
+  "add",
+  "i",
+  "in",
+  "ins",
+  "inst",
+  "insta",
+  "instal",
+  "isnt",
+  "isnta",
+  "isntal",
+  "isntall",
+];
+// Longest-first so `i` cannot shadow `install` in the alternation.
+const INSTALL_INVOCATION_RE = new RegExp(
+  `\\bnpm\\s+(?:${[...NPM_INSTALL_ALIASES].sort((a, b) => b.length - a.length).join("|")})\\b[^\\n;&|]*`,
+  "g",
+);
+
+/**
+ * Resolve npm's `save` config for one install invocation the way npm itself
+ * does, rather than pattern-matching flag text. Two cases make the naive regex
+ * wrong in BOTH directions, and both are verified against real npm 11:
+ *   `--save='false'` / `--save="false"` → save=false (a miss: quotes survive
+ *       shell-less matching, so a `--save=false` regex does not see them)
+ *   `--no-save=false`                   → save=true  (a FALSE POSITIVE: the
+ *       explicit value negates the `no-` prefix, so flagging it would block a
+ *       correct command — the way a gate earns being switched off)
+ *
+ * @param {string} invocation  a single `npm install …` command string
+ * @returns {boolean} the effective `save` setting (npm's default is true)
+ */
+export function resolveSaveFlag(invocation) {
+  let save = true;
+  const flag = /--(no-)?save(?:[=\s]+("[^"]*"|'[^']*'|[^\s]+))?/g;
+  for (const m of invocation.matchAll(flag)) {
+    const negated = Boolean(m[1]);
+    const raw = m[2];
+    if (raw === undefined) {
+      // Bare `--save` / `--no-save`: the prefix alone decides.
+      save = !negated;
+      continue;
+    }
+    const value = raw.replace(/^['"]|['"]$/g, "") !== "false";
+    // `--no-save=false` is save=true: the explicit value is what npm reads, and
+    // the `no-` prefix inverts it.
+    save = negated ? !value : value;
+  }
+  return save;
+}
+
 /**
  * `npm audit signatures` walks the dependency graph, so a package installed with
  * `--no-save` — absent from both the manifest and the lockfile's root deps — is
@@ -527,15 +582,9 @@ export function findUnsavedAuditSubjectViolations(content, name) {
   if (!/npm\s+audit\s+signatures/.test(content)) return [];
   const violations = [];
   for (const command of extractRunCommands(content)) {
-    // Every npm alias that installs from the registry, and both spellings of the
-    // don't-record-it flag. Matching only `npm install --no-save` would leave
-    // `npm i --no-save`, `npm add --no-save`, and `--save=false` as equivalent
-    // ways to reintroduce exactly the defect this guard exists to prevent —
-    // a guard that recognises one spelling of what it forbids is a tripwire, not
-    // a boundary. `--save=false` is npm's config form of the same flag.
-    const install = command.match(/\bnpm\s+(?:install|i|add)\b[^\n;&|]*/g) || [];
+    const install = command.match(INSTALL_INVOCATION_RE) || [];
     for (const inv of install) {
-      if (!/--no-save\b|--save[=\s]+false\b/.test(inv)) continue;
+      if (resolveSaveFlag(inv) !== false) continue;
       if (!/[\w@/.-]+@\$?\{?[\w.$-]/.test(inv.replace(/--[\w-]+/g, ""))) continue;
       violations.push(
         `${name}: '${inv.trim()}' installs a versioned package with --no-save in a workflow that runs 'npm audit signatures'. An unsaved install leaves the package out of the dependency graph, so the audit silently covers only its dependencies and never the package itself — the subject of the verification is skipped while the audit still reports success. Drop --no-save so the package is part of the audited graph.`,
