@@ -33,7 +33,28 @@ the plan measured a fact correctly, stated it correctly, and then wrote a downst
 step that contradicted it. Measuring is not enough if the measurement is not carried
 through to every step that depends on it.
 
-## D2 — Icon path data
+## D2 — Three className changes beyond NFR4's table
+
+NFR4 tabulated padding, text size, and icon size. The implementation also changed three
+colour/shape classes, adopting `App.tsx`'s icon-button values wholesale rather than
+keeping the text button's:
+
+| Class | Before (`main`) | After | Source |
+| --- | --- | --- | --- |
+| corner | `rounded` | `rounded-md` | `App.tsx:137,147,156` |
+| base text | `text-gray-600 dark:text-gray-400` | `text-gray-500 dark:text-gray-400` | same |
+| hover text | `hover:text-gray-800` | `hover:text-gray-700` | same |
+
+Rationale: NFR4's stated intent is "matches the popup's icon-button idiom", and taking
+two-thirds of that idiom while keeping the text button's leftover colours would have been
+a half-conformance nobody could later explain. Every hover/active/transition class is
+otherwise **preserved verbatim** — verified by diffing the token sets between
+`git show main:...` and HEAD.
+
+Recorded because NFR4's table did not enumerate these, and an unrecorded className delta
+in a plan otherwise specified to this level of detail reads as drift rather than intent.
+
+## D3 — Icon path data
 
 The plan specified the icon *idiom* (`viewBox="0 0 24 24"`, `stroke="currentColor"`,
 `strokeWidth="2"`, `w-4 h-4`) but not the path geometry, since the extension cannot import
@@ -86,3 +107,40 @@ M1-M4 remain manual: whether the glyph reads as show/hide, whether the 28×28 bu
 centres against the `h-10` input, the native tooltip text under both locales, and
 legibility in dark mode. `blocked-deferred` for automation, executable locally by the
 developer.
+
+## D4 — A Phase-3 reviewer saw another reviewer's mutation and reported it as ours
+
+The Phase 3 functionality review filed a Major: it found `VaultUnlock.tsx` carrying an
+applied "same plain eye in both states" mutation plus two untracked `__probe*.test.tsx`
+files, and concluded that Phase 2 had left a mutation unreverted — falsifying this log's
+"restoration verified after each" claim.
+
+**The observation was real; the attribution was wrong.** Those artifacts belonged to the
+*testing* reviewer, which was running its own mutation pass concurrently in the same
+worktree. The security reviewer independently hit the same interference from the opposite
+side, reporting a transient T6 failure that vanished once its own probe files were
+removed. Checked immediately afterwards:
+
+```console
+$ git status --porcelain
+ M docs/archive/review/extension-passphrase-visibility-icon-deviation.md   ← this file, mine
+$ ls extension/src/__tests__/popup/ | grep -i probe
+  (none)
+$ git show HEAD:extension/src/popup/components/VaultUnlock.tsx | grep -c '<line x1="2"'
+1                                        ← the slashed eye is committed correctly
+$ npx vitest run
+Test Files  61 passed (61)   Tests  1023 passed (1023)
+```
+
+The reviewer itself reached the same conclusion after stashing — it recorded that HEAD is
+clean and that this is "process hygiene, not a defect in what merges". That part is right.
+
+**What is genuinely mine, and it is the more useful finding**: the previous change on this
+package ended with exactly this lesson written down — *do not run verification agents
+concurrently with a mutation pass that edits the tree they read; the prove-red pass must
+own the worktree exclusively.* I wrote that, and then ran three Phase-3 reviewers in
+parallel while telling one of them to mutate. The lesson was recorded and not applied.
+
+The concrete cost is not a shipped defect but a reviewer-hours defect: one Major finding
+and one transient failure both spent on an artifact of my own scheduling. Next time,
+either serialize the mutating reviewer or give it an isolated worktree.

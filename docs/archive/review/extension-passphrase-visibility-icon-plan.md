@@ -163,7 +163,18 @@ See T6 and the Kind-B table.
   | padding | `px-2 py-1` (8px / 4px) | `p-1.5` (6px, uniform) |
   | text size | `text-xs` | **removed** — dead once no text renders |
   | icon | — | `w-4 h-4` |
-  | colour / hover / active / transition | unchanged | unchanged |
+  | corner | `rounded` | `rounded-md` |
+  | base text | `text-gray-600 dark:text-gray-400` | `text-gray-500 dark:text-gray-400` |
+  | hover text | `hover:text-gray-800` | `hover:text-gray-700` |
+  | hover bg / active / transition | unchanged | **unchanged** |
+
+  The three colour/shape rows adopt `App.tsx`'s icon-button values, since taking
+  two-thirds of an idiom and keeping the text button's leftovers would be a
+  half-conformance nobody could later explain. Every hover-background, active, and
+  transition class is preserved verbatim. (An earlier revision of this table said
+  "colour / hover / active / transition — unchanged", which contradicted NFR3's
+  "matches the popup's icon-button idiom" instruction; the implementation followed
+  NFR3, and the table is corrected to match. Phase 3, F-Func-3.)
 
   `p-1.5` is what **all seven** sibling icon buttons use — `App.tsx:137,147,156`
   and `MatchList.tsx:243,254,262,269` — so this is conformance, not invention.
