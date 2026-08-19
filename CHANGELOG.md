@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.75](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.74...passwd-sso-v0.4.75) (2026-08-19)
+
+
+### Bug Fixes
+
+* **ci:** audit the published package, not only its dependencies ([#775](https://github.com/ngc-shj/passwd-sso/issues/775)) ([83562d2](https://github.com/ngc-shj/passwd-sso/commit/83562d2a27684a0661e8f8da2f53678659706ae5))
+* **docker:** override deepmerge-ts in the prisma-cli stage for CVE-2026-40345 ([#782](https://github.com/ngc-shj/passwd-sso/issues/782)) ([0cf289a](https://github.com/ngc-shj/passwd-sso/commit/0cf289a37f455253f6beee844ee0b1f389bdbe81))
+
 ## [0.4.74](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.73...passwd-sso-v0.4.74) (2026-08-17)
 
 
