@@ -36,17 +36,22 @@ COPY .npmrc ./
 # PRISMA_VER is kept in lockstep with package-lock.json by
 # scripts/checks/check-dockerfile-prisma-pin.
 # FMW_VER: prisma pulls find-my-way (via @prisma/dev) and 9.6.0 carries
-# CVE-2026-47219 (HTTP/2 DDoS). This stage is an ISOLATED `npm init` tree, so the
-# repo's package.json `overrides` do NOT apply here — the override has to be
-# written into this stage's own package.json before installing, or the vulnerable
-# copy ships in the runner via the COPY below and Trivy flags it.
+# CVE-2026-47219 (HTTP/2 DDoS). DMT_VER: prisma pulls deepmerge-ts (via
+# @prisma/config, pinned there to an exact 7.1.5) and 7.1.5 carries
+# CVE-2026-40345 (stack exhaustion on recursive object graphs). This stage is an
+# ISOLATED `npm init` tree, so the repo's package.json `overrides` do NOT apply
+# here — the override has to be written into this stage's own package.json before
+# installing, or the vulnerable copy ships in the runner via the COPY below and
+# Trivy flags it.
 RUN PRISMA_VER=7.9.1 && \
     FMW_VER=9.7.0 && \
+    DMT_VER=8.0.0 && \
     npm init -y >/dev/null 2>&1 && \
-    node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
+    node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}','deepmerge-ts':'^${DMT_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
     npm install "prisma@${PRISMA_VER}" --ignore-scripts --loglevel=error && \
     node -e "const v=require('/prisma-cli/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}" && \
     node -e "const v=require('/prisma-cli/node_modules/find-my-way/package.json').version,c=v.split('.').map(Number),m='${FMW_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('find-my-way still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/prisma-cli/node_modules/deepmerge-ts/package.json').version,c=v.split('.').map(Number),m='${DMT_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('deepmerge-ts still '+v);process.exit(1)}}" && \
     node node_modules/prisma/build/index.js --version >/dev/null
 
 # Stage 2: Build the application
