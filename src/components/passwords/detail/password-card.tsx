@@ -192,6 +192,22 @@ export function PasswordCard({
     expiresAt,
   } = entry;
   const { createGuardedGetter, repromptDialog } = useReprompt();
+
+  /**
+   * Wraps a value-producing getter in the master-passphrase gate.
+   *
+   * Applied to the FETCHERS, not only to the overflow-menu handlers: the
+   * fetchers are handed to EntryActionsMenu, which uses them directly as
+   * CopyButton's `getValue` for the card's quick-copy control. Guarding only the
+   * handlers would leave that one button releasing a secret with no prompt.
+   *
+   * The flag comes from the overview row, which is always loaded; the decrypted
+   * detail agrees but only exists once the card is expanded.
+   */
+  const guard = (getter: () => Promise<string> | string) => async () => {
+    const value = await getter();
+    return createGuardedGetter(id, detailData?.requireReprompt ?? requireReprompt, () => value)();
+  };
   const scopedTeamId = teamId;
   const isTeamMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -474,13 +490,13 @@ export function PasswordCard({
             canEdit={canEdit}
             canDelete={canDelete}
             canShare={canShare}
-            fetchPassword={fetchPassword}
-            fetchCardField={fetchCardField}
-            fetchIdentityField={fetchIdentityField}
-            fetchPasskeyField={fetchPasskeyField}
-            fetchBankField={fetchBankField}
-            fetchLicenseField={fetchLicenseField}
-            fetchSshField={fetchSshField}
+            fetchPassword={guard(fetchPassword)}
+            fetchCardField={(f) => guard(() => fetchCardField(f))()}
+            fetchIdentityField={(f) => guard(() => fetchIdentityField(f))()}
+            fetchPasskeyField={(f) => guard(() => fetchPasskeyField(f))()}
+            fetchBankField={(f) => guard(() => fetchBankField(f))()}
+            fetchLicenseField={(f) => guard(() => fetchLicenseField(f))()}
+            fetchSshField={(f) => guard(() => fetchSshField(f))()}
             onCopyUsername={handleCopyUsername}
             onCopyPassword={handleCopyPassword}
             onCopyContent={handleCopyContent}

@@ -79,8 +79,10 @@ export function useEntryActions<E extends DisplayEntryLike>(
     const getDetail = getDetailFor(entry);
 
     /**
-     * The single place the row and overflow-menu copies obtain a decrypted
-     * value, and therefore the only place the re-prompt has to be applied.
+     * The single place the row and overflow-menu copies obtain a value out of
+     * the DECRYPTED BLOB, and therefore the only place the re-prompt has to be
+     * applied for those. The overview-sourced username copy is deliberately
+     * outside this funnel — see onCopyUsername below.
      *
      * The guard wraps the value AFTER the detail is decrypted, which is the same
      * ordering the detail pane's sections use: `requireReprompt` governs whether
@@ -122,10 +124,17 @@ export function useEntryActions<E extends DisplayEntryLike>(
       fetchSshField,
       onCopyPassword: () => void makeCopyToast(fetchPassword),
       onCopyContent: () => void makeCopyToast(fetchContent),
-      // The `if (!entry.username) return` guard is gone, but this is a cleanup,
-      // not a bug fix: entry-actions-menu.tsx renders the "Copy username" item
-      // inside `{username && (...)}` and is the only path here, so the empty
-      // case was never reachable from the UI. The primitive decides it now.
+      // DELIBERATELY UNGUARDED, and the one copy here that is: this reads the
+      // OVERVIEW row's username, an identifier the list already renders in plain
+      // text next to every entry. The detail pane treats it the same way
+      // (passkey-section.tsx and the pane header both copy it with a raw
+      // getter), so guarding it here would prompt for a value the same screen
+      // displays. The blob-sourced `fetchPasskeyField("username")` is a
+      // different field and IS guarded, via fetchGuarded above.
+      //
+      // Also no `if (!entry.username) return`: the menu item renders inside
+      // `{username && (...)}` and is the only path here, so the empty case was
+      // never reachable from the UI. The primitive decides it now.
       onCopyUsername: () => void makeCopyToast(async () => entry.username ?? ""),
       onCopyCardNumber: () => void makeCopyToast(() => fetchCardField("cardNumber")),
       onCopyCvv: () => void makeCopyToast(() => fetchCardField("cvv")),

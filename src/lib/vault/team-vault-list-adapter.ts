@@ -7,6 +7,7 @@ import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { buildTeamGetDetail } from "@/lib/vault/build-team-get-detail";
 import { fetchApi } from "@/lib/url-helpers";
+import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
 import { throwIfStepUp } from "@/lib/http/handle-step-up-error";
 import { apiPath, ENTRY_TYPE, TEAM_ROLE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -51,7 +52,12 @@ export async function decryptTeamOverview(
   const base = {
     id: entryId,
     entryType,
-    requireReprompt: (rawEntry.requireReprompt as boolean) ?? false,
+    // Fail closed, and validate rather than assert: `as boolean` passes
+    // "false" (truthy) and 0 (falsy) straight through, and the collapsed
+    // accordion card reads THIS row rather than the decrypted detail — so a
+    // response that omits the flag would bypass the detail builder's own
+    // fail-closed default.
+    requireReprompt: readRequireReprompt(rawEntry),
     expiresAt: (rawEntry.expiresAt as string | null) ?? null,
     isFavorite: (rawEntry.isFavorite as boolean) ?? false,
     isArchived: (rawEntry.isArchived as boolean) ?? false,
