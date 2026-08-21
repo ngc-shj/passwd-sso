@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 /**
- * Deny/allow coverage for the two copy funnels that do NOT go through
- * useEntryActions: the accordion card's own handlers and the secure-note body.
+ * Deny/allow coverage for the SECURE-NOTE copy funnel, which does not go through
+ * useEntryActions.
  *
- * Both are exercised through their real CopyButton so the assertion lands on the
- * clipboard mutation. The sibling suites stub CopyButton out, which means
- * reverting either guard leaves them green — that gap is why this file exists.
+ * It is exercised through the real SecureNoteSection and the real CopyButton, so
+ * the assertion lands on the clipboard mutation and reverting the guard reds it.
+ * The sibling suites stub CopyButton out, which is why this file exists.
+ *
+ * The accordion card's funnel is NOT covered here — see the it.todo below for
+ * what is missing and why.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";

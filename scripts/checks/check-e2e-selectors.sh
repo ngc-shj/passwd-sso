@@ -331,12 +331,33 @@ fi
 
 printf "${BOLD}▸ Checking i18n value changes vs E2E regex selectors${RESET}\n"
 
+# `set -o pipefail` reports the RIGHTMOST non-zero status, so an upstream grep
+# failing with 2 is masked by a downstream grep returning 1 ("matched nothing").
+# Each grep therefore runs on its own, and its status is read before the next
+# stage: 1 is a legitimate empty result, >=2 means the scan did not run and must
+# not be spelled the same as success.
+grep_or_die() {  # grep_or_die <label> <grep args...>   (input on stdin)
+  local label="$1"; shift
+  local out rc
+  set +e
+  out=$(grep "$@")
+  rc=$?
+  set -e
+  if [ "$rc" -gt 1 ]; then
+    printf '  ERROR: %s — grep exited %s; this check did not run.\n' "$label" "$rc" >&2
+    printf '         Refusing to report success.\n' >&2
+    exit 1
+  fi
+  printf '%s' "$out"
+}
+
 # Get removed Japanese values from messages/ja/ diff (old values that were replaced)
-i18n_removed_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
-  | grep -E '^\-\s*"[^"]+"\s*:\s*"' \
-  | grep -v '^\-\-\-' \
+ja_diff=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json')
+i18n_removed_lines=$(printf '%s\n' "$ja_diff" | grep_or_die "i18n ja removed-line scan" -E '^\-\s*"[^"]+"\s*:\s*"')
+i18n_removed_lines=$(printf '%s\n' "$i18n_removed_lines" | grep_or_die "i18n ja ----header filter" -v '^\-\-\-')
+i18n_removed_ja=$(printf '%s\n' "$i18n_removed_lines" \
   | sed -E 's/^\-[[:space:]]*"[^"]+"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
-  | sort -u || true)
+  | sort -u)
 
 if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
   # Extract Japanese text fragments from E2E regex patterns
@@ -351,23 +372,15 @@ if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
   # a `C` locale treats the bytes as latin-1 and rejects the >255 code points.
   ja_class='(*UTF)[\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{4E00}-\x{9FFF}\x{FF21}-\x{FF3A}]'
 
-  set +e
-  e2e_ja_raw=$(grep -roE '/[^/]+/' "$E2E_DIR/" 2>/dev/null \
+  # Two separate greps, each checked: the recursive scan of e2e/ and the
+  # Japanese-literal filter. Piping them together would let pipefail hide a
+  # failed scan behind the filter's "matched nothing".
+  e2e_regex_literals=$(grep_or_die "E2E regex-literal scan" -roE '/[^/]+/' "$E2E_DIR/")
+  e2e_candidates=$(printf '%s\n' "$e2e_regex_literals" \
     | sed 's|^[^:]*:||' \
     | tr '|' '\n' \
-    | sed 's|^/||; s|/$||; s|/[gi]*$||' \
-    | grep -P "$ja_class")
-  ja_rc=$?
-  set -e
-
-  # grep exits 1 for "matched nothing" (a legitimate empty result) and >=2 for a
-  # real failure. Only the former may be treated as "no patterns"; the latter has
-  # to be loud, or the gate reports green from a scan that never ran.
-  if [ "$ja_rc" -gt 1 ]; then
-    echo "  ERROR: could not scan E2E regexes for Japanese literals (grep exit $ja_rc)." >&2
-    echo "         The i18n-vs-E2E check did not run; refusing to report success." >&2
-    exit 1
-  fi
+    | sed 's|^/||; s|/$||; s|/[gi]*$||')
+  e2e_ja_raw=$(printf '%s\n' "$e2e_candidates" | grep_or_die "E2E Japanese-literal filter" -P "$ja_class")
 
   e2e_ja_patterns=$(printf '%s\n' "$e2e_ja_raw" | sed 's/[\^$]//g' | sort -u)
 
