@@ -3,19 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 import { CopyCancelledError } from "./copy-cancelled-error";
+import { installClipboard, uninstallClipboard } from "@/__tests__/helpers/mock-clipboard";
 import {
   COPY_OUTCOME,
   copySecretToClipboard,
   copySecretWithoutClear,
 } from "./copy-secret";
-
-function installClipboard(overrides: Record<string, unknown> = {}) {
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  const readText = vi.fn().mockResolvedValue("");
-  const stub = { writeText, readText, ...overrides };
-  Object.defineProperty(navigator, "clipboard", { value: stub, configurable: true });
-  return stub as { writeText: ReturnType<typeof vi.fn>; readText: ReturnType<typeof vi.fn> };
-}
 
 describe("copySecretToClipboard", () => {
   beforeEach(() => {
@@ -27,12 +20,12 @@ describe("copySecretToClipboard", () => {
   // leave fake timers or the clipboard descriptor installed for the rest of the file.
   afterEach(() => {
     vi.useRealTimers();
-    Reflect.deleteProperty(navigator, "clipboard");
+    uninstallClipboard();
   });
 
   describe("outcomes", () => {
     it("returns UNAVAILABLE without invoking the getter when there is no clipboard", async () => {
-      Reflect.deleteProperty(navigator, "clipboard");
+      uninstallClipboard();
       const getValue = vi.fn();
 
       expect(await copySecretToClipboard(getValue)).toBe(COPY_OUTCOME.UNAVAILABLE);

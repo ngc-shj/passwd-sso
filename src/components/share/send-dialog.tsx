@@ -43,6 +43,8 @@ import { formatFileSize } from "@/lib/format/format-file-size";
 import { bindRangeInput } from "@/lib/ui/input-range";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 
 interface SendDialogProps {
   open: boolean;
@@ -54,6 +56,7 @@ const EXPIRY_OPTIONS = ["1h", "1d", "7d", "30d"] as const;
 
 export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
   const t = useTranslations("Share");
+  const tCopy = useTranslations("CopyButton");
   const tApi = useTranslations("ApiErrors");
 
   // Common state
@@ -233,9 +236,22 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                     size="icon"
                     className="h-9 w-9"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(createdAccessPassword);
-                      setPasswordCopied(true);
-                      setTimeout(() => setPasswordCopied(false), 2 * MS_PER_SECOND);
+                      // A credential granting access to shared vault content, so
+                      // it gets the same bounded residency as any other secret.
+                      // The panel keeps it re-copyable until dismissed, and the
+                      // adjacent warning already tells the user to hand it over
+                      // now — after dismissal only the hash is stored, so the
+                      // clear creates no loss class the flow did not already have.
+                      const outcome = await copySecretToClipboard(
+                        () => createdAccessPassword,
+                      );
+                      reportCopyOutcome(outcome, {
+                        tCopy,
+                        onOk: () => {
+                          setPasswordCopied(true);
+                          setTimeout(() => setPasswordCopied(false), 2 * MS_PER_SECOND);
+                        },
+                      });
                     }}
                   >
                     {passwordCopied ? (

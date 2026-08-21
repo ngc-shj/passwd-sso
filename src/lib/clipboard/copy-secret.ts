@@ -59,6 +59,15 @@ function isClipboardAvailable(): boolean {
  * Scheduled outside any React lifecycle and deliberately NOT cancelled on
  * unmount or client-side navigation: the secret outlives the component, so the
  * clear must too. Only a full page unload stops it.
+ *
+ * Three other runtimes implement this same contract and CANNOT import this
+ * module. They each own their interval BY DESIGN, so a policy change here is a
+ * per-runtime decision, not a mechanical sync:
+ *   - cli/src/lib/clipboard.ts — 30s, plus a clear on SIGINT/SIGTERM/exit.
+ *   - extension/src/popup/components/MatchList.tsx — user-configurable
+ *     (`clipboardClearSeconds`), and blanks without a read-back compare.
+ *   - ios/Shared/Clipboard/SecureClipboard.swift — hands the deadline to the OS
+ *     via UIPasteboard.expirationDate; there is no timer to mirror.
  */
 function scheduleClear(copiedValue: string): void {
   setTimeout(async () => {
@@ -118,6 +127,12 @@ async function copy(
 
   // Emptiness is judged on the value, before any write, so an empty field never
   // wipes what the user already had on the clipboard.
+  //
+  // `trim()` is deliberately wider than the `!value` guards this replaced: it
+  // also refuses whitespace-only. That is right for a card number or an ID, and
+  // is a knowing narrowing for a password — " " is a legal passphrase and can no
+  // longer be copied. The primitive cannot tell the two apart, and the trade
+  // favours never reporting a copy that put nothing useful on the clipboard.
   if (value.trim() === "") return COPY_OUTCOME.EMPTY;
 
   try {

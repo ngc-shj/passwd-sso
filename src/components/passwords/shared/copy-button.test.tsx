@@ -15,17 +15,10 @@ import { toast } from "sonner";
 import { CopyButton } from "./copy-button";
 import { CopyCancelledError } from "@/lib/clipboard/copy-cancelled-error";
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { installClipboard, uninstallClipboard } from "@/__tests__/helpers/mock-clipboard";
 
 const toastSuccess = toast.success as ReturnType<typeof vi.fn>;
 const toastError = toast.error as ReturnType<typeof vi.fn>;
-
-function installClipboard(overrides: Partial<Record<"writeText" | "readText", unknown>> = {}) {
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  const readText = vi.fn().mockResolvedValue("");
-  const stub = { writeText, readText, ...overrides };
-  Object.defineProperty(navigator, "clipboard", { value: stub, configurable: true });
-  return stub as { writeText: ReturnType<typeof vi.fn>; readText: ReturnType<typeof vi.fn> };
-}
 
 describe("CopyButton", () => {
   beforeEach(() => {
@@ -42,7 +35,7 @@ describe("CopyButton", () => {
   // of the file (src/__tests__/setup.ts restores neither).
   afterEach(() => {
     vi.useRealTimers();
-    Reflect.deleteProperty(navigator, "clipboard");
+    uninstallClipboard();
   });
 
   it("has no clipboard installed at the start of a fresh test", () => {
@@ -166,66 +159,20 @@ describe("CopyButton", () => {
     });
   });
 
-  // ── Characterization of the 30s auto-clear (plan gate row P1) ────────────────
-  //
-  // These four cases pin the CURRENT observable behaviour of the clear routine
-  // before it is collapsed into the shared clipboard primitive. Requirement 4 says
-  // the behaviour is "preserved exactly"; without a baseline that claim is
-  // unverifiable, and this routine has no coverage today.
-  //
-  // The read-back-rejects case is not an edge case: navigator.clipboard.readText
-  // is unavailable to page script in Firefox and permission-gated in WebKit, so
-  // the unconditional fallback write is the dominant path on those engines.
-  describe("30s clipboard clear", () => {
-    async function copyThenAdvance(clip: ReturnType<typeof installClipboard>) {
-      render(<CopyButton getValue={() => "secret"} />);
-      fireEvent.click(screen.getByRole("button"));
-      await waitFor(() => expect(clip.writeText).toHaveBeenCalledWith("secret"));
-      clip.writeText.mockClear();
-      await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
-    }
+  // The clear routine's own four branches are pinned in copy-secret.test.ts,
+  // where they live now. What only this layer can assert is which variant
+  // CopyButton reaches for: copySecretWithoutClear would leave the secret on the
+  // clipboard indefinitely while the button still promises otherwise.
+  it("routes to the clearing variant, not the no-clear one", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const clip = installClipboard({ readText: vi.fn().mockResolvedValue("secret") });
 
-    beforeEach(() => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-    });
+    render(<CopyButton getValue={() => "secret"} />);
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(clip.writeText).toHaveBeenCalledWith("secret"));
+    clip.writeText.mockClear();
 
-    it("blanks the clipboard when it still holds the copied value", async () => {
-      const clip = installClipboard({ readText: vi.fn().mockResolvedValue("secret") });
-      await copyThenAdvance(clip);
-      expect(clip.readText).toHaveBeenCalledTimes(1);
-      expect(clip.writeText).toHaveBeenCalledTimes(1);
-      expect(clip.writeText).toHaveBeenCalledWith("");
-    });
-
-    it("leaves the clipboard alone when it now holds something else", async () => {
-      const clip = installClipboard({ readText: vi.fn().mockResolvedValue("user copied this later") });
-      await copyThenAdvance(clip);
-      // readText asserted first: "the timer never fired" and "the value had changed"
-      // otherwise present identically as writeText not being called.
-      expect(clip.readText).toHaveBeenCalledTimes(1);
-      expect(clip.writeText).not.toHaveBeenCalled();
-    });
-
-    it("blanks unconditionally when read-back is unavailable", async () => {
-      const clip = installClipboard({
-        readText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
-      });
-      await copyThenAdvance(clip);
-      expect(clip.writeText).toHaveBeenCalledTimes(1);
-      expect(clip.writeText).toHaveBeenCalledWith("");
-    });
-
-    it("does not let a rejected fallback write escape", async () => {
-      const writeText = vi
-        .fn()
-        .mockResolvedValueOnce(undefined) // the copy itself succeeds
-        .mockRejectedValue(new DOMException("denied", "NotAllowedError")); // every clear attempt fails
-      const clip = installClipboard({
-        writeText,
-        readText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
-      });
-      await expect(copyThenAdvance(clip)).resolves.toBeUndefined();
-      expect(clip.writeText).toHaveBeenCalledTimes(1);
-    });
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
+    expect(clip.writeText).toHaveBeenCalledWith("");
   });
 });

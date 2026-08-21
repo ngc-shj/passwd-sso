@@ -316,7 +316,10 @@ export function PasswordCard({
   // different behaviours for the same verb: nine reported a failure, one
   // (`handleCopyUsername`) swallowed it entirely, and eight returned silently on
   // an empty value — while content and password reported SUCCESS on an empty
-  // value, having just wiped the clipboard with "".
+  // value, having just wiped the clipboard with "". Only the last of those was
+  // reachable from the UI for username (the menu item is gated on `username`);
+  // for content and password it was plainly reachable, an empty secure note or
+  // an entry saved with no password being enough.
   const runCopy = async (getter: () => Promise<string> | string) => {
     reportCopyOutcome(await copySecretToClipboard(getter), { tCopy, tCard: t });
   };

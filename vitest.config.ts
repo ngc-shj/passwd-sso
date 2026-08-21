@@ -53,6 +53,7 @@ export default defineConfig({
         "src/lib/security/sentry-sanitize.ts",
         "src/lib/mcp/**/*.ts",
         "src/lib/security/password-policy-validation.ts",
+        "src/lib/clipboard/**/*.ts",
         "src/lib/auth/tokens/extension-token.ts",
       ],
       exclude: [

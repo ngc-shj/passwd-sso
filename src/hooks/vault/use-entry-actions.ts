@@ -119,9 +119,10 @@ export function useEntryActions<E extends DisplayEntryLike>(
       fetchSshField,
       onCopyPassword: () => void makeCopyToast(fetchPassword),
       onCopyContent: () => void makeCopyToast(fetchContent),
-      // No `if (!entry.username) return` guard: an entry with no username used
-      // to swallow the click silently, which is the same defect as the rest of
-      // this change. The primitive reports it as EMPTY.
+      // The `if (!entry.username) return` guard is gone, but this is a cleanup,
+      // not a bug fix: entry-actions-menu.tsx renders the "Copy username" item
+      // inside `{username && (...)}` and is the only path here, so the empty
+      // case was never reachable from the UI. The primitive decides it now.
       onCopyUsername: () => void makeCopyToast(async () => entry.username ?? ""),
       onCopyCardNumber: () => void makeCopyToast(() => fetchCardField("cardNumber")),
       onCopyCvv: () => void makeCopyToast(() => fetchCardField("cvv")),

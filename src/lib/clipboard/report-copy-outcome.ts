@@ -2,8 +2,7 @@
 
 import { toast } from "sonner";
 
-import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
-import { MS_PER_SECOND } from "@/lib/constants/time";
+import { CLIPBOARD_CLEAR_SECONDS } from "@/lib/constants";
 import { COPY_OUTCOME, type CopyOutcome } from "./copy-secret";
 
 // Matches next-intl's Translator value shape so a `useTranslations(...)` result
@@ -50,9 +49,7 @@ export function reportCopyOutcome(
       if (onOk) {
         onOk();
       } else {
-        toast.success(
-          tCopy("copied", { seconds: CLIPBOARD_CLEAR_TIMEOUT_MS / MS_PER_SECOND }),
-        );
+        toast.success(tCopy("copied", { seconds: CLIPBOARD_CLEAR_SECONDS }));
       }
       return;
     case COPY_OUTCOME.CANCELLED:
@@ -70,6 +67,11 @@ export function reportCopyOutcome(
       toast.error(tCard ? tCard("networkError") : tCopy("copySourceFailed"));
       return;
     default: {
+      // Unreachable from TypeScript — the assignment below is the compile-time
+      // guarantee. Reached only from an untyped caller, and a bare throw out of
+      // an async click handler would be exactly the silent failure this module
+      // exists to remove, so say something first.
+      toast.error(tCopy("copySourceFailed"));
       const unreported: never = outcome;
       throw new Error(`unreported copy outcome: ${String(unreported)}`);
     }

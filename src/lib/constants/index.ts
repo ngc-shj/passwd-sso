@@ -113,7 +113,7 @@ export type { ImportFormat } from "./vault/import-format";
 export { EXPORT_FORMAT_VALUES } from "./vault/export-format";
 export type { ExportFormat } from "./vault/export-format";
 
-export { REVEAL_TIMEOUT_MS, CLIPBOARD_CLEAR_TIMEOUT_MS } from "./timing";
+export { REVEAL_TIMEOUT_MS, CLIPBOARD_CLEAR_TIMEOUT_MS, CLIPBOARD_CLEAR_SECONDS } from "./timing";
 
 export { GRANT_STATUS } from "./integrations/breakglass";
 export type { GrantStatus } from "./integrations/breakglass";

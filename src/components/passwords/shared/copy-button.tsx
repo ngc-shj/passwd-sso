@@ -29,7 +29,7 @@ interface CopyButtonProps {
   tabIndex?: number;
 }
 
-import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { CLIPBOARD_CLEAR_SECONDS } from "@/lib/constants";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
@@ -51,7 +51,7 @@ export function CopyButton({
   // After a copy, both the accessible name and the tooltip announce "Copied".
   const idleLabel = ariaLabel ?? (fieldLabel ? t("copyNamed", { name: fieldLabel }) : t("copy"));
   const stateLabel = copied
-    ? t("copied", { seconds: CLIPBOARD_CLEAR_TIMEOUT_MS / MS_PER_SECOND })
+    ? t("copied", { seconds: CLIPBOARD_CLEAR_SECONDS })
     : idleLabel;
 
   const handleCopy = useCallback(async () => {

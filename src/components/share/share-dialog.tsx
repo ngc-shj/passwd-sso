@@ -45,6 +45,8 @@ import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
 import { bindRangeInput } from "@/lib/ui/input-range";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import { safeRecord } from "@/lib/safe-keys";
 
 interface ShareLink {
@@ -160,6 +162,7 @@ export function ShareDialog({
   teamId,
 }: ShareDialogProps) {
   const t = useTranslations("Share");
+  const tCopy = useTranslations("CopyButton");
   const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const [expiresIn, setExpiresIn] = useState<string>("1d");
@@ -454,9 +457,22 @@ export function ShareDialog({
                     size="icon"
                     className="h-9 w-9"
                     onClick={async () => {
-                      await navigator.clipboard.writeText(createdAccessPassword);
-                      setPasswordCopied(true);
-                      setTimeout(() => setPasswordCopied(false), 2 * MS_PER_SECOND);
+                      // A credential granting access to shared vault content, so
+                      // it gets the same bounded residency as any other secret.
+                      // The panel keeps it re-copyable until dismissed, and the
+                      // adjacent warning already tells the user to hand it over
+                      // now — after dismissal only the hash is stored, so the
+                      // clear creates no loss class the flow did not already have.
+                      const outcome = await copySecretToClipboard(
+                        () => createdAccessPassword,
+                      );
+                      reportCopyOutcome(outcome, {
+                        tCopy,
+                        onOk: () => {
+                          setPasswordCopied(true);
+                          setTimeout(() => setPasswordCopied(false), 2 * MS_PER_SECOND);
+                        },
+                      });
                     }}
                   >
                     {passwordCopied ? (
