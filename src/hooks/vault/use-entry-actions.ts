@@ -2,7 +2,8 @@
 
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import type { InlineDetailData } from "@/types/entry";
 
 /**
@@ -63,28 +64,12 @@ export function useEntryActions<E extends DisplayEntryLike>(
   const tCopy = useTranslations("CopyButton");
   const tCard = useTranslations("PasswordCard");
 
-  // Clipboard clear: overwrite only if the value is still there (mirrors password-card.tsx).
-  const scheduleClearClipboard = (copiedValue: string) => {
-    setTimeout(async () => {
-      try {
-        const current = await navigator.clipboard.readText();
-        if (current === copiedValue) await navigator.clipboard.writeText("");
-      } catch {
-        try { await navigator.clipboard.writeText(""); } catch { /* best-effort */ }
-      }
-    }, CLIPBOARD_CLEAR_TIMEOUT_MS);
-  };
-
+  // Clipboard write, emptiness, and the 30s clear all live in the shared
+  // primitive now — this hook, CopyButton and PasswordCard had three
+  // byte-identical copies of the clear routine and three different ideas of what
+  // to show the user.
   const makeCopyToast = async (getter: () => Promise<string>) => {
-    try {
-      const val = await getter();
-      if (!val) return;
-      await navigator.clipboard.writeText(val);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(val);
-    } catch {
-      toast.error(tCard("networkError"));
-    }
+    reportCopyOutcome(await copySecretToClipboard(getter), { tCopy, tCard });
   };
 
   return (entry: E): EntryActionCallbacks => {
@@ -134,10 +119,10 @@ export function useEntryActions<E extends DisplayEntryLike>(
       fetchSshField,
       onCopyPassword: () => void makeCopyToast(fetchPassword),
       onCopyContent: () => void makeCopyToast(fetchContent),
-      onCopyUsername: () => {
-        if (!entry.username) return;
-        void makeCopyToast(async () => entry.username ?? "");
-      },
+      // No `if (!entry.username) return` guard: an entry with no username used
+      // to swallow the click silently, which is the same defect as the rest of
+      // this change. The primitive reports it as EMPTY.
+      onCopyUsername: () => void makeCopyToast(async () => entry.username ?? ""),
       onCopyCardNumber: () => void makeCopyToast(() => fetchCardField("cardNumber")),
       onCopyCvv: () => void makeCopyToast(() => fetchCardField("cvv")),
       onCopyCredentialId: () => void makeCopyToast(() => fetchPasskeyField("credentialId")),

@@ -35,6 +35,8 @@ import {
   KeySquare,
 } from "lucide-react";
 import { toast } from "sonner";
+import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
@@ -140,27 +142,6 @@ interface VaultEntryFull {
   fingerprint?: string | null;
   passphrase?: string | null;
   comment?: string | null;
-}
-
-import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
-
-function scheduleClearClipboard(copiedValue: string) {
-  setTimeout(async () => {
-    try {
-      const current = await navigator.clipboard.readText();
-      if (current === copiedValue) {
-        await navigator.clipboard.writeText("");
-      }
-    } catch {
-      // readText often fails without clipboard-read permission.
-      // Fallback to best-effort clear.
-      try {
-        await navigator.clipboard.writeText("");
-      } catch {
-        // Clipboard may be unavailable (background tab / denied)
-      }
-    }
-  }, CLIPBOARD_CLEAR_TIMEOUT_MS);
 }
 
 export function PasswordCard({
@@ -331,132 +312,26 @@ export function PasswordCard({
     { getDetail, vaultStatus }
   );
 
-  const handleCopyContent = async () => {
-    try {
-      const content = await fetchContent();
-      await navigator.clipboard.writeText(content);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(content);
-    } catch {
-      toast.error(t("networkError"));
-    }
+  // One reporter for all eleven handlers. They previously carried three
+  // different behaviours for the same verb: nine reported a failure, one
+  // (`handleCopyUsername`) swallowed it entirely, and eight returned silently on
+  // an empty value — while content and password reported SUCCESS on an empty
+  // value, having just wiped the clipboard with "".
+  const runCopy = async (getter: () => Promise<string> | string) => {
+    reportCopyOutcome(await copySecretToClipboard(getter), { tCopy, tCard: t });
   };
 
-  const handleCopyUsername = async () => {
-    if (!username) return;
-    try {
-      await navigator.clipboard.writeText(username);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(username);
-    } catch {}
-  };
-
-  const handleCopyPassword = async () => {
-    try {
-      const pw = await fetchPassword();
-      await navigator.clipboard.writeText(pw);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(pw);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyCardNumber = async () => {
-    try {
-      const num = await fetchCardField("cardNumber");
-      if (!num) return;
-      await navigator.clipboard.writeText(num);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(num);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyCvv = async () => {
-    try {
-      const code = await fetchCardField("cvv");
-      if (!code) return;
-      await navigator.clipboard.writeText(code);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(code);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyCredentialId = async () => {
-    try {
-      const cid = await fetchPasskeyField("credentialId");
-      if (!cid) return;
-      await navigator.clipboard.writeText(cid);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(cid);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyAccountNumber = async () => {
-    try {
-      const num = await fetchBankField("accountNumber");
-      if (!num) return;
-      await navigator.clipboard.writeText(num);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(num);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyLicenseKey = async () => {
-    try {
-      const key = await fetchLicenseField("licenseKey");
-      if (!key) return;
-      await navigator.clipboard.writeText(key);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(key);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyFingerprint = async () => {
-    try {
-      const fp = await fetchSshField("fingerprint");
-      if (!fp) return;
-      await navigator.clipboard.writeText(fp);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(fp);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyPublicKey = async () => {
-    try {
-      const pk = await fetchSshField("publicKey");
-      if (!pk) return;
-      await navigator.clipboard.writeText(pk);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(pk);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyIdNumber = async () => {
-    try {
-      const num = await fetchIdentityField("idNumber");
-      if (!num) return;
-      await navigator.clipboard.writeText(num);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(num);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
+  const handleCopyContent = () => runCopy(fetchContent);
+  const handleCopyUsername = () => runCopy(() => username ?? "");
+  const handleCopyPassword = () => runCopy(fetchPassword);
+  const handleCopyCardNumber = () => runCopy(() => fetchCardField("cardNumber"));
+  const handleCopyCvv = () => runCopy(() => fetchCardField("cvv"));
+  const handleCopyCredentialId = () => runCopy(() => fetchPasskeyField("credentialId"));
+  const handleCopyAccountNumber = () => runCopy(() => fetchBankField("accountNumber"));
+  const handleCopyLicenseKey = () => runCopy(() => fetchLicenseField("licenseKey"));
+  const handleCopyFingerprint = () => runCopy(() => fetchSshField("fingerprint"));
+  const handleCopyPublicKey = () => runCopy(() => fetchSshField("publicKey"));
+  const handleCopyIdNumber = () => runCopy(() => fetchIdentityField("idNumber"));
 
   const handleOpenUrl = async () => {
     try {

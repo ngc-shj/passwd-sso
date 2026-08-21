@@ -120,7 +120,11 @@ describe("useEntryActions", () => {
     expect(toastSuccess).toHaveBeenCalledWith("CopyButton.copied");
   });
 
-  it("onCopyUsername is a no-op when entry has no username", async () => {
+  it("onCopyUsername reports an empty field instead of doing nothing", async () => {
+    // This used to be "a no-op": the callback returned early and the click
+    // produced no output at all, which is indistinguishable from a dead button.
+    // The assertion moved rather than the test being deleted — the behaviour it
+    // pinned is exactly what changed.
     const entryNoUser: DisplayEntry = { ...minimalEntry, username: null };
     const { result } = renderHook(() => useEntryActions(getDetailFor));
     const callbacks = result.current(entryNoUser);
@@ -130,6 +134,7 @@ describe("useEntryActions", () => {
 
     expect(writeText).not.toHaveBeenCalled();
     expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("CopyButton.copyEmpty");
   });
 
   it("schedules clipboard clear after CLIPBOARD_CLEAR_TIMEOUT_MS", async () => {

@@ -13,6 +13,8 @@ import {
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
+import { copySecretWithoutClear } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import { API_PATH, LOCAL_STORAGE_KEY } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +103,7 @@ export function RecoveryKeyDialog({
 }: RecoveryKeyDialogProps) {
   const t = useTranslations("Vault");
   const tApi = useTranslations("ApiErrors");
+  const tCopy = useTranslations("CopyButton");
   const { getSecretKey, getAccountSalt, hasRecoveryKey, recoveryKeyInvalidated, setHasRecoveryKey } = useVault();
 
   const [step, setStep] = useState<Step>("passphrase");
@@ -154,12 +157,18 @@ export function RecoveryKeyDialog({
   }
 
   async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(formattedKey);
-      toast.success(t("recoveryKeyCopySuccess"));
-    } catch {
-      // Fallback: select text
-    }
+    // copySecretWithoutClear, not copySecretToClipboard: the user is told to
+    // store the recovery key somewhere permanent, so blanking the clipboard 30s
+    // later would break the dialog's own instruction.
+    //
+    // The previous `catch { // Fallback: select text }` described a fallback the
+    // function did not implement — a failed copy of the one secret shown exactly
+    // once was completely silent.
+    const outcome = await copySecretWithoutClear(() => formattedKey);
+    reportCopyOutcome(outcome, {
+      tCopy,
+      onOk: () => toast.success(t("recoveryKeyCopySuccess")),
+    });
   }
 
   function handleClose() {

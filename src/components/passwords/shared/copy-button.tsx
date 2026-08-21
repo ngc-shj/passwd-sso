@@ -31,6 +31,8 @@ interface CopyButtonProps {
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 
 export function CopyButton({
   getValue,
@@ -48,38 +50,23 @@ export function CopyButton({
   // Precedence: explicit ariaLabel > field-named ("Copy {field}") > generic "Copy".
   // After a copy, both the accessible name and the tooltip announce "Copied".
   const idleLabel = ariaLabel ?? (fieldLabel ? t("copyNamed", { name: fieldLabel }) : t("copy"));
-  const stateLabel = copied ? t("copied") : idleLabel;
+  const stateLabel = copied
+    ? t("copied", { seconds: CLIPBOARD_CLEAR_TIMEOUT_MS / MS_PER_SECOND })
+    : idleLabel;
 
   const handleCopy = useCallback(async () => {
-    try {
-      const value = await getValue();
-      await navigator.clipboard.writeText(value);
+    const outcome = await copySecretToClipboard(getValue);
+
+    // The checkmark is entered ONLY on OK. Previously a copy of an empty value
+    // wrote "" successfully and showed the check, telling the user something had
+    // been copied when nothing had.
+    if (outcome === COPY_OUTCOME.OK) {
       setCopied(true);
-
-      // Auto-clear clipboard after 30 seconds if content still matches
-      const copiedValue = value;
-      setTimeout(async () => {
-        try {
-          const current = await navigator.clipboard.readText();
-          if (current === copiedValue) {
-            await navigator.clipboard.writeText("");
-          }
-        } catch {
-          // readText often fails without clipboard-read permission.
-          // Fallback to best-effort clear.
-          try {
-            await navigator.clipboard.writeText("");
-          } catch {
-            // Clipboard may be unavailable (background tab / denied)
-          }
-        }
-      }, CLIPBOARD_CLEAR_TIMEOUT_MS);
-
       setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
-    } catch {
-      // Clipboard access denied
     }
-  }, [getValue]);
+
+    reportCopyOutcome(outcome, { tCopy: t });
+  }, [getValue, t]);
 
   return (
     <TooltipProvider>

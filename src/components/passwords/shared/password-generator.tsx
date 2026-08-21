@@ -25,6 +25,8 @@ import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import {
   PASSWORD_LENGTH_MIN,
   PASSWORD_LENGTH_MAX,
@@ -89,6 +91,7 @@ export function PasswordGenerator({
 }: PasswordGeneratorProps) {
   const t = useTranslations("PasswordGenerator");
   const tc = useTranslations("Common");
+  const tCopy = useTranslations("CopyButton");
   const [settings, setSettings] = useState<GeneratorSettings>(
     initialSettings ?? { ...DEFAULT_GENERATOR_SETTINGS }
   );
@@ -161,17 +164,32 @@ export function PasswordGenerator({
     }
   };
 
+  // Both of these previously awaited writeText with no catch at all: a rejected
+  // clipboard write became an unhandled rejection, and the "copied" state was
+  // set regardless. A generated password becomes a vault secret the moment the
+  // user saves the entry, so it gets the same 30s clear as any other.
   const copyHistory = async (pw: string, idx: number) => {
-    await navigator.clipboard.writeText(pw);
-    setCopiedIdx(idx);
-    setTimeout(() => setCopiedIdx(null), 2 * MS_PER_SECOND);
+    const outcome = await copySecretToClipboard(() => pw);
+    reportCopyOutcome(outcome, {
+      tCopy,
+      onOk: () => {
+        setCopiedIdx(idx);
+        setTimeout(() => setCopiedIdx(null), 2 * MS_PER_SECOND);
+      },
+    });
   };
 
   const copyGenerated = async () => {
-    if (!generated) return;
-    await navigator.clipboard.writeText(generated);
-    setCopiedGenerated(true);
-    setTimeout(() => setCopiedGenerated(false), 2 * MS_PER_SECOND);
+    // No `if (!generated) return` guard — an empty generator output used to
+    // swallow the click silently; the primitive reports it as EMPTY.
+    const outcome = await copySecretToClipboard(() => generated);
+    reportCopyOutcome(outcome, {
+      tCopy,
+      onOk: () => {
+        setCopiedGenerated(true);
+        setTimeout(() => setCopiedGenerated(false), 2 * MS_PER_SECOND);
+      },
+    });
   };
 
   const update = (partial: Partial<GeneratorSettings>) => {

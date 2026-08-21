@@ -395,11 +395,20 @@ C2 would show "Couldn't load this item — try again" to a user who deliberately
 
 | ID | Subject | Status |
 |----|---------|--------|
-| P1 | RT-3 characterization green on current code, measured fixture order | pending |
-| P2 | Fixture-leak fix in the five extended test files | pending |
-| C1 | clipboard primitive: 6-member union, two exports, leaf error module | pending |
-| C2 | `CopyButton` reports every outcome | pending |
-| C3 | `useEntryActions` consumes C1 | pending |
-| C4 | `PasswordCard` consumes C1 via one shared reporter; Class B′ closed | pending |
-| C5 | i18n: four keys, existence + placeholder test, disclosure sink, constant coupling | pending |
-| C5b | recovery-key + generator consume C1 | pending |
+| P1 | RT-3 characterization green on current code, measured fixture order | locked |
+| P2 | Fixture-leak fix in the extended test files | partial — `copy-button.test.tsx` and `copy-secret.test.ts` release timers and the descriptor in `afterEach`, with the paired "clipboard is absent in a fresh test" positive. `use-entry-actions.test.tsx:136/:152`, `password-generator.test.tsx`, `totp-field.test.tsx` and `password-detail-pane.test.tsx` still install without teardown; intra-file only (`vitest.config.ts` isolates per file), so it is a latent flake in files this change did not have to touch. Owner: follow-up |
+| C1 | clipboard primitive: 6-member union, two exports, leaf error module | locked |
+| C2 | `CopyButton` reports every outcome | locked |
+| C3 | `useEntryActions` consumes C1 | locked |
+| C4 | `PasswordCard` consumes C1 via one shared reporter; Class B′ closed | locked |
+| C5 | i18n: four keys, existence + placeholder test, disclosure sink, constant coupling | locked |
+| C5b | recovery-key + generator consume C1 | locked |
+
+**Verification run.** `npm run lint` clean; `npx next build` compiled; `npx vitest run` →
+1011 files / 14,744 passed, 1 skipped. Each contract's clauses were red-proven separately by
+mutation: the `instanceof` discrimination (impostor case reds), the emptiness-before-write ordering
+(both "without writing" clauses red, outcome unchanged — so the assertions bind to the mutation, not
+the return value), the availability-before-`getValue` ordering (the "getter not called" clause reds),
+the clear's still-holds comparison, the clear's unconditional fallback, and both i18n placeholder
+clauses. P1's four characterization cases were green on the pre-change tree and are still green after
+the collapse, which is the evidence for requirement 4.

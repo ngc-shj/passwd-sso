@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, type ReactNode, createElement } from "react";
 import { RepromptDialog } from "@/components/passwords/dialogs/reprompt-dialog";
+import { CopyCancelledError } from "@/lib/clipboard/copy-cancelled-error";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 
 const CACHE_TTL_MS = 30 * MS_PER_SECOND;
@@ -54,7 +55,11 @@ export function useReprompt() {
         setPending({
           entryId,
           callback: () => resolve(getter()),
-          cancelCallback: () => reject(new Error("cancelled")),
+          // A typed sentinel, not a message string: copySecretToClipboard
+          // discriminates a deliberate decline from a failure by `instanceof`,
+          // so that declining the passphrase stays silent instead of telling the
+          // user their copy broke and to try again.
+          cancelCallback: () => reject(new CopyCancelledError()),
         });
       });
     },
