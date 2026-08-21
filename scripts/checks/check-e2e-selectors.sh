@@ -336,6 +336,16 @@ printf "${BOLD}▸ Checking i18n value changes vs E2E regex selectors${RESET}\n"
 # Each grep therefore runs on its own, and its status is read before the next
 # stage: 1 is a legitimate empty result, >=2 means the scan did not run and must
 # not be spelled the same as success.
+# The whole gate is scoped to this directory. If it is absent every block below
+# is skipped and the script still prints "No E2E selector issues detected" — a
+# gate that examined nothing must not be spelled the same as one that found
+# nothing, which is the defect this file has already been fixed for twice.
+if [ ! -d "$E2E_DIR" ]; then
+  printf '  ERROR: %s/ not found; the E2E selector checks did not run.\n' "$E2E_DIR" >&2
+  printf '         Refusing to report success. Update E2E_DIR if the suite moved.\n' >&2
+  exit 1
+fi
+
 grep_or_die() {  # grep_or_die <label> <grep args...>   (input on stdin)
   local label="$1"; shift
   local out rc
