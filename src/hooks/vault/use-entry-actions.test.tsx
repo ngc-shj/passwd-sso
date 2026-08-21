@@ -100,7 +100,7 @@ describe("useEntryActions", () => {
 
   it("onCopyPassword writes to clipboard and shows success toast", async () => {
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyPassword();
     await flush();
@@ -111,7 +111,7 @@ describe("useEntryActions", () => {
 
   it("onCopyUsername writes username to clipboard and shows success toast", async () => {
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyUsername();
     await flush();
@@ -127,7 +127,7 @@ describe("useEntryActions", () => {
     // pinned is exactly what changed.
     const entryNoUser: DisplayEntry = { ...minimalEntry, username: null };
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(entryNoUser);
+    const callbacks = result.current.buildCallbacks(entryNoUser);
 
     callbacks.onCopyUsername();
     await flush();
@@ -143,7 +143,7 @@ describe("useEntryActions", () => {
     readText.mockResolvedValue("s3cr3t");
 
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyPassword();
     await flush();
@@ -159,7 +159,7 @@ describe("useEntryActions", () => {
 
   it("shows networkError toast when getDetailFor rejects (locked vault / fetch failure)", async () => {
     const { result } = renderHook(() => useEntryActions(lockedGetDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyPassword();
     await flush();
@@ -171,7 +171,7 @@ describe("useEntryActions", () => {
   it("onOpenUrl opens a window when url is present", async () => {
     const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     await callbacks.onOpenUrl();
 
@@ -181,7 +181,7 @@ describe("useEntryActions", () => {
 
   it("fetchPassword resolves the decrypted password", async () => {
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     const pw = await callbacks.fetchPassword();
     expect(pw).toBe("s3cr3t");

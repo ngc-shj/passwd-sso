@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useTranslations } from "next-intl";
+import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -187,9 +188,10 @@ export function PasswordCard({
     tags,
     isFavorite,
     isArchived,
-    requireReprompt = false,
+    requireReprompt,
     expiresAt,
   } = entry;
+  const { createGuardedGetter, repromptDialog } = useReprompt();
   const scopedTeamId = teamId;
   const isTeamMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -320,8 +322,19 @@ export function PasswordCard({
   // reachable from the UI for username (the menu item is gated on `username`);
   // for content and password it was plainly reachable, an empty secure note or
   // an entry saved with no password being enough.
+  // The accordion card renders the same overflow menu as the 3-pane row but
+  // supplies its own fetchers, so useEntryActions' gate never covered it — and
+  // useLayoutMode returns "accordion" for every server and first-client render,
+  // so this is not a narrow-viewport edge case.
   const runCopy = async (getter: () => Promise<string> | string) => {
-    reportCopyOutcome(await copySecretToClipboard(getter), { tCopy, tCard: t });
+    const guarded = async () => {
+      const value = await getter();
+      // The overview flag is authoritative and always present; the decrypted
+      // detail agrees but is only loaded once the card is expanded.
+      const flag = detailData?.requireReprompt ?? requireReprompt;
+      return createGuardedGetter(id, flag, () => value)();
+    };
+    reportCopyOutcome(await copySecretToClipboard(guarded), { tCopy, tCard: t });
   };
 
   const handleCopyContent = () => runCopy(fetchContent);
@@ -600,6 +613,10 @@ export function PasswordCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Master-passphrase re-prompt for this card's copy actions. Scoped to the
+          card because the accordion supplies its own fetchers and never goes
+          through useEntryActions' instance. */}
+      {repromptDialog}
     </>
   );
 }

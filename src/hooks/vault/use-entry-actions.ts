@@ -1,7 +1,9 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
+import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import type { InlineDetailData } from "@/types/entry";
@@ -60,9 +62,10 @@ export interface EntryActionCallbacks {
  */
 export function useEntryActions<E extends DisplayEntryLike>(
   getDetailFor: (entry: E) => () => Promise<InlineDetailData>,
-): (entry: E) => EntryActionCallbacks {
+): { buildCallbacks: (entry: E) => EntryActionCallbacks; repromptDialog: ReactNode } {
   const tCopy = useTranslations("CopyButton");
   const tCard = useTranslations("PasswordCard");
+  const { createGuardedGetter, repromptDialog } = useReprompt();
 
   // Clipboard write, emptiness, and the 30s clear all live in the shared
   // primitive now — this hook, CopyButton and PasswordCard had three
@@ -72,41 +75,41 @@ export function useEntryActions<E extends DisplayEntryLike>(
     reportCopyOutcome(await copySecretToClipboard(getter), { tCopy, tCard });
   };
 
-  return (entry: E): EntryActionCallbacks => {
+  const buildCallbacks = (entry: E): EntryActionCallbacks => {
     const getDetail = getDetailFor(entry);
 
-    const fetchPassword = async () => {
+    /**
+     * The single place the row and overflow-menu copies obtain a decrypted
+     * value, and therefore the only place the re-prompt has to be applied.
+     *
+     * The guard wraps the value AFTER the detail is decrypted, which is the same
+     * ordering the detail pane's sections use: `requireReprompt` governs whether
+     * the secret may leave the vault, not whether it may be decrypted into page
+     * memory. The flag rides on the detail itself, so there is no second fetch
+     * and no way to reach a field without having consulted it.
+     *
+     * A declined prompt rejects with CopyCancelledError, which the clipboard
+     * primitive classifies as CANCELLED — the one outcome reported silently.
+     */
+    const fetchGuarded = (pick: (d: InlineDetailData) => string) => async () => {
       const d = await getDetail();
-      return d.password ?? "";
+      return createGuardedGetter(entry.id, d.requireReprompt, () => pick(d))();
     };
-    const fetchContent = async () => {
-      const d = await getDetail();
-      return d.content ?? "";
-    };
-    const fetchCardField = async (field: "cardNumber" | "cvv") => {
-      const d = await getDetail();
-      return (d[field] ?? "") as string;
-    };
-    const fetchIdentityField = async (field: "idNumber") => {
-      const d = await getDetail();
-      return (d[field] ?? "") as string;
-    };
-    const fetchPasskeyField = async (field: "credentialId" | "username") => {
-      const d = await getDetail();
-      return (d[field] ?? "") as string;
-    };
-    const fetchBankField = async (field: "accountNumber" | "routingNumber") => {
-      const d = await getDetail();
-      return (d[field] ?? "") as string;
-    };
-    const fetchLicenseField = async (field: "licenseKey") => {
-      const d = await getDetail();
-      return (d[field] ?? "") as string;
-    };
-    const fetchSshField = async (field: "fingerprint" | "publicKey") => {
-      const d = await getDetail();
-      return (d[field] ?? "") as string;
-    };
+
+    const fetchPassword = fetchGuarded((d) => d.password ?? "");
+    const fetchContent = fetchGuarded((d) => d.content ?? "");
+    const fetchCardField = (field: "cardNumber" | "cvv") =>
+      fetchGuarded((d) => (d[field] ?? "") as string)();
+    const fetchIdentityField = (field: "idNumber") =>
+      fetchGuarded((d) => (d[field] ?? "") as string)();
+    const fetchPasskeyField = (field: "credentialId" | "username") =>
+      fetchGuarded((d) => (d[field] ?? "") as string)();
+    const fetchBankField = (field: "accountNumber" | "routingNumber") =>
+      fetchGuarded((d) => (d[field] ?? "") as string)();
+    const fetchLicenseField = (field: "licenseKey") =>
+      fetchGuarded((d) => (d[field] ?? "") as string)();
+    const fetchSshField = (field: "fingerprint" | "publicKey") =>
+      fetchGuarded((d) => (d[field] ?? "") as string)();
 
     return {
       fetchPassword,
@@ -140,4 +143,6 @@ export function useEntryActions<E extends DisplayEntryLike>(
       },
     };
   };
+
+  return { buildCallbacks, repromptDialog };
 }

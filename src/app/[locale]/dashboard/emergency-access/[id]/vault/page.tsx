@@ -173,6 +173,10 @@ export default function EmergencyVaultPage() {
           decrypted.push({
             card: {
               id: entry.id,
+              // Deliberate: the grantee cannot satisfy the grantor's passphrase,
+              // so a re-prompt here would be unsatisfiable rather than
+              // protective. Mirrors the InlineDetailData literal below.
+              requireReprompt: false,
               entryType: (entry.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
               title: overview.title || "Untitled",
               username: overview.username ?? null,

@@ -185,7 +185,12 @@ vi.mock("@/hooks/vault/use-password-entry-detail", () => ({
 }));
 
 vi.mock("@/hooks/vault/use-entry-actions", () => ({
-  useEntryActions: () => () => ({
+  // Shape mirrors the real hook: it now also hands back the re-prompt dialog
+  // for the caller to mount, because the row/menu copies are gated on the
+  // per-entry requireReprompt flag.
+  useEntryActions: () => ({
+    repromptDialog: null,
+    buildCallbacks: () => ({
     fetchPassword: vi.fn(),
     fetchContent: vi.fn(),
     fetchCardField: vi.fn(),
@@ -206,6 +211,7 @@ vi.mock("@/hooks/vault/use-entry-actions", () => ({
     onCopyPublicKey: vi.fn(),
     onCopyIdNumber: vi.fn(),
     onOpenUrl: vi.fn(),
+    }),
   }),
 }));
 
