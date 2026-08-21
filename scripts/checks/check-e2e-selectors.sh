@@ -342,13 +342,34 @@ if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
   # Extract Japanese text fragments from E2E regex patterns
   # Matches: /English|日本語/i, /English|日本語1|日本語2/i, hasText: /日本語/
   # Split regex alternatives on '|', keep only those containing Japanese chars
-  e2e_ja_patterns=$(grep -roE '/[^/]+/' "$E2E_DIR/" 2>/dev/null \
+  # Unicode code points, not literal bracket ranges: `[ぁ-ん]` and friends are a
+  # COLLATION range, and under C.UTF-8 glibc rejects them with
+  # "grep: Invalid collation character". Combined with a `|| true` that swallowed
+  # the failure, this whole check silently examined nothing and still printed
+  # "No E2E selector issues detected" with exit 0.
+  # (*UTF) makes PCRE decode the input as UTF-8 regardless of LC_ALL; without it
+  # a `C` locale treats the bytes as latin-1 and rejects the >255 code points.
+  ja_class='(*UTF)[\x{3040}-\x{309F}\x{30A0}-\x{30FF}\x{4E00}-\x{9FFF}\x{FF21}-\x{FF3A}]'
+
+  set +e
+  e2e_ja_raw=$(grep -roE '/[^/]+/' "$E2E_DIR/" 2>/dev/null \
     | sed 's|^[^:]*:||' \
     | tr '|' '\n' \
     | sed 's|^/||; s|/$||; s|/[gi]*$||' \
-    | grep '[ぁ-ん]\\|[ァ-ヶ]\\|[一-龠]\\|[Ａ-Ｚ]' \
-    | sed 's/[\^$]//g' \
-    | sort -u || true)
+    | grep -P "$ja_class")
+  ja_rc=$?
+  set -e
+
+  # grep exits 1 for "matched nothing" (a legitimate empty result) and >=2 for a
+  # real failure. Only the former may be treated as "no patterns"; the latter has
+  # to be loud, or the gate reports green from a scan that never ran.
+  if [ "$ja_rc" -gt 1 ]; then
+    echo "  ERROR: could not scan E2E regexes for Japanese literals (grep exit $ja_rc)." >&2
+    echo "         The i18n-vs-E2E check did not run; refusing to report success." >&2
+    exit 1
+  fi
+
+  e2e_ja_patterns=$(printf '%s\n' "$e2e_ja_raw" | sed 's/[\^$]//g' | sort -u)
 
   if [ -n "$e2e_ja_patterns" ]; then
     for ja_pattern in $e2e_ja_patterns; do

@@ -34,7 +34,6 @@ vi.mock("@/components/passwords/dialogs/reprompt-dialog", () => ({
 
 import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { SecureNoteSection } from "./sections/secure-note-section";
-import { EntryActionsMenu } from "./entry-actions-menu";
 
 function makeDetail(requireReprompt: boolean, extra: Record<string, unknown> = {}): InlineDetailData {
   return {
@@ -126,89 +125,20 @@ describe("secure-note body copy honours requireReprompt", () => {
 });
 
 /**
- * The accordion card hands its fetchers straight to EntryActionsMenu, which uses
- * them as CopyButton's getValue for the quick-copy control — a path that is NOT
- * the overflow-menu handlers and was unguarded even after those were fixed.
- * This harness reproduces that handoff with the real menu and the real button.
+ * NOT COVERED — the accordion card's quick-copy.
+ *
+ * An earlier version of this file had a harness here that re-implemented
+ * password-card.tsx's `guard` helper instead of rendering the card, so stripping
+ * all seven wraps from production left it green. It proved the helper's shape,
+ * not that production uses it, which is worse than no test: a vacuous case reads
+ * as coverage. It was removed rather than left in place.
+ *
+ * Rendering the real PasswordCard here hangs — the import alone does, before any
+ * assertion runs — and diagnosing that is its own task. The production guard IS
+ * applied (password-card.tsx wraps all seven fetchers it hands to
+ * EntryActionsMenu, plus the eleven overflow-menu handlers via runCopy), and the
+ * same gate is proven end-to-end on the secure-note surface above and on the
+ * row/menu surface in use-entry-actions-reprompt.test.tsx. What is missing is a
+ * regression pin specific to the card: removing a wrap there reds nothing today.
  */
-function CardQuickCopyHarness({ requireReprompt }: { requireReprompt: boolean }) {
-  const { createGuardedGetter, repromptDialog } = useReprompt();
-  const guard = (getter: () => Promise<string> | string) => async () => {
-    const value = await getter();
-    return createGuardedGetter("entry-1", requireReprompt, () => value)();
-  };
-  const noop = () => {};
-  return (
-    <>
-      <EntryActionsMenu
-        variant="accelerator"
-        entryType="LOGIN"
-        username="u"
-        urlHost={null}
-        isArchived={false}
-        fetchPassword={guard(async () => "s3cr3t")}
-        fetchCardField={async () => ""}
-        fetchIdentityField={async () => ""}
-        fetchPasskeyField={async () => ""}
-        fetchBankField={async () => ""}
-        fetchLicenseField={async () => ""}
-        fetchSshField={async () => ""}
-        onCopyUsername={noop}
-        onCopyPassword={noop}
-        onCopyContent={noop}
-        onCopyCardNumber={noop}
-        onCopyCvv={noop}
-        onCopyCredentialId={noop}
-        onCopyAccountNumber={noop}
-        onCopyLicenseKey={noop}
-        onCopyFingerprint={noop}
-        onCopyPublicKey={noop}
-        onCopyIdNumber={noop}
-        onOpenUrl={noop}
-        t={(key: string) => key}
-      />
-      {repromptDialog}
-    </>
-  );
-}
-
-describe("accordion quick-copy honours requireReprompt", () => {
-  let clip: ReturnType<typeof installClipboard>;
-
-  beforeEach(() => {
-    verified.length = 0;
-    cancelled.length = 0;
-    clip = installClipboard();
-  });
-  afterEach(() => uninstallClipboard());
-
-  it("does not write until the passphrase is verified", async () => {
-    render(<CardQuickCopyHarness requireReprompt />);
-    screen.getByRole("button", { name: "copyPassword" }).click();
-
-    await waitFor(() => expect(screen.getByTestId("reprompt-dialog")).toBeInTheDocument());
-    expect(clip.writeText).not.toHaveBeenCalled();
-
-    verified[verified.length - 1]!();
-    await waitFor(() => expect(clip.writeText).toHaveBeenCalledWith("s3cr3t"));
-  });
-
-  it("writes nothing when the prompt is declined", async () => {
-    render(<CardQuickCopyHarness requireReprompt />);
-    screen.getByRole("button", { name: "copyPassword" }).click();
-
-    await waitFor(() => expect(screen.getByTestId("reprompt-dialog")).toBeInTheDocument());
-    cancelled[cancelled.length - 1]!();
-
-    await waitFor(() => expect(screen.queryByTestId("reprompt-dialog")).not.toBeInTheDocument());
-    expect(clip.writeText).not.toHaveBeenCalled();
-  });
-
-  it("does not prompt for an entry the user never marked", async () => {
-    render(<CardQuickCopyHarness requireReprompt={false} />);
-    screen.getByRole("button", { name: "copyPassword" }).click();
-
-    await waitFor(() => expect(clip.writeText).toHaveBeenCalledWith("s3cr3t"));
-    expect(screen.queryByTestId("reprompt-dialog")).not.toBeInTheDocument();
-  });
-});
+it.todo("accordion quick-copy: deny/allow through the real PasswordCard render");

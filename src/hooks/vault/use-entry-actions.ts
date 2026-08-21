@@ -124,13 +124,17 @@ export function useEntryActions<E extends DisplayEntryLike>(
       fetchSshField,
       onCopyPassword: () => void makeCopyToast(fetchPassword),
       onCopyContent: () => void makeCopyToast(fetchContent),
-      // DELIBERATELY UNGUARDED, and the one copy here that is: this reads the
-      // OVERVIEW row's username, an identifier the list already renders in plain
-      // text next to every entry. The detail pane treats it the same way
-      // (passkey-section.tsx and the pane header both copy it with a raw
-      // getter), so guarding it here would prompt for a value the same screen
-      // displays. The blob-sourced `fetchPasskeyField("username")` is a
-      // different field and IS guarded, via fetchGuarded above.
+      // DELIBERATELY UNGUARDED, under a stated policy: a username shown on
+      // screen is a public identifier regardless of where it was stored. The
+      // list renders it in plain text beside every entry, and the detail pane
+      // copies it with a raw getter for the same reason — including
+      // passkey-section.tsx, whose `data.username` DOES come out of the
+      // decrypted blob. Guarding it here would demand a passphrase for a value
+      // the same screen is already displaying.
+      //
+      // (The `fetchPasskeyField("username")` branch exists in the callback
+      // surface but has no production caller, so it is not the counter-example
+      // it might look like.)
       //
       // Also no `if (!entry.username) return`: the menu item renders inside
       // `{username && (...)}` and is the only path here, so the empty case was
