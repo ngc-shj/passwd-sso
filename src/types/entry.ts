@@ -20,7 +20,8 @@ export interface InlineDetailData {
   id: string;
   title?: string;
   entryType?: EntryTypeValue;
-  requireReprompt?: boolean;
+  /** Required: a builder that omits this used to disable the re-prompt silently. */
+  requireReprompt: boolean;
   password: string;
   content?: string;
   isMarkdown?: boolean;

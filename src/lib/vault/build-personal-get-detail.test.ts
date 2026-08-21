@@ -241,7 +241,11 @@ describe("buildPersonalGetDetail", () => {
     expect(result.requireReprompt).toBe(true);
   });
 
-  it("assembles requireReprompt as false when both raw row and entry prop are absent", async () => {
+  it("fails closed when both the raw row and the entry prop are absent", async () => {
+    // Was pinned as `false`. That default is what disabled the re-prompt for
+    // every team entry once build-team-get-detail dropped the field, so the
+    // assertion moved rather than the case being deleted: absence must not be
+    // spelled the same as "the user did not ask for a prompt".
     const rawWithout = makeRawRow();
     delete rawWithout.requireReprompt;
     mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => rawWithout });
@@ -251,7 +255,7 @@ describe("buildPersonalGetDetail", () => {
     const closure = buildPersonalGetDetail(entry, { encryptionKey: STABLE_KEY, userId: USER_ID });
     const result = await closure(ENTRY_ID);
 
-    expect(result.requireReprompt).toBe(false);
+    expect(result.requireReprompt).toBe(true);
   });
 
   it("assembles createdAt from the raw row", async () => {

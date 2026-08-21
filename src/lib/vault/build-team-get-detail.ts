@@ -2,6 +2,7 @@
 
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import type { InlineDetailData } from "@/types/entry";
@@ -79,6 +80,9 @@ export function buildTeamGetDetail(
       id: raw.id as string,
       title: (blob.title as string) ?? undefined,
       entryType: entry.entryType,
+      // Was omitted entirely, so every consumer's `?? false` disabled the
+      // re-prompt for team entries regardless of how the entry was configured.
+      requireReprompt: readRequireReprompt(raw),
       urlHost: null,
       passwordHistory: [],
       createdAt: raw.createdAt as string,

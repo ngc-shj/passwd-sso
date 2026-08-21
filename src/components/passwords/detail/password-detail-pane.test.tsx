@@ -44,6 +44,7 @@ import { PasswordDetailPane } from "./password-detail-pane";
 
 const minimalDetailData: InlineDetailData = {
   id: "entry-1",
+  requireReprompt: false,
   password: "",
   url: null,
   urlHost: null,
@@ -233,6 +234,7 @@ describe("T4 INV-C2.1: cross-entry reveal carry-over prevented by key={entryId}"
   function PaneWithKey({ entryId }: { entryId: string }) {
     const data: InlineDetailData = {
       id: entryId,
+      requireReprompt: false,
       entryType: "LOGIN" as InlineDetailData["entryType"],
       password: "s3cr3t",
       url: null,

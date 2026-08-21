@@ -6,6 +6,7 @@ import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import type { InlineDetailData } from "@/types/entry";
 import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
+import { readRequireReprompt } from "@/lib/vault/read-require-reprompt";
 
 /**
  * Minimal entry fields needed to build the personal getDetail closure.
@@ -67,7 +68,7 @@ export function buildPersonalGetDetail(
       ...mapDecryptedBlobToDetailFields(e),
       id,
       entryType: entry.entryType as InlineDetailData["entryType"],
-      requireReprompt: (raw.requireReprompt as boolean | undefined) ?? entry.requireReprompt ?? false,
+      requireReprompt: readRequireReprompt(raw, entry.requireReprompt),
       urlHost: entry.urlHost,
       passwordHistory: (e.passwordHistory ?? []) as InlineDetailData["passwordHistory"],
       createdAt: raw.createdAt as string,

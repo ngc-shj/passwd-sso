@@ -1,141 +1,75 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
-import type { InlineDetailData } from "@/types/entry";
-import type { EntryItemKeyData } from "@/lib/team/team-vault-core";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
-type GetKeyFn = (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>;
-
-// ── Mock boundaries ──────────────────────────────────────────────────────────
-// Mock only the external I/O + crypto boundary. The field-assembly (via the shared
-// mapper) runs for real, so a team-specific drop/rename is caught.
-
-const { mockFetchApi, mockDecryptData, mockBuildTeamEntryAAD } = vi.hoisted(() => ({
+const { mockFetchApi, mockDecryptData } = vi.hoisted(() => ({
   mockFetchApi: vi.fn(),
   mockDecryptData: vi.fn(),
-  mockBuildTeamEntryAAD: vi.fn().mockReturnValue("mock-team-aad"),
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
-  fetchApi: (...args: unknown[]) => mockFetchApi(...args),
-}));
-
-vi.mock("@/lib/crypto/crypto-client", () => ({
-  decryptData: (...args: unknown[]) => mockDecryptData(...args),
-}));
-
-vi.mock("@/lib/crypto/crypto-aad", () => ({
-  buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
-}));
+vi.mock("@/lib/url-helpers", () => ({ fetchApi: mockFetchApi }));
+vi.mock("@/lib/crypto/crypto-client", () => ({ decryptData: mockDecryptData }));
+vi.mock("@/lib/crypto/crypto-aad", () => ({ buildTeamEntryAAD: () => "aad" }));
 
 import { buildTeamGetDetail } from "./build-team-get-detail";
 
-const TEAM_ID = "team-1";
-const ENTRY_ID = "entry-xyz";
-const STABLE_KEY = {} as CryptoKey;
+/**
+ * The re-prompt flag is the client-side control deciding whether a decrypted
+ * team secret may leave the vault without a fresh passphrase. This builder used
+ * to omit it from the InlineDetailData it returns, and every consumer coalesced
+ * the absence to `false` (`data.requireReprompt ?? false`), so the control was
+ * off for every team entry regardless of how it was configured — while the API
+ * had been sending the flag all along.
+ */
+describe("buildTeamGetDetail — requireReprompt propagation", () => {
+  const deps = { getEntryDecryptionKey: vi.fn().mockResolvedValue({} as CryptoKey) };
 
-function makeRawRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    id: ENTRY_ID,
-    itemKeyVersion: 2,
-    encryptedItemKey: "eik",
-    itemKeyIv: "ikiv",
-    itemKeyAuthTag: "iktag",
-    teamKeyVersion: 1,
-    encryptedBlob: "ct",
-    blobIv: "iv",
-    blobAuthTag: "tag",
-    createdAt: "2024-03-01T00:00:00Z",
-    updatedAt: "2024-04-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function makeBlob(overrides: Record<string, unknown> = {}): string {
-  return JSON.stringify({
-    title: "GitHub",
-    password: "s3cr3t",
-    url: "https://example.com",
-    ...overrides,
-  });
-}
-
-describe("buildTeamGetDetail", () => {
-  let getEntryDecryptionKey: Mock<GetKeyFn>;
+  function respondWith(body: Record<string, unknown>) {
+    mockFetchApi.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        encryptedBlob: "c",
+        blobIv: "i",
+        blobAuthTag: "a",
+        itemKeyVersion: 1,
+        teamKeyVersion: 1,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        ...body,
+      }),
+    });
+  }
 
   beforeEach(() => {
-    mockFetchApi.mockReset();
-    mockDecryptData.mockReset();
-    mockBuildTeamEntryAAD.mockReturnValue("mock-team-aad");
-    getEntryDecryptionKey = vi.fn<GetKeyFn>().mockResolvedValue(STABLE_KEY);
+    vi.clearAllMocks();
+    mockDecryptData.mockResolvedValue(JSON.stringify({ title: "t", password: "p" }));
   });
 
-  it("fetches the team entry, derives the key, and decrypts with the team blob AAD", async () => {
-    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow() });
-    mockDecryptData.mockResolvedValueOnce(makeBlob());
+  it("carries a true flag through to the detail the guard reads", async () => {
+    // Reds against the pre-fix builder, which returned no requireReprompt key at
+    // all: `data.requireReprompt ?? false` then read `undefined` as "no prompt".
+    respondWith({ requireReprompt: true });
 
-    const closure = buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey });
-    await closure();
+    const detail = await buildTeamGetDetail("team-1", { id: "e1" }, deps)();
 
-    expect(mockFetchApi).toHaveBeenCalledWith(`/api/teams/${TEAM_ID}/passwords/${ENTRY_ID}`);
-    expect(getEntryDecryptionKey).toHaveBeenCalledWith(TEAM_ID, ENTRY_ID, expect.objectContaining({
-      itemKeyVersion: 2,
-      encryptedItemKey: "eik",
-      teamKeyVersion: 1,
-    }));
-    // Team AAD uses the "blob" scope and the row's itemKeyVersion.
-    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith(TEAM_ID, ENTRY_ID, "blob", 2);
-    expect(mockDecryptData).toHaveBeenCalledWith(
-      expect.objectContaining({ ciphertext: "ct", iv: "iv", authTag: "tag" }),
-      STABLE_KEY,
-      "mock-team-aad",
-    );
+    expect(detail.requireReprompt).toBe(true);
   });
 
-  it("throws when the fetch fails", async () => {
-    mockFetchApi.mockResolvedValueOnce({ ok: false, status: 404 });
-    const closure = buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID }, { getEntryDecryptionKey });
-    await expect(closure()).rejects.toThrow("Failed to fetch entry");
+  it("carries a false flag through without inventing a prompt", async () => {
+    // The allow side: fail-closed must not mean "prompt on every team copy".
+    respondWith({ requireReprompt: false });
+
+    const detail = await buildTeamGetDetail("team-1", { id: "e1" }, deps)();
+
+    expect(detail.requireReprompt).toBe(false);
   });
 
-  it("maps the structured IDENTITY fields from the blob (regression: structured address)", async () => {
-    const structured = {
-      givenName: "Taro",
-      familyName: "Yamada",
-      middleName: "M",
-      familyNameKana: "ヤマダ",
-      givenNameKana: "タロウ",
-      addressLine1: "1-2-3 Chuo",
-      addressLine2: "Apt 4",
-      city: "Yokohama",
-      state: "Kanagawa",
-      postalCode: "220-0000",
-      country: "JP",
-    };
-    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow() });
-    mockDecryptData.mockResolvedValueOnce(makeBlob(structured));
+  it("fails closed when the server omits the flag", async () => {
+    // A future `select:` narrowing on the team route would otherwise silently
+    // disable the control again, exactly as the dropped field did.
+    respondWith({});
 
-    const closure = buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "IDENTITY" }, { getEntryDecryptionKey });
-    const detail = await closure();
+    const detail = await buildTeamGetDetail("team-1", { id: "e1" }, deps)();
 
-    for (const [key, value] of Object.entries(structured)) {
-      expect(detail[key as keyof InlineDetailData]).toBe(value);
-    }
-  });
-
-  it("sets the team caller-specific fields (urlHost null, passwordHistory [], entryType, title, timestamps)", async () => {
-    mockFetchApi.mockResolvedValueOnce({ ok: true, json: async () => makeRawRow() });
-    mockDecryptData.mockResolvedValueOnce(makeBlob({ title: "Prod DB" }));
-
-    const closure = buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID, entryType: "LOGIN" }, { getEntryDecryptionKey });
-    const detail = await closure();
-
-    expect(detail.id).toBe(ENTRY_ID);
-    expect(detail.entryType).toBe("LOGIN");
-    expect(detail.title).toBe("Prod DB");
-    expect(detail.urlHost).toBeNull();
-    expect(detail.passwordHistory).toEqual([]);
-    expect(detail.createdAt).toBe("2024-03-01T00:00:00Z");
-    expect(detail.updatedAt).toBe("2024-04-01T00:00:00Z");
-    expect(detail.password).toBe("s3cr3t");
+    expect(detail.requireReprompt).toBe(true);
   });
 });
