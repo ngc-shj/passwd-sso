@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.76](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.75...passwd-sso-v0.4.76) (2026-08-21)
+
+
+### Bug Fixes
+
+* **vault:** report every copy outcome and close the re-prompt bypass ([#783](https://github.com/ngc-shj/passwd-sso/issues/783)) ([af1d003](https://github.com/ngc-shj/passwd-sso/commit/af1d003623d5ce1420c872d0cbd97f1cc8c1a5fd))
+
 ## [0.4.75](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.74...passwd-sso-v0.4.75) (2026-08-19)
 
 
