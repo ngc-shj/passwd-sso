@@ -20,6 +20,7 @@ export const CLIENT_LOG_EVENT = {
   TEAM_MEMBER_KEY_VERSION_MISMATCH: "team.member_key_version_mismatch",
   TEAM_ENCRYPTION_KEY_FAILED: "team.encryption_key_failed",
   BASE_PATH_MALFORMED: "url.base_path_malformed",
+  CLIPBOARD_COPY_FAILED: "clipboard.copy_failed",
 } as const;
 
 export type ClientLogEvent =
@@ -119,6 +120,13 @@ export type ClientLogPayloads = {
     code: ClientErrorCode;
   };
   [CLIENT_LOG_EVENT.VAULT_ENTRY_DETAIL_FAILED]: {
+    code: ClientErrorCode;
+  };
+  // The copy path decrypts a vault blob, so nothing but the closed error-code
+  // vocabulary may be carried here: a JSON.parse failure on decrypted plaintext
+  // embeds an input prefix in SyntaxError.message, and console breadcrumbs are
+  // shipped to Sentry with their message unscrubbed.
+  [CLIENT_LOG_EVENT.CLIPBOARD_COPY_FAILED]: {
     code: ClientErrorCode;
   };
   [CLIENT_LOG_EVENT.I18N_NAMESPACE_MISSING]: {

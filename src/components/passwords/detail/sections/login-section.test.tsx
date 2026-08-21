@@ -30,6 +30,7 @@ import type { InlineDetailData } from "@/types/entry";
 
 const baseData: InlineDetailData = {
   id: "e1",
+  requireReprompt: false,
   password: "secret-password",
   url: "https://example.com",
   urlHost: "example.com",

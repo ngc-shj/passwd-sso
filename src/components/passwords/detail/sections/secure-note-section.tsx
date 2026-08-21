@@ -17,7 +17,7 @@ interface SectionProps {
   createGuardedGetter: CreateGuardedGetterFn;
 }
 
-export function SecureNoteSection({ data }: SectionProps) {
+export function SecureNoteSection({ data, createGuardedGetter }: SectionProps) {
   const t = useTranslations("PasswordDetail");
   const [showMarkdownView, setShowMarkdownView] = useState(
     data.isMarkdown === true,
@@ -56,7 +56,13 @@ export function SecureNoteSection({ data }: SectionProps) {
             <p className="font-mono whitespace-pre-wrap">{data.content}</p>
           )}
         </div>
-        <CopyButton getValue={() => data.content ?? ""} fieldLabel={t("content")} />
+        <CopyButton
+          // For a secure note the body IS the secret, so it is guarded like a
+          // password. The prop was declared and unused, which left the note the
+          // one entry type whose whole content copied without a re-prompt.
+          getValue={createGuardedGetter(data.id, data.requireReprompt, () => data.content ?? "")}
+          fieldLabel={t("content")}
+        />
       </div>
     </div>
   );

@@ -58,6 +58,8 @@ export function MatchList({ tabUrl }: Props) {
     await navigator.clipboard.writeText(value);
     setToast({ message: successMsg, type: "success" });
     setTimeout(() => setToast(null), 2000);
+    // Divergence from the web app is deliberate: there the interval is fixed
+    // (src/lib/clipboard/copy-secret.ts, 30s); here the user sets it.
     const { clipboardClearSeconds } = await getSettings();
     setTimeout(() => { navigator.clipboard.writeText("").catch(() => {}); }, clipboardClearSeconds * MS_PER_SECOND);
   };

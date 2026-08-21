@@ -138,4 +138,42 @@ describe("buildTeamGetDetail", () => {
     expect(detail.updatedAt).toBe("2024-04-01T00:00:00Z");
     expect(detail.password).toBe("s3cr3t");
   });
+
+  // ── requireReprompt propagation (net-new) ──────────────────────────────────
+  //
+  // The team API sends this flag, but the builder used to omit it from the
+  // returned InlineDetailData. Every consumer reads `data.requireReprompt ??
+  // false`, so the absence was indistinguishable from the user not having asked
+  // for a prompt: the re-prompt was off for every team entry.
+  describe("requireReprompt", () => {
+    it("carries a true flag through to the detail the guard reads", async () => {
+      mockFetchApi.mockResolvedValue({ ok: true, json: async () => makeRawRow({ requireReprompt: true }) });
+      mockDecryptData.mockResolvedValue(makeBlob());
+
+      const detail = await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID }, { getEntryDecryptionKey })();
+
+      expect(detail.requireReprompt).toBe(true);
+    });
+
+    it("carries a false flag through without inventing a prompt", async () => {
+      // The allow side: fail-closed must not mean a passphrase on every copy.
+      mockFetchApi.mockResolvedValue({ ok: true, json: async () => makeRawRow({ requireReprompt: false }) });
+      mockDecryptData.mockResolvedValue(makeBlob());
+
+      const detail = await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID }, { getEntryDecryptionKey })();
+
+      expect(detail.requireReprompt).toBe(false);
+    });
+
+    it("fails closed when the server omits the flag", async () => {
+      // A future `select:` narrowing on the team route would otherwise disable
+      // the control again, exactly as the dropped field did.
+      mockFetchApi.mockResolvedValue({ ok: true, json: async () => makeRawRow() });
+      mockDecryptData.mockResolvedValue(makeBlob());
+
+      const detail = await buildTeamGetDetail(TEAM_ID, { id: ENTRY_ID }, { getEntryDecryptionKey })();
+
+      expect(detail.requireReprompt).toBe(true);
+    });
+  });
 });

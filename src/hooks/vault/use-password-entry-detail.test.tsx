@@ -10,6 +10,7 @@ import type { VaultStatus } from "@/lib/constants";
 function makeDetail(id: string, overrides: Partial<InlineDetailData> = {}): InlineDetailData {
   return {
     id,
+    requireReprompt: false,
     entryType: "LOGIN",
     password: "secret",
     url: null,

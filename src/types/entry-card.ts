@@ -27,6 +27,7 @@ export interface EntryCardData {
   tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
-  requireReprompt?: boolean;
+  /** Required: a `= false` default here silently disabled the accordion's re-prompt. */
+  requireReprompt: boolean;
   expiresAt?: string | null;
 }

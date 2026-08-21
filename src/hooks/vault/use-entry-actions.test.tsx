@@ -100,7 +100,7 @@ describe("useEntryActions", () => {
 
   it("onCopyPassword writes to clipboard and shows success toast", async () => {
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyPassword();
     await flush();
@@ -111,7 +111,7 @@ describe("useEntryActions", () => {
 
   it("onCopyUsername writes username to clipboard and shows success toast", async () => {
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyUsername();
     await flush();
@@ -120,16 +120,21 @@ describe("useEntryActions", () => {
     expect(toastSuccess).toHaveBeenCalledWith("CopyButton.copied");
   });
 
-  it("onCopyUsername is a no-op when entry has no username", async () => {
+  it("onCopyUsername reports an empty field instead of doing nothing", async () => {
+    // This used to be "a no-op": the callback returned early and the click
+    // produced no output at all, which is indistinguishable from a dead button.
+    // The assertion moved rather than the test being deleted — the behaviour it
+    // pinned is exactly what changed.
     const entryNoUser: DisplayEntry = { ...minimalEntry, username: null };
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(entryNoUser);
+    const callbacks = result.current.buildCallbacks(entryNoUser);
 
     callbacks.onCopyUsername();
     await flush();
 
     expect(writeText).not.toHaveBeenCalled();
     expect(toastSuccess).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("CopyButton.copyEmpty");
   });
 
   it("schedules clipboard clear after CLIPBOARD_CLEAR_TIMEOUT_MS", async () => {
@@ -138,7 +143,7 @@ describe("useEntryActions", () => {
     readText.mockResolvedValue("s3cr3t");
 
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyPassword();
     await flush();
@@ -154,7 +159,7 @@ describe("useEntryActions", () => {
 
   it("shows networkError toast when getDetailFor rejects (locked vault / fetch failure)", async () => {
     const { result } = renderHook(() => useEntryActions(lockedGetDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     callbacks.onCopyPassword();
     await flush();
@@ -166,7 +171,7 @@ describe("useEntryActions", () => {
   it("onOpenUrl opens a window when url is present", async () => {
     const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     await callbacks.onOpenUrl();
 
@@ -176,7 +181,7 @@ describe("useEntryActions", () => {
 
   it("fetchPassword resolves the decrypted password", async () => {
     const { result } = renderHook(() => useEntryActions(getDetailFor));
-    const callbacks = result.current(minimalEntry);
+    const callbacks = result.current.buildCallbacks(minimalEntry);
 
     const pw = await callbacks.fetchPassword();
     expect(pw).toBe("s3cr3t");

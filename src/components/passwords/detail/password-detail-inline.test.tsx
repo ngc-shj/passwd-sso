@@ -77,6 +77,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 
 const baseData: InlineDetailData = {
   id: "e1",
+  requireReprompt: false,
   password: "",
   url: null,
   urlHost: null,

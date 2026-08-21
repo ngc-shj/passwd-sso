@@ -17,6 +17,9 @@ public struct SystemPasteboardWriter: PasteboardWriter {
 /// `.localOnly` (no Universal Clipboard / Handoff) and a finite `.expirationDate`
 /// so the value self-clears. Single source for every clipboard write of vault
 /// material (entry fields, TOTP codes, AutoFill auto-copy).
+/// Counterpart of src/lib/clipboard/copy-secret.ts in the web app. The
+/// mechanism differs by design: there a setTimeout re-reads and compares before
+/// blanking, here the deadline is handed to the OS via expirationDate.
 public enum SecureClipboard {
   public static let minClearSeconds = 1
   public static let maxClearSeconds = 600

@@ -1,5 +1,9 @@
 {
-  "copied": "Copied! (clears in 30s)",
+  "copied": "Copied — this app will clear the clipboard in {seconds}s",
   "copy": "Copy to clipboard",
-  "copyNamed": "Copy {name}"
+  "copyNamed": "Copy {name}",
+  "copyEmpty": "Nothing to copy — this field is empty",
+  "copyUnavailable": "Clipboard unavailable in this browser context",
+  "copyWriteFailed": "Couldn't reach the clipboard — check the browser's clipboard permission",
+  "copySourceFailed": "Couldn't load this item — try again"
 }

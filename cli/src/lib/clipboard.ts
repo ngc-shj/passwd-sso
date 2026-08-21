@@ -9,6 +9,9 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { MS_PER_SECOND } from "./time.js";
 
+// Mirrors CLIPBOARD_CLEAR_TIMEOUT_MS in src/lib/constants/timing.ts.
+// Intentionally duplicated across the workspace boundary — the CLI does not
+// import from src/. See src/lib/clipboard/copy-secret.ts for the contract.
 const CLEAR_TIMEOUT_MS = 30 * MS_PER_SECOND;
 
 let clearTimer: ReturnType<typeof setTimeout> | null = null;

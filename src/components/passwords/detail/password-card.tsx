@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { useTranslations } from "next-intl";
+import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +36,8 @@ import {
   KeySquare,
 } from "lucide-react";
 import { toast } from "sonner";
+import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
@@ -142,27 +145,6 @@ interface VaultEntryFull {
   comment?: string | null;
 }
 
-import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
-
-function scheduleClearClipboard(copiedValue: string) {
-  setTimeout(async () => {
-    try {
-      const current = await navigator.clipboard.readText();
-      if (current === copiedValue) {
-        await navigator.clipboard.writeText("");
-      }
-    } catch {
-      // readText often fails without clipboard-read permission.
-      // Fallback to best-effort clear.
-      try {
-        await navigator.clipboard.writeText("");
-      } catch {
-        // Clipboard may be unavailable (background tab / denied)
-      }
-    }
-  }, CLIPBOARD_CLEAR_TIMEOUT_MS);
-}
-
 export function PasswordCard({
   entry,
   expanded,
@@ -206,9 +188,26 @@ export function PasswordCard({
     tags,
     isFavorite,
     isArchived,
-    requireReprompt = false,
+    requireReprompt,
     expiresAt,
   } = entry;
+  const { createGuardedGetter, repromptDialog } = useReprompt();
+
+  /**
+   * Wraps a value-producing getter in the master-passphrase gate.
+   *
+   * Applied to the FETCHERS, not only to the overflow-menu handlers: the
+   * fetchers are handed to EntryActionsMenu, which uses them directly as
+   * CopyButton's `getValue` for the card's quick-copy control. Guarding only the
+   * handlers would leave that one button releasing a secret with no prompt.
+   *
+   * The flag comes from the overview row, which is always loaded; the decrypted
+   * detail agrees but only exists once the card is expanded.
+   */
+  const guard = (getter: () => Promise<string> | string) => async () => {
+    const value = await getter();
+    return createGuardedGetter(id, detailData?.requireReprompt ?? requireReprompt, () => value)();
+  };
   const scopedTeamId = teamId;
   const isTeamMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;
@@ -331,132 +330,40 @@ export function PasswordCard({
     { getDetail, vaultStatus }
   );
 
-  const handleCopyContent = async () => {
-    try {
-      const content = await fetchContent();
-      await navigator.clipboard.writeText(content);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(content);
-    } catch {
-      toast.error(t("networkError"));
-    }
+  // One reporter for all eleven handlers. They previously carried three
+  // different behaviours for the same verb: nine reported a failure, one
+  // (`handleCopyUsername`) swallowed it entirely, and eight returned silently on
+  // an empty value — while content and password reported SUCCESS on an empty
+  // value, having just wiped the clipboard with "". Only the last of those was
+  // reachable from the UI for username (the menu item is gated on `username`);
+  // for content and password it was plainly reachable, an empty secure note or
+  // an entry saved with no password being enough.
+  // The accordion card renders the same overflow menu as the 3-pane row but
+  // supplies its own fetchers, so useEntryActions' gate never covered it — and
+  // useLayoutMode returns "accordion" for every server and first-client render,
+  // so this is not a narrow-viewport edge case.
+  const runCopy = async (getter: () => Promise<string> | string) => {
+    const guarded = async () => {
+      const value = await getter();
+      // The overview flag is authoritative and always present; the decrypted
+      // detail agrees but is only loaded once the card is expanded.
+      const flag = detailData?.requireReprompt ?? requireReprompt;
+      return createGuardedGetter(id, flag, () => value)();
+    };
+    reportCopyOutcome(await copySecretToClipboard(guarded), { tCopy, tCard: t });
   };
 
-  const handleCopyUsername = async () => {
-    if (!username) return;
-    try {
-      await navigator.clipboard.writeText(username);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(username);
-    } catch {}
-  };
-
-  const handleCopyPassword = async () => {
-    try {
-      const pw = await fetchPassword();
-      await navigator.clipboard.writeText(pw);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(pw);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyCardNumber = async () => {
-    try {
-      const num = await fetchCardField("cardNumber");
-      if (!num) return;
-      await navigator.clipboard.writeText(num);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(num);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyCvv = async () => {
-    try {
-      const code = await fetchCardField("cvv");
-      if (!code) return;
-      await navigator.clipboard.writeText(code);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(code);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyCredentialId = async () => {
-    try {
-      const cid = await fetchPasskeyField("credentialId");
-      if (!cid) return;
-      await navigator.clipboard.writeText(cid);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(cid);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyAccountNumber = async () => {
-    try {
-      const num = await fetchBankField("accountNumber");
-      if (!num) return;
-      await navigator.clipboard.writeText(num);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(num);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyLicenseKey = async () => {
-    try {
-      const key = await fetchLicenseField("licenseKey");
-      if (!key) return;
-      await navigator.clipboard.writeText(key);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(key);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyFingerprint = async () => {
-    try {
-      const fp = await fetchSshField("fingerprint");
-      if (!fp) return;
-      await navigator.clipboard.writeText(fp);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(fp);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyPublicKey = async () => {
-    try {
-      const pk = await fetchSshField("publicKey");
-      if (!pk) return;
-      await navigator.clipboard.writeText(pk);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(pk);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
-
-  const handleCopyIdNumber = async () => {
-    try {
-      const num = await fetchIdentityField("idNumber");
-      if (!num) return;
-      await navigator.clipboard.writeText(num);
-      toast.success(tCopy("copied"));
-      scheduleClearClipboard(num);
-    } catch {
-      toast.error(t("networkError"));
-    }
-  };
+  const handleCopyContent = () => runCopy(fetchContent);
+  const handleCopyUsername = () => runCopy(() => username ?? "");
+  const handleCopyPassword = () => runCopy(fetchPassword);
+  const handleCopyCardNumber = () => runCopy(() => fetchCardField("cardNumber"));
+  const handleCopyCvv = () => runCopy(() => fetchCardField("cvv"));
+  const handleCopyCredentialId = () => runCopy(() => fetchPasskeyField("credentialId"));
+  const handleCopyAccountNumber = () => runCopy(() => fetchBankField("accountNumber"));
+  const handleCopyLicenseKey = () => runCopy(() => fetchLicenseField("licenseKey"));
+  const handleCopyFingerprint = () => runCopy(() => fetchSshField("fingerprint"));
+  const handleCopyPublicKey = () => runCopy(() => fetchSshField("publicKey"));
+  const handleCopyIdNumber = () => runCopy(() => fetchIdentityField("idNumber"));
 
   const handleOpenUrl = async () => {
     try {
@@ -583,13 +490,13 @@ export function PasswordCard({
             canEdit={canEdit}
             canDelete={canDelete}
             canShare={canShare}
-            fetchPassword={fetchPassword}
-            fetchCardField={fetchCardField}
-            fetchIdentityField={fetchIdentityField}
-            fetchPasskeyField={fetchPasskeyField}
-            fetchBankField={fetchBankField}
-            fetchLicenseField={fetchLicenseField}
-            fetchSshField={fetchSshField}
+            fetchPassword={guard(fetchPassword)}
+            fetchCardField={(f) => guard(() => fetchCardField(f))()}
+            fetchIdentityField={(f) => guard(() => fetchIdentityField(f))()}
+            fetchPasskeyField={(f) => guard(() => fetchPasskeyField(f))()}
+            fetchBankField={(f) => guard(() => fetchBankField(f))()}
+            fetchLicenseField={(f) => guard(() => fetchLicenseField(f))()}
+            fetchSshField={(f) => guard(() => fetchSshField(f))()}
             onCopyUsername={handleCopyUsername}
             onCopyPassword={handleCopyPassword}
             onCopyContent={handleCopyContent}
@@ -722,6 +629,10 @@ export function PasswordCard({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Master-passphrase re-prompt for this card's copy actions. Scoped to the
+          card because the accordion supplies its own fetchers and never goes
+          through useEntryActions' instance. */}
+      {repromptDialog}
     </>
   );
 }

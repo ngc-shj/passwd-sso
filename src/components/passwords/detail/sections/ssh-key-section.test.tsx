@@ -16,6 +16,7 @@ import type { InlineDetailData } from "@/types/entry";
 
 const baseData: InlineDetailData = {
   id: "e1",
+  requireReprompt: false,
   password: "",
   url: null,
   urlHost: null,

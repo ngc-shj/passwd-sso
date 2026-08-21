@@ -230,7 +230,8 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
   // INV-S1/S4: LAZY row callbacks — useEntryActions is given a factory function;
   // the factory is called per row (creating closures), but the closures themselves
   // are only invoked on explicit user copy/reveal events.
-  const buildRowCallbacks = useEntryActions((entry: E) => adapter.buildGetDetail(entry));
+  const { buildCallbacks: buildRowCallbacks, repromptDialog: rowRepromptDialog } =
+    useEntryActions((entry: E) => adapter.buildGetDetail(entry));
 
   // Notify parent of visible entry list changes (keyboard nav support).
   useEffect(() => {
@@ -935,6 +936,11 @@ export function EntryListView<E extends PasswordRowEntry & PasswordDetailPaneEnt
       {/* C4 — inline step-up reauth dialogs for permanent-delete / empty-trash / bulk-purge. */}
       <RecentSessionRequiredDialog {...inlineReauth.recentSessionDialogProps} cancelLabel={tc("cancel")} />
       <PasskeyReauthDialog {...inlineReauth.reauthDialogProps} cancelLabel={tc("cancel")} />
+      {/* Master-passphrase re-prompt for row / overflow-menu copies. Scoped to the
+          list, not to the selected entry: the copy that triggers it is on a row,
+          which outlives any one selection. The cache inside useReprompt is keyed
+          per entryId, so verifying one entry never satisfies another. */}
+      {rowRepromptDialog}
     </>
   );
 }
