@@ -240,3 +240,33 @@ N/A — no environment constraints declared in Phase 1 (all contracts verifiable
 
 Verification after all fixes: `npx tsc --noEmit` clean; 5 shuffled full-suite runs (5 distinct seeds) 1029/1029; A1's 9 recorded seeds re-run green.
 
+
+---
+
+# Code Review — Round 2 (commit b426424f6)
+Date: 2026-08-23
+
+All 9 Round-1 findings verified RESOLVED by all three experts. Security: No findings (R43 check — every hunk tightens: fail-closed reject, guaranteed restores, narrowed cross-describe channel; C1-I4 on the fix diff satisfied — 3 removed expects re-added verbatim in try blocks). Testing: No findings (independent full shuffled run green, seed 1787418987252; CR1 masking check — all non-flow decrypt consumers use ciphertext '11', byte-identical default, net effect strictly stricter since a miss now throws). Functionality: all resolved + ONE new [Adjacent] Minor:
+
+- F6: same failure-unsafe fake-timer restore class as CR2, in non-diff webauthn-bridge-lib.test.ts (last remaining member per a 7-file useFakeTimers sweep).
+
+Disposition: FIXED rather than deferred (close-the-class rule) — commit 1a733a900 adds vi.useRealTimers() to the file's afterEach.
+
+# Code Review — Round 3 (commit 1a733a900)
+Date: 2026-08-23
+
+All three experts: **No findings.**
+- Functionality: F6 resolved exactly per remedy option 2; afterEach ordering harmless (three independent state subsystems); idempotent with the in-body restore; class closed tree-wide (7/7 files failure-safe).
+- Security: 4 additive teardown lines, zero removed; no assertion/suppression change; C3 exclusivity preserved; RS4 clean; tightening only.
+- Testing: ordering/idempotency confirmed by execution; class member set re-derived (7 files) and each member's restore mechanism individually verified. One [Adjacent] non-finding observation recorded below.
+
+## Termination (Step 3-8)
+Natural stop: all experts returned No findings in Round 3.
+R42 expanding-class check: the fake-timer teardown class expanded once (CR2 → F6), below the ≥2-expansion threshold that would mandate a dedicated CI guard; the class was closed by exhaustive execution-derived member enumeration (all 7 useFakeTimers files verified failure-safe by two experts independently), and the standing shuffle gate — itself red-proven in A6 — remains the dynamic adjudicator for the consequence class (any future order-dependence leak).
+
+## Non-finding observation (recorded, no action)
+passkey-save-banner.test.ts / save-banner.test.ts afterEach call hideBanner() BEFORE vi.useRealTimers(); a teardown-throw (not assertion-throw) could skip the restore. Both experts classify this as a narrower, cosmetic class in unchanged files — left for a future hygiene pass.
+
+## Resolution Status — final
+Rounds: 3. Findings: 9 (R1) + 1 Adjacent (R2) = 10; all resolved (dispositions above and in Round-1 Resolution Status). No open findings. No Anti-Deferral entries pending beyond the plan's SC1-SC4 and deviation-log D1/D2 (documented cost-justifications with revisit triggers).
+
