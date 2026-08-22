@@ -142,7 +142,7 @@ describe("clickjacking hardening guards", () => {
     // jsdom applies the UA popover stylesheet (display:none until shown) but does
     // not implement showPopover(), so simulate a shown popover's computed style.
     const realGetComputedStyle = window.getComputedStyle.bind(window);
-    vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
+    const getComputedStyleSpy = vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
       if (el === popover) {
         return {
           display: "block",
@@ -155,6 +155,7 @@ describe("clickjacking hardening guards", () => {
     });
 
     expect(hasVisiblePopoverOverlayNear(input)).toBe(true);
+    getComputedStyleSpy.mockRestore();
   });
 });
 

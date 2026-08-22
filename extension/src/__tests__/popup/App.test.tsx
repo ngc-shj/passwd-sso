@@ -39,6 +39,11 @@ import { App } from "../../popup/App";
 describe("App tab URL handling", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks only wipes call history; mockSendMessage is a module-scope
+    // const (not recreated per test) so a persistent mockResolvedValue/
+    // mockRejectedValue/mockReturnValue set by one test's body would otherwise
+    // survive as the base implementation for whatever test runs next.
+    mockSendMessage.mockReset();
     const chromeMock = {
       tabs: {
         query: vi.fn(),

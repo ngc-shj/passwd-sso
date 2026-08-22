@@ -48,13 +48,13 @@ All commands below were run and their outputs recorded; re-run to reproduce (R29
 ## Root-cause mechanisms identified so far
 
 - **M1 — persistent mock override in a test body.**
-  `extension/src/__tests__/background/totp-handlers.test.ts:327`
+  `extension/src/__tests__/background/totp-handlers.test.ts` line 327 as of `af1d00362` (pre-fix; the fix moved this line)
   `totpMock.generateTOTPCode.mockReturnValue("654321")` (no `Once`). The file's
   `beforeEach` runs `vi.clearAllMocks()`, which clears call history but does NOT
   restore return values/implementations. Any test that runs after this one sees
   `"654321"` — matching the seed-12345 failure (`expected "123456", got "654321"`).
 - **M2 — unrestored spy.**
-  `extension/src/__tests__/background/totp-handlers.test.ts:204`
+  `extension/src/__tests__/background/totp-handlers.test.ts` line 204 as of `af1d00362` (pre-fix; the fix moved this line)
   `vi.spyOn(Date, "now").mockReturnValue(59_000)` with no `mockRestore()` /
   `restoreAllMocks` anywhere in the file. Every later test in the file runs at a
   frozen clock.
@@ -130,7 +130,7 @@ the issue's own measurements), so more victims are expected.
   input-derived (`grep -rl 'mockResolvedValueOnce' .` → 12 files at plan
   time), NOT filtered by a name-supplied fire-and-forget module list, because
   such a list under-derives (round-2 found unawaited consumers outside
-  `background/index`, e.g. `content/token-bridge-lib.ts:102`'s
+  `background/index`, e.g. `extension/src/content/token-bridge-lib.ts:102`'s
   `void handlePostMessage(event)`, and React-effect consumers in popup tests).
   Each candidate gets a C2 classification row (`m3-race` / `contained — 
   consumer awaited / no fire-and-forget import`); one-line contained verdicts
@@ -453,6 +453,31 @@ Explicitly rejected:
 | SC2 | Refactoring production `background/index` fire-and-forget async | report-only in this PR; separate issue if confirmed as a production defect. Triage classification is pre-committed: if the Phase 2 diagnosis confirms the race is reachable with real (non-mock) decrypt inputs, the filed issue is labeled `security` and states the credential-mis-delivery hypothesis explicitly (unawaited async consuming decrypt results in a password manager's service worker — OWASP A04 class); if the coupling is mock-positional only, the issue notes that and closes the hypothesis |
 | SC3 | `environmentMatchGlobs` deprecation (vitest 4) migration | untouched here; config modernization is not this fix |
 | SC4 | Root vitest.config.ts shuffle gate for `src/` suite | out of scope; #784 is extension-only |
+
+## Implementation Checklist
+
+Phase 2 Step 2-1 impact analysis (2026-08-22). Baseline 50-seed full-shuffle
+sweep (`--sequence.shuffle --sequence.seed=1..50`): **49/50 seeds red**, 24
+distinct failing tests in **5 files** — same 5 files as the 9-seed Set A
+(no new victim files; per-test seed frequencies recorded in the sweep log).
+
+Files that must change:
+- `extension/src/__tests__/background/totp-handlers.test.ts` — victim ×23 seeds (M1 L327, M2 L204, M3 Once queues)
+- `extension/src/__tests__/background.test.ts` — 8 distinct victim tests, "fetches and decrypts password overviews" red in 48/50 seeds (M1 + M3)
+- `extension/src/__tests__/dpop-key.test.ts` — all 10 tests fail together in 14/50 seeds (M4: shared fake-IDB "psso-ext" DB + in-process key cache; order assumption between clean-boot/delete tests and the rest)
+- `extension/src/__tests__/content/form-detector-entry.test.ts` — victim ×23 seeds (M5 hypothesis: window "error" listeners from prior test's module import accumulate on the shared jsdom window; both handlers fire → destroy counted twice)
+- `extension/src/__tests__/login-detector.test.ts` — 4 victim tests (leaked chrome.onMessage listeners / missing cleanup() in some tests)
+- `extension/src/__tests__/lib/messaging.test.ts` — static real-leak candidate (L18/L38 Once-less overrides, clearAllMocks-only beforeEach)
+- `extension/src/__tests__/popup/App.test.tsx` — static real-leak candidate (L167/L204)
+- `extension/vitest.config.ts` — C3 gate line ONLY (exclusivity clause)
+- C2 classification table → `extension-test-order-deps-deviation.md`
+
+Reuse / patterns:
+- No shared test-helper dir exists in extension; `setupFiles: fake-indexeddb/auto` must stay first. setup.ts contingency only per C3 exclusivity clause.
+- Fix vocabulary: `mockXxxOnce` or beforeEach re-establishment (M1); `mockRestore`/`vi.restoreAllMocks` in afterEach (M2); input-keyed mock with throw-on-miss + steal-window/end-of-test flush (M3, I3); explicit listener/DB teardown (M4/M5).
+- Single test tree (`extension/src/__tests__` only) — no parallel test trees (R19 checked). Production `.js`/`-lib.ts` twins NOT touched (test-only diff).
+
+CI gate parity: extension CI job = `npm test` + `npm run build` (`.github/workflows/ci.yml:373-374` at `af1d00362`); pre-pr runs both ("Extension: Test" batch 1, "Extension: Build" batch 2) — no parity gap. No new files added, so no new-file-pattern gates fire. Config diff is `extension/vitest.config.ts` (inside CI's `extension/**` filter — gate change is exercised by CI).
 
 ## User operation scenarios
 

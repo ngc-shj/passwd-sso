@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mock chrome API
 const messageListeners: Array<(message: unknown) => void> = [];
@@ -39,6 +39,7 @@ import {
   extractCredentials,
   extractCredentialsFromPage,
   initLoginDetector,
+  type LoginDetectorCleanup,
 } from "../content/login-detector-lib";
 import { showSaveBanner, hideSaveBanner } from "../content/ui/save-banner";
 import { findPasswordInputs, findUsernameInput } from "../content/form-detector-lib";
@@ -311,8 +312,32 @@ describe("login-detector-lib", () => {
     const mockSendMessage = vi.mocked(chrome.runtime.sendMessage);
     const mockShowSaveBanner = vi.mocked(showSaveBanner);
 
+    // Root-cause fix: mockSendMessage.mockImplementation(...) is set by several
+    // tests below (CHECK_PENDING_SAVE / action response callbacks) and never
+    // restored — the outer beforeEach's vi.clearAllMocks() clears call history
+    // but NOT a custom implementation. Left in place, a later test's own
+    // initLoginDetector() call fires the leftover implementation's callback
+    // (e.g. the "pulled-user"/save response), making it call showSaveBanner
+    // unexpectedly. mockReset() here clears both, so every test starts from
+    // the same no-op sendMessage baseline.
     beforeEach(() => {
       document.body.innerHTML = "";
+      mockSendMessage.mockReset();
+    });
+
+    // Every test below assigns its initLoginDetector() handle to this instead
+    // of a local `const cleanup`, so afterEach can destroy it unconditionally.
+    // Without this, a test whose OWN assertion throws (e.g. the two victims
+    // above, before the mockReset fix) returns before reaching its trailing
+    // `cleanup.destroy()`, leaking that test's document-level submit/click
+    // listeners into every later test in the file — which is exactly how
+    // "stops listening after destroy()" / "removes click listener after
+    // destroy()" observed a second, stale LOGIN_DETECTED call.
+    let currentCleanup: LoginDetectorCleanup | undefined;
+
+    afterEach(() => {
+      currentCleanup?.destroy();
+      currentCleanup = undefined;
     });
 
     it("sends LOGIN_DETECTED on form submit with credentials", () => {
@@ -326,7 +351,7 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       form.dispatchEvent(new Event("submit", { bubbles: true }));
 
@@ -338,8 +363,6 @@ describe("login-detector-lib", () => {
         }),
         expect.any(Function),
       );
-
-      cleanup.destroy();
     });
 
     it("does not send message for forms without credentials", () => {
@@ -350,7 +373,7 @@ describe("login-detector-lib", () => {
 
       mockFindPasswordInputs.mockReturnValue([pw]);
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       form.dispatchEvent(new Event("submit", { bubbles: true }));
 
@@ -358,8 +381,6 @@ describe("login-detector-lib", () => {
         expect.objectContaining({ type: "LOGIN_DETECTED" }),
         expect.any(Function),
       );
-
-      cleanup.destroy();
     });
 
     it("shows save banner when background responds with save action", () => {
@@ -380,7 +401,7 @@ describe("login-detector-lib", () => {
         }
       });
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       form.dispatchEvent(new Event("submit", { bubbles: true }));
 
@@ -390,8 +411,6 @@ describe("login-detector-lib", () => {
           username: "bob",
         }),
       );
-
-      cleanup.destroy();
     });
 
     it("shows update banner when background responds with update action", () => {
@@ -416,7 +435,7 @@ describe("login-detector-lib", () => {
         }
       });
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       form.dispatchEvent(new Event("submit", { bubbles: true }));
 
@@ -427,8 +446,6 @@ describe("login-detector-lib", () => {
           username: "bob",
         }),
       );
-
-      cleanup.destroy();
     });
 
     it("does not show banner when background responds with none action", () => {
@@ -448,13 +465,11 @@ describe("login-detector-lib", () => {
         }
       });
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       form.dispatchEvent(new Event("submit", { bubbles: true }));
 
       expect(mockShowSaveBanner).not.toHaveBeenCalled();
-
-      cleanup.destroy();
     });
 
     it("stops listening after destroy()", () => {
@@ -468,8 +483,8 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
-      cleanup.destroy();
+      currentCleanup = initLoginDetector();
+      currentCleanup.destroy();
 
       form.dispatchEvent(new Event("submit", { bubbles: true }));
 
@@ -481,25 +496,24 @@ describe("login-detector-lib", () => {
 
     it("calls hideSaveBanner on destroy()", () => {
       const mockHideSaveBanner = vi.mocked(hideSaveBanner);
-      const cleanup = initLoginDetector();
-      cleanup.destroy();
+      currentCleanup = initLoginDetector();
+      currentCleanup.destroy();
       expect(mockHideSaveBanner).toHaveBeenCalled();
     });
 
     it("registers onMessage listener for PSSO_SHOW_SAVE_BANNER", () => {
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
       expect(chrome.runtime.onMessage.addListener).toHaveBeenCalled();
-      cleanup.destroy();
     });
 
     it("removes onMessage listener on destroy()", () => {
-      const cleanup = initLoginDetector();
-      cleanup.destroy();
+      currentCleanup = initLoginDetector();
+      currentCleanup.destroy();
       expect(chrome.runtime.onMessage.removeListener).toHaveBeenCalled();
     });
 
     it("shows save banner when PSSO_SHOW_SAVE_BANNER message received", () => {
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       // Simulate background pushing save banner
       for (const listener of messageListeners) {
@@ -519,12 +533,10 @@ describe("login-detector-lib", () => {
           action: "save",
         }),
       );
-
-      cleanup.destroy();
     });
 
     it("does not show banner for PSSO_SHOW_SAVE_BANNER with action=none", () => {
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       for (const listener of messageListeners) {
         listener({
@@ -537,31 +549,25 @@ describe("login-detector-lib", () => {
       }
 
       expect(mockShowSaveBanner).not.toHaveBeenCalled();
-
-      cleanup.destroy();
     });
 
     it("ignores unrelated messages", () => {
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       for (const listener of messageListeners) {
         listener({ type: "UNRELATED_MESSAGE" });
       }
 
       expect(mockShowSaveBanner).not.toHaveBeenCalled();
-
-      cleanup.destroy();
     });
 
     it("sends CHECK_PENDING_SAVE on init", () => {
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       expect(mockSendMessage).toHaveBeenCalledWith(
         { type: "CHECK_PENDING_SAVE" },
         expect.any(Function),
       );
-
-      cleanup.destroy();
     });
 
     it("shows save banner when CHECK_PENDING_SAVE returns save action", () => {
@@ -578,7 +584,7 @@ describe("login-detector-lib", () => {
         }
       });
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       expect(mockShowSaveBanner).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -587,8 +593,6 @@ describe("login-detector-lib", () => {
           action: "save",
         }),
       );
-
-      cleanup.destroy();
     });
 
     it("does not show banner when CHECK_PENDING_SAVE returns none", () => {
@@ -602,11 +606,9 @@ describe("login-detector-lib", () => {
         }
       });
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       expect(mockShowSaveBanner).not.toHaveBeenCalled();
-
-      cleanup.destroy();
     });
 
     it("sends LOGIN_DETECTED when a submit-like button is clicked near password fields", () => {
@@ -623,7 +625,7 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       button.click();
 
@@ -635,8 +637,6 @@ describe("login-detector-lib", () => {
         }),
         expect.any(Function),
       );
-
-      cleanup.destroy();
     });
 
     it("does not send LOGIN_DETECTED for non-submit-like buttons", () => {
@@ -652,7 +652,7 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       button.click();
 
@@ -660,8 +660,6 @@ describe("login-detector-lib", () => {
         expect.objectContaining({ type: "LOGIN_DETECTED" }),
         expect.any(Function),
       );
-
-      cleanup.destroy();
     });
 
     it("debounces duplicate LOGIN_DETECTED within 2 seconds", () => {
@@ -675,7 +673,7 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       // First submit — should send
       form.dispatchEvent(new Event("submit", { bubbles: true }));
@@ -692,8 +690,6 @@ describe("login-detector-lib", () => {
         expect.objectContaining({ type: "LOGIN_DETECTED" }),
         expect.any(Function),
       );
-
-      cleanup.destroy();
     });
 
     it("allows LOGIN_DETECTED after debounce period expires", () => {
@@ -709,7 +705,7 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
+      currentCleanup = initLoginDetector();
 
       // First submit — should send (CHECK_PENDING_SAVE + LOGIN_DETECTED)
       form.dispatchEvent(new Event("submit", { bubbles: true }));
@@ -730,7 +726,6 @@ describe("login-detector-lib", () => {
         expect.any(Function),
       );
 
-      cleanup.destroy();
       vi.useRealTimers();
     });
 
@@ -747,8 +742,8 @@ describe("login-detector-lib", () => {
       mockFindPasswordInputs.mockReturnValue([pw]);
       mockFindUsernameInput.mockReturnValue(user);
 
-      const cleanup = initLoginDetector();
-      cleanup.destroy();
+      currentCleanup = initLoginDetector();
+      currentCleanup.destroy();
 
       button.click();
 

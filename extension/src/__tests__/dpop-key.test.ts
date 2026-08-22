@@ -8,9 +8,24 @@ import "fake-indexeddb/auto";
 import { describe, it, expect, beforeEach } from "vitest";
 import { JKT_RE } from "../lib/constants";
 
+// M4 fix: this open MUST create the "dpop-keys" store on first touch, same as
+// production's openDb() in lib/dpop-key.ts. IndexedDB only fires
+// onupgradeneeded on the request that first bumps the DB from version 0 to 1;
+// whichever test runs first in shuffled order owns that bump. The previous
+// version of this helper (and two ad hoc inline opens below) omitted the
+// handler, so whenever one of them ran first, "psso-ext" was created at
+// version 1 with no object store, and every later open (including
+// production's, which never sees onupgradeneeded again at the same version)
+// permanently failed with "NotFoundError: No objectStore named dpop-keys" —
+// the whole-file all-or-nothing failure seen at seeds 2/6/7/16/24/28/30/31/40/52.
 function openTestDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const r = indexedDB.open("psso-ext", 1);
+    r.onupgradeneeded = () => {
+      if (!r.result.objectStoreNames.contains("dpop-keys")) {
+        r.result.createObjectStore("dpop-keys");
+      }
+    };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
   });
@@ -22,6 +37,19 @@ async function getAllKeys(db: IDBDatabase): Promise<unknown[]> {
     const req = tx.objectStore("dpop-keys").getAll();
     req.onsuccess = () => { db.close(); resolve(req.result as unknown[]); };
     req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+// Delete the shared fake-IDB database between tests so no test's leftover
+// key row/state depends on execution order (M4 baseline reset).
+function deleteTestDb(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const r = indexedDB.deleteDatabase("psso-ext");
+    r.onsuccess = () => resolve();
+    r.onerror = () => reject(r.error);
+    // No connection should still be open at this point (every test closes
+    // what it opens), but resolve rather than hang if one ever is.
+    r.onblocked = () => resolve();
   });
 }
 
@@ -37,7 +65,10 @@ async function importFresh() {
 
 describe("dpop-key (C6)", () => {
   beforeEach(async () => {
-    // Drop in-memory cache between tests (simulates SW restart).
+    // Reset both persistence layers so every test starts from a known state
+    // regardless of shuffled order (M4): delete the shared fake-IDB "psso-ext"
+    // database, then drop the in-process key cache (simulates SW restart).
+    await deleteTestDb();
     const mod = await import("../lib/dpop-key");
     mod.resetInMemoryKeyCache();
   });
@@ -80,16 +111,13 @@ describe("dpop-key (C6)", () => {
     // After cache reset and IDB clear, a new key must be generated and persisted.
     // This covers the "regenerate on missing IDB row" path that also fires when
     // the SW was killed between generateKey() and idbPut() completing.
-    const openFn = indexedDB.open.bind(indexedDB);
     const { getDpopThumbprint, resetInMemoryKeyCache } = await importFresh();
     resetInMemoryKeyCache();
 
     // Clear IDB to simulate clean-boot / partial-write after SW kill.
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const r = openFn("psso-ext", 1);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
+    // Uses openTestDb() (schema-safe) rather than a raw indexedDB.open() —
+    // this was one of the two M4 culprits when it ran first in shuffled order.
+    const db = await openTestDb();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction("dpop-keys", "readwrite");
       tx.oncomplete = () => { db.close(); resolve(); };
@@ -101,11 +129,7 @@ describe("dpop-key (C6)", () => {
     expect(jktNew).toMatch(JKT_RE);
 
     // Verify exactly one IDB row was written.
-    const db2 = await new Promise<IDBDatabase>((resolve, reject) => {
-      const r = openFn("psso-ext");
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
+    const db2 = await openTestDb();
     const all = await new Promise<unknown[]>((resolve, reject) => {
       const tx = db2.transaction("dpop-keys", "readonly");
       const req = tx.objectStore("dpop-keys").getAll();
@@ -182,11 +206,9 @@ describe("dpop-key (C6)", () => {
     // We cannot directly access the CryptoKey from the public API,
     // but we can verify that the sign() function works (proving the key exists)
     // and that a raw export of the key stored in IDB rejects.
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const r = indexedDB.open("psso-ext", 1);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
+    // Uses openTestDb() (schema-safe) — this was the other M4 culprit when it
+    // ran first in shuffled order (its raw open had no onupgradeneeded).
+    const db = await openTestDb();
 
     // Trigger key generation
     await getOrGenerateDpopKeyPair();
@@ -222,11 +244,7 @@ describe("dpop-key (C6)", () => {
     await deleteIdbKey();
 
     // Verify IDB row is gone
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const r = indexedDB.open("psso-ext", 1);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
+    const db = await openTestDb();
     const row = await new Promise<unknown>((resolve, reject) => {
       const tx = db.transaction("dpop-keys", "readonly");
       const req = tx.objectStore("dpop-keys").get("current");

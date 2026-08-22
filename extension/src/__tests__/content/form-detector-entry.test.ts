@@ -48,6 +48,19 @@ vi.mock("../../content/webauthn-bridge", () => ({}));
 
 const GUARD_KEY = "__passwdSsoFormDetector";
 
+// M5 fix: the entry point registers a window "error" listener at import time
+// and never removes it (correct for a real page, which loads it once). The
+// jsdom `window` is shared across every test in this file, and vi.resetModules()
+// only clears the MODULE cache — it does not detach already-registered DOM
+// listeners. Without tracking, a test that imports the entry point but never
+// dispatches the invalidation event (e.g. "double-injection guard...") leaves
+// its listener attached; a later test's dispatch then fires BOTH that leftover
+// listener and its own fresh one, double-counting destroy() calls. Wrapping
+// addEventListener here lets afterEach explicitly detach every listener the
+// entry point registered during the test, closing the leak at its source.
+let errorListeners: EventListenerOrEventListenerObject[] = [];
+let realAddEventListener: typeof window.addEventListener;
+
 beforeEach(() => {
   destroyCC.mockReset();
   destroyIdentity.mockReset();
@@ -71,10 +84,26 @@ beforeEach(() => {
       session: { setAccessLevel: vi.fn() },
     },
   });
+
+  errorListeners = [];
+  realAddEventListener = window.addEventListener.bind(window);
+  window.addEventListener = ((
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ) => {
+    if (type === "error") errorListeners.push(listener);
+    realAddEventListener(type, listener, options);
+  }) as typeof window.addEventListener;
 });
 
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>)[GUARD_KEY];
+  for (const listener of errorListeners) {
+    window.removeEventListener("error", listener);
+  }
+  errorListeners = [];
+  window.addEventListener = realAddEventListener;
 });
 
 describe("M5: entry-point error-handler teardown (F6 invariant)", () => {

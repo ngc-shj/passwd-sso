@@ -73,6 +73,12 @@ describe("context-menu", () => {
     // pending forever — a hang rather than a legible failure.
     chromeMock.contextMenus.create.mockImplementation((_props: unknown, cb?: () => void) => cb?.());
     chromeMock.contextMenus.removeAll.mockImplementation((cb?: () => void) => cb?.());
+    // Some tests override tabs.query to a specific tab so their own
+    // invalidateContextMenu() call rebuilds against it; without resetting it
+    // back here, that leaked resolution would drive THIS beforeEach's own
+    // invalidateContextMenu() (below) to rebuild the menu asynchronously in
+    // the background of whatever test runs next.
+    chromeMock.tabs.query.mockResolvedValue([]);
     deps = createDeps();
     initContextMenu(deps);
     invalidateContextMenu();
