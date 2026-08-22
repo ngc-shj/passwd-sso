@@ -154,8 +154,13 @@ describe("clickjacking hardening guards", () => {
       return realGetComputedStyle(el, pseudo ?? undefined);
     });
 
-    expect(hasVisiblePopoverOverlayNear(input)).toBe(true);
-    getComputedStyleSpy.mockRestore();
+    // finally, not a trailing restore: an assertion throw would otherwise
+    // leak the spy into later tests sharing this jsdom window.
+    try {
+      expect(hasVisiblePopoverOverlayNear(input)).toBe(true);
+    } finally {
+      getComputedStyleSpy.mockRestore();
+    }
   });
 });
 

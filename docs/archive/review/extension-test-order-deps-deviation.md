@@ -6,7 +6,7 @@
 |----|---------------------|--------|
 | A1 | `npx vitest run --sequence.shuffle.files=false --sequence.shuffle.tests=true --sequence.seed=$s` for s ∈ {1..8, 12345} | 9/9 GREEN (1029/1029 each) |
 | A2 | `npx vitest run --sequence.shuffle --sequence.seed=$s` for s ∈ {1..50} | 50/50 GREEN (baseline before fixes: 49/50 RED) |
-| A3 | Per-file pre-fix red seeds recorded before each fix, re-run green after, per batch reports (e.g. totp-handlers seeds 3/9/11/12/14/17/18/20/22/24/25/28; background 28/30 seeds; dpop-key 2/6/7/16/24/28/30/31/40/52; form-detector-entry 12 seeds; login-detector 15 seeds) | all recorded seeds GREEN post-fix |
+| A3 | Per-file pre-fix red seeds recorded before each fix, re-run green after, per batch reports (e.g. totp-handlers seeds 3/9/11/12/14/17/18/20/22/24/25/28; background 28/30 seeds; dpop-key 2/6/7/16/24/28/30/31/40/52; form-detector-entry 12 seeds; login-detector 15 seeds). Provenance of seeds > 50 (e.g. dpop-key's 52, login-detector's 53/71/78): the fix batches ran PER-FILE discovery sweeps (`npx vitest run src/__tests__/<file> --sequence.shuffle.tests=true --sequence.seed=N`) beyond the plan's suite-level 1..50 sweep, widening until the failure surfaced repeatedly — commands and logs in the batch scratch logs | all recorded seeds GREEN post-fix |
 | A3m | Scratch worktree; deny = pre-fix positional totp-handlers + steal-window `vi.waitFor` flush after `unlockVault()` in "does not include totpCode when totp is absent" → `{ok:false}` (NO_PASSWORD shape) 3/3 runs; allow = keyed file + byte-identical flush → 3/3 GREEN | deny RED 3/3, allow GREEN 3/3 → **M3 VERIFIED** |
 | A4 | `npx vitest run --sequence.shuffle=false` (CLI override of the config gate) | GREEN, no seed line (shuffle off confirmed) |
 | A5 | 10 consecutive `npx vitest run` (config shuffle, random seeds) | 10/10 GREEN; seeds 1787352720534, 1787352727780, 1787352734668, 1787352742181, 1787352749156, 1787352756253, 1787352763816, 1787352771470, 1787352778721, 1787352785764 — pairwise distinct |
@@ -161,6 +161,7 @@ module-scope `let` = 10. Verdicts:
 | dpop-key.test.ts | 2 raw `indexedDB.open` without `onupgradeneeded` | M4 (schema-upgrade race) | schema-safe `openTestDb()` + awaited per-test DB delete |
 | content/form-detector-entry.test.ts | entry-point `window` "error" listeners never removed across tests | M5 (DOM listener leak) | tracked listeners removed in afterEach |
 | login-detector.test.ts | `mockSendMessage.mockImplementation` ×5 in test bodies | M1-shaped | `mockReset()` in local beforeEach |
+| login-detector.test.ts | `mockFindPasswordInputs`/`mockFindUsernameInput` `mockReturnValue` in test bodies (~8 sites) | M1-shaped (latent — every consuming test sets its own values) | `mockReset()` for both added beside `mockSendMessage.mockReset()` (Phase 3 R1 finding) |
 | login-detector.test.ts | document submit/click listeners leak when assertion throws before `cleanup.destroy()` | cascade of above | afterEach-guaranteed `currentCleanup?.destroy()` |
 | lib/messaging.test.ts | L18/L38/L51 persistent sendMessage overrides | M1 (latent — no seed reproduces; victim assertion absent) | `…Once` conversions |
 | popup/App.test.tsx | 5 persistent sendMessage overrides incl. never-settling promise | M1 (latent) | `mockSendMessage.mockReset()` in beforeEach |
@@ -195,8 +196,8 @@ popup/VaultUnlock.test.tsx (each reaching test sets its own value; 15 seeds
 green) · webauthn-bridge-lib.test.ts (per-test recreation + restore/unstub
 afterEach) · log.test.ts (describe-scope console spy, uniform for all tests) ·
 content/form-detector.test.ts remaining spyOn sites (per-test-local DOM
-elements) · totp-handlers/background.test.ts chrome mocks (fresh factory every
-beforeEach) · background.test.ts "tab event badge updates" beforeEach
+elements) · background/totp-handlers.test.ts and background.test.ts chrome mocks (fresh
+factory every beforeEach) · background.test.ts "tab event badge updates" beforeEach
 (unconditional `mockResolvedValue` re-establishment — composes with keyed
 impl in either order).
 

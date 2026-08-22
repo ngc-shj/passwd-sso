@@ -58,7 +58,10 @@ const GUARD_KEY = "__passwdSsoFormDetector";
 // listener and its own fresh one, double-counting destroy() calls. Wrapping
 // addEventListener here lets afterEach explicitly detach every listener the
 // entry point registered during the test, closing the leak at its source.
-let errorListeners: EventListenerOrEventListenerObject[] = [];
+let errorListeners: Array<{
+  listener: EventListenerOrEventListenerObject;
+  options?: boolean | AddEventListenerOptions;
+}> = [];
 let realAddEventListener: typeof window.addEventListener;
 
 beforeEach(() => {
@@ -92,15 +95,19 @@ beforeEach(() => {
     listener: EventListenerOrEventListenerObject,
     options?: boolean | AddEventListenerOptions,
   ) => {
-    if (type === "error") errorListeners.push(listener);
+    // Record the options too: removeEventListener only matches a listener
+    // registered with the same capture flag, so dropping the options here
+    // would silently defeat the teardown if the entry point ever registers
+    // with { capture: true }. (Today it registers "error" with no options.)
+    if (type === "error") errorListeners.push({ listener, options });
     realAddEventListener(type, listener, options);
   }) as typeof window.addEventListener;
 });
 
 afterEach(() => {
   delete (window as unknown as Record<string, unknown>)[GUARD_KEY];
-  for (const listener of errorListeners) {
-    window.removeEventListener("error", listener);
+  for (const { listener, options } of errorListeners) {
+    window.removeEventListener("error", listener, options);
   }
   errorListeners = [];
   window.addEventListener = realAddEventListener;

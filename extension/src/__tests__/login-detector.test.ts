@@ -323,6 +323,11 @@ describe("login-detector-lib", () => {
     beforeEach(() => {
       document.body.innerHTML = "";
       mockSendMessage.mockReset();
+      // Same M1 shape as mockSendMessage: several tests set persistent
+      // mockReturnValue on these, and the outer clearAllMocks clears call
+      // history only — reset so no test reads a sibling's detached elements.
+      mockFindPasswordInputs.mockReset();
+      mockFindUsernameInput.mockReset();
     });
 
     // Every test below assigns its initLoginDetector() handle to this instead
@@ -694,39 +699,44 @@ describe("login-detector-lib", () => {
 
     it("allows LOGIN_DETECTED after debounce period expires", () => {
       vi.useFakeTimers();
+      // try/finally, not a trailing restore: an assertion throw above a bare
+      // vi.useRealTimers() would leak fake timers (frozen Date.now) into every
+      // later test in the file — the same skipped-trailing-cleanup class the
+      // afterEach-guaranteed destroy() fixes for listeners.
+      try {
+        const form = createForm();
+        const pw = createPasswordInput("secret");
+        const user = createTextInput("bob");
+        form.appendChild(user);
+        form.appendChild(pw);
+        document.body.appendChild(form);
 
-      const form = createForm();
-      const pw = createPasswordInput("secret");
-      const user = createTextInput("bob");
-      form.appendChild(user);
-      form.appendChild(pw);
-      document.body.appendChild(form);
+        mockFindPasswordInputs.mockReturnValue([pw]);
+        mockFindUsernameInput.mockReturnValue(user);
 
-      mockFindPasswordInputs.mockReturnValue([pw]);
-      mockFindUsernameInput.mockReturnValue(user);
+        currentCleanup = initLoginDetector();
 
-      currentCleanup = initLoginDetector();
+        // First submit — should send (CHECK_PENDING_SAVE + LOGIN_DETECTED)
+        form.dispatchEvent(new Event("submit", { bubbles: true }));
+        expect(mockSendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "LOGIN_DETECTED" }),
+          expect.any(Function),
+        );
 
-      // First submit — should send (CHECK_PENDING_SAVE + LOGIN_DETECTED)
-      form.dispatchEvent(new Event("submit", { bubbles: true }));
-      expect(mockSendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "LOGIN_DETECTED" }),
-        expect.any(Function),
-      );
+        vi.clearAllMocks();
 
-      vi.clearAllMocks();
+        // Advance past debounce period (2 seconds)
+        vi.advanceTimersByTime(2_001);
 
-      // Advance past debounce period (2 seconds)
-      vi.advanceTimersByTime(2_001);
-
-      // Submit again — should send (debounce expired)
-      form.dispatchEvent(new Event("submit", { bubbles: true }));
-      expect(mockSendMessage).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "LOGIN_DETECTED" }),
-        expect.any(Function),
-      );
-
-      vi.useRealTimers();
+        // Submit again — should send (debounce expired)
+        form.dispatchEvent(new Event("submit", { bubbles: true }));
+        expect(mockSendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ type: "LOGIN_DETECTED" }),
+          expect.any(Function),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("removes click listener after destroy()", () => {

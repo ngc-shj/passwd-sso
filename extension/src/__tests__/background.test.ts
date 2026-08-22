@@ -225,15 +225,22 @@ function sendMessageWithSender(message: unknown, sender: unknown): Promise<unkno
   });
 }
 
+// FILE-LEVEL hook, deliberately outside every describe: the keyed decryptData
+// implementation and its response map are module-scope state, so installing
+// them from only one describe's beforeEach would leak the last flow test's
+// map entries into the other nine describes (which run clearAllMocks only —
+// call history, not implementations). Outer hooks run before inner ones, so
+// a describe that re-establishes its own decryptData (e.g. "tab event badge
+// updates") deterministically wins over this default.
+beforeEach(() => {
+  keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
+});
+
 describe("background message flow", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
-
-    // Fresh, input-keyed decryptData for every test regardless of what a
-    // preceding test (in any order) registered — see helpers/keyed-decrypt-mock.
-    keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
 
     vi.stubGlobal(
       "fetch",
@@ -1119,7 +1126,7 @@ describe("background message flow", () => {
         return { ok: false, json: async () => ({}) };
       }),
     );
-    // Keyed by ciphertext (see decryptResponses above), so the sender-host
+    // Keyed by ciphertext (see helpers/keyed-decrypt-mock), so the sender-host
     // fail-closed tests below — which reject before consuming either decrypt —
     // never leave a stale entry for a later test to trip over.
     setDecryptedPlaintext("aa", JSON.stringify({ password: "secret", username: "alice" }));

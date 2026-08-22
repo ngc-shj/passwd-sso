@@ -55,8 +55,16 @@ function deleteTestDb(): Promise<void> {
     r.onsuccess = () => resolve();
     r.onerror = () => reject(r.error);
     // No connection should still be open at this point (every test closes
-    // what it opens), but resolve rather than hang if one ever is.
-    r.onblocked = () => resolve();
+    // what it opens). Fail LOUDLY if one ever is: resolving here would skip
+    // the baseline reset silently and the next versioned open would queue
+    // behind the pending delete — an opaque timeout blamed on the wrong
+    // test. Rejecting names the culprit in the beforeEach that hit it.
+    r.onblocked = () =>
+      reject(
+        new Error(
+          "deleteTestDb blocked: a previous test left an IDB connection to psso-ext open",
+        ),
+      );
   });
 }
 
