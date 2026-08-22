@@ -132,7 +132,7 @@ the issue's own measurements), so more victims are expected.
   such a list under-derives (round-2 found unawaited consumers outside
   `background/index`, e.g. `extension/src/content/token-bridge-lib.ts:102`'s
   `void handlePostMessage(event)`, and React-effect consumers in popup tests).
-  Each candidate gets a C2 classification row (`m3-race` / `contained — 
+  Each candidate gets a C2 classification row (`m3-race` / `contained —
   consumer awaited / no fire-and-forget import`); one-line contained verdicts
   suffice. Reconciliation counts against this grep's own output, which cannot
   under-derive its left side.

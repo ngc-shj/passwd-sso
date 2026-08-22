@@ -297,60 +297,60 @@ Convergence stamps per 'Perspective Convergence as a Severity Signal': R2-1/R2-2
 
 ### Major
 
-**Severity**: Major  
-**Problem**: The widened pattern-2 command and the module-scope-`let` count use `--include='*.test.ts'`, excluding 7 `.test.tsx` files. Recomputation reveals 5 dropped files carry `.mock(ReturnValue|ResolvedValue|RejectedValue|Implementation)(` hits (including M1-shaped Once-less overrides in `popup/App.test.tsx`). Reconciliation is self-referential against the same filtered commands.  
-**Impact**: Five candidate files structurally drop out of the C2 audit, and C2's row-count reconciliation cannot notice because it reconciles against the same filtered commands' output.  
-**Recommended action**: Change include filters to `--include='*.test.ts*'` (or drop `--include`), re-run, add new hits to the C2 table. Boundary: the filter must admit every file vitest's default include admits; reconcile counts from corrected commands.  
+**Severity**: Major
+**Problem**: The widened pattern-2 command and the module-scope-`let` count use `--include='*.test.ts'`, excluding 7 `.test.tsx` files. Recomputation reveals 5 dropped files carry `.mock(ReturnValue|ResolvedValue|RejectedValue|Implementation)(` hits (including M1-shaped Once-less overrides in `popup/App.test.tsx`). Reconciliation is self-referential against the same filtered commands.
+**Impact**: Five candidate files structurally drop out of the C2 audit, and C2's row-count reconciliation cannot notice because it reconciles against the same filtered commands' output.
+**Recommended action**: Change include filters to `--include='*.test.ts*'` (or drop `--include`), re-run, add new hits to the C2 table. Boundary: the filter must admit every file vitest's default include admits; reconcile counts from corrected commands.
 *Flagged by*: Functionality
 
-**Severity**: Major  
-**Problem**: The M3 derivation command keys on the literal `background/index`, leaving Phase 2 name-supply to judgment. Recomputation finds 12 files containing `mockResolvedValueOnce`; the command matches only 4. Excluded files (e.g., `content/token-bridge.test.ts`, `popup/App.test.tsx`, `popup/MatchList.test.tsx`) have unawaited consumers by construction. Verdicts are never recorded.  
-**Impact**: An M3-class race in an excluded file stays latent; the shuffle gate cannot sample it (bypass (b)) and A8's single pre-pr run is one sample.  
-**Recommended action**: Make the candidate set input-derived: every `mockResolvedValueOnce` file is an M3-classification candidate (12 rows). Reconciliation then counts against `grep -rl 'mockResolvedValueOnce' .`, which cannot under-derive its own left side.  
+**Severity**: Major
+**Problem**: The M3 derivation command keys on the literal `background/index`, leaving Phase 2 name-supply to judgment. Recomputation finds 12 files containing `mockResolvedValueOnce`; the command matches only 4. Excluded files (e.g., `content/token-bridge.test.ts`, `popup/App.test.tsx`, `popup/MatchList.test.tsx`) have unawaited consumers by construction. Verdicts are never recorded.
+**Impact**: An M3-class race in an excluded file stays latent; the shuffle gate cannot sample it (bypass (b)) and A8's single pre-pr run is one sample.
+**Recommended action**: Make the candidate set input-derived: every `mockResolvedValueOnce` file is an M3-classification candidate (12 rows). Reconciliation then counts against `grep -rl 'mockResolvedValueOnce' .`, which cannot under-derive its own left side.
 *Flagged by*: Functionality
 
-**Severity**: Major  
-**Problem**: The test-side opt-out regex `\{\s*shuffle\s*:\s*false` is brace-anchored, missing multi-key option objects like `describe("x", { concurrent: true, shuffle: false }, …)`. The companion `shuffle\s*:` is scoped only to `extension/vitests.config.ts`. Zero hits exist under `extension/src/__tests__/`, so a maximally broad pattern carries zero false-positive cost.  
-**Impact**: A suite can opt out of the gate through a spelling the declared residue control does not flag.  
-**Recommended action**: Replace the test-side pattern with unanchored `shuffle\s*:\s*false` (or bare `shuffle`) under `extension/src/__tests__/`. Keep `describe\.shuffle` for readability. Explicitly state the config-side scope.  
+**Severity**: Major
+**Problem**: The test-side opt-out regex `\{\s*shuffle\s*:\s*false` is brace-anchored, missing multi-key option objects like `describe("x", { concurrent: true, shuffle: false }, …)`. The companion `shuffle\s*:` is scoped only to `extension/vitests.config.ts`. Zero hits exist under `extension/src/__tests__/`, so a maximally broad pattern carries zero false-positive cost.
+**Impact**: A suite can opt out of the gate through a spelling the declared residue control does not flag.
+**Recommended action**: Replace the test-side pattern with unanchored `shuffle\s*:\s*false` (or bare `shuffle`) under `extension/src/__tests__/`. Keep `describe\.shuffle` for readability. Explicitly state the config-side scope.
 *Flagged by*: Functionality, Security
 
-**Severity**: Major  
-**Problem**: A7 compares `npm test` wall-clock before/after. The before-side is fact 4's idle-machine measurement (~6.2–7.2 s). A8 designates the "Extension: Test" step duration from pre-pr's batch 1 (concurrent with Lint/Test/Build/CLI: Build) as the after-number. This measures CPU contention, not the shuffle delta.  
-**Impact**: Either a spurious "materially worse" report to the user, or a real shuffle regression hidden inside contention noise. Both corrupt C4's closure evidence.  
-**Recommended action**: Derive A7's two numbers from the same idle environment: idle `npx vitest run --sequence.shuffle=false` (before) vs. idle config-shuffled `npm test` (after). Keep A8's step duration as supplementary contended-environment evidence.  
+**Severity**: Major
+**Problem**: A7 compares `npm test` wall-clock before/after. The before-side is fact 4's idle-machine measurement (~6.2–7.2 s). A8 designates the "Extension: Test" step duration from pre-pr's batch 1 (concurrent with Lint/Test/Build/CLI: Build) as the after-number. This measures CPU contention, not the shuffle delta.
+**Impact**: Either a spurious "materially worse" report to the user, or a real shuffle regression hidden inside contention noise. Both corrupt C4's closure evidence.
+**Recommended action**: Derive A7's two numbers from the same idle environment: idle `npx vitest run --sequence.shuffle=false` (before) vs. idle config-shuffled `npm test` (after). Keep A8's step duration as supplementary contended-environment evidence.
 *Flagged by*: Functionality, QA/Testing
 
-**Severity**: Major  
-**Problem**: A3m's "reds EVERY run" depends on flush placement, but I3 specifies the flush only as "before the test ends". Natural end-of-test placement allows intended consumers to drain the Once queue in order, leaving the fire-and-forget consumer with an exhausted queue. This causes the deny-run to green instead of red, breaking the minimal-pair property.  
-**Impact**: The acceptance criterion built to prove M3 can fail to red for a construction reason, leaving M3 falsely "hypothesized" or requiring ad-hoc executor fixes that break the minimal-pair property.  
-**Recommended action**: Specify in A3m that the red-proof flush sits **at the steal window** — immediately after the fire-and-forget trigger (post-unlock), before intended consumers. The deny/allow pair must use the identical test body, differing only in mock keying. I3's end-of-test flush coexists for miss-attribution.  
+**Severity**: Major
+**Problem**: A3m's "reds EVERY run" depends on flush placement, but I3 specifies the flush only as "before the test ends". Natural end-of-test placement allows intended consumers to drain the Once queue in order, leaving the fire-and-forget consumer with an exhausted queue. This causes the deny-run to green instead of red, breaking the minimal-pair property.
+**Impact**: The acceptance criterion built to prove M3 can fail to red for a construction reason, leaving M3 falsely "hypothesized" or requiring ad-hoc executor fixes that break the minimal-pair property.
+**Recommended action**: Specify in A3m that the red-proof flush sits **at the steal window** — immediately after the fire-and-forget trigger (post-unlock), before intended consumers. The deny/allow pair must use the identical test body, differing only in mock keying. I3's end-of-test flush coexists for miss-attribution.
 *Flagged by*: Functionality, QA/Testing
 
-**Severity**: Major  
-**Problem**: `TestOptions.retry` (and config-level `retry`/`repeats`) exists on the installed surface but matches no forbidden pattern. `{ retry: 2 }` permanently absorbs the gate's exit-code signal for intermittent members without a skip marker, neutralizing the tail-closure mechanism of C3.  
-**Impact**: The gate stays green while the order-dependence class re-accumulates; the standing gate's closure is bypassed by a socially normal "flaky test fix".  
-**Recommended action**: Add forbidden patterns: `retry\s*:` and `repeats\s*:` under `extension/src/__tests__/` and `extension/vitests.config.ts`. Require a deviation-log entry naming the nondeterminism source and an issue link for genuine retries. Verified zero false positives in current extension tests.  
+**Severity**: Major
+**Problem**: `TestOptions.retry` (and config-level `retry`/`repeats`) exists on the installed surface but matches no forbidden pattern. `{ retry: 2 }` permanently absorbs the gate's exit-code signal for intermittent members without a skip marker, neutralizing the tail-closure mechanism of C3.
+**Impact**: The gate stays green while the order-dependence class re-accumulates; the standing gate's closure is bypassed by a socially normal "flaky test fix".
+**Recommended action**: Add forbidden patterns: `retry\s*:` and `repeats\s*:` under `extension/src/__tests__/` and `extension/vitests.config.ts`. Require a deviation-log entry naming the nondeterminism source and an issue link for genuine retries. Verified zero false positives in current extension tests.
 *Flagged by*: Security
 
 ### Minor
 
-**Severity**: Minor  
-**Problem**: C4's acceptance clause states "all acceptance IDs A1–A8 present with commands and outputs." A3m falls outside the lexical A1..A8 range. A checklist-driven executor can omit A3m's evidence without triggering the clause.  
-**Impact**: The M3 proof — the plan's most fragile evidence item — is at risk of being skipped by strict ID-range checklists.  
-**Recommended action**: Update text to "A1–A4, A3m, A5–A8 present with commands and outputs (A3m may instead be a named deviation-log entry per its fallback)".  
+**Severity**: Minor
+**Problem**: C4's acceptance clause states "all acceptance IDs A1–A8 present with commands and outputs." A3m falls outside the lexical A1..A8 range. A checklist-driven executor can omit A3m's evidence without triggering the clause.
+**Impact**: The M3 proof — the plan's most fragile evidence item — is at risk of being skipped by strict ID-range checklists.
+**Recommended action**: Update text to "A1–A4, A3m, A5–A8 present with commands and outputs (A3m may instead be a named deviation-log entry per its fallback)".
 *Flagged by*: Functionality, QA/Testing
 
-**Severity**: Minor  
-**Problem**: The options-object pattern bans `(skip|todo|fails)\s*:\s*true` but omits `only?: boolean`. `it("x", { only: true }, fn)` narrows suites without a dot-form `.only(`. Additionally, destructured `ctx.skip` contains no `.skip(` substring.  
-**Impact**: Local pre-pr runs without `CI` would silently pass narrowed suites; destructured skip goes uncaught by grep-based residue control.  
-**Recommended action**: Change the options pattern to `(skip|todo|fails|only)\s*:\s*true`. Add destructured `ctx.skip` to the un-greppable-residue sentence so C1-I4's diff inspection explicitly owns it.  
+**Severity**: Minor
+**Problem**: The options-object pattern bans `(skip|todo|fails)\s*:\s*true` but omits `only?: boolean`. `it("x", { only: true }, fn)` narrows suites without a dot-form `.only(`. Additionally, destructured `ctx.skip` contains no `.skip(` substring.
+**Impact**: Local pre-pr runs without `CI` would silently pass narrowed suites; destructured skip goes uncaught by grep-based residue control.
+**Recommended action**: Change the options pattern to `(skip|todo|fails|only)\s*:\s*true`. Add destructured `ctx.skip` to the un-greppable-residue sentence so C1-I4's diff inspection explicitly owns it.
 *Flagged by*: Security
 
-**Severity**: Minor  
-**Problem**: I4 (C1 assertion-weakening check) is scoped to "victim tests", but the plan's fixes typically edit *culprit* tests. Reading I4 literally excludes the actually-edited tests from assertion-strengthening verification.  
-**Impact**: Assertion-weakening in culprit tests escapes adjudication.  
-**Recommended action**: Reword I4 from "victim tests'" to "all tests in files edited under C1/C2" — assertions unchanged or strengthened, verified by PR-diff inspection.  
+**Severity**: Minor
+**Problem**: I4 (C1 assertion-weakening check) is scoped to "victim tests", but the plan's fixes typically edit *culprit* tests. Reading I4 literally excludes the actually-edited tests from assertion-strengthening verification.
+**Impact**: Assertion-weakening in culprit tests escapes adjudication.
+**Recommended action**: Reword I4 from "victim tests'" to "all tests in files edited under C1/C2" — assertions unchanged or strengthened, verified by PR-diff inspection.
 *Flagged by*: Security
 
 ## Recurring Issue Check

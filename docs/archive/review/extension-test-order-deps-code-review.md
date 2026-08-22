@@ -269,4 +269,3 @@ passkey-save-banner.test.ts / save-banner.test.ts afterEach call hideBanner() BE
 
 ## Resolution Status — final
 Rounds: 3. Findings: 9 (R1) + 1 Adjacent (R2) = 10; all resolved (dispositions above and in Round-1 Resolution Status). No open findings. No Anti-Deferral entries pending beyond the plan's SC1-SC4 and deviation-log D1/D2 (documented cost-justifications with revisit triggers).
-
