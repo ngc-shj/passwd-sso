@@ -619,7 +619,7 @@ All three applied to the plan immediately after Round 4 (C3 signature exclusivit
 **Round-3 fix verification:**
 - **F8 (seed pinning) — fix correct and complete on all three parts.** Consumer-file row + rationale + allow boundary; config-side `(shuffle|seed)\s*:` + corpus-clean; A5 pairwise-distinct with loud failure. Four-residue adjudication paragraph accurate.
 - **F9 (destructured ctx.skip) — fix correct.** I4 early-exit clause; owner's criterion now fires.
-- **Convergent items #3/#4 — no security holes introduced.** Five-subset enumeration with verbatim commands; bare-shuffle deny/allow boundary sound (named-flagged-adjudicated, cannot smuggle options-position occurrence).
+- **Convergent items `#3`/`#4` — no security holes introduced.** Five-subset enumeration with verbatim commands; bare-shuffle deny/allow boundary sound (named-flagged-adjudicated, cannot smuggle options-position occurrence).
 
 **Final class re-derivation over writable surfaces:**
 - In-test options/chainables: closed (dot-form, options-object, retry/repeats options, suite shuffle any position, destructured ctx.skip via I4). expect.soft still fails the task; tags inert without filter flag; no retry chainable.
@@ -676,10 +676,10 @@ No other findings. A5 distinct-seeds has no false-positive path (Date.now()-deri
 # QA/Testing Review — Round 4 (incremental)
 
 ## Verification performed
-- #1 (C2 five-subset enumeration + commands): coverage clause enumerates all five subsets matching the five Set B bullets one-to-one; every bullet records a derivation command. Commands verified: stubGlobal for-loop → 23 (ran it); let-set → 10; M3 → 12; spyOn → 3; widened override grep. Reconciliation's left side exists for every subset. Stale sentence replaced. Resolved.
-- #2 (bare-shuffle deny/allow): overclaim gone; deny boundary + allow path stated. Config-side corpus claim verified: zero `seed` occurrences (case-insensitive) in tests, config, package.json. Resolved (one wording nit — F1).
-- #3 (consumer row + A5 distinctness + four residues): vitest citation verified verbatim (coverage.DM_a_rWm.js:481). A5 false-fail check: seed granularity is ms and each run is a fresh ~7 s process, so pairwise-distinct seeds are guaranteed on legitimate execution — the clause cannot false-fail, and composes with the rtk capture note. Four-residue statement maps one-to-one onto the pattern rows. No forbidden row matches the PR's own planned diff.
-- #4 (I4 early-exit clause): consistent with residue note; destructured skip I4-owned in both places. Resolved.
+- `#1` (C2 five-subset enumeration + commands): coverage clause enumerates all five subsets matching the five Set B bullets one-to-one; every bullet records a derivation command. Commands verified: stubGlobal for-loop → 23 (ran it); let-set → 10; M3 → 12; spyOn → 3; widened override grep. Reconciliation's left side exists for every subset. Stale sentence replaced. Resolved.
+- `#2` (bare-shuffle deny/allow): overclaim gone; deny boundary + allow path stated. Config-side corpus claim verified: zero `seed` occurrences (case-insensitive) in tests, config, package.json. Resolved (one wording nit — F1).
+- `#3` (consumer row + A5 distinctness + four residues): vitest citation verified verbatim (coverage.DM_a_rWm.js:481). A5 false-fail check: seed granularity is ms and each run is a fresh ~7 s process, so pairwise-distinct seeds are guaranteed on legitimate execution — the clause cannot false-fail, and composes with the rtk capture note. Four-residue statement maps one-to-one onto the pattern rows. No forbidden row matches the PR's own planned diff.
+- `#4` (I4 early-exit clause): consistent with residue note; destructured skip I4-owned in both places. Resolved.
 
 ## Findings
 
@@ -776,7 +776,7 @@ Verification: installed source coverage.DM_a_rWm.js:475-477 confirms the ternary
 2. **Testing F1 rewording — no security hole introduced.** Deny boundary unchanged; allow path still named-flagged-passed at C1-I4; rewording narrows, not widens.
 3. **Func F14 (sequencer:) — fix correct, mechanism claim independently verified this round** (supersedes reviewer's Round-2 unconditional-assignment reading). Corpus-clean verified. Layering consistent: exclusivity clause subsumes; pattern = defense-in-depth callout.
 
-Taxonomy note, below finding threshold: adjudication paragraph counts "four surface-form residues" while sequencer: is a partial-freeze variant of residue #4 (freezes the file-order axis only). Member denied by two layers; an undercounted taxonomy does not overstate the control — wording preference, not a defect.
+Taxonomy note, below finding threshold: adjudication paragraph counts "four surface-form residues" while sequencer: is a partial-freeze variant of residue `#4` (freezes the file-order axis only). Member denied by two layers; an undercounted taxonomy does not overstate the control — wording preference, not a defect.
 
 **No findings.**
 
@@ -815,9 +815,9 @@ Taxonomy note, below finding threshold: adjudication paragraph counts "four surf
 # QA/Testing Review — Round 5 (incremental)
 
 ## Verification performed
-- #2 (Round-4 F1): allow-path example now matches I2's actual text exactly. Resolved.
-- #3 (sequencer row): verified against installed vitest (coverage.DM_a_rWm.js ~477-481): `if (!resolved.sequence?.sequencer)` → `sequencer = shuffle ? RandomSequencer : BaseSequencer` — config `sequencer:` preempts RandomSequencer while in-file shuffle and seed printing continue. Corpus-clean verified: zero case-insensitive occurrences of shuffle/seed/sequencer across tests, config, package.json.
-- #1 (exclusivity clause): coexistence with key-enumerated rows coherent (shape check = mechanism, key rows = callouts; both converge on named-deviation adjudication). One internal tension — F1.
+- `#2` (Round-4 F1): allow-path example now matches I2's actual text exactly. Resolved.
+- `#3` (sequencer row): verified against installed vitest (coverage.DM_a_rWm.js ~477-481): `if (!resolved.sequence?.sequencer)` → `sequencer = shuffle ? RandomSequencer : BaseSequencer` — config `sequencer:` preempts RandomSequencer while in-file shuffle and seed printing continue. Corpus-clean verified: zero case-insensitive occurrences of shuffle/seed/sequencer across tests, config, package.json.
+- `#1` (exclusivity clause): coexistence with key-enumerated rows coherent (shape check = mechanism, key rows = callouts; both converge on named-deviation adjudication). One internal tension — F1.
 - No acceptance criterion gained a false-fail path; A5–A8, A1–A4, A3m, four-residue statement, consumer walkthrough mutually consistent.
 
 ## Findings
