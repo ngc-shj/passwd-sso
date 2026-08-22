@@ -3,6 +3,7 @@ import {
   EXT_ENTRY_TYPE,
 } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
+import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
@@ -32,34 +33,15 @@ const DEFAULT_OVERVIEW_PLAINTEXT = JSON.stringify({
   username: "alice",
   urlHost: "example.com",
 });
-let decryptResponses: Record<string, string> = {};
-
-/** Register the plaintext decryptData resolves to for a given ciphertext.
- * Input-keyed, not positional: UNLOCK_VAULT schedules a fire-and-forget
- * context-menu refresh (real 200 ms debounce) whose overview decrypt would
- * steal a positional Once slot under load — the pre-pr NO_PASSWORD flake in
- * issue #784. An unmapped ciphertext throws so a coverage gap fails loudly in
- * the test that exposed it instead of diverging silently. */
-function setDecryptedPlaintext(ciphertext: string, plaintext: string): void {
-  decryptResponses[ciphertext] = plaintext;
-}
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+const setDecryptedPlaintext = keyedDecrypt.set;
 
 function installKeyedDecryptData(): void {
   // "11" is the overview ciphertext every fetch stub in this file returns —
   // the only input the fire-and-forget consumer ever requests, so it is
-  // always mapped and the consumer can never hit the miss path.
-  decryptResponses = { "11": DEFAULT_OVERVIEW_PLAINTEXT };
-  cryptoMocks.decryptData.mockImplementation(
-    async (encrypted: { ciphertext: string }) => {
-      const plaintext = decryptResponses[encrypted.ciphertext];
-      if (plaintext === undefined) {
-        throw new Error(
-          `decryptData mock miss: no keyed response registered for ciphertext "${encrypted.ciphertext}"`,
-        );
-      }
-      return plaintext;
-    },
-  );
+  // always mapped and the consumer can never hit the miss path
+  // (see helpers/keyed-decrypt-mock for the rationale).
+  keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
 }
 
 type MessageHandler = (

@@ -1,5 +1,26 @@
 # Coding Deviation Log: extension-test-order-deps
 
+## Acceptance evidence (executed 2026-08-22; all outputs file-captured per the rtk evidence-capture rule)
+
+| ID | Command / procedure | Result |
+|----|---------------------|--------|
+| A1 | `npx vitest run --sequence.shuffle.files=false --sequence.shuffle.tests=true --sequence.seed=$s` for s ∈ {1..8, 12345} | 9/9 GREEN (1029/1029 each) |
+| A2 | `npx vitest run --sequence.shuffle --sequence.seed=$s` for s ∈ {1..50} | 50/50 GREEN (baseline before fixes: 49/50 RED) |
+| A3 | Per-file pre-fix red seeds recorded before each fix, re-run green after, per batch reports (e.g. totp-handlers seeds 3/9/11/12/14/17/18/20/22/24/25/28; background 28/30 seeds; dpop-key 2/6/7/16/24/28/30/31/40/52; form-detector-entry 12 seeds; login-detector 15 seeds) | all recorded seeds GREEN post-fix |
+| A3m | Scratch worktree; deny = pre-fix positional totp-handlers + steal-window `vi.waitFor` flush after `unlockVault()` in "does not include totpCode when totp is absent" → `{ok:false}` (NO_PASSWORD shape) 3/3 runs; allow = keyed file + byte-identical flush → 3/3 GREEN | deny RED 3/3, allow GREEN 3/3 → **M3 VERIFIED** |
+| A4 | `npx vitest run --sequence.shuffle=false` (CLI override of the config gate) | GREEN, no seed line (shuffle off confirmed) |
+| A5 | 10 consecutive `npx vitest run` (config shuffle, random seeds) | 10/10 GREEN; seeds 1787352720534, 1787352727780, 1787352734668, 1787352742181, 1787352749156, 1787352756253, 1787352763816, 1787352771470, 1787352778721, 1787352785764 — pairwise distinct |
+| A6 | Scratch worktree with the gate config: revert `totp-handlers.test.ts` to its pre-fix state → `--sequence.shuffle --sequence.seed=12345` exits 1, sole failure in that file ("returns TOTP code…"); restore fix → same seed exits 0 (1029/1029) | deny RED / allow GREEN |
+| A7 | Idle-machine like-for-like: before = fact 4 (~6.2–7.2 s, pre-fix); after = A5 walls 6.8–7.7 s (idle, shuffled) | within noise — no material regression (issue `#784`'s perf question answered) |
+| A8 | `bash ~/.claude/hooks/check-pre-pr.sh run` (full parallel batch incl. "Extension: Test" — the environment fact 5 names) | 62/62 checks PASSED |
+
+Post-A-run addition (self-R-check R1 fix): the duplicated keyed-decrypt logic
+was extracted to `extension/src/__tests__/helpers/keyed-decrypt-mock.ts`
+(shared by background.test.ts and totp-handlers.test.ts); after extraction:
+tsc clean, 3 shuffled runs per file GREEN, full suite GREEN (seed
+1787376666155). The helpers/ file is not matched by vitest's test include
+(`*.test.*`), so the 61-file count is unchanged.
+
 ## D0 — A3m executed: M3 VERIFIED (fact 5 upgraded from "hypothesized")
 
 A3m ran on a scratch git worktree (detached, node_modules symlinked, removed

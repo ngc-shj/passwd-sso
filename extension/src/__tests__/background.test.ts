@@ -9,6 +9,7 @@ import {
 } from "../lib/constants";
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
@@ -84,15 +85,8 @@ const DEFAULT_OVERVIEW_PLAINTEXT = JSON.stringify({
   username: "alice",
   urlHost: "example.com",
 });
-let decryptResponses: Record<string, string> = {};
-
-/** Register the plaintext decryptData resolves to for a given ciphertext. Throws
- * on an unmapped ciphertext (see the mockImplementation below) instead of
- * silently returning undefined, so a coverage gap fails loudly in the test that
- * exposed it rather than diverging silently. */
-function setDecryptedPlaintext(ciphertext: string, plaintext: string): void {
-  decryptResponses[ciphertext] = plaintext;
-}
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+const setDecryptedPlaintext = keyedDecrypt.set;
 
 function installChromeMock() {
   messageHandlers = [];
@@ -238,21 +232,8 @@ describe("background message flow", () => {
     chromeMock = installChromeMock();
 
     // Fresh, input-keyed decryptData for every test regardless of what a
-    // preceding test (in any order) registered — vi.clearAllMocks() clears call
-    // history but not implementations, so without this a persistent override or
-    // a leftover keyed entry from an earlier test would otherwise carry forward.
-    decryptResponses = { "11": DEFAULT_OVERVIEW_PLAINTEXT };
-    cryptoMocks.decryptData.mockImplementation(
-      async (encrypted: { ciphertext: string }) => {
-        const plaintext = decryptResponses[encrypted.ciphertext];
-        if (plaintext === undefined) {
-          throw new Error(
-            `decryptData mock miss: no keyed response registered for ciphertext "${encrypted.ciphertext}"`,
-          );
-        }
-        return plaintext;
-      },
-    );
+    // preceding test (in any order) registered — see helpers/keyed-decrypt-mock.
+    keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
 
     vi.stubGlobal(
       "fetch",
