@@ -9,6 +9,7 @@ import {
 } from "../lib/constants";
 import { DISCONNECT_REASON } from "../lib/disconnect-reason";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { createKeyedDecryptMock } from "./helpers/keyed-decrypt-mock";
 import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
@@ -69,6 +70,23 @@ let tabUpdatedHandlers: Array<(tabId: number, changeInfo: { status?: string }, t
 let contextMenuClickHandlers: Array<
   (info: Record<string, unknown>, tab: Record<string, unknown> | undefined) => void
 > = [];
+
+// decryptData is keyed on its input ciphertext rather than call order: UNLOCK_VAULT
+// fires an unawaited context-menu rebuild (invalidateContextMenu -> debounced
+// doUpdateMenu -> getCachedEntries -> decryptOverviews) that also calls decryptData
+// for the overview ciphertext. With a positional mockResolvedValueOnce queue, that
+// extra call can steal the slot a test set up for its own blob/overview decrypt,
+// depending on real-clock timing (the menu rebuild is a real 200ms setTimeout) —
+// an order/timing-dependent failure, not a wrong-but-valid substitution. Keying on
+// the ciphertext removes the race entirely: every caller of decryptData for a given
+// ciphertext gets the same deterministic answer regardless of who called it or when.
+const DEFAULT_OVERVIEW_PLAINTEXT = JSON.stringify({
+  title: "Example",
+  username: "alice",
+  urlHost: "example.com",
+});
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+const setDecryptedPlaintext = keyedDecrypt.set;
 
 function installChromeMock() {
   messageHandlers = [];
@@ -206,6 +224,17 @@ function sendMessageWithSender(message: unknown, sender: unknown): Promise<unkno
     handler(message, sender, (resp) => resolve(resp));
   });
 }
+
+// FILE-LEVEL hook, deliberately outside every describe: the keyed decryptData
+// implementation and its response map are module-scope state, so installing
+// them from only one describe's beforeEach would leak the last flow test's
+// map entries into the other nine describes (which run clearAllMocks only —
+// call history, not implementations). Outer hooks run before inner ones, so
+// a describe that re-establishes its own decryptData (e.g. "tab event badge
+// updates") deterministically wins over this default.
+beforeEach(() => {
+  keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
+});
 
 describe("background message flow", () => {
   beforeEach(async () => {
@@ -644,9 +673,7 @@ describe("background message flow", () => {
   });
 
   it("returns password for COPY_PASSWORD", async () => {
-    cryptoMocks.decryptData.mockResolvedValueOnce(
-      JSON.stringify({ password: "secret" })
-    );
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
@@ -703,9 +730,8 @@ describe("background message flow", () => {
   });
 
   it("autofills successfully", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice" }));
 
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -720,11 +746,11 @@ describe("background message flow", () => {
   });
 
   it("autofills with blob username fallback when overview username is missing", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(
-        JSON.stringify({ password: "secret", loginId: "fallback-user" }),
-      )
-      .mockResolvedValueOnce(JSON.stringify({ username: null }));
+    setDecryptedPlaintext(
+      "aa",
+      JSON.stringify({ password: "secret", loginId: "fallback-user" }),
+    );
+    setDecryptedPlaintext("11", JSON.stringify({ username: null }));
 
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -739,18 +765,18 @@ describe("background message flow", () => {
   });
 
   it("includes text custom fields in autofill payload", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(
-        JSON.stringify({
-          password: "secret",
-          customFields: [
-            { label: "brchNum", value: "001", type: "text" },
-            { label: "apiKey", value: "sk-123", type: "hidden" },
-            { label: "https://example.com", value: "https://example.com", type: "url" },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+    setDecryptedPlaintext(
+      "aa",
+      JSON.stringify({
+        password: "secret",
+        customFields: [
+          { label: "brchNum", value: "001", type: "text" },
+          { label: "apiKey", value: "sk-123", type: "hidden" },
+          { label: "https://example.com", value: "https://example.com", type: "url" },
+        ],
+      }),
+    );
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice" }));
 
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -768,7 +794,8 @@ describe("background message flow", () => {
   });
 
   it("suppresses inline matches on passwd-sso origin", async () => {
-    cryptoMocks.decryptData.mockResolvedValueOnce(
+    setDecryptedPlaintext(
+      "11",
       JSON.stringify({
         title: "Local entry",
         username: "local-user",
@@ -920,10 +947,8 @@ describe("background message flow", () => {
 
   it("succeeds via sendMessage even when executeScript injection fails", async () => {
     chromeMock?.scripting.executeScript.mockRejectedValue(new Error("CSP"));
-    cryptoMocks.decryptData.mockReset();
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice" }));
 
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -934,9 +959,8 @@ describe("background message flow", () => {
   });
 
   it("retries direct inject without hint when args are unserializable", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice", urlHost: "example.com" }));
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice", urlHost: "example.com" }));
 
     // Message-based autofill must fail so direct fallback runs.
     chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
@@ -1014,19 +1038,19 @@ describe("background message flow", () => {
       }),
     );
 
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(
-        JSON.stringify({
-          givenName: "Jane",
-          familyName: "Doe",
-          addressLine1: "123 Main St",
-          city: "Springfield",
-          state: "CA",
-          postalCode: "90210",
-          country: "US",
-        }),
-      )
-      .mockResolvedValueOnce(JSON.stringify({ username: "Jane Doe" }));
+    setDecryptedPlaintext(
+      "aa",
+      JSON.stringify({
+        givenName: "Jane",
+        familyName: "Doe",
+        addressLine1: "123 Main St",
+        city: "Springfield",
+        state: "CA",
+        postalCode: "90210",
+        country: "US",
+      }),
+    );
+    setDecryptedPlaintext("11", JSON.stringify({ username: "Jane Doe" }));
 
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
@@ -1102,13 +1126,11 @@ describe("background message flow", () => {
         return { ok: false, json: async () => ({}) };
       }),
     );
-    // Reset the once-queue: vi.clearAllMocks() (beforeEach) does not clear
-    // mockResolvedValueOnce values, and the sender-host fail-closed tests
-    // reject before consuming their two decrypts, leaving stale queue entries.
-    cryptoMocks.decryptData.mockReset();
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(JSON.stringify({ password: "secret", username: "alice" }))
-      .mockResolvedValueOnce(JSON.stringify(overview));
+    // Keyed by ciphertext (see helpers/keyed-decrypt-mock), so the sender-host
+    // fail-closed tests below — which reject before consuming either decrypt —
+    // never leave a stale entry for a later test to trip over.
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret", username: "alice" }));
+    setDecryptedPlaintext("11", JSON.stringify(overview));
   };
 
   it("rejects a content-driven LOGIN fill when the sender host does not match the entry host", async () => {
@@ -1350,7 +1372,8 @@ describe("background message flow", () => {
     );
     applyToken("t", Date.now() + 60_000, "");
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-    cryptoMocks.decryptData.mockResolvedValue(
+    setDecryptedPlaintext(
+      "aa",
       JSON.stringify({ title: "Card", cardNumber: "4111111111111111", cvv: "123" }),
     );
 

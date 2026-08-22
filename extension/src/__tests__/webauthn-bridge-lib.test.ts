@@ -55,6 +55,10 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    // Unconditional timer restore: an assertion throw between useFakeTimers()
+    // and a trailing in-body useRealTimers() would otherwise leak the fake
+    // clock into later tests in this file (issue #784 teardown class).
+    vi.useRealTimers();
   });
 
   it("ignores events where source !== window", () => {

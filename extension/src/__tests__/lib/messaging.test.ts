@@ -15,7 +15,7 @@ import { sendMessage } from "../../lib/messaging";
 
 describe("sendMessage", () => {
   it("sends a typed message and returns the response", async () => {
-    mockSendMessage.mockResolvedValue({
+    mockSendMessage.mockResolvedValueOnce({
       type: "GET_STATUS",
       hasToken: true,
       expiresAt: 1700000000000,
@@ -35,7 +35,7 @@ describe("sendMessage", () => {
   });
 
   it("passes message payload to chrome.runtime.sendMessage", async () => {
-    mockSendMessage.mockResolvedValue({ type: "COPY_PASSWORD", ok: true });
+    mockSendMessage.mockResolvedValueOnce({ type: "COPY_PASSWORD", ok: true });
 
     await sendMessage({
       type: "COPY_PASSWORD",
@@ -48,7 +48,7 @@ describe("sendMessage", () => {
   });
 
   it("propagates rejection from chrome.runtime.sendMessage", async () => {
-    mockSendMessage.mockRejectedValue(new Error("Extension context invalidated"));
+    mockSendMessage.mockRejectedValueOnce(new Error("Extension context invalidated"));
 
     await expect(sendMessage({ type: "GET_TOKEN" })).rejects.toThrow(
       "Extension context invalidated",

@@ -3,6 +3,7 @@ import {
   EXT_ENTRY_TYPE,
 } from "../../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
+import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
 
@@ -26,6 +27,22 @@ const cryptoMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../../lib/crypto", () => cryptoMocks);
+
+const DEFAULT_OVERVIEW_PLAINTEXT = JSON.stringify({
+  title: "Example",
+  username: "alice",
+  urlHost: "example.com",
+});
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+const setDecryptedPlaintext = keyedDecrypt.set;
+
+function installKeyedDecryptData(): void {
+  // "11" is the overview ciphertext every fetch stub in this file returns —
+  // the only input the fire-and-forget consumer ever requests, so it is
+  // always mapped and the consumer can never hit the miss path
+  // (see helpers/keyed-decrypt-mock for the rationale).
+  keyedDecrypt.install({ "11": DEFAULT_OVERVIEW_PLAINTEXT });
+}
 
 type MessageHandler = (
   message: unknown,
@@ -132,6 +149,7 @@ describe("COPY_TOTP handler", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    installKeyedDecryptData();
     chromeMock = installChromeMock();
 
     vi.stubGlobal(
@@ -201,29 +219,36 @@ describe("COPY_TOTP handler", () => {
   });
 
   it("returns TOTP code when blob contains totp data", async () => {
-    vi.spyOn(Date, "now").mockReturnValue(59_000);
-    cryptoMocks.decryptData.mockResolvedValueOnce(
-      JSON.stringify({ totp: { secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 } }),
-    );
-    await unlockVault();
+    // Date.now is spied (not stubbed globally), so it must be restored on this
+    // spy specifically — restoreAllMocks would also wipe the vi.hoisted
+    // generateTOTPCode/decryptData default implementations set once at file
+    // load, breaking default-order tests that rely on them.
+    const dateNowSpy = vi.spyOn(Date, "now").mockReturnValue(59_000);
+    try {
+      setDecryptedPlaintext(
+        "aa",
+        JSON.stringify({ totp: { secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 } }),
+      );
+      await unlockVault();
 
-    const res = await sendMsg({ type: "COPY_TOTP", entryId: "pw-1" });
-    expect(res).toEqual({
-      type: "COPY_TOTP",
-      code: "123456",
-    });
-    expect(totpMock.generateTOTPCode).toHaveBeenCalledWith({
-      secret: "JBSWY3DPEHPK3PXP",
-      algorithm: "SHA1",
-      digits: 6,
-      period: 30,
-    });
+      const res = await sendMsg({ type: "COPY_TOTP", entryId: "pw-1" });
+      expect(res).toEqual({
+        type: "COPY_TOTP",
+        code: "123456",
+      });
+      expect(totpMock.generateTOTPCode).toHaveBeenCalledWith({
+        secret: "JBSWY3DPEHPK3PXP",
+        algorithm: "SHA1",
+        digits: 6,
+        period: 30,
+      });
+    } finally {
+      dateNowSpy.mockRestore();
+    }
   });
 
   it("returns NO_TOTP when blob has no totp data", async () => {
-    cryptoMocks.decryptData.mockResolvedValueOnce(
-      JSON.stringify({ password: "secret" }),
-    );
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
     await unlockVault();
 
     const res = await sendMsg({ type: "COPY_TOTP", entryId: "pw-1" });
@@ -235,7 +260,8 @@ describe("COPY_TOTP handler", () => {
   });
 
   it("returns INVALID_TOTP when generateTOTPCode throws", async () => {
-    cryptoMocks.decryptData.mockResolvedValueOnce(
+    setDecryptedPlaintext(
+      "aa",
       JSON.stringify({ totp: { secret: "JBSWY3DPEHPK3PXP", digits: 99 } }),
     );
     totpMock.generateTOTPCode.mockImplementationOnce(() => {
@@ -256,6 +282,7 @@ describe("AUTOFILL with TOTP", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    installKeyedDecryptData();
     chromeMock = installChromeMock();
 
     vi.stubGlobal(
@@ -316,15 +343,15 @@ describe("AUTOFILL with TOTP", () => {
   });
 
   it("includes totpCode in content-script message when totp exists", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(
-        JSON.stringify({
-          password: "secret",
-          totp: { secret: "JBSWY3DPEHPK3PXP" },
-        }),
-      )
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
-    totpMock.generateTOTPCode.mockReturnValue("654321");
+    setDecryptedPlaintext(
+      "aa",
+      JSON.stringify({
+        password: "secret",
+        totp: { secret: "JBSWY3DPEHPK3PXP" },
+      }),
+    );
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice" }));
+    totpMock.generateTOTPCode.mockReturnValueOnce("654321");
 
     await unlockVault();
 
@@ -342,9 +369,8 @@ describe("AUTOFILL with TOTP", () => {
   });
 
   it("does not include totpCode when totp is absent", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(JSON.stringify({ password: "secret" }))
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+    setDecryptedPlaintext("aa", JSON.stringify({ password: "secret" }));
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice" }));
 
     await unlockVault();
 
@@ -357,14 +383,14 @@ describe("AUTOFILL with TOTP", () => {
   });
 
   it("continues autofill without totpCode when generateTOTPCode throws", async () => {
-    cryptoMocks.decryptData
-      .mockResolvedValueOnce(
-        JSON.stringify({
-          password: "secret",
-          totp: { secret: "JBSWY3DPEHPK3PXP", digits: 99 },
-        }),
-      )
-      .mockResolvedValueOnce(JSON.stringify({ username: "alice" }));
+    setDecryptedPlaintext(
+      "aa",
+      JSON.stringify({
+        password: "secret",
+        totp: { secret: "JBSWY3DPEHPK3PXP", digits: 99 },
+      }),
+    );
+    setDecryptedPlaintext("11", JSON.stringify({ username: "alice" }));
     totpMock.generateTOTPCode.mockImplementationOnce(() => {
       throw new Error("INVALID_TOTP");
     });
