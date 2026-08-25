@@ -43,11 +43,19 @@ import { Project, ts } from "ts-morph";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative } from "node:path";
 
-/** True for a source file we scan (.ts/.tsx, excluding test files). */
+/**
+ * True for a source file we scan (.ts/.tsx, excluding test files).
+ *
+ * `.spec.` is listed alongside `.test.` for the reason the module docblock
+ * gives: the drift this file exists to stop was one copy excluding `.test.ts`
+ * but not `.test.tsx`. A copy excluding `.test.` but not `.spec.` is the same
+ * shape. No `.spec.ts` exists under any current scan root, so this changes no
+ * gate's selection today — it removes a way for them to disagree tomorrow.
+ */
 function isScannableSourceFile(name) {
   const ext = extname(name);
   if (ext !== ".ts" && ext !== ".tsx") return false;
-  return !name.endsWith(".test.ts") && !name.endsWith(".test.tsx");
+  return !/\.(test|spec)\.(ts|tsx)$/.test(name);
 }
 
 /** A fresh in-memory ts-morph project (no Program / no dependency resolution). */
@@ -61,8 +69,10 @@ export function createAstProject() {
 
 /**
  * Recursively collect .ts/.tsx source files under `dir`, EXCLUDING test files
- * (`*.test.ts`, `*.test.tsx`) and anything under a `__tests__` directory.
- * Missing directories yield an empty list (never throws).
+ * (`*.test.*`, `*.spec.*`) and anything under a `__tests__` directory.
+ *
+ * Missing directories yield an empty list. A SYMLINK throws — see below; that is
+ * the one input this walker refuses rather than guessing about.
  */
 export function walkSourceFiles(dir) {
   const out = [];
@@ -74,6 +84,33 @@ export function walkSourceFiles(dir) {
   }
   for (const e of entries) {
     const full = join(dir, e.name);
+    // A Dirent reports a symlink as NEITHER directory nor file, so a symlinked
+    // directory used to fall past both branches and its whole subtree went
+    // unscanned with no signal — a gate examining less than it claims reports
+    // the same green as one that found nothing.
+    //
+    // Refuse rather than follow. Following looked like the fix and is worse:
+    // both exclusions below key on the ENTRY name, so `ln -s ./__tests__ x`
+    // and `ln -s ./a.test.ts b.ts` walk straight through them — reopening, for
+    // every gate that uses this module, the exact hole the manifest scan was
+    // being fixed for. It also removes the walk's boundary: a link to
+    // node_modules took one probe from 0 to 14,019 files, and a gate printed
+    // the source of a file outside the repository into a CI log under an
+    // in-repo path that does not exist.
+    //
+    // No tracked symlink exists in this repo (`git ls-files -s | awk
+    // '$1=="120000"'` is empty), so this costs nothing today. If one is ever
+    // added under a scan root, that is a decision about what "shipped source"
+    // means, and it should be made deliberately — not resolved by whichever
+    // behaviour this walker happens to have.
+    if (e.isSymbolicLink()) {
+      throw new Error(
+        `walkSourceFiles: refusing to decide about a symlink: ${full}\n` +
+          `  Following it would let the __tests__ / *.test.* exclusions be bypassed by naming, ` +
+          `and would let the walk leave the repository.\n` +
+          `  Replace it with a real file or directory, or move it outside the gate scan roots.`,
+      );
+    }
     if (e.isDirectory()) {
       if (e.name === "__tests__") continue;
       out.push(...walkSourceFiles(full));

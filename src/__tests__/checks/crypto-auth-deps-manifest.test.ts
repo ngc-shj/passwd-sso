@@ -26,6 +26,9 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import path from "node:path";
 import { parseRouteSource } from "../proxy/ast-guards";
 import { Node, SyntaxKind } from "ts-morph";
+// The repo's single source of truth for "which files are shipped source" — see
+// its docblock for why a local copy is the thing to avoid.
+import { walkSourceFiles as sharedWalkSourceFiles } from "../../../scripts/checks/lib/ast-project.mjs";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 const MANIFEST_PATH = path.join(REPO_ROOT, "scripts/checks/crypto-auth-deps-manifest.json");
@@ -253,24 +256,31 @@ export function computeMetadataViolations(
 
 // ── helpers for walking the real tree ───────────────────────────────────────
 
-function walkSourceFiles(root: string): string[] {
+/**
+ * The walk is NOT implemented here. `scripts/checks/lib/ast-project.mjs` already
+ * owns this exact policy — skip `__tests__` directories, skip `*.test.*` /
+ * `*.spec.*` files — and its docblock says why it exists: hand-rolled copies
+ * drifted, one excluding `.test.ts` but not `.test.tsx`, silently scanning a
+ * test tree. A copy here would have been the third spelling of one rule.
+ *
+ * What that gives this file, beyond not drifting: the shared walker follows
+ * symlinks (resolving a Dirent that reports a symlinked directory as neither
+ * file nor directory, which silently dropped its whole subtree), and it guards
+ * the cycle that following them makes reachable.
+ *
+ * Residual, unchanged by any of this: a crypto import of a *devDependency*
+ * inside a test-support file is observed by nothing. It was already true of
+ * every `*.test.ts` via the filename filter — this makes helpers consistent
+ * with their siblings rather than opening a gap. A *runtime* dependency stays
+ * covered by (C)/(E), but note those read `package.json` and fire identically
+ * whether or not the import exists: they cover the DEPENDENCY, not the import.
+ */
+export function walkSourceFiles(root: string): string[] {
   const abs = path.join(REPO_ROOT, root);
   if (!existsSync(abs)) return [];
-  // If root points at a single file, handle it directly.
-  if (root.endsWith(".ts") || root.endsWith(".tsx")) {
-    return [abs];
-  }
-  const files: string[] = [];
-  for (const entry of readdirSync(abs, { withFileTypes: true })) {
-    const full = path.join(abs, entry.name);
-    const rel = path.join(root, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...walkSourceFiles(rel));
-    } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) {
-      files.push(full);
-    }
-  }
-  return files;
+  // A CODE_ROOTS entry may name a single file rather than a directory.
+  if (root.endsWith(".ts") || root.endsWith(".tsx")) return [abs];
+  return sharedWalkSourceFiles(abs);
 }
 
 function codeSpecifiersForWorkspace(workspace: string): Set<string> {
@@ -601,5 +611,83 @@ describe("RT7 self-test — DEPS name-pattern heuristic (T3)", () => {
   it("does not surface a clearly non-crypto name", () => {
     expect(CRYPTO_NAME_RE.test("chalk")).toBe(false);
     expect(CRYPTO_NAME_RE.test("commander")).toBe(false);
+  });
+});
+
+describe("RT7 self-test — the scan omits test-support files and nothing else", () => {
+  // A helper under __tests__/ that is not itself named *.test.ts. Asserted to
+  // exist first: if it is ever deleted, these cases must fail loudly rather
+  // than pass by having nothing left to exclude.
+  const HELPER = "extension/src/__tests__/helpers/keyed-decrypt-mock.ts";
+
+  /** Same walk, with no exclusions at all — the baseline the delta is against. */
+  function walkEverything(root: string): string[] {
+    const abs = path.join(REPO_ROOT, root);
+    if (!existsSync(abs)) return [];
+    if (root.endsWith(".ts") || root.endsWith(".tsx")) return [abs];
+    const out: string[] = [];
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      const rel = path.join(root, entry.name);
+      if (entry.isDirectory()) out.push(...walkEverything(rel));
+      else if (/\.(ts|tsx)$/.test(entry.name)) out.push(path.join(abs, entry.name));
+    }
+    return out;
+  }
+
+  it("has the fixture this case is about", () => {
+    expect(existsSync(path.join(REPO_ROOT, HELPER)), `${HELPER} is gone`).toBe(true);
+  });
+
+  it("would report the helper's import as unregistered if it were scanned", () => {
+    // The whole point of excluding it. Asserting only that the source yields
+    // `vitest` leaves open that `vitest` is in the manifest's excluded map, in
+    // which case the exclusion would be a no-op and every case here still green.
+    const source = readFileSync(path.join(REPO_ROOT, HELPER), "utf8");
+    const manifest = loadManifest();
+    const packages = new Set(
+      Object.entries(manifest.packages)
+        .filter(([, e]) => e.workspace === "extension")
+        .map(([k, e]) => entryPackage(k, e)),
+    );
+    const excluded = new Set(
+      Object.entries(manifest.excluded)
+        .filter(([, e]) => e.workspace === "extension")
+        .map(([k, e]) => entryPackage(k, e)),
+    );
+    expect(
+      computeUnregisteredImports(extractExternalSpecifiers(source, HELPER), packages, excluded),
+    ).toEqual(["vitest"]);
+  });
+
+  it("drops only files inside a __tests__ directory, across every workspace", () => {
+    // The invariant that survives a rename of the exclusion constant, a widening
+    // written into the walk condition rather than the constant, and a reviewer
+    // "fixing" a value assertion by updating its expected array. Each of those
+    // kept a pinned-value form green while a shipped file with an unregistered
+    // crypto import went unscanned.
+    for (const [workspace, roots] of Object.entries(CODE_ROOTS)) {
+      const scanned = new Set(roots.flatMap((r) => walkSourceFiles(r)));
+      const dropped = roots
+        .flatMap((r) => walkEverything(r))
+        .filter((f) => !scanned.has(f))
+        .map((f) => path.relative(REPO_ROOT, f));
+      const unexpected = dropped.filter(
+        (f) => !f.split(path.sep).includes("__tests__") && !/\.(test|spec)\.(ts|tsx)$/.test(f),
+      );
+      expect(unexpected, `${workspace} dropped non-test files`).toEqual([]);
+    }
+  });
+
+  it("omits the helper, and every other file under __tests__/", () => {
+    const scanned = walkSourceFiles("extension/src").map((f) => path.relative(REPO_ROOT, f));
+    expect(scanned).not.toContain(HELPER);
+    expect(scanned.filter((f) => f.split(path.sep).includes("__tests__"))).toEqual([]);
+  });
+
+  it("still scans ordinary source under the same root", () => {
+    // Allow side: an exclusion that emptied the set would make the whole (A)
+    // reconciliation vacuous.
+    const scanned = walkSourceFiles("extension/src");
+    expect(scanned.length).toBeGreaterThan(0);
   });
 });
