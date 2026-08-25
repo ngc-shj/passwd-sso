@@ -199,7 +199,7 @@ interface TenantState {
   inFailedState: boolean;
 }
 
-async function runTick(
+export async function runTick(
   prisma: PrismaClient,
   states: Map<string, TenantState>,
 ): Promise<void> {
