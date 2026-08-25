@@ -1645,3 +1645,87 @@ describe("FIX #2: validateWebhookDeliveryLease fail-closed guard", () => {
     expect(validateWebhookDeliveryLease(2 * WEBHOOK_WORST_CASE_PER_ITEM_MS)).toBeNull();
   });
 });
+
+/**
+ * The depth check is the watchdog for `outbox.depth.alert`: while it throws,
+ * that alert can never fire, so a silent failure makes "no alert" read as
+ * "outbox healthy". docs/operations/alerts.md keys its Datadog/Loki rules on
+ * the exact `_logType` literal and on the error level, so both are pinned
+ * here — asserting only "something was logged" would still pass against the
+ * original `.warn` call that let this go unnoticed for 1821+ iterations.
+ *
+ * The 22P02 failure itself is connection-scoped and cannot be reproduced with
+ * these mocks; see audit-outbox-depth-check.integration.test.ts for that half.
+ */
+describe("outbox.depth.check_failed observability contract", () => {
+  beforeEach(() => {
+    resetMocks();
+  });
+
+  const DEPTH_SQL_MARKER = "EXTRACT(EPOCH";
+
+  function driveDepthCheck(
+    worker: ReturnType<typeof createWorker>,
+    opts: { failDepth: boolean },
+  ): void {
+    mockTransaction.mockImplementation(async function (fn: TxFn) {
+      const txQueryRaw = vi.fn(async (...args: unknown[]) => {
+        const sql = typeof args[0] === "string" ? args[0] : "";
+        if (sql.includes(DEPTH_SQL_MARKER) && sql.includes("audit_outbox")) {
+          // Stop before throwing: the throw unwinds into checkDepthAlert's
+          // catch, so there is no later point in this iteration to stop from.
+          worker.stop();
+          if (opts.failDepth) {
+            throw new Error('invalid input syntax for type uuid: ""');
+          }
+          return [{ pending: 0n, oldest_age_secs: 0 }];
+        }
+        return [];
+      });
+      return fn({
+        $executeRaw: mockExecuteRaw,
+        $queryRawUnsafe: txQueryRaw,
+        $executeRawUnsafe: mockExecuteRawUnsafe,
+        auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+        auditDelivery: {
+          upsert: vi.fn().mockResolvedValue({}),
+          findMany: vi.fn().mockResolvedValue([]),
+          update: vi.fn().mockResolvedValue({}),
+        },
+      });
+    });
+  }
+
+  it("logs at error level with _logType when the depth query throws", async () => {
+    const worker = createWorker({ databaseUrl: TEST_DB_URL });
+    driveDepthCheck(worker, { failDepth: true });
+    await worker.start();
+
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ _logType: "outbox.depth.check_failed" }),
+      "outbox.depth.check_failed",
+    );
+    // The level is the point: a regression back to warn must fail this test.
+    expect(mockLoggerWarn).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "outbox.depth.check_failed",
+    );
+  });
+
+  it("logs nothing for a depth check that succeeds under threshold", async () => {
+    const worker = createWorker({ databaseUrl: TEST_DB_URL });
+    driveDepthCheck(worker, { failDepth: false });
+    await worker.start();
+
+    // Allow side: a healthy check must stay silent, or the alert rule pages
+    // on every poll and gets muted.
+    expect(mockLoggerError).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "outbox.depth.check_failed",
+    );
+    expect(mockLoggerError).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "outbox.depth.alert",
+    );
+  });
+});

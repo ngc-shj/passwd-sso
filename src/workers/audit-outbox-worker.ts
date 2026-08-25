@@ -688,9 +688,17 @@ async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Pr
     ...new Set(deliveries.map((d) => d.outboxId).filter((id) => UUID_RE.test(id))),
   ];
   if (outboxIds.length === 0) return deliveries.length;
-  const outboxRows = await prisma.auditOutbox.findMany({
-    where: { id: { in: outboxIds } },
-    select: { id: true, createdAt: true, payload: true, tenantId: true },
+  // Bypass tx required, same reason as checkDepthAlert: this runs after the
+  // claim transaction above has already committed on this pooled connection,
+  // so app.tenant_id has reverted to the session default '' and the
+  // audit_outbox RLS policy would cast ''::uuid (22P02). Only reachable when
+  // an audit_deliveries row is PENDING, which is why it has not surfaced.
+  const outboxRows = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.auditOutbox.findMany({
+      where: { id: { in: outboxIds } },
+      select: { id: true, createdAt: true, payload: true, tenantId: true },
+    });
   });
   const outboxById = new Map(outboxRows.map((o) => [o.id, o]));
 
@@ -1729,6 +1737,46 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
   }
 }
 
+/**
+ * Read the current outbox depth. Exported as a seam so the bypass-transaction
+ * requirement can be exercised against a real pooled connection — the failure
+ * this guards against (GUC reverting to '' after the first bypass tx, then
+ * ''::uuid in the RLS policy) is connection-scoped state that a mocked
+ * `$transaction` cannot represent.
+ *
+ * MUST run inside a bypass transaction. Reading audit_outbox on a bare pool
+ * connection fails: the `tenant_id = current_setting('app.tenant_id', true)::uuid`
+ * branch of the RLS policy casts an EMPTY STRING and raises 22P02. A custom GUC
+ * set with `SET LOCAL` does not revert to unset when the transaction ends — it
+ * reverts to the session default, which is '' once the GUC has been touched at
+ * all. So after the first bypass tx on a pooled connection, current_setting(...)
+ * returns '' rather than NULL for the rest of that connection's life, and
+ * `''::uuid` errors before the OR-bypass clause can short-circuit. Same trap
+ * documented in scripts/rls-cross-tenant-verify.sql (Block 4's nil-sentinel
+ * comment).
+ */
+export async function readOutboxDepth(
+  prisma: PrismaClient,
+): Promise<{ pending: number; oldestAgeSecs: number }> {
+  const rows = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$queryRawUnsafe<
+      Array<{ pending: bigint; oldest_age_secs: number | null }>
+    >(`
+      SELECT
+        COUNT(*)::bigint AS pending,
+        EXTRACT(EPOCH FROM (now() - MIN(created_at)))::int AS oldest_age_secs
+      FROM audit_outbox
+      WHERE status = 'PENDING'
+    `);
+  });
+  const r = rows[0];
+  return {
+    pending: Number(r?.pending ?? 0),
+    oldestAgeSecs: r?.oldest_age_secs ?? 0,
+  };
+}
+
 // ��── Worker ─────────────────────────────────────────────────────
 
 export function createWorker(config: WorkerConfig) {
@@ -1902,18 +1950,8 @@ export function createWorker(config: WorkerConfig) {
 
   async function checkDepthAlert(): Promise<void> {
     try {
-      const rows = await workerPrisma.$queryRawUnsafe<
-        Array<{ pending: bigint; oldest_age_secs: number | null }>
-      >(`
-        SELECT
-          COUNT(*)::bigint AS pending,
-          EXTRACT(EPOCH FROM (now() - MIN(created_at)))::int AS oldest_age_secs
-        FROM audit_outbox
-        WHERE status = 'PENDING'
-      `);
-      const r = rows[0];
-      const pending = Number(r?.pending ?? 0);
-      const oldestAge = r?.oldest_age_secs ?? 0;
+      const { pending, oldestAgeSecs: oldestAge } =
+        await readOutboxDepth(workerPrisma);
       const overThreshold =
         pending > pendingThreshold || oldestAge > oldestThresholdSecs;
 
@@ -1941,7 +1979,14 @@ export function createWorker(config: WorkerConfig) {
         lastDepthAlertAt = 0;
       }
     } catch (err) {
-      getLogger().warn({ err }, "outbox.depth.check_failed");
+      // error, not warn: while this throws, `outbox.depth.alert` can never
+      // fire, so a silent depth check makes "no alert" indistinguishable from
+      // "outbox healthy". The _logType is what alerting matches on — without
+      // it this line is invisible to the rules in docs/operations/alerts.md.
+      getLogger().error(
+        { err, _logType: "outbox.depth.check_failed" },
+        "outbox.depth.check_failed",
+      );
     }
   }
 

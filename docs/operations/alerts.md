@@ -71,6 +71,40 @@ on `audit_logs` for the `passwd_outbox_worker` role.
 Datadog: `{ _logType="outbox.depth.alert" } | count`
 Loki: `{_logType="outbox.depth.alert"} | json`
 
+## `outbox.depth.check_failed`
+
+Emitted by `src/workers/audit-outbox-worker.ts` when the depth query
+itself throws. **This is the watchdog for the alert above**: while it
+fires, `outbox.depth.alert` cannot fire at all, so a silent outbox
+means "the check is broken", not "the outbox is healthy". Alerting on
+`outbox.depth.alert` alone therefore fails open — pair the two.
+
+The check runs on the reaper cadence (every 30s by default), so a
+persistent fault repeats until fixed; dedupe in the alert rule rather
+than sampling, or a transient single failure is lost.
+
+**Severity**: high
+**Trigger**: any occurrence
+**Recovery**: read `err` on the log line. Known cause: running the
+depth query outside a bypass transaction, which trips the
+`audit_outbox` RLS policy's `''::uuid` cast (Postgres error 22P02 —
+`invalid input syntax for type uuid: ""`). A custom GUC set via
+`SET LOCAL` reverts to the session default (`''`), not to unset, when
+the transaction ends, so every pooled connection that has run one
+bypass transaction fails this query afterwards.
+
+The same trap applies to any read of an RLS-forced table by a
+`NOBYPASSRLS` role on a pooled connection. Inside
+`src/workers/audit-outbox-worker.ts` the local helper is
+`setBypassRlsGucs`; elsewhere use `withBypassRls` from
+`src/lib/tenant-rls.ts`. Note this is a convention, not an enforced
+invariant — no gate currently derives the set of RLS-table reads and
+checks each one is wrapped, so a new unwrapped read will not be
+caught at review time.
+
+Datadog: `{ _logType="outbox.depth.check_failed" } | count`
+Loki: `{_logType="outbox.depth.check_failed"} | json`
+
 ## `audit-chain-verify-heartbeat`
 
 Emitted by `scripts/audit-chain-verify-worker.ts` on every hourly

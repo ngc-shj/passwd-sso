@@ -376,7 +376,11 @@ fi
 # Cross-tenant SQL parse check (issue #434). Runs against the local docker DB
 # if reachable; skips gracefully otherwise (preserves pre-pr.sh's "no Postgres
 # required" contract for the static checks above).
-if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -U passwd_user -q 2>/dev/null; then
+# -d passwd_sso is load-bearing: without it libpq defaults dbname to the user
+# name and the probe emits `FATAL: database "passwd_user" does not exist` into
+# the Postgres server log on every pre-pr run. The probe still answers the
+# reachability question either way, so this is log noise, not a broken gate.
+if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -U passwd_user -d passwd_sso -q 2>/dev/null; then
   run_step "Static: rls-cross-tenant SQL parse" bash -c '
     set -uo pipefail
     # sed (not awk) — bash -c "..." double-escapes positional vars and breaks awk $1 references.
@@ -384,8 +388,40 @@ if command -v docker >/dev/null 2>&1 && docker exec passwd-sso-db-1 pg_isready -
       scripts/rls-cross-tenant-tables.manifest | paste -sd,)
     out=$(cat scripts/rls-cross-tenant-verify.sql | docker exec -i passwd-sso-db-1 \
       psql -U passwd_app -d passwd_sso -v ON_ERROR_STOP=1 -v expected_tables="$EXPECTED_TABLES" 2>&1) && ec=0 || ec=$?
-    # Whitelist exact codes — typos like [E-RLS-NUL] would otherwise pass.
-    if (( ec == 0 )) || grep -qE "\[E-RLS-(MANIFEST-(EXTRA|MISSING)|COLPARITY|COUNT-A|COUNT-B|NULL|SYM|BYPASS|DISCOVER|ROLE|COVERAGE|FORCE|SECDEF)\]" <<<"$out"; then
+    if (( ec == 0 )); then
+      exit 0
+    fi
+    # NOTE: no apostrophes in this block — it is a single-quoted bash -c body.
+    #
+    # ONLY the row-counting blocks are whitelisted. COUNT-A / COUNT-B / BYPASS
+    # count rows seeded by scripts/rls-cross-tenant-seed.sql, which is additive
+    # (no teardown) and blindly re-GRANTs every table to passwd_app, so it is
+    # only ever run against the ephemeral CI database. Against a long-lived dev
+    # DB those three can never pass, and that is not a local defect.
+    #
+    # Every OTHER code stays fatal here. Block 1 of rls-cross-tenant-verify.sql
+    # (ROLE, DISCOVER, NULL, SYM, COLPARITY, MANIFEST-EXTRA, MANIFEST-MISSING,
+    # FORCE, SECDEF) is pure pg_catalog inspection with NO seed dependency — it
+    # runs and passes locally today. Whitelisting those would green a dropped
+    # FORCE ROW LEVEL SECURITY, a new SECURITY DEFINER function in public, or a
+    # tenant_id column added without a policy. COVERAGE belongs to
+    # rls-cross-tenant-coverage.sql, which this step never runs.
+    #
+    # `|| true` + the -n test, not `if matched=$(...)`: testing the exit status
+    # of the grep|sort|paste pipeline is correct ONLY while `pipefail` is set
+    # above. Drop pipefail and that pipeline reports paste-s status — 0 with no
+    # match — which would whitelist ANY failure, including a genuine parse
+    # error. Testing the captured string instead holds either way.
+    matched=$(grep -oE "\[E-RLS-(COUNT-A|COUNT-B|BYPASS)\]" <<<"$out" | sort -u | paste -sd" ") || true
+    if [ -n "$matched" ]; then
+      # Deliberately NOT "parse OK": ON_ERROR_STOP=1 aborts psql at the first
+      # failing block, so every statement after it went unparsed. Claiming the
+      # whole file parsed would be a stronger statement than the run supports.
+      printf "  Parsed up to the first row-count block, which failed as expected\n"
+      printf "  on an unseeded dev DB: %s. Statements after it were NOT parsed.\n" "$matched"
+      printf "  These also appear as ERROR lines in the passwd-sso-db-1 log; they come from\n"
+      printf "  this step, not from a cross-tenant breach. The CI job \"RLS: Role separation\n"
+      printf "  smoke test\" seeds first and enforces all blocks.\n"
       exit 0
     fi
     printf "%s\n" "$out"

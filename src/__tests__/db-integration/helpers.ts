@@ -81,10 +81,20 @@ export interface PrismaWithPool {
   pool: pg.Pool;
 }
 
-export function createPrismaForRole(role: TestRole): PrismaWithPool {
+/**
+ * `opts.max` pins the pool size. Pass `max: 1` when a test needs two
+ * statements to land on the SAME backend connection — connection-scoped
+ * state (custom GUCs surviving a transaction, session settings) is invisible
+ * at the default size, because the second statement may get a fresh
+ * connection and the test then passes against the very bug it targets.
+ */
+export function createPrismaForRole(
+  role: TestRole,
+  opts?: { max?: number },
+): PrismaWithPool {
   const pool = new pg.Pool({
     connectionString: getConnectionString(role),
-    max: 3,
+    max: opts?.max ?? 3,
     idleTimeoutMillis: 10_000,
     statement_timeout: 30_000,
   });
