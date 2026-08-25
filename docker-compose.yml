@@ -1,3 +1,41 @@
+# Container log caps.
+#
+# Docker's default json-file driver has NO rotation limit. A service stuck in a
+# per-second retry loop writes until the disk fills — a single misconfigured DB
+# role produced 4.5 GB across two containers in 27 hours on the dev host, and
+# nothing bounded it. The cap makes the worst case a function of the container
+# count, not of how long the failure goes unnoticed.
+#
+# 20m x 5 is deliberately generous rather than minimal, because two of these
+# streams are forensically load-bearing:
+#
+#   - app stdout carries the synchronous audit line (_logType "audit") — but
+#     only when AUDIT_LOG_FORWARD=true, which .env.example ships as false and
+#     only docker-compose.logging.yml sets, and that overlay moves app off
+#     json-file onto fluentd. So the cap governs it in no shipped config.
+#   - app and worker stdout always carry deadLetterLogger (_logType
+#     "audit-dead-letter", src/lib/audit/audit-logger.ts:93-96) — the record of
+#     an audit event that never reached audit_outbox. Most have a durable
+#     AUDIT_OUTBOX_DEAD_LETTER row behind them, so rotation costs alerting
+#     latency rather than the record; the exception is the app-side
+#     tenant_not_found path (src/lib/audit/audit.ts:259-264), which returns
+#     without enqueuing anything, making stdout the only copy.
+#
+# docker-compose.logging.yml ships the APP stream off-host, but do not read that
+# as a way to retain dead-letters past the rotation window: its Fluent Bit filter
+# matches `_logType ^(audit|app)$`, so audit-dead-letter records are dropped
+# before any output sees them. It also defines no worker services. Both halves of
+# that stream therefore stay host-local and bounded by this cap.
+#
+# YAML anchors do not cross compose files, so each overlay repeats this block
+# for the services it defines. Nothing in YAML enforces that — the gate is
+# scripts/checks/check-compose-log-caps.mjs, run by scripts/pre-pr.sh.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   app:
     build:
@@ -29,6 +67,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
 
@@ -55,6 +94,7 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
     # Do NOT expose port 5432 to host in production
@@ -84,6 +124,7 @@ services:
       retries: 10
       start_period: 60s
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
     # Do NOT expose port 5225 to host in production
@@ -104,6 +145,7 @@ services:
         condition: service_healthy
     command: ["npx", "prisma", "migrate", "deploy"]
     restart: "no"
+    logging: *default-logging
     networks:
       - internal
 
@@ -121,6 +163,7 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
 

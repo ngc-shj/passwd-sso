@@ -26,6 +26,14 @@
 # Do NOT combine this with docker-compose.override.yml in production — the dev
 # override exposes DB/Jackson/Redis ports to the host and runs the tsx source.
 
+# Repeated from docker-compose.yml — YAML anchors do not cross compose files.
+# See the comment there for why the cap exists and why it is this size.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   audit-outbox-worker:
     build:
@@ -49,6 +57,7 @@ services:
         required: false
     command: ["node", "dist/audit-outbox-worker.js"]
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
 
@@ -74,5 +83,6 @@ services:
         required: false
     command: ["node", "dist/retention-gc-worker.js"]
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal

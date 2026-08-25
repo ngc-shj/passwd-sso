@@ -455,3 +455,279 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pa
 The Docker Compose dev setup enforces the same role separation: the `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) while the `migrate` service connects as `passwd_user` (SUPERUSER). RLS is enforced in all environments.
 
 > **⚠️ Breaking change for existing dev environments**: After upgrading, run `docker compose down -v && docker compose up` to recreate the database with the new `passwd_app` role. The initdb scripts only run on first initialization (empty volume).
+
+### Jackson runs as its own role (`jackson_user`) since v0.4.57
+
+Jackson used to connect to the `jackson` database as the bootstrap superuser
+(`passwd_user`). It now connects as `jackson_user` — NOSUPERUSER, NOBYPASSRLS,
+owner of the `jackson` database only, and without `CONNECT` on `passwd_sso`.
+
+`jackson_user` is created by `infra/postgres/initdb/01-create-jackson-db.sql`,
+and **initdb runs only against an empty data directory**. On a volume
+initialized before this change the role does not exist, so after upgrading,
+Jackson fails to connect — every second, forever:
+
+```
+error connecting to engine: sql, type: postgres db: error:
+password authentication failed for user "jackson_user"
+```
+
+PostgreSQL returns *authentication failed* for a role that does not exist at all
+(it does not confirm which names are valid), so this reads as a wrong password.
+Confirm which it is before changing anything:
+
+```bash
+docker compose exec db psql -U passwd_user -d postgres \
+  -Atc "SELECT count(*) FROM pg_roles WHERE rolname = 'jackson_user'"
+```
+
+Both counts need an answer, because the error message does not distinguish them:
+
+- `0` — the role was never created. Repair below.
+- `1` — the role exists but Jackson still cannot authenticate, so its password or
+  its `LOGIN` attribute is out of sync. This is not hypothetical:
+  `01-create-jackson-db.sql` creates the role **NOLOGIN** when
+  `PASSWD_JACKSON_PASSWORD` was unset at first boot. The same repair below
+  covers it — it converges the role rather than only creating it.
+
+Jackson keeps its HTTP port open while it retries, so it accepts TCP connections
+and never answers. Docker's own health check does bound this (`timeout: 10s`), so
+the container goes `unhealthy` after roughly `start_period` + `retries` ×
+`interval`, and a fresh `docker compose up` aborts with `dependency failed to
+start … is unhealthy` because `app` gates on `service_healthy`. An *external*
+probe without a timeout is the one that hangs instead of failing — check
+`docker compose ps jackson` first.
+
+#### Repair (data-preserving, operator-only)
+
+> **Takes `ACCESS EXCLUSIVE` locks on the Jackson tables.** Stop Jackson first;
+> a live writer will block or fail. Run it in a maintenance window.
+
+Ownership must move along with the role: the tables inside the `jackson`
+database are still owned by `passwd_user`, and creating the role alone leaves
+Jackson unable to write to them. `REASSIGN OWNED BY` cannot be used —
+PostgreSQL refuses to reassign objects owned by the bootstrap superuser.
+
+```bash
+docker compose stop jackson
+
+# Record the SAML connection count. The repair must not change it.
+# to_regclass keeps this from erroring on a volume where Jackson never ran its
+# schema bootstrap — which is exactly the NOLOGIN case above.
+docker compose exec -T db psql -U passwd_user -d jackson -Atc \
+  "SELECT CASE WHEN to_regclass('public.jackson_store') IS NULL
+               THEN -1 ELSE (SELECT count(*) FROM jackson_store) END"   # call this N
+```
+
+`N = -1` means Jackson has never connected, so there is no schema and nothing to
+preserve: skip verify checks 2 and 3 below, and expect check 1 to be trivially
+satisfied because the database is empty. `N = 0` — tables exist but hold no
+connections — is also legitimate; check 3 still applies.
+
+Step 1 — converge the role. No `PASSWORD` clause here: `log_min_error_statement`
+defaults to `error`, so a statement that fails is written to the server log in
+full, and under `log_statement=ddl` every DDL statement is logged whether it
+fails or not. Either way the cleartext would land in the `db` container's log.
+
+```bash
+docker compose exec -T db psql -U passwd_user -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'jackson_user') THEN
+    CREATE ROLE jackson_user;
+  END IF;
+END $$;
+
+-- Report what we are about to converge, so a role that was hand-repaired into
+-- something privileged is visible rather than silently demoted.
+SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolreplication
+  FROM pg_roles WHERE rolname = 'jackson_user';
+
+-- Unconditional, so a role that already exists is converged rather than left
+-- as-is. This CLEARS the attributes above; it is the repair, not a check.
+ALTER ROLE jackson_user WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
+
+-- Memberships are what ALTER ROLE does NOT touch, and they are the escalation
+-- that survives it: `GRANT postgres TO jackson_user` is the usual "just make it
+-- work" hand-repair, and it leaves a NOSUPERUSER role one `SET ROLE` away from
+-- superuser — on the same cluster as passwd_sso. Step 3 hands this role
+-- ownership of a whole database, so refuse here rather than converge silently.
+DO $$
+DECLARE granted text;
+BEGIN
+  SELECT string_agg(g.rolname, ', ') INTO granted
+    FROM pg_auth_members m
+    JOIN pg_roles g ON g.oid = m.roleid
+    JOIN pg_roles c ON c.oid = m.member
+   WHERE c.rolname = 'jackson_user';
+  IF granted IS NOT NULL THEN
+    RAISE EXCEPTION 'jackson_user is a member of: % — revoke these before granting it database ownership', granted;
+  END IF;
+END $$;
+SQL
+```
+
+If that raises, revoke each membership (`REVOKE <role> FROM jackson_user`) and
+re-run Step 1. Do not skip ahead: Steps 2 and 3 are separate `psql` invocations,
+so an exception here aborts only Step 1 — nothing stops you pasting the rest.
+Verify check 0 below re-asserts it immediately before the ownership transfer.
+
+Step 2 — set the password. `\password` computes the SCRAM-SHA-256 verifier
+client-side, so the cleartext never reaches the server or its log. The value is
+read from the `db` container's own environment and piped on stdin, so it reaches
+neither the host's shell history nor any process argument list.
+
+```bash
+docker compose exec -T db sh -c '
+  [ -n "$PASSWD_JACKSON_PASSWORD" ] || { echo "PASSWD_JACKSON_PASSWORD is not set in the db container" >&2; exit 1; }
+  printf "%s\n%s\n" "$PASSWD_JACKSON_PASSWORD" "$PASSWD_JACKSON_PASSWORD" \
+    | psql -U passwd_user -d postgres -q \
+        -c "SET log_statement TO '\''none'\''" -c "\password jackson_user"'
+```
+
+The `SET log_statement` is not decoration. `\password` issues
+`ALTER USER ... PASSWORD 'SCRAM-SHA-256$4096:...'`, which is DDL — so under
+`log_statement=ddl` or `all` the **verifier** is written to the `db` container
+log, which this stack now retains at 20 MB × 5. A verifier is not
+password-equivalent, but it is offline-crackable at 4096 iterations, so it is
+worth keeping out of a log that gets shipped. Residual: if the statement *fails*,
+`log_min_error_statement=error` records it anyway. If that log has been exported
+anywhere, rotate `PASSWD_JACKSON_PASSWORD`.
+
+Step 3 — move ownership, then restart Jackson.
+
+```bash
+docker compose exec -T db psql -U passwd_user -d jackson -v ON_ERROR_STOP=1 <<'SQL'
+-- Check 0, adjacent to the operation it guards. Step 1's identical assertion is
+-- in a different psql invocation, so on its own it cannot stop this statement.
+DO $$
+DECLARE granted text;
+BEGIN
+  SELECT string_agg(g.rolname, ', ') INTO granted
+    FROM pg_auth_members m
+    JOIN pg_roles g ON g.oid = m.roleid
+    JOIN pg_roles c ON c.oid = m.member
+   WHERE c.rolname = 'jackson_user';
+  IF granted IS NOT NULL THEN
+    RAISE EXCEPTION 'jackson_user is a member of: % — refusing to grant it database ownership', granted;
+  END IF;
+END $$;
+
+DO $$
+DECLARE r RECORD;
+BEGIN
+  FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO jackson_user', r.tablename);
+  END LOOP;
+  FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO jackson_user', r.sequencename);
+  END LOOP;
+  FOR r IN SELECT table_name FROM information_schema.views WHERE table_schema = 'public' LOOP
+    EXECUTE format('ALTER VIEW public.%I OWNER TO jackson_user', r.table_name);
+  END LOOP;
+END;
+$$;
+
+ALTER DATABASE jackson OWNER TO jackson_user;
+SQL
+
+docker compose start jackson
+```
+
+`ALTER DATABASE ... OWNER` also carries the `public` schema, because that schema
+is owned by `pg_database_owner` — no separate `ALTER SCHEMA` is needed.
+
+#### Verify
+
+Every check below has to be able to fail for the reason it claims, so run all
+four. Note `-h db` and not `-h 127.0.0.1`: the `postgres` image's generated
+`pg_hba.conf` puts `host all all 127.0.0.1/32 trust` above the scram rule, so a
+loopback connection from inside the container succeeds with **any** password and
+proves nothing about authentication. `-h db` takes the same bridge-network path
+Jackson itself uses.
+
+```bash
+# 1. Ownership transfer is complete. One query over pg_class, so the assertion
+#    and the repair loop share a member set — tables, partitions, sequences,
+#    views, materialized views and foreign tables.
+docker compose exec -T db psql -U passwd_user -d jackson -Atc "
+  SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'public' AND c.relkind IN ('r','p','S','v','m','f')
+     AND pg_get_userbyid(c.relowner) <> 'jackson_user'"
+# expected: 0
+#   Note this is 0 on an empty database too (N = -1 above), where it proves
+#   nothing — check 3 is what tells you the repair worked in that case.
+
+# 2. No SAML connection was lost.
+docker compose exec -T db psql -U passwd_user -d jackson -Atc "SELECT count(*) FROM jackson_store"
+# expected: N, the count recorded before the repair
+
+# 3. jackson_user can authenticate and read its own database.
+docker compose exec -T db sh -c \
+  'PGPASSWORD="$PASSWD_JACKSON_PASSWORD" psql -h db -U jackson_user -d jackson -Atc "SELECT count(*) FROM jackson_store"'
+# expected: N
+
+# 4. jackson_user cannot reach passwd_sso — the point of the split role
+#    (migration 20260611011121 revoked the PUBLIC CONNECT default).
+docker compose exec -T db sh -c \
+  'PGPASSWORD="$PASSWD_JACKSON_PASSWORD" psql -h db -U jackson_user -d passwd_sso -Atc "SELECT 1"'
+# expected: FATAL: permission denied for database "passwd_sso"
+#   NOT "password authentication failed" — that would mean check 3 should have
+#   failed too, and this denial says nothing about the CONNECT privilege.
+```
+
+If check 3 fails with `password authentication failed` while checks 1 and 2 pass,
+`$PASSWD_JACKSON_PASSWORD` has a trailing CR or is whitespace-only: `\password`
+strips the line ending before hashing and still exits 0, so Step 2 set something
+other than the value the `jackson` service uses. Fix the variable and re-run
+Step 2.
+
+Then confirm Jackson itself recovered — the checks above all pass with Jackson
+stopped:
+
+```bash
+docker compose ps jackson                        # expected: healthy
+docker compose logs --since 2m jackson | grep -c "error connecting to engine"
+# expected: 0
+```
+
+If `N` was `0` on entry, check 2 is vacuous — there was nothing to preserve, and
+the destructive path below is simpler.
+
+The destructive alternative — drop and recreate the `jackson` database with
+`OWNER jackson_user` — is faster but loses every stored SAML connection, which
+must then be re-imported. Both paths are in
+`docs/archive/review/security-audit-remediation-manual-test.md`.
+
+### Applying the container log caps
+
+`docker-compose.yml` bounds every service's log at `max-size: 20m` / `max-file: 5`.
+The setting is part of a container's config, so it takes effect only when the
+container is **recreated** — `docker compose restart` and `docker compose start`
+leave an existing container on the unbounded default.
+
+Run it with **the same `-f` set the stack was deployed with**. A bare
+`docker compose up -d` resolves only `docker-compose.yml`, so on the production
+topology (`-f docker-compose.yml -f docker-compose.workers.yml`, see
+`docs/setup/docker/en.md`) it has no definition for the two workers and cannot
+recreate them — they keep the unbounded config while `docker compose ps` still
+lists them, and re-running the bare command changes nothing.
+
+```bash
+# dev (base + override is the default):
+docker compose up -d
+# production topology:
+docker compose -f docker-compose.yml -f docker-compose.workers.yml up -d
+
+docker inspect -f '{{.Name}} {{.HostConfig.LogConfig.Type}} {{.HostConfig.LogConfig.Config}}' \
+  $(docker compose ps -aq)
+# expected: json-file map[max-file:5 max-size:20m] for every container
+# map[] means the cap is not in force for that container — recreate it with the
+# -f set that defines it
+```
+
+`ps -aq`, not `ps -q`: a stopped container — `jackson`, if you are here straight
+from the repair above — is absent from `-q` and its stale config goes
+unreported. Confirm the list is non-empty first; with no containers,
+`docker inspect` succeeds having examined nothing. Under
+`docker-compose.logging.yml` the `app` container correctly reports the `fluentd`
+driver with no `max-size` — that overlay ships its log off-host instead.

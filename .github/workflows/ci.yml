@@ -77,10 +77,11 @@ jobs:
               - "scripts/env-allowlist.ts"
               - "scripts/lib/compose-env-scan.ts"
               - "scripts/generate-env-example.ts"
-              - "docker-compose.yml"
-              - "docker-compose.override.yml"
-              - "docker-compose.ha.yml"
-              - "docker-compose.logging.yml"
+              # Glob, not an enumeration: check-env-docs.ts scans by the same
+              # /^docker-compose.*\.yml$/ pattern, and the four-file list this
+              # replaces had already drifted — docker-compose.workers.yml landed
+              # later and never triggered this job.
+              - "docker-compose*.yml"
               # check 12 [src-read-undeclared] fires on any new env read
               # under src/**, regardless of which file it lands in.
               - "src/**"

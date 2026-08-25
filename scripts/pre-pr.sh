@@ -303,6 +303,7 @@ queue_step "Static: actions-sha-pinned" bash scripts/checks/check-actions-sha-pi
 queue_step "Static: workflow-supply-chain" node scripts/checks/check-workflow-supply-chain.mjs
 queue_step "Static: crypto-auth-deps-classified" node scripts/checks/check-crypto-auth-deps-classified.mjs
 queue_step "Static: override-key-disjointness" node scripts/checks/check-override-key-disjointness.mjs
+queue_step "Static: compose-log-caps" node scripts/checks/check-compose-log-caps.mjs
 queue_step "Static: dockerfile-prisma-pin" bash scripts/checks/check-dockerfile-prisma-pin.sh
 queue_step "Static: dockerignore-secrets" bash scripts/checks/check-dockerignore-secrets.sh
 queue_step "Static: cosign-kms-uri" bash scripts/checks/check-cosign-kms-uri.sh
