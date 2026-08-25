@@ -655,7 +655,7 @@ function parsePayloadAction(raw: unknown): string {
  * Claim and process a batch of pending delivery rows.
  * Uses the same FOR UPDATE SKIP LOCKED pattern as outbox claim.
  */
-async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Promise<number> {
+export async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Promise<number> {
   // Claim + fetch in a single transaction to avoid an extra roundtrip
   const deliveries = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);

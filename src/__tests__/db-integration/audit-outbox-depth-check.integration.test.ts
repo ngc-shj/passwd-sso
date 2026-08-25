@@ -17,14 +17,28 @@
  * file would pass against the unfixed code.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from "vitest";
+import { randomUUID } from "node:crypto";
 import {
   createPrismaForRole,
+  createTestContext,
   setBypassRlsGucs,
   sqlStateOf,
   type PrismaWithPool,
+  type TestContext,
 } from "./helpers";
-import { readOutboxDepth } from "@/workers/audit-outbox-worker";
+import {
+  readOutboxDepth,
+  processDeliveryBatch,
+} from "@/workers/audit-outbox-worker";
 
 describe("audit_outbox depth check on a pooled connection", () => {
   // passwd_outbox_worker: NOBYPASSRLS, and audit_outbox is FORCE ROW LEVEL
@@ -121,5 +135,105 @@ describe("audit_outbox depth check on a pooled connection", () => {
         );
       });
     }
+  });
+});
+
+/**
+ * The sibling defect: processDeliveryBatch hydrated its outbox rows AFTER its
+ * own claim transaction had committed, on the same pooled connection — so it
+ * hit the identical ''::uuid cast. It is only reachable when an
+ * audit_deliveries row is PENDING, which is why it never surfaced in the
+ * incident even though the depth check was failing every 30s.
+ */
+describe("audit_outbox hydration in processDeliveryBatch", () => {
+  let ctx: TestContext;
+  let wp: PrismaWithPool;
+  let tenantId: string;
+  let userId: string;
+
+  beforeAll(async () => {
+    ctx = await createTestContext();
+    // Worker role: NOBYPASSRLS, so the policy is really evaluated. A superuser
+    // client would bypass RLS outright and pass against the unfixed code.
+    wp = createPrismaForRole("worker", { max: 1 });
+  });
+
+  afterAll(async () => {
+    await wp.prisma.$disconnect();
+    await wp.pool.end();
+    await ctx.cleanup();
+  });
+
+  beforeEach(async () => {
+    tenantId = await ctx.createTenant();
+    userId = await ctx.createUser(tenantId);
+  });
+
+  afterEach(async () => {
+    await ctx.deleteTestData(tenantId);
+  });
+
+  it("hydrates outbox rows on a connection whose GUC already reverted to empty string", async () => {
+    const outboxId = randomUUID();
+    const targetId = randomUUID();
+    const deliveryId = randomUUID();
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', now())`,
+        outboxId,
+        tenantId,
+        JSON.stringify({
+          scope: "PERSONAL",
+          action: "ENTRY_CREATE",
+          userId,
+          actorType: "HUMAN",
+        }),
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_delivery_targets (
+           id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag,
+           master_key_version, is_active, created_at
+         ) VALUES ($1::uuid, $2::uuid, 'WEBHOOK', 'test_enc', 'test_iv', 'test_tag', 1, true, now())`,
+        targetId,
+        tenantId,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PENDING')`,
+        deliveryId,
+        outboxId,
+        targetId,
+        tenantId,
+      );
+    });
+
+    // Poison the connection exactly as the claim transaction does in production.
+    await wp.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+    });
+
+    // The claim inside processDeliveryBatch commits, then the hydration runs on
+    // this same connection. Unfixed, that read raises 22P02 and this rejects.
+    // The delivery attempt itself fails on the placeholder config — that is the
+    // recorded-error path, not a throw, and is not what this pins.
+    await expect(
+      processDeliveryBatch(wp.prisma, 10),
+    ).resolves.toBeGreaterThanOrEqual(1);
+
+    const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<Array<{ attempt_count: number }>>(
+        `SELECT attempt_count FROM audit_deliveries WHERE id = $1::uuid`,
+        deliveryId,
+      );
+    });
+    // Allow side: the row was really claimed and attempted, not skipped. The
+    // placeholder target config makes the attempt fail, and a failed delivery
+    // is reset to PENDING for retry — so status is not the discriminator here;
+    // the incremented attempt count is.
+    expect(row.attempt_count).toBeGreaterThanOrEqual(1);
   });
 });
