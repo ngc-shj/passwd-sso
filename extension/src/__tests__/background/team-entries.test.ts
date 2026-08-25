@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createKeyedDecryptMock } from "../helpers/keyed-decrypt-mock";
 import { EXT_API_PATH, extApiPath } from "../../lib/api-paths";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 
@@ -7,17 +8,59 @@ const cryptoMocks = vi.hoisted(() => ({
   unwrapSecretKey: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])),
   deriveEncryptionKey: vi.fn().mockResolvedValue("enc-key"),
   verifyKey: vi.fn().mockResolvedValue(true),
-  decryptData: vi
-    .fn()
-    .mockResolvedValue(
-      JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" }),
-    ),
+  decryptData: vi.fn(),
   buildPersonalEntryAAD: vi.fn().mockReturnValue(new Uint8Array([1, 2])),
   hexDecode: vi.fn().mockReturnValue(new Uint8Array([0, 1])),
   VAULT_TYPE: { BLOB: "blob", OVERVIEW: "overview" },
 }));
 
 vi.mock("../../lib/crypto", () => cryptoMocks);
+
+/**
+ * Positional `mockResolvedValueOnce` queues are forbidden for decryptData in
+ * files that load background/index — UNLOCK_VAULT schedules a fire-and-forget
+ * context-menu refresh on a real 200 ms debounce, and under CPU contention its
+ * overview decrypt lands inside a test body and consumes a queued slot. Every
+ * assertion downstream then reads the next test's value. This file used queues
+ * and produced exactly that: four different tests in it failed across four
+ * `scripts/pre-pr.sh` runs (`res.code` an object, `res.ok` false,
+ * `res.password` null, `NO_PASSWORD` for `FETCH_FAILED`), while the file in
+ * isolation passed 12/12 and the suite alone 6/6.
+ *
+ * Keying on the ciphertext makes the result independent of interleaving. See
+ * helpers/keyed-decrypt-mock for the miss-path rationale.
+ */
+const PERSONAL_OVERVIEW_PLAINTEXT = JSON.stringify({
+  title: "Example",
+  username: "alice",
+  urlHost: "example.com",
+});
+const TEAM_OVERVIEW_PLAINTEXT = JSON.stringify({
+  title: "Team Entry",
+  username: "bob",
+  urlHost: "team.com",
+});
+const keyedDecrypt = createKeyedDecryptMock(cryptoMocks.decryptData);
+const setDecryptedPlaintext = keyedDecrypt.set;
+
+/**
+ * Every overview ciphertext any endpoint in this file returns is mapped as a
+ * default, because all of them are reachable by the fire-and-forget consumer,
+ * and that consumer must never hit the throwing miss path:
+ *   "11"            personal entry (single + list)
+ *   "enc-overview"  team passwords LIST
+ *   "ov-cipher"     team password by ID
+ * The list and by-ID endpoints use different ciphertexts, which is easy to miss
+ * — mapping only one of them left FETCH_PASSWORDS returning zero entries,
+ * because the miss throws inside the per-entry decrypt and the entry is dropped.
+ */
+function installKeyedDecryptData(): void {
+  keyedDecrypt.install({
+    "11": PERSONAL_OVERVIEW_PLAINTEXT,
+    "enc-overview": TEAM_OVERVIEW_PLAINTEXT,
+    "ov-cipher": TEAM_OVERVIEW_PLAINTEXT,
+  });
+}
 
 const teamCryptoMocks = vi.hoisted(() => ({
   deriveEcdhWrappingKey: vi.fn().mockResolvedValue("ecdh-wrap-key"),
@@ -207,6 +250,7 @@ describe("team entries in background", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    installKeyedDecryptData();
     installChromeMock();
 
     fetchMock = vi.fn(async (url: string) => {
@@ -340,10 +384,6 @@ describe("team entries in background", () => {
 
   describe("FETCH_PASSWORDS with team entries", () => {
     it("merges personal and team entries", async () => {
-      cryptoMocks.decryptData.mockResolvedValue(
-        JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" }),
-      );
-
       await unlockVault();
       const res = (await sendMessage({ type: "FETCH_PASSWORDS" })) as {
         type: string;
@@ -547,12 +587,7 @@ describe("team entries in background", () => {
     it("routes to team API when teamId is present", async () => {
       await unlockVault();
 
-      // After unlock + cache population, reset decryptData to return team blob data
-      cryptoMocks.decryptData
-        .mockResolvedValueOnce(JSON.stringify({ password: "team-secret" }))
-        .mockResolvedValueOnce(
-          JSON.stringify({ title: "Team Entry", username: "bob", urlHost: "team.com" }),
-        );
+      setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "team-secret" }));
 
       const res = (await sendMessage({
         type: "COPY_PASSWORD",
@@ -571,7 +606,8 @@ describe("team entries in background", () => {
     it("does not surface decrypted team plaintext when the blob is not valid JSON", async () => {
       await unlockVault();
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      cryptoMocks.decryptData.mockResolvedValueOnce(
+      setDecryptedPlaintext(
+        "blob-cipher",
         '{"username":"bob","password":S3cr3t-Passw0rd-VeryLong}',
       );
 
@@ -636,17 +672,13 @@ describe("team entries in background", () => {
     it("routes to team API when teamId is present", async () => {
       await unlockVault();
 
-      // After unlock + cache, set decryptData to return blob with TOTP
-      cryptoMocks.decryptData
-        .mockResolvedValueOnce(
-          JSON.stringify({
-            password: "pw",
-            totp: { secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 },
-          }),
-        )
-        .mockResolvedValueOnce(
-          JSON.stringify({ title: "Team Entry", username: "bob", urlHost: "team.com" }),
-        );
+      setDecryptedPlaintext(
+        "blob-cipher",
+        JSON.stringify({
+          password: "pw",
+          totp: { secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 },
+        }),
+      );
 
       const res = (await sendMessage({
         type: "COPY_TOTP",
@@ -664,14 +696,7 @@ describe("team entries in background", () => {
     it("passes teamId to performAutofillForEntry", async () => {
       await unlockVault();
 
-      // After unlock + cache, set decryptData to return blob + overview
-      cryptoMocks.decryptData
-        .mockResolvedValueOnce(
-          JSON.stringify({ password: "pw", username: "bob" }),
-        )
-        .mockResolvedValueOnce(
-          JSON.stringify({ username: "bob" }),
-        );
+      setDecryptedPlaintext("blob-cipher", JSON.stringify({ password: "pw", username: "bob" }));
 
       const res = (await sendMessage({
         type: "AUTOFILL",
