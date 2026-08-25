@@ -83,13 +83,23 @@ const UNIT_BYTES = { "": 1, k: 1e3, kb: 1e3, m: 1e6, mb: 1e6, g: 1e9, gb: 1e9 };
  */
 const MAX_TOTAL_BYTES = 1024 ** 3;
 
-/** Parse a `max-size` value to bytes, or null when the daemon would reject it. */
+/**
+ * Parse a `max-size` value to whole bytes, or null when the daemon would reject
+ * it.
+ *
+ * The daemon converts to an integer byte count and then requires it to be
+ * positive, so a positive *decimal* is not enough: `0.1` and `0.0000000001g`
+ * both truncate to 0 and are refused ("must be at least 1"), while `1.5m` is
+ * accepted. Checking the coefficient rather than the product judged those first
+ * two `capped`. Floor first, then compare — the same order the daemon uses.
+ */
 export function parseMaxSize(value) {
   const m = MAX_SIZE_RE.exec(String(value).trim());
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return n * UNIT_BYTES[(m[2] ?? "").toLowerCase()];
+  const bytes = Math.floor(n * UNIT_BYTES[(m[2] ?? "").toLowerCase()]);
+  return bytes >= 1 ? bytes : null;
 }
 
 /** Parse `max-file`, or null when the daemon would reject it (it requires >= 1). */
@@ -131,13 +141,52 @@ const DEFAULT_NAMES = {
  * same thing as a guard that found nothing wrong.
  */
 /**
- * Compose files that are inputs to a test, not stacks anyone runs. Same rule the
- * shared AST walker uses for source (`scripts/checks/lib/ast-project.mjs`): a
- * `__tests__` path segment means scaffolding. The count of what this drops is
- * printed, so the exclusion is visible rather than a silent narrowing.
+ * Compose files that are inputs to a test rather than stacks anyone runs.
+ *
+ * An explicit path list, not a `__tests__`/`fixtures` path-segment rule. That
+ * rule was a hole shaped exactly like the one this gate exists to close: a
+ * production stack parked at `deploy/fixtures/docker-compose.yml` would have
+ * been excluded from the scan by its directory name. Two entries is a small
+ * enough set to name, and naming them means adding a third is a reviewable act.
  */
+export const FIXTURE_ALLOW = [
+  {
+    path: "scripts/__tests__/fixtures/env-drift/compose-missing/docker-compose.yml",
+    reason: "input to check-env-docs' self-test; never started",
+  },
+  {
+    path: "scripts/__tests__/fixtures/env-drift/stale-allowlist/docker-compose.yml",
+    reason: "input to check-env-docs' self-test; never started",
+  },
+];
+
+const FIXTURE_PATHS = new Set(FIXTURE_ALLOW.map((f) => f.path));
+
 export function isTestFixturePath(relPath) {
-  return relPath.split("/").some((seg) => seg === "__tests__" || seg === "fixtures");
+  return FIXTURE_PATHS.has(relPath);
+}
+
+/** Allowlist entries naming a file that no longer exists — a hole left behind. */
+export function findStaleFixtureEntries(seenPaths) {
+  return FIXTURE_ALLOW.filter((f) => !seenPaths.has(f.path)).map(
+    (f) =>
+      `stale FIXTURE_ALLOW entry: ${f.path} is not a tracked compose file — remove it so it cannot exclude a future file that lands on that path`,
+  );
+}
+
+/** Tracked compose paths, repo-relative, BEFORE the fixture allowlist is applied. */
+export function listTrackedComposePaths(root = ".") {
+  try {
+    return execFileSync("git", ["ls-files", "-z", ...GIT_PATHSPECS], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split("\0")
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export function findComposeFiles(root = ".") {
@@ -188,20 +237,37 @@ export function findComposeFiles(root = ".") {
  * Compose picks ONE default file and warns when both families exist; which one
  * it picked is then invisible in the guard's output. Refuse instead of guessing.
  */
-export function findAmbiguousDefaults(basenames) {
-  const present = new Set(basenames);
+export function findAmbiguousDefaults(paths) {
+  // Grouped by directory: the inputs are repo-relative paths now, and comparing
+  // them against bare basenames silently stopped detecting anything below the
+  // root — `deploy/compose.yaml` + `deploy/docker-compose.yml` reported clean.
+  const byDir = new Map();
+  for (const p of paths) {
+    const i = p.lastIndexOf("/");
+    const dir = i === -1 ? "." : p.slice(0, i);
+    const base = i === -1 ? p : p.slice(i + 1);
+    if (!byDir.has(dir)) byDir.set(dir, new Set());
+    byDir.get(dir).add(base);
+  }
+  return [...byDir.entries()].flatMap(([dir, names]) => findAmbiguousInDir(dir, names));
+}
+
+function findAmbiguousInDir(dir, present) {
+  const where = dir === "." ? "" : `${dir}/`;
   const compose = DEFAULT_NAMES.compose.filter((n) => present.has(n));
   const dockerCompose = DEFAULT_NAMES.dockerCompose.filter((n) => present.has(n));
   const clashes = [];
   if (compose.length > 0 && dockerCompose.length > 0) {
     clashes.push(
-      `${compose.join("/")} and ${dockerCompose.join("/")} both exist — Compose reads the compose.* one and ignores the other, so which file this guard's verdict describes is ambiguous. Keep one.`,
+      `${where}${compose.join("/")} and ${where}${dockerCompose.join("/")} both exist — Compose reads the compose.* one and ignores the other, so which file this guard's verdict describes is ambiguous. Keep one.`,
     );
   }
   for (const family of Object.values(DEFAULT_NAMES)) {
     const both = family.filter((n) => present.has(n));
     if (both.length > 1) {
-      clashes.push(`${both.join(" and ")} both exist — Compose reads only one of them. Keep one.`);
+      clashes.push(
+        `${where}${both.join(` and ${where}`)} both exist — Compose reads only one of them. Keep one.`,
+      );
     }
   }
   return clashes;
@@ -369,6 +435,26 @@ async function main(root = process.env.COMPOSE_LOG_CAPS_ROOT ?? ".") {
       `check-compose-log-caps: NO_COMPOSE_FILES — no docker-compose*.yml under ${root}. Refusing to pass on an empty member set.`,
     );
     process.exit(1);
+  }
+
+  // What the fixture allowlist excluded, named rather than silently dropped —
+  // and an entry that matches nothing is reported, so it cannot sit there
+  // waiting to exclude a future file that lands on that path.
+  const trackedRel = new Set(listTrackedComposePaths(root));
+  // Only judge staleness when a git listing was actually available. Outside a
+  // checkout (a source tarball, a fixture root) the listing is empty, and every
+  // entry would look stale — reporting "that file is gone" when the truth is
+  // "this root has no file list" is the same mistake as judging an allowlist
+  // entry against a partial set.
+  const staleFixtures = trackedRel.size > 0 ? findStaleFixtureEntries(trackedRel) : [];
+  if (staleFixtures.length > 0) {
+    console.error("compose log cap guard failed:");
+    for (const v of staleFixtures) console.error(`  - ${v}`);
+    process.exit(1);
+  }
+  const excluded = [...trackedRel].filter((f) => isTestFixturePath(f));
+  if (excluded.length > 0) {
+    console.log(`check-compose-log-caps: excluded ${excluded.length} test fixture(s): ${excluded.join(", ")}`);
   }
 
   const docs = new Map();

@@ -23,8 +23,11 @@ import {
   classifyLogging,
   findAmbiguousDefaults,
   findComposeFiles,
+  findStaleFixtureEntries,
   findViolations,
   isTestFixturePath,
+  parseMaxSize,
+  FIXTURE_ALLOW,
 } from "../checks/check-compose-log-caps.mjs";
 
 const GATE = join(process.cwd(), "scripts/checks/check-compose-log-caps.mjs");
@@ -545,5 +548,71 @@ describe("findViolations refuses an empty set", () => {
     // `docs` — not on the file count, which was non-zero when this happened.
     expect(findViolations(new Map())).toHaveLength(1);
     expect(findViolations(new Map())[0]).toContain("refusing to pass on an empty set");
+  });
+});
+
+describe("parseMaxSize matches the daemon's truncate-then-reject order", () => {
+  it("rejects a positive decimal that floors to zero bytes", () => {
+    // Measured: `docker run --log-opt max-size=0.1` is refused ("must be at
+    // least 1"), as is 0.0000000001g. Checking the coefficient instead of the
+    // byte product called both of these capped.
+    expect(parseMaxSize("0.1")).toBeNull();
+    expect(parseMaxSize("0.0000000001g")).toBeNull();
+    expect(parseMaxSize("0.4")).toBeNull();
+  });
+
+  it("keeps a decimal that floors to a positive byte count, which the daemon takes", () => {
+    expect(parseMaxSize("1.5m")).toBe(1_500_000);
+    expect(parseMaxSize("1")).toBe(1);
+  });
+
+  it("returns whole bytes, never a fraction", () => {
+    // `1.5` and `1.0000001k` are the cases that separate flooring from a bare
+    // `>= 1` comparison: both are >= 1 unrounded, so only the floor makes the
+    // returned value the byte count the daemon will actually use.
+    for (const v of ["20m", "1.5m", "1g", "1024", "1.5", "1.0000001k", "2.7"]) {
+      expect(Number.isInteger(parseMaxSize(v)), v).toBe(true);
+    }
+    expect(parseMaxSize("1.5")).toBe(1);
+    expect(parseMaxSize("2.7")).toBe(2);
+  });
+});
+
+describe("fixture exclusion is a named list, not a directory-name rule", () => {
+  it("excludes only the paths it names", () => {
+    for (const entry of FIXTURE_ALLOW) expect(isTestFixturePath(entry.path)).toBe(true);
+  });
+
+  it("does not excuse a production stack parked under a `fixtures` directory", () => {
+    // The earlier path-segment rule made the gate's own exclusion the hole:
+    // deploy/fixtures/docker-compose.yml would have been skipped by name.
+    expect(isTestFixturePath("deploy/fixtures/docker-compose.yml")).toBe(false);
+    expect(isTestFixturePath("deploy/__tests__/docker-compose.yml")).toBe(false);
+  });
+
+  it("gives every entry a reason", () => {
+    expect(FIXTURE_ALLOW.length).toBeGreaterThan(0);
+    for (const entry of FIXTURE_ALLOW) expect(entry.reason.length).toBeGreaterThan(10);
+  });
+
+  it("reports an entry that matches no tracked file", () => {
+    expect(findStaleFixtureEntries(new Set())).toHaveLength(FIXTURE_ALLOW.length);
+    expect(findStaleFixtureEntries(new Set(FIXTURE_ALLOW.map((f) => f.path)))).toEqual([]);
+  });
+});
+
+describe("findAmbiguousDefaults groups by directory", () => {
+  it("detects a collision below the repo root", () => {
+    // Recursive discovery changed the inputs from basenames to paths; comparing
+    // them against bare basenames stopped detecting anything but the root.
+    const clashes = findAmbiguousDefaults(["deploy/compose.yaml", "deploy/docker-compose.yml"]);
+    expect(clashes).toHaveLength(1);
+    expect(clashes[0]).toContain("deploy/compose.yaml");
+    expect(clashes[0]).toContain("deploy/docker-compose.yml");
+  });
+
+  it("does not pair default names that live in different directories", () => {
+    // Two stacks in two directories are two stacks, not an ambiguity.
+    expect(findAmbiguousDefaults(["compose.yaml", "deploy/docker-compose.yml"])).toEqual([]);
   });
 });
