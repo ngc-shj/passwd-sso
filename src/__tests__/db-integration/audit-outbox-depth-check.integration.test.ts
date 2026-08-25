@@ -235,4 +235,70 @@ describe("audit_outbox hydration in processDeliveryBatch", () => {
     // the incremented attempt count is.
     expect(row.attempt_count).toBeGreaterThanOrEqual(1);
   });
+
+  it("skips a delivery whose outbox row belongs to a different tenant", async () => {
+    // Deny side of the tenant cross-check. The hydration reads under bypass so
+    // it is not tenant-filtered, and audit_deliveries.outbox_id has no FK —
+    // which is exactly what lets this row be constructed. Without the guard
+    // the payload would be delivered to the other tenant's target.
+    const otherTenantId = await ctx.createTenant();
+    const outboxId = randomUUID();
+    const targetId = randomUUID();
+    const deliveryId = randomUUID();
+
+    try {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        // Outbox row on the OTHER tenant.
+        await tx.$executeRawUnsafe(
+          `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+           VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', now())`,
+          outboxId,
+          otherTenantId,
+          JSON.stringify({
+            scope: "PERSONAL",
+            action: "ENTRY_CREATE",
+            userId,
+            actorType: "HUMAN",
+          }),
+        );
+        // Target and delivery on THIS tenant, pointing at the other's outbox.
+        await tx.$executeRawUnsafe(
+          `INSERT INTO audit_delivery_targets (
+             id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag,
+             master_key_version, is_active, created_at
+           ) VALUES ($1::uuid, $2::uuid, 'WEBHOOK', 'test_enc', 'test_iv', 'test_tag', 1, true, now())`,
+          targetId,
+          tenantId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PENDING')`,
+          deliveryId,
+          outboxId,
+          targetId,
+          tenantId,
+        );
+      });
+
+      await wp.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+      });
+
+      await processDeliveryBatch(wp.prisma, 50);
+
+      const [row] = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<Array<{ attempt_count: number }>>(
+          `SELECT attempt_count FROM audit_deliveries WHERE id = $1::uuid`,
+          deliveryId,
+        );
+      });
+      // Never attempted: the mismatch is caught before processOneDelivery,
+      // which is the only place attempt_count is incremented.
+      expect(row.attempt_count).toBe(0);
+    } finally {
+      await ctx.deleteTestData(otherTenantId);
+    }
+  });
 });
