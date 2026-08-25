@@ -24,8 +24,15 @@
  *
  * This failure mode is silent by construction — unlike the audit_outbox case,
  * which raised 22P02 once a GUC had been touched on the connection. Hence the
- * GUC precondition assertion below and the heartbeat suppression in runTick:
- * an inert verifier must not be able to report healthy.
+ * GUC precondition assertion in verifyTenantChain: an inert verifier must not
+ * be able to report healthy.
+ *
+ * Liveness and coverage are reported separately. The heartbeat is emitted every
+ * tick and means only "the process ran"; how much it actually covered rides on
+ * the same line as tenantCount / verifiedTenantCount / erroredTenantCount.
+ * Withholding the heartbeat on a tenant failure would make one permanently
+ * failing tenant indistinguishable from a dead worker, which is the same
+ * manufactured assurance one layer up.
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -39,7 +46,7 @@ import {
   CHAIN_VERIFY_REASON,
   type ChainVerifyReason,
 } from "@/lib/audit/audit-chain-verify";
-import { MS_PER_HOUR, MS_PER_DAY } from "@/lib/constants/time";
+import { MS_PER_HOUR, MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { withTenantRls } from "@/lib/tenant-rls";
 
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -54,6 +61,16 @@ const HYSTERESIS_REALERT_MS = Number(
 const MAX_ROWS_PER_TENANT = Number(
   process.env.AUDIT_CHAIN_VERIFY_MAX_ROWS ?? 100_000,
 );
+
+// Stated, not inherited. Prisma's interactive-transaction default is 5s, which
+// covers the 100k-row default read with headroom but not a raised
+// AUDIT_CHAIN_VERIFY_MAX_ROWS — and the failure (P2028) is indistinguishable at
+// the catch site from a real verification error, so it would land in the tick's
+// errored count and read as a coverage gap rather than a timeout.
+const CHAIN_VERIFY_TX_TIMEOUT_MS = Number(
+  process.env.AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS ?? MS_PER_MINUTE,
+);
+const CHAIN_VERIFY_TX_MAX_WAIT_MS = 10_000;
 
 export interface VerifyResult {
   tenantId: string;
@@ -85,74 +102,74 @@ interface AnchorRow {
 
 export interface VerifyDeps {
   prisma: PrismaClient;
-  logger: { error: (...args: unknown[]) => void; info: (...args: unknown[]) => void };
+  logger: {
+    error: (...args: unknown[]) => void;
+    info: (...args: unknown[]) => void;
+  };
 }
 
 export async function verifyTenantChain(
   tenantId: string,
   deps: VerifyDeps,
 ): Promise<VerifyResult> {
-  return withTenantRls(deps.prisma, tenantId, async (tx) => {
-    // Precondition, asserted rather than assumed. Every read below returns
-    // zero rows with no error when app.tenant_id is unset, so "the wrapper
-    // was removed" and "this tenant has no audit rows" are indistinguishable
-    // from the result alone. This is the assertion that makes a future
-    // refactor loud instead of silently reinstating the inert verifier.
-    const [guc] = await tx.$queryRawUnsafe<Array<{ tenant_id: string | null }>>(
-      `SELECT current_setting('app.tenant_id', true) AS tenant_id`,
-    );
-    if (guc?.tenant_id !== tenantId) {
-      throw new Error(
-        `RLS_CONTEXT_MISSING: app.tenant_id is ${JSON.stringify(
-          guc?.tenant_id ?? null,
-        )}, expected ${tenantId} — reads would silently return zero rows`,
+  // Only the READS hold the transaction. verifyChainRows below is pure —
+  // canonicalisation plus a SHA-256 per row, no DB — so leaving it inside the
+  // callback would spend an operator-tunable amount of JS CPU inside Prisma's
+  // interactive-transaction budget for no benefit. The budget is stated rather
+  // than inherited: the default is 5s, and MAX_ROWS_PER_TENANT is the knob an
+  // operator turns up for exactly the tenant whose walk is already the slowest.
+  const fetched = await withTenantRls(
+    deps.prisma,
+    tenantId,
+    async (tx) => {
+      // Precondition, asserted rather than assumed. Every read below returns
+      // zero rows with no error when app.tenant_id is unset, so "the wrapper
+      // was removed" and "this tenant has no audit rows" are indistinguishable
+      // from the result alone. This is the assertion that makes a future
+      // refactor loud instead of silently reinstating the inert verifier.
+      const [guc] = await tx.$queryRawUnsafe<
+        Array<{ tenant_id: string | null }>
+      >(`SELECT current_setting('app.tenant_id', true) AS tenant_id`);
+      if (guc?.tenant_id !== tenantId) {
+        throw new Error(
+          `RLS_CONTEXT_MISSING: app.tenant_id is ${JSON.stringify(
+            guc?.tenant_id ?? null,
+          )}, expected ${tenantId} — reads would silently return zero rows`,
+        );
+      }
+
+      // The anchor is read first and for the same reason the endpoint reads it:
+      // without it, a tenant whose rows were all deleted walks zero rows, finds
+      // nothing wrong, and reports healthy — which is precisely the state periodic
+      // monitoring exists to notice.
+      const anchors = await tx.$queryRawUnsafe<AnchorRow[]>(
+        `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
+        tenantId,
       );
-    }
 
-    // The anchor is read first and for the same reason the endpoint reads it:
-    // without it, a tenant whose rows were all deleted walks zero rows, finds
-    // nothing wrong, and reports healthy — which is precisely the state periodic
-    // monitoring exists to notice.
-    const anchors = await tx.$queryRawUnsafe<AnchorRow[]>(
-      `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1`,
-      tenantId,
-    );
-
-    if (anchors.length === 0) {
-      const counted = await tx.$queryRawUnsafe<{ count: bigint }[]>(
-        `SELECT COUNT(*) AS count
+      if (anchors.length === 0) {
+        const counted = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+          `SELECT COUNT(*) AS count
          FROM audit_logs
          WHERE tenant_id = $1
            AND chain_seq IS NOT NULL`,
-        tenantId,
-      );
-      const chainedRows = Number(counted[0]?.count ?? 0);
-      return {
-        tenantId,
-        ok: chainedRows === 0,
-        reason:
-          chainedRows === 0 ? undefined : CHAIN_VERIFY_REASON.ANCHOR_MISSING,
-        totalVerified: 0,
-        walkedThrough: 0,
-        firstTamperedSeq: null,
-        firstGapAfterSeq: null,
-        firstTimestampViolationSeq: null,
-        firstBrokenLinkSeq: null,
-        anchorChecked: false,
-      };
-    }
+          tenantId,
+        );
+        const chainedRows = Number(counted[0]?.count ?? 0);
+        return { kind: "no-anchor" as const, chainedRows };
+      }
 
-    const anchorSeq = Number(anchors[0].chain_seq);
+      const anchorSeq = Number(anchors[0].chain_seq);
 
-    // Bounded by the anchor's seq, matching the endpoint's query. The anchor is
-    // read first, so on a tenant still writing audit rows the walk would
-    // otherwise pick up rows appended after it — ending on a hash later than the
-    // head the anchor recorded, and reporting ANCHOR_HASH_MISMATCH for a
-    // perfectly healthy chain. On the monitoring path that is a page in the
-    // middle of the night for nothing, and worse, it trains the reader to
-    // discount the alert that matters.
-    const rows = await tx.$queryRawUnsafe<ChainRowRaw[]>(
-      `SELECT id, tenant_id, created_at,
+      // Bounded by the anchor's seq, matching the endpoint's query. The anchor is
+      // read first, so on a tenant still writing audit rows the walk would
+      // otherwise pick up rows appended after it — ending on a hash later than the
+      // head the anchor recorded, and reporting ANCHOR_HASH_MISMATCH for a
+      // perfectly healthy chain. On the monitoring path that is a page in the
+      // middle of the night for nothing, and worse, it trains the reader to
+      // discount the alert that matters.
+      const rows = await tx.$queryRawUnsafe<ChainRowRaw[]>(
+        `SELECT id, tenant_id, created_at,
               chain_seq, event_hash, chain_prev_hash, metadata
        FROM audit_logs
        WHERE tenant_id = $1
@@ -160,36 +177,67 @@ export async function verifyTenantChain(
          AND chain_seq <= $2
        ORDER BY chain_seq ASC
        LIMIT $3`,
-      tenantId,
-      BigInt(anchorSeq),
-      MAX_ROWS_PER_TENANT,
-    );
+        tenantId,
+        BigInt(anchorSeq),
+        MAX_ROWS_PER_TENANT,
+      );
 
-    const outcome = verifyChainRows({
-      rows,
-      seedPrevHash: GENESIS_PREV_HASH,
-      fromSeq: 1,
-      toSeq: anchorSeq,
-      anchorPrevHash: anchors[0].prev_hash,
-      // The worker always walks the whole chain, so the head hash is always
-      // comparable — this is the only caller that can catch a full rewrite.
-      anchorComparable: true,
-      rowCap: MAX_ROWS_PER_TENANT,
-    });
+      return {
+        kind: "walk" as const,
+        anchorSeq,
+        anchorPrevHash: anchors[0].prev_hash,
+        rows,
+      };
+    },
+    {
+      timeout: CHAIN_VERIFY_TX_TIMEOUT_MS,
+      maxWait: CHAIN_VERIFY_TX_MAX_WAIT_MS,
+    },
+  );
 
+  if (fetched.kind === "no-anchor") {
     return {
       tenantId,
-      ok: outcome.ok,
-      reason: outcome.reason,
-      totalVerified: outcome.totalVerified,
-      walkedThrough: outcome.walkedThrough,
-      firstTamperedSeq: outcome.firstTamperedSeq,
-      firstGapAfterSeq: outcome.firstGapAfterSeq,
-      firstTimestampViolationSeq: outcome.firstTimestampViolationSeq,
-      firstBrokenLinkSeq: outcome.firstBrokenLinkSeq,
-      anchorChecked: outcome.anchorChecked,
+      ok: fetched.chainedRows === 0,
+      reason:
+        fetched.chainedRows === 0
+          ? undefined
+          : CHAIN_VERIFY_REASON.ANCHOR_MISSING,
+      totalVerified: 0,
+      walkedThrough: 0,
+      firstTamperedSeq: null,
+      firstGapAfterSeq: null,
+      firstTimestampViolationSeq: null,
+      firstBrokenLinkSeq: null,
+      anchorChecked: false,
     };
+  }
+
+  // Outside the transaction: pure computation over rows already read.
+  const outcome = verifyChainRows({
+    rows: fetched.rows,
+    seedPrevHash: GENESIS_PREV_HASH,
+    fromSeq: 1,
+    toSeq: fetched.anchorSeq,
+    anchorPrevHash: fetched.anchorPrevHash,
+    // The worker always walks the whole chain, so the head hash is always
+    // comparable — this is the only caller that can catch a full rewrite.
+    anchorComparable: true,
+    rowCap: MAX_ROWS_PER_TENANT,
   });
+
+  return {
+    tenantId,
+    ok: outcome.ok,
+    reason: outcome.reason,
+    totalVerified: outcome.totalVerified,
+    walkedThrough: outcome.walkedThrough,
+    firstTamperedSeq: outcome.firstTamperedSeq,
+    firstGapAfterSeq: outcome.firstGapAfterSeq,
+    firstTimestampViolationSeq: outcome.firstTimestampViolationSeq,
+    firstBrokenLinkSeq: outcome.firstBrokenLinkSeq,
+    anchorChecked: outcome.anchorChecked,
+  };
 }
 
 // ── Worker main loop ─────────────────────────────────────────────
@@ -209,6 +257,7 @@ export async function runTick(
   const logger = console;
   let verified = 0;
   let errored = 0;
+  const erroredTenantIds: string[] = [];
 
   for (const { id: tenantId } of tenants) {
     try {
@@ -250,6 +299,7 @@ export async function runTick(
       verified++;
     } catch (err) {
       errored++;
+      erroredTenantIds.push(tenantId);
       logger.error(
         "audit-chain-verify-worker: tenant=%s verify threw: %O",
         tenantId,
@@ -258,21 +308,26 @@ export async function runTick(
     }
   }
 
-  // Heartbeat: emit a single console log per tick so operators can detect
-  // silent worker crashes via "no heartbeat in 2h" alarm.
+  // Liveness and coverage are independent facts and get independent signals.
   //
-  // Withheld when any tenant failed to verify. The absence alarm is the only
-  // signal an operator has, so emitting it after a tick that verified nothing
-  // would manufacture assurance — exactly the state that let an inert verifier
-  // report healthy. "Examined nothing" must not be spelled like "found nothing
-  // wrong": a partial tick is a failed tick.
+  // The heartbeat is LIVENESS only, and is emitted unconditionally: its alarm
+  // is `absence(...) for 2h`, so withholding it on a tenant failure would make
+  // one permanently-failing tenant indistinguishable from a dead worker. That
+  // alarm would then fire forever with a recovery step that does nothing, get
+  // muted, and a real crash would go unseen — the manufactured-assurance
+  // failure this worker exists to avoid, reproduced at the operator.
+  //
+  // COVERAGE rides on the same line as counts. A partial tick must never read
+  // as fully verified, so alert on `verifiedTenantCount < tenantCount` rather
+  // than on the heartbeat's absence.
   if (errored > 0) {
     logger.error(
-      "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify; heartbeat withheld",
+      "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify: %s",
       errored,
       tenants.length,
+      // Name them: an alarm an operator cannot act on gets muted.
+      erroredTenantIds.join(","),
     );
-    return;
   }
 
   console.log(
@@ -280,9 +335,8 @@ export async function runTick(
       level: "info",
       _logType: "audit-chain-verify-heartbeat",
       tenantCount: tenants.length,
-      // Present so the heartbeat carries what it actually covered rather than
-      // only that the process is alive.
       verifiedTenantCount: verified,
+      erroredTenantCount: errored,
       time: new Date().toISOString(),
     }),
   );
@@ -302,8 +356,12 @@ async function main(): Promise<void> {
 
   const states = new Map<string, TenantState>();
   const stop = { value: false };
-  process.on("SIGTERM", () => { stop.value = true; });
-  process.on("SIGINT", () => { stop.value = true; });
+  process.on("SIGTERM", () => {
+    stop.value = true;
+  });
+  process.on("SIGINT", () => {
+    stop.value = true;
+  });
 
   console.log(
     `audit-chain-verify-worker: starting (tick=${TICK_INTERVAL_MS}ms)`,

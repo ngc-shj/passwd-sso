@@ -34,6 +34,11 @@ export async function withTenantRls<T>(
   prisma: PrismaClient,
   tenantId: string,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  // Additive and optional: every existing caller keeps Prisma's defaults
+  // (5s timeout / 2s maxWait). Pass an explicit budget where the work inside
+  // is bounded by something other than a single quick statement — a batch read
+  // sized by an operator-tunable cap, for instance.
+  options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
   // Symmetric nesting guard: AsyncLocalStorage does NOT roll back PostgreSQL
   // GUCs, and the Prisma Proxy folds nested $transaction into the outer tx,
@@ -47,7 +52,7 @@ export async function withTenantRls<T>(
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
     return tenantRlsStorage.run({ tx, tenantId, bypass: false }, () => fn(tx));
-  });
+  }, options);
 }
 
 

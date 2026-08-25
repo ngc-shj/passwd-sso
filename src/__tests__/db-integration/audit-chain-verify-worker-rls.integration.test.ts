@@ -159,16 +159,22 @@ describe("audit-chain verify worker RLS context", () => {
     expect(anchors).toHaveLength(0);
     expect(rows).toHaveLength(0);
 
-    // Ground truth: the rows really are there.
-    const truth = await ctx.su.prisma.$transaction(async (tx) => {
+    // Ground truth for BOTH clauses. Without the anchor half, a fixture whose
+    // `ON CONFLICT DO NOTHING` anchor insert never landed would satisfy
+    // `anchors).toHaveLength(0)` for the wrong reason.
+    const [truth] = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<Array<{ count: bigint }>>(
-        `SELECT COUNT(*) AS count FROM audit_logs
-         WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL`,
+      return tx.$queryRawUnsafe<Array<{ rows: bigint; anchors: bigint }>>(
+        `SELECT
+           (SELECT COUNT(*) FROM audit_logs
+             WHERE tenant_id = $1::uuid AND chain_seq IS NOT NULL) AS rows,
+           (SELECT COUNT(*) FROM audit_chain_anchors
+             WHERE tenant_id = $1::uuid) AS anchors`,
         tenantId,
       );
     });
-    expect(Number(truth[0].count)).toBe(CHAIN_LENGTH);
+    expect(Number(truth.rows)).toBe(CHAIN_LENGTH);
+    expect(Number(truth.anchors)).toBe(1);
   });
 
   it("verifies a healthy chain as passwd_app, with the anchor actually compared", async () => {

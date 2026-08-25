@@ -21,13 +21,33 @@
  * close this; the mechanism had to change.
  *
  * CONTROL CLASS (R49): fail-closed verification gate over a BOUNDED scan root.
- * It is not an enforceable boundary — it is bypassable by editing the gate, by
- * aliasing a client through a shape it cannot resolve (`const p = prisma`), or
- * by adding code outside SEARCH_DIRS. What it guarantees is that within those
- * directories every recognised statement is decided, and that an unresolvable
- * subject FAILS rather than passing quietly. `src/app` and `src/lib` are out of
- * scope on purpose: request-path code runs inside withTenantRls established by
- * the proxy/route layer, which this gate does not model.
+ * NOT an enforceable boundary — it is bypassable by editing the gate or by
+ * adding code outside SEARCH_DIRS.
+ *
+ * Every entry below was measured against a synthetic tree, not assumed:
+ *
+ *   CAUGHT   bare model read; bare raw call; tagged-template raw; bare
+ *            `$transaction` whose callback never sets the GUC; SQL the gate
+ *            cannot read (reported as UNRESOLVED rather than skipped);
+ *            one-hop client alias (`const p = prisma`); model-accessor alias
+ *            (`const m = prisma.auditOutbox`); `this.prisma.<model>`
+ *   PASSES   context helpers; `$transaction` + setBypassRlsGucs; a parameter
+ *            typed TransactionClient/TxClient/RawExecutor; one-hop alias of a
+ *            context binding (`const db = tx`)
+ *   MISSED   destructured methods (`const { findMany } = prisma.auditOutbox`);
+ *            alias chains longer than one hop; a client reached through a
+ *            data structure or a returned closure; `.mjs`/`.js` files, which
+ *            the shared AST helper does not treat as scannable
+ *
+ * `src/app` and `src/lib` are out of scope because the app's mechanism is
+ * AMBIENT, not lexical: `src/lib/prisma.ts` exports a Proxy that rebinds
+ * `prisma` to the AsyncLocalStorage-active transaction, so a statement written
+ * as `prisma.x.findMany()` is already tenant-scoped at runtime with nothing in
+ * the syntax to show it. This gate's model is lexical, so scanning there would
+ * report hundreds of false positives (measured: 237 in src/app, 46 in src/lib).
+ * Consequence to know: `src/lib/health.ts:checkAuditOutbox` is a real member of
+ * this class and is covered by NO gate. It is dormant (no non-test caller);
+ * wiring it up needs the withBypassRls fix first.
  *
  * Table set is DERIVED, never re-typed: manifest ∩ schema @@map.
  *
@@ -44,6 +64,24 @@ const REPO_ROOT = process.env.RLS_READ_CONTEXT_ROOT
   ? process.env.RLS_READ_CONTEXT_ROOT
   : join(__dirname, "..", "..");
 
+// Env pollution guard. The overrides exist for the self-test, which drives the
+// gate against a synthetic tree. Left ungated they are a way to silently NARROW
+// what CI examines: `scanned === 0` fails loudly, but a wrong-but-non-empty
+// scope prints OK — the same "examined nothing, reported nothing wrong" shape
+// this gate exists to close. Mirrors the guard in
+// check-gate-selftest-coverage.sh.
+const HAS_OVERRIDE =
+  Boolean(process.env.RLS_READ_CONTEXT_ROOT) ||
+  Boolean(process.env.RLS_READ_CONTEXT_DIRS);
+if (process.env.CI === "true" && HAS_OVERRIDE) {
+  console.error(
+    "check-rls-read-context: RLS_READ_CONTEXT_ROOT/DIRS must not be set in CI " +
+      "(they would narrow the scan). Set RLS_READ_CONTEXT_FIXTURE_MODE=1 only " +
+      "from the self-test.",
+  );
+  if (process.env.RLS_READ_CONTEXT_FIXTURE_MODE !== "1") process.exit(1);
+}
+
 const SEARCH_DIRS = (
   process.env.RLS_READ_CONTEXT_DIRS ?? "src/workers,scripts"
 )
@@ -53,14 +91,24 @@ const SEARCH_DIRS = (
 
 console.log(`check-rls-read-context: SEARCH_DIRS=${SEARCH_DIRS.join(", ")}`);
 
-// Calls that establish an RLS context for their callback parameter.
-const CONTEXT_ESTABLISHING = new Set([
-  "$transaction",
+// These helpers set the GUC themselves, so their callback parameter is
+// context-bearing by construction.
+const CONTEXT_HELPERS = new Set([
   "withBypassRls",
   "withTenantRls",
   "withUserTenantRls",
   "withTeamTenantRls",
 ]);
+
+// $transaction does NOT establish a context — it only opens a transaction. The
+// GUC has to be set inside, and a $transaction whose callback never sets one is
+// exactly the shape of the checkDepthAlert defect. Accepting the bare form would
+// re-admit the class this gate exists to close, so it is checked separately.
+const TX_OPENING = "$transaction";
+
+// A statement that establishes the GUC on a transaction binding.
+const GUC_SETTER_RE =
+  /\bsetBypassRlsGucs\s*\(|set_config\s*\(\s*['"`]app\.(bypass_rls|tenant_id)['"`]/;
 
 const MODEL_METHODS = new Set([
   "findMany", "findFirst", "findFirstOrThrow", "findUnique",
@@ -72,6 +120,37 @@ const MODEL_METHODS = new Set([
 const RAW_METHODS = new Set([
   "$queryRaw", "$queryRawUnsafe", "$executeRaw", "$executeRawUnsafe",
 ]);
+
+/**
+ * Files allowed to use the bare client because they refuse at runtime to run
+ * without RLS visibility. Each must still contain a real assertRlsVisibility()
+ * call — see the check at the use site.
+ */
+const PREFLIGHT_EXEMPT = new Map([
+  [
+    "scripts/migrate-account-tokens-to-encrypted.ts",
+    "one-shot; assertRlsVisibility refuses a NOSUPERUSER/NOBYPASSRLS connection before the scan",
+  ],
+  [
+    "scripts/migrate-webhook-secrets-v1-to-v2.ts",
+    "one-shot; same preflight, called in main() before migrateWebhookSecrets()",
+  ],
+]);
+
+/** A real call to the imported assertRlsVisibility, not a mention of the name. */
+function hasResolvedPreflightCall(sf) {
+  const imported = sf
+    .getImportDeclarations()
+    .some((d) =>
+      d
+        .getNamedImports()
+        .some((n) => n.getName() === "assertRlsVisibility"),
+    );
+  if (!imported) return false;
+  return sf
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .some((c) => c.getExpression().getText() === "assertRlsVisibility");
+}
 
 function fail(msg) {
   console.error(`check-rls-read-context: ${msg}`);
@@ -127,11 +206,25 @@ function loadModelAccessors(rlsTables) {
 const TX_TYPE_RE = /\b(TransactionClient|TxClient|RawExecutor)\b/;
 
 /**
+ * Text of the initializer for a same-file `const <name> = <init>`, or null.
+ * Enough to follow one alias hop, which is the shape that actually occurs
+ * (`const db = tx`, `const m = prisma.auditOutbox`).
+ */
+function resolveAlias(sf, name) {
+  for (const decl of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+    if (decl.getName() !== name) continue;
+    const init = decl.getInitializer();
+    if (init) return init.getText();
+  }
+  return null;
+}
+
+/**
  * True when `recvText` names a binding that is already transaction-scoped:
  * either the parameter of a callback passed to a context-establishing call, or
  * a parameter annotated as a transaction client and threaded in by its caller.
  */
-function hasRlsContext(node, recvText) {
+function hasRlsContext(node, recvText, sf, depth = 0) {
   let cur = node.getParent();
   while (cur) {
     if (
@@ -154,11 +247,24 @@ function hasRlsContext(node, recvText) {
             expr.getKind() === SyntaxKind.PropertyAccessExpression
               ? expr.getName()
               : expr.getText();
-          if (CONTEXT_ESTABLISHING.has(name)) return true;
+          if (CONTEXT_HELPERS.has(name)) return true;
+          // Bare $transaction: accept only if the callback body actually sets
+          // the GUC on this binding.
+          if (name === TX_OPENING && GUC_SETTER_RE.test(cur.getText())) {
+            return true;
+          }
         }
       }
     }
     cur = cur.getParent();
+  }
+  // Follow one alias hop: `const db = tx` inside a context callback is correct
+  // code, and flagging it is the false positive that gets a gate routed around.
+  if (sf && depth < 1) {
+    const aliased = resolveAlias(sf, recvText);
+    if (aliased && aliased !== recvText) {
+      return hasRlsContext(node, aliased, sf, depth + 1);
+    }
   }
   return false;
 }
@@ -181,6 +287,7 @@ console.log(
 
 const project = createAstProject();
 const violations = [];
+const exempted = [];
 let scanned = 0;
 
 for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
@@ -189,50 +296,112 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
     path.includes("__tests__") ||
     // Gate fixtures are deliberately-malformed inputs for OTHER gates.
     path.includes("__fixtures__") ||
-    // Developer scratch tools, run by hand against a superuser URL. Not
-    // shipped, not scheduled, and not part of any deployment path.
+    // Developer scratch tools: not shipped, not scheduled, not part of any
+    // deployment path. (They are NOT uniformly superuser-connected —
+    // share-access-audit.ts uses the app client and withBypassRls — so the
+    // load-bearing reason is the deployment one, not the credential one.)
     path.includes("scripts/manual-tests/")
   ) {
     continue;
   }
   scanned++;
 
-  // A script that refuses to run without RLS visibility has EARNED the bare
-  // client: assertRlsVisibility fails closed on a NOSUPERUSER/NOBYPASSRLS role,
-  // so its statements cannot be silently emptied. This is an exemption a file
-  // has to implement, not one it gets by being named in a list here.
-  if (sf.getFullText().includes("assertRlsVisibility(")) continue;
+  // Exemption for one-shot migrations that legitimately run privileged.
+  //
+  // TWO conditions, both required, because either alone is weak. The allowlist
+  // makes the exemption visible in a diff — a reviewed list beats a predicate
+  // nobody sees. The resolved call makes the list unable to drift: if a script
+  // loses its preflight, being listed no longer saves it.
+  //
+  // Deliberately NOT a substring test over the file text. `getFullText()`
+  // includes comments and string literals, so `// TODO: call
+  // assertRlsVisibility(...)` would have exempted a whole file — judging code
+  // by its spelling, which is the failure this gate replaced.
+  if (PREFLIGHT_EXEMPT.has(path)) {
+    if (!hasResolvedPreflightCall(sf)) {
+      fail(
+        `${path} is listed in PREFLIGHT_EXEMPT but has no resolved assertRlsVisibility() call — ` +
+          "remove it from the list or restore the preflight",
+      );
+    }
+    exempted.push(path);
+    continue;
+  }
 
-  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const expr = call.getExpression();
+  // BOTH node kinds. `prisma.$queryRaw`...`` is a TaggedTemplateExpression, not
+  // a CallExpression — walking only calls silently skipped the dominant raw form
+  // in this repo (every set_config line, and src/lib/health.ts).
+  const statements = [
+    ...sf.getDescendantsOfKind(SyntaxKind.CallExpression),
+    ...sf.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression),
+  ];
+
+  for (const node of statements) {
+    const isTagged = node.getKind() === SyntaxKind.TaggedTemplateExpression;
+    const expr = isTagged ? node.getTag() : node.getExpression();
     if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
-    const method = expr.getName();
+    let method = expr.getName();
     const recv = expr.getExpression();
 
     let subject = null;
     let recvText = null;
 
     if (RAW_METHODS.has(method)) {
-      const argText = call.getArguments()[0]?.getText() ?? "";
-      const hits = tablesInSql(argText, rlsTables);
+      recvText = recv.getText();
+      const sqlNode = isTagged ? node.getTemplate() : node.getArguments()[0];
+      const sqlText = sqlNode?.getText() ?? "";
+      const literal =
+        isTagged ||
+        (sqlNode &&
+          (sqlNode.getKind() === SyntaxKind.StringLiteral ||
+            sqlNode.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral ||
+            sqlNode.getKind() === SyntaxKind.TemplateExpression));
+      if (!literal) {
+        // SQL the gate cannot read (an identifier, a built string). Do not spell
+        // "unreadable" the same as "touches no RLS table": report it unless the
+        // receiver is already proven context-bearing.
+        if (hasRlsContext(node, recvText, sf)) continue;
+        violations.push({
+          path,
+          line: node.getStartLineNumber(),
+          recvText,
+          method,
+          subject: "UNRESOLVED SQL (non-literal argument)",
+        });
+        continue;
+      }
+      const hits = tablesInSql(sqlText, rlsTables);
       if (hits.size === 0) continue;
       subject = [...hits].join(",");
-      recvText = recv.getText();
     } else if (MODEL_METHODS.has(method)) {
-      if (recv.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
-      const accessor = recv.getName();
+      if (isTagged) continue;
+      let accessor = null;
+      if (recv.getKind() === SyntaxKind.PropertyAccessExpression) {
+        accessor = recv.getName();
+        recvText = recv.getExpression().getText();
+      } else if (recv.getKind() === SyntaxKind.Identifier) {
+        // `const m = prisma.auditOutbox; m.findMany()`
+        const aliased = resolveAlias(sf, recv.getText());
+        const m = aliased?.match(/^(.*)\.([A-Za-z_$][\w$]*)$/);
+        if (!m) continue;
+        recvText = m[1];
+        accessor = m[2];
+      } else {
+        continue;
+      }
       if (!modelAccessors.has(accessor)) continue;
       subject = modelAccessors.get(accessor);
-      recvText = recv.getExpression().getText();
+      // Print the accessor too: `prisma.findMany` alone hides which model.
+      method = `${accessor}.${method}`;
     } else {
       continue;
     }
 
-    if (hasRlsContext(call, recvText)) continue;
+    if (hasRlsContext(node, recvText, sf)) continue;
 
     violations.push({
       path,
-      line: call.getStartLineNumber(),
+      line: node.getStartLineNumber(),
       recvText,
       method,
       subject,
@@ -247,7 +416,12 @@ if (scanned === 0) {
   );
 }
 
-console.log(`check-rls-read-context: scanned ${scanned} files`);
+console.log(
+  `check-rls-read-context: scanned ${scanned} files` +
+    (exempted.length
+      ? `; ${exempted.length} preflight-exempt (${exempted.join(", ")})`
+      : ""),
+);
 
 if (violations.length > 0) {
   console.error(

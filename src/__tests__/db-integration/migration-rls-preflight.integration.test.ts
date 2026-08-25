@@ -61,8 +61,19 @@ describe("migration RLS visibility preflight", () => {
   it("permits the migration role", async () => {
     // Allow side. Without it a preflight that refused unconditionally would
     // satisfy the deny case while making both scripts unrunnable.
+    //
+    // The role name is DERIVED, never a literal: the privileged connection is
+    // `passwd_user` locally but `postgres` in CI (ci-integration.yml sets
+    // MIGRATION_DATABASE_URL to the postgres superuser). Hardcoding it is the
+    // documented local-green/CI-red divergence — see the same note in
+    // helpers.ts and tenant-claim-cli.integration.test.ts.
+    const [{ current_user: expectedRole }] = await su.prisma.$queryRawUnsafe<
+      Array<{ current_user: string }>
+    >(`SELECT current_user`);
+
     const v = await assertRlsVisibility(su.prisma, "migrate-webhook-secrets");
-    expect(v.role).toBe("passwd_user");
+    expect(v.role).toBe(expectedRole);
+    // The property the preflight actually branches on.
     expect(v.isSuperuser || v.bypassesRls).toBe(true);
   });
 });

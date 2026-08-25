@@ -115,23 +115,14 @@ Loki: `{_logType="outbox.depth.check_failed"} | json`
 ## `audit-chain-verify-heartbeat`
 
 Emitted by `scripts/audit-chain-verify-worker.ts` on every hourly
-tick. Absence indicates the chain verifier is silently down.
+tick, unconditionally. It means **the process ran** — liveness only.
+How much that tick actually covered is carried by the counts on the
+same line, and is a separate alarm (below).
 
-> **⚠️ Presence does NOT currently mean tampering would be detected.**
-> The heartbeat is emitted unconditionally at the end of each tick,
-> regardless of what the walk saw. And the worker reads `audit_logs`
-> and `audit_chain_anchors` through the plain client as `passwd_app`
-> (`NOBYPASSRLS`) without ever setting `app.tenant_id` or
-> `app.bypass_rls` — the file contains no `set_config` call at all.
-> Both tables are `FORCE ROW LEVEL SECURITY`, so an unset GUC makes
-> the policy predicate NULL and every read returns **0 rows with no
-> error**. Each tenant then walks an empty chain and verifies clean.
->
-> Unlike the `audit_outbox` case above, this fails to the *silent*
-> side: it never produces the 22P02 that made the outbox defect
-> visible. Until it is fixed, treat this heartbeat as liveness only,
-> never as evidence that the chain has been verified. Tracked as an
-> open issue; not fixed in this change.
+The heartbeat is deliberately NOT withheld when a tenant fails to
+verify: its alarm is absence-based, so withholding would make one
+permanently-failing tenant indistinguishable from a dead worker, and
+the resulting always-firing alarm gets muted.
 
 **Severity**: high
 **Trigger**: no event for > 2 hours
@@ -140,6 +131,25 @@ DB SELECT permissions on `audit_logs` and `tenants`.
 
 Datadog: monitor on `absence(_logType="audit-chain-verify-heartbeat") for 2h`
 Sentry Cron Monitor: register `audit-chain-verify` with schedule `0 * * * *`.
+
+## audit-chain verify coverage shortfall
+
+The same heartbeat line carries `tenantCount`, `verifiedTenantCount`
+and `erroredTenantCount`. A tick that verified only some tenants must
+never read as a verified fleet, so alert on the counts, not on
+absence.
+
+**Severity**: high
+**Trigger**: `verifiedTenantCount < tenantCount`
+**Recovery**: the accompanying `tick incomplete` stderr line names the
+failing tenant ids. `RLS_CONTEXT_MISSING` there means the worker lost
+its RLS context and its reads would have returned zero rows — treat as
+"the verifier is inert", not as a per-tenant blip. `P2028` means the
+read outgrew `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it
+or lower `AUDIT_CHAIN_VERIFY_MAX_ROWS`.
+
+Datadog: `{ _logType="audit-chain-verify-heartbeat" } | verifiedTenantCount < tenantCount`
+Loki: `{_logType="audit-chain-verify-heartbeat"} | json | verifiedTenantCount < tenantCount`
 
 ## `CHAIN_VERIFY_FAILED`
 
@@ -151,8 +161,7 @@ It is written with `console.error` as a printf-formatted line — it is
 **not** stored in `audit_logs` and is not a structured pino record, so
 it carries no `_logType` and cannot be matched by the rules above.
 Alert on the raw stderr text, or ship container stdout to a durable
-sink. See also the caveat on the heartbeat above: today this event
-cannot fire at all, because the walk sees no rows.
+sink.
 
 **Severity**: critical
 **Trigger**: any occurrence
