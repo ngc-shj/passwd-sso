@@ -71,11 +71,67 @@ on `audit_logs` for the `passwd_outbox_worker` role.
 Datadog: `{ _logType="outbox.depth.alert" } | count`
 Loki: `{_logType="outbox.depth.alert"} | json`
 
+## `outbox.depth.check_failed`
+
+Emitted by `src/workers/audit-outbox-worker.ts` when the depth query
+itself throws. **This is the watchdog for the alert above**: while it
+fires, `outbox.depth.alert` cannot fire at all, so a silent outbox
+means "the check is broken", not "the outbox is healthy". Alerting on
+`outbox.depth.alert` alone therefore fails open — pair the two.
+
+The check runs on the reaper cadence — at least 30s apart, and longer
+under load, since it runs only after the batch, delivery and webhook
+passes have all returned in the same loop iteration. A persistent
+fault therefore repeats until fixed; dedupe in the alert rule rather
+than sampling, or a transient single failure is lost.
+
+**Severity**: high
+**Trigger**: any occurrence
+**Recovery**: read `err` on the log line. Two known causes:
+
+- **22P02** (`invalid input syntax for type uuid: ""`) — the depth
+  query ran outside a bypass transaction and tripped the
+  `audit_outbox` RLS policy's `''::uuid` cast. A custom GUC set via
+  `SET LOCAL` reverts to the session default (`''`), not to unset,
+  when the transaction ends, so every pooled connection that has run
+  one bypass transaction fails this query afterwards.
+- **P2028** (transaction timeout) — the aggregate outgrew the
+  transaction budget. `MIN(created_at)` has no index-only path, so
+  this scan slows as the outbox deepens. This means a real backlog,
+  not a bug: check `outbox.depth.alert`, which normally fires first.
+
+The same trap applies to any read of an RLS-forced table by a
+`NOBYPASSRLS` role on a pooled connection. Inside
+`src/workers/audit-outbox-worker.ts` the local helper is
+`setBypassRlsGucs`; elsewhere use `withBypassRls` from
+`src/lib/tenant-rls.ts`. Note this is a convention, not an enforced
+invariant — no gate currently derives the set of RLS-table reads and
+checks each one is wrapped, so a new unwrapped read will not be
+caught at review time.
+
+Datadog: `{ _logType="outbox.depth.check_failed" } | count`
+Loki: `{_logType="outbox.depth.check_failed"} | json`
+
 ## `audit-chain-verify-heartbeat`
 
 Emitted by `scripts/audit-chain-verify-worker.ts` on every hourly
-tick. Absence indicates the chain verifier is silently down — chain
-tampering would go undetected.
+tick. Absence indicates the chain verifier is silently down.
+
+> **⚠️ Presence does NOT currently mean tampering would be detected.**
+> The heartbeat is emitted unconditionally at the end of each tick,
+> regardless of what the walk saw. And the worker reads `audit_logs`
+> and `audit_chain_anchors` through the plain client as `passwd_app`
+> (`NOBYPASSRLS`) without ever setting `app.tenant_id` or
+> `app.bypass_rls` — the file contains no `set_config` call at all.
+> Both tables are `FORCE ROW LEVEL SECURITY`, so an unset GUC makes
+> the policy predicate NULL and every read returns **0 rows with no
+> error**. Each tenant then walks an empty chain and verifies clean.
+>
+> Unlike the `audit_outbox` case above, this fails to the *silent*
+> side: it never produces the 22P02 that made the outbox defect
+> visible. Until it is fixed, treat this heartbeat as liveness only,
+> never as evidence that the chain has been verified. Tracked as an
+> open issue; not fixed in this change.
 
 **Severity**: high
 **Trigger**: no event for > 2 hours
@@ -85,12 +141,18 @@ DB SELECT permissions on `audit_logs` and `tenants`.
 Datadog: monitor on `absence(_logType="audit-chain-verify-heartbeat") for 2h`
 Sentry Cron Monitor: register `audit-chain-verify` with schedule `0 * * * *`.
 
-## `CHAIN_VERIFY_FAILED` (audit event)
+## `CHAIN_VERIFY_FAILED`
 
-Stored in `audit_logs` (NOT a pino log). The audit-chain-verify
-worker writes this when a tenant's chain detects tampering. Read
-via standard audit-log queries OR via SIEM if you forward audit
-events.
+Emitted by `scripts/audit-chain-verify-worker.ts` when a tenant's
+chain shows tampering, with hysteresis (re-emit on clean → failed,
+then every 24h while still failed).
+
+It is written with `console.error` as a printf-formatted line — it is
+**not** stored in `audit_logs` and is not a structured pino record, so
+it carries no `_logType` and cannot be matched by the rules above.
+Alert on the raw stderr text, or ship container stdout to a durable
+sink. See also the caveat on the heartbeat above: today this event
+cannot fire at all, because the walk sees no rows.
 
 **Severity**: critical
 **Trigger**: any occurrence
