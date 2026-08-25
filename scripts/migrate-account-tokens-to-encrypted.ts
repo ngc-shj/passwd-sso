@@ -25,6 +25,7 @@ import {
   encryptAccountToken,
   isEncryptedAccountToken,
 } from "@/lib/crypto/account-token-crypto";
+import { assertRlsVisibility } from "./lib/assert-rls-visibility";
 
 type RawAccount = {
   id: string;
@@ -48,6 +49,15 @@ async function main(): Promise<void> {
   }
 
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+
+  // Before the scan, never after: `accounts` is RLS-protected and this script
+  // sets no tenant GUC, so an unprivileged connection would scan zero rows and
+  // report a clean success having migrated nothing.
+  const visibility = await assertRlsVisibility(
+    prisma,
+    "migrate-account-tokens-to-encrypted",
+  );
+  console.log(`Connected as ${visibility.role} (RLS visibility confirmed).`);
 
   let cursorId: string | null = null;
   let scanned = 0;

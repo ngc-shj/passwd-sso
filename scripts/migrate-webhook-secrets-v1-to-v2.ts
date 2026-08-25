@@ -24,6 +24,7 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
+import { assertRlsVisibility } from "./lib/assert-rls-visibility";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -208,6 +209,15 @@ async function main(): Promise<void> {
 
   try {
     console.log(`webhook secret migration v1 → v2 (dry-run=${dryRun})`);
+    // Before the scan, never after: team_webhooks and tenant_webhooks are
+    // RLS-protected and this script sets no tenant GUC, so an unprivileged
+    // connection would scan zero rows and report a clean success having
+    // migrated nothing.
+    const visibility = await assertRlsVisibility(
+      prisma,
+      "migrate-webhook-secrets-v1-to-v2",
+    );
+    console.log(`Connected as ${visibility.role} (RLS visibility confirmed).`);
     const stats = await migrateWebhookSecrets(prisma, { dryRun });
     console.log("Result:", stats);
     if (stats.teamRowsSkipped > 0 || stats.tenantRowsSkipped > 0) {
