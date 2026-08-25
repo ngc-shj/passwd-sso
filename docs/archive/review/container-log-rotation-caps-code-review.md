@@ -48,15 +48,13 @@ fixed in `review(1)`; the two open items are recorded below with reasons.
 
 ### F7 [Minor] — `mailpit` is the only override service without `networks: internal` — moved out of this branch
 
-Raised in round 1 as an open product decision. The user chose to add it, so
-Raised in round 1, fixed, then re-opened twice by later rounds — first because
-joining `internal` exposed mailpit's unauthenticated API to every dev container,
-then because the version it was pinned to carried a WebSocket-origin CVE. That
-belongs with the audit/forwarding work, not with a log-rotation change; it moved
-there. Round 2 (SEC-R2-4) flagged the trade — mailpit's UI and REST API are
-unauthenticated, so anything on `internal` can read captured mail — which is
-recorded in the compose comment rather than closed with `MP_UI_AUTH`, that being
-a change to how developers reach the UI.
+Raised in round 1 as an open product decision, fixed once the user chose to add
+the network, then re-opened twice — first because joining `internal` exposed
+mailpit's unauthenticated UI and REST API to every dev container, then because
+the version it was pinned to carried a WebSocket origin-check CVE. Two rounds of
+findings on one dev-only service is the signature of work that belongs somewhere
+else: it moved to the audit/forwarding branch, where the reach was removed rather
+than gated and the pin was corrected.
 
 ## Open items (not fixed, with reasons)
 
