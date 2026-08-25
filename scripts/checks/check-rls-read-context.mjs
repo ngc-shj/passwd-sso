@@ -35,16 +35,20 @@
  *            typed TransactionClient/TxClient/RawExecutor; one-hop alias of a
  *            context binding (`const db = tx`)
  *   MISSED   destructured methods (`const { findMany } = prisma.auditOutbox`);
- *            alias chains longer than one hop; a client reached through a
+ *            element access (`prisma["auditLog"]`); a client reached through a
  *            data structure or a returned closure; `.mjs`/`.js` files, which
- *            the shared AST helper does not treat as scannable
+ *            the shared AST helper does not treat as scannable (no `.mjs` in
+ *            the scan roots issues a Prisma statement today)
+ *   FALSE +  alias chains longer than ONE hop are flagged even when the chain
+ *            ends at a context binding — correct code, no suppression path.
+ *            Rewrite as a single hop, or raise the depth bound
  *
  * `src/app` and `src/lib` are out of scope because the app's mechanism is
  * AMBIENT, not lexical: `src/lib/prisma.ts` exports a Proxy that rebinds
  * `prisma` to the AsyncLocalStorage-active transaction, so a statement written
  * as `prisma.x.findMany()` is already tenant-scoped at runtime with nothing in
  * the syntax to show it. This gate's model is lexical, so scanning there would
- * report hundreds of false positives (measured: 237 in src/app, 46 in src/lib).
+ * report hundreds of false positives (measured: 310 in src/app, 67 in src/lib).
  * Consequence to know: `src/lib/health.ts:checkAuditOutbox` is a real member of
  * this class and is covered by NO gate. It is dormant (no non-test caller);
  * wiring it up needs the withBypassRls fix first.
@@ -73,13 +77,17 @@ const REPO_ROOT = process.env.RLS_READ_CONTEXT_ROOT
 const HAS_OVERRIDE =
   Boolean(process.env.RLS_READ_CONTEXT_ROOT) ||
   Boolean(process.env.RLS_READ_CONTEXT_DIRS);
-if (process.env.CI === "true" && HAS_OVERRIDE) {
+if (
+  process.env.CI === "true" &&
+  HAS_OVERRIDE &&
+  process.env.RLS_READ_CONTEXT_FIXTURE_MODE !== "1"
+) {
   console.error(
     "check-rls-read-context: RLS_READ_CONTEXT_ROOT/DIRS must not be set in CI " +
       "(they would narrow the scan). Set RLS_READ_CONTEXT_FIXTURE_MODE=1 only " +
       "from the self-test.",
   );
-  if (process.env.RLS_READ_CONTEXT_FIXTURE_MODE !== "1") process.exit(1);
+  process.exit(1);
 }
 
 const SEARCH_DIRS = (
@@ -106,9 +114,23 @@ const CONTEXT_HELPERS = new Set([
 // re-admit the class this gate exists to close, so it is checked separately.
 const TX_OPENING = "$transaction";
 
-// A statement that establishes the GUC on a transaction binding.
-const GUC_SETTER_RE =
-  /\bsetBypassRlsGucs\s*\(|set_config\s*\(\s*['"`]app\.(bypass_rls|tenant_id)['"`]/;
+// Matches set_config on an RLS GUC and captures the VALUE argument.
+const GUC_SQL_RE =
+  /set_config\s*\(\s*['"`]app\.(bypass_rls|tenant_id)['"`]\s*,\s*([^,]*?)\s*,/;
+
+/**
+ * True when the SQL sets an RLS GUC to something other than the empty string.
+ * The empty case is excluded deliberately: `set_config('app.tenant_id','',true)`
+ * IS the reverted-GUC state this gate exists to catch, not an establishment of
+ * context. Checked as a captured value rather than a lookahead — `\s*,\s*`
+ * backtracks past the space, so a lookahead for `''` silently misses.
+ */
+function setsGucNonEmpty(sql) {
+  const m = GUC_SQL_RE.exec(sql);
+  if (!m) return false;
+  const value = m[2].trim();
+  return value !== "''" && value !== '""' && value !== "``" && value !== "";
+}
 
 const MODEL_METHODS = new Set([
   "findMany", "findFirst", "findFirstOrThrow", "findUnique",
@@ -206,6 +228,70 @@ function loadModelAccessors(rlsTables) {
 const TX_TYPE_RE = /\b(TransactionClient|TxClient|RawExecutor)\b/;
 
 /**
+ * Does `callback` establish an RLS GUC on the binding named `recvText`, at a
+ * position before `beforeNode`?
+ *
+ * AST, not a text match over `getText()`. A regex over the callback source is
+ * satisfied by a comment, a string literal, a setter applied to a DIFFERENT
+ * binding, or a call sitting after the read in dead code — every one of which
+ * re-admits the defect this rule exists to reject. Same reasoning, and same
+ * shape, as hasResolvedPreflightCall.
+ *
+ * Returns "established" | "absent" | "unresolved".
+ */
+function gucEstablishedOn(callback, recvText, beforeNode) {
+  const limit = beforeNode.getStart();
+  let sawUndecidable = false;
+
+  // setBypassRlsGucs(<recvText>) — the shared worker helper.
+  for (const call of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (call.getStart() >= limit) continue;
+    const callee = call.getExpression();
+    if (callee.getText() !== "setBypassRlsGucs") continue;
+    const arg0 = call.getArguments()[0];
+    if (!arg0) continue;
+    if (arg0.getText() === recvText) return "established";
+    // Right helper, different binding: says nothing about this one.
+  }
+
+  // <recvText>.$executeRaw`... set_config('app.tenant_id', ...) ...`
+  const rawNodes = [
+    ...callback.getDescendantsOfKind(SyntaxKind.CallExpression),
+    ...callback.getDescendantsOfKind(SyntaxKind.TaggedTemplateExpression),
+  ];
+  for (const n of rawNodes) {
+    if (n.getStart() >= limit) continue;
+    const isTagged = n.getKind() === SyntaxKind.TaggedTemplateExpression;
+    const expr = isTagged ? n.getTag() : n.getExpression();
+    if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
+    if (!RAW_METHODS.has(expr.getName())) continue;
+    if (expr.getExpression().getText() !== recvText) continue;
+    const sqlNode = isTagged ? n.getTemplate() : n.getArguments()[0];
+    const sql = sqlNode?.getText() ?? "";
+    if (setsGucNonEmpty(sql)) return "established";
+    // A raw statement on this binding whose SQL we cannot read could be the
+    // setter. Do not conclude "absent" from it.
+    if (!/set_config/.test(sql) && /^[A-Za-z_$][\w$]*$/.test(sql.trim())) {
+      sawUndecidable = true;
+    }
+  }
+
+  // A call passing this binding to some other function may establish the GUC
+  // out of sight (e.g. a project-local establishTenantContext(tx, ...)).
+  for (const call of callback.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    if (call.getStart() >= limit) continue;
+    const callee = call.getExpression().getText();
+    if (callee === "setBypassRlsGucs") continue;
+    if (RAW_METHODS.has(call.getExpression().getLastChildByKind?.(SyntaxKind.Identifier)?.getText() ?? "")) continue;
+    if (call.getArguments().some((a) => a.getText() === recvText)) {
+      sawUndecidable = true;
+    }
+  }
+
+  return sawUndecidable ? "unresolved" : "absent";
+}
+
+/**
  * Text of the initializer for a same-file `const <name> = <init>`, or null.
  * Enough to follow one alias hop, which is the shape that actually occurs
  * (`const db = tx`, `const m = prisma.auditOutbox`).
@@ -248,10 +334,17 @@ function hasRlsContext(node, recvText, sf, depth = 0) {
               ? expr.getName()
               : expr.getText();
           if (CONTEXT_HELPERS.has(name)) return true;
-          // Bare $transaction: accept only if the callback body actually sets
-          // the GUC on this binding.
-          if (name === TX_OPENING && GUC_SETTER_RE.test(cur.getText())) {
-            return true;
+          // Bare $transaction: accept only if the callback actually sets the
+          // GUC on THIS binding, before this statement.
+          if (name === TX_OPENING) {
+            const verdict = gucEstablishedOn(cur, recvText, node);
+            if (verdict === "established") return true;
+            if (verdict === "unresolved") {
+              // Cannot decide: refuse rather than accept. Surfaced at the call
+              // site as an UNRESOLVED violation so the failure mode is "someone
+              // annotates this" rather than "a defect ships".
+              return false;
+            }
           }
         }
       }

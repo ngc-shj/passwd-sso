@@ -75,6 +75,10 @@ function runGate(source, { dirs = "src/workers" } = {}) {
       ...process.env,
       RLS_READ_CONTEXT_ROOT: root,
       RLS_READ_CONTEXT_DIRS: dirs,
+      // Required under CI=true: the gate refuses scan-scope overrides there
+      // unless fixture mode is declared. Porting the guard from
+      // check-gate-selftest-coverage.sh means porting its test side too.
+      RLS_READ_CONTEXT_FIXTURE_MODE: "1",
     },
   });
 }
@@ -154,6 +158,7 @@ describe("check-rls-read-context", () => {
         ...process.env,
         RLS_READ_CONTEXT_ROOT: root,
         RLS_READ_CONTEXT_DIRS: dirname(relPath),
+        RLS_READ_CONTEXT_FIXTURE_MODE: "1",
       },
     });
   }
@@ -248,16 +253,22 @@ describe("check-rls-read-context", () => {
     expect(r.stderr).toContain("UNRESOLVED");
   });
 
-  it("FAILS a file that only MENTIONS assertRlsVisibility in a comment", () => {
-    // Deny counterpart to the exemption case. A substring test over the file
-    // text would pass this, which is why the exemption resolves the call.
-    const r = runGate(`
+  it("FAILS an allowlisted file that only MENTIONS assertRlsVisibility in a comment", () => {
+    // Must sit on an ALLOWLISTED path, or it fails on the allowlist clause
+    // alone and never reaches the resolved-call check — leaving the
+    // substring-to-AST fix unproven. Measured: with the fixture off-allowlist,
+    // reverting to `getFullText().includes(...)` left every case green.
+    const r = runGateAt(
+      EXEMPT_PATH,
+      `
       // TODO: call assertRlsVisibility(prisma, "subject") before the scan.
       export async function f(prisma: any) {
         return prisma.auditOutbox.findMany({});
       }
-    `);
+    `,
+    );
     expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("PREFLIGHT_EXEMPT");
   });
 
   it("PASSES a one-hop alias of a context binding", () => {
@@ -306,8 +317,88 @@ describe("check-rls-read-context", () => {
     // The gate's only execution path (CI runs PRE_PR_STATIC_ONLY=1 pre-pr.sh).
     // Deleting that line disarms it in both places, and
     // check-gate-selftest-coverage only proves a self-test EXISTS.
+    // Anchored at line start: `toContain` stays green against
+    // `# DISABLED: queue_step ...`, which is disarming, not deletion.
     const prePr = readFileSync(join(REPO_ROOT, "scripts/pre-pr.sh"), "utf8");
-    expect(prePr).toContain("scripts/checks/check-rls-read-context.mjs");
+    expect(prePr).toMatch(/^queue_step .*check-rls-read-context\.mjs/m);
+  });
+
+  describe("$transaction GUC establishment", () => {
+    const read = "return tx.auditOutbox.findMany({});";
+    const decl = "declare function setBypassRlsGucs(x: any): Promise<void>;";
+
+    // Every one of these re-admits the checkDepthAlert defect. They are the
+    // shapes a text predicate over the callback source accepts, which is why
+    // the check is an AST walk rather than a regex.
+    it.each([
+      ["a comment naming the helper", `/* setBypassRlsGucs(tx) in caller */ ${read}`],
+      ["a comment naming set_config", `/* set_config("app.tenant_id", t, true) */ ${read}`],
+      ["a string literal naming the helper", `const m = "wrap in setBypassRlsGucs(tx)"; void m; ${read}`],
+      ["the setter on a DIFFERENT binding", `await setBypassRlsGucs(other); ${read}`],
+      ["set_config to the EMPTY string", `await tx.$executeRawUnsafe("SELECT set_config('app.tenant_id', '', true)"); ${read}`],
+    ])("FAILS a bare $transaction with only %s", (_label, body) => {
+      const r = runGate(`
+        export async function f(prisma: any, other: any) {
+          return prisma.$transaction(async (tx: any) => { ${body} });
+        }
+        ${decl}
+      `);
+      expect(r.status).not.toBe(0);
+    });
+
+    it("FAILS when the setter runs AFTER the read", () => {
+      const r = runGate(`
+        export async function f(prisma: any) {
+          return prisma.$transaction(async (tx: any) => {
+            const rows = await tx.auditOutbox.findMany({});
+            await setBypassRlsGucs(tx);
+            return rows;
+          });
+        }
+        ${decl}
+      `);
+      expect(r.status).not.toBe(0);
+    });
+
+    it("PASSES a real setBypassRlsGucs on the binding, before the read", () => {
+      const r = runGate(`
+        export async function f(prisma: any) {
+          return prisma.$transaction(async (tx: any) => {
+            await setBypassRlsGucs(tx);
+            ${read}
+          });
+        }
+        ${decl}
+      `);
+      expect(r.status).toBe(0);
+    });
+
+    it("PASSES raw set_config on the binding, before the read", () => {
+      const r = runGate(`
+        export async function f(prisma: any, t: string) {
+          return prisma.$transaction(async (tx: any) => {
+            await tx.$executeRawUnsafe("SELECT set_config('app.tenant_id', $1, true)", t);
+            ${read}
+          });
+        }
+      `);
+      expect(r.status).toBe(0);
+    });
+
+    it("REPORTS rather than accepts when the binding is passed to an unknown helper", () => {
+      // A project-local establishTenantContext(tx, ...) may or may not set the
+      // GUC. Undecidable must fail loudly, not resolve to "fine".
+      const r = runGate(`
+        export async function f(prisma: any, t: string) {
+          return prisma.$transaction(async (tx: any) => {
+            await establishTenantContext(tx, t);
+            ${read}
+          });
+        }
+        declare function establishTenantContext(tx: any, t: string): Promise<void>;
+      `);
+      expect(r.status).not.toBe(0);
+    });
   });
 
   it("FAILS LOUDLY when the scan root resolves to no files", () => {
@@ -327,6 +418,7 @@ describe("check-rls-read-context", () => {
           ...process.env,
           RLS_READ_CONTEXT_ROOT: bare,
           RLS_READ_CONTEXT_DIRS: "src/workers",
+          RLS_READ_CONTEXT_FIXTURE_MODE: "1",
         },
       });
       expect(r.status).not.toBe(0);

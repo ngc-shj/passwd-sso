@@ -31,7 +31,8 @@ function makeStubPrisma(tenantIds, failFor = []) {
     // verifyTenantChain wraps its reads in withTenantRls, which opens a
     // transaction — so failing here is exactly how a broken RLS context
     // reaches runTick.
-    $transaction: async (fn) => {
+    $transaction: async (fn, opts) => {
+      txOptions = opts;
       const tx = {
         $executeRaw: async () => 0,
         $queryRawUnsafe: async (sql) => {
@@ -44,6 +45,9 @@ function makeStubPrisma(tenantIds, failFor = []) {
             return [
               { tenant_id: gucOverride === undefined ? currentTenantId : gucOverride },
             ];
+          }
+          if (String(sql).includes("audit_chain_anchors") && anchorRows) {
+            return anchorRows;
           }
           // No anchor, no chained rows -> a legitimately empty, healthy chain.
           return [];
@@ -64,18 +68,24 @@ function makeStubPrisma(tenantIds, failFor = []) {
 let currentTenantId = null;
 /** undefined = report the real tenant id; otherwise the value to report. */
 let gucOverride;
+/** Options withTenantRls forwarded to $transaction on the last call. */
+let txOptions;
+/** When set, the anchors query returns this instead of []. */
+let anchorRows;
 
 /** Advance `currentTenantId` in walk order as each transaction opens. */
 function trackTenantOrder(prisma, order) {
   let i = 0;
   const orig = prisma.$transaction;
-  prisma.$transaction = async (fn) => {
+  // Forward opts: dropping it here would make the tx-budget assertion vacuous
+  // even with the stub capturing it.
+  prisma.$transaction = async (fn, opts) => {
     currentTenantId = order[i++];
-    return orig(fn);
+    return orig(fn, opts);
   };
 }
 
-describe("audit-chain-verify heartbeat suppression", () => {
+describe("audit-chain-verify liveness vs coverage signals", () => {
   let logLines;
   let errLines;
 
@@ -97,6 +107,8 @@ describe("audit-chain-verify heartbeat suppression", () => {
     vi.restoreAllMocks();
     currentTenantId = null;
     gucOverride = undefined;
+    txOptions = undefined;
+    anchorRows = undefined;
   });
 
   it("emits the heartbeat with full coverage when every tenant verified", async () => {
@@ -162,6 +174,41 @@ describe("audit-chain-verify heartbeat suppression", () => {
     // And it counts as a coverage shortfall rather than a silent pass.
     const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
     expect(beat.erroredTenantCount).toBe(1);
+  });
+
+  it("forwards an explicit transaction budget, not Prisma's 5s default", async () => {
+    // The whole point of the F5 fix. Without capturing opts here, dropping the
+    // { timeout, maxWait } argument reds nothing.
+    const t = "77777777-7777-4777-8777-777777777777";
+    const prisma = makeStubPrisma([t]);
+    trackTenantOrder(prisma, [t]);
+
+    await runTick(prisma, new Map());
+
+    expect(txOptions?.timeout).toBeGreaterThan(5000);
+  });
+
+  it("counts a tampered tenant as verified, not as a coverage shortfall", async () => {
+    // The worker/runbook contract: erroredTenantCount drives the coverage
+    // alarm, failedTenantCount drives the tamper alarm. Moving `verified++`
+    // inside `if (result.ok)` would turn every real tamper into a
+    // "verifier is inert" page and hide the critical behind the high.
+    const t = "88888888-8888-4888-8888-888888888888";
+    // An anchor claiming chain_seq 1 with no chained rows -> ok:false.
+    anchorRows = [{ chain_seq: "1", prev_hash: Buffer.from([0]) }];
+    const prisma = makeStubPrisma([t]);
+    trackTenantOrder(prisma, [t]);
+
+    await runTick(prisma, new Map());
+
+    const beat = JSON.parse(logLines.find((l) => l.includes(HEARTBEAT)));
+    expect(beat.verifiedTenantCount).toBe(1);
+    expect(beat.erroredTenantCount).toBe(0);
+    expect(beat.failedTenantCount).toBe(1);
+    // And the tamper line itself is emitted.
+    expect(
+      errLines.some(([fmt]) => String(fmt).includes("CHAIN_VERIFY_FAILED")),
+    ).toBe(true);
   });
 
   it("does NOT throw when the GUC matches the tenant under verification", async () => {

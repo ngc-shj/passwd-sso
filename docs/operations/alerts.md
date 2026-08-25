@@ -104,10 +104,12 @@ The same trap applies to any read of an RLS-forced table by a
 `NOBYPASSRLS` role on a pooled connection. Inside
 `src/workers/audit-outbox-worker.ts` the local helper is
 `setBypassRlsGucs`; elsewhere use `withBypassRls` from
-`src/lib/tenant-rls.ts`. Note this is a convention, not an enforced
-invariant — no gate currently derives the set of RLS-table reads and
-checks each one is wrapped, so a new unwrapped read will not be
-caught at review time.
+`src/lib/tenant-rls.ts`. `scripts/checks/check-rls-read-context.mjs`
+enforces this for `src/workers` and `scripts` — but it is a bounded
+verification gate, not a boundary: `src/app` and `src/lib` are out of
+its scope (their context is ambient, via the AsyncLocalStorage Proxy
+in `src/lib/prisma.ts`), and its declared misses are listed in the
+gate's own header.
 
 Datadog: `{ _logType="outbox.depth.check_failed" } | count`
 Loki: `{_logType="outbox.depth.check_failed"} | json`
@@ -134,13 +136,23 @@ Sentry Cron Monitor: register `audit-chain-verify` with schedule `0 * * * *`.
 
 ## audit-chain verify coverage shortfall
 
-The same heartbeat line carries `tenantCount`, `verifiedTenantCount`
-and `erroredTenantCount`. A tick that verified only some tenants must
-never read as a verified fleet, so alert on the counts, not on
-absence.
+The same heartbeat line carries `tenantCount`, `verifiedTenantCount`,
+`erroredTenantCount` and `failedTenantCount`. A tick that verified only
+some tenants must never read as a verified fleet, so alert on the
+counts, not on absence.
+
+Note the split: a tenant whose chain shows TAMPERING counts as
+*verified* (the check ran and produced a verdict) and is reported by
+`failedTenantCount`. `erroredTenantCount` means the check could not run
+at all. Conflating them would hide a tamper behind a coverage page.
 
 **Severity**: high
-**Trigger**: `verifiedTenantCount < tenantCount`
+**Trigger**: `erroredTenantCount > 0`
+
+(Not `verifiedTenantCount < tenantCount`: neither LogQL nor Datadog can
+compare two extracted fields — a label-filter expression needs a literal
+on the right. `erroredTenantCount` is equivalent by construction,
+because every tenant increments exactly one of the two counters.)
 **Recovery**: the accompanying `tick incomplete` stderr line names the
 failing tenant ids. `RLS_CONTEXT_MISSING` there means the worker lost
 its RLS context and its reads would have returned zero rows — treat as
@@ -148,14 +160,29 @@ its RLS context and its reads would have returned zero rows — treat as
 read outgrew `AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS` (default 60s); raise it
 or lower `AUDIT_CHAIN_VERIFY_MAX_ROWS`.
 
-Datadog: `{ _logType="audit-chain-verify-heartbeat" } | verifiedTenantCount < tenantCount`
-Loki: `{_logType="audit-chain-verify-heartbeat"} | json | verifiedTenantCount < tenantCount`
+Datadog: `@_logType:audit-chain-verify-heartbeat @erroredTenantCount:>0`
+Loki: `{_logType="audit-chain-verify-heartbeat"} | json | erroredTenantCount > 0`
+
+## audit-chain tamper detected
+
+**Severity**: critical
+**Trigger**: `failedTenantCount > 0` on the heartbeat line
+**Recovery**: treat as a possible audit-log rewrite. The
+`CHAIN_VERIFY_FAILED` stderr line below carries the reason and the
+first offending `chain_seq`.
+
+Datadog: `@_logType:audit-chain-verify-heartbeat @failedTenantCount:>0`
+Loki: `{_logType="audit-chain-verify-heartbeat"} | json | failedTenantCount > 0`
 
 ## `CHAIN_VERIFY_FAILED`
 
 Emitted by `scripts/audit-chain-verify-worker.ts` when a tenant's
 chain shows tampering, with hysteresis (re-emit on clean → failed,
 then every 24h while still failed).
+
+Prefer the structured `failedTenantCount` alert above as the primary
+signal — this line is the detail, not the trigger, and its hysteresis
+means it is absent on most ticks of an ongoing failure.
 
 It is written with `console.error` as a printf-formatted line — it is
 **not** stored in `audit_logs` and is not a structured pino record, so

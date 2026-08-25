@@ -71,6 +71,7 @@ const CHAIN_VERIFY_TX_TIMEOUT_MS = Number(
   process.env.AUDIT_CHAIN_VERIFY_TX_TIMEOUT_MS ?? MS_PER_MINUTE,
 );
 const CHAIN_VERIFY_TX_MAX_WAIT_MS = 10_000;
+const ERRORED_IDS_LOGGED = 20;
 
 export interface VerifyResult {
   tenantId: string;
@@ -257,6 +258,9 @@ export async function runTick(
   const logger = console;
   let verified = 0;
   let errored = 0;
+  // Tampered/gap tenants. Distinct from `errored`: verification RAN and found a
+  // problem, which is CHAIN_VERIFY_FAILED's business, not a coverage shortfall.
+  let failed = 0;
   const erroredTenantIds: string[] = [];
 
   for (const { id: tenantId } of tenants) {
@@ -295,6 +299,7 @@ export async function runTick(
         state.inFailedState = false;
         state.lastAlertAt = null;
       }
+      if (!result.ok) failed++;
       states.set(tenantId, state);
       verified++;
     } catch (err) {
@@ -325,8 +330,12 @@ export async function runTick(
       "audit-chain-verify-worker: tick incomplete — %d/%d tenants failed to verify: %s",
       errored,
       tenants.length,
-      // Name them: an alarm an operator cannot act on gets muted.
-      erroredTenantIds.join(","),
+      // Name them, but bounded: the dominant failure (RLS context lost) fails
+      // EVERY tenant, so an unbounded join is a ~10KB line at 283 tenants —
+      // past the point a log driver keeps it in one record.
+      erroredTenantIds.length > ERRORED_IDS_LOGGED
+        ? `${erroredTenantIds.slice(0, ERRORED_IDS_LOGGED).join(",")} (+${erroredTenantIds.length - ERRORED_IDS_LOGGED} more)`
+        : erroredTenantIds.join(","),
     );
   }
 
@@ -337,6 +346,10 @@ export async function runTick(
       tenantCount: tenants.length,
       verifiedTenantCount: verified,
       erroredTenantCount: errored,
+      // Carried here so tamper detection has a structured signal. The only
+      // other one is CHAIN_VERIFY_FAILED, a printf stderr line with no
+      // _logType that the documented rules cannot match.
+      failedTenantCount: failed,
       time: new Date().toISOString(),
     }),
   );

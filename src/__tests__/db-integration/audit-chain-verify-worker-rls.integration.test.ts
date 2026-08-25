@@ -11,8 +11,8 @@
  * This is the silent half of the RLS-read class. The `audit_outbox` case
  * raised 22P02 once a GUC had been touched on the connection and so was
  * eventually noticed; this one cannot raise anything, which is why the fix
- * carries a precondition assertion and heartbeat suppression rather than
- * relying on an error surfacing.
+ * carries a precondition assertion rather than relying on an error surfacing,
+ * and reports what a tick covered as counts on the heartbeat line.
  *
  * The role matters: these cases MUST run as `passwd_app`. A superuser client
  * bypasses RLS outright and passes against the unfixed code.
