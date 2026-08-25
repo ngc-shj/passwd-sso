@@ -23,6 +23,35 @@ Datadog/Loki: `{ _logType="audit-dead-letter" }`
 Splunk: `_logType="audit-dead-letter"`
 Sentry: auto-captured at error level.
 
+> **⚠️ Known gap — this record is not durable, and the default deployment does
+> not forward it.** Tracked as an open security risk; not fixed.
+>
+> For the `tenant_not_found` reason (`src/lib/audit/audit.ts`, in
+> `logAuditAsync` and `logAuditBulkAsync`) the function returns **without**
+> enqueuing anything, so there is no `audit_outbox` row and no `audit_logs`
+> row. The stdout line is the only record that the audit event existed.
+>
+> Two things then work against it:
+> - `infra/fluent-bit/fluent-bit.conf` matches `_logType ^(audit|app)$`, so the
+>   audit-log-forwarding overlay **drops** `audit-dead-letter` before any output
+>   plugin sees it. Adopting that overlay does not make this record leave the
+>   host.
+> - Container logs are capped at `max-size: 20m` × `max-file: 5`
+>   (`docker-compose.yml`). Ordinary application logging can therefore push the
+>   record out of the retention window. Before the cap existed the log grew
+>   until the disk filled — which is the incident the cap was added for — so
+>   this is a narrowed window, not a new loss, but it is narrower.
+>
+> **What to do until it is fixed**: if you rely on dead-letter alerting, do not
+> rely on the shipped forwarder. Ship the raw container stdout (not the
+> `docker-compose.logging.yml` overlay) to a durable sink, or widen the Fluent
+> Bit `Regex` to include `audit-dead-letter` yourself — noting that the record
+> then carries whatever a caller passed, including error text, so review what
+> your sink retains.
+>
+> **The fix** is to persist `tenant_not_found` to a durable dead-letter table
+> rather than only to stdout, so alerting stops depending on log retention.
+
 ## `outbox.depth.alert`
 
 Emitted by `src/workers/audit-outbox-worker.ts` when the

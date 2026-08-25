@@ -257,6 +257,17 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
   try {
     const tenantId = await resolveTenantId(params);
     if (!tenantId) {
+      // KNOWN GAP (open security risk, see docs/operations/alerts.md):
+      // this returns WITHOUT enqueuing, so the line below is the only record
+      // that the audit event ever existed — no audit_outbox row, no audit_logs
+      // row. And the shipped forwarder does not carry it: fluent-bit.conf
+      // matches `_logType ^(audit|app)$`, which drops `audit-dead-letter`.
+      // Container logs are capped (20m x 5), so ordinary logging can push the
+      // record out of the window.
+      //
+      // If you change this branch, the fix is to persist the dead letter
+      // durably rather than to widen the log — alerting should not depend on
+      // log retention.
       deadLetterLogger.warn(
         deadLetterEntry(params, "tenant_not_found"),
         "audit.dead_letter",
@@ -338,6 +349,9 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
     // Resolve tenantId once; assume all entries share it.
     const tenantId = await resolveTenantId(paramsList[0]);
     if (!tenantId) {
+      // Same known gap as logAuditAsync above, once per entry: nothing is
+      // enqueued, so these lines are the only record. See the comment there and
+      // docs/operations/alerts.md.
       for (const params of paramsList) {
         deadLetterLogger.warn(
           deadLetterEntry(params, "tenant_not_found"),

@@ -48,6 +48,26 @@ fixed in `review(1)`; the two open items are recorded below with reasons.
 
 ## Open items (not fixed, with reasons)
 
+### Security — the only record of a `tenant_not_found` audit failure is not durable
+
+Raised by review of this branch, confirmed, **not fixed here**. `logAuditAsync`
+and `logAuditBulkAsync` return without enqueuing when the tenant cannot be
+resolved, so the stdout `audit-dead-letter` line is the sole record; the shipped
+Fluent Bit filter matches `^(audit|app)$` and drops it; and this branch's cap
+(20m x 5) bounds how long it survives ordinary application logging.
+
+The branch narrows an existing window rather than creating the gap — before the
+cap the log grew until the disk filled, which is the incident the cap exists for
+— but narrower is worse, and that is the honest framing.
+
+It is not fixed here because the fix is to persist the dead letter durably,
+which is a change to the audit-emission path. That path was reviewed for four
+rounds on a companion branch without converging, and its work was discarded
+(reflog `51135b1c6`); pulling it back in would make a log-rotation fix wait on it
+again. Recorded in two places instead, so neither reader has to find the other:
+`docs/operations/alerts.md` under `audit-dead-letter` for the operator, and at
+both `return` sites in `src/lib/audit/audit.ts` for whoever edits the code.
+
 ### F7 [Minor] — `mailpit` is the only override service without `networks: internal`
 
 Raised in round 1 as an open product decision. It was fixed, then re-opened
