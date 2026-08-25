@@ -40,14 +40,22 @@
  *     purpose; adding jsx:ReactJSX would change how its .tsx inputs parse.
  */
 import { Project, ts } from "ts-morph";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative } from "node:path";
 
-/** True for a source file we scan (.ts/.tsx, excluding test files). */
+/**
+ * True for a source file we scan (.ts/.tsx, excluding test files).
+ *
+ * `.spec.` is listed alongside `.test.` for the reason the module docblock
+ * gives: the drift this file exists to stop was one copy excluding `.test.ts`
+ * but not `.test.tsx`. A copy excluding `.test.` but not `.spec.` is the same
+ * shape. No `.spec.ts` exists under any current scan root, so this changes no
+ * gate's selection today — it removes a way for them to disagree tomorrow.
+ */
 function isScannableSourceFile(name) {
   const ext = extname(name);
   if (ext !== ".ts" && ext !== ".tsx") return false;
-  return !name.endsWith(".test.ts") && !name.endsWith(".test.tsx");
+  return !/\.(test|spec)\.(ts|tsx)$/.test(name);
 }
 
 /** A fresh in-memory ts-morph project (no Program / no dependency resolution). */
@@ -64,7 +72,7 @@ export function createAstProject() {
  * (`*.test.ts`, `*.test.tsx`) and anything under a `__tests__` directory.
  * Missing directories yield an empty list (never throws).
  */
-export function walkSourceFiles(dir) {
+export function walkSourceFiles(dir, visited = new Set()) {
   const out = [];
   let entries;
   try {
@@ -74,12 +82,39 @@ export function walkSourceFiles(dir) {
   }
   for (const e of entries) {
     const full = join(dir, e.name);
-    if (e.isDirectory()) {
+    let isDir = e.isDirectory();
+    let isFile = e.isFile();
+    if (e.isSymbolicLink()) {
+      // A Dirent reports a symlink as NEITHER directory nor file, so before
+      // this the directory branch was not taken and the file branch's
+      // `!e.isFile()` dropped it: a symlinked directory's entire subtree went
+      // silently unscanned. Silent is the problem — a gate that examines less
+      // than it claims reports the same green as one that found nothing.
+      // A dangling link is skipped: it resolves to no source at all.
+      try {
+        const st = statSync(full);
+        isDir = st.isDirectory();
+        isFile = st.isFile();
+      } catch {
+        continue;
+      }
+    }
+    if (isDir) {
       if (e.name === "__tests__") continue;
-      out.push(...walkSourceFiles(full));
+      // Following links means a cycle is now reachable. Keyed on the resolved
+      // path so two links to one directory are walked once.
+      let key = full;
+      try {
+        key = realpathSync(full);
+      } catch {
+        continue;
+      }
+      if (visited.has(key)) continue;
+      visited.add(key);
+      out.push(...walkSourceFiles(full, visited));
       continue;
     }
-    if (!e.isFile()) continue;
+    if (!isFile) continue;
     if (!isScannableSourceFile(e.name)) continue;
     out.push(full);
   }
