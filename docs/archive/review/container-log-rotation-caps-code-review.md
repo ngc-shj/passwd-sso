@@ -23,7 +23,7 @@ fixed in `review(1)`; the two open items are recorded below with reasons.
 | S2 / F2 | Major (2 experts) | Repair was create-only (`\if :should_create`), so the "role exists, password or LOGIN out of sync" branch — which `01-create-jackson-db.sql`'s NOLOGIN `\else` branch actually produces — was a no-op; the doc posed both hypotheses and answered one | Fixed — `IF NOT EXISTS` create plus an unconditional `ALTER ROLE`, matching `bootstrap-rds-roles.mjs:201-206`, plus a `RAISE EXCEPTION` refusing to hand database ownership to a role still carrying elevated attributes |
 | T2 | Major | Only stated expected output was a denial that a partially-executed run also produces; allow path had no assertion, no pre-count, no ready signal | Fixed — pre-count `N`, an ownership assertion over tables+sequences (not one table), a data-preservation check against `N`, a relabelled deny check, and a post-restart health/log check |
 | F3 / S3 | Major (2 experts) | The `20m x 5` rationale was false in both directions: `auditLogger` is gated on `AUDIT_LOG_FORWARD`, which only the overlay that moves `app` off json-file sets, and the two compose workers emit `deadLetterLogger`, not the audit line | Fixed — comment rewritten against what is actually on each stream, naming the one sole-record path (`tenant_not_found`, `src/lib/audit/audit.ts:259-264`) |
-| F4 | Major | "Ship those lines off-host with docker-compose.logging.yml" — the overlay defines no worker services, and `fluent-bit.conf`'s `Regex _logType ^(audit\|app)$` drops `audit-dead-letter`, the record `audit-logger.ts:94` designates for external alerting | Claim withdrawn here: the compose comment now states the filter drops those records rather than offering the overlay as a way to retain them. Widening the filter is a change to what is forwarded off-host, so it went to the audit branch with the rest of that work (see "Scope" below) |
+| F4 | Major | "Ship those lines off-host with docker-compose.logging.yml" — the overlay defines no worker services, and `fluent-bit.conf`'s `Regex _logType ^(audit\|app)$` drops `audit-dead-letter`, the record `audit-logger.ts:94` designates for external alerting | Claim withdrawn, filter unchanged. The compose comment now states that `fluent-bit.conf` drops `audit-dead-letter` rather than offering the overlay as a way to retain those records. Widening the filter was tried and abandoned — see "Withdrawn" below. The finding itself stands open: there is still no off-host path for a dead-letter record |
 | F5 / S4 / T1 | Major (3 experts) | Nothing enforced the cap; the next service added to any overlay silently reverts to unbounded | Fixed — `scripts/checks/check-compose-log-caps.mjs` + RT7 self-test, wired into `scripts/pre-pr.sh` |
 | T4 / F8 | Major (2 experts) | CI `env` paths-filter enumerated 4 of the 5 compose files `check-env-docs.ts` globs, so `docker-compose.workers.yml` changes never triggered `env-drift-check` | Fixed — replaced the enumeration with `docker-compose*.yml`, the same pattern the gate scans by |
 | T6 | Minor | New section dropped the source procedure's DESTRUCTIVE label and maintenance-window precondition; `ALTER TABLE ... OWNER TO` takes `ACCESS EXCLUSIVE` against a live writer | Fixed — procedure now stops Jackson first and says why |
@@ -46,17 +46,23 @@ fixed in `review(1)`; the two open items are recorded below with reasons.
   (`PARSE_FAILED`, not a green "0 uncapped"), and an empty directory
   (`NO_COMPOSE_FILES`) each exit non-zero.
 
-### F7 [Minor] — `mailpit` is the only override service without `networks: internal` — moved out of this branch
-
-Raised in round 1 as an open product decision, fixed once the user chose to add
-the network, then re-opened twice — first because joining `internal` exposed
-mailpit's unauthenticated UI and REST API to every dev container, then because
-the version it was pinned to carried a WebSocket origin-check CVE. Two rounds of
-findings on one dev-only service is the signature of work that belongs somewhere
-else: it moved to the audit/forwarding branch, where the reach was removed rather
-than gated and the pin was corrected.
-
 ## Open items (not fixed, with reasons)
+
+### F7 [Minor] — `mailpit` is the only override service without `networks: internal`
+
+Raised in round 1 as an open product decision. It was fixed, then re-opened
+twice — joining `internal` exposed mailpit's unauthenticated UI and REST API to
+every other dev container, and the version it was subsequently pinned to carried
+a WebSocket origin-check CVE. All of that was withdrawn along with the rest of
+the work below, so the config is back to what `main` had: mailpit on the implicit
+default network, unpinned.
+
+The original question is still unanswered and still latent: if magic-link email
+from the *containerized* app is a supported dev path, mailpit needs
+`networks: [internal]` or a dedicated one; if it is only ever reached from the
+host through the published `127.0.0.1:1025`, the current config is correct and a
+comment saying so is the whole fix. Nothing in the repo sets `SMTP_HOST=mailpit`,
+so today it is the second.
 
 ### Pre-existing failure on `main` — fixed on a separate branch
 
@@ -71,16 +77,35 @@ Fixed on `fix/crypto-manifest-scan-excludes-test-helpers` rather than here —
 bundling an unrelated scanner fix into a log-rotation PR hides it. That branch
 must merge first, or this one's CI stays red for a reason it did not cause.
 
-## Scope
+## Scope, and what was withdrawn
 
 This branch carries the container log caps, the gate that keeps them on, the CI
-paths-filter fix, and the `jackson_user` upgrade runbook. Rounds 2 and 3
-produced 40 further findings, and **none** were against those — every one landed
-on material added later: the dead-letter/fluent-bit forwarding work, the mailpit
-network and pin, and `scripts/pre-pr.sh`'s failure-log handling. That material
-is on a separate branch with its own review history, because it has not
-converged and this has: no finding since round 2 has touched the files in this
-diff.
+paths-filter fix, and the `jackson_user` upgrade runbook. Nothing else.
+
+Rounds 2, 3 and 4 produced roughly 40 further findings and **none** were against
+those files. Every one landed on material added later, all of it downstream of a
+single decision: round 1's F4 said the compose comment claimed the logging
+overlay could retain dead-letter records when its filter drops them, and the fix
+chosen was to widen the filter rather than withdraw the claim. That one line
+opened the question of what those records contain, which pulled in the pino
+serializer chain, error summarisation, the app logger's redaction paths, and —
+through the same overlay — mailpit's network and image pin.
+
+Four review rounds later that work had not converged: each round found holes in
+the previous round's fix, and each fix added machinery that produced the next
+round's findings. It was discarded rather than continued, because none of it was
+needed for the problem this branch exists to solve. Recoverable from reflog at
+`51135b1c6` if it is ever wanted.
+
+Two unrelated fixes went with it and may be worth re-landing on their own:
+`scripts/pre-pr.sh` deletes failing steps' logs at EXIT and anchors its failure
+context below vitest's shuffle-seed line, so a flaky run is irreproducible by the
+time anyone looks; and `extension/vitest.config.ts` inherits a 5s test timeout
+against the root suite's 10s while sharing an unthrottled pre-pr batch with it.
+
+The lesson worth keeping: when a review finds a comment claiming more than the
+code does, withdrawing the claim and widening the implementation are not
+equivalent options. The first is bounded.
 
 ## Recurring Issue Check
 
