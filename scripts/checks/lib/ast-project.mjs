@@ -40,7 +40,7 @@
  *     purpose; adding jsx:ReactJSX would change how its .tsx inputs parse.
  */
 import { Project, ts } from "ts-morph";
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, join, relative } from "node:path";
 
 /**
@@ -69,10 +69,12 @@ export function createAstProject() {
 
 /**
  * Recursively collect .ts/.tsx source files under `dir`, EXCLUDING test files
- * (`*.test.ts`, `*.test.tsx`) and anything under a `__tests__` directory.
- * Missing directories yield an empty list (never throws).
+ * (`*.test.*`, `*.spec.*`) and anything under a `__tests__` directory.
+ *
+ * Missing directories yield an empty list. A SYMLINK throws — see below; that is
+ * the one input this walker refuses rather than guessing about.
  */
-export function walkSourceFiles(dir, visited = new Set()) {
+export function walkSourceFiles(dir) {
   const out = [];
   let entries;
   try {
@@ -82,39 +84,39 @@ export function walkSourceFiles(dir, visited = new Set()) {
   }
   for (const e of entries) {
     const full = join(dir, e.name);
-    let isDir = e.isDirectory();
-    let isFile = e.isFile();
+    // A Dirent reports a symlink as NEITHER directory nor file, so a symlinked
+    // directory used to fall past both branches and its whole subtree went
+    // unscanned with no signal — a gate examining less than it claims reports
+    // the same green as one that found nothing.
+    //
+    // Refuse rather than follow. Following looked like the fix and is worse:
+    // both exclusions below key on the ENTRY name, so `ln -s ./__tests__ x`
+    // and `ln -s ./a.test.ts b.ts` walk straight through them — reopening, for
+    // every gate that uses this module, the exact hole the manifest scan was
+    // being fixed for. It also removes the walk's boundary: a link to
+    // node_modules took one probe from 0 to 14,019 files, and a gate printed
+    // the source of a file outside the repository into a CI log under an
+    // in-repo path that does not exist.
+    //
+    // No tracked symlink exists in this repo (`git ls-files -s | awk
+    // '$1=="120000"'` is empty), so this costs nothing today. If one is ever
+    // added under a scan root, that is a decision about what "shipped source"
+    // means, and it should be made deliberately — not resolved by whichever
+    // behaviour this walker happens to have.
     if (e.isSymbolicLink()) {
-      // A Dirent reports a symlink as NEITHER directory nor file, so before
-      // this the directory branch was not taken and the file branch's
-      // `!e.isFile()` dropped it: a symlinked directory's entire subtree went
-      // silently unscanned. Silent is the problem — a gate that examines less
-      // than it claims reports the same green as one that found nothing.
-      // A dangling link is skipped: it resolves to no source at all.
-      try {
-        const st = statSync(full);
-        isDir = st.isDirectory();
-        isFile = st.isFile();
-      } catch {
-        continue;
-      }
+      throw new Error(
+        `walkSourceFiles: refusing to decide about a symlink: ${full}\n` +
+          `  Following it would let the __tests__ / *.test.* exclusions be bypassed by naming, ` +
+          `and would let the walk leave the repository.\n` +
+          `  Replace it with a real file or directory, or move it outside the gate scan roots.`,
+      );
     }
-    if (isDir) {
+    if (e.isDirectory()) {
       if (e.name === "__tests__") continue;
-      // Following links means a cycle is now reachable. Keyed on the resolved
-      // path so two links to one directory are walked once.
-      let key = full;
-      try {
-        key = realpathSync(full);
-      } catch {
-        continue;
-      }
-      if (visited.has(key)) continue;
-      visited.add(key);
-      out.push(...walkSourceFiles(full, visited));
+      out.push(...walkSourceFiles(full));
       continue;
     }
-    if (!isFile) continue;
+    if (!e.isFile()) continue;
     if (!isScannableSourceFile(e.name)) continue;
     out.push(full);
   }
