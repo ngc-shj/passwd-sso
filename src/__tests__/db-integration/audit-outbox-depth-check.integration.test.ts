@@ -12,9 +12,13 @@
  * object with no connection, no session and no GUCs, so those 38 tests pass
  * identically against the buggy and the fixed code.
  *
- * `max: 1` is load-bearing. At the default pool size the second statement may
- * land on a fresh connection where the GUC was never touched, and the whole
- * file would pass against the unfixed code.
+ * `max: 1` makes "both statements hit the same backend" an explicit invariant
+ * of the fixture. It is not that the default size would reliably break this:
+ * pg-pool checks out from a LIFO idle stack, and these statements are serial,
+ * so `max: 3` happens to reuse the same connection too. That is an
+ * implementation detail of pg, not a contract — and this test is worthless the
+ * moment it stops holding, because a second connection with a virgin GUC makes
+ * the file pass against the unfixed code.
  */
 
 import {
@@ -44,20 +48,30 @@ describe("audit_outbox depth check on a pooled connection", () => {
   // passwd_outbox_worker: NOBYPASSRLS, and audit_outbox is FORCE ROW LEVEL
   // SECURITY — so the RLS predicate really is evaluated for this role.
   let wp: PrismaWithPool;
-  // passwd_outbox_worker holds SELECT/UPDATE/DELETE on audit_outbox but NOT
-  // INSERT, so the probe row is seeded through the superuser role.
-  let su: PrismaWithPool;
+  let ctx: TestContext;
+  let tenantId: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     wp = createPrismaForRole("worker", { max: 1 });
-    su = createPrismaForRole("superuser");
+    ctx = await createTestContext();
   });
 
   afterAll(async () => {
     await wp.prisma.$disconnect();
     await wp.pool.end();
-    await su.prisma.$disconnect();
-    await su.pool.end();
+    await ctx.cleanup();
+  });
+
+  // The probe row goes on a tracked throwaway tenant, never on an arbitrary
+  // pre-existing one: ctx.cleanup() sweeps it even if the process dies before
+  // the finally block, so a hard kill cannot leave a PENDING row that a live
+  // worker would later drain into a real tenant's audit log.
+  beforeEach(async () => {
+    tenantId = await ctx.createTenant();
+  });
+
+  afterEach(async () => {
+    await ctx.deleteTestData(tenantId);
   });
 
   /** Put the single pooled connection into the state the worker leaves it in. */
@@ -100,41 +114,26 @@ describe("audit_outbox depth check on a pooled connection", () => {
 
     // Delta, not an absolute count: the dev DB is shared, and asserting
     // `>= 0` would pass no matter what the query returned.
-    const ids: string[] = [];
-    await su.prisma.$transaction(async (tx) => {
+    //
+    // Two rows, only one PENDING. The SENT row pins the query's own
+    // `WHERE status = 'PENDING'` predicate: drop it and the delta becomes 2,
+    // so this fails for a reason a single-PENDING-row fixture would miss.
+    await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      const rows = await tx.$queryRawUnsafe<Array<{ id: string }>>(
+      await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox
            (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
-         SELECT gen_random_uuid(), t.id, '{"probe":"depth-check"}'::jsonb,
-                'PENDING', 0, 5, now(), now()
-         FROM tenants t LIMIT 1
-         RETURNING id`,
+         VALUES
+           (gen_random_uuid(), $1::uuid, '{"probe":"depth-pending"}'::jsonb,
+            'PENDING', 0, 5, now(), now()),
+           (gen_random_uuid(), $1::uuid, '{"probe":"depth-sent"}'::jsonb,
+            'SENT', 0, 5, now(), now())`,
+        tenantId,
       );
-      rows.forEach((r) => ids.push(r.id));
     });
-    expect(ids).toHaveLength(1);
 
-    try {
-      const after = await readOutboxDepth(wp.prisma);
-      expect(after.pending - before.pending).toBe(1);
-    } finally {
-      // Cleanup on the failure path too — a leaked PENDING row would be
-      // drained by a live worker and skew a later run.
-      await su.prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        // audit_outbox_before_delete_guard only permits deleting SENT/FAILED
-        // rows, so the probe has to be retired before it can be removed.
-        await tx.$executeRawUnsafe(
-          `UPDATE audit_outbox SET status = 'SENT', sent_at = now() WHERE id = $1::uuid`,
-          ids[0],
-        );
-        await tx.$executeRawUnsafe(
-          `DELETE FROM audit_outbox WHERE id = $1::uuid`,
-          ids[0],
-        );
-      });
-    }
+    const after = await readOutboxDepth(wp.prisma);
+    expect(after.pending - before.pending).toBe(1);
   });
 });
 
@@ -220,7 +219,7 @@ describe("audit_outbox hydration in processDeliveryBatch", () => {
     // The delivery attempt itself fails on the placeholder config — that is the
     // recorded-error path, not a throw, and is not what this pins.
     await expect(
-      processDeliveryBatch(wp.prisma, 10),
+      processDeliveryBatch(wp.prisma, 50),
     ).resolves.toBeGreaterThanOrEqual(1);
 
     const [row] = await ctx.su.prisma.$transaction(async (tx) => {

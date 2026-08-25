@@ -704,6 +704,22 @@ export async function processDeliveryBatch(prisma: PrismaClient, batchSize: numb
 
   for (const delivery of deliveries) {
     const outbox = outboxById.get(delivery.outboxId);
+    // The hydration above runs under bypass, so it is not tenant-filtered, and
+    // audit_deliveries.outbox_id carries no FK. The only writer derives both
+    // ids from one tenantId, so this should be unreachable — check it anyway:
+    // this is the point where a bypass read hands a payload to a tenant-scoped
+    // delivery target.
+    if (outbox && outbox.tenantId !== delivery.tenantId) {
+      getLogger().error(
+        {
+          deliveryId: delivery.id,
+          outboxId: delivery.outboxId,
+          _logType: "delivery.tenant_mismatch",
+        },
+        "delivery.tenant_mismatch",
+      );
+      continue;
+    }
     if (!outbox) {
       // Outbox row was purged before delivery completed — log and skip
       getLogger().warn({ deliveryId: delivery.id, outboxId: delivery.outboxId }, "delivery.outbox_purged");
@@ -1758,18 +1774,27 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
 export async function readOutboxDepth(
   prisma: PrismaClient,
 ): Promise<{ pending: number; oldestAgeSecs: number }> {
-  const rows = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    return tx.$queryRawUnsafe<
-      Array<{ pending: bigint; oldest_age_secs: number | null }>
-    >(`
-      SELECT
-        COUNT(*)::bigint AS pending,
-        EXTRACT(EPOCH FROM (now() - MIN(created_at)))::int AS oldest_age_secs
-      FROM audit_outbox
-      WHERE status = 'PENDING'
-    `);
-  });
+  const rows = await prisma.$transaction(
+    async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<
+        Array<{ pending: bigint; oldest_age_secs: number | null }>
+      >(`
+        SELECT
+          COUNT(*)::bigint AS pending,
+          EXTRACT(EPOCH FROM (now() - MIN(created_at)))::int AS oldest_age_secs
+        FROM audit_outbox
+        WHERE status = 'PENDING'
+      `);
+    },
+    // Keep the pool's own statement budget rather than inheriting Prisma's
+    // 5s interactive-transaction default, which the wrapping would otherwise
+    // impose. MIN(created_at) has no index-only path, so this scan gets slower
+    // exactly as the outbox deepens — the 5s default would start aborting the
+    // depth check precisely when the depth matters most, and the abort lands
+    // in the same catch as the RLS failure.
+    { timeout: WORKER_POOL_STATEMENT_TIMEOUT_MS },
+  );
   const r = rows[0];
   return {
     pending: Number(r?.pending ?? 0),

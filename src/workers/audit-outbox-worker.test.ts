@@ -244,6 +244,11 @@ interface MockTxClient {
   $executeRawUnsafe: Mock;
   auditDeliveryTarget: { findMany: Mock };
   auditDelivery: { upsert: Mock; findMany: Mock; update: Mock };
+  // processDeliveryBatch hydrates outbox rows through the tx client. Without
+  // this the real function TypeErrors the moment a delivery claim returns a
+  // row, and the failure reads as "Cannot read properties of undefined"
+  // rather than as the behaviour under test.
+  auditOutbox: { findMany: Mock };
 }
 type TxFn = (tx: MockTxClient) => Promise<unknown>;
 
@@ -299,6 +304,7 @@ function makeOneShotTxImpl(
       $executeRawUnsafe: mockExecuteRawUnsafe,
       auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
       auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
     });
 
     return result;
@@ -322,6 +328,7 @@ function resetMocks() {
       // Phase 3: delivery model stubs
       auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
       auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
     });
   });
   mockComputeBackoffMs.mockReturnValue(1000);
@@ -601,6 +608,7 @@ describe("error paths", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -640,6 +648,7 @@ describe("error paths", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -672,6 +681,7 @@ describe("error paths", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -704,6 +714,7 @@ describe("error paths", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1093,6 +1104,7 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1189,6 +1201,7 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1263,6 +1276,7 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1316,6 +1330,7 @@ describe("reaper — invoked on first loop tick", () => {
         $executeRawUnsafe: mockExecuteRawUnsafe,
         auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
         auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
       });
     });
 
@@ -1372,6 +1387,7 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1431,6 +1447,7 @@ describe("recordError — sanitizes error message before persisting", () => {
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1510,6 +1527,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1559,6 +1577,7 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
           $executeRawUnsafe: mockExecuteRawUnsafe,
           auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
           auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
+      auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
         });
       },
     );
@@ -1692,6 +1711,7 @@ describe("outbox.depth.check_failed observability contract", () => {
           findMany: vi.fn().mockResolvedValue([]),
           update: vi.fn().mockResolvedValue({}),
         },
+        auditOutbox: { findMany: vi.fn().mockResolvedValue([]) },
       });
     });
   }
