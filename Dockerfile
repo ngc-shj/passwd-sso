@@ -108,10 +108,13 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # - npm 11.16.0: drops bundled cross-spawn entirely and ships glob 13.x /
 #   minimatch 10.x, closing CVE-2024-21538, CVE-2025-64756,
 #   CVE-2026-26996/27903/27904.
-# - tar >=7.5.19: closes CVE-2026-31802 (fixed in 7.5.11) AND the newer
-#   CVE-2026-59873 (gzip-bomb DoS, fixed 7.5.19) / CVE-2026-59874 (malformed
-#   tar-header DoS, fixed 7.5.18). npm 11.16.0 ships tar 7.5.15 under its own
-#   node_modules, so the patch block below force-upgrades it.
+# - tar >=7.5.21: closes CVE-2026-31802 (fixed 7.5.11), CVE-2026-59874
+#   (malformed tar-header DoS, fixed 7.5.18), CVE-2026-59873 (gzip-bomb DoS,
+#   fixed 7.5.19) and CVE-2026-73566 (long-path DoS, affects <= 7.5.20, fixed
+#   7.5.21). npm 11.16.0 ships tar 7.5.15 under its own node_modules, so the
+#   patch block below force-upgrades it. Note the pin has to move for each new
+#   advisory: the block installs an exact version, so a CVE against the pinned
+#   version is not covered by "we already patch tar".
 # - picomatch >=4.0.4: closes CVE-2026-33671. npm 11.16.0 already bundles 4.0.4
 #   (nested under tinyglobby), so the patch is a no-op skip — kept as a
 #   fail-closed tripwire in case a future npm regresses it.
@@ -140,7 +143,7 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 # `migrate` compose service runs); a floating `latest` here breaks build
 # reproducibility and risks CLI/generated-client skew. Kept in lockstep with the
 # lockfile by scripts/checks/check-dockerfile-prisma-pin.sh.
-RUN TAR_VER=7.5.19 && \
+RUN TAR_VER=7.5.21 && \
     PICOMATCH_VER=4.0.4 && \
     SIGSTORE_VER=4.1.1 && \
     BE_VER=5.0.9 && \
