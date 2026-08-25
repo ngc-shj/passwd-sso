@@ -262,8 +262,27 @@ export function computeMetadataViolations(
  * crypto/auth dependency (extension/src/__tests__/helpers/keyed-decrypt-mock.ts).
  * Excluding the directory keeps the set this walker produces to what actually
  * ships, which is what the manifest is a manifest OF.
+ *
+ * ONE entry, because one directory is what was measured. Adding a name here
+ * removes real source from the (A) scan — a shipped file importing an
+ * unregistered crypto package inside a newly-excluded directory goes invisible
+ * — so the exact membership is asserted below rather than left editable.
+ * `__mocks__` / `__fixtures__` were in an earlier draft and are removed: neither
+ * exists anywhere in the repo, so they declared a class wider than the evidence
+ * and pre-authorised exactly that widening.
+ *
+ * Scope of the claim: it holds for the CODE_ROOTS above, none of which names a
+ * test-support directory. The skip is applied to child entries, so passing one
+ * as a root scans it normally — an explicit opt-in, not a hole.
+ *
+ * Residual, unchanged by this exclusion: a crypto import of a *devDependency*
+ * inside a test-support file is observed by nothing. (C) and (E) both read
+ * `package.json` `dependencies` only. That was already true of every
+ * `*.test.ts` file via the filename filter; this makes helpers consistent with
+ * their siblings rather than opening a new gap. A *runtime* dependency stays
+ * covered by (E) / check-crypto-auth-deps-classified.mjs regardless of name.
  */
-const TEST_SUPPORT_DIRS = new Set(["__tests__", "__mocks__", "__fixtures__"]);
+const TEST_SUPPORT_DIRS = new Set(["__tests__"]);
 
 export function walkSourceFiles(root: string): string[] {
   const abs = path.join(REPO_ROOT, root);
@@ -277,6 +296,9 @@ export function walkSourceFiles(root: string): string[] {
     const full = path.join(abs, entry.name);
     const rel = path.join(root, entry.name);
     if (entry.isDirectory()) {
+      // Exact-case, and a symlinked directory reports isDirectory() === false,
+      // so neither is skipped here. Both err toward scanning more, which fails
+      // loudly rather than silently dropping a file from the scan.
       if (TEST_SUPPORT_DIRS.has(entry.name)) continue;
       files.push(...walkSourceFiles(rel));
     } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) {
@@ -627,7 +649,20 @@ describe("RT7 self-test — walkSourceFiles excludes test-support directories", 
     expect(existsSync(path.join(REPO_ROOT, HELPER)), `${HELPER} is gone`).toBe(true);
   });
 
-  it("would flag the helper's import if it were scanned, so the exclusion is what removes it", () => {
+  it("pins the exact set of excluded directories", () => {
+    // The set is the whole control. Widening it removes real source from the
+    // (A) scan — a shipped file importing an unregistered crypto package inside
+    // a newly-excluded directory would go unreported with every test green —
+    // and nothing else in this suite would notice, because the only allow-side
+    // assertion is that the scanned set is non-empty. Adding a name here must
+    // cost a deliberate edit to this line.
+    expect([...TEST_SUPPORT_DIRS].sort()).toEqual(["__tests__"]);
+  });
+
+  it("extracts vitest from the helper's source", () => {
+    // Establishes that the specifier the exclusion suppresses is really there;
+    // paired with the next case, that is what makes the exclusion — rather than
+    // a vanished import — the reason it is absent from the scanned set.
     const source = readFileSync(path.join(REPO_ROOT, HELPER), "utf8");
     expect(extractExternalSpecifiers(source, HELPER)).toContain("vitest");
   });
