@@ -253,7 +253,19 @@ export function computeMetadataViolations(
 
 // ── helpers for walking the real tree ───────────────────────────────────────
 
-function walkSourceFiles(root: string): string[] {
+/**
+ * Directories whose contents are test scaffolding rather than shipped code.
+ * The `*.test.ts` / `*.spec.ts` filename filter below covers the test files
+ * themselves but not what they import from — a shared mock or fixture helper
+ * living beside them carries no `.test.` in its name, so it was scanned as
+ * production source and its `vitest` import surfaced as an unregistered
+ * crypto/auth dependency (extension/src/__tests__/helpers/keyed-decrypt-mock.ts).
+ * Excluding the directory keeps the set this walker produces to what actually
+ * ships, which is what the manifest is a manifest OF.
+ */
+const TEST_SUPPORT_DIRS = new Set(["__tests__", "__mocks__", "__fixtures__"]);
+
+export function walkSourceFiles(root: string): string[] {
   const abs = path.join(REPO_ROOT, root);
   if (!existsSync(abs)) return [];
   // If root points at a single file, handle it directly.
@@ -265,6 +277,7 @@ function walkSourceFiles(root: string): string[] {
     const full = path.join(abs, entry.name);
     const rel = path.join(root, entry.name);
     if (entry.isDirectory()) {
+      if (TEST_SUPPORT_DIRS.has(entry.name)) continue;
       files.push(...walkSourceFiles(rel));
     } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) {
       files.push(full);
@@ -601,5 +614,35 @@ describe("RT7 self-test — DEPS name-pattern heuristic (T3)", () => {
   it("does not surface a clearly non-crypto name", () => {
     expect(CRYPTO_NAME_RE.test("chalk")).toBe(false);
     expect(CRYPTO_NAME_RE.test("commander")).toBe(false);
+  });
+});
+
+describe("RT7 self-test — walkSourceFiles excludes test-support directories", () => {
+  // A helper under __tests__/ that is not itself named *.test.ts. Asserted to
+  // exist first: if it is ever deleted, these cases must fail loudly rather
+  // than pass by having nothing left to exclude.
+  const HELPER = "extension/src/__tests__/helpers/keyed-decrypt-mock.ts";
+
+  it("has the fixture this case is about", () => {
+    expect(existsSync(path.join(REPO_ROOT, HELPER)), `${HELPER} is gone`).toBe(true);
+  });
+
+  it("would flag the helper's import if it were scanned, so the exclusion is what removes it", () => {
+    const source = readFileSync(path.join(REPO_ROOT, HELPER), "utf8");
+    expect(extractExternalSpecifiers(source, HELPER)).toContain("vitest");
+  });
+
+  it("omits files under __tests__/ from the scanned set", () => {
+    const scanned = walkSourceFiles("extension/src").map((f) => path.relative(REPO_ROOT, f));
+    expect(scanned).not.toContain(HELPER);
+    expect(scanned.filter((f) => f.split(path.sep).includes("__tests__"))).toEqual([]);
+  });
+
+  it("still scans ordinary source under the same root", () => {
+    const scanned = walkSourceFiles("extension/src").map((f) => path.relative(REPO_ROOT, f));
+    // Allow side: excluding a directory must not empty the set — a walker that
+    // returned nothing would make the whole (A) reconciliation vacuous.
+    expect(scanned.length).toBeGreaterThan(0);
+    expect(scanned.every((f) => !f.split(path.sep).includes("__tests__"))).toBe(true);
   });
 });
