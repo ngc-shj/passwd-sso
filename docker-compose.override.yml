@@ -12,14 +12,17 @@ x-logging: &default-logging
 
 services:
   db:
+    logging: *default-logging
     ports:
       - "127.0.0.1:5432:5432"
 
   jackson:
+    logging: *default-logging
     ports:
       - "127.0.0.1:5225:5225"
 
   redis:
+    logging: *default-logging
     ports:
       - "127.0.0.1:6379:6379"
 

@@ -37,6 +37,7 @@ x-sentinel: &sentinel
 services:
   # Override base redis command to include requirepass and masterauth for post-failover rejoin.
   redis:
+    logging: *default-logging
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--masterauth", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
 
   redis-replica-1:
@@ -84,6 +85,7 @@ services:
 
   # Override app environment for Sentinel mode
   app:
+    logging: *default-logging
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}

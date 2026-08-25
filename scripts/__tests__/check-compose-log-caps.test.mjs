@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import yaml from "js-yaml";
@@ -24,11 +24,24 @@ import {
   findAmbiguousDefaults,
   findComposeFiles,
   findViolations,
+  isTestFixturePath,
 } from "../checks/check-compose-log-caps.mjs";
 
 const GATE = join(process.cwd(), "scripts/checks/check-compose-log-caps.mjs");
 
 const CAPPED = { driver: "json-file", options: { "max-size": "20m", "max-file": "5" } };
+
+/** An overlay fragment that carries its own block, as the gate now requires. */
+const CAPPED_OVERLAY = `services:
+  db:
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    ports:
+      - "5432:5432"
+`;
 
 /** Build a docs map the way main() does, from YAML text so aliases resolve. */
 function docsFrom(files) {
@@ -52,7 +65,7 @@ services:
 
 describe("classifyLogging", () => {
   it("accepts a json-file block carrying both max-size and max-file", () => {
-    expect(classifyLogging(CAPPED)).toEqual({ kind: "capped" });
+    expect(classifyLogging(CAPPED)).toMatchObject({ kind: "capped" });
   });
 
   it("reports a service with no logging block at all", () => {
@@ -60,7 +73,7 @@ describe("classifyLogging", () => {
   });
 
   it("treats a block with options but no driver as json-file, since Compose does", () => {
-    expect(classifyLogging({ options: { "max-size": "20m", "max-file": "5" } })).toEqual({
+    expect(classifyLogging({ options: { "max-size": "20m", "max-file": "5" } })).toMatchObject({
       kind: "capped",
     });
   });
@@ -92,10 +105,48 @@ describe("classifyLogging", () => {
     });
   });
 
-  it("accepts any max-size value, so a deliberate retune is not a build failure", () => {
+  it("accepts a deliberate retune within the ceiling", () => {
     expect(
-      classifyLogging({ driver: "json-file", options: { "max-size": "1g", "max-file": "2" } }),
-    ).toEqual({ kind: "capped" });
+      classifyLogging({ driver: "json-file", options: { "max-size": "100m", "max-file": "2" } }),
+    ).toMatchObject({ kind: "capped" });
+  });
+
+  it("rejects values the daemon itself rejects, instead of deferring to deploy time", () => {
+    // Measured against `docker run --log-opt max-size=X`: -1, 0 and 2Ommm are
+    // rejected with `invalid size`, so the container refuses to start. Passing
+    // them here moves a config error from review to deploy.
+    for (const bad of ["-1", "0", "2Ommm", "twenty"]) {
+      expect(
+        classifyLogging({ driver: "json-file", options: { "max-size": bad, "max-file": "5" } }),
+        `max-size ${bad}`,
+      ).toMatchObject({ kind: "unparseable", option: "max-size" });
+    }
+    for (const bad of ["0", "-1", "abc", "1.5"]) {
+      expect(
+        classifyLogging({ driver: "json-file", options: { "max-size": "20m", "max-file": bad } }),
+        `max-file ${bad}`,
+      ).toMatchObject({ kind: "unparseable", option: "max-file" });
+    }
+  });
+
+  it("accepts every spelling the daemon accepts", () => {
+    for (const good of ["20m", "20M", "20mb", "1g", "1048576"]) {
+      expect(
+        classifyLogging({ driver: "json-file", options: { "max-size": good, "max-file": "1" } }),
+        good,
+      ).toMatchObject({ kind: "capped" });
+    }
+  });
+
+  it("rejects a valid but enormous value — the case a syntax check cannot catch", () => {
+    // `max-size: 999g` is accepted by the daemon and is unbounded in every sense
+    // the incident cared about. A cap has to be a number.
+    expect(
+      classifyLogging({ driver: "json-file", options: { "max-size": "999g", "max-file": "1" } }),
+    ).toMatchObject({ kind: "oversized" });
+    expect(
+      classifyLogging({ driver: "json-file", options: { "max-size": "200m", "max-file": "50" } }),
+    ).toMatchObject({ kind: "oversized" });
   });
 });
 
@@ -104,18 +155,21 @@ describe("findViolations — allow side", () => {
     expect(findViolations(docsFrom({ "docker-compose.yml": BASE_YAML }))).toEqual([]);
   });
 
-  it("passes an overlay fragment that only adds ports to a service the base caps", () => {
+  it("requires the block even on a fragment that only adds ports", () => {
+    // Inheritance from the base file is NOT admitted. A per-file rule cannot
+    // tell an overlay from a standalone file, and a tracked
+    // docker-compose.recovery.yml run on its own renders logging: null.
     const overlay = `
 services:
   db:
     ports:
       - "127.0.0.1:5432:5432"
 `;
-    expect(
-      findViolations(
-        docsFrom({ "docker-compose.yml": BASE_YAML, "docker-compose.override.yml": overlay }),
-      ),
-    ).toEqual([]);
+    const violations = findViolations(
+      docsFrom({ "docker-compose.yml": BASE_YAML, "docker-compose.override.yml": overlay }),
+    );
+    expect(violations.join("\n")).toContain("docker-compose.override.yml");
+    expect(violations.join("\n")).toContain("this file may be run on its own");
   });
 
   it("resolves a merge key, so a service built from <<: *anchor counts as capped", () => {
@@ -139,9 +193,7 @@ services:
     ).toEqual([]);
   });
 
-  it("admits an overlay that retunes one option of a matching-driver capped base", () => {
-    // Compose merges logging.options key-by-key when the driver matches, so
-    // this renders as max-size 1g + max-file 5 — fully bounded.
+  it("requires both options on a retune, since the file may be read alone", () => {
     const overlay = `
 services:
   db:
@@ -153,8 +205,8 @@ services:
     expect(
       findViolations(
         docsFrom({ "docker-compose.yml": BASE_YAML, "docker-compose.override.yml": overlay }),
-      ),
-    ).toEqual([]);
+      ).join("\n"),
+    ).toContain("missing max-file");
   });
 
   it("passes an off-host driver that has a matching OFF_HOST_ALLOW entry", () => {
@@ -186,8 +238,8 @@ describe("findViolations — deny side", () => {
     // The base-file wording, not the overlay one: a service defined here has no
     // base to inherit from, and saying "is not a capped service from
     // docker-compose.yml" about docker-compose.yml itself reads as nonsense.
-    expect(violations[0]).toContain("has no logging block — its container writes");
-    expect(violations[0]).not.toContain("is not a capped service from");
+    expect(violations[0]).toContain("has no logging block");
+    expect(violations[0]).toContain("this file may be run on its own");
   });
 
   it("reds on an overlay-only service with no logging block, since it inherits nothing", () => {
@@ -302,13 +354,22 @@ services:
 });
 
 describe("the real compose files", () => {
-  it("enumerates every tracked compose file, not a hand-written list", () => {
+  it("enumerates every tracked compose file at any depth, minus test fixtures", () => {
+    // Compared against a RECURSIVE listing, not against the gate's own pathspec.
+    // The earlier form used the same root-anchored pattern the gate used, so it
+    // agreed with the bug: `deploy/docker-compose.yml` was invisible to both.
     const files = findComposeFiles(".").map((f) => f.replace(/^\.\//, ""));
-    const tracked = execFileSync("git", ["ls-files", "docker-compose*.yml"], { encoding: "utf8" })
+    const tracked = execFileSync("git", ["ls-files"], { encoding: "utf8" })
       .split("\n")
-      .filter(Boolean);
-    expect(files.sort()).toEqual(tracked.sort());
+      .filter((f) => /(^|\/)(docker-)?compose.*\.ya?ml$/.test(f));
+    const fixtures = tracked.filter((f) => isTestFixturePath(f));
+
+    expect(files.sort()).toEqual(tracked.filter((f) => !isTestFixturePath(f)).sort());
     expect(files.length).toBeGreaterThan(0);
+    // Non-vacuous: fixtures exist, so the exclusion is doing work rather than
+    // filtering an empty set.
+    expect(fixtures.length).toBeGreaterThan(0);
+    for (const f of fixtures) expect(files).not.toContain(f);
   });
 
   it("passes on the tree as it stands", () => {
@@ -429,22 +490,16 @@ describe("end-to-end refusals", () => {
     }
   });
 
-  it("carries base-file inheritance through the real discover -> parse -> classify chain", () => {
-    // The other e2e fixtures are single-file, so nothing end-to-end exercises
-    // how parsed docs are keyed for the base-file lookup.
+  it("carries multi-file discovery through the real discover -> parse -> classify chain", () => {
     dir = mkdtempSync(join(tmpdir(), "compose-caps-"));
     try {
       writeFileSync(join(dir, "docker-compose.yml"), BASE_YAML);
-      writeFileSync(
-        join(dir, "docker-compose.override.yml"),
-        'services:\n  db:\n    ports:\n      - "5432:5432"\n',
-      );
+      writeFileSync(join(dir, "docker-compose.override.yml"), CAPPED_OVERLAY);
       expect(run(dir).code).toBe(0);
 
-      // Same overlay, but introducing a service the base does not define.
       writeFileSync(
         join(dir, "docker-compose.override.yml"),
-        'services:\n  db:\n    ports:\n      - "5432:5432"\n  extra:\n    image: x\n',
+        `${CAPPED_OVERLAY}  extra:\n    image: x\n`,
       );
       const { code, out } = run(dir);
       expect(code).toBe(1);
@@ -452,5 +507,43 @@ describe("end-to-end refusals", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("scans a compose file in a subdirectory, which a root-anchored pathspec missed", () => {
+    dir = mkdtempSync(join(tmpdir(), "compose-caps-"));
+    try {
+      writeFileSync(join(dir, "docker-compose.yml"), BASE_YAML);
+      mkdirSync(join(dir, "deploy"));
+      writeFileSync(join(dir, "deploy", "docker-compose.yml"), "services:\n  app:\n    image: x\n");
+      const { code, out } = run(dir);
+      expect(code).toBe(1);
+      expect(out).toContain("deploy/docker-compose.yml");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a run that parsed files but examined no service block", () => {
+    // A bad edit once left the docs.set() line inside a comment and the gate
+    // printed "passed (7 file(s), 0 service block(s))". The file count was
+    // non-zero, so NO_COMPOSE_FILES did not catch it.
+    dir = mkdtempSync(join(tmpdir(), "compose-caps-"));
+    try {
+      writeFileSync(join(dir, "docker-compose.yml"), "volumes: {}\n");
+      const { code, out } = run(dir);
+      expect(code).toBe(1);
+      expect(out).toMatch(/NO_SERVICES|no services found/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("findViolations refuses an empty set", () => {
+  it("does not report a pass when no document was examined", () => {
+    // The verdict is computed from `docs`, so the emptiness check belongs on
+    // `docs` — not on the file count, which was non-zero when this happened.
+    expect(findViolations(new Map())).toHaveLength(1);
+    expect(findViolations(new Map())[0]).toContain("refusing to pass on an empty set");
   });
 });

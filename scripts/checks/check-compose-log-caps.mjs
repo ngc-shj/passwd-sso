@@ -31,7 +31,7 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { basename, join } from "node:path";
+import { join, relative } from "node:path";
 
 /**
  * Services that legitimately do NOT use json-file, with the reason. An entry is
@@ -57,6 +57,50 @@ const DEFAULT_DRIVER = "json-file";
 const REQUIRED_JSON_FILE_OPTIONS = ["max-size", "max-file"];
 
 /**
+ * `max-size` as the daemon parses it: a positive number with an optional unit.
+ * Measured against the daemon rather than assumed (`docker run --log-opt
+ * max-size=X`): `20m`, `20M`, `20mb`, `999g` accepted; `-1`, `0`, `2Ommm`
+ * rejected with `invalid size`. So an invalid value does NOT silently disable
+ * rotation — the container refuses to start. It fails at deploy time instead of
+ * at review time, which is the wrong end, hence this check.
+ */
+const MAX_SIZE_RE = /^(\d+(?:\.\d+)?)([kmg]b?)?$/i;
+const UNIT_BYTES = { "": 1, k: 1e3, kb: 1e3, m: 1e6, mb: 1e6, g: 1e9, gb: 1e9 };
+
+/**
+ * Per-container ceiling on `max-size` x `max-file`.
+ *
+ * The silent failure a format check does NOT catch is a value that is perfectly
+ * valid and enormous: `max-size: "999g"` is accepted by the daemon and passes
+ * any syntax rule, while being unbounded in every sense that matters. A cap has
+ * to be a number.
+ *
+ * 1 GiB. The incident that produced this gate was 4.5 GB across two containers;
+ * the guarantee being bought is "worst case is a function of container count",
+ * and at 15 service blocks this ceiling puts that worst case at 15 GiB — large,
+ * but bounded and far below the disk. Raise it deliberately if a service really
+ * needs more, and say why in the same commit.
+ */
+const MAX_TOTAL_BYTES = 1024 ** 3;
+
+/** Parse a `max-size` value to bytes, or null when the daemon would reject it. */
+export function parseMaxSize(value) {
+  const m = MAX_SIZE_RE.exec(String(value).trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n * UNIT_BYTES[(m[2] ?? "").toLowerCase()];
+}
+
+/** Parse `max-file`, or null when the daemon would reject it (it requires >= 1). */
+export function parseMaxFile(value) {
+  const raw = String(value).trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 1 ? n : null;
+}
+
+/**
  * All four filenames Compose accepts by default, plus their overlay variants.
  * `docker-compose*.yml` alone is NOT the member set: Compose reads
  * `compose.yaml` in PREFERENCE to `docker-compose.yml`, so a project could keep
@@ -64,8 +108,15 @@ const REQUIRED_JSON_FILE_OPTIONS = ["max-size", "max-file"];
  * `compose.yaml` is what actually runs — and a guard scoped to the first
  * spelling would pass having examined the file nobody uses.
  */
-const COMPOSE_FILE_RE = /^(docker-)?compose.*\.ya?ml$/;
-const GIT_PATHSPECS = ["docker-compose*.yml", "docker-compose*.yaml", "compose*.yml", "compose*.yaml"];
+const COMPOSE_FILE_RE = /(^|\/)(docker-)?compose.*\.ya?ml$/;
+// Leading `*` so the pathspec is not anchored at the repo root — `deploy/
+// docker-compose.yml` is a tracked compose file and was invisible to the gate.
+const GIT_PATHSPECS = [
+  "*docker-compose*.yml",
+  "*docker-compose*.yaml",
+  "*compose*.yml",
+  "*compose*.yaml",
+];
 
 /** The two default-name families. Both present at one root is ambiguous. */
 const DEFAULT_NAMES = {
@@ -79,6 +130,16 @@ const DEFAULT_NAMES = {
  * is a refusal, not a pass — a guard that examined nothing must not report the
  * same thing as a guard that found nothing wrong.
  */
+/**
+ * Compose files that are inputs to a test, not stacks anyone runs. Same rule the
+ * shared AST walker uses for source (`scripts/checks/lib/ast-project.mjs`): a
+ * `__tests__` path segment means scaffolding. The count of what this drops is
+ * printed, so the exclusion is visible rather than a silent narrowing.
+ */
+export function isTestFixturePath(relPath) {
+  return relPath.split("/").some((seg) => seg === "__tests__" || seg === "fixtures");
+}
+
 export function findComposeFiles(root = ".") {
   try {
     const tracked = execFileSync("git", ["ls-files", "-z", ...GIT_PATHSPECS], {
@@ -88,13 +149,39 @@ export function findComposeFiles(root = ".") {
     })
       .split("\0")
       .filter(Boolean);
-    if (tracked.length > 0) return [...new Set(tracked)].map((f) => join(root, f));
+    if (tracked.length > 0) {
+      return [...new Set(tracked)]
+        .filter((f) => !isTestFixturePath(f))
+        .map((f) => join(root, f));
+    }
   } catch {
     // not a git checkout, or git is absent
   }
-  return readdirSync(root)
-    .filter((f) => COMPOSE_FILE_RE.test(f))
-    .map((f) => join(root, f));
+  // Recursive, matching the git pathspec above. A top-level-only fallback would
+  // make the source-tarball path quietly weaker than the checkout path — and
+  // that asymmetry is invisible until it matters.
+  const out = [];
+  const walk = (dir, rel) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name === "node_modules" || e.name === ".git") continue;
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) {
+        if (!isTestFixturePath(childRel)) walk(join(dir, e.name), childRel);
+        continue;
+      }
+      if (e.isFile() && COMPOSE_FILE_RE.test(e.name) && !isTestFixturePath(childRel)) {
+        out.push(join(dir, e.name));
+      }
+    }
+  };
+  walk(root, "");
+  return out;
 }
 
 /**
@@ -122,8 +209,13 @@ export function findAmbiguousDefaults(basenames) {
 
 /**
  * Classify one service's resolved `logging` block.
- * Returns {kind:"capped"} | {kind:"missing"} | {kind:"off-host",driver}
- * | {kind:"incomplete",missing:[...]}.
+ * Returns {kind:"capped",bytes} | {kind:"missing"} | {kind:"off-host",driver}
+ * | {kind:"incomplete",missing:[...]} | {kind:"unparseable",option,value}
+ * | {kind:"oversized",bytes}.
+ *
+ * Presence alone is not a cap. The values are parsed the way the daemon parses
+ * them, and their product is bounded — `max-size: "999g"` is valid, accepted,
+ * and unbounded in every sense the incident cared about.
  */
 export function classifyLogging(logging) {
   if (logging === undefined || logging === null) return { kind: "missing" };
@@ -133,29 +225,38 @@ export function classifyLogging(logging) {
   const missing = REQUIRED_JSON_FILE_OPTIONS.filter(
     (k) => options[k] === undefined || options[k] === null || String(options[k]).trim() === "",
   );
-  // Presence, not a numeric floor: pinning "20m"/"5" here would make a
-  // deliberate retune a build failure, which is how gates get disabled.
-  return missing.length > 0 ? { kind: "incomplete", missing } : { kind: "capped" };
+  if (missing.length > 0) return { kind: "incomplete", missing };
+
+  const size = parseMaxSize(options["max-size"]);
+  if (size === null) {
+    return { kind: "unparseable", option: "max-size", value: String(options["max-size"]) };
+  }
+  const files = parseMaxFile(options["max-file"]);
+  if (files === null) {
+    return { kind: "unparseable", option: "max-file", value: String(options["max-file"]) };
+  }
+  const bytes = size * files;
+  if (bytes > MAX_TOTAL_BYTES) return { kind: "oversized", bytes };
+  return { kind: "capped", bytes };
 }
 
 /**
- * @param {Map<string, any>} docs file basename -> parsed YAML document
+ * @param {Map<string, any>} docs repo-relative path -> parsed YAML document
  * @returns {string[]} violations
  */
-export function findViolations(docs, baseFile = "docker-compose.yml") {
+export function findViolations(docs) {
   const violations = [];
   const matchedAllow = new Set();
 
-  const base = docs.get(baseFile);
-  const baseServices = Object.entries(base?.services ?? {});
-  const cappedInBase = new Set(
-    baseServices
-      .filter(([, svc]) => classifyLogging(svc?.logging).kind === "capped")
-      .map(([name]) => name),
-  );
-  const baseDriver = new Map(
-    baseServices.map(([name, svc]) => [name, svc?.logging?.driver ?? DEFAULT_DRIVER]),
-  );
+  // An empty set is a refusal, not a pass. This is where the "examined nothing"
+  // failure actually lands: a bad edit once left the `docs.set(...)` line inside
+  // a comment, and the gate printed "passed (7 file(s), 0 service block(s))".
+  // main()'s NO_COMPOSE_FILES check did not catch it — it counts FILES, and
+  // seven were found. Guarding here means the check sits on the value the
+  // verdict is actually computed from.
+  if (docs.size === 0) {
+    return ["no compose documents were examined — refusing to pass on an empty set"];
+  }
 
   violations.push(...findAmbiguousDefaults([...docs.keys()]));
 
@@ -191,34 +292,39 @@ export function findViolations(docs, baseFile = "docker-compose.yml") {
       }
 
       if (verdict.kind === "incomplete") {
-        // Compose merges logging.options key-by-key when the driver matches, so
-        // an overlay may legally set just one option — `max-size: 1g` on top of
-        // a capped base is fully bounded. Rejecting that would be a false
-        // positive on a normal prod-overlay retune, and the message would be
-        // factually wrong about the merged result.
-        const mergedWithBase =
-          file !== baseFile &&
-          cappedInBase.has(name) &&
-          baseDriver.get(name) === (svc?.logging?.driver ?? DEFAULT_DRIVER);
-        if (!mergedWithBase) {
-          violations.push(
-            `${file}: service '${name}' has a json-file logging block missing ${verdict.missing.join(" and ")} — an unbounded option is the same as no cap`,
-          );
-        }
+        violations.push(
+          `${file}: service '${name}' has a json-file logging block missing ${verdict.missing.join(" and ")} — an unbounded option is the same as no cap`,
+        );
         continue;
       }
 
-      // kind === "missing": only an overlay fragment of an already-capped base
-      // service may omit it. A service that exists nowhere else is uncapped.
-      if (file === baseFile) {
+      if (verdict.kind === "unparseable") {
         violations.push(
-          `${baseFile}: service '${name}' has no logging block — its container writes an unbounded json-file log`,
+          `${file}: service '${name}' sets ${verdict.option}: '${verdict.value}', which the daemon rejects — the container will refuse to start. Use a positive size (20m, 1g) and a max-file of at least 1`,
         );
-      } else if (!cappedInBase.has(name)) {
-        violations.push(
-          `${file}: service '${name}' has no logging block and is not a capped service from ${baseFile} — its container writes an unbounded json-file log`,
-        );
+        continue;
       }
+
+      if (verdict.kind === "oversized") {
+        violations.push(
+          `${file}: service '${name}' allows ${Math.round(verdict.bytes / 1e6)} MB (max-size x max-file), over the ${Math.round(MAX_TOTAL_BYTES / 1e6)} MB per-container ceiling — a valid but enormous value is unbounded in the sense that matters`,
+        );
+        continue;
+      }
+
+      // kind === "missing". Every service block must carry its own `logging:`.
+      //
+      // The earlier form admitted a missing block when the base file capped a
+      // service of the same name, on the assumption that such a file is always
+      // merged onto the base. Nothing enforces that assumption: a tracked
+      // `docker-compose.recovery.yml` defining an uncapped `app` and run as
+      // `docker compose -f docker-compose.recovery.yml up` renders
+      // `logging: null` and passed the gate. A per-file rule cannot tell an
+      // overlay from a standalone file, so it must not try — requiring the block
+      // everywhere costs one anchor reference per fragment and has no such gap.
+      violations.push(
+        `${file}: service '${name}' has no logging block — declare one (\`logging: *default-logging\`), even in an overlay fragment: this file may be run on its own`,
+      );
     }
   }
 
@@ -274,7 +380,10 @@ async function main(root = process.env.COMPOSE_LOG_CAPS_ROOT ?? ".") {
       console.error(`check-compose-log-caps: PARSE_FAILED ${path} — ${err.message}`);
       process.exit(1);
     }
-    docs.set(basename(path), doc);
+    // Keyed by the repo-relative path, not the basename: two tracked files can
+    // share a name in different directories, and a basename key silently
+    // overwrote one with the other.
+    docs.set(relative(root, path) || path, doc);
   }
 
   const violations = findViolations(docs);
