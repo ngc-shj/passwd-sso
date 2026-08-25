@@ -4,6 +4,14 @@
 # Provides: 1 master + 2 replicas + 3 sentinels
 # App connects via ioredis Sentinel mode (REDIS_SENTINEL=true)
 
+# Repeated from docker-compose.yml — YAML anchors do not cross compose files.
+# See the comment there for why the cap exists and why it is this size.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 x-sentinel: &sentinel
   image: redis:7-alpine
   # Runtime-env expansion ($$REDIS_PASSWORD) keeps the real value out of compose
@@ -22,12 +30,14 @@ x-sentinel: &sentinel
     redis-replica-2:
       condition: service_healthy
   restart: unless-stopped
+  logging: *default-logging
   networks:
     - internal
 
 services:
   # Override base redis command to include requirepass and masterauth for post-failover rejoin.
   redis:
+    logging: *default-logging
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "--masterauth", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
 
   redis-replica-1:
@@ -44,6 +54,7 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
 
@@ -61,6 +72,7 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
 
@@ -73,6 +85,7 @@ services:
 
   # Override app environment for Sentinel mode
   app:
+    logging: *default-logging
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}

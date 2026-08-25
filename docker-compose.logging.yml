@@ -5,6 +5,15 @@
 # so `docker logs app` will NOT work. Use `docker compose logs fluent-bit` instead.
 # To restore `docker logs`, run without this overlay.
 
+# Repeated from docker-compose.yml — YAML anchors do not cross compose files.
+# Applied to fluent-bit only: `app` deliberately switches to the fluentd driver
+# below, and Compose drops the base json-file options when the driver differs.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   app:
     environment:
@@ -41,6 +50,7 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    logging: *default-logging
     networks:
       - internal
     # Uncomment and set environment variables for your output destination:
