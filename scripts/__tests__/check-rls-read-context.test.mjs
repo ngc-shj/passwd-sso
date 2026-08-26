@@ -288,10 +288,12 @@ describe("check-rls-read-context", () => {
       expect(r.status).toBe(0);
     });
 
-    it("TERMINATES on a cyclic alias chain", () => {
-      // `seen`, not a hop counter, is what bounds this: a cycle has no length.
-      // A gate that hangs here fails the same way as one that passes wrongly —
-      // CI reports nothing either way.
+    it("REPORTS rather than crashes on a cyclic alias chain", () => {
+      // `seen`, not a hop counter, is what bounds the context walk: a cycle has
+      // no length, and `seen.add` of a name already present does not grow it.
+      // Asserted on the REPORT, not on a non-zero exit — dropping the guard
+      // overflows the stack, which also exits non-zero and would leave this
+      // green while the gate had stopped being able to answer.
       const r = runGate(`
         export async function f() {
           const a = b; const b = a;
@@ -299,6 +301,8 @@ describe("check-rls-read-context", () => {
         }
       `);
       expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("audit_outbox");
+      expect(r.stderr).not.toContain("call stack");
     });
   });
 
