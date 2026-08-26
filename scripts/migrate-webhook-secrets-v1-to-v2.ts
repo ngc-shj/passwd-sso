@@ -13,7 +13,7 @@
  *     npx tsx scripts/migrate-webhook-secrets-v1-to-v2.ts [--dry-run]
  */
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import { createDecipheriv, createCipheriv, randomBytes } from "node:crypto";
@@ -24,11 +24,17 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
 import { buildWebhookSecretAAD } from "@/lib/crypto/webhook-aad";
+import { assertBypassRlsActive } from "./lib/assert-bypass-rls-active";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
 const NEW_AAD_VERSION = 2;
+// Read + per-row re-encrypt/UPDATE for one table runs in a single bypass
+// transaction, so the budget is stated rather than left at Prisma's 5s default.
+const TX_TIMEOUT_MS = 5 * MS_PER_MINUTE;
 
 // Load env from .env.local if present (matches prisma.config.ts pattern)
 config({ path: resolve(process.cwd(), ".env.local") });
@@ -99,8 +105,30 @@ export async function migrateWebhookSecrets(
     tenantRowsSkipped: 0,
   };
 
+  // team_webhooks and tenant_webhooks are FORCE ROW LEVEL SECURITY. Read AND
+  // write inside a bypass transaction: outside it both findMany calls return
+  // zero rows with no error, and this function reports a clean success having
+  // re-encrypted nothing.
+  return withBypassRls(
+    prisma,
+    async (tx) => {
+      // Transaction-scoped GUC, so asserted on THIS transaction and before the
+      // first read.
+      await assertBypassRlsActive(tx, "migrate-webhook-secrets-v1-to-v2");
+      return migrateInTx(tx, options, stats);
+    },
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    { timeout: TX_TIMEOUT_MS },
+  );
+}
+
+async function migrateInTx(
+  tx: Prisma.TransactionClient,
+  options: { dryRun: boolean },
+  stats: MigrationStats,
+): Promise<MigrationStats> {
   // ── TeamWebhook ──────────────────────────────────────────────
-  const teamRows = await prisma.teamWebhook.findMany({
+  const teamRows = await tx.teamWebhook.findMany({
     where: { secretAadVersion: 1 },
     select: {
       id: true,
@@ -128,7 +156,7 @@ export async function migrateWebhookSecrets(
       const reEncrypted = encryptV2WithAad(plaintext, newKey, aad);
 
       if (!options.dryRun) {
-        await prisma.teamWebhook.update({
+        await tx.teamWebhook.update({
           where: { id: row.id },
           data: {
             secretEncrypted: reEncrypted.ciphertext,
@@ -147,7 +175,7 @@ export async function migrateWebhookSecrets(
   }
 
   // ── TenantWebhook ────────────────────────────────────────────
-  const tenantRows = await prisma.tenantWebhook.findMany({
+  const tenantRows = await tx.tenantWebhook.findMany({
     where: { secretAadVersion: 1 },
     select: {
       id: true,
@@ -173,7 +201,7 @@ export async function migrateWebhookSecrets(
       const reEncrypted = encryptV2WithAad(plaintext, newKey, aad);
 
       if (!options.dryRun) {
-        await prisma.tenantWebhook.update({
+        await tx.tenantWebhook.update({
           where: { id: row.id },
           data: {
             secretEncrypted: reEncrypted.ciphertext,
@@ -196,9 +224,15 @@ export async function migrateWebhookSecrets(
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
-  const databaseUrl = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+  // No DATABASE_URL fallback — see the note in
+  // migrate-account-tokens-to-encrypted.ts. Running this against the app
+  // credential produced a silent success, so the mistake is made impossible
+  // rather than merely detected.
+  const databaseUrl = process.env.MIGRATION_DATABASE_URL;
   if (!databaseUrl) {
-    console.error("MIGRATION_DATABASE_URL or DATABASE_URL must be set");
+    console.error(
+      "MIGRATION_DATABASE_URL must be set (DDL-capable connection)",
+    );
     process.exit(1);
   }
 

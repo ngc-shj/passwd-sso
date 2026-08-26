@@ -61,14 +61,15 @@
 #   entry below). See bypass-rls-tx-callback-form plan.
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
+scripts/lib/assert-bypass-rls-active.ts # reads current_setting('app.bypass_rls') on the caller's transaction so a migration cannot proceed with RLS silently emptying its reads; static SQL, no interpolation, no parameters
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
 scripts/tenant-domain.ts # operator CLI: unmapped-claim report unions audit_logs + audit_outbox by static SQL + $N params, no interpolation
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors
 src/app/api/maintenance/audit-outbox-metrics/route.ts # operator-gated outbox depth/age metrics query, tagged-template $queryRaw
 src/app/api/maintenance/audit-outbox-purge-failed/route.ts # operator-gated purge of FAILED outbox rows, tagged-template $queryRaw
 src/app/api/maintenance/purge-audit-logs/route.ts # operator-gated system-wide audit log purge via audit_log_purge() definer fn
-src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) for atomic blob snapshot read before history restore
+src/app/api/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT
 src/app/api/share-links/[id]/content/route.ts # atomic view_count increment + revocation/expiry recheck (TOCTOU close)
 src/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route.ts # row lock (FOR UPDATE) so the pre-restore snapshot sources the committed row, serialising with concurrent PUTs
 src/app/api/v1/passwords/[id]/route.ts # row lock (FOR UPDATE) for atomic blob snapshot+update on concurrent PUT

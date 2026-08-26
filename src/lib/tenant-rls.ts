@@ -34,6 +34,11 @@ export async function withTenantRls<T>(
   prisma: PrismaClient,
   tenantId: string,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  // Additive and optional: every existing caller keeps Prisma's defaults
+  // (5s timeout / 2s maxWait). Pass an explicit budget where the work inside
+  // is bounded by something other than a single quick statement — a batch read
+  // sized by an operator-tunable cap, for instance.
+  options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
   // Symmetric nesting guard: AsyncLocalStorage does NOT roll back PostgreSQL
   // GUCs, and the Prisma Proxy folds nested $transaction into the outer tx,
@@ -47,7 +52,7 @@ export async function withTenantRls<T>(
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
     return tenantRlsStorage.run({ tx, tenantId, bypass: false }, () => fn(tx));
-  });
+  }, options);
 }
 
 
@@ -55,6 +60,12 @@ export async function withBypassRls<T>(
   prisma: PrismaClient,
   fn: (tx: Prisma.TransactionClient) => Promise<T>,
   purpose: BypassPurpose,
+  // Additive and optional, same contract as withTenantRls: every existing
+  // caller keeps Prisma's defaults (5s timeout / 2s maxWait). One-shot
+  // migrations that rewrite a batch inside a single bypass transaction need an
+  // explicit budget — the work there is sized by a batch constant, not by a
+  // single quick statement.
+  options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
   if (getTenantRlsContext()?.bypass === false) {
     throw new Error(
@@ -67,7 +78,7 @@ export async function withBypassRls<T>(
     // Set a valid UUID to prevent cast errors when PG evaluates both OR branches
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
     return tenantRlsStorage.run({ tx, tenantId: null, bypass: true }, () => fn(tx));
-  });
+  }, options);
 }
 
 /**
