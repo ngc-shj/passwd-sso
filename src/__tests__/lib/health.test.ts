@@ -179,7 +179,7 @@ describe("health checks", () => {
       expect(mockWithBypassRls).toHaveBeenCalledWith(
         expect.anything(),
         expect.any(Function),
-        "system_maintenance",
+        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
       );
     });
 
