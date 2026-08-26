@@ -117,19 +117,6 @@ const SEARCH_DIRS = (
 
 console.log(`check-rls-read-context: SEARCH_DIRS=${SEARCH_DIRS.join(", ")}`);
 
-// Per-ENTRY, not per-run. `scanned === 0` below cannot fire while src/workers
-// and scripts still resolve, so renaming or misspelling the single-file entry
-// drops the one src/lib member this gate was extended to cover and still prints
-// OK. Measured: `src/lib/heaith.ts` gave `scanned 30 files` / OK / exit 0.
-{
-  const missing = unresolvedTargets(SEARCH_DIRS, REPO_ROOT);
-  if (missing.length > 0) {
-    fail(
-      `scan target(s) resolved to no source file: ${missing.join(", ")} — ` +
-        `moved, renamed, or misspelled. A target the gate cannot find is not a target it may skip.`,
-    );
-  }
-}
 
 // These helpers set the GUC themselves, so their callback parameter is
 // context-bearing by construction.
@@ -501,6 +488,20 @@ function tablesInSql(text, rlsTables) {
 
 const rlsTables = loadRlsTables();
 const modelAccessors = loadModelAccessors(rlsTables);
+// Per-ENTRY, not per-run. `scanned === 0` below cannot fire while src/workers
+// and scripts still resolve, so renaming or misspelling the single-file entry
+// drops the one src/lib member this gate was extended to cover and still prints
+// OK. Measured: `src/lib/heaith.ts` gave `scanned 30 files` / OK / exit 0.
+{
+  const missing = unresolvedTargets(SEARCH_DIRS, REPO_ROOT);
+  if (missing.length > 0) {
+    fail(
+      `scan target(s) resolved to no source file: ${missing.join(", ")} — ` +
+        `moved, renamed, or misspelled. A target the gate cannot find is not a target it may skip.`,
+    );
+  }
+}
+
 console.log(
   `check-rls-read-context: ${rlsTables.size} RLS tables, ${modelAccessors.size} model accessors`,
 );

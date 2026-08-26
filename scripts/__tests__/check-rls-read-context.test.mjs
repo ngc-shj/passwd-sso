@@ -488,12 +488,31 @@ describe("check-rls-read-context", () => {
     });
   });
 
-  it("FAILS LOUDLY when the scan root resolves to no files", () => {
+  it("FAILS LOUDLY when a scan target resolves to no files", () => {
     // "Examined nothing" must not be spelled like "found nothing wrong" — the
     // shape that lets a gate report PASS forever after a directory rename.
     const r = runGate(null, { dirs: "src/does-not-exist" });
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("scanned 0 source files");
+    expect(r.stderr).toContain("scan target(s) resolved to no source file");
+    expect(r.stderr).toContain("src/does-not-exist");
+  });
+
+  it("names the missing target even when the other targets still resolve", () => {
+    // Round-1 F-M2. SEARCH_DIRS names src/lib/health.ts by exact path, and a
+    // whole-run "scanned 0" floor cannot fire while src/workers still has
+    // files — so a moved file dropped out of the scan with the gate green.
+    const r = runGate(
+      `export async function f(prisma: any) {
+         return prisma.$transaction(async (tx: any) => {
+           await setBypassRlsGucs(tx);
+           return tx.auditOutbox.findMany({});
+         });
+       }
+       declare function setBypassRlsGucs(tx: any): Promise<void>;`,
+      { dirs: "src/workers,src/lib/health_MOVED.ts" },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("src/lib/health_MOVED.ts");
   });
 
   it("FAILS LOUDLY when the manifest is unreadable", () => {

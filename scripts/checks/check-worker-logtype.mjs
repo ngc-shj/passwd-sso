@@ -152,7 +152,27 @@ function loadAlertNamespaces() {
   if (namespaces.length === 0) {
     fail(`the alert-namespaces marker in ${ALERTS_DOC} lists no namespaces`);
   }
-  return new Set(namespaces);
+  return { namespaces: new Set(namespaces), raw };
+}
+
+/**
+ * Identifiers alerts.md gives a named `## \`x.y\`` section to, restricted to
+ * the declared namespaces.
+ *
+ * The restriction is what keeps this list DERIVED rather than hand-maintained:
+ * the document also documents `audit-dead-letter`, `csp.violation`,
+ * `CHAIN_VERIFY_FAILED` and `audit-chain-verify-heartbeat`, none of which a
+ * worker emits — and none of which is in a declared namespace, so they drop out
+ * by construction instead of needing an exclusion list that would rot.
+ */
+function documentedIdentifiers(raw, namespaces) {
+  const ids = new Set();
+  for (const m of raw.matchAll(/^##\s+`([^`]+)`/gm)) {
+    for (const id of m[1].split(/\s*\/\s*/)) {
+      if (namespaces.has(id.split(".")[0])) ids.add(id);
+    }
+  }
+  return ids;
 }
 
 /** Names bound to `getLogger()` in this file (`const log = getLogger()`). */
@@ -241,9 +261,15 @@ const REASON = {
   }
 }
 
-const alertNamespaces = loadAlertNamespaces();
+const { namespaces: alertNamespaces, raw: alertsDocRaw } = loadAlertNamespaces();
+const documented = documentedIdentifiers(alertsDocRaw, alertNamespaces);
 const project = createAstProject();
 const violations = [];
+// Every `_logType` literal the scan set emits, at ANY level. The warn-level
+// dead-letter identifiers are documented with their own SIEM queries and are
+// deliberately outside ALERT_LEVELS, so an error-only sweep cannot tell whether
+// the document still describes something that exists.
+const emitted = new Set();
 let scanned = 0;
 let callSites = 0;
 
@@ -252,6 +278,18 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
   scanned++;
 
   const bindings = loggerBindings(sf);
+
+  for (const prop of sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
+    if (prop.getName() !== LOGTYPE_PROP) continue;
+    const value = prop.getInitializer();
+    const kind = value?.getKind();
+    if (
+      kind === SyntaxKind.StringLiteral ||
+      kind === SyntaxKind.NoSubstitutionTemplateLiteral
+    ) {
+      emitted.add(value.getLiteralText().trim());
+    }
+  }
 
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     const expr = call.getExpression();
@@ -289,8 +327,32 @@ if (callSites === 0) {
 
 console.log(
   `check-worker-logtype: scanned ${scanned} files, ${callSites} error/fatal logger call sites, ` +
+    `${emitted.size} distinct _logType values, ` +
     `namespaces from ${ALERTS_DOC}: ${[...alertNamespaces].sort().join(", ")}`,
 );
+
+// The other direction: an identifier the document gives a named section and a
+// SIEM query to, that nothing emits any more. A rename leaves the rule pointing
+// at a string that can never appear, and a rule that never fires is
+// indistinguishable from a system that never fails — the same
+// manufactured-assurance shape, arrived at from the documentation side.
+// Catches the warn-level dead-letter pair, which ALERT_LEVELS deliberately
+// excludes from the presence check above.
+const orphanedRules = [...documented].filter((id) => !emitted.has(id));
+if (orphanedRules.length > 0) {
+  console.error(
+    `\ncheck-worker-logtype: ${orphanedRules.length} documented alert rule(s) nothing emits:\n`,
+  );
+  for (const id of orphanedRules.sort()) {
+    console.error(`  ${ALERTS_DOC} documents "${id}", which no ${LOGGER_FACTORY}() call site emits`);
+  }
+  console.error(
+    `\nEither the identifier was renamed and the document not updated, or the log
+line was removed and its rule left behind. A rule matching a string that can
+never appear is silent for the same reason a healthy system is.\n`,
+  );
+  process.exit(1);
+}
 
 if (violations.length > 0) {
   console.error(

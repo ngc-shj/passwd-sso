@@ -21,9 +21,13 @@ vi.mock("@/lib/prisma", () => ({
 // The outbox read runs inside a bypass-RLS transaction; the callback gets a tx
 // whose $queryRaw is the same mock, so the SQL-discriminating implementations
 // below keep working.
-vi.mock("@/lib/tenant-rls", () => ({
+// BYPASS_PURPOSE comes from the REAL module. Re-typing its value here would
+// let the mock and the assertion agree with each other while production
+// recorded a different purpose in app.bypass_purpose — the double and the
+// expectation would share an author.
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/tenant-rls")>()),
   withBypassRls: mockWithBypassRls,
-  BYPASS_PURPOSE: { SYSTEM_MAINTENANCE: "system_maintenance" },
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -40,6 +44,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { runHealthChecks } from "./health";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 describe("runHealthChecks", () => {
   beforeEach(() => {
@@ -164,7 +169,7 @@ describe("runHealthChecks", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Function),
-      "system_maintenance",
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     );
   });
 
