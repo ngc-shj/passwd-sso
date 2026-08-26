@@ -61,7 +61,7 @@
 #   entry below). See bypass-rls-tx-callback-form plan.
 
 scripts/audit-chain-verify-worker.ts # standalone CLI: walks audit_logs chain per tenant via static SQL + $N params, no interpolation
-scripts/lib/assert-rls-visibility.ts # role-attribute probe (current_user, rolsuper, rolbypassrls) so a migration refuses a connection RLS would silently empty; no interpolation, no parameters
+scripts/lib/assert-bypass-rls-active.ts # reads current_setting('app.bypass_rls') on the caller's transaction so a migration cannot proceed with RLS silently emptying its reads; static SQL, no interpolation, no parameters
 scripts/migrate-account-tokens-to-encrypted.ts # one-shot OAuth token re-encryption migration; batched SELECT/UPDATE against accounts table # ident-markers=2
 scripts/tenant-domain.ts # operator CLI: unmapped-claim report unions audit_logs + audit_outbox by static SQL + $N params, no interpolation
 src/app/api/maintenance/audit-chain-verify/route.ts # operator-gated chain-verify endpoint; static SQL + $N params reading audit_logs/audit_chain_anchors

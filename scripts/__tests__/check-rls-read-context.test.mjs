@@ -144,68 +144,6 @@ describe("check-rls-read-context", () => {
     expect(r.status).toBe(0);
   });
 
-  // The exemption needs BOTH the allowlist entry and a resolved call, so these
-  // three cases use a real allowlisted path as the fixture filename.
-  const EXEMPT_PATH = "scripts/migrate-account-tokens-to-encrypted.ts";
-
-  function runGateAt(relPath, source) {
-    const full = join(root, relPath);
-    mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, source);
-    return spawnSync("node", [GATE], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        RLS_READ_CONTEXT_ROOT: root,
-        RLS_READ_CONTEXT_DIRS: dirname(relPath),
-        RLS_READ_CONTEXT_FIXTURE_MODE: "1",
-      },
-    });
-  }
-
-  it("PASSES an allowlisted script that calls the preflight", () => {
-    const r = runGateAt(
-      EXEMPT_PATH,
-      `
-      import { assertRlsVisibility } from "./lib/assert-rls-visibility";
-      export async function f(prisma: any) {
-        await assertRlsVisibility(prisma, "fixture");
-        return prisma.auditOutbox.findMany({});
-      }
-    `,
-    );
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("preflight-exempt");
-  });
-
-  it("FAILS an allowlisted script whose preflight was removed", () => {
-    // The allowlist must not be able to drift away from the control it stands
-    // for: being listed cannot save a script that lost its refusal.
-    const r = runGateAt(
-      EXEMPT_PATH,
-      `
-      export async function f(prisma: any) {
-        return prisma.auditOutbox.findMany({});
-      }
-    `,
-    );
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("PREFLIGHT_EXEMPT");
-  });
-
-  it("FAILS a NON-allowlisted file that calls the preflight", () => {
-    // Calling the helper is not self-service exemption — the allowlist is what
-    // makes an exemption visible in a diff.
-    const r = runGate(`
-      import { assertRlsVisibility } from "./lib/assert-rls-visibility";
-      export async function f(prisma: any) {
-        await assertRlsVisibility(prisma, "fixture");
-        return prisma.auditOutbox.findMany({});
-      }
-    `);
-    expect(r.status).not.toBe(0);
-  });
-
   it("FAILS a bare tagged-template raw read", () => {
     // The dominant raw form in this repo. A TaggedTemplateExpression is a
     // different AST node from a CallExpression, so walking only calls skipped
@@ -251,24 +189,6 @@ describe("check-rls-read-context", () => {
     `);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("UNRESOLVED");
-  });
-
-  it("FAILS an allowlisted file that only MENTIONS assertRlsVisibility in a comment", () => {
-    // Must sit on an ALLOWLISTED path, or it fails on the allowlist clause
-    // alone and never reaches the resolved-call check — leaving the
-    // substring-to-AST fix unproven. Measured: with the fixture off-allowlist,
-    // reverting to `getFullText().includes(...)` left every case green.
-    const r = runGateAt(
-      EXEMPT_PATH,
-      `
-      // TODO: call assertRlsVisibility(prisma, "subject") before the scan.
-      export async function f(prisma: any) {
-        return prisma.auditOutbox.findMany({});
-      }
-    `,
-    );
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("PREFLIGHT_EXEMPT");
   });
 
   it("PASSES a one-hop alias of a context binding", () => {

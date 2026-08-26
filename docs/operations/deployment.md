@@ -354,10 +354,21 @@ The application uses four database roles with separated privileges:
 
 | Role | Privileges | Purpose |
 |------|-----------|---------|
-| `passwd_user` (or equivalent) | SUPERUSER or DDL-capable | Table owner, migrations (`prisma migrate deploy`) |
+| `passwd_user` (or equivalent) | DDL-capable (`rds_superuser`-class on RDS) | Table owner, migrations (`prisma migrate deploy`), one-shot data migrations |
 | `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
 | `passwd_outbox_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` | Audit outbox drain worker (least privilege) |
 | `passwd_retention_gc_worker` (or equivalent) | NOSUPERUSER NOBYPASSRLS; scoped DELETE/SELECT on the retention-swept tables | Retention GC worker (least privilege) |
+
+> **`rds_superuser` is a role MEMBERSHIP, not a role ATTRIBUTE.** On RDS the
+> master user is a member of `rds_superuser` but has `rolsuper = false` and
+> `rolbypassrls = false` (RDS creates it `NOSUPERUSER`, and `BYPASSRLS`
+> defaults to `NOBYPASSRLS` when unspecified). Tables carrying `FORCE ROW
+> LEVEL SECURITY` therefore bind that role too — including the table owner.
+>
+> Anything that must read across tenants (the one-shot data migrations,
+> `scripts/tenant-domain.ts`) must open a `withBypassRls` transaction rather
+> than rely on a role attribute. Skipping it does not error: the read returns
+> zero rows and the job reports a clean, empty success.
 
 On AWS RDS these roles are NOT auto-created (the `infra/postgres/initdb/*.sql`
 scripts run only on the Docker Postgres image) — create them during bootstrap,
@@ -384,7 +395,7 @@ Detection runs automatically on **every deploy**: the migrate task's command is
 `prisma migrate deploy && node scripts/audit-db-grants.mjs`
 (`infra/terraform/ecs.tf`), so a migration that grants more than the manifest
 sanctions fails the migrate task — and `deploy.sh` aborts before any service is
-advanced. The audit needs a SUPERUSER connection and RDS admits only the ECS
+advanced. The audit needs a DDL-capable connection and RDS admits only the ECS
 security group, so the migrate task is the only place it can run.
 
 To run it manually against a deployed database:
@@ -428,7 +439,7 @@ added.
 `PUBLIC` by default. A `SECURITY DEFINER` routine is therefore callable by every
 role unless a migration revokes it — and it runs with its **owner's** privileges,
 which no table-level audit would reveal. Role attributes are re-asserted on every
-deploy because migrations run as SUPERUSER and can re-grant them, so the
+deploy because migrations run as the table owner and can re-grant them, so the
 bootstrap-time convergence is not durable on its own.
 
 When a migration intentionally changes a grant, regenerate the manifest with
@@ -448,7 +459,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO pa
 ```
 
 **Environment variables:**
-- `DATABASE_URL` — app runtime connection (non-SUPERUSER role, e.g. `passwd_app`)
+- `DATABASE_URL` — app runtime connection (`NOSUPERUSER NOBYPASSRLS` role, e.g. `passwd_app`)
 - `MIGRATION_DATABASE_URL` — Prisma CLI connection (SUPERUSER role, e.g. `passwd_user`)
 - `OUTBOX_WORKER_DATABASE_URL` — audit outbox worker connection (least-privilege role, e.g. `passwd_outbox_worker`). Set the worker role password with `scripts/set-outbox-worker-password.sh`.
 

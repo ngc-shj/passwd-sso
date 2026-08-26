@@ -143,37 +143,6 @@ const RAW_METHODS = new Set([
   "$queryRaw", "$queryRawUnsafe", "$executeRaw", "$executeRawUnsafe",
 ]);
 
-/**
- * Files allowed to use the bare client because they refuse at runtime to run
- * without RLS visibility. Each must still contain a real assertRlsVisibility()
- * call — see the check at the use site.
- */
-const PREFLIGHT_EXEMPT = new Map([
-  [
-    "scripts/migrate-account-tokens-to-encrypted.ts",
-    "one-shot; assertRlsVisibility refuses a NOSUPERUSER/NOBYPASSRLS connection before the scan",
-  ],
-  [
-    "scripts/migrate-webhook-secrets-v1-to-v2.ts",
-    "one-shot; same preflight, called in main() before migrateWebhookSecrets()",
-  ],
-]);
-
-/** A real call to the imported assertRlsVisibility, not a mention of the name. */
-function hasResolvedPreflightCall(sf) {
-  const imported = sf
-    .getImportDeclarations()
-    .some((d) =>
-      d
-        .getNamedImports()
-        .some((n) => n.getName() === "assertRlsVisibility"),
-    );
-  if (!imported) return false;
-  return sf
-    .getDescendantsOfKind(SyntaxKind.CallExpression)
-    .some((c) => c.getExpression().getText() === "assertRlsVisibility");
-}
-
 function fail(msg) {
   console.error(`check-rls-read-context: ${msg}`);
   process.exit(1);
@@ -380,7 +349,6 @@ console.log(
 
 const project = createAstProject();
 const violations = [];
-const exempted = [];
 let scanned = 0;
 
 for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
@@ -398,28 +366,6 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
     continue;
   }
   scanned++;
-
-  // Exemption for one-shot migrations that legitimately run privileged.
-  //
-  // TWO conditions, both required, because either alone is weak. The allowlist
-  // makes the exemption visible in a diff — a reviewed list beats a predicate
-  // nobody sees. The resolved call makes the list unable to drift: if a script
-  // loses its preflight, being listed no longer saves it.
-  //
-  // Deliberately NOT a substring test over the file text. `getFullText()`
-  // includes comments and string literals, so `// TODO: call
-  // assertRlsVisibility(...)` would have exempted a whole file — judging code
-  // by its spelling, which is the failure this gate replaced.
-  if (PREFLIGHT_EXEMPT.has(path)) {
-    if (!hasResolvedPreflightCall(sf)) {
-      fail(
-        `${path} is listed in PREFLIGHT_EXEMPT but has no resolved assertRlsVisibility() call — ` +
-          "remove it from the list or restore the preflight",
-      );
-    }
-    exempted.push(path);
-    continue;
-  }
 
   // BOTH node kinds. `prisma.$queryRaw`...`` is a TaggedTemplateExpression, not
   // a CallExpression — walking only calls silently skipped the dominant raw form
@@ -509,12 +455,7 @@ if (scanned === 0) {
   );
 }
 
-console.log(
-  `check-rls-read-context: scanned ${scanned} files` +
-    (exempted.length
-      ? `; ${exempted.length} preflight-exempt (${exempted.join(", ")})`
-      : ""),
-);
+console.log(`check-rls-read-context: scanned ${scanned} files`);
 
 if (violations.length > 0) {
   console.error(
