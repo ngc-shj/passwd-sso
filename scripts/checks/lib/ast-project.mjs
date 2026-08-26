@@ -170,3 +170,20 @@ export function* sourceFilesFrom(project, targets, repoRoot) {
     yield { file, rel, sf };
   }
 }
+
+/**
+ * The subset of `targets` that contributed no source file.
+ *
+ * A gate whose scan set names an exact path — `src/lib/health.ts`, `src/auth.ts`
+ * — loses that member silently when the file moves: `collectSourceFiles`
+ * swallows the failed `statSync`, and a whole-run `scanned === 0` floor cannot
+ * fire while the sibling DIRECTORY targets still resolve. The gate then prints
+ * OK having stopped examining the one file it was extended to cover.
+ *
+ * Returned rather than thrown so each gate words its own refusal; every caller
+ * is expected to treat a non-empty result as fatal. "Target missing" must not be
+ * spelled the same as "target present and clean".
+ */
+export function unresolvedTargets(targets, root) {
+  return targets.filter((t) => collectSourceFiles([t], root).length === 0);
+}

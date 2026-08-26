@@ -298,14 +298,21 @@ describe("check-rls-read-context", () => {
       const ctx = `const db = tx;
                    return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;`;
 
+      // `tx: TransactionClient`, never `tx: any`. The typed parameter is what
+      // makes the sibling's binding context-bearing — with `any` these cases
+      // report no matter how the resolver behaves, and a mutation back to
+      // file-wide resolution leaves them green. (Measured: it did.)
+      const TYPED = "tx: Prisma.TransactionClient";
+
       it.each([
-        ["the context binding is declared FIRST", `${ctx}`, `${bare}`],
-        ["the bare binding is declared FIRST", `${bare}`, `${ctx}`],
+        ["the context binding is declared FIRST", ctx, bare],
+        ["the bare binding is declared FIRST", bare, ctx],
       ])("FAILS the bare-client read when %s", (_label, first, second) => {
         const r = runGate(`
+          import type { Prisma } from "@prisma/client";
           declare const prisma: any;
-          export async function a(tx: any) { ${first} }
-          export async function b(tx: any) { ${second} }
+          export async function a(${TYPED}) { ${first} }
+          export async function b(${TYPED}) { ${second} }
         `);
         expect(r.status).not.toBe(0);
         expect(r.stderr).toContain("audit_outbox");
@@ -313,12 +320,13 @@ describe("check-rls-read-context", () => {
 
       it("FAILS a shadowed model-accessor read behind a 2-hop sibling chain", () => {
         const r = runGate(`
+          import type { Prisma } from "@prisma/client";
           declare const prisma: any;
-          export async function drain(tx: any) {
+          export async function drain(${TYPED}) {
             const conn = tx; const db = conn;
             return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;
           }
-          export async function depthAlert(tx: any) {
+          export async function depthAlert(${TYPED}) {
             const db = prisma;
             return db.auditOutbox.count({});
           }
@@ -330,10 +338,11 @@ describe("check-rls-read-context", () => {
         // Unresolvable must fail CLOSED: an alias the gate cannot follow is not
         // an alias it may assume safe.
         const r = runGate(`
+          import type { Prisma } from "@prisma/client";
           declare const prisma: any;
           declare const db: any;
           export function outer() { const db = prisma; void db; }
-          export async function g(tx: any) { return db.auditOutbox.findMany({}); }
+          export async function g(${TYPED}) { return db.auditOutbox.findMany({}); }
         `);
         expect(r.status).not.toBe(0);
       });

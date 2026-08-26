@@ -12,6 +12,7 @@
  * instead of the default "warn" (200 degraded).
  */
 
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { getLogger } from "@/lib/logger";
@@ -101,27 +102,43 @@ const PG_UNDEFINED_TABLE = "42P01";
  * the count comes back 0 (a check that can only pass), and on a connection that
  * already ran a transaction the GUC is back to '' and the ::uuid cast raises
  * 22P02 (a check that can only warn). Neither can report a real backlog.
+ *
+ * EXPORTED AS A SEAM, for the same reason `readOutboxDepth` is in
+ * audit-outbox-worker.ts: the property above is connection-scoped runtime
+ * state, and both health suites mock `@/lib/tenant-rls` wholesale, so they pass
+ * identically against the bypassed and the un-bypassed form. The only test that
+ * can tell the two apart drives this against a real pooled connection —
+ * src/__tests__/db-integration/health-outbox-depth.integration.test.ts. The
+ * client parameter exists for that test; production always takes the default.
  */
+export async function readAuditOutboxDepth(
+  client: PrismaClient = prisma,
+): Promise<{ pending: number; oldestAgeSecs: number }> {
+  const rows = await withBypassRls(
+    client,
+    (tx) =>
+      tx.$queryRaw<{ pending: bigint; oldest_age: number | null }[]>`
+        SELECT
+          COUNT(*) AS pending,
+          EXTRACT(EPOCH FROM (now() - MIN(created_at)))::float AS oldest_age
+        FROM audit_outbox
+        WHERE status = 'PENDING'
+      `,
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+  );
+  return {
+    pending: Number(rows[0]?.pending ?? 0),
+    oldestAgeSecs: rows[0]?.oldest_age ?? 0,
+  };
+}
+
 async function checkAuditOutbox(): Promise<CheckResult> {
   const start = performance.now();
   try {
-    const rows = await withTimeout(
-      withBypassRls(
-        prisma,
-        (tx) =>
-          tx.$queryRaw<{ pending: bigint; oldest_age: number | null }[]>`
-            SELECT
-              COUNT(*) AS pending,
-              EXTRACT(EPOCH FROM (now() - MIN(created_at)))::float AS oldest_age
-            FROM audit_outbox
-            WHERE status = 'PENDING'
-          `,
-        BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
-      ),
+    const { pending, oldestAgeSecs: oldestAge } = await withTimeout(
+      readAuditOutboxDepth(),
       CHECK_TIMEOUT_MS,
     );
-    const pending = Number(rows[0]?.pending ?? 0);
-    const oldestAge = rows[0]?.oldest_age ?? 0;
     const responseTimeMs = Math.round(performance.now() - start);
 
     if (

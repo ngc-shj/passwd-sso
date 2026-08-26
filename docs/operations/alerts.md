@@ -5,14 +5,27 @@ emitted by the application/workers via pino structured logs (and
 Sentry for error-level events). Pipe pino → your SIEM, then add the
 rules below.
 
-Every error- and fatal-level pino log emitted by a worker carries a
-`_logType` string. Match on that. This is enforced by
-`scripts/checks/check-worker-logtype.mjs`, not merely stated here — when
-it was only stated, 19 of the 22 error-level worker logs did not carry
-one, and the three that did were the three somebody had written a rule
-for.
+Every error- and fatal-level pino log under `src/workers` and `scripts`
+carries a `_logType` string drawn from the namespaces declared below.
+Match on that. It is enforced by `scripts/checks/check-worker-logtype.mjs`,
+not merely stated here — when it was only stated, 22 of the 25 error-level
+worker logs did not carry one, and the three that did were the three
+somebody had written a rule for. Re-derive with:
 
-Two things that field does **not** cover, both deliberate:
+```bash
+git archive main@{the ref you are comparing against} | tar -x -C "$T"
+WORKER_LOGTYPE_ROOT=$T WORKER_LOGTYPE_DIRS=src/workers \
+  WORKER_LOGTYPE_FIXTURE_MODE=1 node scripts/checks/check-worker-logtype.mjs
+```
+
+Three things that field does **not** cover, all deliberate:
+
+- **Modules outside `src/workers` and `scripts`**, even when a worker
+  calls into them. The gate's class is the two directories plus any file
+  named individually in its `SEARCH_DIRS`; `src/lib/webhook-dispatcher.ts`
+  is named there because the outbox worker drives it. A `src/lib` module
+  that only ever runs in a request is deliberately out — pulling all of
+  `src/lib` in would make the gate a wall and get it routed around.
 
 - **warn/info levels.** The named sections below include the warn-level
   events worth alerting on; anything else at warn is routine. The
@@ -22,22 +35,53 @@ Two things that field does **not** cover, both deliberate:
   records at all. `CHAIN_VERIFY_FAILED` (below) is the one that matters;
   match it on raw stderr text.
 
+**Your consumer must resolve duplicate JSON keys last-wins.** pino writes
+`_logType: "app"` from its `base` config and the alert value from the call
+site, so an alert record carries the key twice:
+
+```json
+{"level":50,"_logType":"app","_app":"passwd-sso","err":{},"_logType":"worker.pool.error","msg":"worker.pool.error"}
+```
+
+RFC 8259 leaves this to the implementation. Go's `encoding/json` (Loki)
+and JavaScript's `JSON.parse` (most Datadog-side tooling) take the last,
+which is the alert value every rule here assumes. A first-wins or
+reject-duplicates parser sees `app` and matches **nothing** — and that
+silence reads exactly like a healthy pipeline. Confirm the behaviour on
+your pipeline once, by checking that the long-standing
+`outbox.depth.alert` rule has actually been observed firing. If it is
+first-wins, rename pino's base field (`_stream: "app"`) so `_logType` is
+single-valued.
+
 ## Catch-all: any worker error
 
-Every `_logType` in the `worker.*`, `delivery.*`, `webhook_delivery.*`,
-`retention-gc.*` and `audit-anchor-publisher.*` namespaces is emitted at
-error level by a worker, meaning some part of the audit or retention
-pipeline failed and did not complete its work. The named sections below
-carry specific recovery steps; this rule is what catches the rest,
-including ones added after this document was last read.
+Every `_logType` emitted by a worker begins with one of the namespaces in
+the marker below, and this is the rule that catches the ones without a
+named section of their own — including ones added after this document was
+last read.
+
+<!-- alert-namespaces: worker delivery webhook_delivery retention-gc audit-anchor-publisher outbox -->
+
+That marker is not documentation. `scripts/checks/check-worker-logtype.mjs`
+**reads the namespace set from it** and rejects any worker error log whose
+`_logType` falls outside it, so the list here is the one place it exists.
+Adding a namespace to the code means adding it here first; the build says
+so. (The first version of that gate only checked the field was *present*,
+which is how `outbox.*` came to be emitted outside this list and matched
+by nothing but its hand-written sections below.)
+
+Most members are error-level, meaning some part of the audit or retention
+pipeline failed and did not complete its work. Two — the dead-letter pair
+below — are warn-level; the queries here carry no level filter, so those
+match both this rule and their own section.
 
 **Severity**: high
 **Trigger**: any occurrence
 **Recovery**: read the message identifier — it names the operation that
 failed — then the worker's surrounding log lines for the `err` field.
 
-Datadog: `{ _logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher)\\..*" }`
-Loki: `{_logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher)\\..*"} | json`
+Datadog: `{ _logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher|outbox)\\..*" }`
+Loki: `{_logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher|outbox)\\..*"} | json`
 
 Note that `worker.pool.error` fires on transient connection drops and is
 the one member of this set with a meaningful benign rate. Alert on a

@@ -1838,7 +1838,19 @@ export function createWorker(config: WorkerConfig) {
   });
 
   pool.on("error", (err) => {
-    getLogger().error({ err, _logType: "worker.pool.error" }, "worker.pool.error");
+    // `{code}`, not `{err}`: pino's default err serializer emits message and
+    // stack, and a pg pool error's message carries the connection target and
+    // the role name ("password authentication failed for user
+    // \"passwd_outbox_worker\"", "getaddrinfo ENOTFOUND <db-host>").
+    // src/lib/logger.ts redacts by top-level key name, which never reaches
+    // message text. Same shape as the two sibling pool handlers (S6/S7).
+    getLogger().error(
+      {
+        code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
+        _logType: "worker.pool.error",
+      },
+      "worker.pool.error",
+    );
   });
 
   const adapter = new PrismaPg(pool);

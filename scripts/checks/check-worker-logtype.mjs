@@ -10,10 +10,18 @@
  * shape as an RLS-less read returning zero rows: the signal cannot arrive, and
  * nothing distinguishes "cannot arrive" from "nothing to report".
  *
- * Measured before this gate existed: 22 error-level pino calls across
- * src/workers, three of which carried `_logType`. The three were the ones
- * somebody had written an alert rule for; the rule was true of those and of
- * nothing else, which is why a declaration in prose could not hold.
+ * Measured before this gate existed: **25** error-level pino calls across
+ * src/workers, **22** of which carried no `_logType`. The three that did were
+ * the ones somebody had written an alert rule for; the rule was true of those
+ * and of nothing else, which is why a declaration in prose could not hold.
+ * (An earlier revision of this docblock said "22 calls, three of which carried
+ * one" — the violation count restated as the total, which does not even
+ * self-agree: 22 - 3 = 19. Re-derive rather than copy:
+ *   T=$(mktemp -d); git archive <ref> | tar -x -C "$T"
+ *   WORKER_LOGTYPE_ROOT=$T WORKER_LOGTYPE_DIRS=src/workers \
+ *     WORKER_LOGTYPE_FIXTURE_MODE=1 node scripts/checks/check-worker-logtype.mjs
+ * The default SEARCH_DIRS scans more than src/workers, so the printed
+ * `scanned` count there is larger; the call-site count is the comparable one.)
  *
  * CONTROL CLASS (R49): fail-closed verification gate over a BOUNDED scan root.
  * NOT an enforceable boundary — bypassable by editing the gate or by adding
@@ -28,8 +36,15 @@
  *   PASSES   `_logType: "x"` as a string literal, inline or expanded; warn/info/
  *            debug levels; `console.error`, and any receiver not resolvable to
  *            `getLogger()`
- *   MISSED   a logger reached through a parameter, a field, or a data structure
- *            — the receiver has to be `getLogger()` or a same-file binding of it
+ *   MISSED   a logger reached through a parameter, a field, or a data structure;
+ *            `getLogger().child({...})`, whose result is a pino logger this gate
+ *            does not follow; and an ASSIGNMENT-form binding (`let log; log =
+ *            getLogger()`) — `loggerBindings` reads `const` initializers only.
+ *            The receiver has to be `getLogger()` itself or a `const`-declared
+ *            identifier initialized directly from it. All three were measured
+ *            against a synthetic tree, and none occurs under the scan roots
+ *            today; `.child()` is the one to watch, being pino's canonical
+ *            per-worker pattern.
  *
  * DELIBERATELY out of scope, not an oversight:
  *   - warn/info levels. The boundary is severity, and it is the one alerts.md
@@ -44,9 +59,14 @@
  * Runs without a Program (in-memory project).
  */
 import { SyntaxKind } from "ts-morph";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import {
+  createAstProject,
+  sourceFilesFrom,
+  unresolvedTargets,
+} from "./lib/ast-project.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.WORKER_LOGTYPE_ROOT
@@ -73,8 +93,18 @@ if (
   process.exit(1);
 }
 
+// Directories, plus SINGLE FILES a worker drives from outside them.
+//
+// src/lib/webhook-dispatcher.ts is here because audit-outbox-worker.ts lazily
+// imports deliverToWebhookRecords from it, so its error logs are emitted BY a
+// worker while living outside src/workers — the gap between the class the doc
+// states ("emitted by a worker") and the class a directory scan can see. Named
+// individually rather than by widening to src/lib: most of src/lib only ever
+// runs in a request, and a gate that reports hundreds of those is a gate that
+// gets routed around.
 const SEARCH_DIRS = (
-  process.env.WORKER_LOGTYPE_DIRS ?? "src/workers,scripts"
+  process.env.WORKER_LOGTYPE_DIRS ??
+  "src/workers,scripts,src/lib/webhook-dispatcher.ts"
 )
   .split(",")
   .map((d) => d.trim())
@@ -90,6 +120,39 @@ const LOGTYPE_PROP = "_logType";
 function fail(msg) {
   console.error(`check-worker-logtype: ${msg}`);
   process.exit(1);
+}
+
+// The namespace set lives in alerts.md, not here, and is READ from there. A
+// copy in the gate would be a second list to keep in step with the document the
+// gate exists to keep true — and the first version of this gate demonstrated
+// exactly that failure at one remove: it required a `_logType` to be PRESENT and
+// never looked at its value, so `_logType: "zzz"` passed the gate and matched no
+// rule in the document. `outbox.depth.alert` was already outside the documented
+// namespaces when this was written, surviving only on a hand-written section.
+const ALERT_NAMESPACE_MARKER = /<!--\s*alert-namespaces:\s*([^>]*?)\s*-->/;
+const ALERTS_DOC = "docs/operations/alerts.md";
+
+function loadAlertNamespaces() {
+  const p = join(REPO_ROOT, ALERTS_DOC);
+  let raw;
+  try {
+    raw = readFileSync(p, "utf8");
+  } catch (err) {
+    // Fail loudly: an unreadable contract must not be spelled like a satisfied one.
+    fail(`cannot read ${p}: ${err.message}`);
+  }
+  const m = ALERT_NAMESPACE_MARKER.exec(raw);
+  if (!m) {
+    fail(
+      `no '<!-- alert-namespaces: ... -->' marker in ${ALERTS_DOC} — the gate ` +
+        `reads the enforced namespace set from there, and cannot enforce a set it cannot find`,
+    );
+  }
+  const namespaces = m[1].split(/\s+/).filter(Boolean);
+  if (namespaces.length === 0) {
+    fail(`the alert-namespaces marker in ${ALERTS_DOC} lists no namespaces`);
+  }
+  return new Set(namespaces);
 }
 
 /** Names bound to `getLogger()` in this file (`const log = getLogger()`). */
@@ -117,16 +180,20 @@ function isPinoLogger(recv, bindings) {
 }
 
 /**
- * "ok" | "missing" | "not-literal" | "no-object".
+ * "ok" | "missing" | "not-literal" | "no-object" | "unknown-namespace".
  *
  * A non-literal `_logType` is reported rather than accepted: an alert rule is
  * written against a fixed string, so a value the gate cannot read is a value
  * the operator cannot match — the same failure as no value at all, arriving
  * with the appearance of compliance.
+ *
+ * The namespace check is what makes this about the DOCUMENT rather than about
+ * the field's presence. `_logType: "zzz"` is a perfectly good string literal
+ * and matches no rule alerts.md defines.
  */
-function logTypeVerdict(arg) {
+function logTypeVerdict(arg, namespaces) {
   if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) {
-    return "no-object";
+    return { verdict: "no-object" };
   }
   for (const prop of arg.getProperties()) {
     if (prop.getKind() !== SyntaxKind.PropertyAssignment) continue;
@@ -134,22 +201,47 @@ function logTypeVerdict(arg) {
     const value = prop.getInitializer();
     const kind = value?.getKind();
     if (
-      kind === SyntaxKind.StringLiteral ||
-      kind === SyntaxKind.NoSubstitutionTemplateLiteral
+      kind !== SyntaxKind.StringLiteral &&
+      kind !== SyntaxKind.NoSubstitutionTemplateLiteral
     ) {
-      return value.getLiteralText().trim() ? "ok" : "not-literal";
+      return { verdict: "not-literal" };
     }
-    return "not-literal";
+    const text = value.getLiteralText().trim();
+    if (!text) return { verdict: "not-literal" };
+    // The namespace is everything before the first dot; a bare identifier with
+    // no dot is its own namespace, and must still be one the document names.
+    const namespace = text.split(".")[0];
+    if (!namespaces.has(namespace)) {
+      return { verdict: "unknown-namespace", detail: namespace };
+    }
+    return { verdict: "ok" };
   }
-  return "missing";
+  return { verdict: "missing" };
 }
 
 const REASON = {
-  missing: `no ${LOGTYPE_PROP}`,
-  "not-literal": `${LOGTYPE_PROP} is not a non-empty string literal`,
-  "no-object": `first argument is not an object literal, so it carries no ${LOGTYPE_PROP}`,
+  missing: () => `no ${LOGTYPE_PROP}`,
+  "not-literal": () => `${LOGTYPE_PROP} is not a non-empty string literal`,
+  "no-object": () =>
+    `first argument is not an object literal, so it carries no ${LOGTYPE_PROP}`,
+  "unknown-namespace": (ns) =>
+    `${LOGTYPE_PROP} namespace "${ns}" is not one ${ALERTS_DOC} declares`,
 };
 
+// Same per-entry floor as check-rls-read-context: this gate also names a single
+// file (src/lib/webhook-dispatcher.ts), and `callSites === 0` cannot fire while
+// src/workers still resolves.
+{
+  const missing = unresolvedTargets(SEARCH_DIRS, REPO_ROOT);
+  if (missing.length > 0) {
+    fail(
+      `scan target(s) resolved to no source file: ${missing.join(", ")} — ` +
+        `moved, renamed, or misspelled. A target the gate cannot find is not a target it may skip.`,
+    );
+  }
+}
+
+const alertNamespaces = loadAlertNamespaces();
 const project = createAstProject();
 const violations = [];
 let scanned = 0;
@@ -168,13 +260,13 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
     if (!isPinoLogger(expr.getExpression(), bindings)) continue;
 
     callSites++;
-    const verdict = logTypeVerdict(call.getArguments()[0]);
+    const { verdict, detail } = logTypeVerdict(call.getArguments()[0], alertNamespaces);
     if (verdict === "ok") continue;
     violations.push({
       path,
       line: call.getStartLineNumber(),
       level: expr.getName(),
-      reason: REASON[verdict],
+      reason: REASON[verdict](detail),
     });
   }
 }
@@ -196,7 +288,8 @@ if (callSites === 0) {
 }
 
 console.log(
-  `check-worker-logtype: scanned ${scanned} files, ${callSites} error/fatal logger call sites`,
+  `check-worker-logtype: scanned ${scanned} files, ${callSites} error/fatal logger call sites, ` +
+    `namespaces from ${ALERTS_DOC}: ${[...alertNamespaces].sort().join(", ")}`,
 );
 
 if (violations.length > 0) {
