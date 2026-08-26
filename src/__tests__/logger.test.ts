@@ -19,23 +19,22 @@ describe("logger", () => {
     vi.resetModules();
   });
 
-  it("uses _logType 'app' (not 'audit')", async () => {
+  /**
+   * Build a logger from the module's REAL options, writing to a sink.
+   *
+   * The previous version of this file hand-rolled an equivalent-looking pino
+   * config, so it asserted only that the copy matched itself — a change to the
+   * module's base field shipped green. Importing the options is what makes
+   * these cases able to fail for the reason they claim.
+   */
+  async function realLoggerTo(stream: Writable) {
+    const { loggerOptions } = await import("@/lib/logger");
+    return pino({ ...loggerOptions, level: "info" }, stream);
+  }
+
+  it("labels the app stream with _stream, not _logType", async () => {
     const { chunks, stream } = createSink();
-    const mod = await import("@/lib/logger");
-    // Create a child logger that writes to our sink by re-creating with same options
-    const testLogger = pino(
-      {
-        level: "info",
-        timestamp: pino.stdTimeFunctions.isoTime,
-        base: { _logType: "app", _app: "test-app" },
-        formatters: {
-          level(label: string) {
-            return { level: label };
-          },
-        },
-      },
-      stream,
-    );
+    const testLogger = await realLoggerTo(stream);
 
     testLogger.info("test message");
     testLogger.flush();
@@ -43,51 +42,38 @@ describe("logger", () => {
 
     expect(chunks.length).toBeGreaterThan(0);
     const record = JSON.parse(chunks[0]);
-    expect(record._logType).toBe("app");
-    expect(record._app).toBe("test-app");
+    expect(record._stream).toBe("app");
+    expect(record._app).toBe("passwd-sso");
     expect(record.level).toBe("info");
+    // The base must NOT claim _logType: that key belongs to the call site, and
+    // a base value for it is what produced duplicate keys on every alert line.
+    expect(record).not.toHaveProperty("_logType");
+  });
 
-    // Verify the actual module's default export has correct base
-    expect(mod.default).toBeDefined();
+  it("emits _logType exactly once when a call site sets it", async () => {
+    // The property the whole alerting contract rests on. Asserted on the RAW
+    // line, not the parsed object: JSON.parse is last-wins, so a parsed record
+    // reports the right value even when the key appears twice — the parse would
+    // hide exactly the defect this pins.
+    const { chunks, stream } = createSink();
+    const testLogger = await realLoggerTo(stream);
+
+    testLogger.error({ _logType: "worker.pool.error" }, "worker.pool.error");
+    testLogger.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(chunks.length).toBeGreaterThan(0);
+    const line = chunks[0];
+    expect(line.match(/"_logType"/g)).toHaveLength(1);
+    expect(JSON.parse(line)._logType).toBe("worker.pool.error");
   });
 
   it("redacts sensitive fields at top level", async () => {
     const { chunks, stream } = createSink();
-
-    // Re-create logger with same redact config but custom destination
-    const testLogger = pino(
-      {
-        level: "info",
-        base: { _logType: "app" },
-        redact: {
-          paths: [
-            "password",
-            "passphrase",
-            "secret",
-            "secretKey",
-            "authHash",
-            "encryptedBlob",
-            "encryptedOverview",
-            "encryptedData",
-            "encryptedSecretKey",
-            "token",
-            "tokenHash",
-            "accessToken",
-            "refreshToken",
-            "idToken",
-            "authorization",
-            "cookie",
-          ],
-          censor: "[REDACTED]",
-        },
-        formatters: {
-          level(label: string) {
-            return { level: label };
-          },
-        },
-      },
-      stream,
-    );
+    // The module's real redact paths, not a transcribed copy: a key dropped
+    // from SECRET_REDACT_KEYS must redden this, and against a local list it
+    // could not.
+    const testLogger = await realLoggerTo(stream);
 
     testLogger.info(
       {

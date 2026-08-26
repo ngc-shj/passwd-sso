@@ -35,23 +35,28 @@ Three things that field does **not** cover, all deliberate:
   records at all. `CHAIN_VERIFY_FAILED` (below) is the one that matters;
   match it on raw stderr text.
 
-**Your consumer must resolve duplicate JSON keys last-wins.** pino writes
-`_logType: "app"` from its `base` config and the alert value from the call
-site, so an alert record carries the key twice:
+**`_logType` is single-valued.** It used not to be: the app logger set
+`_logType: "app"` in its pino `base`, and a call site naming an alert
+identifier set `_logType` too, so every alert line went out with the key
+twice —
 
 ```json
-{"level":50,"_logType":"app","_app":"passwd-sso","err":{},"_logType":"worker.pool.error","msg":"worker.pool.error"}
+{"level":50,"_logType":"app",...,"_logType":"worker.pool.error","msg":"..."}
 ```
 
-RFC 8259 leaves this to the implementation. Go's `encoding/json` (Loki)
-and JavaScript's `JSON.parse` (most Datadog-side tooling) take the last,
-which is the alert value every rule here assumes. A first-wins or
-reject-duplicates parser sees `app` and matches **nothing** — and that
-silence reads exactly like a healthy pipeline. Confirm the behaviour on
-your pipeline once, by checking that the long-standing
-`outbox.depth.alert` rule has actually been observed firing. If it is
-first-wins, rename pino's base field (`_stream: "app"`) so `_logType` is
-single-valued.
+— and every rule below silently depended on the consumer resolving
+duplicate names last-wins. Go's `encoding/json` (Loki) and JavaScript's
+`JSON.parse` do; a first-wins or reject-duplicates parser would have seen
+`app` and matched nothing, with that silence reading exactly like a
+healthy pipeline. The stream label now lives on `_stream`, so the two
+facts no longer share a key and no rule here depends on parser
+behaviour. Pinned by `src/__tests__/logger.test.ts`, which asserts on the
+raw line rather than the parsed record — `JSON.parse` is last-wins and
+would hide the very defect that case exists for.
+
+Audit lines are unaffected: they come from a separate pino instance
+(`src/lib/audit/audit-logger.ts`) whose base carries `_logType: "audit"`
+and which no call site overrides.
 
 ## Catch-all: any worker error
 
@@ -111,10 +116,12 @@ Sentry: auto-captured at error level.
 > row. The stdout line is the only record that the audit event existed.
 >
 > Two things then work against it:
-> - `infra/fluent-bit/fluent-bit.conf` matches `_logType ^(audit|app)$`, so the
->   audit-log-forwarding overlay **drops** `audit-dead-letter` before any output
->   plugin sees it. Adopting that overlay does not make this record leave the
->   host.
+> - `infra/fluent-bit/fluent-bit.conf` carries an explicit
+>   `Exclude _logType ^audit-dead-letter$`, so the audit-log-forwarding overlay
+>   **drops** this record before any output plugin sees it. Adopting that
+>   overlay does not make it leave the host. The exclusion is deliberate rather
+>   than incidental — see the "What to do" note below — but the effect on
+>   alerting is the same as when it was an accident of the keep-filter.
 > - Container logs are capped at `max-size: 20m` × `max-file: 5`
 >   (`docker-compose.yml`). Ordinary application logging can therefore push the
 >   record out of the retention window. Before the cap existed the log grew
@@ -123,10 +130,10 @@ Sentry: auto-captured at error level.
 >
 > **What to do until it is fixed**: if you rely on dead-letter alerting, do not
 > rely on the shipped forwarder. Ship the raw container stdout (not the
-> `docker-compose.logging.yml` overlay) to a durable sink, or widen the Fluent
-> Bit `Regex` to include `audit-dead-letter` yourself — noting that the record
-> then carries whatever a caller passed, including error text, so review what
-> your sink retains.
+> `docker-compose.logging.yml` overlay) to a durable sink, or delete the
+> `Exclude _logType ^audit-dead-letter$` filter yourself — noting that the
+> record then carries whatever a caller passed, including error text, so review
+> what your sink retains.
 >
 > **The fix** is to persist `tenant_not_found` to a durable dead-letter table
 > rather than only to stdout, so alerting stops depending on log retention.

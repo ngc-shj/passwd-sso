@@ -23,7 +23,7 @@
 #
 # docker-compose.logging.yml ships the APP stream off-host, but do not read that
 # as a way to retain dead-letters past the rotation window: its Fluent Bit filter
-# matches `_logType ^(audit|app)$`, so audit-dead-letter records are dropped
+# excludes `_logType ^audit-dead-letter$`, so those records are dropped
 # before any output sees them. It also defines no worker services. Both halves of
 # that stream therefore stay host-local and bounded by this cap.
 #
