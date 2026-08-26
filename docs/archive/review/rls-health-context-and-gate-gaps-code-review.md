@@ -558,18 +558,28 @@ dependency rather than carried.
   be kept in step with the alert-namespaces marker.
 
 ## Verification
-- `npx vitest run` — 1019 files, 14929 passed
-- `npx vitest run --config vitest.integration.config.ts` — 102 files, 625 passed
-  (compose workers stopped for the run, restarted after)
+Final state of the branch unless noted:
+
+- `npx vitest run` — 1019 files, 14930 passed
 - `npx next build` — success
 - `bash scripts/pre-pr.sh` — 73/73
+- `npx vitest run --config vitest.integration.config.ts` — 102 files, 625 passed
+  (compose workers stopped for the run, restarted after). **Run BEFORE the
+  `_stream` logger change**, so it does not cover that commit. Not re-run, and
+  the reason is that the change is out of its reach rather than merely unlikely
+  to matter: the integration suite exercises database behaviour, and no case in
+  it asserts on a log record's shape. What the change does touch — the pino base,
+  the single-key property, and the real redact paths — is covered by
+  `src/__tests__/logger.test.ts` in the unit run above, which was re-run after
+  the change and is where that behaviour is pinned.
 
 ## Round 2 decision
 Not required. Every round-1 finding is fixed and verified; the remaining items
-are the four questions above, which are Minor by Finding Floor clause 2 and none
-of which touch a security boundary. The tightening-only skip does not apply —
-this round's fixes are substantive, not inline minors — so the stop condition is
-the ordinary one: no unresolved findings.
+are the three questions above (F-m6 was closed by removing the dependency rather
+than answering it), which are Minor by Finding Floor clause 2 and none of which
+touch a security boundary. The tightening-only skip does not apply — this round's
+fixes are substantive, not inline minors — so the stop condition is the ordinary
+one: no unresolved findings.
 
 R42 note: no class in this review expanded its member-set twice, so the
 expanding-class convergence condition does not apply. Both classes closed in this
