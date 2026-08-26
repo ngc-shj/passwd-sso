@@ -40,7 +40,6 @@ import { migrateWebhookSecrets } from "@/../scripts/migrate-webhook-secrets-v1-t
 describe("one-shot migrations under an RDS-equivalent role", () => {
   let ctx: TestContext;
   let tenantId: string;
-  let userId: string;
 
   beforeAll(async () => {
     ctx = await createTestContext();
@@ -50,7 +49,6 @@ describe("one-shot migrations under an RDS-equivalent role", () => {
   });
   beforeEach(async () => {
     tenantId = await ctx.createTenant();
-    userId = await ctx.createUser(tenantId);
   });
   afterEach(async () => {
     await ctx.deleteTestData(tenantId);
