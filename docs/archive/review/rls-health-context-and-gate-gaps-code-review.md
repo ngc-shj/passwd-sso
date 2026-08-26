@@ -36,6 +36,38 @@ Signal".
 35 raw findings across three experts → 24 consolidated (2 Critical, 9 Major,
 13 Minor).
 
+### Post-hoc verification of the merge (deviation follow-up)
+
+The deviation above stands as recorded: `merge-findings` was available and was
+not used at Step 3-4. It was run afterwards, against the three experts' findings
+verbatim, purely to check the consolidation rather than to replace it.
+
+**Result: no finding it produced is absent from the 24.** It emitted 7 coarse
+groups (1 Critical, 4 Major, 2 Minor) against the 24 actionable items here; every
+group maps onto items already present, so the manual consolidation is a strict
+refinement of it, not a divergence.
+
+Two judgments differ, and both are kept as they are here:
+
+- It merged the scope-blind binding resolver (F-C1) with the scan-target
+  resolution floor (F-M2) into one Major group. They share a file and nothing
+  else: one is a fail-open in the adjudication of a security control, the other
+  is a coverage floor. Keeping them apart also keeps F-C1 at Critical, which the
+  reproduction supports — the merger's rating would have downgraded a
+  fail-open that was demonstrated by execution.
+- It folded the `INVALID_RLS_NESTING` question (F-m3) into the health-test-mocking
+  group. That question is about a future caller, not about test doubles.
+
+It also mis-attributed the pgErrorCode group to "Security expert F1", which is
+the RLS resolver finding. Noted so the attribution in this file is not read as
+corroborated by it.
+
+Its Quality Warnings section returned PASS on all three checks
+(no VAGUE / NO-EVIDENCE / UNTESTED-CLAIM), matching the assessment recorded
+below. It reported the `Recurring Issue Check` sections as absent from its input,
+which is accurate — only the findings sections were fed to it. Those sections are
+preserved verbatim in this file from the experts' own outputs.
+
 ## Functionality Findings
 
 **F-C2 / Critical / `src/lib/prisma/prisma-error.ts:22`** — see the merged
@@ -170,7 +202,8 @@ form matters most — it is pino's canonical per-worker pattern and the natural 
 edit to the four `const log = getLogger()` sites in `audit-outbox-worker.ts`.
 Converges with Testing F15.
 
-**F-m6 / Minor (question) / `src/lib/logger.ts:21`** — R40. `base` writes
+**F-m6 / Minor (question) / `src/lib/logger.ts:21`** — R40. *(Closed after the
+review round — see Resolution Status.)* `base` writes
 `_logType: "app"` into every record; the per-line merge object adds a second one, so
 each alert line emits a duplicate JSON key. Last-wins parsers (Go `encoding/json`,
 JS `JSON.parse`) yield the intended value, but a first-wins or reject-duplicates
@@ -491,7 +524,9 @@ deferred, so there are no Anti-Deferral entries.
 
 ### Open questions carried forward (Minor, correctly ranked as questions)
 These rest on intent the change does not contain, so per Finding Floor clause 2
-they are recorded rather than acted on:
+they are recorded rather than acted on. F-m6 was the exception: it was the one
+whose answer every alert rule depended on, so it was closed by removing the
+dependency rather than carried.
 
 - **F-m2** `withTimeout` now races an interactive transaction: on the 3 s budget
   the race rejects but the transaction holds its connection to Prisma's 5 s
@@ -506,9 +541,21 @@ they are recorded rather than acted on:
   experts independently sampled the 66 remaining `src/lib` violations and could
   name no second true member. Closes if the derivation is stated as a property
   with the entry-point enumeration behind it.
-- **F-m6** whether the deployment's log pipeline resolves duplicate JSON keys
-  last-wins. Every rule in alerts.md depends on it. Verifiable in one step: has
-  the long-standing `outbox.depth.alert` rule been observed firing?
+- ~~**F-m6** whether the deployment's log pipeline resolves duplicate JSON keys
+  last-wins.~~ **CLOSED — the dependency was removed instead.** Verification was
+  the alternative and is not available here: no Fluent Bit or SIEM runs in this
+  environment, and `outbox.depth.alert` has never fired against a dev outbox at
+  depth 0, so there is no ingestion record to point at. The app logger's base now
+  carries `_stream: "app"` and `_logType` is single-valued, so no rule in
+  alerts.md rests on duplicate-name resolution. Pinned by
+  `src/__tests__/logger.test.ts`, asserting on the raw line — `JSON.parse` is
+  last-wins and would hide the defect. Red-proved twice: reverting the base
+  reddens both new cases, and asserting on the parsed record instead of the raw
+  line leaves the duplicate-key case green, which is what makes the raw-line
+  assertion load-bearing rather than stylistic. The Fluent Bit keep-filter moved
+  to `_app` (set by both pino instances), which also retired the namespace
+  alternation added earlier in this branch — a second list that would have had to
+  be kept in step with the alert-namespaces marker.
 
 ## Verification
 - `npx vitest run` — 1019 files, 14929 passed
