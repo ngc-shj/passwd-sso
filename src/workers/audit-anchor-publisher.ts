@@ -304,7 +304,7 @@ export class AuditAnchorPublisher {
           } catch (uploadErr) {
             const reason = `${dest.name}_UPLOAD_FAILED`;
             const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
-            log.error({ destination: dest.name, err: errMsg }, "audit-anchor-publisher.upload_failed");
+            log.error({ destination: dest.name, err: errMsg, _logType: "audit-anchor-publisher.upload_failed" }, "audit-anchor-publisher.upload_failed");
             uploadFailedReason = `${reason}: ${errMsg}`;
             throw new Error(uploadFailedReason);
           }
@@ -358,7 +358,7 @@ export class AuditAnchorPublisher {
       return outcome;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      log.error({ reason }, "audit-anchor-publisher.cadence_failed");
+      log.error({ reason, _logType: "audit-anchor-publisher.cadence_failed" }, "audit-anchor-publisher.cadence_failed");
 
       // Persist publishPausedUntil in a SEPARATE tx — the publish tx rolled
       // back on throw, so any in-tx pause UPDATE is lost. This closes the
@@ -401,7 +401,10 @@ export class AuditAnchorPublisher {
           // already failed, and the next cron tick's safety net will detect
           // the missing prior cadence. Do not mask the original error.
           log.error(
-            { err: pauseErr instanceof Error ? pauseErr.message : String(pauseErr) },
+            {
+              err: pauseErr instanceof Error ? pauseErr.message : String(pauseErr),
+              _logType: "audit-anchor-publisher.pause_persist_failed",
+            },
             "audit-anchor-publisher.pause_persist_failed",
           );
         }
@@ -442,7 +445,10 @@ export function createPublisher(config: PublisherConfig): {
 
   pool.on("error", (err) => {
     getLogger().error(
-      { code: (err as NodeJS.ErrnoException | undefined)?.code },
+      {
+        code: (err as NodeJS.ErrnoException | undefined)?.code,
+        _logType: "audit-anchor-publisher.pool.error",
+      },
       "audit-anchor-publisher.pool.error",
     );
   });

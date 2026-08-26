@@ -636,7 +636,11 @@ async function recordError(
     });
   } catch (recoveryErr) {
     getLogger().error(
-      { outboxId: row.id, err: recoveryErr },
+      {
+        outboxId: row.id,
+        err: recoveryErr,
+        _logType: "worker.error_recovery_tx_failed",
+      },
       "worker.error_recovery_tx_failed",
     );
   }
@@ -760,7 +764,10 @@ async function processOneDelivery(
   const kind = delivery.target.kind;
   const deliverFn = DELIVERERS[kind];
   if (!deliverFn) {
-    getLogger().error({ deliveryId: delivery.id, kind }, "no deliverer for target kind");
+    getLogger().error(
+      { deliveryId: delivery.id, kind, _logType: "delivery.unknown_target_kind" },
+      "delivery.unknown_target_kind",
+    );
     // F-P3-2 fix: immediately record error instead of leaving row in PROCESSING
     await recordDeliveryError(workerPrisma, delivery, new Error(`Unknown delivery target kind: ${kind}`));
     return;
@@ -867,7 +874,13 @@ async function recordDeliveryError(
       });
     });
 
-    getLogger().warn({ deliveryId: delivery.id }, "delivery dead-lettered");
+    // warn, not error, because the row reached a terminal state cleanly — but
+    // it is permanent delivery loss, so it carries a _logType and is named in
+    // docs/operations/alerts.md rather than left to the error-level catch-all.
+    getLogger().warn(
+      { deliveryId: delivery.id, _logType: "delivery.dead_lettered" },
+      "delivery.dead_lettered",
+    );
   } else {
     const backoffMs = computeBackoffMs(newAttemptCount);
     const nextRetry = new Date(Date.now() + withFullJitter(backoffMs));
@@ -1273,13 +1286,20 @@ async function recordWebhookDeliveryError(
     });
   } catch (recoveryErr) {
     getLogger().error(
-      { deliveryId: item.id, err: recoveryErr },
+      {
+        deliveryId: item.id,
+        err: recoveryErr,
+        _logType: "webhook_delivery.error_recovery_tx_failed",
+      },
       "webhook_delivery.error_recovery_tx_failed",
     );
   }
 
   if (isDead) {
-    getLogger().warn({ deliveryId: item.id }, "webhook_delivery.dead_lettered");
+    getLogger().warn(
+      { deliveryId: item.id, _logType: "webhook_delivery.dead_lettered" },
+      "webhook_delivery.dead_lettered",
+    );
   } else {
     getLogger().info(
       { deliveryId: item.id, attempt: newAttemptCount },
@@ -1731,25 +1751,25 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
       log.info({ reaped }, "worker.reaper.stuck_reset");
     }
   } catch (err) {
-    log.error({ err }, "worker.reaper.stuck_reset_failed");
+    log.error({ err, _logType: "worker.reaper.stuck_reset_failed" }, "worker.reaper.stuck_reset_failed");
   }
 
   try {
     await reapStuckDeliveries(prisma);
   } catch (err) {
-    log.error({ err }, "worker.reaper.stuck_deliveries_reset_failed");
+    log.error({ err, _logType: "worker.reaper.stuck_deliveries_reset_failed" }, "worker.reaper.stuck_deliveries_reset_failed");
   }
 
   try {
     await reapStuckWebhookDeliveries(prisma);
   } catch (err) {
-    log.error({ err }, "worker.reaper.stuck_webhook_deliveries_reset_failed");
+    log.error({ err, _logType: "worker.reaper.stuck_webhook_deliveries_reset_failed" }, "worker.reaper.stuck_webhook_deliveries_reset_failed");
   }
 
   try {
     await purgeRetention(prisma);
   } catch (err) {
-    log.error({ err }, "worker.reaper.retention_purge_failed");
+    log.error({ err, _logType: "worker.reaper.retention_purge_failed" }, "worker.reaper.retention_purge_failed");
   }
 }
 
@@ -1818,7 +1838,19 @@ export function createWorker(config: WorkerConfig) {
   });
 
   pool.on("error", (err) => {
-    getLogger().error({ err }, "worker.pool.error");
+    // `{code}`, not `{err}`: pino's default err serializer emits message and
+    // stack, and a pg pool error's message carries the connection target and
+    // the role name ("password authentication failed for user
+    // \"passwd_outbox_worker\"", "getaddrinfo ENOTFOUND <db-host>").
+    // src/lib/logger.ts redacts by top-level key name, which never reaches
+    // message text. Same shape as the two sibling pool handlers (S6/S7).
+    getLogger().error(
+      {
+        code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
+        _logType: "worker.pool.error",
+      },
+      "worker.pool.error",
+    );
   });
 
   const adapter = new PrismaPg(pool);
@@ -1837,7 +1869,7 @@ export function createWorker(config: WorkerConfig) {
     try {
       rows = await claimBatch(workerPrisma, batchSize);
     } catch (err) {
-      log.error({ err }, "worker.claim_batch_failed");
+      log.error({ err, _logType: "worker.claim_batch_failed" }, "worker.claim_batch_failed");
       return 0;
     }
 
@@ -1865,7 +1897,7 @@ export function createWorker(config: WorkerConfig) {
       try {
         payload = parsePayload(row.payload);
       } catch (err) {
-        log.error({ err, outboxId: row.id }, "worker.payload_parse_failed");
+        log.error({ err, outboxId: row.id, _logType: "worker.payload_parse_failed" }, "worker.payload_parse_failed");
         await recordError(workerPrisma, row, err);
         continue;
       }
@@ -2030,7 +2062,7 @@ export function createWorker(config: WorkerConfig) {
           log.debug({ deliveryClaimed }, "processed delivery batch");
         }
       } catch (err) {
-        log.error({ err }, "worker.delivery_batch_failed");
+        log.error({ err, _logType: "worker.delivery_batch_failed" }, "worker.delivery_batch_failed");
       }
 
       // Durable webhook delivery: drain pending webhook_deliveries work items.
@@ -2049,7 +2081,7 @@ export function createWorker(config: WorkerConfig) {
           log.debug({ webhookDeliveryClaimed }, "processed webhook delivery batch");
         }
       } catch (err) {
-        log.error({ err }, "worker.webhook_delivery_batch_failed");
+        log.error({ err, _logType: "worker.webhook_delivery_batch_failed" }, "worker.webhook_delivery_batch_failed");
       }
 
       // Run reaper at REAPER_INTERVAL_MS intervals
@@ -2108,7 +2140,7 @@ export function createWorker(config: WorkerConfig) {
       // in-flight rows mid-delivery for a duplicate re-claim (F1 lease guard).
       const leaseError = validateWebhookDeliveryLease();
       if (leaseError) {
-        getLogger().error({ leaseError }, "worker.webhook_delivery_lease_misconfigured");
+        getLogger().error({ leaseError, _logType: "worker.webhook_delivery_lease_misconfigured" }, "worker.webhook_delivery_lease_misconfigured");
         throw new Error(leaseError);
       }
 

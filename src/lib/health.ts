@@ -12,11 +12,14 @@
  * instead of the default "warn" (200 degraded).
  */
 
+import type { PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 
@@ -87,21 +90,55 @@ async function checkRedis(): Promise<CheckResult> {
   }
 }
 
-async function checkAuditOutbox(): Promise<CheckResult> {
-  const start = performance.now();
-  try {
-    const rows = await withTimeout(
-      prisma.$queryRaw<{ pending: bigint; oldest_age: number | null }[]>`
+// undefined_table. The one outbox-query failure that is a deployment ordering
+// artifact rather than a fault, and the only one this check degrades to "warn".
+const PG_UNDEFINED_TABLE = "42P01";
+
+/**
+ * Backlog depth across the whole outbox — an operator signal, deliberately not
+ * scoped to one tenant, so it needs a bypass context. Read on the top-level
+ * client it would carry no RLS context at all: `app.tenant_id` is unset on a
+ * fresh pooled connection, so the tenant_isolation policy evaluates to NULL and
+ * the count comes back 0 (a check that can only pass), and on a connection that
+ * already ran a transaction the GUC is back to '' and the ::uuid cast raises
+ * 22P02 (a check that can only warn). Neither can report a real backlog.
+ *
+ * EXPORTED AS A SEAM, for the same reason `readOutboxDepth` is in
+ * audit-outbox-worker.ts: the property above is connection-scoped runtime
+ * state, and both health suites mock `@/lib/tenant-rls` wholesale, so they pass
+ * identically against the bypassed and the un-bypassed form. The only test that
+ * can tell the two apart drives this against a real pooled connection —
+ * src/__tests__/db-integration/health-outbox-depth.integration.test.ts. The
+ * client parameter exists for that test; production always takes the default.
+ */
+export async function readAuditOutboxDepth(
+  client: PrismaClient = prisma,
+): Promise<{ pending: number; oldestAgeSecs: number }> {
+  const rows = await withBypassRls(
+    client,
+    (tx) =>
+      tx.$queryRaw<{ pending: bigint; oldest_age: number | null }[]>`
         SELECT
           COUNT(*) AS pending,
           EXTRACT(EPOCH FROM (now() - MIN(created_at)))::float AS oldest_age
         FROM audit_outbox
         WHERE status = 'PENDING'
       `,
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+  );
+  return {
+    pending: Number(rows[0]?.pending ?? 0),
+    oldestAgeSecs: rows[0]?.oldest_age ?? 0,
+  };
+}
+
+async function checkAuditOutbox(): Promise<CheckResult> {
+  const start = performance.now();
+  try {
+    const { pending, oldestAgeSecs: oldestAge } = await withTimeout(
+      readAuditOutboxDepth(),
       CHECK_TIMEOUT_MS,
     );
-    const pending = Number(rows[0]?.pending ?? 0);
-    const oldestAge = rows[0]?.oldest_age ?? 0;
     const responseTimeMs = Math.round(performance.now() - start);
 
     if (
@@ -118,9 +155,17 @@ async function checkAuditOutbox(): Promise<CheckResult> {
     return { status: "pass", responseTimeMs };
   } catch (err) {
     const responseTimeMs = Math.round(performance.now() - start);
-    // Graceful degradation: if table doesn't exist yet, warn instead of fail
-    getLogger().warn({ err, responseTimeMs }, "health.auditOutbox.warn");
-    return { status: "warn", responseTimeMs };
+    // Graceful degradation for the pre-migration tree only. Degrading EVERY
+    // error to "warn" made the check unable to report a fault: a timeout, a
+    // dropped connection, or the 22P02 raised by a missing RLS context all came
+    // back as the same non-blocking "warn" this branch was written to give a
+    // table that does not exist yet.
+    if (pgErrorCode(err) === PG_UNDEFINED_TABLE) {
+      getLogger().warn({ err, responseTimeMs }, "health.auditOutbox.warn");
+      return { status: "warn", responseTimeMs };
+    }
+    getLogger().warn({ err, responseTimeMs }, "health.auditOutbox.fail");
+    return { status: "fail", responseTimeMs };
   }
 }
 

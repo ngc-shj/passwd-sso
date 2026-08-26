@@ -204,8 +204,9 @@ async function deliverSingleWebhook(
           masterKeyVersion: webhook.masterKeyVersion,
           secretAadVersion: webhook.secretAadVersion,
           err,
+          _logType: "webhook_delivery.secret_decrypt_failed",
         },
-        "webhook secret decryption failed",
+        "webhook_delivery.secret_decrypt_failed",
       );
       // Secret-version / key / decrypt failure is RECOVERABLE (a pending key
       // migration or transient key-store error), NOT a delivery attempt that
@@ -231,7 +232,10 @@ async function deliverSingleWebhook(
   } catch (err) {
     // Reaches here on an onSuccess/onFailure DB-update throw (or any unexpected
     // error). Also recoverable — propagate so the durable path can retry.
-    getLogger().error({ webhookId: webhook.id, err }, "webhook dispatch error");
+    getLogger().error(
+      { webhookId: webhook.id, err, _logType: "webhook_delivery.dispatch_error" },
+      "webhook_delivery.dispatch_error",
+    );
     if (onError) await onError(webhook.id, err);
   }
 }
@@ -349,7 +353,10 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
       },
     );
   })().catch((err) => {
-    getLogger().error({ err }, "webhook dispatch failed");
+    getLogger().error(
+      { err, _logType: "webhook_delivery.fire_and_forget_failed" },
+      "webhook_delivery.fire_and_forget_failed",
+    );
   });
 }
 
@@ -435,6 +442,9 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
       },
     );
   })().catch((err) => {
-    getLogger().error({ err }, "webhook dispatch failed");
+    getLogger().error(
+      { err, _logType: "webhook_delivery.fire_and_forget_failed" },
+      "webhook_delivery.fire_and_forget_failed",
+    );
   });
 }

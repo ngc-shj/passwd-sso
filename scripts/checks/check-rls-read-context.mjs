@@ -29,29 +29,34 @@
  *   CAUGHT   bare model read; bare raw call; tagged-template raw; bare
  *            `$transaction` whose callback never sets the GUC; SQL the gate
  *            cannot read (reported as UNRESOLVED rather than skipped);
- *            one-hop client alias (`const p = prisma`); model-accessor alias
- *            (`const m = prisma.auditOutbox`); `this.prisma.<model>`
+ *            client alias chains (`const p = prisma`, and chains up to
+ *            ALIAS_HOP_LIMIT hops), INCLUDING a chain whose name is also bound
+ *            to a transaction client in a sibling scope — bindings resolve from
+ *            the statement outward, so a shadowing declaration elsewhere in the
+ *            file cannot clear a bare-client read; model-accessor alias
+ *            (`const m = prisma.auditOutbox`); `this.prisma.<model>`; element access on
+ *            either half (`prisma["auditLog"].findMany`, `prisma.auditLog
+ *            ["findMany"]`); a method or accessor DETACHED by destructuring
+ *            (`const { findMany } = prisma.auditOutbox`, `const { auditOutbox }
+ *            = prisma`, and the renamed form `{ findMany: fm }`)
  *   PASSES   context helpers; `$transaction` + setBypassRlsGucs; a parameter
- *            typed TransactionClient/TxClient/RawExecutor; one-hop alias of a
- *            context binding (`const db = tx`)
- *   MISSED   destructured methods (`const { findMany } = prisma.auditOutbox`);
- *            element access (`prisma["auditLog"]`); a client reached through a
- *            data structure or a returned closure; `.mjs`/`.js` files, which
- *            the shared AST helper does not treat as scannable (no `.mjs` in
- *            the scan roots issues a Prisma statement today)
- *   FALSE +  alias chains longer than ONE hop are flagged even when the chain
- *            ends at a context binding — correct code, no suppression path.
- *            Rewrite as a single hop, or raise the depth bound
+ *            typed TransactionClient/TxClient/RawExecutor; every indirect
+ *            spelling above when the chain ends at a context binding
+ *   MISSED   a client reached through a data structure, a computed key
+ *            (`prisma[name]`), or a returned closure; a GUC established through
+ *            an element-access raw call (`tx["$executeRaw"]`) — fail-CLOSED, it
+ *            reports rather than accepts; `.mjs`/`.js` files, which the shared
+ *            AST helper does not treat as scannable (no `.mjs` in the scan
+ *            roots issues a Prisma statement today)
  *
- * `src/app` and `src/lib` are out of scope because the app's mechanism is
- * AMBIENT, not lexical: `src/lib/prisma.ts` exports a Proxy that rebinds
- * `prisma` to the AsyncLocalStorage-active transaction, so a statement written
- * as `prisma.x.findMany()` is already tenant-scoped at runtime with nothing in
- * the syntax to show it. This gate's model is lexical, so scanning there would
- * report hundreds of false positives (measured: 310 in src/app, 67 in src/lib).
- * Consequence to know: `src/lib/health.ts:checkAuditOutbox` is a real member of
- * this class and is covered by NO gate. It is dormant (no non-test caller);
- * wiring it up needs the withBypassRls fix first.
+ * `src/app` and the rest of `src/lib` are out of scope because the app's
+ * mechanism is AMBIENT, not lexical: `src/lib/prisma.ts` exports a Proxy that
+ * rebinds `prisma` to the AsyncLocalStorage-active transaction, so a statement
+ * written as `prisma.x.findMany()` is already tenant-scoped at runtime with
+ * nothing in the syntax to show it. This gate's model is lexical, so scanning
+ * there would report hundreds of false positives (measured: 310 in src/app, 67
+ * in src/lib). `src/lib/health.ts` is named individually in SEARCH_DIRS anyway,
+ * because that ambient argument does not reach it — see the comment there.
  *
  * Table set is DERIVED, never re-typed: manifest ∩ schema @@map.
  *
@@ -61,7 +66,11 @@ import { SyntaxKind } from "ts-morph";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import {
+  createAstProject,
+  sourceFilesFrom,
+  unresolvedTargets,
+} from "./lib/ast-project.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.RLS_READ_CONTEXT_ROOT
@@ -90,14 +99,24 @@ if (
   process.exit(1);
 }
 
+// Directories, plus SINGLE FILES where the lexical model happens to hold (see
+// the docblock on why src/lib as a whole is out of scope). sourceFilesFrom
+// takes both; check-null-tenant-fail-closed mixes them the same way.
+//
+// src/lib/health.ts is here because it is the one src/lib member of this class
+// that the ambient-Proxy argument does NOT cover: it runs from a health probe,
+// outside any AsyncLocalStorage transaction, so `prisma` there really is the
+// bare client. Measured: 1 violation before the fix, 0 after, no false
+// positives from the file's other $queryRaw (`SELECT 1` names no RLS table).
 const SEARCH_DIRS = (
-  process.env.RLS_READ_CONTEXT_DIRS ?? "src/workers,scripts"
+  process.env.RLS_READ_CONTEXT_DIRS ?? "src/workers,scripts,src/lib/health.ts"
 )
   .split(",")
   .map((d) => d.trim())
   .filter(Boolean);
 
 console.log(`check-rls-read-context: SEARCH_DIRS=${SEARCH_DIRS.join(", ")}`);
+
 
 // These helpers set the GUC themselves, so their callback parameter is
 // context-bearing by construction.
@@ -260,18 +279,141 @@ function gucEstablishedOn(callback, recvText, beforeNode) {
   return sawUndecidable ? "unresolved" : "absent";
 }
 
+// An alias chain is followed this far before the gate gives up and reports.
+// One hop covered the shapes that occur today (`const db = tx`), but a chain
+// that ends at a context binding is CORRECT code, and flagging it left no
+// suppression path — the pressure that gets a gate routed around. Bounded
+// rather than unbounded so a pathological file cannot make the gate the slow
+// step; the bound is far above any chain a reviewer would accept.
+const ALIAS_HOP_LIMIT = 8;
+
 /**
- * Text of the initializer for a same-file `const <name> = <init>`, or null.
- * Enough to follow one alias hop, which is the shape that actually occurs
- * (`const db = tx`, `const m = prisma.auditOutbox`).
+ * Where a same-file binding came from, as TEXT, or null.
+ *
+ * Covers both spellings, because a destructured binding is the same statement
+ * with the member access moved to the left-hand side:
+ *   `const p = prisma`                        -> "prisma"
+ *   `const m = prisma.auditOutbox`            -> "prisma.auditOutbox"
+ *   `const { findMany } = prisma.auditOutbox` -> "prisma.auditOutbox.findMany"
+ *   `const { auditOutbox } = prisma`          -> "prisma.auditOutbox"
+ * Rewriting the destructured forms into the member access they are equivalent
+ * to means one resolver serves both, instead of a second code path that has to
+ * be kept in step with this one.
  */
-function resolveAlias(sf, name) {
-  for (const decl of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
-    if (decl.getName() !== name) continue;
-    const init = decl.getInitializer();
-    if (init) return init.getText();
+/** The text `decl` binds to `name`, or null if it binds some other name. */
+function bindingTextFor(decl, name) {
+  const init = decl.getInitializer();
+  if (!init) return null;
+  const nameNode = decl.getNameNode();
+  if (nameNode.getKind() === SyntaxKind.Identifier) {
+    return nameNode.getText() === name ? init.getText() : null;
+  }
+  if (nameNode.getKind() !== SyntaxKind.ObjectBindingPattern) return null;
+  for (const el of nameNode.getElements()) {
+    if (el.getName() !== name) continue;
+    // `{ findMany: fm }` binds `fm` but reads the `findMany` property.
+    const prop = el.getPropertyNameNode()?.getText() ?? el.getName();
+    return `${init.getText()}.${prop.replace(/^["'`]|["'`]$/g, "")}`;
   }
   return null;
+}
+
+/**
+ * The initializer text bound to `name` in the innermost scope enclosing `node`.
+ *
+ * SCOPE-AWARE, and that is the whole point. A file-wide "first declaration
+ * wins" index reads correct until one file declares the same local name twice —
+ * and then it adjudicates the SECOND statement using the FIRST's initializer:
+ *
+ *   async function drain(tx: TransactionClient) {
+ *     const db = tx;                                  // indexed first
+ *     return db.$queryRaw`... audit_outbox ...`;      // correct
+ *   }
+ *   async function depthAlert(tx: TransactionClient) {
+ *     const db = prisma;                              // shadow, never consulted
+ *     return db.$queryRaw`... audit_outbox ...`;      // NOT flagged — fail-open
+ *   }
+ *
+ * That second function is the name and the shape of the defect this gate exists
+ * to catch, and the gate cleared it. `db` has to be resolved from where the
+ * STATEMENT is, not from where the file happens to declare it first.
+ *
+ * Walking outward also gives the right answer for free when two sibling scopes
+ * declare a name and neither encloses the statement: nothing resolves, so no
+ * context is proven, so the statement is reported. Unresolvable must fail
+ * CLOSED here — an alias the gate cannot follow is not an alias it may assume
+ * safe.
+ */
+function resolveBindingAt(node, name) {
+  for (let cur = node.getParent(); cur; cur = cur.getParent()) {
+    if (typeof cur.getStatements !== "function") continue;
+    for (const stmt of cur.getStatements()) {
+      if (stmt.getKind() !== SyntaxKind.VariableStatement) continue;
+      for (const decl of stmt.getDeclarations()) {
+        const text = bindingTextFor(decl, name);
+        if (text !== null) return text;
+      }
+    }
+  }
+  return null;
+}
+
+// Splits a receiver's TEXT into client + member for BOTH access spellings.
+// `prisma["auditLog"]` reaches the same table as `prisma.auditLog`, and a gate
+// that reads only the dotted form reports the element-access form as clean.
+const MEMBER_TEXT_RE =
+  /^(.*)(?:\.([A-Za-z_$][\w$]*)|\[\s*["'`]([^"'`]+)["'`]\s*\])$/;
+
+/** { clientText, member } for `a.b` / `a["b"]` given as text, else null. */
+function splitMemberText(text) {
+  const m = MEMBER_TEXT_RE.exec(text.trim());
+  if (!m) return null;
+  return { clientText: m[1], member: m[2] ?? m[3] };
+}
+
+/**
+ * Follow `name` through its bindings until the text reads as `<client>.<member>`.
+ * `const m = prisma.auditOutbox; const n = m; n.findMany()` is the chained form
+ * of the alias case, and stopping at one hop reported it as clean.
+ */
+function resolveMemberChain(node, name) {
+  const seen = new Set();
+  let text = name;
+  for (let hop = 0; hop <= ALIAS_HOP_LIMIT; hop++) {
+    const split = splitMemberText(text);
+    if (split) return split;
+    if (seen.has(text)) return null; // `const a = b; const b = a`
+    seen.add(text);
+    const next = resolveBindingAt(node, text);
+    if (!next || next === text) return null;
+    text = next;
+  }
+  return null;
+}
+
+/**
+ * The member a call/tagged-template invokes, and the text of what it is invoked
+ * on: `{ method, recvText }`. Handles `x.m()`, `x["m"]()`, and a method
+ * DETACHED from its receiver by destructuring (`const { findMany } =
+ * prisma.auditOutbox; findMany({})`), which is a bare Identifier at the call
+ * site and was skipped entirely.
+ */
+function resolveInvocation(expr, node) {
+  const kind = expr.getKind();
+  if (kind === SyntaxKind.PropertyAccessExpression) {
+    return { method: expr.getName(), recvText: expr.getExpression().getText() };
+  }
+  if (kind === SyntaxKind.ElementAccessExpression) {
+    const split = splitMemberText(expr.getText());
+    return split ? { method: split.member, recvText: split.clientText } : null;
+  }
+  if (kind !== SyntaxKind.Identifier) return null;
+  // The bare identifier is only interesting if it is BOUND to something —
+  // resolving on the name alone would miss `const { findMany: fm } = ...`,
+  // where the local name is nothing a method set knows about.
+  const origin = resolveMemberChain(node, expr.getText());
+  if (!origin) return null;
+  return { method: origin.member, recvText: origin.clientText };
 }
 
 /**
@@ -279,7 +421,7 @@ function resolveAlias(sf, name) {
  * either the parameter of a callback passed to a context-establishing call, or
  * a parameter annotated as a transaction client and threaded in by its caller.
  */
-function hasRlsContext(node, recvText, sf, depth = 0) {
+function hasRlsContext(node, recvText, seen = new Set()) {
   let cur = node.getParent();
   while (cur) {
     if (
@@ -320,12 +462,15 @@ function hasRlsContext(node, recvText, sf, depth = 0) {
     }
     cur = cur.getParent();
   }
-  // Follow one alias hop: `const db = tx` inside a context callback is correct
+  // Follow the alias chain: `const db = tx` inside a context callback is correct
   // code, and flagging it is the false positive that gets a gate routed around.
-  if (sf && depth < 1) {
-    const aliased = resolveAlias(sf, recvText);
+  // `seen` bounds a cycle (`const a = b; const b = a`), which no hop counter
+  // alone would terminate cheaply.
+  if (seen.size <= ALIAS_HOP_LIMIT && !seen.has(recvText)) {
+    seen.add(recvText);
+    const aliased = resolveBindingAt(node, recvText);
     if (aliased && aliased !== recvText) {
-      return hasRlsContext(node, aliased, sf, depth + 1);
+      return hasRlsContext(node, aliased, seen);
     }
   }
   return false;
@@ -343,6 +488,20 @@ function tablesInSql(text, rlsTables) {
 
 const rlsTables = loadRlsTables();
 const modelAccessors = loadModelAccessors(rlsTables);
+// Per-ENTRY, not per-run. `scanned === 0` below cannot fire while src/workers
+// and scripts still resolve, so renaming or misspelling the single-file entry
+// drops the one src/lib member this gate was extended to cover and still prints
+// OK. Measured: `src/lib/heaith.ts` gave `scanned 30 files` / OK / exit 0.
+{
+  const missing = unresolvedTargets(SEARCH_DIRS, REPO_ROOT);
+  if (missing.length > 0) {
+    fail(
+      `scan target(s) resolved to no source file: ${missing.join(", ")} — ` +
+        `moved, renamed, or misspelled. A target the gate cannot find is not a target it may skip.`,
+    );
+  }
+}
+
 console.log(
   `check-rls-read-context: ${rlsTables.size} RLS tables, ${modelAccessors.size} model accessors`,
 );
@@ -378,15 +537,14 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
   for (const node of statements) {
     const isTagged = node.getKind() === SyntaxKind.TaggedTemplateExpression;
     const expr = isTagged ? node.getTag() : node.getExpression();
-    if (expr.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
-    let method = expr.getName();
-    const recv = expr.getExpression();
+    const invocation = resolveInvocation(expr, node);
+    if (!invocation) continue;
+    let { method } = invocation;
+    const { recvText } = invocation;
 
     let subject = null;
-    let recvText = null;
 
     if (RAW_METHODS.has(method)) {
-      recvText = recv.getText();
       const sqlNode = isTagged ? node.getTemplate() : node.getArguments()[0];
       const sqlText = sqlNode?.getText() ?? "";
       const literal =
@@ -399,7 +557,7 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
         // SQL the gate cannot read (an identifier, a built string). Do not spell
         // "unreadable" the same as "touches no RLS table": report it unless the
         // receiver is already proven context-bearing.
-        if (hasRlsContext(node, recvText, sf)) continue;
+        if (hasRlsContext(node, recvText)) continue;
         violations.push({
           path,
           line: node.getStartLineNumber(),
@@ -414,29 +572,28 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
       subject = [...hits].join(",");
     } else if (MODEL_METHODS.has(method)) {
       if (isTagged) continue;
-      let accessor = null;
-      if (recv.getKind() === SyntaxKind.PropertyAccessExpression) {
-        accessor = recv.getName();
-        recvText = recv.getExpression().getText();
-      } else if (recv.getKind() === SyntaxKind.Identifier) {
-        // `const m = prisma.auditOutbox; m.findMany()`
-        const aliased = resolveAlias(sf, recv.getText());
-        const m = aliased?.match(/^(.*)\.([A-Za-z_$][\w$]*)$/);
-        if (!m) continue;
-        recvText = m[1];
-        accessor = m[2];
-      } else {
-        continue;
-      }
-      if (!modelAccessors.has(accessor)) continue;
-      subject = modelAccessors.get(accessor);
+      // recvText is `<client>.<accessor>` (either access spelling), or an
+      // identifier bound to one (`const m = prisma.auditOutbox; m.findMany()`).
+      const split = splitMemberText(recvText) ?? resolveMemberChain(node, recvText);
+      if (!split) continue;
+      if (!modelAccessors.has(split.member)) continue;
+      subject = modelAccessors.get(split.member);
       // Print the accessor too: `prisma.findMany` alone hides which model.
-      method = `${accessor}.${method}`;
+      method = `${split.member}.${method}`;
+      if (hasRlsContext(node, split.clientText)) continue;
+      violations.push({
+        path,
+        line: node.getStartLineNumber(),
+        recvText: split.clientText,
+        method,
+        subject,
+      });
+      continue;
     } else {
       continue;
     }
 
-    if (hasRlsContext(node, recvText, sf)) continue;
+    if (hasRlsContext(node, recvText)) continue;
 
     violations.push({
       path,

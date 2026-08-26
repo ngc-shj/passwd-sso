@@ -162,12 +162,17 @@ describe("dispatchWebhook", () => {
     // Outbound HTTP MUST NOT have fired.
     expect(mockFetch).not.toHaveBeenCalled();
     // Logger captured the decryption failure with the documented key shape.
+    // `_logType` is asserted by literal because it is the field
+    // docs/operations/alerts.md tells operators to match on — this path runs
+    // inside the outbox worker, so it is an alert path even though it lives
+    // under src/lib.
     expect(mockLoggerError).toHaveBeenCalledWith(
       expect.objectContaining({
         webhookId: WEBHOOK.id,
         masterKeyVersion: WEBHOOK.masterKeyVersion,
+        _logType: "webhook_delivery.secret_decrypt_failed",
       }),
-      expect.stringContaining("webhook secret decryption failed"),
+      "webhook_delivery.secret_decrypt_failed",
     );
     // No update path was taken — the row remains untouched, no
     // lastDeliveredAt / lastFailedAt / failCount mutation.

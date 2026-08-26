@@ -261,7 +261,8 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
       // this returns WITHOUT enqueuing, so the line below is the only record
       // that the audit event ever existed — no audit_outbox row, no audit_logs
       // row. And the shipped forwarder does not carry it: fluent-bit.conf
-      // matches `_logType ^(audit|app)$`, which drops `audit-dead-letter`.
+      // excludes `_logType ^audit-dead-letter$` by default, because the record
+      // carries whatever the failing caller passed, including error text.
       // Container logs are capped (20m x 5), so ordinary logging can push the
       // record out of the window.
       //

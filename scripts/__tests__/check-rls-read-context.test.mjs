@@ -216,6 +216,173 @@ describe("check-rls-read-context", () => {
     expect(r.status).not.toBe(0);
   });
 
+  // The four ways a statement used to reach an RLS table without the gate
+  // seeing it, each measured against this harness before the widening. The
+  // allow-side twin of each is below: the point of following a chain further is
+  // that correct code keeps passing, and a deny-only widening would just move
+  // the false positive.
+  describe("indirect access spellings", () => {
+    it.each([
+      [
+        "an alias chain longer than one hop",
+        `const a = prisma; const b = a; const c = b;
+         return c.auditOutbox.findMany({});`,
+      ],
+      [
+        "element access on the model",
+        `return prisma["auditOutbox"].findMany({});`,
+      ],
+      [
+        "element access on the method",
+        `return prisma.auditOutbox["findMany"]({});`,
+      ],
+      [
+        "a destructured model accessor",
+        `const { auditOutbox } = prisma; return auditOutbox.findMany({});`,
+      ],
+      [
+        "a destructured method",
+        `const { findMany } = prisma.auditOutbox; return findMany({});`,
+      ],
+      [
+        "a destructured method under a different local name",
+        `const { findMany: fm } = prisma.auditOutbox; return fm({});`,
+      ],
+      [
+        "a destructured raw method",
+        "const { $queryRaw } = prisma; return $queryRaw`SELECT count(*) FROM audit_outbox`;",
+      ],
+      [
+        "an accessor alias reached through a second hop",
+        `const m = prisma.auditOutbox; const n = m; return n.findMany({});`,
+      ],
+    ])("FAILS %s", (_label, body) => {
+      const r = runGate(`
+        export async function f(prisma: any) { ${body} }
+      `);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("audit_outbox");
+    });
+
+    it.each([
+      [
+        "an alias chain longer than one hop",
+        `const a = tx; const b = a; const c = b;
+         return c.auditOutbox.findMany({});`,
+      ],
+      [
+        "a destructured model accessor",
+        `const { auditOutbox } = tx; return auditOutbox.findMany({});`,
+      ],
+      [
+        "a destructured method under a different local name",
+        `const { findMany: fm } = tx.auditOutbox; return fm({});`,
+      ],
+    ])("PASSES %s inside a context callback", (_label, body) => {
+      const r = runGate(`
+        import { withBypassRls } from "@/lib/tenant-rls";
+        export async function f(prisma: any) {
+          return withBypassRls(prisma, async (tx: any) => { ${body} }, "audit_write");
+        }
+      `);
+      expect(r.status).toBe(0);
+    });
+
+    // Round 1 F-C1. A file-wide "first declaration wins" index adjudicated the
+    // SECOND statement using the FIRST's initializer, so a bare-client read in
+    // one function was cleared by a same-named `const db = tx` in another. That
+    // second function is the shape the docblock says shipped to production.
+    describe("shadowed bindings resolve from the statement, not the file", () => {
+      const bare = `const db = prisma;
+                    return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;`;
+      const ctx = `const db = tx;
+                   return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;`;
+
+      // `tx: TransactionClient`, never `tx: any`. The typed parameter is what
+      // makes the sibling's binding context-bearing — with `any` these cases
+      // report no matter how the resolver behaves, and a mutation back to
+      // file-wide resolution leaves them green. (Measured: it did.)
+      const TYPED = "tx: Prisma.TransactionClient";
+
+      it.each([
+        ["the context binding is declared FIRST", ctx, bare],
+        ["the bare binding is declared FIRST", bare, ctx],
+      ])("FAILS the bare-client read when %s", (_label, first, second) => {
+        const r = runGate(`
+          import type { Prisma } from "@prisma/client";
+          declare const prisma: any;
+          export async function a(${TYPED}) { ${first} }
+          export async function b(${TYPED}) { ${second} }
+        `);
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain("audit_outbox");
+      });
+
+      it("FAILS a shadowed model-accessor read behind a 2-hop sibling chain", () => {
+        const r = runGate(`
+          import type { Prisma } from "@prisma/client";
+          declare const prisma: any;
+          export async function drain(${TYPED}) {
+            const conn = tx; const db = conn;
+            return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;
+          }
+          export async function depthAlert(${TYPED}) {
+            const db = prisma;
+            return db.auditOutbox.count({});
+          }
+        `);
+        expect(r.status).not.toBe(0);
+      });
+
+      it("FAILS when two sibling scopes bind the name and neither encloses the read", () => {
+        // Unresolvable must fail CLOSED: an alias the gate cannot follow is not
+        // an alias it may assume safe.
+        const r = runGate(`
+          import type { Prisma } from "@prisma/client";
+          declare const prisma: any;
+          declare const db: any;
+          export function outer() { const db = prisma; void db; }
+          export async function g(${TYPED}) { return db.auditOutbox.findMany({}); }
+        `);
+        expect(r.status).not.toBe(0);
+      });
+
+      it("PASSES an inner-block binding that shadows an outer bare-client one", () => {
+        // The allow side of the same mechanism. Innermost binder wins, so the
+        // outer `const db = prisma` must not drag the inner read down with it.
+        const r = runGate(`
+          import { withBypassRls } from "@/lib/tenant-rls";
+          declare const prisma: any;
+          export async function f() {
+            const db = prisma;
+            void db;
+            return withBypassRls(prisma, async (tx: any) => {
+              { const db = tx; return db.auditOutbox.findMany({}); }
+            }, "audit_write");
+          }
+        `);
+        expect(r.status).toBe(0);
+      });
+    });
+
+    it("REPORTS rather than crashes on a cyclic alias chain", () => {
+      // `seen`, not a hop counter, is what bounds the context walk: a cycle has
+      // no length, and `seen.add` of a name already present does not grow it.
+      // Asserted on the REPORT, not on a non-zero exit — dropping the guard
+      // overflows the stack, which also exits non-zero and would leave this
+      // green while the gate had stopped being able to answer.
+      const r = runGate(`
+        export async function f() {
+          const a = b; const b = a;
+          return a.auditOutbox.findMany({});
+        }
+      `);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("audit_outbox");
+      expect(r.stderr).not.toContain("call stack");
+    });
+  });
+
   it("REFUSES scan-scope overrides in CI without fixture mode", () => {
     // The overrides exist for this file. Left ungated they are a way to
     // silently narrow what CI examines — a wrong-but-non-empty scope prints OK.
@@ -321,12 +488,31 @@ describe("check-rls-read-context", () => {
     });
   });
 
-  it("FAILS LOUDLY when the scan root resolves to no files", () => {
+  it("FAILS LOUDLY when a scan target resolves to no files", () => {
     // "Examined nothing" must not be spelled like "found nothing wrong" — the
     // shape that lets a gate report PASS forever after a directory rename.
     const r = runGate(null, { dirs: "src/does-not-exist" });
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("scanned 0 source files");
+    expect(r.stderr).toContain("scan target(s) resolved to no source file");
+    expect(r.stderr).toContain("src/does-not-exist");
+  });
+
+  it("names the missing target even when the other targets still resolve", () => {
+    // Round-1 F-M2. SEARCH_DIRS names src/lib/health.ts by exact path, and a
+    // whole-run "scanned 0" floor cannot fire while src/workers still has
+    // files — so a moved file dropped out of the scan with the gate green.
+    const r = runGate(
+      `export async function f(prisma: any) {
+         return prisma.$transaction(async (tx: any) => {
+           await setBypassRlsGucs(tx);
+           return tx.auditOutbox.findMany({});
+         });
+       }
+       declare function setBypassRlsGucs(tx: any): Promise<void>;`,
+      { dirs: "src/workers,src/lib/health_MOVED.ts" },
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("src/lib/health_MOVED.ts");
   });
 
   it("FAILS LOUDLY when the manifest is unreadable", () => {

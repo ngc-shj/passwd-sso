@@ -5,8 +5,92 @@ emitted by the application/workers via pino structured logs (and
 Sentry for error-level events). Pipe pino → your SIEM, then add the
 rules below.
 
-All structured logs include a `_logType` field on the alerting paths.
-Match on that.
+Every error- and fatal-level pino log under `src/workers` and `scripts`
+carries a `_logType` string drawn from the namespaces declared below.
+Match on that. It is enforced by `scripts/checks/check-worker-logtype.mjs`,
+not merely stated here — when it was only stated, 22 of the 25 error-level
+worker logs did not carry one, and the three that did were the three
+somebody had written a rule for. Re-derive with:
+
+```bash
+git archive main@{the ref you are comparing against} | tar -x -C "$T"
+WORKER_LOGTYPE_ROOT=$T WORKER_LOGTYPE_DIRS=src/workers \
+  WORKER_LOGTYPE_FIXTURE_MODE=1 node scripts/checks/check-worker-logtype.mjs
+```
+
+Three things that field does **not** cover, all deliberate:
+
+- **Modules outside `src/workers` and `scripts`**, even when a worker
+  calls into them. The gate's class is the two directories plus any file
+  named individually in its `SEARCH_DIRS`; `src/lib/webhook-dispatcher.ts`
+  is named there because the outbox worker drives it. A `src/lib` module
+  that only ever runs in a request is deliberately out — pulling all of
+  `src/lib` in would make the gate a wall and get it routed around.
+
+- **warn/info levels.** The named sections below include the warn-level
+  events worth alerting on; anything else at warn is routine. The
+  boundary is severity, and widening the rule to warn would put ordinary
+  worker chatter under an alert.
+- **printf lines written with `console`**, which are not structured
+  records at all. `CHAIN_VERIFY_FAILED` (below) is the one that matters;
+  match it on raw stderr text.
+
+**`_logType` is single-valued.** It used not to be: the app logger set
+`_logType: "app"` in its pino `base`, and a call site naming an alert
+identifier set `_logType` too, so every alert line went out with the key
+twice —
+
+```json
+{"level":50,"_logType":"app",...,"_logType":"worker.pool.error","msg":"..."}
+```
+
+— and every rule below silently depended on the consumer resolving
+duplicate names last-wins. Go's `encoding/json` (Loki) and JavaScript's
+`JSON.parse` do; a first-wins or reject-duplicates parser would have seen
+`app` and matched nothing, with that silence reading exactly like a
+healthy pipeline. The stream label now lives on `_stream`, so the two
+facts no longer share a key and no rule here depends on parser
+behaviour. Pinned by `src/__tests__/logger.test.ts`, which asserts on the
+raw line rather than the parsed record — `JSON.parse` is last-wins and
+would hide the very defect that case exists for.
+
+Audit lines are unaffected: they come from a separate pino instance
+(`src/lib/audit/audit-logger.ts`) whose base carries `_logType: "audit"`
+and which no call site overrides.
+
+## Catch-all: any worker error
+
+Every `_logType` emitted by a worker begins with one of the namespaces in
+the marker below, and this is the rule that catches the ones without a
+named section of their own — including ones added after this document was
+last read.
+
+<!-- alert-namespaces: worker delivery webhook_delivery retention-gc audit-anchor-publisher outbox -->
+
+That marker is not documentation. `scripts/checks/check-worker-logtype.mjs`
+**reads the namespace set from it** and rejects any worker error log whose
+`_logType` falls outside it, so the list here is the one place it exists.
+Adding a namespace to the code means adding it here first; the build says
+so. (The first version of that gate only checked the field was *present*,
+which is how `outbox.*` came to be emitted outside this list and matched
+by nothing but its hand-written sections below.)
+
+Most members are error-level, meaning some part of the audit or retention
+pipeline failed and did not complete its work. Two — the dead-letter pair
+below — are warn-level; the queries here carry no level filter, so those
+match both this rule and their own section.
+
+**Severity**: high
+**Trigger**: any occurrence
+**Recovery**: read the message identifier — it names the operation that
+failed — then the worker's surrounding log lines for the `err` field.
+
+Datadog: `{ _logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher|outbox)\\..*" }`
+Loki: `{_logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher|outbox)\\..*"} | json`
+
+Note that `worker.pool.error` fires on transient connection drops and is
+the one member of this set with a meaningful benign rate. Alert on a
+sustained rate for that identifier rather than on single occurrences.
 
 ## `audit-dead-letter`
 
@@ -32,10 +116,12 @@ Sentry: auto-captured at error level.
 > row. The stdout line is the only record that the audit event existed.
 >
 > Two things then work against it:
-> - `infra/fluent-bit/fluent-bit.conf` matches `_logType ^(audit|app)$`, so the
->   audit-log-forwarding overlay **drops** `audit-dead-letter` before any output
->   plugin sees it. Adopting that overlay does not make this record leave the
->   host.
+> - `infra/fluent-bit/fluent-bit.conf` carries an explicit
+>   `Exclude _logType ^audit-dead-letter$`, so the audit-log-forwarding overlay
+>   **drops** this record before any output plugin sees it. Adopting that
+>   overlay does not make it leave the host. The exclusion is deliberate rather
+>   than incidental — see the "What to do" note below — but the effect on
+>   alerting is the same as when it was an accident of the keep-filter.
 > - Container logs are capped at `max-size: 20m` × `max-file: 5`
 >   (`docker-compose.yml`). Ordinary application logging can therefore push the
 >   record out of the retention window. Before the cap existed the log grew
@@ -44,13 +130,33 @@ Sentry: auto-captured at error level.
 >
 > **What to do until it is fixed**: if you rely on dead-letter alerting, do not
 > rely on the shipped forwarder. Ship the raw container stdout (not the
-> `docker-compose.logging.yml` overlay) to a durable sink, or widen the Fluent
-> Bit `Regex` to include `audit-dead-letter` yourself — noting that the record
-> then carries whatever a caller passed, including error text, so review what
-> your sink retains.
+> `docker-compose.logging.yml` overlay) to a durable sink, or delete the
+> `Exclude _logType ^audit-dead-letter$` filter yourself — noting that the
+> record then carries whatever a caller passed, including error text, so review
+> what your sink retains.
 >
 > **The fix** is to persist `tenant_not_found` to a durable dead-letter table
 > rather than only to stdout, so alerting stops depending on log retention.
+
+## `delivery.dead_lettered` / `webhook_delivery.dead_lettered`
+
+Emitted by `src/workers/audit-outbox-worker.ts` when a delivery or
+webhook-delivery row exhausts `max_attempts` and moves to a terminal
+FAILED state. Logged at **warn**, because the row reached that state
+cleanly rather than by a fault — but the payload is not delivered and
+will not be retried, so this is permanent loss at the destination.
+
+Unlike `audit-dead-letter`, the record itself is durable: the transition
+is written in the same transaction as an `AUDIT_DELIVERY_DEAD_LETTER`
+row in `audit_logs`, so a missed log line does not lose the fact.
+
+**Severity**: high
+**Trigger**: any occurrence
+**Recovery**: read the `FAILED` rows for the destination
+(`/api/maintenance/audit-outbox-metrics` reports `dead_letter_count`);
+fix the destination, then requeue.
+
+Datadog: `{ _logType="delivery.dead_lettered" OR _logType="webhook_delivery.dead_lettered" }`
 
 ## `outbox.depth.alert`
 
@@ -70,6 +176,21 @@ on `audit_logs` for the `passwd_outbox_worker` role.
 
 Datadog: `{ _logType="outbox.depth.alert" } | count`
 Loki: `{_logType="outbox.depth.alert"} | json`
+
+## `delivery.tenant_mismatch`
+
+Emitted by `src/workers/audit-outbox-worker.ts` when a claimed delivery
+row's `tenant_id` does not match its outbox row's. The delivery is
+skipped, not sent.
+
+**Severity**: critical
+**Trigger**: any occurrence
+**Recovery**: this is a data-integrity failure, not a transient one —
+snapshot the `audit_outbox` / delivery rows for the named ids before
+touching anything, and treat it as a potential cross-tenant leak
+attempt until shown otherwise.
+
+Datadog: `{ _logType="delivery.tenant_mismatch" }`
 
 ## `outbox.depth.check_failed`
 
