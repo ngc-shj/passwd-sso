@@ -216,6 +216,92 @@ describe("check-rls-read-context", () => {
     expect(r.status).not.toBe(0);
   });
 
+  // The four ways a statement used to reach an RLS table without the gate
+  // seeing it, each measured against this harness before the widening. The
+  // allow-side twin of each is below: the point of following a chain further is
+  // that correct code keeps passing, and a deny-only widening would just move
+  // the false positive.
+  describe("indirect access spellings", () => {
+    it.each([
+      [
+        "an alias chain longer than one hop",
+        `const a = prisma; const b = a; const c = b;
+         return c.auditOutbox.findMany({});`,
+      ],
+      [
+        "element access on the model",
+        `return prisma["auditOutbox"].findMany({});`,
+      ],
+      [
+        "element access on the method",
+        `return prisma.auditOutbox["findMany"]({});`,
+      ],
+      [
+        "a destructured model accessor",
+        `const { auditOutbox } = prisma; return auditOutbox.findMany({});`,
+      ],
+      [
+        "a destructured method",
+        `const { findMany } = prisma.auditOutbox; return findMany({});`,
+      ],
+      [
+        "a destructured method under a different local name",
+        `const { findMany: fm } = prisma.auditOutbox; return fm({});`,
+      ],
+      [
+        "a destructured raw method",
+        "const { $queryRaw } = prisma; return $queryRaw`SELECT count(*) FROM audit_outbox`;",
+      ],
+      [
+        "an accessor alias reached through a second hop",
+        `const m = prisma.auditOutbox; const n = m; return n.findMany({});`,
+      ],
+    ])("FAILS %s", (_label, body) => {
+      const r = runGate(`
+        export async function f(prisma: any) { ${body} }
+      `);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain("audit_outbox");
+    });
+
+    it.each([
+      [
+        "an alias chain longer than one hop",
+        `const a = tx; const b = a; const c = b;
+         return c.auditOutbox.findMany({});`,
+      ],
+      [
+        "a destructured model accessor",
+        `const { auditOutbox } = tx; return auditOutbox.findMany({});`,
+      ],
+      [
+        "a destructured method under a different local name",
+        `const { findMany: fm } = tx.auditOutbox; return fm({});`,
+      ],
+    ])("PASSES %s inside a context callback", (_label, body) => {
+      const r = runGate(`
+        import { withBypassRls } from "@/lib/tenant-rls";
+        export async function f(prisma: any) {
+          return withBypassRls(prisma, async (tx: any) => { ${body} }, "audit_write");
+        }
+      `);
+      expect(r.status).toBe(0);
+    });
+
+    it("TERMINATES on a cyclic alias chain", () => {
+      // `seen`, not a hop counter, is what bounds this: a cycle has no length.
+      // A gate that hangs here fails the same way as one that passes wrongly —
+      // CI reports nothing either way.
+      const r = runGate(`
+        export async function f() {
+          const a = b; const b = a;
+          return a.auditOutbox.findMany({});
+        }
+      `);
+      expect(r.status).not.toBe(0);
+    });
+  });
+
   it("REFUSES scan-scope overrides in CI without fixture mode", () => {
     // The overrides exist for this file. Left ungated they are a way to
     // silently narrow what CI examines — a wrong-but-non-empty scope prints OK.
