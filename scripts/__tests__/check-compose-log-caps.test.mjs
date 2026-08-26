@@ -17,9 +17,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import yaml from "js-yaml";
 import {
   OFF_HOST_ALLOW,
+  createComposeYamlLoader,
   classifyLogging,
   findAmbiguousDefaults,
   findComposeFiles,
@@ -46,9 +46,17 @@ const CAPPED_OVERLAY = `services:
       - "5432:5432"
 `;
 
-/** Build a docs map the way main() does, from YAML text so aliases resolve. */
+/**
+ * Build a docs map the way main() does, from YAML text so aliases resolve.
+ *
+ * The loader comes from the gate rather than being rebuilt here: the merge-key
+ * case below only proves anything if the test parses with the same schema the
+ * gate does.
+ */
+const loadComposeYaml = await createComposeYamlLoader();
+
 function docsFrom(files) {
-  return new Map(Object.entries(files).map(([name, text]) => [name, yaml.load(text)]));
+  return new Map(Object.entries(files).map(([name, text]) => [name, loadComposeYaml(text)]));
 }
 
 const BASE_YAML = `

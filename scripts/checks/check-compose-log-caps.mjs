@@ -410,10 +410,19 @@ export function findViolations(docs) {
   return violations;
 }
 
-async function loadYaml() {
+/**
+ * Build the compose-YAML loader that this gate and its self-test share.
+ *
+ * js-yaml 5 loads with CORE_SCHEMA, which leaves `!!merge` out: the
+ * `<<: *sentinel` in docker-compose.ha.yml then comes back as a literal '<<'
+ * key and every sentinel reads as having no logging block at all. Re-adding
+ * the tag is what keeps the parse equal to what Compose itself resolves, and
+ * the self-test imports this same loader so the two cannot drift on it.
+ */
+export async function createComposeYamlLoader() {
+  let mod;
   try {
-    const mod = await import("js-yaml");
-    return mod.default ?? mod;
+    mod = await import("js-yaml");
   } catch {
     // js-yaml is a declared devDependency. This gate runs in the always-on CI
     // static-checks job, so refuse loudly rather than falling back to a line
@@ -424,11 +433,26 @@ async function loadYaml() {
     );
     process.exit(1);
   }
+  const { load, CORE_SCHEMA, mergeTag } = mod;
+  if (
+    typeof load !== "function" ||
+    typeof CORE_SCHEMA?.withTags !== "function" ||
+    mergeTag === undefined
+  ) {
+    // Same reasoning as the import failure: a merge-unaware parse is a silent
+    // green rather than a degraded one, so it is not an acceptable fallback.
+    console.error(
+      "check-compose-log-caps: YAML_MERGE_UNSUPPORTED — js-yaml is missing load/CORE_SCHEMA/mergeTag (needs >= 5). Run `npm ci`.",
+    );
+    process.exit(1);
+  }
+  const schema = CORE_SCHEMA.withTags(mergeTag);
+  return (text) => load(text, { schema });
 }
 
 async function main(root = process.env.COMPOSE_LOG_CAPS_ROOT ?? ".") {
   console.log(`check-compose-log-caps: ROOT=${root}`);
-  const yaml = await loadYaml();
+  const loadComposeYaml = await createComposeYamlLoader();
   const files = findComposeFiles(root);
   if (files.length === 0) {
     console.error(
@@ -461,7 +485,7 @@ async function main(root = process.env.COMPOSE_LOG_CAPS_ROOT ?? ".") {
   for (const path of files) {
     let doc;
     try {
-      doc = yaml.load(readFileSync(path, "utf8"));
+      doc = loadComposeYaml(readFileSync(path, "utf8"));
     } catch (err) {
       console.error(`check-compose-log-caps: PARSE_FAILED ${path} — ${err.message}`);
       process.exit(1);
