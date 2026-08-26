@@ -5,8 +5,43 @@ emitted by the application/workers via pino structured logs (and
 Sentry for error-level events). Pipe pino → your SIEM, then add the
 rules below.
 
-All structured logs include a `_logType` field on the alerting paths.
-Match on that.
+Every error- and fatal-level pino log emitted by a worker carries a
+`_logType` string. Match on that. This is enforced by
+`scripts/checks/check-worker-logtype.mjs`, not merely stated here — when
+it was only stated, 19 of the 22 error-level worker logs did not carry
+one, and the three that did were the three somebody had written a rule
+for.
+
+Two things that field does **not** cover, both deliberate:
+
+- **warn/info levels.** The named sections below include the warn-level
+  events worth alerting on; anything else at warn is routine. The
+  boundary is severity, and widening the rule to warn would put ordinary
+  worker chatter under an alert.
+- **printf lines written with `console`**, which are not structured
+  records at all. `CHAIN_VERIFY_FAILED` (below) is the one that matters;
+  match it on raw stderr text.
+
+## Catch-all: any worker error
+
+Every `_logType` in the `worker.*`, `delivery.*`, `webhook_delivery.*`,
+`retention-gc.*` and `audit-anchor-publisher.*` namespaces is emitted at
+error level by a worker, meaning some part of the audit or retention
+pipeline failed and did not complete its work. The named sections below
+carry specific recovery steps; this rule is what catches the rest,
+including ones added after this document was last read.
+
+**Severity**: high
+**Trigger**: any occurrence
+**Recovery**: read the message identifier — it names the operation that
+failed — then the worker's surrounding log lines for the `err` field.
+
+Datadog: `{ _logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher)\\..*" }`
+Loki: `{_logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher)\\..*"} | json`
+
+Note that `worker.pool.error` fires on transient connection drops and is
+the one member of this set with a meaningful benign rate. Alert on a
+sustained rate for that identifier rather than on single occurrences.
 
 ## `audit-dead-letter`
 
@@ -52,6 +87,26 @@ Sentry: auto-captured at error level.
 > **The fix** is to persist `tenant_not_found` to a durable dead-letter table
 > rather than only to stdout, so alerting stops depending on log retention.
 
+## `delivery.dead_lettered` / `webhook_delivery.dead_lettered`
+
+Emitted by `src/workers/audit-outbox-worker.ts` when a delivery or
+webhook-delivery row exhausts `max_attempts` and moves to a terminal
+FAILED state. Logged at **warn**, because the row reached that state
+cleanly rather than by a fault — but the payload is not delivered and
+will not be retried, so this is permanent loss at the destination.
+
+Unlike `audit-dead-letter`, the record itself is durable: the transition
+is written in the same transaction as an `AUDIT_DELIVERY_DEAD_LETTER`
+row in `audit_logs`, so a missed log line does not lose the fact.
+
+**Severity**: high
+**Trigger**: any occurrence
+**Recovery**: read the `FAILED` rows for the destination
+(`/api/maintenance/audit-outbox-metrics` reports `dead_letter_count`);
+fix the destination, then requeue.
+
+Datadog: `{ _logType="delivery.dead_lettered" OR _logType="webhook_delivery.dead_lettered" }`
+
 ## `outbox.depth.alert`
 
 Emitted by `src/workers/audit-outbox-worker.ts` when the
@@ -70,6 +125,21 @@ on `audit_logs` for the `passwd_outbox_worker` role.
 
 Datadog: `{ _logType="outbox.depth.alert" } | count`
 Loki: `{_logType="outbox.depth.alert"} | json`
+
+## `delivery.tenant_mismatch`
+
+Emitted by `src/workers/audit-outbox-worker.ts` when a claimed delivery
+row's `tenant_id` does not match its outbox row's. The delivery is
+skipped, not sent.
+
+**Severity**: critical
+**Trigger**: any occurrence
+**Recovery**: this is a data-integrity failure, not a transient one —
+snapshot the `audit_outbox` / delivery rows for the named ids before
+touching anything, and treat it as a potential cross-tenant leak
+attempt until shown otherwise.
+
+Datadog: `{ _logType="delivery.tenant_mismatch" }`
 
 ## `outbox.depth.check_failed`
 

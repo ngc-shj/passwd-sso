@@ -335,6 +335,10 @@ queue_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 # Complements bypass-rls, which is an allowlist over withBypassRls USAGE and so
 # cannot report a MISSING RLS context. This one does.
 queue_step "Static: rls-read-context" node scripts/checks/check-rls-read-context.mjs
+# docs/operations/alerts.md tells operators to match on _logType; this keeps
+# that true of every error-level worker log rather than of the three someone
+# happened to write a rule for.
+queue_step "Static: worker-logtype" node scripts/checks/check-worker-logtype.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
 queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
 queue_step "Static: runtime-image-assets" node scripts/checks/check-runtime-image-assets.mjs

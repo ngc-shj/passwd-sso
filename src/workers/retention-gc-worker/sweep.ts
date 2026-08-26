@@ -691,7 +691,7 @@ export async function sweepOnce(
     }
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
-    log.error({ table: "access_requests", code }, "retention-gc.entry_failed");
+    log.error({ table: "access_requests", code, _logType: "retention-gc.entry_failed" }, "retention-gc.entry_failed");
   }
 
   for (const entry of RETENTION_REGISTRY) {
@@ -730,7 +730,7 @@ export async function sweepOnce(
       // Never log err.message or the generated SQL (S6).
       const code =
         (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
-      log.error({ table: tableName, code }, "retention-gc.entry_failed");
+      log.error({ table: tableName, code, _logType: "retention-gc.entry_failed" }, "retention-gc.entry_failed");
       counts[tableName] = -1;
     }
   }
@@ -772,7 +772,7 @@ export async function sweepOnce(
       // authoritative record (INV-C4b). Log {code} only (S6).
       const code =
         (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
-      log.error({ code }, "retention-gc.heartbeat_failed");
+      log.error({ code, _logType: "retention-gc.heartbeat_failed" }, "retention-gc.heartbeat_failed");
     }
   }
 

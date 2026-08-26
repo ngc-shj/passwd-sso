@@ -148,7 +148,10 @@ export function createWorker(config: WorkerConfig) {
 
   pool.on("error", (err) => {
     getLogger().error(
-      { code: (err as NodeJS.ErrnoException | undefined)?.code },
+      {
+        code: (err as NodeJS.ErrnoException | undefined)?.code,
+        _logType: "retention-gc.pool.error",
+      },
       "retention-gc.pool.error",
     );
   });
@@ -175,7 +178,7 @@ export function createWorker(config: WorkerConfig) {
         // leaking pg connection target/username via err.message (S6/S7).
         const code =
           (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown";
-        log.error({ code }, "retention-gc.sweep_failed");
+        log.error({ code, _logType: "retention-gc.sweep_failed" }, "retention-gc.sweep_failed");
         // Do not exit; transient DB errors should not crash the worker.
       }
 
