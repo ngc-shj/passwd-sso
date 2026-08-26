@@ -1,14 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockQueryRaw, mockGetRedis, mockPing, mockWarn } = vi.hoisted(() => ({
-  mockQueryRaw: vi.fn(),
-  mockGetRedis: vi.fn(),
-  mockPing: vi.fn(),
-  mockWarn: vi.fn(),
-}));
+const { mockQueryRaw, mockGetRedis, mockPing, mockWarn, mockWithBypassRls } =
+  vi.hoisted(() => ({
+    mockQueryRaw: vi.fn(),
+    mockGetRedis: vi.fn(),
+    mockPing: vi.fn(),
+    mockWarn: vi.fn(),
+    mockWithBypassRls: vi.fn(),
+  }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: { $queryRaw: mockQueryRaw },
+}));
+
+// Runs the callback against a tx whose $queryRaw is the same mock, so the
+// outbox query keeps flowing through mockQueryRaw. The purpose argument is
+// recorded, which is what pins the bypass context in place: dropping
+// withBypassRls leaves this uncalled.
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+  BYPASS_PURPOSE: { SYSTEM_MAINTENANCE: "system_maintenance" },
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -20,10 +31,14 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { runHealthChecks } from "@/lib/health";
+import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 
 describe("health checks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWithBypassRls.mockImplementation((_prisma, fn) =>
+      fn({ $queryRaw: mockQueryRaw }),
+    );
     mockGetRedis.mockReturnValue(null);
   });
 
@@ -107,6 +122,69 @@ describe("health checks", () => {
     });
   });
 
+  // ─── checkAuditOutbox ───────────────────────────────────
+  describe("auditOutbox", () => {
+    /** A raw-query failure in the shape Prisma gives it (P2010 + meta.code). */
+    function pgFailure(sqlstate: string) {
+      return Object.assign(new Error("Raw query failed"), {
+        code: "P2010",
+        meta: { code: sqlstate },
+      });
+    }
+
+    it("reads the outbox inside a bypass-RLS transaction", async () => {
+      mockQueryRaw.mockResolvedValue([{ pending: 0n, oldest_age: null }]);
+      const result = await runHealthChecks();
+      expect(result.checks.auditOutbox.status).toBe("pass");
+      expect(mockWithBypassRls).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(Function),
+        "system_maintenance",
+      );
+    });
+
+    it("returns fail when the backlog exceeds the pending threshold", async () => {
+      mockQueryRaw.mockResolvedValue([
+        { pending: BigInt(AUDIT_OUTBOX.READY_PENDING_THRESHOLD + 1), oldest_age: 0 },
+      ]);
+      const result = await runHealthChecks();
+      expect(result.checks.auditOutbox.status).toBe("fail");
+    });
+
+    it("returns warn when the table does not exist yet (42P01)", async () => {
+      mockQueryRaw.mockRejectedValue(pgFailure("42P01"));
+      const result = await runHealthChecks();
+      expect(result.checks.auditOutbox.status).toBe("warn");
+    });
+
+    // The regression this narrowing exists for: a missing RLS context raises
+    // 22P02, and the old blanket catch reported it as the same non-blocking
+    // "warn" a pre-migration tree gets.
+    it("returns fail on a query error that is not a missing table", async () => {
+      mockQueryRaw.mockRejectedValue(pgFailure("22P02"));
+      const result = await runHealthChecks();
+      expect(result.checks.auditOutbox.status).toBe("fail");
+    });
+
+    it("returns fail when the query rejects with a non-PG error", async () => {
+      mockQueryRaw.mockRejectedValue(new Error("connection refused"));
+      const result = await runHealthChecks();
+      expect(result.checks.auditOutbox.status).toBe("fail");
+    });
+
+    it("returns fail on timeout", async () => {
+      mockQueryRaw.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, 10_000)),
+      );
+      vi.useFakeTimers();
+      const promise = runHealthChecks();
+      await vi.advanceTimersByTimeAsync(3_500);
+      const result = await promise;
+      vi.useRealTimers();
+      expect(result.checks.auditOutbox.status).toBe("fail");
+    });
+  });
+
   // ─── runHealthChecks (aggregate) ────────────────────────
   describe("runHealthChecks", () => {
     it("returns healthy when all checks pass", async () => {
@@ -157,6 +235,9 @@ describe("health checks", () => {
 describe("health checks (HEALTH_REDIS_REQUIRED=true)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWithBypassRls.mockImplementation((_prisma, fn) =>
+      fn({ $queryRaw: mockQueryRaw }),
+    );
   });
 
   it("returns fail when redis is not configured but required", async () => {

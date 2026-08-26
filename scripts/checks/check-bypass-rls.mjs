@@ -191,6 +191,10 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],
   ["src/app/api/maintenance/audit-outbox-metrics/route.ts", []],
+  // Health probe: whole-deployment outbox backlog depth. Raw SQL, no model
+  // accessor. Runs outside any request tenant context, and the depth it reports
+  // is deliberately not tenant-scoped.
+  ["src/lib/health.ts", []],
   ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", []],
   ["src/app/api/maintenance/audit-chain-verify/route.ts", []],
   ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],

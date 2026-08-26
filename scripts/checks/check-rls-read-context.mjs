@@ -90,8 +90,17 @@ if (
   process.exit(1);
 }
 
+// Directories, plus SINGLE FILES where the lexical model happens to hold (see
+// the docblock on why src/lib as a whole is out of scope). sourceFilesFrom
+// takes both; check-null-tenant-fail-closed mixes them the same way.
+//
+// src/lib/health.ts is here because it is the one src/lib member of this class
+// that the ambient-Proxy argument does NOT cover: it runs from a health probe,
+// outside any AsyncLocalStorage transaction, so `prisma` there really is the
+// bare client. Measured: 1 violation before the fix, 0 after, no false
+// positives from the file's other $queryRaw (`SELECT 1` names no RLS table).
 const SEARCH_DIRS = (
-  process.env.RLS_READ_CONTEXT_DIRS ?? "src/workers,scripts"
+  process.env.RLS_READ_CONTEXT_DIRS ?? "src/workers,scripts,src/lib/health.ts"
 )
   .split(",")
   .map((d) => d.trim())
