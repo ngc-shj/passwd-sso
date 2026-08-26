@@ -7,14 +7,44 @@ interface PrismaErrorMapping {
 }
 
 /**
+ * A five-character SQLSTATE, excluding Prisma's own error codes.
+ *
+ * The two domains overlap in shape, which is why the exclusion is by pattern
+ * rather than by length: Prisma numbers its errors P1000-P6xxx, and PostgreSQL
+ * has a real SQLSTATE class P0 (P0001 raise_exception, P0002 no_data_found).
+ * `P2010` and `P0001` are both `[0-9A-Z]{5}`, so a length test would hand back
+ * the wrapper code as if it were the driver's — the defect this ordering
+ * exists to avoid. `P[1-9]` is Prisma's; everything else is the driver's.
+ */
+const PRISMA_ERROR_CODE_RE = /^P[1-9]\d{3}$/;
+const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
+
+function asSqlState(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (!SQLSTATE_RE.test(value)) return null;
+  return PRISMA_ERROR_CODE_RE.test(value) ? null : value;
+}
+
+/**
  * The PostgreSQL SQLSTATE carried by an error, or null when there is none.
  *
- * Prisma surfaces a driver-level error in three different shapes depending on
- * where it was raised, and a check that reads only one of them silently
- * classifies the other two as "unknown error". The shapes:
- *   1. Direct PG error:                 err.code === "42P01"
- *   2. Prisma P2010 (raw query failed): err.meta.code === "42P01"
- *   3. Prisma wrapped:                  err.cause.code === "42P01"
+ * Prisma surfaces a driver-level error in several shapes depending on where it
+ * was raised, and a check that reads only one silently classifies the others as
+ * "unknown error". The order below is the MEASURED one — `sqlStateOf` in
+ * src/__tests__/db-integration/helpers.ts established the first two against a
+ * real database (fixtures at helpers.test.ts), and that helper now delegates
+ * here so the two cannot drift into deciding one predicate differently:
+ *
+ *   1. meta.driverAdapterError.cause.code   the pg driver adapter's nesting
+ *   2. meta.code                            P2010's flatter rendering
+ *   3. err.code                             a direct pg error
+ *   4. err.cause.code                       a Prisma-wrapped driver error
+ *   5. "Code: `42P01`" in the message       paths that render it into the text
+ *
+ * Reading the wrapper before the nested value is what makes this order
+ * load-bearing rather than arbitrary: a P2010 carries `code` AND the driver's
+ * SQLSTATE underneath, so returning `code` first hands back "P2010" for every
+ * raw-query failure. That is why steps 3 and 4 go through `asSqlState`.
  *
  * `isLockTimeoutError` in src/lib/auth/policy/account-lockout.ts predates this
  * and still carries its own copy of the same unwrap for 55P03.
@@ -22,21 +52,31 @@ interface PrismaErrorMapping {
 export function pgErrorCode(err: unknown): string | null {
   if (!err || typeof err !== "object") return null;
 
-  const code = "code" in err ? (err as { code: unknown }).code : undefined;
-  if (typeof code === "string" && code !== "P2010") return code;
-
-  // P2010 wraps the driver error's SQLSTATE in meta.code.
-  if (code === "P2010" && "meta" in err && err.meta && typeof err.meta === "object") {
-    const metaCode = (err.meta as { code?: unknown }).code;
-    if (typeof metaCode === "string") return metaCode;
+  const meta = (err as { meta?: unknown }).meta;
+  if (meta && typeof meta === "object") {
+    const adapter = (meta as { driverAdapterError?: unknown }).driverAdapterError;
+    if (adapter && typeof adapter === "object") {
+      const cause = (adapter as { cause?: unknown }).cause;
+      if (cause && typeof cause === "object") {
+        const nested = (cause as { code?: unknown }).code;
+        if (typeof nested === "string") return nested;
+      }
+    }
+    const flat = (meta as { code?: unknown }).code;
+    if (typeof flat === "string") return flat;
   }
 
-  if ("cause" in err && err.cause && typeof err.cause === "object") {
-    const causeCode = (err.cause as { code?: unknown }).code;
-    if (typeof causeCode === "string") return causeCode;
+  const direct = asSqlState((err as { code?: unknown }).code);
+  if (direct) return direct;
+
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause && typeof cause === "object") {
+    const causeCode = asSqlState((cause as { code?: unknown }).code);
+    if (causeCode) return causeCode;
   }
 
-  return null;
+  const message = err instanceof Error ? err.message : String(err);
+  return /Code:\s*`([0-9A-Z]{5})`/.exec(message)?.[1] ?? null;
 }
 
 /**

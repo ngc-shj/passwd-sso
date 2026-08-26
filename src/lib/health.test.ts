@@ -123,14 +123,20 @@ describe("runHealthChecks", () => {
     });
   }
 
+  /**
+   * The shape the pg driver adapter actually produces (measured — see
+   * src/__tests__/db-integration/helpers.ts), not a hand-written one.
+   */
+  function pgFailure(sqlstate: string) {
+    return Object.assign(
+      new Error("\nInvalid `prisma.$queryRaw()` invocation:\n\nRaw query failed."),
+      { code: "P2010", meta: { driverAdapterError: { cause: { code: sqlstate } } } },
+    );
+  }
+
   it("warns (does not fail) when the audit_outbox table does not exist yet", async () => {
     // The pre-migration tree — the only case the graceful degradation is for.
-    rejectOutboxWith(
-      Object.assign(new Error("Raw query failed"), {
-        code: "P2010",
-        meta: { code: "42P01" },
-      }),
-    );
+    rejectOutboxWith(pgFailure("42P01"));
 
     const result = await runHealthChecks();
     expect(result.checks.auditOutbox.status).toBe("warn");
@@ -142,16 +148,24 @@ describe("runHealthChecks", () => {
     // Degrading every error to "warn" left the check unable to report a fault:
     // a missing RLS context raises 22P02 and came back looking like a tree that
     // had not been migrated yet.
-    rejectOutboxWith(
-      Object.assign(new Error("Raw query failed"), {
-        code: "P2010",
-        meta: { code: "22P02" },
-      }),
-    );
+    rejectOutboxWith(pgFailure("22P02"));
 
     const result = await runHealthChecks();
     expect(result.checks.auditOutbox.status).toBe("fail");
     expect(result.status).toBe("unhealthy");
+  });
+
+  // F-M7: the twin at src/__tests__/lib/health.test.ts asserts this; without it
+  // here, deleting withBypassRls from health.ts leaves this whole suite green,
+  // because the mock forwards to the same mockQueryRaw the bare client uses.
+  it("reads the outbox inside a bypass-RLS transaction", async () => {
+    const result = await runHealthChecks();
+    expect(result.checks.auditOutbox.status).toBe("pass");
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      "system_maintenance",
+    );
   });
 
   it("includes responseTimeMs as a non-negative number on each check", async () => {

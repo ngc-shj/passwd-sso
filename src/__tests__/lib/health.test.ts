@@ -124,12 +124,18 @@ describe("health checks", () => {
 
   // ─── checkAuditOutbox ───────────────────────────────────
   describe("auditOutbox", () => {
-    /** A raw-query failure in the shape Prisma gives it (P2010 + meta.code). */
+    /**
+     * A raw-query failure in the shape the pg driver adapter actually
+     * produces — measured against a real database in
+     * src/__tests__/db-integration/helpers.ts and pinned by fixture in
+     * helpers.test.ts. Hand-writing a third spelling here is what let the
+     * 42P01 branch be green in this file while returning null in production.
+     */
     function pgFailure(sqlstate: string) {
-      return Object.assign(new Error("Raw query failed"), {
-        code: "P2010",
-        meta: { code: sqlstate },
-      });
+      return Object.assign(
+        new Error("\nInvalid `prisma.$queryRaw()` invocation:\n\nRaw query failed."),
+        { code: "P2010", meta: { driverAdapterError: { cause: { code: sqlstate } } } },
+      );
     }
 
     it("reads the outbox inside a bypass-RLS transaction", async () => {

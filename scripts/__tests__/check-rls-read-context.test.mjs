@@ -288,6 +288,74 @@ describe("check-rls-read-context", () => {
       expect(r.status).toBe(0);
     });
 
+    // Round 1 F-C1. A file-wide "first declaration wins" index adjudicated the
+    // SECOND statement using the FIRST's initializer, so a bare-client read in
+    // one function was cleared by a same-named `const db = tx` in another. That
+    // second function is the shape the docblock says shipped to production.
+    describe("shadowed bindings resolve from the statement, not the file", () => {
+      const bare = `const db = prisma;
+                    return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;`;
+      const ctx = `const db = tx;
+                   return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;`;
+
+      it.each([
+        ["the context binding is declared FIRST", `${ctx}`, `${bare}`],
+        ["the bare binding is declared FIRST", `${bare}`, `${ctx}`],
+      ])("FAILS the bare-client read when %s", (_label, first, second) => {
+        const r = runGate(`
+          declare const prisma: any;
+          export async function a(tx: any) { ${first} }
+          export async function b(tx: any) { ${second} }
+        `);
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain("audit_outbox");
+      });
+
+      it("FAILS a shadowed model-accessor read behind a 2-hop sibling chain", () => {
+        const r = runGate(`
+          declare const prisma: any;
+          export async function drain(tx: any) {
+            const conn = tx; const db = conn;
+            return db.$queryRaw\`SELECT count(*) FROM audit_outbox\`;
+          }
+          export async function depthAlert(tx: any) {
+            const db = prisma;
+            return db.auditOutbox.count({});
+          }
+        `);
+        expect(r.status).not.toBe(0);
+      });
+
+      it("FAILS when two sibling scopes bind the name and neither encloses the read", () => {
+        // Unresolvable must fail CLOSED: an alias the gate cannot follow is not
+        // an alias it may assume safe.
+        const r = runGate(`
+          declare const prisma: any;
+          declare const db: any;
+          export function outer() { const db = prisma; void db; }
+          export async function g(tx: any) { return db.auditOutbox.findMany({}); }
+        `);
+        expect(r.status).not.toBe(0);
+      });
+
+      it("PASSES an inner-block binding that shadows an outer bare-client one", () => {
+        // The allow side of the same mechanism. Innermost binder wins, so the
+        // outer `const db = prisma` must not drag the inner read down with it.
+        const r = runGate(`
+          import { withBypassRls } from "@/lib/tenant-rls";
+          declare const prisma: any;
+          export async function f() {
+            const db = prisma;
+            void db;
+            return withBypassRls(prisma, async (tx: any) => {
+              { const db = tx; return db.auditOutbox.findMany({}); }
+            }, "audit_write");
+          }
+        `);
+        expect(r.status).toBe(0);
+      });
+    });
+
     it("REPORTS rather than crashes on a cyclic alias chain", () => {
       // `seen`, not a hop counter, is what bounds the context walk: a cycle has
       // no length, and `seen.add` of a name already present does not grow it.

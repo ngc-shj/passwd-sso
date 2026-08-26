@@ -16,6 +16,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { randomUUID, randomBytes } from "node:crypto";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
 
 // ─── Role connection strings ────────────────────────────────────
 
@@ -170,17 +171,18 @@ export const RETRYABLE_CLEANUP_SQLSTATES = [
  * Exported for reuse: any test asserting a specific SQLSTATE from a Prisma
  * call (not only this file's own retry classifier) should read it through
  * here rather than growing a second positional parser.
+ *
+ * The parser itself now lives in `src/lib/prisma/prisma-error.ts`, because
+ * production needed the same reading and grew a second one that handled only
+ * `meta.code` — so `checkAuditOutbox`'s 42P01 branch was green in unit tests
+ * and dead against the shape measured here. Two parsers deciding one predicate
+ * is the defect; this is the thinner half of the fix. `pgErrorCode` is a
+ * superset: it also reads a direct `err.code` and `err.cause.code`, which can
+ * only turn a `null` here into a real SQLSTATE — and for
+ * `isRetryableCleanupConflict` that means classifying a driver error it
+ * previously could not see, never reclassifying one it already read.
  */
-export function sqlStateOf(error: unknown): string | null {
-  const meta = (error as { meta?: Record<string, unknown> })?.meta;
-  const adapterError = meta?.driverAdapterError as { cause?: { code?: unknown } } | undefined;
-  const nested = adapterError?.cause?.code;
-  if (typeof nested === "string") return nested;
-  const flat = meta?.code;
-  if (typeof flat === "string") return flat;
-  const message = error instanceof Error ? error.message : String(error);
-  return /Code:\s*`([0-9A-Z]{5})`/.exec(message)?.[1] ?? null;
-}
+export const sqlStateOf = pgErrorCode;
 
 /**
  * Tags a `tenant_claim_events` purge failure inside `deleteTestData` (QA-3a).
