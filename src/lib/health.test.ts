@@ -4,16 +4,26 @@ const {
   mockQueryRaw,
   mockGetRedis,
   mockRedisPing,
+  mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockQueryRaw: vi.fn(),
   mockGetRedis: vi.fn(),
   mockRedisPing: vi.fn(),
+  mockWithBypassRls: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     $queryRaw: mockQueryRaw,
   },
+}));
+
+// The outbox read runs inside a bypass-RLS transaction; the callback gets a tx
+// whose $queryRaw is the same mock, so the SQL-discriminating implementations
+// below keep working.
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+  BYPASS_PURPOSE: { SYSTEM_MAINTENANCE: "system_maintenance" },
 }));
 
 vi.mock("@/lib/redis", () => ({
@@ -34,6 +44,9 @@ import { runHealthChecks } from "./health";
 describe("runHealthChecks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWithBypassRls.mockImplementation((_prisma, fn) =>
+      fn({ $queryRaw: mockQueryRaw }),
+    );
     mockGetRedis.mockReturnValue({ ping: mockRedisPing });
     // Default audit_outbox query result: empty pending queue
     mockQueryRaw.mockImplementation((strings: TemplateStringsArray) => {
@@ -101,19 +114,44 @@ describe("runHealthChecks", () => {
     expect(result.checks.auditOutbox.status).toBe("fail");
   });
 
-  it("warns (does not fail) when audit_outbox query rejects (graceful degradation)", async () => {
+  /** Rejects the outbox query with `err`, leaving `SELECT 1` healthy. */
+  function rejectOutboxWith(err: unknown) {
     mockQueryRaw.mockImplementation((strings: TemplateStringsArray) => {
       const sql = strings.join("");
-      if (sql.includes("audit_outbox")) {
-        return Promise.reject(new Error("relation does not exist"));
-      }
+      if (sql.includes("audit_outbox")) return Promise.reject(err);
       return Promise.resolve([{ "?column?": 1 }]);
     });
+  }
+
+  it("warns (does not fail) when the audit_outbox table does not exist yet", async () => {
+    // The pre-migration tree — the only case the graceful degradation is for.
+    rejectOutboxWith(
+      Object.assign(new Error("Raw query failed"), {
+        code: "P2010",
+        meta: { code: "42P01" },
+      }),
+    );
 
     const result = await runHealthChecks();
     expect(result.checks.auditOutbox.status).toBe("warn");
     // Overall: redis pass + db pass + outbox warn → degraded
     expect(result.status).toBe("degraded");
+  });
+
+  it("fails when the audit_outbox query rejects for any other reason", async () => {
+    // Degrading every error to "warn" left the check unable to report a fault:
+    // a missing RLS context raises 22P02 and came back looking like a tree that
+    // had not been migrated yet.
+    rejectOutboxWith(
+      Object.assign(new Error("Raw query failed"), {
+        code: "P2010",
+        meta: { code: "22P02" },
+      }),
+    );
+
+    const result = await runHealthChecks();
+    expect(result.checks.auditOutbox.status).toBe("fail");
+    expect(result.status).toBe("unhealthy");
   });
 
   it("includes responseTimeMs as a non-negative number on each check", async () => {
