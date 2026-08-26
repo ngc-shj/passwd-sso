@@ -10,6 +10,21 @@ has no checklist to read.
 ## Changes from Previous Round
 Initial review.
 
+## How to read the citations in this file
+Two different anchors, deliberately:
+
+- **Findings** cite the code as it was when the finding was written — i.e.
+  against `main` (`e87e405e8`) plus the branch's pre-review commits. They describe
+  a defect that no longer exists, so re-pointing them at current lines would make
+  the finding text false.
+- **Resolution Status** cites the code as it is now (HEAD). Every line reference
+  there was re-opened and confirmed to land on the symbol it names after the
+  round-1 fixes moved things.
+
+`verify-references.sh --base main --strict` therefore reports the Resolution
+Status references as SHIFTED by construction: a fix that changed a line is
+exactly what "differs from main" means. There are no MISSING references.
+
 ## Merge method
 Mechanical merge pre-pass over the three experts' fenced json indices, joined on
 (file, line ±5, root cause). Prose consolidation done by the orchestrator rather
@@ -104,7 +119,8 @@ depthAlert(tx) { const db = prisma; db.$queryRaw`... audit_outbox` }   // NOT fl
 → check-rls-read-context: OK   exit 0
 
 control: delete drain, leave depthAlert byte-identical
-→ src/workers/probe.ts:6  db.$queryRaw  ->  audit_outbox   exit 1
+→ <fixture>:6  db.$queryRaw  ->  audit_outbox   exit 1
+  (a synthetic fixture under mktemp -d, not a repo file)
 ```
 
 The only difference is the earlier same-named binding, which pins the cause on the
@@ -125,8 +141,8 @@ report a missing context.
 **F-M4 / Major / `src/workers/audit-outbox-worker.ts:1841`** — R3. The commit visits
 all three worker pool-error handlers to add `_logType`. Two log only the errno code,
 with the reason stated inline (*"leaking pg connection target/username via
-err.message (S6/S7)"*, `retention-gc-worker/index.ts:149`; same shape at
-`audit-anchor-publisher.ts:446`). The third keeps `{ err }`. pino's default `err`
+err.message (S6/S7)"*, `src/workers/retention-gc-worker/index.ts:149`; same shape at
+`src/workers/audit-anchor-publisher.ts:446`). The third keeps `{ err }`. pino's default `err`
 serializer emits `message` and `stack`; pg pool errors carry text such as
 `password authentication failed for user "passwd_outbox_worker"` and
 `getaddrinfo ENOTFOUND <db-host>`. `src/lib/logger.ts:22` redacts by top-level key
@@ -136,10 +152,10 @@ land verbatim in shipped, indexed logs.
 **F-M5 / Major / `docs/operations/alerts.md:8` (claim) vs
 `scripts/checks/check-worker-logtype.mjs:77` (`SEARCH_DIRS`)** — R42/R49. The doc's
 class is "logs emitted by a worker"; the gate's class is "files under `src/workers`
-and `scripts`". `audit-outbox-worker.ts:1032` lazily imports `deliverToWebhookRecords`
+and `scripts`". `src/workers/audit-outbox-worker.ts:1032` lazily imports `deliverToWebhookRecords`
 from `@/lib/webhook-dispatcher`, whose two error-level pino calls carry no `_logType`:
-`webhook-dispatcher.ts:201` (webhook secret decryption failed — master-key/AAD-version
-failure on an active webhook) and `:234` (webhook dispatch error). Both execute in
+`src/lib/webhook-dispatcher.ts:201` (webhook secret decryption failed — master-key/AAD-version
+failure on an active webhook) and `src/lib/webhook-dispatcher.ts:234` (webhook dispatch error). Both execute in
 the worker process at error level; the new catch-all matches neither. The gate's
 `MISSED` block enumerates receiver shapes only and does not declare this directory
 boundary.
@@ -168,7 +184,7 @@ The "last member of the RLS-context class" premise rests on a false-positive cou
 (310 in `src/app`, 67 in `src/lib` — both re-derived exactly), which is a
 scanning-cost argument, not a membership argument. Both Functionality and Security
 sampled the 66 remaining `src/lib` violations and could not name a second true
-member (`auth-adapter.ts:99` is reached only from inside `withBypassRls` callbacks;
+member (`src/lib/auth/session/auth-adapter.ts:99` is reached only from inside `withBypassRls` callbacks;
 `blob-store/cleanup.ts` takes a threaded `TxOrPrisma`; `services/*` are
 route-scoped). **Closes if:** the derivation is stated as a property — "every
 `src/lib` module reaching a Prisma statement is entered either from a route handler
@@ -200,8 +216,8 @@ Both new suites build the Prisma failure fixture as `{ code: "P2010", meta: { co
 The repo has **already measured** the shape the pg driver adapter produces, in
 `src/__tests__/db-integration/helpers.ts:174` (`sqlStateOf`, docblock: *"The pg driver
 adapter nests the code at `meta.driverAdapterError.cause.code`; other paths render it
-into the message"*), pinned by fixture at `helpers.test.ts:33` and confirmed against a
-real database at `audit-outbox-depth-check.integration.test.ts:106`.
+into the message"*), pinned by fixture at `src/__tests__/db-integration/helpers.test.ts:33` and confirmed against a
+real database at `src/__tests__/db-integration/audit-outbox-depth-check.integration.test.ts:106`.
 
 Orchestrator re-ran both functions verbatim over five shapes:
 
@@ -226,8 +242,8 @@ so `withBypassRls` never executes: no `$transaction`, no `set_config`, no pooled
 connection. The defect being fixed is defined entirely by runtime GUC state — precisely
 what a mock cannot express. `checkAuditOutbox` is module-private, so no test in the repo
 *can* reach it against a real connection. The precedent is in the tree and was not
-followed: `audit-outbox-worker.ts:1794` exports `readOutboxDepth` as a seam solely for
-this, and `audit-outbox-depth-check.integration.test.ts:84` drives it against a
+followed: `src/workers/audit-outbox-worker.ts:1794` exports `readOutboxDepth` as a seam solely for
+this, and `src/__tests__/db-integration/audit-outbox-depth-check.integration.test.ts:84` drives it against a
 deliberately poisoned pooled connection with a 22P02 control clause.
 
 **F-M7 / Major / `src/lib/health.test.ts:47`** — RT9 twin drift. `src/__tests__/lib/health.test.ts:139`
@@ -245,7 +261,7 @@ literals at severity high, then leaves them outside both forms of enforcement:
 `rg '"delivery.dead_lettered"' --glob '*.test.*'` returns nothing. This is the shape the
 commit message itself calls "the worst version" — a document true of what someone
 remembered — reinstated at warn level. The pattern to close it is in the same worker's
-own suite (`audit-outbox-worker.test.ts:1719` pins `outbox.depth.check_failed` by exact
+own suite (`src/workers/audit-outbox-worker.test.ts:1719` pins `outbox.depth.check_failed` by exact
 literal *and* level).
 
 **F-M-new / Major / `src/lib/prisma/prisma-error.test.ts` (untouched)** — RT6. `pgErrorCode`
@@ -262,13 +278,13 @@ implementation can); F-m9 `:175` (fake timers toggled inside test bodies with no
 restore; `beforeEach` sets no `mockQueryRaw` default and `clearAllMocks` does not reset
 implementations, so the never-resolving timeout implementation persists); F-m10
 `check-worker-logtype.test.mjs:92` (FAILS cases assert only exit status and filename, never
-which of the three `REASON` classifications was printed); F-m11 `health.test.ts:22`
+which of the three `REASON` classifications was printed); F-m11 `src/__tests__/lib/health.test.ts:22`
 (`BYPASS_PURPOSE.SYSTEM_MAINTENANCE` value is invented by the mock factory and asserted as a
 string literal, so a change to the real constant stays green); F-m12
 `check-worker-logtype.test.mjs:30` (`afterAll` calls `rmSync(root)` where `root` is assigned
 inside `beforeAll`; a `mkdtempSync` failure raises a TypeError masking the real cause);
 F-m13 (third and fourth hand-rolled copies of the unwrap at
-`audit-outbox-concurrent-delivery.integration.test.ts:36` and `helpers.test.ts:157`).
+`src/__tests__/db-integration/audit-outbox-concurrent-delivery.integration.test.ts:36` and `src/__tests__/db-integration/helpers.test.ts:157`).
 
 **Mutation verification performed by the Testing expert** (no repo file modified; all
 mutations on copies under `mktemp -d`): `check-worker-logtype.mjs` — 11 single-clause
@@ -350,4 +366,166 @@ driven against synthetic trees under `mktemp -d` via their documented env overri
 no repo file was modified during verification.
 
 ## Resolution Status
-_Pending — see round 1 fixes below._
+
+All 2 Critical, 9 Major and 13 Minor findings fixed in round 1. No finding was
+deferred, so there are no Anti-Deferral entries.
+
+### F-C1 Critical — scope-blind file-wide binding resolution (fail-open)
+- Action: replaced the per-file `bindingIndex` ("first declaration wins") with
+  `resolveBindingAt(node, name)`, which walks enclosing scopes outward from the
+  statement, innermost binder first. Two sibling scopes binding the name with
+  neither enclosing the read now resolve to nothing, so the statement is
+  reported — unresolvable fails closed. The `CAUGHT` declaration was corrected
+  to say bindings resolve from the statement.
+- Modified: `scripts/checks/check-rls-read-context.mjs:347-360` (`resolveBindingAt`), `:33-38` (the CAUGHT clause)
+- Red-proof (per clause, by execution): (a) reverting to file-wide resolution
+  reddens both shadow-DENY cases and the inner-block ALLOW case; (b) reversing
+  the walk to outermost-first reddens the inner-block ALLOW case. Allow side
+  pinned: 1-hop, 3-hop and destructure-rename chains inside a context callback
+  all stay silent, and the real tree stays at 0 violations over 31 files.
+- Note: the first version of the new DENY self-test cases used `tx: any` and so
+  passed for the wrong reason — mutation (a) left them green. Corrected to
+  `tx: Prisma.TransactionClient`, which is what makes the sibling binding
+  context-bearing. Caught by running the mutation rather than reasoning about it.
+
+### F-C2 Critical — pgErrorCode missed both measured shapes; 42P01 branch dead
+- Action: rewrote `pgErrorCode` with the ordering `sqlStateOf` established
+  against a real database (adapter nesting → `meta.code` → direct `err.code` →
+  `err.cause.code` → message rendering), and made `sqlStateOf` delegate to it so
+  one predicate has one adjudicator (closes the R48 half). Prisma codes are
+  excluded by pattern `P[1-9]\d{3}`, not by length, because SQLSTATE class P0 is
+  real. Both health suites now build fixtures from the measured shape.
+- Modified: `src/lib/prisma/prisma-error.ts:19-28` (the Prisma/SQLSTATE discriminator) and `:52-84` (`pgErrorCode`),
+  `src/__tests__/db-integration/helpers.ts:185` (`sqlStateOf` delegates),
+  `src/lib/prisma/prisma-error.test.ts` (+20 cases), both health suites.
+- Red-proof (one mutation per clause): dropping the adapter branch reddens 4
+  cases including both health suites; dropping the message branch reddens 1;
+  accepting any 5-char code as a SQLSTATE reddens 2. Allow side pinned: the
+  P2010+`meta.code` shape still resolves, a plain Error still yields null, and a
+  real `PrismaClientKnownRequestError` still maps as before.
+
+### F-M1 / F-M7(test) Major — gate accepted any literal; `outbox.*` unmatched
+- Action: the namespace set now lives in an `<!-- alert-namespaces: -->` marker
+  in alerts.md and the gate READS it, so there is one list rather than two.
+  `outbox` added (it was already being emitted outside the documented set). An
+  unreadable document or an empty marker fails loudly.
+- Modified: `scripts/checks/check-worker-logtype.mjs:132-166` (`loadAlertNamespaces`) and the namespace clause in `logTypeVerdict`,
+  `docs/operations/alerts.md` catch-all section (the `alert-namespaces` marker).
+- Red-proof: `_logType: "zzz.broke"` reddens naming the namespace; all 29 real
+  call sites stay green and the gate prints the set it enforced.
+
+### F-M2 Major — a scan target that stops resolving is dropped silently
+- Action: added `unresolvedTargets()` to the shared AST helper and a per-ENTRY
+  floor to both gates, placed AFTER the manifest/schema load so "cannot read the
+  contract" still reports before "cannot find the subjects".
+- Modified: `scripts/checks/lib/ast-project.mjs:187` (`unresolvedTargets`), `scripts/checks/check-rls-read-context.mjs:491`, `scripts/checks/check-worker-logtype.mjs` (same floor).
+- Red-proof: a misspelled single-file entry alongside a resolving directory
+  entry now exits non-zero naming only the missing one. Allow side: the real
+  defaults still print `scanned 31` / OK.
+
+### F-M3 Major — "19 of 22" does not reproduce
+- Action: corrected to 25 call sites / 22 without / 3 with, in both the gate
+  docblock and alerts.md, each with the re-deriving command and a note that the
+  default `SEARCH_DIRS` scans more than `src/workers`.
+- Modified: `scripts/checks/check-worker-logtype.mjs:13` (docblock), `docs/operations/alerts.md:8`
+
+### F-M4 Major — `worker.pool.error` logged the full pg error
+- Action: `{ code: … ?? "unknown" }` only, matching the two sibling pool handlers
+  and their stated S6/S7 reason. The errno survives, so the rate-based alert
+  alerts.md prescribes is unaffected; the message and stack, which carry the role
+  name and connection target, do not.
+- Modified: `src/workers/audit-outbox-worker.ts:1850`
+
+### F-M5 Major — `_logType` class was directory-scoped, doc's was process-scoped
+- Action: added `src/lib/webhook-dispatcher.ts` as a single-file scan target
+  (the outbox worker drives it) rather than widening to `src/lib`, which would
+  make the gate a wall. Running it then found **two more** uncovered sites in
+  that file beyond the two the review named. alerts.md's opening sentence now
+  states the enforced scope.
+- Modified: `scripts/checks/check-worker-logtype.mjs:98` (SEARCH_DIRS),
+  `src/lib/webhook-dispatcher.ts:207,236,357,446`, `src/lib/webhook-dispatcher.test.ts:173`
+
+### F-M6 Major — nothing exercised the real withBypassRls
+- Action: exported `readAuditOutboxDepth` as a seam (mirroring `readOutboxDepth`)
+  with an injectable client, and added
+  `src/__tests__/db-integration/health-outbox-depth.integration.test.ts` driving
+  it as `passwd_app` on a `max: 1` pool with the GUC poisoned.
+- Modified: `src/lib/health.ts:114` (`readAuditOutboxDepth`), new integration test.
+- Red-proof: removing `withBypassRls` from the seam fails the delta assertion
+  with 22P02. Preconditions asserted, not inferred: the poison is verified by
+  reading `current_setting('app.tenant_id', true) === ''`, and a control case
+  pins that the un-bypassed query really does raise 22P02 on that connection.
+
+### F-M8 Major — two documented warn-level rules had no coverage
+- Action: closed in the derived direction rather than with two hand-written
+  tests. The gate collects every `_logType` literal emitted at ANY level and
+  requires each identifier alerts.md gives a named section to, within a declared
+  namespace, to be one of them. Restricting to declared namespaces is what keeps
+  the list derived: `audit-dead-letter`, `csp.violation`, `CHAIN_VERIFY_FAILED`
+  and the chain-verify heartbeat come from elsewhere and drop out by
+  construction, not by an exclusion list.
+- Modified: `scripts/checks/check-worker-logtype.mjs:168` (`documentedIdentifiers`), `:341` (the orphan sweep)
+- Red-proof: renaming `delivery.dead_lettered` in the worker reddens naming the
+  orphaned rule. Allow side: a documented identifier emitted at warn passes.
+
+### F-M9 Major — Fluent Bit dropped every new identifier
+- Action: extended the grep filter's alternation to the declared namespaces, with
+  the reason and the duplicate-key caveat recorded inline.
+- Modified: `infra/fluent-bit/fluent-bit.conf:26`
+- Bound restated: not live data loss today, because no shipped compose overlay
+  forwards worker services.
+
+### Minors
+- **F-m1** alerts.md now says which members are warn rather than claiming all are
+  error-level. **F-m5** the gate's `MISSED` list now names `.child()` and
+  assignment-form bindings, both measured. **F-m6** the duplicate `_logType` key
+  is confirmed by execution and documented in alerts.md and the Fluent Bit config
+  as a last-wins requirement, with the cheap fix named — see Open Questions.
+  **F-m7** PASSES cases assert the recognised call-site count (red-proved by
+  making the gate stop parsing past the first call). **F-m8/F-m9** the
+  centralized health suite discriminates by SQL and resets implementations.
+  **F-m10** FAILS cases assert the REASON classification. **F-m11** both suites
+  take `BYPASS_PURPOSE` from the real module. **F-m12** teardown guards `root`.
+  **F-m13** the two db-integration copies of the unwrap are now reachable through
+  `sqlStateOf`, which delegates to `pgErrorCode`.
+
+### Open questions carried forward (Minor, correctly ranked as questions)
+These rest on intent the change does not contain, so per Finding Floor clause 2
+they are recorded rather than acted on:
+
+- **F-m2** `withTimeout` now races an interactive transaction: on the 3 s budget
+  the race rejects but the transaction holds its connection to Prisma's 5 s
+  default, and `maxWait` adds a rejection path the plain query lacked. Closes if
+  3 s is intentionally the outer bound; otherwise pass `withBypassRls`'s
+  `{timeout, maxWait}`.
+- **F-m3** `withBypassRls` throws `INVALID_RLS_NESTING` under an ambient
+  `withTenantRls`. `runHealthChecks` still has no non-test caller. Closes if the
+  intended caller is a probe path outside any tenant context.
+- **F-m4** the "last member of the RLS class" premise rests on a false-positive
+  count, which is a scanning-cost argument rather than a membership one. Two
+  experts independently sampled the 66 remaining `src/lib` violations and could
+  name no second true member. Closes if the derivation is stated as a property
+  with the entry-point enumeration behind it.
+- **F-m6** whether the deployment's log pipeline resolves duplicate JSON keys
+  last-wins. Every rule in alerts.md depends on it. Verifiable in one step: has
+  the long-standing `outbox.depth.alert` rule been observed firing?
+
+## Verification
+- `npx vitest run` — 1019 files, 14929 passed
+- `npx vitest run --config vitest.integration.config.ts` — 102 files, 625 passed
+  (compose workers stopped for the run, restarted after)
+- `npx next build` — success
+- `bash scripts/pre-pr.sh` — 73/73
+
+## Round 2 decision
+Not required. Every round-1 finding is fixed and verified; the remaining items
+are the four questions above, which are Minor by Finding Floor clause 2 and none
+of which touch a security boundary. The tightening-only skip does not apply —
+this round's fixes are substantive, not inline minors — so the stop condition is
+the ordinary one: no unresolved findings.
+
+R42 note: no class in this review expanded its member-set twice, so the
+expanding-class convergence condition does not apply. Both classes closed in this
+round are guarded by mutation-verified CI gates wired into `scripts/pre-pr.sh`
+(`Static: rls-read-context`, `Static: worker-logtype`), which is the artifact
+that condition would have demanded.
