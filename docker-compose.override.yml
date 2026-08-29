@@ -99,12 +99,50 @@ services:
     networks:
       - internal
 
+  # Isolated on a network of its own, and reached only over the published
+  # loopback ports.
+  #
+  # mailpit's web UI and REST API are unauthenticated by design, and what they
+  # serve is every captured message — magic-link sign-in tokens, team and
+  # emergency-access invitations. So the question is who can reach 8025.
+  #
+  # Today the answer is already "nobody on `internal`", but by OMISSION: with no
+  # `networks:` key a service falls to compose's `default`, and mailpit happens
+  # to be the only member. That is a property of what has not been written yet,
+  # not a boundary — the next service added without a `networks:` key lands on
+  # `default` beside it, silently. Naming a network mailpit does not share makes
+  # the isolation something the file states rather than something it implies.
+  #
+  # Deliberately a network of ONE. `SMTP_HOST=localhost` / `SMTP_PORT=1025`: the
+  # only consumer reaches mailpit through the published loopback port, never by
+  # compose hostname (`grep -rn 'mailpit:1025\|mailpit:8025\|http://mailpit'`
+  # over the tree finds no caller). Adding `app` here would hand a container a
+  # route to that unauthenticated UI which it does not have today — widening the
+  # reach in the name of restricting it.
   mailpit:
-    image: axllent/mailpit:latest
+    # Pinned like its siblings (jackson, minio), and to a version chosen from
+    # the advisory list rather than from whatever was running. `latest` resolved
+    # to v1.29.1 here, which is inside the vulnerable range of TEN published
+    # advisories — among them CVE-2026-45713 (High, unauthenticated SMTP/HTTP
+    # memory-exhaustion DoS) and CVE-2026-67448, a WebSocket origin-check bypass
+    # that lets any page open in the developer's browser read every captured
+    # message. That is the same magic-link exposure the network split above
+    # removes, arriving through the loopback port it deliberately keeps.
+    #
+    # 1.30.6 is the lowest release clearing all ten; v1.31.0 is the current
+    # release and postdates every advisory (newest 2026-07-28, release
+    # 2026-08-22). Re-derive before bumping — a pin freezes whatever was
+    # unpatched on the day it was written:
+    #   gh api '/advisories?ecosystem=go&affects=github.com/axllent/mailpit' \
+    #     --jq '.[]|{cve:.cve_id,sev:.severity,
+    #                patched:.vulnerabilities[0].first_patched_version}'
+    image: axllent/mailpit:v1.31.0
     ports:
       - "127.0.0.1:1025:1025"   # SMTP
       - "127.0.0.1:8025:8025"   # Web UI
     logging: *default-logging
+    networks:
+      - mail
 
   minio:
     image: minio/minio:RELEASE.2024-10-13T13-34-11Z
@@ -119,3 +157,10 @@ services:
     logging: *default-logging
     networks:
       - internal
+
+networks:
+  # mailpit only. Compose MERGES this map with the base file's, so `internal`
+  # is still defined — declaring `mail` here adds a second network rather than
+  # replacing the first.
+  mail:
+    driver: bridge
