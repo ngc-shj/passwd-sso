@@ -63,9 +63,28 @@ failures=()
 tempfiles=()
 
 cleanup_tempfiles() {
-  local logfile
+  local logfile failed_entry keep
   for logfile in "${tempfiles[@]:-}"; do
-    [ -n "$logfile" ] && [ -f "$logfile" ] && rm -f "$logfile"
+    [ -n "$logfile" ] || continue
+    [ -f "$logfile" ] || continue
+    # Keep the log of a step that FAILED. Deleting every temp file at EXIT
+    # destroyed the only copy of a shuffled extension run's seed, so a failure
+    # that had already happened was irreproducible by the time anyone looked —
+    # and "could not reproduce" then reads as "probably fine". A handful of
+    # files left in TMPDIR is cheaper than re-rolling the dice.
+    #
+    # Both paths funnel here: run_step and run_batch each rm their own log on
+    # success and push `label|logfile` to `failures` otherwise, so matching on
+    # the entry's logfile half covers the serial and parallel runners alike.
+    #
+    # Spelled with a flag rather than `&& continue 2`: this runs from the EXIT
+    # trap, where a compound ending non-zero sets the script's exit status —
+    # the same quirk the `return 0` below exists for.
+    keep=0
+    for failed_entry in "${failures[@]:-}"; do
+      if [ "${failed_entry#*|}" = "$logfile" ]; then keep=1; break; fi
+    done
+    [ "$keep" -eq 1 ] || rm -f "$logfile"
   done
   # The for-loop's last iteration short-circuits at `[ -f "$logfile" ]` when
   # run_step already removed the file on success — leaving the function's
@@ -106,6 +125,16 @@ show_failure_context() {
     printf "\n  (no captured logfile; see output above)\n"
     return
   fi
+
+  # Reproduction handles first, and unconditionally. The seed line sits near the
+  # TOP of a vitest log while every context window below is anchored at
+  # `Failed Tests`, so no window can ever reach it. extension/vitest.config.ts
+  # sets `sequence: { shuffle: true }` and names
+  # `--sequence.shuffle --sequence.seed=N` as the way to replay an order-dependent
+  # failure; without the seed and a surviving log that instruction is unusable
+  # from pre-pr, which is where the failure was actually seen.
+  { grep -nE 'Running tests with seed|--sequence\.seed' "$logfile" || true; } | head -3
+  printf "  (log retained: %s)\n" "$logfile"
 
   matches=$({ grep -nE "$markers" "$logfile" || true; } \
     | { grep -v "$noise" || true; } | head -30)
