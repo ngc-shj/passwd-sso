@@ -120,22 +120,46 @@ services:
   # route to that unauthenticated UI which it does not have today — widening the
   # reach in the name of restricting it.
   mailpit:
-    # Pinned like its siblings (jackson, minio), and to a version chosen from
-    # the advisory list rather than from whatever was running. `latest` resolved
-    # to v1.29.1 here, which is inside the vulnerable range of TEN published
-    # advisories — among them CVE-2026-45713 (High, unauthenticated SMTP/HTTP
+    # Pinned like its siblings (jackson, minio), and to a version chosen from the
+    # advisory list rather than from whatever was running. `latest` resolved to
+    # v1.29.1 here, which sits inside the vulnerable range of TEN advisories —
+    # among them CVE-2026-45713 (High, unauthenticated SMTP/HTTP
     # memory-exhaustion DoS) and CVE-2026-67448, a WebSocket origin-check bypass
     # that lets any page open in the developer's browser read every captured
     # message. That is the same magic-link exposure the network split above
     # removes, arriving through the loopback port it deliberately keeps.
     #
-    # 1.30.6 is the lowest release clearing all ten; v1.31.0 is the current
-    # release and postdates every advisory (newest 2026-07-28, release
-    # 2026-08-22). Re-derive before bumping — a pin freezes whatever was
-    # unpatched on the day it was written:
+    # TEN NEEDS TWO SOURCES, which is why both commands are here. mailpit
+    # publishes some advisories only on its own repository; they never reach the
+    # global database, so a single query answers eight and looks complete. Three
+    # independent reviewers re-derived this from the global query alone and each
+    # got eight — the count is not wrong, the one-source recipe was.
+    #
+    #   # 8 of 13 — the global advisory database
     #   gh api '/advisories?ecosystem=go&affects=github.com/axllent/mailpit' \
-    #     --jq '.[]|{cve:.cve_id,sev:.severity,
-    #                patched:.vulnerabilities[0].first_patched_version}'
+    #     --jq '.[]|{cve:.cve_id,sev:.severity,pub:.published_at,
+    #                r:(.vulnerabilities[]|select(.package.name|test("mailpit"))
+    #                   |.vulnerable_version_range),
+    #                p:(.vulnerabilities[]|select(.package.name|test("mailpit"))
+    #                   |.first_patched_version)}'
+    #   # + 2 repository-only: CVE-2026-67446, CVE-2026-67445 (both 1.30.4)
+    #   gh api repos/axllent/mailpit/security-advisories \
+    #     --jq '.[]|{cve:.cve_id,sev:.severity,pub:.published_at}'
+    #
+    # `vulnerable_version_range` is the field that decides whether a RUNNING
+    # version is affected; filtering on `first_patched_version` instead admits
+    # CVE-2026-67447 (>= 1.30.0), which never touched v1.29.1.
+    #
+    # 1.30.6 is the lowest release clearing all ten. v1.31.0 (released
+    # 2026-08-22) postdates every advisory on both clocks, but state the margin
+    # on the conservative one: the newest advisory is CVE-2026-67448, published
+    # 2026-07-28 on the repository and ingested into the global database
+    # 2026-08-20 — so the pin leads the frontier by 2 days, not by 25.
+    #
+    # Re-derive before bumping; a pin freezes whatever was unpatched the day it
+    # was written. A `gh` that is unauthenticated or rate-limited returns an
+    # empty array, which reads exactly like a clean bill — check the exit status,
+    # not just the output.
     image: axllent/mailpit:v1.31.0
     ports:
       - "127.0.0.1:1025:1025"   # SMTP
@@ -162,5 +186,23 @@ networks:
   # mailpit only. Compose MERGES this map with the base file's, so `internal`
   # is still defined — declaring `mail` here adds a second network rather than
   # replacing the first.
+  #
+  # NOT `internal: true`, and the reason is measured rather than assumed. It does
+  # block mailpit's egress — which is desirable, since the container accumulates
+  # live magic-link sign-in tokens — but on this Docker it also stops the daemon
+  # from publishing the ports at all: with `internal: true` set, `docker port
+  # passwd-sso-mailpit-1` prints nothing, the host has no LISTEN on 8025/1025,
+  # and mailpit becomes unreachable from the host while reporting healthy
+  # inside. That is the whole dev mail workflow, traded for an egress path
+  # nothing has been shown to use. If a future Docker separates the two, re-test
+  # BOTH sides before adopting it: egress blocked AND `curl 127.0.0.1:8025`
+  # answering 200.
+  #
+  # NOTE for a host that ran the pre-`mail` config: mailpit used to fall to
+  # compose's implicit `default`, and nothing declares `default` any more — so
+  # `docker compose down` will not reclaim it. Remove the empty bridge once:
+  #   docker network rm passwd-sso_default
+  # (It refuses while a container is attached, so it is safe to run blind. On a
+  # host that never ran the old config it simply exits non-zero.)
   mail:
     driver: bridge

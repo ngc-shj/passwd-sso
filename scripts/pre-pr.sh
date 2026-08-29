@@ -84,7 +84,16 @@ cleanup_tempfiles() {
     for failed_entry in "${failures[@]:-}"; do
       if [ "${failed_entry#*|}" = "$logfile" ]; then keep=1; break; fi
     done
-    [ "$keep" -eq 1 ] || rm -f "$logfile"
+    # `|| rm` ends the OR list, so a non-zero `rm` IS the last command and
+    # `set -e` fires here — the `return 0` below is never reached and an
+    # all-green run prints its success banner and then exits 1. Measured with a
+    # non-writable TMPDIR, on this version and on the one it replaced. Routing
+    # the failure to a named warning keeps "could not clean up" distinguishable
+    # from "cleaned up"; a bare `|| true` would spell them the same.
+    if [ "$keep" -ne 1 ]; then
+      rm -f "$logfile" \
+        || printf 'pre-pr: could not remove %s\n' "$logfile" >&2
+    fi
   done
   # The for-loop's last iteration short-circuits at `[ -f "$logfile" ]` when
   # run_step already removed the file on success — leaving the function's
@@ -134,7 +143,12 @@ show_failure_context() {
   # failure; without the seed and a surviving log that instruction is unusable
   # from pre-pr, which is where the failure was actually seen.
   { grep -nE 'Running tests with seed|--sequence\.seed' "$logfile" || true; } | head -3
-  printf "  (log retained: %s)\n" "$logfile"
+  # Only where the path outlives the run. CI runs this on an ephemeral runner
+  # (PRE_PR_STATIC_ONLY=1, ci.yml), so naming a file that dies with the job is a
+  # follow-up instruction nobody can follow.
+  if [ -z "${CI:-}" ]; then
+    printf "  (log retained: %s)\n" "$logfile"
+  fi
 
   matches=$({ grep -nE "$markers" "$logfile" || true; } \
     | { grep -v "$noise" || true; } | head -30)
@@ -177,6 +191,20 @@ run_step() {
   shift
   local logfile
   local ec
+
+  # `failures` entries are `label|logfile` and the retention match in
+  # cleanup_tempfiles splits on the FIRST `|`. A label containing one therefore
+  # mis-splits and the failed step's log is DELETED — the one outcome retention
+  # exists to prevent. Shortest-prefix (`#*|`) is deliberate: `$TMPDIR` is
+  # environment-controlled and may itself contain `|`, which `##*|` would break.
+  # So the invariant is asserted on the half we control, at the moment a label
+  # enters, rather than left to hold by luck as labels are added.
+  case "$label" in
+    *"|"*)
+      printf 'pre-pr: step label must not contain "|": %s\n' "$label" >&2
+      exit 2
+      ;;
+  esac
 
   logfile=$(mktemp -t "pre-pr.XXXXXX")
   tempfiles+=("$logfile")
@@ -232,6 +260,19 @@ batch_cmds=()
 queue_step() {
   local label="$1"
   shift
+  # `failures` entries are `label|logfile` and the retention match in
+  # cleanup_tempfiles splits on the FIRST `|`. A label containing one therefore
+  # mis-splits and the failed step's log is DELETED — the one outcome retention
+  # exists to prevent. Shortest-prefix (`#*|`) is deliberate: `$TMPDIR` is
+  # environment-controlled and may itself contain `|`, which `##*|` would break.
+  # So the invariant is asserted on the half we control, at the moment a label
+  # enters, rather than left to hold by luck as labels are added.
+  case "$label" in
+    *"|"*)
+      printf 'pre-pr: step label must not contain "|": %s\n' "$label" >&2
+      exit 2
+      ;;
+  esac
   batch_labels+=("$label")
   # Store argv safely for later eval-free replay via bash arrays-of-strings.
   batch_cmds+=("$(printf '%q ' "$@")")

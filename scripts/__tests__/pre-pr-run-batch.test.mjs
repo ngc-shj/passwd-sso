@@ -193,7 +193,13 @@ function run(body, env = {}) {
     const r = spawnSync("bash", [script], {
       encoding: "utf8",
       cwd: REPO_ROOT,
-      env: { ...process.env, ...env },
+      // TMPDIR LAST so a caller's `env` cannot escape containment. Without it
+      // the spliced run_batch's `mktemp -t` resolves against the ambient
+      // TMPDIR, outside the mkdtemp tree `finally` reclaims — 15 `pre-pr.*`
+      // files leaked per run. That name is also what production uses for
+      // deliberately RETAINED failure logs, so the corpses were indistinguishable
+      // from a developer's own.
+      env: { ...process.env, ...env, TMPDIR: dir },
       timeout: 60_000,
     });
     const stdout = r.stdout ?? "";
@@ -460,7 +466,7 @@ describe("pre-pr.sh bounded-parallel scheduler", () => {
       const r = spawnSync("bash", [script], {
         encoding: "utf8",
         cwd: REPO_ROOT,
-        env: { ...process.env, PRE_PR_JOBS: "2" },
+        env: { ...process.env, PRE_PR_JOBS: "2", TMPDIR: dir },
         timeout: 60_000,
       });
       let cur = 0;
