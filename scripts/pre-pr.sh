@@ -122,7 +122,16 @@ show_failure_context() {
       start_line=$(( fail_summary_line > 3 ? fail_summary_line - 3 : 1 ))
       end_line=$(( start_line + 60 ))
     else
-      first_line=$(head -1 | cut -d: -f1) <<<"$matches"
+      # The here-string belongs INSIDE the command substitution. Written as
+      # `first_line=$(head -1 | cut -d: -f1) <<<"$matches"` it redirected the
+      # ASSIGNMENT — which consumes no input — leaving `head -1` reading the
+      # script's own stdin. On a terminal that blocks forever; under CI, where
+      # stdin is /dev/null, it returns empty and the arithmetic below silently
+      # treats it as 0, anchoring the context window at line 1 instead of at the
+      # first marker. This branch is the NON-vitest one (lint, build, gate
+      # scripts): the failures whose context is least self-evident got the least
+      # useful window, and nothing said so.
+      first_line=$(head -1 <<<"$matches" | cut -d: -f1)
       start_line=$(( first_line > 5 ? first_line - 5 : 1 ))
       end_line=$(( start_line + 24 ))
     fi
