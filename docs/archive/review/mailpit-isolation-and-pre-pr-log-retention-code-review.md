@@ -154,7 +154,7 @@ missing rather than merely absent from the diff:
   functions are in neither, and the diff adds no inline gate — so no debt entry is
   required and none is missing.
 - `pre-pr-run-batch.test.mjs` splices from `SCHED_START = "batch_labels=()"` at
-  `pre-pr.sh:229`; both changed functions are at 65 and 98, **above** the splice.
+  `scripts/pre-pr.sh:229`; both changed functions are at 65 and 98, **above** the splice.
 
 The author's mutations were real but the harness was uncommitted. A proof outside
 the tree cannot red a future PR.
@@ -171,7 +171,7 @@ on a self-test's corpse.
 
 **F-m7 / Minor / `scripts/pre-pr.sh:137`** — `(log retained: %s)` prints
 unconditionally, but CI runs `PRE_PR_STATIC_ONLY=1` on an ephemeral runner
-(`ci.yml:242`), where the named path does not survive the job. The failure output
+(`.github/workflows/ci.yml:242`), where the named path does not survive the job. The failure output
 prints a follow-up instruction that cannot be followed in the one environment CI
 uses. (The seed grep is merely inert there — `Test` / `Extension: Test` are gated
 out by `STATIC_ONLY`.)
@@ -184,7 +184,7 @@ out by `STATIC_ONLY`.)
 - [Adjacent] Minor — retention match splits on the first `|` with unvalidated
   free-text labels (Security → Functionality; adopted as F-m1).
 - [Adjacent] Minor — the gitleaks-fallback branch pushes a `failures` entry with an
-  empty logfile half (`pre-pr.sh:743`), the one entry not satisfying the
+  empty logfile half (`scripts/pre-pr.sh:743`), the one entry not satisfying the
   `label|logfile` invariant the new loop's comment states universally. Harmless
   today: `[ -n "$logfile" ] || continue` runs first. Folded into F-m1's fix.
 - [Adjacent] Minor — advisory numbers (Testing → Security/Functionality; adopted as
@@ -233,9 +233,9 @@ RS1-RS3 N/A · RS4 clean · **RS5 FIRED — F-M3** · RS6 N/A
 
 ### Testing expert
 R1-R15 N/A · R16 checked clear (STATIC_ONLY divergence is by design, documented at
-`pre-pr.sh:11`; covered as F-m7) · R17-R28 N/A · **R29 FIRED — F-M1** (also
+`scripts/pre-pr.sh:11`; covered as F-m7) · R17-R28 N/A · **R29 FIRED — F-M1** (also
 re-derived the 15-file leak claim, which reproduces) · R30-R32 N/A · R33 checked
-clear (one CI path, `ci.yml:242`) · R34 checked clear (the here-string bug was
+clear (one CI path, `.github/workflows/ci.yml:242`) · R34 checked clear (the here-string bug was
 fixed not deferred; the TMPDIR leak is reported as F-M6) · R35-R41 N/A ·
 R42 checked (changed-behaviour class derived from the diff: retention, seed,
 here-string, image pin — all four covered) · R43-R49 N/A · R50 checked ·
@@ -278,4 +278,117 @@ Pin the allow side by asserting `app` keeps `networks: [internal]` — compose
 whole published set.
 
 ## Resolution Status
-_Pending — round 1 fixes below._
+
+Round 1: 6 Major and 7 Minor findings. Fixed 10, rejected 1 with evidence, raised
+2 for a decision, closed 1 by evidence. No deferrals.
+
+### F-M1 Major — the pin's figures are not reproducible from the shipped command
+- Action: **the converged remedy was NOT adopted.** All three experts queried only
+  the global advisory database and proposed "TEN" -> "eight". Re-derivation showed
+  two further advisories affecting v1.29.1 (CVE-2026-67446/67445, published
+  2026-07-09, patched 1.30.4) exist only as repository-level entries the global
+  API does not carry, and that 2026-07-28 and 2026-08-20 are the repository and
+  global-DB clocks for the same advisory. Ten was right; the sourcing was not.
+  Both commands are now shipped, `vulnerable_version_range` is selected because
+  it is the field that decides whether a RUNNING version is affected, and the
+  margin is stated on the conservative clock (2 days, not 25). The comment also
+  records that an unauthenticated `gh` returns `[]`, which reads like a clean bill.
+- Modified: `docker-compose.override.yml:123` (the rationale block) and `:163` (the pin)
+
+### F-M2 Major — a failing `rm` defeats the `return 0` guarantee
+- Action: routed to a named stderr warning inside an `if`, so `rm`'s status is no
+  longer the OR list's last command.
+- Modified: `scripts/pre-pr.sh:93` (the `keep` branch) and `:95` (the warning)
+- Red-proof, three runs observed: rm-fails + green body -> rc 0 with the warning
+  (was rc 1); rm-fails + red body -> rc 1; writable + green -> rc 0.
+
+### F-M5 Major (RT7) — nothing could fail if the changed behaviours were reverted
+- Action: added `scripts/__tests__/pre-pr-failure-context.test.mjs` — 15 cases
+  splicing the production functions verbatim, every spawn bounded by a timeout
+  because the here-string defect's symptom is a hang, and the splice asserting it
+  found its anchor so "not found" cannot be spelled like "empty".
+- Red-proof, one mutation per clause: retention -> unconditional `rm` (1 red);
+  seed grep deleted (2 red); here-string back on the assignment (1 red); label
+  guard removed from both entry points (2 red) and from `run_step` only (1 red);
+  CI suppression removed (1 red).
+- **Two of its own assertions were decorative and were repaired**, which the
+  mutation run is what exposed: the seed fixtures put the seed adjacent to the
+  markers, so the context window echoed it and deleting the dedicated grep stayed
+  green — the fixtures now carry 200 filler lines with the seed at line 1, outside
+  the 60-line window. And the label cases drove only `queue_step`, so a
+  non-global mutation removing `run_step`'s copy went unseen; both entry points
+  are now driven by `it.each`.
+
+### F-M6 Major (RT11) — the sibling self-test leaked 15 files per run
+- Action: `TMPDIR: dir` last in the spawn env at both sites, so a caller's `env`
+  cannot escape containment.
+- Modified: `scripts/__tests__/pre-pr-run-batch.test.mjs:202,469`
+- Red-proof: 15 -> 0, with 21/21 still passing (the allow side — the concurrency
+  cases read files at absolute paths under their own mkdtemp dirs).
+
+### F-m1 Minor — a label containing `|` would delete a failed step's log
+- Action: invariant asserted at BOTH entry points. `#*|` is kept deliberately —
+  `$TMPDIR` is environment-controlled and may contain `|`, which `##*|` would
+  break — so the guard is on the half we control.
+- Modified: `scripts/pre-pr.sh` (`run_step`, `queue_step`)
+
+### F-m7 Minor — the retention notice named a path CI discards
+- Action: suppressed under `CI`. The context itself still prints.
+- Modified: `scripts/pre-pr.sh:149`
+
+### F-m3 Minor — the orphaned `passwd-sso_default` network
+- Action: documented in the `networks:` block with the one-line reclaim, noting
+  `docker network rm` refuses while a container is attached so it is safe to run
+  blind.
+
+### F-m4 Minor (question) — CLOSED by evidence
+`docs/operations/dev-host-migration.md:322` brings the stack up as
+`redis jackson mailpit audit-outbox-worker`, without `app`; the dev server runs
+host-side. The comment's `SMTP_HOST=localhost` claim is accurate as written.
+
+### F-m5 Minor — REJECTED with evidence
+`internal: true` on the `mail` network does block mailpit's egress, as the
+reviewer said. It also stops the daemon publishing the ports at all: with it set,
+`docker port passwd-sso-mailpit-1` prints nothing, the host has no LISTEN on
+8025/1025, and mailpit reports healthy inside while unreachable from outside —
+the entire dev mail workflow, traded for an egress path nothing was shown to use.
+The reviewer's fix asserted "published-port DNAT is unaffected by `internal`";
+that is false on this Docker. Caught by the allow-side check the Remedy Floor
+requires. Reverted, service restored, and the measurement recorded in the file so
+the next reader does not re-derive it — with the condition for revisiting stated:
+egress blocked AND `curl 127.0.0.1:8025` answering 200, both re-tested.
+
+### F-M3 / F-m2 Major+Minor — no watcher for compose image pins: RAISED
+See Open Decisions. Adding a `docker` Dependabot ecosystem plus a compose
+image-pin gate is a new CI control with its own self-test, beyond what this
+branch was cut for. The pin it would protect is correct today; what is missing is
+what keeps it so.
+
+### F-M4 Major — compose `app` binds all interfaces: RAISED
+See Open Decisions.
+
+### Unplanned: CI Trivy failure (CVE-2026-9496, High)
+Not a review finding — CI went red while this round was in progress. `pacote`
+21.5.0 bundled inside npm, range `>= 11.2.7, < 21.5.1`. Unrelated to this
+branch's contents (main's last run was green; the advisory is new), fixed here
+per the no-dismissal rule. Added to `Dockerfile` in the established form, plus
+the post-patch assertion in the tail block that every sibling entry has and this
+one would have been missing. Verified by building the real image and scanning it
+under CI's exact flags: pacote 21.5.1, Trivy exit 0, `npm -v` still 11.16.0.
+
+## Verification
+- `bash scripts/pre-pr.sh` — 73/73 (runs lint, the full vitest suite, and the
+  production build)
+- `docker build -t passwd-sso:scan .` + Trivy under CI's flags — exit 0
+- mailpit boot smoke test on the live stack: SMTP banner on 127.0.0.1:1025, HTTP
+  200 on :8025, and `mailpit` unresolvable from `internal`
+
+## Round 2 decision
+Not required. Every round-1 finding is fixed, rejected with evidence, or raised
+as a decision; the two raised items are recorded in Open Decisions with what
+would close them. The tightening-only skip does not apply — this round's fixes
+are substantive — so the stop condition is the ordinary one.
+
+R42 note: no class in this review expanded its member-set twice. The changed
+behaviours are now covered by a mutation-verified self-test wired into the
+default vitest run, which is the artifact that condition would have demanded.
