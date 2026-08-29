@@ -177,48 +177,58 @@ exit 1
     expect(r.exitCode).toBe(1);
   });
 
-  it("rejects a step label containing the '|' delimiter", () => {
-    // `failures` entries are `label|logfile` and the match splits on the FIRST
-    // `|`, so such a label mis-splits and the failed step's log is DELETED —
-    // the one outcome retention exists to prevent.
-    const guard = source.slice(source.indexOf("queue_step() {"));
-    expect(guard).toContain('step label must not contain');
+  // BOTH entry points, because both push to `failures` and a mutation that
+  // removes only the first guard would otherwise go unseen — measured: it did.
+  it.each(["run_step", "queue_step"])(
+    "%s rejects a step label containing the '|' delimiter",
+    (fn) => {
+      // `failures` entries are `label|logfile` and the match splits on the
+      // FIRST `|`, so such a label mis-splits and the failed step's log is
+      // DELETED — the one outcome retention exists to prevent.
+      const r = run(
+        [
+          "batch_labels=(); batch_cmds=()",
+          splice(fn),
+          `${fn} "Static: a|b" true`,
+          'echo "ACCEPTED"',
+        ].join("\n"),
+      );
+      expect(r.exitCode).toBe(2);
+      expect(r.stdout).not.toContain("ACCEPTED");
+      expect(r.stderr).toMatch(/must not contain/);
+    },
+  );
+
+  it.each(["run_step", "queue_step"])("%s accepts an ordinary label", (fn) => {
     const r = run(
       [
         "batch_labels=(); batch_cmds=()",
-        splice("queue_step"),
-        'queue_step "Static: a|b" true',
+        splice(fn),
+        `${fn} "Static: normal" true`,
         'echo "ACCEPTED"',
       ].join("\n"),
     );
-    expect(r.exitCode).toBe(2);
-    expect(r.stdout).not.toContain("ACCEPTED");
-    expect(r.stderr).toMatch(/must not contain/);
-  });
-
-  it("accepts an ordinary label", () => {
-    const r = run(
-      [
-        "batch_labels=(); batch_cmds=()",
-        splice("queue_step"),
-        'queue_step "Static: normal" true',
-        'echo "ACCEPTED ${#batch_labels[@]}"',
-      ].join("\n"),
-    );
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain("ACCEPTED 1");
+    expect(r.stdout).toContain("ACCEPTED");
   });
 });
 
 describe("show_failure_context — reproduction handles", () => {
   it("prints the shuffle seed for a vitest-shaped failure", () => {
     // extension/vitest.config.ts sets `sequence: { shuffle: true }` and names
-    // `--sequence.seed=N` as the replay mechanism. The seed line is near the
-    // TOP of the log; every context window is anchored at `Failed Tests`, so
-    // the window can never reach it and it has to be printed separately.
+    // `--sequence.seed=N` as the replay mechanism.
+    //
+    // The 200 filler lines are load-bearing, and were added after a mutation
+    // run proved the case decorative without them: with the seed adjacent to
+    // the markers, the context window ECHOES it, so deleting the dedicated grep
+    // left the assertion green. The window is anchored at `Failed Tests` and
+    // spans 60 lines, so a seed at line 1 of a 200-line log is reachable ONLY
+    // by the dedicated grep — which is the real shape this exists for.
     const r = run(`
 f=$(mktemp -t "pre-pr.XXXXXX")
-printf '%s\\n' 'Running tests with seed "424242"' 'Failed Tests 1' 'AssertionError: boom' > "$f"
+{ echo 'Running tests with seed "424242"'
+  for i in $(seq 1 200); do echo "filler-$i"; done
+  echo 'Failed Tests 1'; echo 'AssertionError: boom'; } > "$f"
 show_failure_context "Extension: Test" "$f"
 `);
     expect(r.timedOut).toBe(false);
@@ -231,10 +241,14 @@ show_failure_context "Extension: Test" "$f"
     // here-string defect lived in, so it must be exercised separately.
     const r = run(`
 f=$(mktemp -t "pre-pr.XXXXXX")
-printf '%s\\n' 'Running tests with seed "999999"' 'AssertionError: par' > "$f"
+{ echo 'Running tests with seed "999999"'
+  for i in $(seq 1 200); do echo "filler-$i"; done
+  echo 'AssertionError: par'; } > "$f"
 show_failure_context "Static: thing" "$f"
 `);
     expect(r.timedOut).toBe(false);
+    // Same reason as above: outside the window, so only the dedicated grep
+    // can surface it.
     expect(r.stdout).toContain('Running tests with seed "999999"');
   });
 
