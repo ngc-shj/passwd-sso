@@ -63,9 +63,37 @@ failures=()
 tempfiles=()
 
 cleanup_tempfiles() {
-  local logfile
+  local logfile failed_entry keep
   for logfile in "${tempfiles[@]:-}"; do
-    [ -n "$logfile" ] && [ -f "$logfile" ] && rm -f "$logfile"
+    [ -n "$logfile" ] || continue
+    [ -f "$logfile" ] || continue
+    # Keep the log of a step that FAILED. Deleting every temp file at EXIT
+    # destroyed the only copy of a shuffled extension run's seed, so a failure
+    # that had already happened was irreproducible by the time anyone looked —
+    # and "could not reproduce" then reads as "probably fine". A handful of
+    # files left in TMPDIR is cheaper than re-rolling the dice.
+    #
+    # Both paths funnel here: run_step and run_batch each rm their own log on
+    # success and push `label|logfile` to `failures` otherwise, so matching on
+    # the entry's logfile half covers the serial and parallel runners alike.
+    #
+    # Spelled with a flag rather than `&& continue 2`: this runs from the EXIT
+    # trap, where a compound ending non-zero sets the script's exit status —
+    # the same quirk the `return 0` below exists for.
+    keep=0
+    for failed_entry in "${failures[@]:-}"; do
+      if [ "${failed_entry#*|}" = "$logfile" ]; then keep=1; break; fi
+    done
+    # `|| rm` ends the OR list, so a non-zero `rm` IS the last command and
+    # `set -e` fires here — the `return 0` below is never reached and an
+    # all-green run prints its success banner and then exits 1. Measured with a
+    # non-writable TMPDIR, on this version and on the one it replaced. Routing
+    # the failure to a named warning keeps "could not clean up" distinguishable
+    # from "cleaned up"; a bare `|| true` would spell them the same.
+    if [ "$keep" -ne 1 ]; then
+      rm -f "$logfile" \
+        || printf 'pre-pr: could not remove %s\n' "$logfile" >&2
+    fi
   done
   # The for-loop's last iteration short-circuits at `[ -f "$logfile" ]` when
   # run_step already removed the file on success — leaving the function's
@@ -107,6 +135,21 @@ show_failure_context() {
     return
   fi
 
+  # Reproduction handles first, and unconditionally. The seed line sits near the
+  # TOP of a vitest log while every context window below is anchored at
+  # `Failed Tests`, so no window can ever reach it. extension/vitest.config.ts
+  # sets `sequence: { shuffle: true }` and names
+  # `--sequence.shuffle --sequence.seed=N` as the way to replay an order-dependent
+  # failure; without the seed and a surviving log that instruction is unusable
+  # from pre-pr, which is where the failure was actually seen.
+  { grep -nE 'Running tests with seed|--sequence\.seed' "$logfile" || true; } | head -3
+  # Only where the path outlives the run. CI runs this on an ephemeral runner
+  # (PRE_PR_STATIC_ONLY=1, ci.yml), so naming a file that dies with the job is a
+  # follow-up instruction nobody can follow.
+  if [ -z "${CI:-}" ]; then
+    printf "  (log retained: %s)\n" "$logfile"
+  fi
+
   matches=$({ grep -nE "$markers" "$logfile" || true; } \
     | { grep -v "$noise" || true; } | head -30)
   if [ -n "$matches" ]; then
@@ -122,7 +165,16 @@ show_failure_context() {
       start_line=$(( fail_summary_line > 3 ? fail_summary_line - 3 : 1 ))
       end_line=$(( start_line + 60 ))
     else
-      first_line=$(head -1 | cut -d: -f1) <<<"$matches"
+      # The here-string belongs INSIDE the command substitution. Written as
+      # `first_line=$(head -1 | cut -d: -f1) <<<"$matches"` it redirected the
+      # ASSIGNMENT — which consumes no input — leaving `head -1` reading the
+      # script's own stdin. On a terminal that blocks forever; under CI, where
+      # stdin is /dev/null, it returns empty and the arithmetic below silently
+      # treats it as 0, anchoring the context window at line 1 instead of at the
+      # first marker. This branch is the NON-vitest one (lint, build, gate
+      # scripts): the failures whose context is least self-evident got the least
+      # useful window, and nothing said so.
+      first_line=$(head -1 <<<"$matches" | cut -d: -f1)
       start_line=$(( first_line > 5 ? first_line - 5 : 1 ))
       end_line=$(( start_line + 24 ))
     fi
@@ -139,6 +191,20 @@ run_step() {
   shift
   local logfile
   local ec
+
+  # `failures` entries are `label|logfile` and the retention match in
+  # cleanup_tempfiles splits on the FIRST `|`. A label containing one therefore
+  # mis-splits and the failed step's log is DELETED — the one outcome retention
+  # exists to prevent. Shortest-prefix (`#*|`) is deliberate: `$TMPDIR` is
+  # environment-controlled and may itself contain `|`, which `##*|` would break.
+  # So the invariant is asserted on the half we control, at the moment a label
+  # enters, rather than left to hold by luck as labels are added.
+  case "$label" in
+    *"|"*)
+      printf 'pre-pr: step label must not contain "|": %s\n' "$label" >&2
+      exit 2
+      ;;
+  esac
 
   logfile=$(mktemp -t "pre-pr.XXXXXX")
   tempfiles+=("$logfile")
@@ -194,6 +260,19 @@ batch_cmds=()
 queue_step() {
   local label="$1"
   shift
+  # `failures` entries are `label|logfile` and the retention match in
+  # cleanup_tempfiles splits on the FIRST `|`. A label containing one therefore
+  # mis-splits and the failed step's log is DELETED — the one outcome retention
+  # exists to prevent. Shortest-prefix (`#*|`) is deliberate: `$TMPDIR` is
+  # environment-controlled and may itself contain `|`, which `##*|` would break.
+  # So the invariant is asserted on the half we control, at the moment a label
+  # enters, rather than left to hold by luck as labels are added.
+  case "$label" in
+    *"|"*)
+      printf 'pre-pr: step label must not contain "|": %s\n' "$label" >&2
+      exit 2
+      ;;
+  esac
   batch_labels+=("$label")
   # Store argv safely for later eval-free replay via bash arrays-of-strings.
   batch_cmds+=("$(printf '%q ' "$@")")
