@@ -125,6 +125,11 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 #   WebSocket → DoS). npm 11.16.0 bundles 6.26.0. The app's own top-level undici
 #   is already 7.28.0 (also fixed); this patches npm's bundled copy, which Trivy
 #   reports separately.
+# - pacote >=21.5.1: closes CVE-2026-9496 (High, DoS via addGitSha; range
+#   >= 11.2.7, < 21.5.1). npm 11.16.0 bundles 21.5.0, so this patch is doing
+#   real work. pacote is npm's own package fetcher and appears nowhere in any
+#   package-lock.json — Trivy sees it only because it scans the image, which is
+#   why it surfaced here and not in the dependency-audit jobs.
 # - brace-expansion >=5.0.9: closes CVE-2026-13149 (exponential-time DoS),
 #   GHSA-mh99-v99m-4gvg (unbounded expansion → OOM, range <=5.0.7) AND
 #   GHSA-rgw5-rvv9-x895 / CVE-2026-69152, whose range is 4.0.0 – 5.0.8
@@ -149,6 +154,7 @@ RUN TAR_VER=7.5.21 && \
     BE_VER=5.0.9 && \
     UNDICI_VER=6.28.0 && \
     IPADDR_VER=10.4.0 && \
+    PACOTE_VER=21.5.1 && \
     NPM_VER=11.16.0 && \
     npm install -g "npm@${NPM_VER}" --loglevel=error --ignore-scripts && \
     TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
@@ -211,6 +217,21 @@ RUN TAR_VER=7.5.21 && \
     else \
       echo "ERROR: brace-expansion directory not found at ${BE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
     fi && \
+    PACOTE_DIR=/usr/local/lib/node_modules/npm/node_modules/pacote && \
+    if [ -d "$PACOTE_DIR" ]; then \
+      CURRENT=$(node -p "require('${PACOTE_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$PACOTE_VER" "$CURRENT" | sort -V | head -n1)" != "$PACOTE_VER" ]; then \
+        cd "$PACOTE_DIR" && \
+        npm pack "pacote@${PACOTE_VER}" --quiet && \
+        tar xzf "pacote-${PACOTE_VER}.tgz" --strip-components=1 && \
+        rm -f "pacote-${PACOTE_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${PACOTE_VER}'){console.error('pacote patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "pacote ${CURRENT} already >= ${PACOTE_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "ERROR: pacote directory not found at ${PACOTE_DIR}; npm layout changed, re-verify patch path" >&2 && exit 1; \
+    fi && \
     IPADDR_DIR=/usr/local/lib/node_modules/npm/node_modules/ip-address && \
     if [ -d "$IPADDR_DIR" ]; then \
       CURRENT=$(node -p "require('${IPADDR_DIR}/package.json').version") && \
@@ -250,6 +271,7 @@ RUN TAR_VER=7.5.21 && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch/package.json').version,c=v.split('.').map(Number),m='${PICOMATCH_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('picomatch still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/sigstore/package.json').version,c=v.split('.').map(Number),m='${SIGSTORE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('sigstore still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json').version,c=v.split('.').map(Number),m='${BE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('brace-expansion still '+v);process.exit(1)}}" && \
+    node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/pacote/package.json').version,c=v.split('.').map(Number),m='${PACOTE_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('pacote still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/undici/package.json').version,c=v.split('.').map(Number),m='${UNDICI_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('undici still '+v);process.exit(1)}}" && \
     node -e "const v=require('/usr/local/lib/node_modules/npm/node_modules/ip-address/package.json').version,c=v.split('.').map(Number),m='${IPADDR_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('ip-address still '+v);process.exit(1)}}"
 
