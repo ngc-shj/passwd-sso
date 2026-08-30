@@ -55,11 +55,13 @@ export class TenantClaimUnusableError extends Error {
    *
    * It rides on the error because the audit emit below NEEDS it: a
    * first-ever sign-in has no user row, so logAuditAsync -> resolveTenantId
-   * falls back to a users lookup on SYSTEM_ACTOR_ID, finds nothing, and
-   * returns WITHOUT enqueuing. Emitting without a tenantId therefore writes
-   * neither an audit_logs nor an audit_outbox row, and `tenant-domain
-   * unmapped` — which groups by tenant_id on both — stays blind to exactly
-   * the lockout it exists to diagnose.
+   * falls back to a users lookup on SYSTEM_ACTOR_ID and finds nothing. The
+   * row is still written — under SYSTEM_TENANT_ID, the encoding of "no
+   * owning tenant" — but `tenant-domain unmapped` groups by tenant_id, so a
+   * denial emitted without this field lands under the sentinel instead of
+   * under the tenant whose claim was refused, which is exactly the lockout
+   * it exists to diagnose. Carrying it is what preserves the ATTRIBUTION;
+   * before the encoding landed it also preserved the row's existence.
    */
   readonly tenantId: string | null;
   /**

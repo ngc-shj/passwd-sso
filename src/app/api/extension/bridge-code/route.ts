@@ -106,12 +106,18 @@ async function handlePOST(req: NextRequest) {
     userId: null,
   });
   if (ipBlocked) {
-    await emitBridgeCodeIssueFailure({
-      req,
-      userId: null,
-      tenantId: null,
-      reason: ipRl.redisErrored ? "ip_rate_limit_redis_fail" : "ip_rate_limit",
-    });
+    // No audit emit on the REFUSAL arm. The limiter refuses the response, not
+    // the emit, so this fired once per request past the limit — and since
+    // `resolveTenantId` began encoding "no owning tenant" instead of returning
+    // null, each of those became a durable audit_logs row under the sentinel
+    // tenant, which has no retention and no application-reachable delete path.
+    // Exceeding the limit would increase persistent work rather than shed it.
+    //
+    // checkRateLimitOrFail has already emitted its throttled warn, which is the
+    // surface src/lib/security/rate-limit-audit.ts chose for exactly this event
+    // class and for exactly this reason. The other three pre-auth arms below
+    // keep their emit: each is reached only AFTER this limiter allowed the
+    // request, so the limiter bounds them.
     return ipBlocked;
   }
 

@@ -322,12 +322,29 @@ describe("logAuditAsync", () => {
       userId: "not-a-uuid",
     });
     expect(mockedFindUser).not.toHaveBeenCalled();
-    // The DB is still not queried — that is what this case is about — but the
-    // entry is no longer dropped: a sentinel actor has no users row by
-    // construction, so SYSTEM_TENANT_ID is the answer without a lookup.
-    expect(mockedEnqueue).toHaveBeenCalledOnce();
-    expect(mockedEnqueue.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
-    expect(deadLetterWarnSpy).not.toHaveBeenCalled();
+    // A malformed id is NOT the unattributable class and must not be encoded as
+    // one: audit-outbox-worker refuses a payload failing UUID_RE, so enqueuing
+    // would cost a poison row that retries to max_attempts instead of one warn
+    // line. It is dropped here under its own reason.
+    expect(mockedEnqueue).not.toHaveBeenCalled();
+    expect(deadLetterWarnSpy).toHaveBeenCalledOnce();
+    expect(deadLetterWarnSpy.mock.calls[0][0].reason).toBe("invalid_user_id");
+  });
+
+  it("drops only the malformed entries in a bulk batch, not the whole batch", async () => {
+    // The batch is not all-or-nothing: one bad id must neither poison the
+    // enqueue nor silently ride along inside it.
+    mockedFindUser.mockResolvedValue({
+      tenantId: TENANT_A,
+    } as unknown as Awaited<ReturnType<typeof mockedFindUser>>);
+    await logAuditBulkAsync([
+      { scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: USER_A },
+      { scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: "not-a-uuid" },
+    ]);
+    expect(mockedEnqueueBulk).toHaveBeenCalledOnce();
+    expect(mockedEnqueueBulk.mock.calls[0][1]).toHaveLength(1);
+    expect(deadLetterWarnSpy).toHaveBeenCalledOnce();
+    expect(deadLetterWarnSpy.mock.calls[0][0].reason).toBe("invalid_user_id");
   });
 
   it("records an unresolvable tenant under SYSTEM_TENANT_ID instead of dropping it", async () => {

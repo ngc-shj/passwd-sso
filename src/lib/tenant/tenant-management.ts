@@ -358,12 +358,14 @@ export async function findOrCreateTenantForClaim(
     return row.revokedAt === null
       ? { kind: "tenant", id: row.tenantId }
       // The owning tenant rides on the refusal so the caller can emit an
-      // audit row that resolveTenantId() can actually bind. Without it the
-      // emit dead-letters: a first-ever sign-in has no user row, so
-      // logAuditAsync -> resolveTenantId falls back to a users lookup on
-      // SYSTEM_ACTOR_ID, finds nothing, and returns without enqueuing —
-      // leaving the denial invisible to `tenant-domain unmapped`, which is
-      // the whole point of distinguishing this refusal.
+      // audit row that resolveTenantId() binds to the RIGHT tenant. Without
+      // it, a first-ever sign-in has no user row, the lookup on
+      // SYSTEM_ACTOR_ID finds nothing, and the row is filed under
+      // SYSTEM_TENANT_ID — so `tenant-domain unmapped`, which groups by
+      // tenant_id, shows the denial under the sentinel rather than under the
+      // tenant it is about, which is the whole point of distinguishing this
+      // refusal. (Before the encoding landed the emit dead-lettered and the
+      // denial was invisible entirely.)
       : { kind: "claim_taken", tenantId: row.tenantId };
   }
 

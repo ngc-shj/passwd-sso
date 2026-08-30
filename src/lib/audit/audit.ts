@@ -220,9 +220,38 @@ async function resolveTenantId(params: AuditLogParams): Promise<string> {
       return user?.tenantId ?? SYSTEM_TENANT_ID;
     }
 
-    // A non-UUID userId is a sentinel actor; no users row exists for one.
+    // Unreachable from logAuditAsync / logAuditBulkAsync: both reject a
+    // malformed userId before calling in (see assertEnqueueableUserId). Kept as
+    // defense-in-depth for a future caller, and it must NOT be spelled "a
+    // sentinel actor" — sentinels ARE UUIDs by construction
+    // (constants/app.ts), which is what the guard above relies on.
     return SYSTEM_TENANT_ID;
   }, BYPASS_PURPOSE.AUDIT_WRITE);
+}
+
+/**
+ * Reject a malformed actor id before it can reach the outbox.
+ *
+ * `audit-outbox-worker.ts:1959-1970` refuses any payload whose `userId` fails
+ * `UUID_RE` — "SYSTEM actor with invalid userId must not enter the outbox".
+ * Before the tenant encoding landed, `resolveTenantId` returning null held that
+ * invariant as a side effect: a non-UUID id resolved no tenant, so the entry
+ * never got enqueued. Encoding "no owning tenant" removed that side effect, and
+ * without this guard a malformed id would enqueue a row that cycles through
+ * max_attempts and dead-letters with the event's content never reaching
+ * audit_logs — strictly worse than the one warn line it used to cost.
+ *
+ * This is a DIFFERENT fault from an unattributable event and carries its own
+ * reason: the tenant is unknowable there, whereas here the caller is wrong.
+ * Returns true when the entry may proceed.
+ */
+function assertEnqueueableUserId(params: AuditLogParams): boolean {
+  if (UUID_RE.test(params.userId)) return true;
+  deadLetterLogger.warn(
+    deadLetterEntry(params, "invalid_user_id"),
+    "audit.dead_letter",
+  );
+  return false;
 }
 
 // ─── logAuditInTx ────────────���───────────────────────────────────
@@ -300,11 +329,15 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
 
   // All errors caught (MF2: never throws)
   try {
+    // A malformed actor id is rejected here, not encoded: the outbox worker
+    // refuses it, so enqueuing would cost a poison row instead of a log line.
+    if (!assertEnqueueableUserId(params)) return;
+
     // No `if (!tenantId)` branch: resolveTenantId never returns null, so every
-    // entry reaches the outbox. The KNOWN GAP that used to sit here — return
-    // WITHOUT enqueuing, leaving one log line the shipped forwarder excludes as
-    // the sole record — is closed by encoding "no owning tenant" rather than by
-    // giving the unenqueued record a new home. See resolveTenantId's docblock.
+    // well-formed entry reaches the outbox. The KNOWN GAP that used to sit here
+    // — return WITHOUT enqueuing, leaving one log line the shipped forwarder
+    // excludes as the sole record — is closed by encoding "no owning tenant"
+    // rather than by giving the unenqueued record a new home.
     const tenantId = await resolveTenantId(params);
     await enqueueAudit(tenantId, payload);
   } catch (err) {
@@ -377,10 +410,16 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
   }
 
   try {
+    // Same malformed-id rejection as the singular path, per entry: one bad id
+    // in a batch must not poison the whole enqueue, and must not be silently
+    // included either.
+    const enqueueable = paramsList.filter(assertEnqueueableUserId);
+    if (enqueueable.length === 0) return;
+
     // Resolve tenantId once; assume all entries share it. Never null — see
     // resolveTenantId's docblock for why the enqueue-less branch is gone.
-    const tenantId = await resolveTenantId(paramsList[0]);
-    const payloads = paramsList.map((params) => buildOutboxPayload(params));
+    const tenantId = await resolveTenantId(enqueueable[0]);
+    const payloads = enqueueable.map((params) => buildOutboxPayload(params));
     await enqueueAuditBulk(tenantId, payloads);
   } catch (err) {
     for (const params of paramsList) {

@@ -128,19 +128,29 @@ the event reaches `audit_outbox` and then `audit_logs` like any other.
 tenant:
 
 ```sql
-SELECT created_at, action, user_id, actor_type, team_id
+SELECT action, actor_type, COUNT(*) AS n, MAX(created_at) AS latest
 FROM audit_logs
-WHERE tenant_id = '00000000-0000-4000-8000-000000000002'   -- __system__
-  AND actor_type <> 'SYSTEM'                               -- exclude genuine system emissions
-ORDER BY created_at DESC
-LIMIT 100;
+WHERE tenant_id = '00000000-0000-4000-8000-000000000002'   -- the sentinel tenant (name/slug: __system__)
+GROUP BY action, actor_type
+ORDER BY n DESC;
 ```
 
-`actor_type` is what separates the two populations: a genuine system emission
-(the anchor publisher, the retention GC heartbeat) carries `SYSTEM`; an
-unattributable one carries the caller's own actor. No tenant can read these rows
-— `__system__` has zero `tenant_members` and `/api/tenant/audit-logs` scopes by
-membership.
+**Group by `action`; do not filter on `actor_type`.** Both populations under this
+tenant emit `SYSTEM` — the anchor publisher, the retention GC, and also
+`emitAuthLoginFailure`, `emitBridgeCodeIssueFailure` and the DCR registration —
+so an `actor_type <> 'SYSTEM'` predicate would hide almost every unattributable
+event rather than isolate it. `ip` does not separate them either: the retention
+GC forwards a row's `last_used_ip` on some sweeps.
+
+Routine rows to expect: `AUDIT_ANCHOR_*` (the anchor publisher) and
+`RETENTION_GC_SWEEP` (the GC heartbeat). **Anything else under this tenant is an
+event whose owning tenant could not be resolved** — a first-ever sign-in denial,
+a claim refusal, a pre-auth emission. A rising count of one of those actions is
+what replaced the old `audit-dead-letter` alert.
+
+No tenant can read these rows: the sentinel has zero `tenant_members` and
+`/api/tenant/audit-logs` scopes by membership. That is an unenforced invariant,
+not a constraint — see the note below.
 
 **What replaces the alert.** A broad tenant-resolution failure used to fire
 `audit-dead-letter`. It now shows up as a rising count from the query above
