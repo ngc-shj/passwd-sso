@@ -586,3 +586,110 @@ expanding-class convergence condition does not apply. Both classes closed in thi
 round are guarded by mutation-verified CI gates wired into `scripts/pre-pr.sh`
 (`Static: rls-read-context`, `Static: worker-logtype`), which is the artifact
 that condition would have demanded.
+
+## Carried-forward questions — closed (2026-08-31)
+
+The three questions recorded under "Open questions carried forward" were answered
+by the user in a later session. Recorded here rather than in the round-1 findings
+because the findings describe the code as it was; these describe how each closed.
+
+### F-m2 Minor — health-check budget vs. transaction hold time — FIXED
+
+**Answer: 3 s is the hard outer bound**, so the previous behaviour was a bug
+rather than a deliberate trade.
+
+`withTimeout` rejects a Promise; it does not end a transaction. Since the outbox
+depth read moved inside `withBypassRls`, the check reported `fail` at 3 s while
+the interactive transaction went on holding its pooled connection to Prisma's 5 s
+default — two extra seconds of a scarce resource during exactly the incident that
+made the check fail.
+
+`withBypassRls` already accepted `options?: { timeout?, maxWait? }`
+(`src/lib/tenant-rls.ts:68`); the call site never passed them. It does now.
+Prisma bounds the two phases separately — `maxWait` to START the transaction,
+`timeout` to RUN it — so the outer bound is their SUM, and passing `timeout`
+alone would have left the `maxWait` tail outside the budget. Only
+`maxWait + timeout <= CHECK_TIMEOUT_MS` is load-bearing; the split gives the
+larger share to execution because the statement is one indexed aggregate.
+
+Red-proved by executed mutation, one per clause, each run against both suites:
+
+| mutation | result |
+|---|---|
+| control | 34 passed |
+| drop `maxWait` | 4 failed (arity + the `maxWait > 0` clause) |
+| drop `timeout` | 4 failed (arity + the `timeout > 0` clause) |
+| widen so the sum is 4000 | **2 failed — only the sum clause**, which is what separates it from the two above |
+| remove the options argument (the pre-fix state) | 4 failed, incl. `expected undefined to be defined` |
+
+Both health suites were updated: `src/lib/health.test.ts` and
+`src/__tests__/lib/health.test.ts` are two suites over one module with different
+mocks, and changing one leaves the other asserting the old three-argument call.
+
+### F-m3 Minor — `INVALID_RLS_NESTING` under an ambient context — CLOSED
+
+**Answer: the intended caller is a probe path outside any tenant context**
+(`/api/health/ready`, cron, a k8s liveness probe).
+
+`withBypassRls` throws `INVALID_RLS_NESTING` when `getTenantRlsContext()?.bypass
+=== false` (`src/lib/tenant-rls.ts:70-74`), so `runHealthChecks` invoked from
+inside a `withTenantRls` callback would report `fail` — a plausible wrong answer
+rather than a refusal. The premise that made this a question rather than a
+finding still holds: re-derived on 2026-08-31, `runHealthChecks` has no non-test
+caller (`grep -rn runHealthChecks src scripts` returns the definition at
+`src/lib/health.ts` plus two test files and this document).
+
+Closed on the recorded intent, not on the absence of a caller. If a future change
+wires `runHealthChecks` into a request path that has already established a tenant
+context, this question reopens as a finding — the behaviour is unchanged, only
+the premise would be.
+
+### F-m4 Minor — "the last member of the RLS-context class" — RESTATED AS A PROPERTY
+
+**Answer: it can be restated**, and restating it changes what the sentence
+claims. The false-positive count (310 in `src/app`, 67 in `src/lib`) is a
+scanning-cost argument; the property below is a membership one.
+
+**The class.** A Prisma statement against an RLS-protected table that executes
+while `tenantRlsStorage` has no active store. `src/lib/prisma.ts:165-193` exports
+a Proxy whose `get` trap rebinds to `ctx.tx` if and only if
+`getTenantRlsContext()?.tx` is set at the moment of the property read; with no
+store it falls through to the base client, `app.tenant_id` is unset, and the
+tenant_isolation policy returns zero rows or raises 22P02.
+
+**Why the gate's scope is not the class.** The store can be established by an
+ancestor at any depth on the call stack — or by the module itself. Measured:
+`src/lib/team/team-policy.ts:55-58` wraps its own read in `withTeamTenantRls`
+with a callback that takes no `tx` parameter, so the statement is context-bearing
+at runtime and lexically indistinguishable from a bare-client read. That single
+example is enough to show the lexical model cannot decide `src/lib`. So
+`SEARCH_DIRS = src/workers, scripts, src/lib/health.ts` is a **decidability**
+boundary, not a membership boundary, and the docblock at
+`scripts/checks/check-rls-read-context.mjs:52` should say so.
+
+**Entry-point enumeration.** `src/lib` modules are entered from: (i) route
+handlers and server components under `src/app`; (ii) `src/workers` processes;
+(iii) `scripts/` one-shots; (iv) `src/proxy.ts`; (v) Auth.js callbacks in
+`src/auth.ts`. (ii) and (iii) never establish a store before calling into
+`src/lib`, which is why they are scanned as whole roots. For (i), (iv) and (v)
+the store may be established at any depth or by the callee itself, so membership
+is not lexically decidable there.
+
+**What `src/lib/health.ts` actually is.** Not "the last member of the class" —
+the last `src/lib` module known to be reachable ONLY from an entry point that
+establishes no store (a probe), which is what makes the lexical reading
+decidably correct for it.
+
+**What this does NOT establish.** That the enumeration is complete. 149 of 214
+`src/app` route files call a context helper somewhere in the file; the remaining
+65 do not, and a `src/lib` module reachable only from those and not
+self-wrapping would be a second member of the same shape. Deriving that set
+requires resolving, per call site, whether the statement executes under a store —
+which is the same undecidable question, so it needs a runtime probe (a
+development-mode assertion in the Proxy's fall-through branch) rather than
+another scan. Recorded as the successor to this question rather than answered
+here.
+
+`TODO(rls-read-context): add a dev-mode assertion on the Proxy fall-through at
+src/lib/prisma.ts:191 so a store-less RLS-table statement is observable at
+runtime, and use it to decide the 65 helper-free route files.`

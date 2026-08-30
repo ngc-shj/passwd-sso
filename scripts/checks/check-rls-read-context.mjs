@@ -49,14 +49,28 @@
  *            AST helper does not treat as scannable (no `.mjs` in the scan
  *            roots issues a Prisma statement today)
  *
- * `src/app` and the rest of `src/lib` are out of scope because the app's
- * mechanism is AMBIENT, not lexical: `src/lib/prisma.ts` exports a Proxy that
- * rebinds `prisma` to the AsyncLocalStorage-active transaction, so a statement
- * written as `prisma.x.findMany()` is already tenant-scoped at runtime with
- * nothing in the syntax to show it. This gate's model is lexical, so scanning
- * there would report hundreds of false positives (measured: 310 in src/app, 67
- * in src/lib). `src/lib/health.ts` is named individually in SEARCH_DIRS anyway,
- * because that ambient argument does not reach it — see the comment there.
+ * SEARCH_DIRS IS A DECIDABILITY BOUNDARY, NOT A MEMBERSHIP ONE. The class is
+ * "a statement against an RLS table that runs with no active tenantRlsStorage
+ * store". `src/lib/prisma.ts:165-193` exports a Proxy whose `get` trap rebinds
+ * to `ctx.tx` iff `getTenantRlsContext()?.tx` is set at the moment of the
+ * property read, so a statement written `prisma.x.findMany()` may be
+ * tenant-scoped at runtime with nothing in the syntax to show it. The store can
+ * be established by an ancestor at any depth OR by the callee itself:
+ * `src/lib/team/team-policy.ts:55-58` wraps its own read in `withTeamTenantRls`
+ * with a callback taking no `tx` parameter, which is lexically identical to a
+ * bare-client read. One such example is enough — a lexical model cannot decide
+ * `src/lib`, and scanning it reports hundreds of false positives (measured: 310
+ * in src/app, 67 in src/lib).
+ *
+ * So the roots here are the entry points where the answer IS lexically decided:
+ * `src/workers` processes and `scripts/` one-shots never establish a store
+ * before calling in, so a bare client there is a member by construction.
+ * `src/lib/health.ts` is named individually for the same reason at file
+ * granularity — it is reached only from a probe, which establishes no store.
+ * That is what it is; it is NOT "the last member of the class", a claim this
+ * gate's scope cannot support. See
+ * docs/archive/review/rls-health-context-and-gate-gaps-code-review.md, F-m4,
+ * for the entry-point enumeration and for what the derivation does not close.
  *
  * Table set is DERIVED, never re-typed: manifest ∩ schema @@map.
  *
