@@ -339,9 +339,11 @@ describe("AuditAnchorPublisher.runCadence", () => {
 
     expect(outcome.kind).toBe("failed");
     if (outcome.kind === "failed") {
-      // Reason format: `${dest.name}_UPLOAD_FAILED: ${errMsg}` (dest.name = "s3")
-      expect(outcome.reason).toContain("s3_UPLOAD_FAILED");
-      expect(outcome.reason).toContain("S3 unavailable");
+      // Reason format: `${dest.name}_UPLOAD_FAILED:${code}` (dest.name = "s3").
+      // The message is deliberately NOT in it — this value is persisted to
+      // audit_logs.metadata.failureReason, which the tenant reads.
+      expect(outcome.reason).toBe("s3_UPLOAD_FAILED:unknown");
+      expect(outcome.reason).not.toContain("S3 unavailable");
     }
     // The pause-persist tx must run AFTER rollback. Look for an updateMany
     // whose data carries `publishPausedUntil` (the dedicated pause UPDATE).

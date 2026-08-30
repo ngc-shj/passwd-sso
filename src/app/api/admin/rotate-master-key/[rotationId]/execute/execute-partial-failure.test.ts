@@ -145,9 +145,14 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/execute — partial-fai
         metadata: expect.objectContaining({
           rotationId: ROTATION_ID,
           revokedShares: 0,
-          shareRevocationError: expect.stringContaining("transient db error"),
+          // Token, not the message — see route.test.ts's twin of this case.
+          shareRevocationError: "SHARE_REVOCATION_FAILED:unknown",
         }),
       }),
     );
+    const auditCall = mockLogAudit.mock.calls.find(
+      ([args]) => args.action === "MASTER_KEY_ROTATION_EXECUTE",
+    );
+    expect(JSON.stringify(auditCall)).not.toContain("transient db error");
   });
 });
