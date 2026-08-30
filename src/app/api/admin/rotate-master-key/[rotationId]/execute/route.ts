@@ -36,6 +36,7 @@ import {
 } from "@/lib/admin-rotation/rotation-eligibility";
 import { getLogger } from "@/lib/logger";
 import { RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 const rateLimiter = createRateLimiter({
   windowMs: RATE_WINDOW_MS,
@@ -204,7 +205,7 @@ async function handlePOST(
       getLogger().error(
         {
           rotationId,
-          err: shareRevocationError,
+          error: errorLogFields(err),
         },
         "master-key-rotation execute: passwordShare.updateMany failed; rotation row remains executed but share-state is partial",
       );
@@ -225,7 +226,7 @@ async function handlePOST(
       {
         rotationId,
         revokedShares,
-        err: err instanceof Error ? err.message : String(err),
+        error: errorLogFields(err),
       },
       "master-key-rotation execute: failed to record revokedShares on row (count preserved in audit)",
     );

@@ -14,6 +14,7 @@ import { NOTIFICATION_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export interface LockoutNotifyParams {
   userId: string;
@@ -107,13 +108,13 @@ export async function notifyAdminsOfLockout(
       } catch (adminErr) {
         // Per-admin error isolation: one failure must not skip remaining admins
         getLogger().warn(
-          { err: adminErr, adminUserId: admin.userId },
+          { error: errorLogFields(adminErr), adminUserId: admin.userId },
           "lockout.adminNotify.perAdmin.error",
         );
       }
     }
   } catch (err) {
     // Fire-and-forget: log but never block the auth/lockout flow
-    getLogger().warn({ err, userId: params.userId }, "lockout.adminNotify.error");
+    getLogger().warn({ error: errorLogFields(err), userId: params.userId }, "lockout.adminNotify.error");
   }
 }

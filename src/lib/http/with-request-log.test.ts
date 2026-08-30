@@ -141,7 +141,10 @@ describe("withRequestLog", () => {
     const wrapped = withRequestLog(handler);
     await expect(wrapped(makeRequest())).rejects.toThrow("handler failure");
     expect(mocks.reqLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err, durationMs: expect.any(Number) }),
+      expect.objectContaining({
+        error: { name: "Error", code: "unknown" },
+        durationMs: expect.any(Number),
+      }),
       "request.error",
     );
   });

@@ -3,7 +3,6 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { getLogger } from "@/lib/logger";
-import { errorLogFields } from "@/lib/logger/error-fields";
 import { deadLetterLogger } from "@/lib/audit/audit-logger";
 import { computeBackoffMs, withFullJitter } from "@/lib/http/backoff";
 import {
@@ -35,6 +34,7 @@ import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/
 import type { WebhookRecord } from "@/lib/webhook-dispatcher";
 import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_DELIVERY_CONCURRENCY } from "@/lib/validations/common.server";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export interface AuditOutboxRow {
   id: string;
@@ -572,7 +572,7 @@ async function writeDirectAuditLogBestEffort(
     });
   } catch (err) {
     getLogger().warn(
-      { err, tenantId, action },
+      { error: errorLogFields(err), tenantId, action },
       "worker.direct_audit_log_write_failed",
     );
   }
@@ -2001,7 +2001,7 @@ export function createWorker(config: WorkerConfig) {
         // dispatch here (replaces the former dispatchWebhookForRow + fanOutDeliveries).
       } catch (err) {
         log.warn(
-          { err, outboxId: row.id, action: payload.action },
+          { error: errorLogFields(err), outboxId: row.id, action: payload.action },
           "worker.deliver_failed",
         );
         const isDead = row.attempt_count + 1 >= row.max_attempts;
@@ -2012,7 +2012,7 @@ export function createWorker(config: WorkerConfig) {
               tenantId: row.tenant_id,
               action: payload.action,
               attemptCount: row.attempt_count + 1,
-              err,
+              error: errorLogFields(err),
             },
             "outbox row dead-lettered",
           );
@@ -2205,7 +2205,7 @@ export function createWorker(config: WorkerConfig) {
         await workerPrisma.$disconnect();
         await pool.end();
       } catch (err) {
-        getLogger().warn({ err }, "worker.shutdown_cleanup_error");
+        getLogger().warn({ error: errorLogFields(err) }, "worker.shutdown_cleanup_error");
       }
 
       getLogger().info("worker.shutdown_complete");

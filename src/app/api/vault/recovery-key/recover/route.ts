@@ -20,6 +20,7 @@ import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash, WRAPPED_SECRET_KEY_MAX } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -243,7 +244,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     }
   } catch (err) {
     getLogger().error(
-      { userId, err },
+      { userId, error: errorLogFields(err) },
       "vault.recoveryRecover.invalidateFailed",
     );
     return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);

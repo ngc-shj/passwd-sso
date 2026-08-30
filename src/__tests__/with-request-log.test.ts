@@ -91,7 +91,11 @@ describe("withRequestLog", () => {
     // request.error was logged
     expect(mockError).toHaveBeenCalledOnce();
     const errorArgs = mockError.mock.calls[0];
-    expect(errorArgs[0].err).toBe(error);
+    // The caught Error is reduced before it reaches the sink — this is the
+    // highest-volume error egress in the product, every unhandled route error
+    // including /api/vault/*.
+    expect(errorArgs[0].err).toBeUndefined();
+    expect(errorArgs[0].error).toEqual({ name: "Error", code: "unknown" });
     expect(typeof errorArgs[0].durationMs).toBe("number");
     expect(errorArgs[1]).toBe("request.error");
   });

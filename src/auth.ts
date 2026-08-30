@@ -34,6 +34,7 @@ import {
 } from "@/lib/audit/auth-failure-mapping";
 import authConfig from "./auth.config";
 import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 function getAuthRouteBasePath(): string {
   const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
@@ -709,7 +710,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // ensureTenantMembershipForSignIn and returns false (not thrown here).
         // Any other error is unexpected — log and block sign-in.
         getLogger().error(
-          { err: error, provider: provider ?? "unknown" },
+          { error: errorLogFields(error), provider: provider ?? "unknown" },
           "auth.signin.ensureTenantMembership_failed",
         );
         await emitAuthLoginFailure({
@@ -795,7 +796,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           {
             userId: user.id,
             tenantId: (user as { tenantId?: string }).tenantId ?? null,
-            err,
+            error: errorLogFields(err),
           },
           "auth.session.passkey_data_fetch_failed",
         );

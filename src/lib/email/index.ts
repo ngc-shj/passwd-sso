@@ -2,6 +2,7 @@ import { getLogger } from "@/lib/logger";
 import { ResendProvider } from "./resend-provider";
 import { SmtpProvider } from "./smtp-provider";
 import type { EmailMessage, EmailProvider } from "./types";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 let provider: EmailProvider | null = null;
 let initialised = false;
@@ -54,7 +55,7 @@ export async function sendEmail(message: EmailMessage): Promise<void> {
     await p.send(message);
   } catch (err) {
     getLogger().error(
-      { to: message.to, subject: message.subject, err },
+      { to: message.to, subject: message.subject, error: errorLogFields(err) },
       "email.send.failed",
     );
   }

@@ -19,6 +19,7 @@ import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { LOCKOUT_THRESHOLD_MIN, LOCKOUT_DURATION_MAX } from "@/lib/validations/common";
 import { notifyAdminsOfLockout } from "@/lib/auth/policy/lockout-admin-notify";
 import type { NextRequest } from "next/server";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 /** Observation window: reset counter if last failure was this long ago */
 const OBSERVATION_WINDOW_MS = MS_PER_DAY;
@@ -112,7 +113,7 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
     // than the tenant's real policy) and do not cache it. Logged so the
     // degradation is observable.
     getLogger().warn(
-      { err, tenantId, metric: "lockout_strictest_fallback", reason: "fetch_failed" },
+      { error: errorLogFields(err), tenantId, metric: "lockout_strictest_fallback", reason: "fetch_failed" },
       "vault.lockout.thresholdsFetchFailed.usingStrictest",
     );
     return STRICTEST_LOCKOUT_THRESHOLDS;
@@ -320,7 +321,7 @@ export async function recordFailure(
         });
       }
     } catch (auditErr) {
-      getLogger().error({ err: auditErr, userId }, "audit.vaultUnlockFailed.error");
+      getLogger().error({ error: errorLogFields(auditErr), userId }, "audit.vaultUnlockFailed.error");
     }
 
     // Atomic audit: VAULT_LOCKOUT_TRIGGERED (threshold crossed)
@@ -374,7 +375,7 @@ export async function recordFailure(
           "vault.lockout.triggered",
         );
       } catch (auditErr) {
-        getLogger().error({ err: auditErr, userId }, "audit.vaultLockoutTriggered.error");
+        getLogger().error({ error: errorLogFields(auditErr), userId }, "audit.vaultLockoutTriggered.error");
       }
     }
 
@@ -403,7 +404,7 @@ export async function recordFailure(
       return null;
     }
     // Unexpected error — log and re-throw
-    getLogger().error({ err, userId }, "vault.lockout.recordFailure.error");
+    getLogger().error({ error: errorLogFields(err), userId }, "vault.lockout.recordFailure.error");
     throw err;
   }
 }
@@ -426,7 +427,7 @@ export async function resetLockout(userId: string): Promise<void> {
       }),
     BYPASS_PURPOSE.AUTH_FLOW);
   } catch (err) {
-    getLogger().error({ err, userId }, "vault.lockout.resetLockout.error");
+    getLogger().error({ error: errorLogFields(err), userId }, "vault.lockout.resetLockout.error");
     // Swallow — do not block successful unlock
   }
 }

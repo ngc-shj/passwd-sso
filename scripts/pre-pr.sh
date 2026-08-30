@@ -418,6 +418,11 @@ queue_step "Static: rls-read-context" node scripts/checks/check-rls-read-context
 # that true of every error-level worker log rather than of the three someone
 # happened to write a rule for.
 queue_step "Static: worker-logtype" node scripts/checks/check-worker-logtype.mjs
+# Complements worker-logtype, which asks whether an alert line can be MATCHED.
+# This one asks what the line CARRIES: pino's default err serializer emits
+# message and stack, and logger.ts redacts by key name, which never reaches
+# message text.
+queue_step "Static: caught-error-logging" node scripts/checks/check-caught-error-logging.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
 queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
 queue_step "Static: runtime-image-assets" node scripts/checks/check-runtime-image-assets.mjs

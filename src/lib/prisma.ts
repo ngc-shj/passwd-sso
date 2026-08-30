@@ -9,6 +9,7 @@ import {
   SEC_PER_MINUTE,
   SEC_PER_DAY,
 } from "@/lib/constants/time";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 /**
  * Either the global `prisma` client or an interactive transaction client.
@@ -124,7 +125,7 @@ function registerShutdown(pool: pg.Pool): void {
       await pool.end();
       log.info("pool.shutdown.complete");
     } catch (err) {
-      log.error({ err }, "pool.shutdown.error");
+      log.error({ error: errorLogFields(err) }, "pool.shutdown.error");
     }
   };
   detachPreviousShutdown?.();

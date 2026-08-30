@@ -44,6 +44,7 @@ import {
 } from "@/lib/notification/notification-messages";
 import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 const rateLimiter = createRateLimiter({
   windowMs: RATE_WINDOW_MS,
@@ -86,7 +87,7 @@ async function notifyOtherAdmins(
     });
   } catch (err) {
     getLogger().warn(
-      { tenantId, err: err instanceof Error ? err.message : String(err) },
+      { tenantId, error: errorLogFields(err) },
       "master-key-rotation initiate: recipient enumeration failed",
     );
     return;

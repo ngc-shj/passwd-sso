@@ -184,10 +184,17 @@ describe("prisma shutdown", () => {
     const handler = process.listeners("SIGTERM")[0] as () => Promise<void>;
     await handler();
 
+    // {name, code}, never the caught Error: pino's default `err` serializer
+    // emits message and stack, and a pg error's message carries the role name
+    // and connection target.
     expect(mockError).toHaveBeenCalledWith(
-      { err: endError },
+      { error: { name: "Error", code: "unknown" } },
       "pool.shutdown.error",
     );
+    const [fields] = mockError.mock.calls[0]!;
+    expect(fields).not.toHaveProperty("err");
+    expect(fields.error).not.toHaveProperty("message");
+    expect(fields.error).not.toHaveProperty("stack");
   });
 
   it("calls pool.end() only once when both SIGTERM and SIGINT fire", async () => {

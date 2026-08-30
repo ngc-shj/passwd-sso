@@ -34,6 +34,7 @@ import {
   derivePasskeyState,
   passkeyEnforcementBlocks,
 } from "@/lib/auth/policy/passkey-enforcement";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export interface McpTokenData {
   tokenId: string;
@@ -734,7 +735,7 @@ async function revokeFamilyOutOfBand(
     );
   } catch (err) {
     getLogger().error(
-      { err, familyId, accessTokenId },
+      { error: errorLogFields(err), familyId, accessTokenId },
       "mcp.refresh_token.family_revocation_failed",
     );
   }

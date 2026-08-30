@@ -63,6 +63,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { verifyDpopProof } from "@/lib/auth/dpop/verify";
 import { getJtiCache } from "@/lib/auth/dpop/jti-cache";
 import { canonicalHtu } from "@/lib/auth/dpop/htu-canonical";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -247,7 +248,7 @@ async function handlePOST(req: NextRequest) {
         event: "extension_token_exchange_failure",
         reason: "issue_failed",
         userId: consumed.userId,
-        err,
+        error: errorLogFields(err),
       },
       "extension token exchange failed: issueExtensionToken threw",
     );
