@@ -367,3 +367,88 @@ patterns, or acceptance criteria.
 | C6 | Operator contract in alerts.md | pending (M-3, M-9, m-3, m-5, m-7) |
 | C7 | Tests | pending (M-14, M-15, M-16, M-17) |
 | C8 | *(new)* Pre-auth sentinel-actor audit sites | pending (C-2) |
+
+---
+
+# Round 2 — and the decision to discard this design
+
+Date: 2026-08-31
+
+Two of three experts returned (Functionality: 12 findings, 3 Critical;
+Testing: 16 findings, 1 Critical, 12 Major). The Security round was stopped
+mid-run once the decision below was taken — it was reviewing a design being
+discarded, and its remaining budget bought nothing.
+
+## The finding that matters is the SHAPE, not the count
+
+Every round-2 Critical landed **inside a round-1 fix**:
+
+| Round-2 Critical | Round-1 fix that produced it |
+|---|---|
+| FN-F-01 / TE-11 | M-6's fix (add `writeDirectAuditLogBestEffort` as a fifth member) collides with M-2's fix (deny `passwd_outbox_worker` every privilege). The worker cannot import `@/lib/audit/audit` — the app Prisma singleton throws at module load with `DATABASE_URL` unset, documented at `sweep.ts:102-110` and `audit-outbox-worker.ts:29-33` — and it is denied the INSERT. The member is named and nothing is closed for it. |
+| FN-F-02 | C2's fix moved the grants into the migration (M-1) with `REVOKE ALL … FROM passwd_app` unguarded. `ci-integration.yml:120` and `ci.yml:567` run `prisma migrate deploy` **before** the role exists (`:158-163`, and the E2E job never creates it). `42704` aborts the `BEGIN/COMMIT` migration, so the table is never created and two CI jobs fail. All four sibling migrations guard it. |
+| FN-F-03 | C5's fix (`ExpiryEntry.retentionDays`) reinstates C-1's tautology: the value is `envInt("OUTBOX_FAILED_RETENTION_DAYS", 90)` with `min = 0`, `0` is admissible **and falsy**, the branch is a truthiness test, and `validateRegistry` has no rule for the field. `OUTBOX_FAILED_RETENTION_DAYS=0` renders `created_at < now()` again. |
+| FN-F-04 / TE-23 | C8's fix relocates unauthenticated-request records from a 90-day table to `audit_logs` under `SYSTEM_TENANT_ID`, whose `audit_log_retention_days` is NULL (`20260428170853:40-48`) and which `sweepAuditLogs` skips (`sweep.ts:368-371`). Requirement 7 is met for the new table by moving the growth somewhere unbounded. |
+
+Two experts reached FN-F-01/TE-11 and FN-F-04/TE-23 independently.
+
+## Why this is a scope signal, not slow convergence
+
+`feedback_rounds_that_seed_their_own_defects_mean_wrong_scope` describes exactly
+this, and its recorded case is **this work's predecessor**:
+`fix/audit-dead-letter-bound`, local-only, agreed-discarded after four rounds
+still carrying 1 Critical and 2 Major.
+
+The non-convergent shape here is the same one that rule names: the design treats
+"an audit event whose tenant does not resolve" as an exceptional failure and
+builds it a new home. Each element of that home opens the next — a table needs
+RLS, RLS needs grants, grants need the role bootstrap, the bootstrap needs CI
+ordering, retention needs a shared worker type, the shared type needs a
+validator, the column name collides with a parity assertion, denying `SELECT`
+forces the write shape, and the fifth class member turns out to live in a process
+that cannot reach any of it.
+
+## The convergent direction
+
+Not a new home — **remove the state**. `resolveTenantId`
+(`src/lib/audit/audit.ts:168-192`) returns `null` on three paths (team miss, user
+miss, non-UUID `userId`), and that `null` is the sole cause of the enqueue-less
+return at `:283` / `:368`. Falling back to `SYSTEM_TENANT_ID` makes the branch
+unreachable and the event lands in the existing outbox, which already has RLS,
+grants, a retention entry, a worker and an anchor lineage.
+
+Verified before proposing it: the sentinel `tenants` row exists with zero
+memberships, so no tenant can read it (`20260428170853:35-48`);
+`SYSTEM_TENANT_ID` already carries `audit_logs` rows from the anchor publisher
+(`audit-anchor-publisher.ts:118,197`) and the retention GC (`sweep.ts:752`).
+
+What that removes: the table, the RLS policy, the grants, the denylist entries,
+the bootstrap change, the `ExpiryEntry` change, the new gate, the column-parity
+dodge, the `createMany`-everywhere cascade, and C8 — which is subsumed rather
+than fixed.
+
+What it does **not** close, stated rather than elided: the two `catch`-arm
+emissions (`audit.ts:292`, `:379`). If the enqueue itself failed, no durable
+write is available; the log line remains the only record, as today. That residue
+is narrow and honest, where the discarded design's residue was a growing set of
+new mechanisms.
+
+What it still owes: `audit_log_retention_days` on the sentinel tenant
+(FN-F-04 / TE-23 applies to both designs), and the anchor-chain interaction a
+retention purge causes (`registry.ts:490-494` cites
+`docs/security/audit-chain-threat-model.md#retention-purge-interaction`).
+
+The objection the user weighed and accepted: routing every unresolvable-tenant
+event to `__system__` means a tenant's own audit view will not show it. The
+`userId` is preserved on the row, so the information is not lost — but it is not
+where a tenant would look for it.
+
+## Disposition
+
+This design is discarded, not iterated. Round 3 was not run. The plan file is
+replaced by the cause-side design; this artifact is kept in full because the
+36 + 28 findings are the evidence for why the smaller design is the right one,
+and re-deriving them would cost three more parallel reviews.
+
+Contracts C1-C9 of the discarded design are void. Nothing from it is
+cherry-picked: the replacement is written fresh.

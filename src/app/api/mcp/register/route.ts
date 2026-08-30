@@ -20,7 +20,7 @@ import {
   DCR_RATE_LIMIT_MAX,
   LOOPBACK_REDIRECT_RE,
 } from "@/lib/constants/auth/mcp";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 
@@ -186,12 +186,18 @@ async function handlePOST(req: NextRequest) {
     throw err;
   }
 
-  // Audit log — system-level, no tenant or user context
+  // Audit log — system-level, no tenant or user context. This is a pre-auth
+  // endpoint, and no `users` row exists for the sentinel actor, so the tenant is
+  // stated rather than resolved: SYSTEM_TENANT_ID is the encoding of "no owning
+  // tenant" (see resolveTenantId), and naming it here keeps a deliberate
+  // system-scoped emission distinguishable from one that merely failed to
+  // resolve. It also skips a DB round trip on an unauthenticated path.
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MCP_CLIENT_DCR_REGISTER,
     userId: SYSTEM_ACTOR_ID,
     actorType: ACTOR_TYPE.SYSTEM,
+    tenantId: SYSTEM_TENANT_ID,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: client.id,
     metadata: { client_name: body.client_name, clientId: client.clientId },

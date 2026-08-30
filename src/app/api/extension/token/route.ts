@@ -16,7 +16,7 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { ANONYMOUS_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 function internalError() {
   return errorResponse(API_ERROR.INTERNAL_ERROR);
@@ -45,7 +45,9 @@ async function handlePOST(req: NextRequest) {
     limiter: legacyDeprecatedLimiter,
     // Bound IP-less traffic too (M2): this endpoint is 410-always so there is no
     // legitimate traffic to protect, and fail-open would let IP-less requests
-    // amplify dead-letter audit writes + warn logs without limit.
+    // amplify audit writes + warn logs without limit. Since the emission below
+    // enqueues under SYSTEM_TENANT_ID rather than dead-lettering, this limiter
+    // is now the only bound on rows that reach audit_logs from a pre-auth path.
     boundUnknownIp: true,
   });
   const blocked = await checkRateLimitOrFail({
@@ -56,18 +58,23 @@ async function handlePOST(req: NextRequest) {
   });
   if (blocked) return blocked;
 
-  // 2. Anonymous audit emission — fire-and-forget; goes to dead-letter
-  // because no tenantId is resolvable (handler intentionally skips auth()).
+  // 2. Anonymous audit emission. The handler intentionally skips auth(), so no
+  // tenant is resolvable from the request — and no `users` row exists for the
+  // sentinel actor, so a lookup would find nothing either. `SYSTEM_TENANT_ID` is
+  // stated here rather than left to resolveTenantId's encoding of the same fact:
+  // it is the difference between a deliberate system-scoped emission and an
+  // accident, and it skips a DB round trip on a pre-auth path.
   await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED,
     userId: ANONYMOUS_ACTOR_ID,
     actorType: ACTOR_TYPE.ANONYMOUS,
+    tenantId: SYSTEM_TENANT_ID,
     ip,
     userAgent: req.headers.get("user-agent"),
   });
 
-  // 3. Structured warn — primary observability surface (dead-letter for audit row).
+  // 3. Structured warn — the human-readable surface beside the audit row.
   logger.warn(
     { event: "extension_token_legacy_issuance_blocked", ip },
     "legacy extension token issuance attempted — endpoint is gone",

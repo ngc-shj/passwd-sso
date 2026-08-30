@@ -71,6 +71,9 @@ import {
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx } from "@/lib/audit/audit-outbox";
+// From the REAL module, not re-typed: an expectation that spells the sentinel
+// itself agrees with the test rather than with production.
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { prisma } from "@/lib/prisma";
 
 const TENANT_A = "550e8400-e29b-41d4-a716-446655440000";
@@ -319,21 +322,60 @@ describe("logAuditAsync", () => {
       userId: "not-a-uuid",
     });
     expect(mockedFindUser).not.toHaveBeenCalled();
-    expect(mockedEnqueue).not.toHaveBeenCalled();
-    expect(deadLetterWarnSpy).toHaveBeenCalledOnce();
+    // The DB is still not queried — that is what this case is about — but the
+    // entry is no longer dropped: a sentinel actor has no users row by
+    // construction, so SYSTEM_TENANT_ID is the answer without a lookup.
+    expect(mockedEnqueue).toHaveBeenCalledOnce();
+    expect(mockedEnqueue.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(deadLetterWarnSpy).not.toHaveBeenCalled();
   });
 
-  it("dead-letters when tenant cannot be resolved", async () => {
+  it("records an unresolvable tenant under SYSTEM_TENANT_ID instead of dropping it", async () => {
+    // This replaces "dead-letters when tenant cannot be resolved". That branch
+    // returned WITHOUT enqueuing, so the log line was the only record — and the
+    // shipped forwarder excludes it. `__system__` is the encoding of "no owning
+    // tenant" in a NOT NULL column, not a fallback to somebody else's tenant.
     mockedFindUser.mockResolvedValue(null);
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
       userId: USER_A,
     });
-    expect(mockedEnqueue).not.toHaveBeenCalled();
-    expect(deadLetterWarnSpy).toHaveBeenCalledOnce();
-    const entry = deadLetterWarnSpy.mock.calls[0][0];
-    expect(entry.reason).toBe("tenant_not_found");
+    expect(mockedEnqueue).toHaveBeenCalledOnce();
+    expect(mockedEnqueue.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(deadLetterWarnSpy).not.toHaveBeenCalled();
+  });
+
+  it("records an unresolvable TEAM under SYSTEM_TENANT_ID", async () => {
+    // The team branch resolves first and is a distinct path through
+    // resolveTenantId; the user-miss case above does not cover it.
+    mockedFindTeam.mockResolvedValue(null);
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.TEAM,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: USER_A,
+      teamId: "11111111-1111-4111-8111-111111111111",
+    });
+    expect(mockedFindUser).not.toHaveBeenCalled();
+    expect(mockedEnqueue).toHaveBeenCalledOnce();
+    expect(mockedEnqueue.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(deadLetterWarnSpy).not.toHaveBeenCalled();
+  });
+
+  it("still binds a RESOLVABLE tenant to its own id, not to SYSTEM_TENANT_ID", async () => {
+    // The allow side. Without it, a fallback that fires unconditionally passes
+    // every case above.
+    mockedFindUser.mockResolvedValue({
+      tenantId: TENANT_A,
+    } as unknown as Awaited<ReturnType<typeof mockedFindUser>>);
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: USER_A,
+    });
+    expect(mockedEnqueue).toHaveBeenCalledOnce();
+    expect(mockedEnqueue.mock.calls[0][0]).toBe(TENANT_A);
+    expect(mockedEnqueue.mock.calls[0][0]).not.toBe(SYSTEM_TENANT_ID);
   });
 
   it("never throws when enqueueAudit fails (caller-fail-safe)", async () => {
@@ -470,14 +512,18 @@ describe("logAuditBulkAsync", () => {
     expect(payloads).toHaveLength(2);
   });
 
-  it("dead-letters every entry when tenant resolution fails", async () => {
+  it("records every entry under SYSTEM_TENANT_ID when tenant resolution finds none", async () => {
+    // Replaces "dead-letters every entry when tenant resolution fails": the
+    // bulk path had the same enqueue-less return, once per entry.
     mockedFindUser.mockResolvedValue(null);
     await logAuditBulkAsync([
       { scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: USER_A },
       { scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: USER_A },
     ]);
-    expect(mockedEnqueueBulk).not.toHaveBeenCalled();
-    expect(deadLetterWarnSpy).toHaveBeenCalledTimes(2);
+    expect(mockedEnqueueBulk).toHaveBeenCalledOnce();
+    expect(mockedEnqueueBulk.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(mockedEnqueueBulk.mock.calls[0][1]).toHaveLength(2);
+    expect(deadLetterWarnSpy).not.toHaveBeenCalled();
   });
 
   it("dead-letters every entry when enqueueAuditBulk fails", async () => {

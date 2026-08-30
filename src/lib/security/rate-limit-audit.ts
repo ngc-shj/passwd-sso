@@ -8,10 +8,17 @@
  * itself never throws (errors swallowed internally).
  *
  * For pre-auth routes where neither `userId` nor a resolvable `tenantId` is
- * available, this helper skips the audit emission entirely (would otherwise
- * dead-letter at `logAuditAsync` resolveTenantId step) and emits a single
+ * available, this helper skips the audit emission entirely and emits a single
  * throttled warn log instead. Operators monitor the warn log channel for
  * pre-auth fail-closed events.
+ *
+ * The original reason for skipping was that the emit would dead-letter and
+ * write nothing. That is no longer so — `resolveTenantId` records the
+ * unattributable case under SYSTEM_TENANT_ID — so the skip now rests only on
+ * volume: this fires on rate-limit refusal, the highest-frequency pre-auth
+ * event there is, and the throttled warn is the intended surface. Emitting
+ * instead is a deliberate widening of what reaches audit_logs from
+ * unauthenticated traffic, not a repair; it is left alone here.
  *
  * scope arg MUST match a restrictive regex to prevent log-injection and
  * throttle-key bypass via newline / tab / control-char injection.

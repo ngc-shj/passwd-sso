@@ -73,7 +73,7 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
 
 // Re-export from constants for backward compatibility
 export { OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit/audit";
-import { UUID_RE } from "@/lib/constants/app";
+import { UUID_RE, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 export interface AuditLogParams {
   scope: AuditScope;
@@ -162,10 +162,43 @@ export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
 // ─── Tenant resolution helper ───────���────────────────────────────
 
 /**
- * Resolve tenantId for a single entry that doesn't have one.
- * Falls back to user or team lookup.
+ * Resolve the tenant an entry is recorded under. Never null.
+ *
+ * `audit_logs.tenant_id` and `audit_outbox.tenant_id` are NOT NULL, so "no
+ * owning tenant" needs an ENCODING, and `SYSTEM_TENANT_ID` is this tree's. It is
+ * not a tenant anyone occupies: the row is created with zero `tenant_members`
+ * (20260428170853_add_dcr_cleanup_worker_role_and_system_tenant), and
+ * /api/tenant/audit-logs scopes by membership, so nothing routes these rows into
+ * another tenant's view. The anchor publisher and the retention GC heartbeat
+ * already write under it for the same reason.
+ *
+ * This used to return null, and the two callers returned WITHOUT enqueuing —
+ * no audit_outbox row, no audit_logs row, one dead-letter log line that the
+ * shipped forwarder excludes (infra/fluent-bit/fluent-bit.conf) and the 20m x 5
+ * container cap can push out. Two places in the tree recorded that as the honest
+ * position on the grounds that "the synchronous structured log line is the
+ * durable record"; the premise was false, which is what the KNOWN GAP below was.
+ * What that position correctly protects — a denial must not surface in an
+ * unrelated tenant's audit log — is preserved, because `__system__` is not one.
+ *
+ * Attribution stays honest in the row: `userId`, `actorType` and `teamId` say
+ * who acted and against what, and `__system__` says no tenant owns it. Today the
+ * event says nothing, because it does not exist.
+ *
+ * The return type is narrowed rather than the call sites gaining `?? SYSTEM_…`:
+ * two call sites is two places to forget, and narrowing makes the compiler
+ * delete the branch instead.
+ *
+ * NOT closed by this: the two `catch` arms below (`logAuditAsync_failed`,
+ * `logAuditBulkAsync_failed`) and `writeDirectAuditLogBestEffort` in the outbox
+ * worker. All three require the database to be unavailable, which is the one
+ * condition under which no durable write can succeed by any design.
+ * TODO(audit-dead-letter-durability): the three database-unreachable
+ * dead-letter sites remain log-only.
+ * TODO(audit-dead-letter-durability): decide __system__ audit_logs retention
+ * against the chain-verify false-TAMPER interaction (docs/operations/alerts.md).
  */
-async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
+async function resolveTenantId(params: AuditLogParams): Promise<string> {
   if (params.tenantId) return params.tenantId;
 
   return withBypassRls(prisma, async (tx) => {
@@ -174,7 +207,7 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
         where: { id: params.teamId },
         select: { tenantId: true },
       });
-      return team?.tenantId ?? null;
+      return team?.tenantId ?? SYSTEM_TENANT_ID;
     }
 
     // Defense-in-depth: userId is typed as string, but sentinel UUIDs and
@@ -184,10 +217,11 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
         where: { id: params.userId },
         select: { tenantId: true },
       });
-      return user?.tenantId ?? null;
+      return user?.tenantId ?? SYSTEM_TENANT_ID;
     }
 
-    return null;
+    // A non-UUID userId is a sentinel actor; no users row exists for one.
+    return SYSTEM_TENANT_ID;
   }, BYPASS_PURPOSE.AUDIT_WRITE);
 }
 
@@ -266,27 +300,12 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
 
   // All errors caught (MF2: never throws)
   try {
+    // No `if (!tenantId)` branch: resolveTenantId never returns null, so every
+    // entry reaches the outbox. The KNOWN GAP that used to sit here — return
+    // WITHOUT enqueuing, leaving one log line the shipped forwarder excludes as
+    // the sole record — is closed by encoding "no owning tenant" rather than by
+    // giving the unenqueued record a new home. See resolveTenantId's docblock.
     const tenantId = await resolveTenantId(params);
-    if (!tenantId) {
-      // KNOWN GAP (open security risk, see docs/operations/alerts.md):
-      // this returns WITHOUT enqueuing, so the line below is the only record
-      // that the audit event ever existed — no audit_outbox row, no audit_logs
-      // row. And the shipped forwarder does not carry it: fluent-bit.conf
-      // excludes `_logType ^audit-dead-letter$` by default, because the record
-      // carries whatever the failing caller passed, including error text.
-      // Container logs are capped (20m x 5), so ordinary logging can push the
-      // record out of the window.
-      //
-      // If you change this branch, the fix is to persist the dead letter
-      // durably rather than to widen the log — alerting should not depend on
-      // log retention.
-      deadLetterLogger.warn(
-        deadLetterEntry(params, "tenant_not_found"),
-        "audit.dead_letter",
-      );
-      return;
-    }
-
     await enqueueAudit(tenantId, payload);
   } catch (err) {
     deadLetterLogger.warn(
@@ -358,20 +377,9 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
   }
 
   try {
-    // Resolve tenantId once; assume all entries share it.
+    // Resolve tenantId once; assume all entries share it. Never null — see
+    // resolveTenantId's docblock for why the enqueue-less branch is gone.
     const tenantId = await resolveTenantId(paramsList[0]);
-    if (!tenantId) {
-      // Same known gap as logAuditAsync above, once per entry: nothing is
-      // enqueued, so these lines are the only record. See the comment there and
-      // docs/operations/alerts.md.
-      for (const params of paramsList) {
-        deadLetterLogger.warn(
-          deadLetterEntry(params, "tenant_not_found"),
-          "audit.dead_letter",
-        );
-      }
-      return;
-    }
     const payloads = paramsList.map((params) => buildOutboxPayload(params));
     await enqueueAuditBulk(tenantId, payloads);
   } catch (err) {

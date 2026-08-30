@@ -289,15 +289,24 @@ export function createCustomAdapter(): Adapter {
             //
             // Observability differs by arm, and the difference is inherent
             // rather than an oversight (round-3 S3-4). `claim_taken` and
-            // `claim_collision` carry the owning tenant, so their emit binds
-            // and lands in audit_logs/audit_outbox. `claim_invalid` has no
-            // owning tenant by construction — an unstorable claim belongs to
-            // nobody — and a first-ever sign-in has no user row either, so
-            // resolveTenantId finds nothing and logAuditAsync DEAD-LETTERS it:
-            // the synchronous structured log line is the durable record. There
-            // is nothing to bind it to; stating that is the honest position,
-            // and inventing a binding would file the denial under a tenant
-            // that has nothing to do with it.
+            // `claim_collision` carry the owning tenant, so their emit binds to
+            // it. `claim_invalid` has no owning tenant by construction — an
+            // unstorable claim belongs to nobody — and a first-ever sign-in has
+            // no user row either, so resolveTenantId finds none.
+            //
+            // It no longer dead-letters. This comment used to say the
+            // synchronous log line was that arm's durable record; it was not —
+            // the shipped forwarder excludes `audit-dead-letter` and the
+            // container cap can push it out, which is what audit.ts's KNOWN GAP
+            // recorded. resolveTenantId now returns SYSTEM_TENANT_ID for the
+            // unattributable case, so the row lands in audit_logs like the other
+            // two arms.
+            //
+            // What that older wording correctly protected still holds: a denial
+            // must not surface in an unrelated tenant's audit log. `__system__`
+            // is not one — zero tenant_members, and /api/tenant/audit-logs
+            // scopes by membership — so this binds the row to "no owning
+            // tenant" rather than to a tenant that has nothing to do with it.
             throw new TenantClaimUnusableError(
               resolution.kind,
               resolution.tenantId,
