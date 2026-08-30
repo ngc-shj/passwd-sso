@@ -102,8 +102,17 @@ export const deadLetterLogger = pino({
     _logType: "audit-dead-letter",
     _app: DEFAULT_APP_NAME,
   },
-  // No redact paths needed — deadLetterEntry() in audit.ts emits only
-  // { scope, action, userId, tenantId, reason, error }, never raw metadata.
+  // No redact paths needed — but the reason is that every field deadLetterEntry()
+  // emits is BOUNDED, not merely that they can be enumerated. The enumeration
+  // was already correct while `error` held `String(err)`: a pg error's message
+  // names the DB role and host, a Prisma error's carries the failing query with
+  // its bound parameters, and pino's key-name redaction never reaches inside a
+  // message. `error` is now ErrorLogFields — a token-shaped { name, code } —
+  // which is what lets this logger ship without redact paths.
+  //
+  // Adding a free-text field here re-opens that hole silently. Reduce it at the
+  // call site (errorLogFields) rather than adding a redact path, because a path
+  // matches a key and the leak lives in the value.
   formatters: {
     level(label: string) {
       return { level: label };

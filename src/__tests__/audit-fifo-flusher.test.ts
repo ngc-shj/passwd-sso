@@ -238,7 +238,10 @@ describe("logAuditAsync", () => {
     expect(mockDeadLetterWarn).toHaveBeenCalledWith(
       expect.objectContaining({
         reason: "logAuditAsync_failed",
-        error: expect.stringContaining("outbox write failed"),
+        // Bounded fields, not the message — deadLetterLogger ships without
+        // redact paths, and pino's key-name redaction never reaches inside a
+        // message anyway.
+        error: { name: "Error", code: "unknown" },
       }),
       "audit.dead_letter",
     );

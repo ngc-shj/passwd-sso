@@ -106,6 +106,20 @@ describe("check-caught-error-logging", () => {
       "one field reduced and another leaked",
       `try {} catch (err) { log.error({ a: errorLogFields(err), b: err.message }, "m"); }`,
     ],
+    [
+      // The field object need not be written at the call site. This is the
+      // audit dead-letter shape: deadLetterEntry() builds the object and the
+      // caught value rides in as one of its arguments.
+      "a field object built by a helper call",
+      `declare const mk: (a: string, b: string) => object;
+       try {} catch (err) { log.warn(mk("reason", String(err)), "m"); }`,
+    ],
+    [
+      // The anchor-publisher entrypoint's shape: an inline object, but wrapped
+      // in JSON.stringify so the argument is a call, not a literal.
+      "an object wrapped in JSON.stringify",
+      `try {} catch (err) { log.error(JSON.stringify({ code: err.message }), "m"); }`,
+    ],
   ])("FAILS %s", (_label, body) => {
     const r = runGate(`${LOG}export function f() { ${body} }`);
     expect(r.refused).toBe(false);
@@ -138,6 +152,20 @@ describe("check-caught-error-logging", () => {
     [
       "a logger call whose fields hold no catch binding",
       `try {} catch (err) { log.error({ id: 1 }, "m"); }`,
+    ],
+    [
+      "a builder call whose caught argument is already reduced",
+      `declare const mk: (a: string, b: object) => object;
+       try {} catch (err) { log.warn(mk("reason", errorLogFields(err)), "m"); }`,
+    ],
+    [
+      // A bare identifier argument is deliberately outside the gate's reach:
+      // the only occurrence in this tree is a ReadableStream controller
+      // propagating the error to its consumer, and telling that from a logger
+      // needs a type checker the gate runs without. Pinned so a future widening
+      // is a deliberate act with this case in front of it.
+      "a bare identifier argument (documented MISSED, not a silent gap)",
+      `try {} catch (err) { log.error(err); }`,
     ],
   ])("PASSES %s", (_label, body) => {
     const r = runGate(
