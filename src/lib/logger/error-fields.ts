@@ -34,30 +34,50 @@ function asToken(value: unknown): string | null {
  * shared with `sqlStateOf` in the db-integration helpers. Two readings of one
  * predicate drift, and the one that drifts is the one nobody is looking at.
  */
+function readCode(error: unknown): string {
+  if (typeof error !== "object" || error === null) return "unknown";
+  const e = error as { code?: unknown; cause?: { code?: unknown } };
+
+  // Order is load-bearing, and each step covers what the next cannot:
+  //   1. the nested driver SQLSTATE — a Prisma raw-query failure arrives as
+  //      P2010 with the real fault underneath, so the top level would report
+  //      "raw query failed" for 42501, 23503 and 55P03 alike;
+  //   2. the top-level code — Prisma's own non-raw codes (P2028) and a direct
+  //      Node errno, neither of which pgErrorCode claims;
+  //   3. ONE level of `cause.code` — undici puts the errno there and leaves the
+  //      top level empty, so `fetch failed` reduced to `{TypeError, unknown}`
+  //      for every network fault. That is the anchor-publisher's commonest
+  //      failure (destination unreachable), and it is the shape
+  //      docs/operations/alerts.md promises an errno for.
+  // Exactly one level: a cause chain can be cyclic, and a walk is not needed to
+  // reach what Node actually sets.
+  return (
+    asToken(pgErrorCode(error)) ??
+    asToken(e.code) ??
+    asToken(e.cause?.code) ??
+    "unknown"
+  );
+}
+
 export function errorLogFields(error: unknown): ErrorLogFields {
+  // Two independent try blocks, not one. A single block let a throwing `name`
+  // getter abort before `code` was computed, so a hostile value could suppress
+  // the very SQLSTATE this helper exists to surface by throwing from an
+  // unrelated accessor. Each field now degrades on its own.
   let name = "unknown";
-  let code = "unknown";
-
   try {
-    if (error instanceof Error) {
-      name = asToken(error.name) ?? "unknown";
-    }
-
-    // Nested driver SQLSTATE first, then the top-level code — which covers a
-    // plain Node errno (ENOTFOUND, ECONNREFUSED) and Prisma's own non-raw codes
-    // (P2028), neither of which pgErrorCode claims.
-    code =
-      asToken(pgErrorCode(error)) ??
-      asToken(
-        typeof error === "object" && error !== null
-          ? (error as { code?: unknown }).code
-          : undefined,
-      ) ??
-      "unknown";
+    if (error instanceof Error) name = asToken(error.name) ?? "unknown";
   } catch {
-    // A caught value may expose throwing name/code getters, and pgErrorCode
-    // walks `meta`/`cause` which may do the same. Logging the failure must
-    // never replace the original control flow with a second exception.
+    // A caught value may expose a throwing `name` getter.
+  }
+
+  let code = "unknown";
+  try {
+    code = readCode(error);
+  } catch {
+    // pgErrorCode walks `meta` and `cause`, either of which may throw. Logging
+    // the failure must never replace the original control flow with a second
+    // exception.
   }
 
   return { name, code };

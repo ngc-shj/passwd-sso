@@ -84,3 +84,58 @@ describe("errorLogFields — driver SQLSTATE", () => {
       .toEqual({ name: "unknown", code: "unknown" });
   });
 });
+
+describe("errorLogFields — cause and independent degradation", () => {
+  const E = (o: object, m = "boom") => Object.assign(new Error(m), o);
+
+  it("reads a nested cause.code errno", () => {
+    // undici puts the errno on `cause` and leaves the top level empty, so
+    // `fetch failed` reduced to `{TypeError, unknown}` for every network fault.
+    // That is the anchor-publisher's commonest failure — destination
+    // unreachable — and the shape alerts.md promises an errno for.
+    const undici = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+    });
+    expect(errorLogFields(undici)).toEqual({ name: "TypeError", code: "ECONNREFUSED" });
+  });
+
+  it("prefers the top-level code over cause.code", () => {
+    // The tie: Prisma's own code is the fault when it has one, and a cause
+    // underneath it is transport detail. Boundary stated so the next reader
+    // does not reorder the chain.
+    expect(errorLogFields(E({ code: "P2028", cause: { code: "ENOTFOUND" } })).code)
+      .toBe("P2028");
+  });
+
+  it("terminates on a self-referential cause chain", () => {
+    // Exactly one level is read, so a cycle cannot hang the walk. A gate or a
+    // logger that hangs reports nothing at all.
+    const cyclic: { code?: string; cause?: unknown } = { code: undefined };
+    cyclic.cause = cyclic;
+    expect(errorLogFields(cyclic).code).toBe("unknown");
+  });
+
+  it("still resolves the code when the name getter throws", () => {
+    // One try block over both reads let a hostile value suppress the SQLSTATE
+    // this helper exists to surface by throwing from an unrelated accessor.
+    const hostile = new Proxy(E({ code: "22P02" }), {
+      get(t, p) {
+        if (p === "name") throw new Error("boom");
+        return Reflect.get(t, p);
+      },
+    });
+    expect(errorLogFields(hostile)).toEqual({ name: "unknown", code: "22P02" });
+  });
+
+  it("still resolves the name when the code path throws", () => {
+    // The mirror of the case above — neither field may depend on the other.
+    // defineProperty, not Object.assign: assigning a getter INVOKES it, so the
+    // fixture would throw during setup and test nothing.
+    const hostile = new Error("x");
+    Object.defineProperty(hostile, "code", {
+      get() { throw new Error("boom"); },
+      enumerable: true,
+    });
+    expect(errorLogFields(hostile)).toEqual({ name: "Error", code: "unknown" });
+  });
+});
