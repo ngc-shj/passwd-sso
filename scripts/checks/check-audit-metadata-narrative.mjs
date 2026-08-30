@@ -38,7 +38,7 @@
  * outside SEARCH_DIRS.
  *
  * Measured against the tree at f5dacefb3^ (before #805 reduced them) and against
- * the tree after, with the SAME 1042 files and 315 catch clauses scanned either
+ * the tree after, with the SAME 1040 files and 315 catch clauses scanned either
  * way — so the difference is the rule and not the scope:
  *   CAUGHT   the two #805 sites, and nothing else: rotate-master-key/execute's
  *            `shareRevocationError` (assigned in the catch, persisted 30 lines

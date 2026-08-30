@@ -452,3 +452,60 @@ and re-deriving them would cost three more parallel reviews.
 
 Contracts C1-C9 of the discarded design are void. Nothing from it is
 cherry-picked: the replacement is written fresh.
+
+---
+
+# Phase 3 — code review of the branch, and what it changed
+
+Date: 2026-08-31. Three experts over `git diff main...HEAD`.
+Functionality: 12 findings (1 Critical). Security: 8 (0 Critical) — it traced
+every read surface and confirmed the access boundary holds. Testing: 11.
+
+Two experts reached the Critical independently.
+
+## Acted on in `9f532706e` and the follow-up
+
+| Finding | What it was |
+|---|---|
+| **FN-M2** | The regression. `resolveTenantId` returning null also held `audit-outbox-worker.ts:1959-1970`'s invariant (a payload failing `UUID_RE` must not enter the outbox). Encoding "no owning tenant" removed that side effect without replacing it, so a malformed `userId` would have enqueued a poison row that retries to `max_attempts` and dead-letters — worse than the warn line it replaced. Now rejected at the caller under its own reason, `invalid_user_id`, because it is a different fault: the tenant is unknowable in the unattributable case; here the caller is wrong. |
+| **FN-M1** | The comment that hid it: "a non-UUID userId is a sentinel actor". Sentinels ARE UUIDs, and the guard ten lines above in the same function says so. |
+| **FN-C1 / SE-S1** | `/api/extension/bridge-code` is a third pre-auth emitter, and its emit sits on the rate limiter's REFUSAL arm — the limiter refuses the response, not the emit, so past the limit each request cost a durable row under a tenant with no retention and no application-reachable delete path. Removed from that arm only; the other three pre-auth arms run only after the limiter allowed the request. |
+| **FN-M4 / SE-S2** | The `alerts.md` replacement query filtered `actor_type <> 'SYSTEM'` on a premise that four of the five emitters break. `ip` does not separate them either — the retention GC forwards `last_used_ip`. Now groups by action and names the routine ones, which needs no maintained predicate. |
+| **FN-C2 / SE-S5** (partial) | Three comment blocks that contradicted their own files: `auth-adapter.ts:56-64` vs `:297`, `tenant-management.ts:281` vs `:362`, and `bridge-code-failure.ts`'s docblock. |
+| **TE-T1** | The gate's three `fail()`-routed refusals asserted stderr only. Red-proved by the reviewer: `fail()` exiting 0 leaves the message byte-identical and all three green, while `queue_step` — which reads only the exit code — reports PASS. Exit status now asserted. |
+| **TE-T9** | The pre-pr wiring assertion was open-ended, so `… .mjs \|\| true` and `--warn-only` satisfied it. Anchored at both ends. |
+| **FN-m3** | Gate header said 1042 files; measured 1040 on both trees, and the commit message said 1040. |
+
+## Open, with the reason each is open
+
+Recorded here rather than implied. Every one is grounded in a named file:line by
+the reviewer who filed it.
+
+**Test coverage** — the branch's weakest axis, and the findings are correct:
+- **TE-T2** `tenantId: SYSTEM_TENANT_ID` at both pre-auth sites is asserted by nothing. `objectContaining` ignores extra keys and `AuditLogParams.tenantId` is optional, so deleting it compiles and leaves three tests green.
+- **TE-T3** A THIRD suite drives `logAuditAsync` (`src/__tests__/audit.mocked.test.ts`); it spreads the real `@/lib/tenant-rls` over a `prisma` mock with no `$transaction`, so every no-`tenantId` case dies as a `TypeError` inside `resolveTenantId` and lands in the catch arm. The "both suites" claim in the previous commit undercounted. (FN-m4 notes the same file never asserted the old branch, so it needed no change — both are true: it needs a mock fix, not a behavioural one.)
+- **TE-T4 / FN-M3** The new integration file proves FK acceptance by proxy: three read-only SELECTs, no `logAuditAsync`, no INSERT. The plan's own acceptance criterion (`plan:158`) asked for the write.
+- **TE-T5** The `audit_log_retention_days IS NULL` pin has no differential. The previous commit claimed its red-proof needs a write to the shared dev database; the reviewer showed that is wrong — `ctx.createTenant()` hands out an isolated tenant swept by `cleanup()` even on the failure path.
+- **TE-T6** Five test comments still carry the pre-change premise.
+- **TE-T7/T8/T10/T11** A stale test name that now states the opposite of its body; the `scanned 0` refusal unreached by any case; `unallocatablePid()`'s Linux path returning without the probe its docblock promises; and a question about the backup-db red-proof's count.
+
+**Design questions, deliberately not decided here:**
+- **SE-S3** Sentinel rows are never purged AND `claimBatch` is a global FIFO, so sentinel volume delays every tenant's audit delivery. Two independent fixes; the retention half is the `TODO(audit-dead-letter-durability)` already in `audit.ts`, and it is entangled with the chain-verify false-TAMPER interaction.
+- **SE-S4** "Zero `tenant_members`" is the load-bearing read-side invariant and nothing enforces it — `scripts/tenant-domain.ts`'s `resolveTenantRef` accepts a bare UUID with no sentinel refusal. Pre-existing, and this change is what makes it worth closing.
+- **SE-S6** If `audit_chain_enabled` is ever set fleet-wide, the sentinel's unbounded chain passes `MAX_ROWS_PER_TENANT` and pins `CHAIN_VERIFY_FAILED`.
+- **SE-S7** The gate anchors on `metadata`; `targetType`/`targetId`/`userAgent` reach the same row unmodelled.
+- **FN-a1** The synchronous audit line logs the SUPPLIED tenant, not the resolved one, so it says `null` where the row says the sentinel. Fixing it means moving the emit after `resolveTenantId`, which changes the documented "synchronous, before outbox write" ordering — a design decision, not a one-liner.
+
+**Remaining stale prose** — re-derived rather than taken from the reviewers'
+lists, which surfaced sites neither named:
+`src/auth.ts:111`, `:227`, `:640`; `auth-adapter.ts:379`;
+`tenant-management.ts:362`; `unsafe-display-chars.ts:81`;
+`auth-failure.ts:173`; `docker-compose.yml:21-22`;
+`infra/fluent-bit/fluent-bit.conf:47`; and `audit.ts`'s Bucket C list (FN-m2),
+which still names `/api/mcp/register` as relying on `resolveTenantId`.
+
+Derivation:
+`grep -rn "dead-letter\|DEAD-LETTER\|without enqueuing\|returns WITHOUT" src docs infra docker-compose.yml`
+
+That the member set grew each time it was re-derived — two sites, then five,
+then ten — is the finding, not the count.

@@ -272,6 +272,11 @@ export function f() {
     });
     expect(r.refused).toBe(true);
     expect(r.violated).toBe(false);
+    // The exit status is the ONLY channel queue_step reads. Asserting stderr
+    // alone leaves fail() free to exit 0 — measured: the message is
+    // byte-identical either way, so all three fail()-routed cases stayed green
+    // under that mutation while pre-pr reported PASS.
+    expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("recognised 0 catch clauses");
   });
 
@@ -284,12 +289,14 @@ export function f() {
     });
     expect(r.refused).toBe(true);
     expect(r.violated).toBe(false);
+    expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("recognised 0 `metadata` properties");
   });
 
   it("REFUSES when a scan target resolves to no file", () => {
     const r = runGate(null, { dirs: "src/does-not-exist" });
     expect(r.refused).toBe(true);
+    expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("src/does-not-exist");
   });
 
@@ -316,6 +323,6 @@ export function f() {
     // `# DISABLED: queue_step …` does not satisfy it — that is disarming, not
     // deletion, and `toContain` returns true for both.
     const prePr = readFileSync(join(REPO_ROOT, "scripts/pre-pr.sh"), "utf8");
-    expect(prePr).toMatch(/^queue_step .*check-audit-metadata-narrative\.mjs/m);
+    expect(prePr).toMatch(/^queue_step .*check-audit-metadata-narrative\.mjs\s*$/m);
   });
 });
