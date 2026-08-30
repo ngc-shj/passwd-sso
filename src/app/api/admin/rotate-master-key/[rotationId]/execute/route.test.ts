@@ -307,9 +307,16 @@ describe("POST /api/admin/rotate-master-key/[rotationId]/execute", () => {
         metadata: expect.objectContaining({
           rotationId: ROTATION_ID,
           revokedShares: 0,
-          shareRevocationError: expect.stringContaining("transient db error"),
+          // Token, not the message: this metadata is tenant-readable via
+          // /api/tenant/audit-logs, and a Prisma error's message carries the
+          // failing statement with its bound parameters.
+          shareRevocationError: "SHARE_REVOCATION_FAILED:unknown",
         }),
       }),
     );
+    const auditCall = mockLogAudit.mock.calls.find(
+      ([args]) => args.action === "MASTER_KEY_ROTATION_EXECUTE",
+    );
+    expect(JSON.stringify(auditCall)).not.toContain("transient db error");
   });
 });

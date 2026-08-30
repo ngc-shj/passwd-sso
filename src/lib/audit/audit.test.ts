@@ -342,7 +342,25 @@ describe("logAuditAsync", () => {
     expect(deadLetterWarnSpy).toHaveBeenCalledOnce();
     const entry = deadLetterWarnSpy.mock.calls[0][0];
     expect(entry.reason).toBe("logAuditAsync_failed");
-    expect(entry.error).toContain("DB unreachable");
+    expect(entry.error).toEqual({ name: "Error", code: "unknown" });
+  });
+
+  it("dead-letter error field carries the SQLSTATE, not the message", async () => {
+    // deadLetterLogger has no redact paths. What makes that safe is that every
+    // field is bounded — so the message, which is where pg names the DB role
+    // and Prisma names the failing query with its bound parameters, must not
+    // reach it.
+    mockedEnqueue.mockRejectedValue(
+      Object.assign(
+        new Error('permission denied for table audit_outbox; role "passwd_app"'),
+        { code: "P2010", meta: { driverAdapterError: { cause: { code: "42501" } } } },
+      ),
+    );
+    await logAuditAsync(baseParams);
+    const entry = deadLetterWarnSpy.mock.calls[0][0];
+    expect(entry.error).toEqual({ name: "Error", code: "42501" });
+    expect(JSON.stringify(entry)).not.toContain("passwd_app");
+    expect(JSON.stringify(entry)).not.toContain("permission denied");
   });
 
   it("dead-letter payload never includes raw metadata", async () => {

@@ -24,6 +24,7 @@ import {
   createPrismaForRole,
   setBypassRlsGucs,
   raceTwoClients,
+  sqlStateOf,
   type TestContext,
   type PrismaWithPool,
 } from "./helpers";
@@ -33,38 +34,23 @@ import type { AuditOutboxRow, AuditOutboxPayload } from "@/workers/audit-outbox-
 
 /**
  * PG error code 55P03 = lock_not_available (our SET LOCAL lock_timeout).
- * Prisma may surface this as a direct code, a P2010 meta.code, or wrapped
- * in err.cause.code — same detection shape as
- * src/lib/auth/policy/account-lockout.ts's private isLockTimeoutError.
+ *
+ * The unwrap is `sqlStateOf` (= pgErrorCode), the repo's single reading of
+ * which SQLSTATE an error carries. This used to be a hand-rolled copy of the
+ * three shapes account-lockout.ts also copied, and it inherited the same gap:
+ * neither read `meta.driverAdapterError.cause.code`, which is what PrismaPg
+ * actually produces here.
+ *
+ * The message branch is deliberately WIDER than the production predicate and
+ * stays: this is a concurrency test tolerating a lock timeout, so admitting one
+ * spelling too many costs a skipped assertion, while missing one costs a flake.
  */
 function isLockTimeoutError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
+  if (sqlStateOf(err) === "55P03") return true;
   const message = err instanceof Error ? err.message : String(err);
-  if (message.toLowerCase().includes("lock_timeout") || message.toLowerCase().includes("lock timeout")) {
-    return true;
-  }
-  if ("code" in err && (err as { code: string }).code === "55P03") return true;
-  if (
-    "code" in err &&
-    (err as { code: string }).code === "P2010" &&
-    "meta" in err &&
-    err.meta &&
-    typeof err.meta === "object" &&
-    "code" in err.meta &&
-    (err.meta as { code: string }).code === "55P03"
-  ) {
-    return true;
-  }
-  if (
-    "cause" in err &&
-    err.cause &&
-    typeof err.cause === "object" &&
-    "code" in err.cause &&
-    (err.cause as { code: string }).code === "55P03"
-  ) {
-    return true;
-  }
-  return false;
+  const lowered = message.toLowerCase();
+  return lowered.includes("lock_timeout") || lowered.includes("lock timeout");
 }
 
 describe("audit-outbox concurrent same-row delivery (C7/M-c)", () => {

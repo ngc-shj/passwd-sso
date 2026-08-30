@@ -201,7 +201,12 @@ async function handlePOST(
       );
       revokedShares = shareResult.count;
     } catch (err) {
-      shareRevocationError = err instanceof Error ? err.message : String(err);
+      // Token, not the message. This lands in audit_logs.metadata below, which
+      // the tenant reads via /api/tenant/audit-logs — and the throwing call is
+      // a Prisma updateMany, whose message carries the failing statement and
+      // its bound parameters. The line right below already reduces the same
+      // value for the log; the audit record must not be the weaker of the two.
+      shareRevocationError = `SHARE_REVOCATION_FAILED:${errorLogFields(err).code}`;
       getLogger().error(
         {
           rotationId,

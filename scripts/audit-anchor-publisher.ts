@@ -18,6 +18,7 @@ import { GitHubReleaseDestination } from "@/lib/audit/anchor-destinations/github
 import { FilesystemDestination } from "@/lib/audit/anchor-destinations/filesystem-destination";
 import type { AnchorDestination } from "@/lib/audit/anchor-destinations/destination";
 import { derivePublicKey } from "@/lib/audit/anchor-manifest";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_ANCHOR_CADENCE_MS,
   AUDIT_ANCHOR_PUBLISH_OFFSET_MS,
@@ -204,7 +205,12 @@ async function runOnce(): Promise<void> {
       JSON.stringify({
         level: "error",
         msg: "audit-anchor-publisher.cadence_error",
-        code: (err as NodeJS.ErrnoException | undefined)?.code ?? "unknown",
+        // errorLogFields, not a top-level `code` read: a Prisma raw-query
+        // failure carries the driver's SQLSTATE nested underneath a P2010, and
+        // undici puts the errno on `cause`. Reading the top level reported
+        // "P2010" for every SQL fault and "unknown" for every network one —
+        // the two things this line exists to tell apart.
+        error: errorLogFields(err),
       }),
     );
   }

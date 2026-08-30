@@ -303,8 +303,6 @@ export class AuditAnchorPublisher {
               contentType: "application/jose",
             });
           } catch (uploadErr) {
-            const reason = `${dest.name}_UPLOAD_FAILED`;
-            const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
             log.error(
               {
                 destination: dest.name,
@@ -313,7 +311,14 @@ export class AuditAnchorPublisher {
               },
               "audit-anchor-publisher.upload_failed",
             );
-            uploadFailedReason = `${reason}: ${errMsg}`;
+            // Token, not narrative. This value is re-emitted by the outer catch
+            // 50 lines below AND persisted to audit_logs.metadata.failureReason,
+            // where the tenant reads it via /api/tenant/audit-logs — so putting
+            // the message here would undo the reduction two lines above and put
+            // it in a durable, tenant-visible place besides. Which destination
+            // failed and with what code is what diagnosis needs; the `error`
+            // field and `_logType` above carry the rest.
+            uploadFailedReason = `${dest.name}_UPLOAD_FAILED:${errorLogFields(uploadErr).code}`;
             throw new Error(uploadFailedReason);
           }
         }
@@ -365,8 +370,26 @@ export class AuditAnchorPublisher {
 
       return outcome;
     } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      log.error({ reason, _logType: "audit-anchor-publisher.cadence_failed" }, "audit-anchor-publisher.cadence_failed");
+      // This catch covers the WHOLE publish transaction, not just the upload:
+      // the set_config statements, every Prisma read, the previous-manifest
+      // JSON.parse and its Zod parse, and the signing step. So `err.message`
+      // here is a pg connection string, a Prisma query with its bound
+      // parameters, or a parser echoing the input it choked on — and `reason`
+      // is written to audit_logs.metadata.failureReason, which the tenant reads
+      // via /api/tenant/audit-logs. That field's other producers in this file
+      // (DEPLOYMENT_ID_MISMATCH, MISSING_PRIOR_CADENCE_PUBLICATION) are tokens;
+      // this one was the exception.
+      //
+      // `uploadFailedReason` being set means `err` is our own wrapper around a
+      // token that already carries the driver's code, so reducing it a second
+      // time would yield {Error, unknown} and read as a failed extraction. The
+      // original upload error's full { name, code } is on the per-destination
+      // `upload_failed` line above.
+      const reason = uploadFailedReason ?? `CADENCE_FAILED:${errorLogFields(err).code}`;
+      log.error(
+        { reason, _logType: "audit-anchor-publisher.cadence_failed" },
+        "audit-anchor-publisher.cadence_failed",
+      );
 
       // Persist publishPausedUntil in a SEPARATE tx — the publish tx rolled
       // back on throw, so any in-tx pause UPDATE is lost. This closes the

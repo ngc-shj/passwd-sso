@@ -60,6 +60,7 @@ import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/session/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
+import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
 
 /** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -206,8 +207,18 @@ export async function logAuditInTx(
 
 // ─── logAuditAsync ──────────────────────────────────────────────
 
-/** Minimal dead-letter payload — never includes raw metadata. */
-function deadLetterEntry(params: AuditLogParams, reason: string, error?: string) {
+/**
+ * Minimal dead-letter payload — never includes raw metadata.
+ *
+ * `error` is `ErrorLogFields`, not a string. It used to be `String(err)`, which
+ * is `"<name>: <message>"` — and the message is where a pg error puts the DB
+ * role and host, and a Prisma error the failing query with its bound
+ * parameters. deadLetterLogger carries NO redact paths, justified by this
+ * payload being a known small set of fields; that enumeration was accurate
+ * while `error` was unbounded free text, so the conclusion did not follow from
+ * it. Bounding the field is what makes the justification true.
+ */
+function deadLetterEntry(params: AuditLogParams, reason: string, error?: ErrorLogFields) {
   return {
     scope: params.scope,
     action: params.action,
@@ -279,7 +290,7 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
     await enqueueAudit(tenantId, payload);
   } catch (err) {
     deadLetterLogger.warn(
-      deadLetterEntry(params, "logAuditAsync_failed", String(err)),
+      deadLetterEntry(params, "logAuditAsync_failed", errorLogFields(err)),
       "audit.dead_letter",
     );
   }
@@ -366,7 +377,7 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
   } catch (err) {
     for (const params of paramsList) {
       deadLetterLogger.warn(
-        deadLetterEntry(params, "logAuditBulkAsync_failed", String(err)),
+        deadLetterEntry(params, "logAuditBulkAsync_failed", errorLogFields(err)),
         "audit.dead_letter",
       );
     }

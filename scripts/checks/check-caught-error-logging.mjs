@@ -32,17 +32,25 @@
  *            (`catch (e)`); a nested property (`{ ctx: { err } }`); a template
  *            or concatenation embedding the binding (`` `${e.message}` ``); a
  *            member read (`err.message`, `err.stack`); `String(err)`;
- *            a binding logged from a nested function inside the catch block
+ *            a binding logged from a nested function inside the catch block;
+ *            a field object BUILT BY A CALL rather than written at the call
+ *            site (`warn(deadLetterEntry(p, r, String(err)), …)`,
+ *            `console.error(JSON.stringify({ code: err.code }))`)
  *   PASSES   `errorLogFields(err)` in any position; a catch binding used OUTSIDE
  *            a logger call (`throw err`, `recordError(prisma, row, err)`,
  *            `onError(id, err)`, `if (isLockTimeout(err))`); a logger call whose
  *            fields hold no catch binding; a shadowing binding of the same name
  *            declared inside the catch block
  *   MISSED   a logger reached through a parameter or a data structure; a caught
- *            value stored to an outer variable and logged after the block
- *            closes (the anchor-publisher's `uploadFailedReason` shape — caught
- *            by review, not by this gate, and named here so the next reader
- *            knows the boundary)
+ *            value stored to an outer variable and logged (or persisted to
+ *            audit metadata) after the block closes — the anchor-publisher's
+ *            `uploadFailedReason` and the rotate-master-key route's
+ *            `shareRevocationError` were both that shape, found by review, not
+ *            here; a BARE IDENTIFIER argument (`x.error(err)`), deliberately
+ *            not examined because the only occurrence in this tree is
+ *            `controller.error(err)` on a ReadableStream controller, which is
+ *            correct propagation, and telling it from a logger needs a type
+ *            checker this gate runs without.
  *
  * Runs without a Program (in-memory project).
  */
@@ -166,6 +174,32 @@ function offendingProperty(objectLiteral, name) {
   return null;
 }
 
+/**
+ * The argument of `builderCall` that carries `name`, or null.
+ *
+ * A logger's field object does not have to be written at the call site. Both
+ * `deadLetterLogger.warn(deadLetterEntry(params, reason, String(err)), …)` and
+ * `console.error(JSON.stringify({ code: err.code }))` hand a caught value to a
+ * logger through a call that BUILDS the object, and the object-literal rule
+ * above sees an argument of the wrong kind and moves on. Measured: three such
+ * sites, all real, none reported.
+ *
+ * Whether the builder reduces internally is not knowable here and deliberately
+ * not assumed — a builder that is safe today stops being safe when someone adds
+ * a field to it, and nothing would re-check this call. Reduce at the call site,
+ * where the gate can see it.
+ */
+function offendingArgument(builderCall, name) {
+  const ref = new RegExp(`(^|[^\\w$])${name}([^\\w$]|$)`);
+  for (const arg of builderCall.getArguments()) {
+    const text = arg.getText();
+    if (!ref.test(text)) continue;
+    if (new RegExp(`${REDUCER}\\s*\\(`).test(text)) continue;
+    return arg;
+  }
+  return null;
+}
+
 {
   const missing = unresolvedTargets(SEARCH_DIRS, REPO_ROOT);
   if (missing.length > 0) {
@@ -206,7 +240,18 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
       if (!LOG_METHODS.has(expr.getName())) continue;
 
       const arg = call.getArguments()[0];
-      if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) continue;
+      if (!arg) continue;
+      const argKind = arg.getKind();
+      // A bare identifier (`controller.error(err)`) is NOT examined — see the
+      // MISSED note in the header. Every other receiver with an `.error` method
+      // would be caught by it, and the one in this tree is a stream controller
+      // propagating the error to its consumer, which is correct.
+      if (
+        argKind !== SyntaxKind.ObjectLiteralExpression &&
+        argKind !== SyntaxKind.CallExpression
+      ) {
+        continue;
+      }
 
       // Innermost catch OWNS the call. A nested try/catch rebinding the same
       // name means the identifier no longer refers to the outer value, and
@@ -214,13 +259,21 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
       if (innermostCatchClause(call) !== clause) continue;
       if (isShadowed(call, bound)) continue;
 
-      const prop = offendingProperty(arg, bound);
-      if (!prop) continue;
+      let key;
+      if (argKind === SyntaxKind.ObjectLiteralExpression) {
+        const prop = offendingProperty(arg, bound);
+        if (!prop) continue;
+        key = prop.getKind() === SyntaxKind.SpreadAssignment ? "…spread" : prop.getName();
+      } else {
+        const offending = offendingArgument(arg, bound);
+        if (!offending) continue;
+        key = `${arg.getExpression().getText()}(…${offending.getText().slice(0, 40)}…)`;
+      }
       violations.push({
         path,
         line: call.getStartLineNumber(),
         level: expr.getName(),
-        key: prop.getKind() === SyntaxKind.SpreadAssignment ? "…spread" : prop.getName(),
+        key,
       });
     }
   }
