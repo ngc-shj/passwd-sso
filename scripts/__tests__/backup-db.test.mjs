@@ -48,6 +48,46 @@ const FIXTURES = resolve(__dirname, "fixtures", "backup-db");
 const SENTINEL_PASSWORD = "S3NT1NEL-p@ss";
 
 /**
+ * A pid that cannot be running while the fixture runs.
+ *
+ * The lock fixtures used a literal `999999`, which is not a dead pid — it is a
+ * perfectly allocatable one. Measured on this host: `/proc/sys/kernel/pid_max`
+ * is 4194304, and under `scripts/pre-pr.sh`'s parallel steps 999999 was
+ * genuinely live. The script then reported `(pid 999999, alive)` and correctly
+ * refused, so the two "holder is gone" cases failed — standalone green, red only
+ * under process churn. That is an in-band sentinel colliding with a legitimate
+ * value of its own domain, and the collision made a working guard look broken.
+ *
+ * Linux gives a value that is unallocatable BY CONSTRUCTION: anything above
+ * `pid_max`. Where that file is unreadable (macOS — the platform #772 repaired
+ * other gates for), probe downward from the signed-32-bit ceiling and take the
+ * first pid that reports ESRCH. Refuse rather than return a value that might be
+ * live: a fixture that seeds a live pid exercises the opposite branch and says
+ * nothing about the one it names.
+ */
+function unallocatablePid() {
+  try {
+    const max = Number(readFileSync("/proc/sys/kernel/pid_max", "utf8").trim());
+    if (Number.isInteger(max) && max > 0) return max + 1;
+  } catch {
+    // No /proc. Fall through to probing.
+  }
+  for (let candidate = 0x7ffffffe; candidate > 0x7ffff000; candidate--) {
+    try {
+      process.kill(candidate, 0);
+    } catch (e) {
+      if (e.code === "ESRCH") return candidate;
+    }
+  }
+  throw new Error(
+    "backup-db.test: no pid could be shown to be absent — refusing to seed a " +
+      "lock fixture with a pid that may be alive",
+  );
+}
+
+const GONE_PID = unallocatablePid();
+
+/**
  * One row of the cluster enumeration as the script reads it: the connect flag
  * followed by the HEX-encoded datname. Hex is the transport because a quoted
  * identifier may contain any byte but NUL, and a newline in one used to split a
@@ -531,7 +571,7 @@ exit 0`);
     chmodSync(backupDir, 0o700);
     const lock = join(backupDir, ".lock.d");
     mkdirSync(lock, { recursive: true, mode: 0o700 });
-    writeFileSync(join(lock, "pid"), "999999\n", "utf8");
+    writeFileSync(join(lock, "pid"), `${GONE_PID}\n`, "utf8");
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
     const r = run();
     expect(err(r)).toBe("LOCKED");
@@ -547,7 +587,7 @@ exit 0`);
     chmodSync(backupDir, 0o700);
     const lock = join(backupDir, ".lock.d");
     mkdirSync(lock, { recursive: true, mode: 0o700 });
-    writeFileSync(join(lock, "pid"), "999999\n", "utf8");
+    writeFileSync(join(lock, "pid"), `${GONE_PID}\n`, "utf8");
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
     const r = run();
     expect(err(r)).toBe("LOCKED");
@@ -2018,7 +2058,7 @@ describe("concurrency and destination ownership", () => {
     chmodSync(backupDir, 0o700);
     const lock = join(backupDir, ".lock.d");
     mkdirSync(lock, { recursive: true, mode: 0o700 });
-    writeFileSync(join(lock, "pid"), "999999\n", "utf8");        // gone
+    writeFileSync(join(lock, "pid"), `${GONE_PID}\n`, "utf8");        // gone
     writeFileSync(join(lock, "host"), `${hostname()}\n`, "utf8");
 
     // Slow the dump so the two runs genuinely overlap.
@@ -3437,8 +3477,8 @@ describe("guards the round-3 sweep found unpinned", () => {
     const lock = join(backupDir, ".lock.d");
     const cases = [
       { files: {}, re: /records no holder/ },
-      { files: { pid: "999999\n", host: "not-this-host\n" }, re: /liveness cannot be tested/ },
-      { files: { pid: "999999\n", host: `${hostname()}\n` }, re: /is held by a process that is gone/ },
+      { files: { pid: `${GONE_PID}\n`, host: "not-this-host\n" }, re: /liveness cannot be tested/ },
+      { files: { pid: `${GONE_PID}\n`, host: `${hostname()}\n` }, re: /is held by a process that is gone/ },
     ];
     for (const c of cases) {
       rmSync(lock, { recursive: true, force: true });
