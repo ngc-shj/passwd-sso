@@ -46,8 +46,11 @@ function asSqlState(value: unknown): string | null {
  * SQLSTATE underneath, so returning `code` first hands back "P2010" for every
  * raw-query failure. That is why steps 3 and 4 go through `asSqlState`.
  *
- * `isLockTimeoutError` in src/lib/auth/policy/account-lockout.ts predates this
- * and still carries its own copy of the same unwrap for 55P03.
+ * This is the repo's single reading of "what SQLSTATE does this error carry".
+ * Add callers here rather than re-deriving: `isLockTimeoutError` in
+ * src/lib/auth/policy/account-lockout.ts kept its own copy for a while and
+ * missed step 1 the whole time, silently rethrowing the lock timeouts it
+ * existed to recognise.
  */
 export function pgErrorCode(err: unknown): string | null {
   if (!err || typeof err !== "object") return null;

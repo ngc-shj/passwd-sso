@@ -20,6 +20,7 @@ import { LOCKOUT_THRESHOLD_MIN, LOCKOUT_DURATION_MAX } from "@/lib/validations/c
 import { notifyAdminsOfLockout } from "@/lib/auth/policy/lockout-admin-notify";
 import type { NextRequest } from "next/server";
 import { errorLogFields } from "@/lib/logger/error-fields";
+import { pgErrorCode } from "@/lib/prisma/prisma-error";
 
 /** Observation window: reset counter if last failure was this long ago */
 const OBSERVATION_WINDOW_MS = MS_PER_DAY;
@@ -432,46 +433,24 @@ export async function resetLockout(userId: string): Promise<void> {
   }
 }
 
+/** PG 55P03 = lock_not_available, raised by our `SET LOCAL lock_timeout`. */
+const SQLSTATE_LOCK_NOT_AVAILABLE = "55P03";
+
 /**
  * Check if an error is a PostgreSQL lock_timeout error.
- * PG error code 55P03 = lock_not_available.
  *
- * Prisma may surface this in multiple formats:
- *  1. Direct PG error: err.code === "55P03"
- *  2. Prisma wrapped:  err.cause.code === "55P03"
- *  3. PrismaClientKnownRequestError: err.code === "P2010" && err.meta.code === "55P03"
+ * The unwrap belongs to `pgErrorCode`, not here. This function used to carry
+ * its own copy covering three shapes (`err.code`, `err.meta.code` under a
+ * P2010, `err.cause.code`) and missed the fourth —
+ * `meta.driverAdapterError.cause.code`, which is what this repo's PrismaPg
+ * adapter actually produces for a raw-query failure. A real 55P03 in that shape
+ * fell through to the rethrow above, so the caller never returned null and no
+ * VAULT_UNLOCK_FAILED / `reason: "lock_timeout"` audit event was emitted.
+ *
+ * Two readings of one predicate drift, and the one that drifts is the one
+ * nobody is looking at. `pgErrorCode`'s order is measured against a real
+ * database (src/__tests__/db-integration/helpers.ts); this copy's never was.
  */
 function isLockTimeoutError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-
-  // Direct PG error: err.code === "55P03"
-  if ("code" in err && (err as { code: string }).code === "55P03") {
-    return true;
-  }
-
-  // Prisma P2010 (Raw query failed): err.meta.code === "55P03"
-  if (
-    "code" in err &&
-    (err as { code: string }).code === "P2010" &&
-    "meta" in err &&
-    err.meta &&
-    typeof err.meta === "object" &&
-    "code" in err.meta &&
-    (err.meta as { code: string }).code === "55P03"
-  ) {
-    return true;
-  }
-
-  // Prisma wrapped error: err.cause.code === "55P03"
-  if (
-    "cause" in err &&
-    err.cause &&
-    typeof err.cause === "object" &&
-    "code" in err.cause &&
-    (err.cause as { code: string }).code === "55P03"
-  ) {
-    return true;
-  }
-
-  return false;
+  return pgErrorCode(err) === SQLSTATE_LOCK_NOT_AVAILABLE;
 }

@@ -335,6 +335,39 @@ describe("recordFailure", () => {
     expect(result).toBeNull();
   });
 
+  it("returns null on lock_timeout nested under meta.driverAdapterError.cause", async () => {
+    // The shape PrismaPg actually produces for a raw-query failure. The
+    // hand-rolled unwrap this predicate used to carry did not read it, so a
+    // real 55P03 fell through to the rethrow and no VAULT_UNLOCK_FAILED /
+    // reason: "lock_timeout" audit event was ever emitted.
+    const adapterError = Object.assign(new Error("Raw query failed"), {
+      code: "P2010",
+      meta: { driverAdapterError: { cause: { code: "55P03" } } },
+    });
+    mockTxState.queryRawImpl.mockRejectedValue(adapterError);
+
+    const result = await recordFailure("user-1");
+    expect(result).toBeNull();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VAULT_UNLOCK_FAILED",
+        metadata: { reason: "lock_timeout" },
+      }),
+    );
+  });
+
+  it("rethrows a non-lock_timeout SQLSTATE nested under the driver adapter", async () => {
+    // Guards the widening: routing through pgErrorCode must not turn every
+    // driver error into a swallowed lock_timeout.
+    const adapterError = Object.assign(new Error("Raw query failed"), {
+      code: "P2010",
+      meta: { driverAdapterError: { cause: { code: "42501" } } },
+    });
+    mockTxState.queryRawImpl.mockRejectedValue(adapterError);
+
+    await expect(recordFailure("user-1")).rejects.toThrow("Raw query failed");
+  });
+
   it("records audit with reason: lock_timeout on lock_timeout", async () => {
     const lockTimeoutError = Object.assign(new Error("lock timeout"), {
       code: "55P03",
