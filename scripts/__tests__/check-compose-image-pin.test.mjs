@@ -14,7 +14,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -232,7 +232,11 @@ services:
   });
 
   it("is wired into scripts/pre-pr.sh", () => {
-    const prepr = execFileSync("cat", ["scripts/pre-pr.sh"], { encoding: "utf8" });
-    expect(prepr).toContain("check-compose-image-pin.mjs");
+    // The gate's only execution path (CI runs PRE_PR_STATIC_ONLY=1 pre-pr.sh).
+    // Anchored at line start so a commented-out `# DISABLED: queue_step …` does
+    // not satisfy it — that is disarming, not deletion, and `toContain` cannot
+    // tell the two apart.
+    const prePr = readFileSync(join(process.cwd(), "scripts/pre-pr.sh"), "utf8");
+    expect(prePr).toMatch(/^queue_step .*check-compose-image-pin\.mjs/m);
   });
 });
