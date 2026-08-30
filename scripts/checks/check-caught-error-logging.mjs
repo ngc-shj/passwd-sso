@@ -42,11 +42,17 @@
  *            fields hold no catch binding; a shadowing binding of the same name
  *            declared inside the catch block
  *   MISSED   a logger reached through a parameter or a data structure; a caught
- *            value stored to an outer variable and logged (or persisted to
- *            audit metadata) after the block closes — the anchor-publisher's
+ *            value stored to an outer variable and LOGGED after the block
+ *            closes — this gate anchors on the call and reads its field object,
+ *            so it stops at the block boundary. The other half of that shape,
+ *            the same value PERSISTED to audit metadata, is no longer missed:
+ *            check-audit-metadata-narrative.mjs follows the value out of the
+ *            catch into `metadata`, which is where the anchor-publisher's
  *            `uploadFailedReason` and the rotate-master-key route's
- *            `shareRevocationError` were both that shape, found by review, not
- *            here; a BARE IDENTIFIER argument (`x.error(err)`), deliberately
+ *            `shareRevocationError` both landed. Widening THIS gate would not
+ *            have reached them — the defect is a data path across statements,
+ *            not a spelling at the call site;
+ *            a BARE IDENTIFIER argument (`x.error(err)`), deliberately
  *            not examined because the only occurrence in this tree is
  *            `controller.error(err)` on a ReadableStream controller, which is
  *            correct propagation, and telling it from a logger needs a type

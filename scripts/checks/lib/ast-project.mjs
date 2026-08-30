@@ -15,7 +15,7 @@
  * set mixes directories with a single-file target `src/auth.ts`, which
  * sourceFilesFrom handles), check-boot-diagnostic-shape, check-cli-shell-safety,
  * check-operator-echo-escaped, check-runtime-image-assets,
- * check-tenant-claim-event-coverage.
+ * check-tenant-claim-event-coverage, check-audit-metadata-narrative.
  *
  * Partial adopter — createAstProject only, walk NOT migrated:
  *   - check-bypass-rls keeps its own `getSourceFiles()`. The only behavioural

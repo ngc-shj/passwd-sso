@@ -424,6 +424,11 @@ queue_step "Static: worker-logtype" node scripts/checks/check-worker-logtype.mjs
 # message and stack, and logger.ts redacts by key name, which never reaches
 # message text.
 queue_step "Static: caught-error-logging" node scripts/checks/check-caught-error-logging.mjs
+# Same narrative, second sink. caught-error-logging anchors on a LOGGER CALL, so
+# it stops at the block boundary; this one follows the value out of the catch
+# into audit_logs.metadata, which tenants read and which no key-blocklist or
+# size cap can sanitize.
+queue_step "Static: audit-metadata-narrative" node scripts/checks/check-audit-metadata-narrative.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
 queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
 queue_step "Static: runtime-image-assets" node scripts/checks/check-runtime-image-assets.mjs
