@@ -83,7 +83,17 @@ match both this rule and their own section.
 **Severity**: high
 **Trigger**: any occurrence
 **Recovery**: read the message identifier — it names the operation that
-failed — then the worker's surrounding log lines for the `err` field.
+failed — then `error.code` on the same line.
+
+`error` is `{name, code}`, never the caught Error: pino's default `err`
+serializer emits `message` and `stack`, and a pg pool error's message
+carries the role name and connection target while a Prisma error's
+carries the failing query. `error.code` is the driver's SQLSTATE or
+errno where one exists (`src/lib/logger/error-fields.ts` resolves it
+through `pgErrorCode`, so a Prisma wrapper does not hide it), and
+`"unknown"` when the caught value carried no token-shaped code. A
+narrative is deliberately not available here — reproduce locally if the
+code alone is not enough.
 
 Datadog: `{ _logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher|outbox)\\..*" }`
 Loki: `{_logType=~"(worker|delivery|webhook_delivery|retention-gc|audit-anchor-publisher|outbox)\\..*"} | json`
@@ -208,7 +218,8 @@ than sampling, or a transient single failure is lost.
 
 **Severity**: high
 **Trigger**: any occurrence
-**Recovery**: read `err` on the log line. Two known causes:
+**Recovery**: read `error.code` on the log line. Two known causes,
+and only one of them is a bug:
 
 - **22P02** (`invalid input syntax for type uuid: ""`) — the depth
   query ran outside a bypass transaction and tripped the
