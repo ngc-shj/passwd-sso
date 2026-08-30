@@ -104,26 +104,18 @@ function fail(msg) {
 }
 
 /**
- * Names bound by a `catch (x)` clause, innermost first, for the scopes
- * enclosing `node`.
+ * The innermost `catch` clause enclosing `node`, or null.
  *
- * Scope-aware deliberately: a same-named binding declared INSIDE the catch
- * block shadows the caught value, and resolving names file-wide would report
- * that correct code as a violation. (A sibling gate learned this the hard way
- * in the opposite direction — a file-wide index cleared a real defect.)
+ * Returns the CLAUSE, not its name. Comparing names instead reports a nested
+ * `catch (err)` inside an outer `catch (err)` twice — once from each clause's
+ * own walk — because the two bindings are distinct while their names are equal.
+ * Measured: two offending lines produced three findings.
  */
-function enclosingCatchBindings(node) {
-  const names = [];
+function innermostCatchClause(node) {
   for (let cur = node.getParent(); cur; cur = cur.getParent()) {
-    if (cur.getKind() !== SyntaxKind.CatchClause) continue;
-    const decl = cur.getVariableDeclaration();
-    if (!decl) continue;
-    const nameNode = decl.getNameNode();
-    if (nameNode.getKind() === SyntaxKind.Identifier) {
-      names.push(nameNode.getText());
-    }
+    if (cur.getKind() === SyntaxKind.CatchClause) return cur;
   }
-  return names;
+  return null;
 }
 
 /** True when `expr` shadows `name` with its own declaration before use. */
@@ -216,10 +208,10 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
       const arg = call.getArguments()[0];
       if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) continue;
 
-      // Innermost catch wins: a nested try/catch rebinding the name means the
-      // outer value is no longer what the identifier refers to.
-      const innermost = enclosingCatchBindings(call)[0];
-      if (innermost !== bound) continue;
+      // Innermost catch OWNS the call. A nested try/catch rebinding the same
+      // name means the identifier no longer refers to the outer value, and
+      // attributing the line to both clauses reports one defect twice.
+      if (innermostCatchClause(call) !== clause) continue;
       if (isShadowed(call, bound)) continue;
 
       const prop = offendingProperty(arg, bound);

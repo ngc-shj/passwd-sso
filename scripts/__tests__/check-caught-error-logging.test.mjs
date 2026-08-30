@@ -148,6 +148,35 @@ describe("check-caught-error-logging", () => {
     expect(r.status).toBe(0);
   });
 
+  it("PASSES a same-named binding shadowed in a nested block inside the catch", () => {
+    // `catch (e) { let e = 1 }` is a SyntaxError, but a nested block may
+    // legally shadow. That value is not the caught one, so reporting it would
+    // be a false positive with no suppression path — the pressure that gets a
+    // gate routed around.
+    const r = runGate(`${LOG}declare const mk: () => object;
+export function f() {
+  try {} catch (err) { { const err = mk(); log.error({ err }, "m"); } }
+}`);
+    expect(r.violated).toBe(false);
+    expect(r.status).toBe(0);
+  });
+
+  it("reports a nested same-named catch ONCE per line, not once per clause", () => {
+    // Both clauses bind `err`, and comparing NAMES rather than clause identity
+    // made the outer walk claim the inner line too — measured: two offending
+    // lines, three findings. A duplicate reads as a second defect and sends the
+    // reader to a line already fixed.
+    const r = runGate(`${LOG}export function f() {
+  try {} catch (err) {
+    log.error({ err }, "outer");
+    try {} catch (err) { log.error({ err }, "inner"); }
+  }
+}`);
+    expect(r.violated).toBe(true);
+    const lines = r.stderr.split("\n").filter((l) => /^ {2}src\/subject/.test(l));
+    expect(lines).toHaveLength(2);
+  });
+
   it("REFUSES when it recognises no catch clause", () => {
     // "Examined nothing" must not be spelled like "found nothing wrong". A
     // changed catch shape, a moved tree or a broken parse all land here.
