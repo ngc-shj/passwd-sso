@@ -26,6 +26,7 @@ import {
   ScimExternalIdConflictError,
   ScimDeleteConflictError,
 } from "@/lib/services/scim-user-service";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -90,7 +91,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       invalidationCounts = await invalidateUserSessions(userId, { tenantId });
     } catch (error) {
       sessionInvalidationFailed = true;
-      getLogger().error({ userId, error }, "session-invalidation-failed");
+      getLogger().error({ userId, error: errorLogFields(error) }, "session-invalidation-failed");
     }
   }
 
@@ -157,7 +158,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
       patchInvalidationCounts = await invalidateUserSessions(userId, { tenantId });
     } catch (error) {
       patchSessionInvalidationFailed = true;
-      getLogger().error({ userId, error }, "session-invalidation-failed");
+      getLogger().error({ userId, error: errorLogFields(error) }, "session-invalidation-failed");
     }
   }
 
@@ -213,7 +214,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
       deleteInvalidationCounts = await invalidateUserSessions(userId, { tenantId });
     } catch (error) {
       deleteSessionInvalidationFailed = true;
-      getLogger().error({ userId, error }, "session-invalidation-failed");
+      getLogger().error({ userId, error: errorLogFields(error) }, "session-invalidation-failed");
     }
   }
 

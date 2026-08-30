@@ -33,6 +33,7 @@ import {
   isSafeMetadataString,
 } from "@/lib/auth/access/delegation";
 import type { DelegationMetadata } from "@/lib/auth/access/delegation";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -210,7 +211,7 @@ async function handlePOST(request: NextRequest) {
     );
   } catch (err) {
     getLogger().warn(
-      { err, sessionId: delegationSession.id, userId },
+      { error: errorLogFields(err), sessionId: delegationSession.id, userId },
       "delegation.create.redis_store_failed",
     );
     await withBypassRls(prisma, (tx) =>
@@ -243,7 +244,7 @@ async function handlePOST(request: NextRequest) {
       await evictDelegationRedisKeys(userId, existingSession.id);
     } catch (err) {
       getLogger().warn(
-        { err, oldSessionId: existingSession.id, userId },
+        { error: errorLogFields(err), oldSessionId: existingSession.id, userId },
         "delegation.create.evict_old_redis_failed",
       );
     }
@@ -256,7 +257,7 @@ async function handlePOST(request: NextRequest) {
       BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     } catch (err) {
       getLogger().warn(
-        { err, oldSessionId: existingSession.id, userId },
+        { error: errorLogFields(err), oldSessionId: existingSession.id, userId },
         "delegation.create.revoke_old_db_failed",
       );
     }

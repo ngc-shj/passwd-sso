@@ -16,6 +16,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -118,7 +119,7 @@ async function handlePOST(request: NextRequest) {
   try {
     await resetLockout(session.user.id);
   } catch (err) {
-    getLogger().error({ err, userId: session.user.id }, "vault.unlock.resetLockout.error");
+    getLogger().error({ error: errorLogFields(err), userId: session.user.id }, "vault.unlock.resetLockout.error");
   }
   await unlockLimiter.clear(rateKey);
 

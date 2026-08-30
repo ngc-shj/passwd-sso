@@ -20,6 +20,7 @@ import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 
@@ -59,7 +60,7 @@ async function checkDatabase(): Promise<CheckResult> {
     };
   } catch (err) {
     const responseTimeMs = Math.round(performance.now() - start);
-    getLogger().warn({ err, responseTimeMs }, "health.database.fail");
+    getLogger().warn({ error: errorLogFields(err), responseTimeMs }, "health.database.fail");
     return { status: "fail", responseTimeMs };
   }
 }
@@ -85,7 +86,7 @@ async function checkRedis(): Promise<CheckResult> {
   } catch (err) {
     const responseTimeMs = Math.round(performance.now() - start);
     const failStatus: CheckStatus = redisRequired ? "fail" : "warn";
-    getLogger().warn({ err, responseTimeMs }, `health.redis.${failStatus}`);
+    getLogger().warn({ error: errorLogFields(err), responseTimeMs }, `health.redis.${failStatus}`);
     return { status: failStatus, responseTimeMs };
   }
 }
@@ -161,10 +162,10 @@ async function checkAuditOutbox(): Promise<CheckResult> {
     // back as the same non-blocking "warn" this branch was written to give a
     // table that does not exist yet.
     if (pgErrorCode(err) === PG_UNDEFINED_TABLE) {
-      getLogger().warn({ err, responseTimeMs }, "health.auditOutbox.warn");
+      getLogger().warn({ error: errorLogFields(err), responseTimeMs }, "health.auditOutbox.warn");
       return { status: "warn", responseTimeMs };
     }
-    getLogger().warn({ err, responseTimeMs }, "health.auditOutbox.fail");
+    getLogger().warn({ error: errorLogFields(err), responseTimeMs }, "health.auditOutbox.fail");
     return { status: "fail", responseTimeMs };
   }
 }

@@ -29,6 +29,7 @@ import { hashSessionToken } from "@/lib/auth/session/session-cache";
 import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session/session-timeout";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -195,7 +196,7 @@ async function handlePOST(req: NextRequest) {
     }
   } catch (err) {
     getLogger().error(
-      { userId: user.id, err },
+      { userId: user.id, error: errorLogFields(err) },
       "auth.passkey.verify.invalidateFailed",
     );
     return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);

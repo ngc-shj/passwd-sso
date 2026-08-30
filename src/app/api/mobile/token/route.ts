@@ -59,6 +59,7 @@ import {
 } from "@/lib/auth/tokens/mobile-token";
 import { verifyPkceS256 } from "@/lib/mcp/oauth-server";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -254,7 +255,7 @@ async function handlePOST(req: NextRequest): Promise<Response> {
       {
         event: "mobile_token_issue_failed",
         userId: stored.userId,
-        err,
+        error: errorLogFields(err),
       },
       "mobile token issuance threw",
     );

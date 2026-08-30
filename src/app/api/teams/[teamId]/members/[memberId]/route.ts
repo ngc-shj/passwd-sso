@@ -20,6 +20,7 @@ import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { buildTeamMemberDisplayItems } from "@/lib/team/team-member-display";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -217,7 +218,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     });
   } catch (error) {
     sessionInvalidationFailed = true;
-    getLogger().error({ userId: target.userId, error }, "session-invalidation-failed");
+    getLogger().error({ userId: target.userId, error: errorLogFields(error) }, "session-invalidation-failed");
   }
 
   await logAuditAsync({

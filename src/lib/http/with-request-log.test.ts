@@ -141,7 +141,10 @@ describe("withRequestLog", () => {
     const wrapped = withRequestLog(handler);
     await expect(wrapped(makeRequest())).rejects.toThrow("handler failure");
     expect(mocks.reqLogger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ err, durationMs: expect.any(Number) }),
+      expect.objectContaining({
+        error: { name: "Error", code: "unknown" },
+        durationMs: expect.any(Number),
+      }),
       "request.error",
     );
   });
@@ -185,8 +188,11 @@ describe("withRequestLog", () => {
   });
 
   it("captures exception to Sentry when SENTRY_DSN is set", async () => {
-    const originalDsn = process.env.SENTRY_DSN;
-    process.env.SENTRY_DSN = "https://fake@sentry.io/123";
+    // vi.stubEnv, not direct mutation: setup.ts wires an afterEach unstub, so
+    // the restore happens even when the assertions below throw. The manual
+    // save/restore this replaced put the restore AFTER the expects, so a
+    // failure leaked the fake DSN into every later test in the run.
+    vi.stubEnv("SENTRY_DSN", "https://fake@sentry.io/123");
 
     const err = new Error("sentry test error");
     const handler = vi.fn().mockRejectedValue(err);
@@ -209,13 +215,12 @@ describe("withRequestLog", () => {
         path: "/api/test",
       }),
     });
-
-    process.env.SENTRY_DSN = originalDsn;
   });
 
   it("does not capture to Sentry when SENTRY_DSN is not set", async () => {
-    const originalDsn = process.env.SENTRY_DSN;
-    delete process.env.SENTRY_DSN;
+    // `undefined` DELETES the variable rather than setting it to the empty
+    // string — the distinction the code branches on.
+    vi.stubEnv("SENTRY_DSN", undefined);
 
     const err = new Error("no sentry");
     const handler = vi.fn().mockRejectedValue(err);
@@ -227,7 +232,5 @@ describe("withRequestLog", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(mocks.captureException).not.toHaveBeenCalled();
-
-    process.env.SENTRY_DSN = originalDsn;
   });
 });

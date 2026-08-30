@@ -14,6 +14,7 @@
 import { type NextRequest } from "next/server";
 import logger, { requestContext } from "@/lib/logger";
 import { sanitizeErrorForSentry } from "@/lib/security/sentry-sanitize";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 // Route handlers have varying signatures:
 //   (request: NextRequest) => Promise<Response>                    — static routes
@@ -62,7 +63,7 @@ export function withRequestLog<H extends RouteHandler>(handler: H): H {
         }
       } catch (err) {
         const durationMs = Math.round(performance.now() - start);
-        reqLogger.error({ err, durationMs }, "request.error");
+        reqLogger.error({ error: errorLogFields(err), durationMs }, "request.error");
 
         // Capture to Sentry if configured (fire-and-forget)
         if (process.env.SENTRY_DSN) {

@@ -34,6 +34,7 @@ import {
 } from "@/lib/http/api-response";
 import type { RateLimiter, RateLimitResult } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export type FailClosedEnvelope =
   | "canonical"
@@ -169,7 +170,7 @@ export async function emitRateLimitFailClosed(args: EmitArgs): Promise<void> {
     // Never propagate — the 503 hot path MUST NOT block on audit failures.
     try {
       getLogger().error(
-        { err, scope: args.scope },
+        { error: errorLogFields(err), scope: args.scope },
         "rate-limit.fail_closed.emit_error",
       );
     } catch {

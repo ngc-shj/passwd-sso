@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   getMasterKeyByVersion,
   decryptServerData,
@@ -203,7 +204,7 @@ async function deliverSingleWebhook(
           webhookId: webhook.id,
           masterKeyVersion: webhook.masterKeyVersion,
           secretAadVersion: webhook.secretAadVersion,
-          err,
+          error: errorLogFields(err),
           _logType: "webhook_delivery.secret_decrypt_failed",
         },
         "webhook_delivery.secret_decrypt_failed",
@@ -233,7 +234,11 @@ async function deliverSingleWebhook(
     // Reaches here on an onSuccess/onFailure DB-update throw (or any unexpected
     // error). Also recoverable — propagate so the durable path can retry.
     getLogger().error(
-      { webhookId: webhook.id, err, _logType: "webhook_delivery.dispatch_error" },
+      {
+        webhookId: webhook.id,
+        error: errorLogFields(err),
+        _logType: "webhook_delivery.dispatch_error",
+      },
       "webhook_delivery.dispatch_error",
     );
     if (onError) await onError(webhook.id, err);
@@ -354,7 +359,10 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
     );
   })().catch((err) => {
     getLogger().error(
-      { err, _logType: "webhook_delivery.fire_and_forget_failed" },
+      {
+        error: errorLogFields(err),
+        _logType: "webhook_delivery.fire_and_forget_failed",
+      },
       "webhook_delivery.fire_and_forget_failed",
     );
   });
@@ -443,7 +451,10 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
     );
   })().catch((err) => {
     getLogger().error(
-      { err, _logType: "webhook_delivery.fire_and_forget_failed" },
+      {
+        error: errorLogFields(err),
+        _logType: "webhook_delivery.fire_and_forget_failed",
+      },
       "webhook_delivery.fire_and_forget_failed",
     );
   });

@@ -76,6 +76,18 @@ RULE5_CARVEOUT_PAT=$(IFS='|'; printf '%s' "${RULE5_CARVEOUTS[*]}" | sed 's/\./\\
 
 violations=0
 
+# "Examined nothing" must not be spelled like "found nothing wrong". Run from
+# the wrong cwd — as a copy under /tmp was, while auditing this very gate — the
+# `find` roots resolve to nothing, every rule inspects an empty set, and the
+# script prints its success banner and exits 0. Measured: a tree carrying a real
+# C12 violation reported OK.
+server_file_count=$(list_server_ts_files | wc -l | tr -d ' ')
+if [ "$server_file_count" -eq 0 ]; then
+  echo "check-api-error-codes: found 0 server files under src/app/api, src/app/s, src/lib —" >&2
+  echo "  wrong working directory, or the tree moved. Refusing to report a verdict." >&2
+  exit 1
+fi
+
 # (1) C5 — ACCESS_DENIED string literal outside tests
 hits=$(grep -RnE 'NextResponse\.json\(\s*\{\s*error:\s*"ACCESS_DENIED"' src/ \
   --include='*.ts' --include='*.tsx' \
@@ -141,10 +153,31 @@ c12_hits=$(
   list_server_ts_files \
     | grep -vE "(${RULE5_CARVEOUT_PAT})$" \
     | xargs -r perl -0777 -ne '
-      while (/NextResponse\.json\(\s*\{[\s\S]*?\berror\s*:/g) {
-        my $pos = pos($_);
-        my $line = (substr($_, 0, $pos) =~ tr/\n/\n/) + 1;
-        print "$ARGV:$line: " . substr($_, $-[0], 80) . "\n";
+      # Brace-BALANCED, not `[\s\S]*?`. The non-greedy form crossed unlimited
+      # intervening code, so ANY later `error:` key — a log field, an object
+      # literal in another function — bound itself to an earlier
+      # `NextResponse.json({`. Measured on this tree: a legitimate
+      # `NextResponse.json({ valid: false })` matched an `error:` 105 lines
+      # below it, in a call that was not a response at all. The reported LINE
+      # was the stray key rather than the response, so the message sent the
+      # reader to the wrong place too. Now the scan walks to the matching close
+      # brace and inspects only the keys inside it.
+      while (/NextResponse\.json\(\s*\{/g) {
+        my $open = $-[0];
+        my $i = pos($_) - 1;
+        my $depth = 0;
+        my $close = -1;
+        for (my $j = $i; $j < length($_); $j++) {
+          my $c = substr($_, $j, 1);
+          $depth++ if $c eq q({);
+          if ($c eq q(})) { $depth--; if ($depth == 0) { $close = $j; last } }
+        }
+        # Unbalanced source: refuse to guess rather than scan to EOF.
+        last if $close < 0;
+        my $body = substr($_, $i, $close - $i + 1);
+        next unless $body =~ /\berror\s*:/;
+        my $line = (substr($_, 0, $open) =~ tr/\n/\n/) + 1;
+        print "$ARGV:$line: " . substr($_, $open, 80) . "\n";
       }
     ' 2>/dev/null || true
 )

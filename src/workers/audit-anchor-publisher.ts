@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import {
   AUDIT_SCOPE,
   AUDIT_ACTION,
@@ -304,7 +305,14 @@ export class AuditAnchorPublisher {
           } catch (uploadErr) {
             const reason = `${dest.name}_UPLOAD_FAILED`;
             const errMsg = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
-            log.error({ destination: dest.name, err: errMsg, _logType: "audit-anchor-publisher.upload_failed" }, "audit-anchor-publisher.upload_failed");
+            log.error(
+              {
+                destination: dest.name,
+                error: errorLogFields(uploadErr),
+                _logType: "audit-anchor-publisher.upload_failed",
+              },
+              "audit-anchor-publisher.upload_failed",
+            );
             uploadFailedReason = `${reason}: ${errMsg}`;
             throw new Error(uploadFailedReason);
           }
@@ -402,7 +410,7 @@ export class AuditAnchorPublisher {
           // the missing prior cadence. Do not mask the original error.
           log.error(
             {
-              err: pauseErr instanceof Error ? pauseErr.message : String(pauseErr),
+              error: errorLogFields(pauseErr),
               _logType: "audit-anchor-publisher.pause_persist_failed",
             },
             "audit-anchor-publisher.pause_persist_failed",

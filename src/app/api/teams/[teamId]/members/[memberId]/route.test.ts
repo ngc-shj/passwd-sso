@@ -569,7 +569,7 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     );
 
     expect(mockLogger.error).toHaveBeenCalledWith(
-      { userId: "target-user", error: dbError },
+      { userId: "target-user", error: { name: "Error", code: "unknown" } },
       "session-invalidation-failed",
     );
   });

@@ -40,6 +40,7 @@ import {
   RESET_TOTAL_TTL_MS,
 } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -203,7 +204,7 @@ async function handlePOST(
     plaintextToken = decrypted;
   } catch (err) {
     getLogger().warn(
-      { resetId, err: err instanceof Error ? err.message : String(err) },
+      { resetId, error: errorLogFields(err) },
       "admin-vault-reset approve: token decrypt failed",
     );
     await logAuditAsync({
@@ -276,7 +277,7 @@ async function handlePOST(
     }
   } catch (err) {
     getLogger().warn(
-      { resetId, err: err instanceof Error ? err.message : String(err) },
+      { resetId, error: errorLogFields(err) },
       "admin-vault-reset approve: notification dispatch failed",
     );
   }

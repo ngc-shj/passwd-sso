@@ -62,6 +62,7 @@ import {
   passkeyEnforcementBlocks,
   recordPasskeyAuditEmit,
 } from "@/lib/auth/policy/passkey-enforcement";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 // Strict empty-object schema — cnfJkt is intentionally NOT declared. Any
 // client-supplied `cnfJkt` (or any other key) is rejected as
@@ -315,7 +316,7 @@ async function handlePOST(req: NextRequest) {
         event: "extension_bridge_code_issue_failure",
         reason: "db_error",
         userId,
-        err,
+        error: errorLogFields(err),
       },
       "extension bridge-code issuance failed: DB write threw",
     );

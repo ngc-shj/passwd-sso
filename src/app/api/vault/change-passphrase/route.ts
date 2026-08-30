@@ -18,6 +18,7 @@ import { hexIv, hexAuthTag, hexSalt, hexHash, WRAPPED_SECRET_KEY_MAX } from "@/l
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { getSessionToken } from "@/app/api/sessions/helpers";
+import { errorLogFields } from "@/lib/logger/error-fields";
 
 export const runtime = "nodejs";
 
@@ -139,7 +140,7 @@ async function handlePOST(request: NextRequest) {
     }
   } catch (err) {
     getLogger().error(
-      { userId: session.user.id, err },
+      { userId: session.user.id, error: errorLogFields(err) },
       "vault.changePassphrase.invalidateFailed",
     );
     return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);

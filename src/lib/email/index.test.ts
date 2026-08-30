@@ -149,8 +149,13 @@ describe("sendEmail", () => {
 
     await expect(sendEmail(testMessage)).resolves.toBeUndefined();
 
+    // The correlation keys survive; only the narrative is dropped.
     expect(getLogger().error).toHaveBeenCalledWith(
-      { to: "user@example.com", subject: "Test", err: error },
+      {
+        to: "user@example.com",
+        subject: "Test",
+        error: { name: "Error", code: "unknown" },
+      },
       "email.send.failed",
     );
   });

@@ -1394,9 +1394,13 @@ describe("reaper — invoked on first loop tick", () => {
 
     await expect(worker.start()).resolves.toBeUndefined();
 
-    // The reaper error should have been logged
+    // The reaper error should be reduced to stable fields. Passing the Error
+    // itself would let pino serialize its message and stack.
     expect(mockLoggerError).toHaveBeenCalledWith(
-      expect.objectContaining({ err: expect.any(Error) }),
+      {
+        error: { name: "Error", code: "unknown" },
+        _logType: "worker.reaper.stuck_reset_failed",
+      },
       "worker.reaper.stuck_reset_failed",
     );
   }, 15000);
