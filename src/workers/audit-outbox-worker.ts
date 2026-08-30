@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { getLogger } from "@/lib/logger";
+import { errorLogFields } from "@/lib/logger/error-fields";
 import { deadLetterLogger } from "@/lib/audit/audit-logger";
 import { computeBackoffMs, withFullJitter } from "@/lib/http/backoff";
 import {
@@ -638,7 +639,7 @@ async function recordError(
     getLogger().error(
       {
         outboxId: row.id,
-        err: recoveryErr,
+        error: errorLogFields(recoveryErr),
         _logType: "worker.error_recovery_tx_failed",
       },
       "worker.error_recovery_tx_failed",
@@ -1288,7 +1289,7 @@ async function recordWebhookDeliveryError(
     getLogger().error(
       {
         deliveryId: item.id,
-        err: recoveryErr,
+        error: errorLogFields(recoveryErr),
         _logType: "webhook_delivery.error_recovery_tx_failed",
       },
       "webhook_delivery.error_recovery_tx_failed",
@@ -1751,25 +1752,46 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
       log.info({ reaped }, "worker.reaper.stuck_reset");
     }
   } catch (err) {
-    log.error({ err, _logType: "worker.reaper.stuck_reset_failed" }, "worker.reaper.stuck_reset_failed");
+    log.error(
+      { error: errorLogFields(err), _logType: "worker.reaper.stuck_reset_failed" },
+      "worker.reaper.stuck_reset_failed",
+    );
   }
 
   try {
     await reapStuckDeliveries(prisma);
   } catch (err) {
-    log.error({ err, _logType: "worker.reaper.stuck_deliveries_reset_failed" }, "worker.reaper.stuck_deliveries_reset_failed");
+    log.error(
+      {
+        error: errorLogFields(err),
+        _logType: "worker.reaper.stuck_deliveries_reset_failed",
+      },
+      "worker.reaper.stuck_deliveries_reset_failed",
+    );
   }
 
   try {
     await reapStuckWebhookDeliveries(prisma);
   } catch (err) {
-    log.error({ err, _logType: "worker.reaper.stuck_webhook_deliveries_reset_failed" }, "worker.reaper.stuck_webhook_deliveries_reset_failed");
+    log.error(
+      {
+        error: errorLogFields(err),
+        _logType: "worker.reaper.stuck_webhook_deliveries_reset_failed",
+      },
+      "worker.reaper.stuck_webhook_deliveries_reset_failed",
+    );
   }
 
   try {
     await purgeRetention(prisma);
   } catch (err) {
-    log.error({ err, _logType: "worker.reaper.retention_purge_failed" }, "worker.reaper.retention_purge_failed");
+    log.error(
+      {
+        error: errorLogFields(err),
+        _logType: "worker.reaper.retention_purge_failed",
+      },
+      "worker.reaper.retention_purge_failed",
+    );
   }
 }
 
@@ -1869,7 +1891,10 @@ export function createWorker(config: WorkerConfig) {
     try {
       rows = await claimBatch(workerPrisma, batchSize);
     } catch (err) {
-      log.error({ err, _logType: "worker.claim_batch_failed" }, "worker.claim_batch_failed");
+      log.error(
+        { error: errorLogFields(err), _logType: "worker.claim_batch_failed" },
+        "worker.claim_batch_failed",
+      );
       return 0;
     }
 
@@ -1897,7 +1922,14 @@ export function createWorker(config: WorkerConfig) {
       try {
         payload = parsePayload(row.payload);
       } catch (err) {
-        log.error({ err, outboxId: row.id, _logType: "worker.payload_parse_failed" }, "worker.payload_parse_failed");
+        log.error(
+          {
+            error: errorLogFields(err),
+            outboxId: row.id,
+            _logType: "worker.payload_parse_failed",
+          },
+          "worker.payload_parse_failed",
+        );
         await recordError(workerPrisma, row, err);
         continue;
       }
@@ -2041,7 +2073,7 @@ export function createWorker(config: WorkerConfig) {
       // "outbox healthy". The _logType is what alerting matches on — without
       // it this line is invisible to the rules in docs/operations/alerts.md.
       getLogger().error(
-        { err, _logType: "outbox.depth.check_failed" },
+        { error: errorLogFields(err), _logType: "outbox.depth.check_failed" },
         "outbox.depth.check_failed",
       );
     }
@@ -2062,7 +2094,10 @@ export function createWorker(config: WorkerConfig) {
           log.debug({ deliveryClaimed }, "processed delivery batch");
         }
       } catch (err) {
-        log.error({ err, _logType: "worker.delivery_batch_failed" }, "worker.delivery_batch_failed");
+        log.error(
+          { error: errorLogFields(err), _logType: "worker.delivery_batch_failed" },
+          "worker.delivery_batch_failed",
+        );
       }
 
       // Durable webhook delivery: drain pending webhook_deliveries work items.
@@ -2081,7 +2116,13 @@ export function createWorker(config: WorkerConfig) {
           log.debug({ webhookDeliveryClaimed }, "processed webhook delivery batch");
         }
       } catch (err) {
-        log.error({ err, _logType: "worker.webhook_delivery_batch_failed" }, "worker.webhook_delivery_batch_failed");
+        log.error(
+          {
+            error: errorLogFields(err),
+            _logType: "worker.webhook_delivery_batch_failed",
+          },
+          "worker.webhook_delivery_batch_failed",
+        );
       }
 
       // Run reaper at REAPER_INTERVAL_MS intervals

@@ -170,10 +170,15 @@ describe("dispatchWebhook", () => {
       expect.objectContaining({
         webhookId: WEBHOOK.id,
         masterKeyVersion: WEBHOOK.masterKeyVersion,
+        error: { name: "Error", code: "unknown" },
         _logType: "webhook_delivery.secret_decrypt_failed",
       }),
       "webhook_delivery.secret_decrypt_failed",
     );
+    const [fields] = mockLoggerError.mock.calls[0]!;
+    expect(fields).not.toHaveProperty("err");
+    expect(fields.error).not.toHaveProperty("message");
+    expect(fields.error).not.toHaveProperty("stack");
     // No update path was taken — the row remains untouched, no
     // lastDeliveredAt / lastFailedAt / failCount mutation.
     expect(mockPrismaTeamWebhook.update).not.toHaveBeenCalled();

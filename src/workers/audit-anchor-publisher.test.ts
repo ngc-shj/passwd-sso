@@ -354,6 +354,15 @@ describe("AuditAnchorPublisher.runCadence", () => {
       ([args]) => args.action === "AUDIT_ANCHOR_PUBLISH_FAILED",
     );
     expect(failureEvent).toBeDefined();
+
+    const uploadLog = mockLoggerError.mock.calls.find(
+      ([, message]) => message === "audit-anchor-publisher.upload_failed",
+    );
+    expect(uploadLog?.[0]).toEqual({
+      destination: "s3",
+      error: { name: "Error", code: "unknown" },
+      _logType: "audit-anchor-publisher.upload_failed",
+    });
   });
 
   it("emits informational pause audit for paused anchors and continues with non-paused", async () => {
