@@ -224,7 +224,22 @@ describe("buildOutboxPayload", () => {
     expect(payload.userAgent?.length).toBeLessThanOrEqual(512);
   });
 
+  it("truncates ip at AUDIT_IP_MAX_LENGTH", () => {
+    // The DENY arm of the pair below. audit_logs.ip is @db.VarChar(45), and an
+    // over-length value does not truncate at the column — it raises 22001 in
+    // the outbox worker's insert. Unlike 22P02 that error does not echo the
+    // offending value, so the row cycles through max_attempts and the audit
+    // event is lost with nothing left to say what it was. `ip` is also the
+    // narrower column of the two AND the one fed from a request header, which
+    // is why it was the asymmetry worth closing.
+    const payload = buildOutboxPayload({ ...baseParams, ip: "9".repeat(200) });
+    expect(payload.ip?.length).toBe(45);
+  });
+
   it("preserves ip and userAgent when supplied", () => {
+    // The ALLOW arm: a real address is longer than nothing and shorter than the
+    // cap, and must pass through byte-identical. A truncation that fired on
+    // every value would satisfy the deny arm above on its own.
     const payload = buildOutboxPayload({
       ...baseParams,
       ip: "10.0.0.1",
@@ -232,6 +247,18 @@ describe("buildOutboxPayload", () => {
     });
     expect(payload.ip).toBe("10.0.0.1");
     expect(payload.userAgent).toBe("Mozilla");
+  });
+
+  it("preserves the longest address the column is sized for", () => {
+    // The boundary, stated rather than left to the cap's arithmetic: 45 is the
+    // width of an IPv4-mapped IPv6 address with a zone id, which is the widest
+    // legitimate value. It must survive intact — a cap set one short would pass
+    // both arms above and silently corrupt exactly the addresses the column was
+    // sized for.
+    const widest = "0000:0000:0000:0000:0000:ffff:192.168.100.228%eth0";
+    const payload = buildOutboxPayload({ ...baseParams, ip: widest.slice(0, 45) });
+    expect(payload.ip).toBe(widest.slice(0, 45));
+    expect(payload.ip?.length).toBe(45);
   });
 });
 

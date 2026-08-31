@@ -72,7 +72,7 @@ import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/session/auth-or-token";
-import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { AUDIT_IP_MAX_LENGTH, METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
 
@@ -168,7 +168,15 @@ export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
     targetType: params.targetType ?? null,
     targetId: params.targetId ?? null,
     metadata: sanitized ?? null,
-    ip: params.ip ?? null,
+    // Both bounded to their column widths. `ip` used to be passed through raw
+    // while `userAgent` was sliced — an asymmetry with a sharp edge, because
+    // `ip` is the narrower column (45 vs 512) and the one whose value comes
+    // from a request header. An over-length value does not truncate at the
+    // column, it raises 22001 in the outbox worker's insert; that error, unlike
+    // 22P02, does not echo the offending value, so the row cycles through
+    // max_attempts and the audit event behind it is lost with nothing to say
+    // what it was. Truncating keeps the event.
+    ip: params.ip?.slice(0, AUDIT_IP_MAX_LENGTH) ?? null,
     userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
   };
 }

@@ -23,6 +23,13 @@ export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB
 export const USER_AGENT_MAX_LENGTH = 512;      // matches @db.VarChar(512)
+// Matches audit_logs.ip @db.VarChar(45) — the widest an IPv4-mapped IPv6
+// address with a zone id gets. Bounding here rather than trusting the column:
+// an over-length value raises 22001 in the outbox worker's insert, and unlike
+// 22P02 that error does not echo the value, so the row cycles through
+// max_attempts and the audit event behind it is lost silently. The column
+// rejects; this truncates, which keeps the event.
+export const AUDIT_IP_MAX_LENGTH = 45;
 export const MAX_JSON_BODY_BYTES = 1_048_576;  // 1 MB default stream cap for parseBody
 // Bound for WebAuthn credential ids recorded in audit metadata (e.g. the
 // step-up reauth mismatch/unavailable events). Deliberately NOT
