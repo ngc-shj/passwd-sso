@@ -236,6 +236,7 @@ public struct SessionRestorer: Sendable {
 ## Open questions
 
 - **O1**: Place `SessionRestorer` in `ios/Shared/Session/` (reusable, matches `Shared/Storage`, `Shared/Models`) vs. `ios/PasswdSSOApp/Auth/`. It depends on `MobileAPIClient`/`AuthCoordinator`, which live in `PasswdSSOApp`, not `Shared` → it likely must live in `PasswdSSOApp` (Shared cannot import the app target). **Tentative decision: `ios/PasswdSSOApp/Auth/SessionRestorer.swift`.** Phase 2 confirms the module boundary before placing the file.
+  **Closed by `1a96fc6ff`** (the file shipped at exactly the tentative path — `ios/PasswdSSOApp/Auth/SessionRestorer.swift`, with `ios/PasswdSSOTests/SessionRestorerTests.swift` alongside it).
 
 ## Go/No-Go Gate
 

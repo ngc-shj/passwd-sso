@@ -726,17 +726,32 @@ N/A — no DB migrations, no raw-query tests.
 ## Open questions (all resolved through Round 2)
 
 1. ~~README.md env table sync~~ → NOT in scope; README table becomes descriptive, not authoritative. Generator's `.env.example` is the source of truth.
+   **Closed** — a scope decision, not a code change; `npm run check:env-docs` (`scripts/checks/check-env-docs.mjs`) arbitrates `.env.example` ↔ `env-schema.ts` ↔ allowlist ↔ docker-compose, and README is not among its inputs.
 2. ~~PASSWD_OUTBOX_WORKER_PASSWORD bucket~~ → allowlist (A-Table-2).
+   **Closed** (`scripts/env-allowlist.ts` carries the `PASSWD_OUTBOX_WORKER_PASSWORD` entry).
 3. ~~@clack/prompts~~ → forbidden. NF-1 + S11.
+   **Closed** (no `@clack/prompts` reference anywhere in the tree; `scripts/init-env.ts:25` uses the in-repo `createPrompter` from `./lib/prompt`).
 4. ~~--non-interactive / --edit~~ → reserved, errors in this PR; out of scope.
+   **Closed** (`scripts/init-env.ts:300-302` — `--non-interactive` is parsed, then refused with `ERROR: --non-interactive is not implemented in this PR.`).
 5. ~~JACKSON_API_KEY bucket~~ → allowlist only (F5 / T14 resolved).
+   **Closed** (`scripts/env-allowlist.ts:81` — `key: "JACKSON_API_KEY"`, allowlist entry only; absent from the Zod schema).
 6. ~~LOG_LEVEL classification~~ → add to Zod (F3 / T15 resolved). **Production debug/trace ban DEFERRED** to a follow-up PR (S15 / NF-5).
+   **Closed in part / still open in part** — the Zod half landed (`src/lib/env-schema.ts:397`, a plain `.enum([...])` with `.default("info")`); the **deferred production debug/trace ban is still open**, and `src/lib/env-schema.ts:396` still carries the marker comment `Production debug/trace ban DEFERRED to follow-up PR (S15)`. No `superRefine` in that file bans `debug`/`trace` under `NODE_ENV=production`. This is the only live residue in this section.
 7. ~~HEALTH_REDIS_REQUIRED default~~ → `false` (S3 / T8 resolved).
+   **Closed** (`src/lib/env-schema.ts:403-406` — `.enum(["true","false"]).default("false")`).
 8. ~~SHARE_MASTER_KEY_V{N} SSOT status~~ → hybrid: V1..V10 explicit Zod fields; V11..V100 documented allowlist-regex exception; CURRENT_VERSION.max stays 100 (S4 / F13 / F17 resolved).
+   **Closed** (`src/lib/env-schema.ts:139-148` — `SHARE_MASTER_KEY_V1`..`_V10` explicit; the version field at `:150-155` keeps `.min(1).max(100).default(1)`).
 9. ~~Worker env validation~~ → Option (a) via `envObject.pick()` on the BASE object (not the refined schema) (T9 / F16 resolved). Worker gains `--validate-env-only` flag for unit testing (T17).
+   **Closed by `516acb5b3`** (`scripts/audit-outbox-worker.ts:15` calls `envObject.pick({...})`; `:109` implements `--validate-env-only`).
 10. ~~NEXT_DEV_ALLOWED_ORIGINS bucket~~ → allowlist only; reader (`next.config.ts`) runs before Zod validation (F19 resolved).
+    **Closed** (`scripts/env-allowlist.ts:255` — `key: "NEXT_DEV_ALLOWED_ORIGINS"`, allowlist entry only).
 11. ~~NEXT_PUBLIC_* Zod default vs client inline~~ → server-side Zod default as safety net; consumer-side `??` fallbacks preserved in NF-5 (F20 resolved).
+    **Closed** (`src/lib/env-schema.ts:463-464` — `NEXT_PUBLIC_APP_NAME` / `NEXT_PUBLIC_BASE_PATH` carry server-side `.default(...)`, with the build-time inlining caveat recorded at `:459`).
 12. ~~CODEOWNERS self-healing~~ → add roster entry to `check-codeowners-drift.mjs` (S18 resolved).
+    **Closed** — the gate exists, but at `scripts/check-codeowners-drift.mjs`, **not** `scripts/checks/check-codeowners-drift.mjs`; the path in this line has no `checks/` segment in the tree.
 13. ~~SEC-5 fallback scope~~ → broadened to `\b[a-f0-9]{64}\b` with comment-line exclusion (S14 resolved).
+    **Closed** (`scripts/lib/hex-leak-scan.mjs:28` — `HEX64_RE = /(?:^|[^a-f0-9])([a-f0-9]{64})(?:$|[^a-f0-9])/i`, the boundary expressed as negated character classes rather than `\b`).
 14. ~~Determinism locale test~~ → use `tr_TR.UTF-8` (always available on ubuntu-latest) with precondition skip (T19 resolved).
+    **Closed, but not by the mechanism recorded here** — T19's premise is false and was superseded within this same document by T26 (`plan:374`): `tr_TR.UTF-8` is **not** shipped on default `ubuntu-latest` images. The delivered test has no OS-locale dependency and cannot silently skip: `scripts/__tests__/generate-env-example.test.mjs:80` drives `makeEnvKeyCollator("en")` / `("tr")` from `scripts/lib/env-sort.ts:19`. No `tr_TR` reference exists anywhere under `scripts/`.
 15. ~~pre-pr.sh test recursion risk~~ → split into (a) check:env-docs direct test, (b) grep wiring assertion (T18 resolved).
+    **Closed** (`package.json` exposes `check:env-docs`, `scripts/pre-pr.sh:411` wires it, and `scripts/__tests__/pre-pr-env-drift.test.mjs` is the separate wiring assertion).

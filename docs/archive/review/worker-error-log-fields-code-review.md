@@ -258,6 +258,10 @@ after the block closes). Recommended: reduce `uploadFailedReason` to
 `${dest.name}_UPLOAD_FAILED:${errorLogFields(uploadErr).code}` and keep
 `destination` + the distinct `_logType`s as the diagnosis.
 
+**Closed by `f5dacefb3`** (`src/workers/audit-anchor-publisher.ts:321` now builds
+`uploadFailedReason` as `` `${dest.name}_UPLOAD_FAILED:${errorLogFields(uploadErr).code}` ``, the
+recommended reduction adopted verbatim).
+
 **F-M5 — the dead-letter path stringifies the whole error** into a field whose
 logger has no redact paths, justified by an inaccurate enumeration at
 `src/lib/audit/audit-logger.ts:105`. The fix is small; what makes it a decision is that
@@ -265,12 +269,21 @@ logger has no redact paths, justified by an inaccurate enumeration at
 thrown value is not an `Error`, so reducing `error` narrows what an operator has
 at exactly the moment the audit pipeline is failing.
 
+**Closed by `f5dacefb3`** (`src/lib/audit/audit.ts:284` — `deadLetterEntry(params, reason,
+error?: ErrorLogFields)` takes bounded fields instead of a stringified error; callers pass
+`errorLogFields(err)`).
+
 **F-m3 — `isLockTimeoutError`.** Replacing its body with
 `pgErrorCode(err) === "55P03"` retires the last second reading of the predicate,
 but `pgErrorCode`'s order is measured and this function's is not; the three
 shapes it currently recognises must be pinned as fixtures before the copy is
 deleted. Out of this branch's scope, and now cheaper than before because
 `pgErrorCode` has a second consumer.
+
+**Closed by `f5dacefb3`** (`src/lib/auth/policy/account-lockout.ts:455` — the body is now
+`return pgErrorCode(err) === SQLSTATE_LOCK_NOT_AVAILABLE;`, the named constant rather than the
+literal `"55P03"`. The path is the post-reorg one; the pre-reorg spelling `src/lib/account-lockout.ts`
+no longer resolves.)
 
 ## Round 2 decision
 Not required for the findings. Every Major is fixed or raised with what would

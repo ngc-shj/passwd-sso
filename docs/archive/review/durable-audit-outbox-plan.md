@@ -995,12 +995,19 @@ These describe the workflows that exercise the system end-to-end, to surface edg
 These are flagged for the expert agents to evaluate explicitly:
 
 - ~~**Q1 (resolved)**: Keep void shim + two-path design. Phase 1 migrates security-critical call sites to `logAuditInTx`; remaining ~170 tracked in follow-up.~~
+  **Closed** (both paths exist: `src/lib/audit/audit.ts:263` `logAuditInTx` and `src/lib/audit/audit-outbox.ts:20` `enqueueAuditInTx`).
 - **Q2 (security)**: Is the worker DB role design sufficient, or should the worker use a dedicated unencrypted-config file for the role password rather than env var injection? (Today, `passwd_app`'s password is also via env var.)
+  **Still open** — env-var injection remains the only implemented path: `docker-compose.override.yml:41` passes `OUTBOX_WORKER_DATABASE_URL` with `${PASSWD_OUTBOX_WORKER_PASSWORD}` inline, and `scripts/set-outbox-worker-password.sh` sets the role password through the environment, not a config file. The question was never adjudicated, only left at the default.
 - ~~**Q3 (resolved)**: Use GitHub Actions postgres service in CI (matching `rls-smoke` pattern), dev docker-compose `db` container locally. No testcontainers.~~
+  **Closed** (`.github/workflows/ci-integration.yml:42` runs a `postgres:16` service; no testcontainers dependency in the tree).
 - ~~**Q4 (resolved)**: FIFO + flusher is retained in Phase 1; removed in Phase 2 when `logAuditAsync` replaces `logAudit`.~~
+  **Closed** (`src/lib/audit/audit.ts:302` `logAuditAsync` is the surviving entry point; no `export function logAudit(` and no FIFO/flusher remain in `src/lib/audit/`).
 - **Q5 (security)**: For Phase 3, should `audit_delivery_targets.config_encrypted` use the same envelope as `TeamWebhook.secretEncrypted` (master-key versioned) or a new, audit-specific master key for blast-radius isolation?
+  **Closed by `c794e1e74`** — decided in favour of the **shared** envelope, so the reason has changed from "undecided" to "decided the other way": `src/app/api/tenant/audit-delivery-targets/route.ts:171` encrypts via the same `getCurrentMasterKeyVersion`/`encryptServerData` pair the team-webhook path uses; `prisma/schema.prisma:1196` carries `configEncrypted` + `masterKeyVersion`. No audit-specific master key was introduced — the blast-radius isolation this question raised was not taken.
 - **Q6 (functionality)**: Should we pre-populate the `audit_delivery_targets` row schema with a `kind=DB` always-on row per tenant, or special-case DB in the worker code? Current plan: special-case.
+  **Closed by `db08c7ae8`** (special-case, as planned: `src/workers/audit-outbox-worker.ts:491` filters `kind: { not: "DB" }` when fanning out deliveries; the `DB` enum member exists in `prisma/schema.prisma:1107` but no code path creates such a row).
 - ~~**Q7 (resolved)**: Use two-Prisma-client + Deferred barrier pattern in vitest. No separate harness needed.~~
+  **Closed** (`src/__tests__/db-integration/helpers.ts` provides the Deferred barrier over real Prisma clients; no separate harness was added).
 
 ## Implementation Checklist (Phase 1 only)
 

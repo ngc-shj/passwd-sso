@@ -877,6 +877,10 @@ Phase 2 Step 2-1 reads this section explicitly.
   wrong in prose. What settles it: writing the argument parser and running AC-3.0.
 - **Orchestrator sign-off**: P-4 carries every property that would produce a wrong
   result; only the spelling is deferred.
+- **Closed by `57c33e238`** — `scripts/checks/check-override-floor-staleness.mjs:240` `parseArgs()`
+  separates flags (`/^--([a-z-]+)=(.*)$/`) from paths, and all four named refusals exist:
+  `REFUSED_UNKNOWN_FLAG` (`:305`), `REFUSED_MANIFEST_UNREADABLE` (`:1113`),
+  `REFUSED_MANIFEST_DISCOVERY_FALLBACK`/`_INCOMPLETE` (`:370`), `REFUSED_EMPTY_WALK` (`:1235`).
 
 ### R3-CF2 [Major] AC-3.3's fixture-server reachability under the origin pin — Out of scope (deferred to Phase 2)
 - **Source findings**: round 3 — TEST-F29 (Critical), SEC-R3-F1, SEC-R3-F2, FUNC-R3-F4.
@@ -890,6 +894,10 @@ Phase 2 Step 2-1 reads this section explicitly.
   it. What settles it: writing AC-3.3's first case.
 - **Orchestrator sign-off**: the design decision (S11) is made; the residual is
   implementation, and O-4 requires the ambient-origin refusal to carry a deny/allow pair.
+- **Closed by `57c33e238`** — `scripts/__tests__/check-override-floor-staleness.test.mjs:1840`
+  (`AC-3.3 — the network shell as a process`) runs a real `node:http` fixture server; the deny/allow
+  pair is present: ambient refused at `:2109` (`HTTPS_PROXY` set → `REFUSED_AMBIENT_ORIGIN`, zero
+  requests), explicit `--origin=` accepted throughout, default pinned at `:919`.
 
 ### R3-CF3 [Minor] O-9's fixture cannot detect an upstream rename — Accepted, with the claim corrected
 - **Source findings**: round 3 — TEST-F37, FUNC-R3-F9.
@@ -903,6 +911,10 @@ Phase 2 Step 2-1 reads this section explicitly.
   lookup fails or the element became withdrawn, which converts staleness into a red.
 - **Orchestrator sign-off**: the false claim is removed; the residual is bounded by a
   refusal.
+- **Closed by `57c33e238`** — `scripts/checks/check-override-floor-staleness.mjs:749` `checkCanary()`
+  selects the advisory by `ghsa_id` (`:757`) and converts staleness into a red:
+  `CANARY_CHANNEL_DEAD` when the lookup fails (`:759`), `CANARY_CONSTANT_STALE` when the advisory is
+  withdrawn (`:765`).
 
 ### R3-CF4 [Minor] The `not-judged` row's effect on the census arithmetic — Out of scope (deferred to Phase 2)
 - **Source findings**: round 3 — SEC-R3-F7, TEST-F36, FUNC-R3-F3.
@@ -914,6 +926,10 @@ Phase 2 Step 2-1 reads this section explicitly.
 - **Orchestrator sign-off**: S10 names the member and S1 states the queried-vs-judged
   rule (17 + 1 = 18); the counting convention is a Phase-2 detail the criterion itself
   surfaces.
+- **Closed by `57c33e238`** — the convention is settled in code:
+  `scripts/checks/check-override-floor-staleness.mjs:1219` filters `judgeable` by excluding
+  `kind === "manifest"`, and `OUTCOME.NOT_JUDGED` is kept out of `FAILING_OUTCOMES` (`:203`); the
+  17 + 1 = 18 census is asserted at `scripts/__tests__/check-override-floor-staleness.test.mjs:1584`.
 
 ## User operation scenarios
 

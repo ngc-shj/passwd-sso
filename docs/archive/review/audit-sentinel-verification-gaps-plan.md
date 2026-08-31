@@ -904,3 +904,66 @@ this section.
 | `npm run db:migrate` (dev DB) | applies cleanly | pending |
 | `node scripts/audit-db-grants.mjs` | no manifest drift | pending |
 | Narrative-gate parity after C14 | per-sink breakdown recorded, exit 0, asserted **after all branch edits and with no probe fixtures in the tree** (C1's allow arm adds one temporarily) | pending |
+
+---
+
+## Implementation Checklist
+
+Authored by Phase 2 Step 2-1 from its own impact analysis. Distinct from
+`## Carried-Forward Plan Findings` above. Phase 3 reads this as the set of files that must
+appear in the diff.
+
+### Derivations re-run at implementation time (all reproduce)
+
+| Derivation | Result |
+|---|---|
+| C1 intersection | grep → 7 sites; `git show --stat e3f50de5e` touches `extension/token/route.ts` + `mcp/register/route.ts`, **not** `audit-anchor-publisher.ts` → **2** |
+| C12 Prisma writers | **14** (6 create/upsert + 8 update) |
+| C12 raw SQL | **9** — `helpers.ts`, `admin-vault-reset-cross-tenant-sessions.integration.test.ts`, `rls-cross-tenant-seed.sql`, 4 migrations, **`e2e/helpers/db.ts` ×2** (reached by derivation; absent from both curated lists) |
+| C12 nested relation writes | **0 to `tenant_members`** — `teams/route.ts:116` is `members:` on `TeamMember`; `members/search/route.ts:79` is a read filter. Both adjudicated out |
+| Sentinel literal, non-archive | **8** — in class (denotes the sentinel tenant): `src/lib/constants/app.ts:71`, `prisma/migrations/20260428170853_…/migration.sql:42`, `docs/operations/alerts.md:133`. Out of class by **role**: `validate-token-dpop.test.ts:48` / `mobile-token.test.ts:119` (arbitrary test tenant), `audit-outbox-worker.test.ts:185` (a user id), `generate-team-key-fixture.ts:141` + `ios/PasswdSSOTests/fixtures/team-key-fixture.json:34` (`entryIdV1`) |
+
+### Files to modify
+
+**C1** — `src/app/api/extension/token/route.test.ts`, `src/app/api/mcp/register/route.test.ts`
+**C2** — `src/__tests__/audit.mocked.test.ts`
+**C3** — `src/__tests__/db-integration/audit-unattributable-tenant.integration.test.ts`, `src/__tests__/db-integration/helpers.ts` (`trackTenant` sentinel guard)
+**C4** — same integration file
+**C5** — `src/auth.test.ts`, `src/lib/audit/auth-failure.test.ts`, `src/lib/auth/session/auth-adapter.test.ts`, `src/lib/tenant/tenant-management.test.ts` (+ whatever the derivation returns)
+**C6** — `src/__tests__/audit-fifo-flusher.test.ts`
+**C7** — `scripts/__tests__/check-audit-metadata-narrative.test.mjs`, `scripts/checks/check-audit-metadata-narrative.mjs` (annotation only)
+**C8** — `scripts/__tests__/backup-db.test.mjs` (docblock scoping clause + TODO)
+**C10** — `src/auth.ts`, `src/lib/auth/session/auth-adapter.ts`, `src/lib/audit/audit.ts` (Bucket C), `docker-compose.yml`, `infra/fluent-bit/fluent-bit.conf` (+ derivation)
+**C11** — 11 files under `docs/archive/review/` (Tier 1), this branch's own two excluded
+**C12** — new migration; `scripts/checks/check-sentinel-tenant-literal-parity.mjs` (new); `scripts/__tests__/check-sentinel-tenant-literal-parity.test.mjs` (new); `scripts/pre-pr.sh`; `scripts/tenant-domain.ts`; a new integration test
+**C13** — `docs/operations/` (new section), the migration's header comment
+**C14** — `scripts/checks/check-audit-metadata-narrative.mjs`, `scripts/__tests__/check-audit-metadata-narrative.test.mjs`, `src/lib/audit/audit.ts` (slice `ip`)
+
+### Ordering (contract-stated, not preference)
+
+`C6 → C5` (a deleted test name is a member of C5's derivation) · `C14 → C7` (C14 rewrites the
+message C7's per-refusal predicate anchors on; then re-run C7's four constructions and assert the
+OR still equals today's boolean).
+
+### Shared utilities that MUST be reused (no reimplementation)
+
+`SYSTEM_TENANT_ID` / `UUID_RE` (`src/lib/constants/app.ts`) · `escapeUnsafeDisplayChars`
+(`src/lib/security/unsafe-display-chars.ts`) — for the new `tenant-domain` refusal messages, as
+the neighbouring refusals already do · `createTenant` / `trackTenant` / `cleanup`
+(`src/__tests__/db-integration/helpers.ts`) · the existing AST helpers under
+`scripts/checks/lib/` for the parity gate · `errorLogFields` / `pgErrorCode` · the sibling gate
+`scripts/__tests__/check-audit-metadata-narrative.test.mjs:321-327` as the template for the parity
+gate's anchored wiring assertion · `USER_AGENT_MAX_LENGTH` (`src/lib/validations/common.server.ts`)
+as the precedent for the `ip` slice.
+
+### CI gate parity (Step 2-1 item 7)
+
+15 CI gates extracted. Four are absent from `scripts/pre-pr.sh`; the rest are present under a
+different invocation (script path rather than npm-script name) or via `tsc`.
+
+| Gate | Disposition |
+|---|---|
+| `bash scripts/check-state-mutation-centralization.sh` | **Deferred parity gap** — pre-existing, unrelated to this branch's subject; wiring it is a separate decision about pre-pr's runtime budget. Run locally in Step 2-4 regardless. *Anti-Deferral: worst case — a state-mutation-centralization violation reaches CI and costs one push round; likelihood — low, this branch adds no state-transition code; cost to fix — one `queue_step` line plus whatever runtime it adds, which is a judgement about pre-pr's budget, not about this branch.* |
+| `npm run licenses:check:strict` / `:cli:strict` / `:ext:strict` | **Deferred parity gap** — same reasoning, and they cannot fire here: this branch adds no dependency. Run locally in Step 2-4. *Anti-Deferral: worst case — a licence violation reaches CI; likelihood — nil for this diff (no `package.json` dependency change); cost to fix — three `queue_step` lines plus a network-dependent runtime in a script that is otherwise offline.* |
+
+Both entries are copied to the deviation log so Phase 3 reads them.

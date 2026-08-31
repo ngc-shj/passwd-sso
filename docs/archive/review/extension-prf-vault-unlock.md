@@ -152,17 +152,35 @@ fallback.
 
 ## Open questions before coding
 
+All four are **superseded by `extension-prf-vault-autounlock-plan.md`**, which took the feature
+forward and was then reviewed **No-Go** (`extension-prf-vault-autounlock-review.md:5`, all three
+experts rejecting; that plan's Go/No-Go table shows contracts C1-C8 all `pending`). Nothing was
+implemented, so none of these is open as *work* — they are closed as questions about a design that
+was declined. `docs/architecture/client-reauth-timing.md:161-164` is the standing architectural
+record.
+
 1. **Envelope channel**: direct bridge message vs server escrow. Lean direct.
    Needs a new `EXT_VAULT_KEY_ENVELOPE` (page→CS→SW) message + ordering after the
    `ok`. Confirm the content-script relay can carry a second message without
    reopening the C15 activation gate (the wrap is a consequence of the same user
    gesture).
+   **Superseded by `extension-prf-vault-autounlock-plan.md`** — `EXT_VAULT_KEY_ENVELOPE` has zero
+   occurrences in `extension/` or `src/`; the return channel was never built
+   (`extension-prf-vault-autounlock-review.md:12`).
 2. **Does auto-extension-connect have access to the vault context's unwrapped
    key** at connect time? Trace whether the `ext_connect` page is inside the
    VaultProvider and whether `getSecretKey()` (or equiv) is callable there.
+   **Superseded by `extension-prf-vault-autounlock-plan.md`** — answered there (`:68`, "Key
+   reachability (**resolved** Open Question #2)"): after #620 the `ext_connect` page skips
+   `VaultLockScreen`, so the key is reachable. The answer stands even though the feature did not ship.
 3. **ECDH key lifecycle**: regenerate on DPoP key reset? Tie its lifetime to the
    connection; drop on disconnect/CLEAR_TOKEN.
+   **Superseded by `extension-prf-vault-autounlock-review.md`** — moot: no ECDH keypair was ever
+   built, and findings S1/S2 (`:11`) rejected the surrounding design for opening a page-XSS
+   exfiltration window during connect.
 4. **AAD exact bytes**: define and golden-vector test across web + extension.
+   **Superseded by `extension-prf-vault-autounlock-review.md`** — finding F2 (`:12`, `:22`) records
+   the plan's new "EV" AAD scope byte as never implemented (contracts C2/C8 `pending`).
 
 ## Comparison recap (why 方式A over 方式B)
 
