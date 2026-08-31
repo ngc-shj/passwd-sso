@@ -34,7 +34,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ warn: mockWarn, info: vi.fn(), error: vi.fn() }),
 }));
 
-import { runHealthChecks } from "@/lib/health";
+import { runHealthChecks, CHECK_TIMEOUT_MS } from "@/lib/health";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
@@ -180,6 +180,33 @@ describe("health checks", () => {
         expect.anything(),
         expect.any(Function),
         BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+        expect.objectContaining({
+          timeout: expect.any(Number),
+          maxWait: expect.any(Number),
+        }),
+      );
+    });
+
+    it("bounds the transaction with Prisma's own budget, not only the race", async () => {
+      // withTimeout rejects the race; it does not end the transaction, so
+      // without this the connection stayed held to Prisma's 5 s default after
+      // the check had already reported "fail" — during exactly the incident
+      // where connections are the scarce resource.
+      mockQueryRaw.mockResolvedValue([{ pending: 0n, oldest_age: null }]);
+      await runHealthChecks();
+      const options = mockWithBypassRls.mock.calls[0]?.[3] as
+        | { timeout: number; maxWait: number }
+        | undefined;
+      expect(options).toBeDefined();
+      // The SPLIT is not the contract and must not be pinned here. Prisma
+      // bounds the two phases separately — maxWait to START the transaction,
+      // timeout to RUN it — so passing only `timeout` still holds a connection
+      // for maxWait beyond the budget. Each assertion has its own mutation:
+      // drop maxWait, drop timeout, or widen either past the budget.
+      expect(options!.maxWait).toBeGreaterThan(0);
+      expect(options!.timeout).toBeGreaterThan(0);
+      expect(options!.maxWait + options!.timeout).toBeLessThanOrEqual(
+        CHECK_TIMEOUT_MS,
       );
     });
 

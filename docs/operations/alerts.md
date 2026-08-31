@@ -117,36 +117,67 @@ Datadog/Loki: `{ _logType="audit-dead-letter" }`
 Splunk: `_logType="audit-dead-letter"`
 Sentry: auto-captured at error level.
 
-> **⚠️ Known gap — this record is not durable, and the default deployment does
-> not forward it.** Tracked as an open security risk; not fixed.
->
-> For the `tenant_not_found` reason (`src/lib/audit/audit.ts`, in
-> `logAuditAsync` and `logAuditBulkAsync`) the function returns **without**
-> enqueuing anything, so there is no `audit_outbox` row and no `audit_logs`
-> row. The stdout line is the only record that the audit event existed.
->
-> Two things then work against it:
-> - `infra/fluent-bit/fluent-bit.conf` carries an explicit
->   `Exclude _logType ^audit-dead-letter$`, so the audit-log-forwarding overlay
->   **drops** this record before any output plugin sees it. Adopting that
->   overlay does not make it leave the host. The exclusion is deliberate rather
->   than incidental — see the "What to do" note below — but the effect on
->   alerting is the same as when it was an accident of the keep-filter.
-> - Container logs are capped at `max-size: 20m` × `max-file: 5`
->   (`docker-compose.yml`). Ordinary application logging can therefore push the
->   record out of the retention window. Before the cap existed the log grew
->   until the disk filled — which is the incident the cap was added for — so
->   this is a narrowed window, not a new loss, but it is narrower.
->
-> **What to do until it is fixed**: if you rely on dead-letter alerting, do not
-> rely on the shipped forwarder. Ship the raw container stdout (not the
-> `docker-compose.logging.yml` overlay) to a durable sink, or delete the
-> `Exclude _logType ^audit-dead-letter$` filter yourself — noting that the
-> record then carries whatever a caller passed, including error text, so review
-> what your sink retains.
->
-> **The fix** is to persist `tenant_not_found` to a durable dead-letter table
-> rather than only to stdout, so alerting stops depending on log retention.
+**`tenant_not_found` no longer occurs.** `resolveTenantId` used to return null
+when an event could not be attributed — no `params.tenantId`, no team, no `users`
+row — and both callers then returned **without** enqueuing, so the stdout line
+was the only record the event had ever existed. It now returns
+`SYSTEM_TENANT_ID`, the encoding of "no owning tenant" in a `NOT NULL` column, so
+the event reaches `audit_outbox` and then `audit_logs` like any other.
+
+**Finding an unattributable event.** It carries the real actor and a sentinel
+tenant:
+
+```sql
+SELECT action, actor_type, COUNT(*) AS n, MAX(created_at) AS latest
+FROM audit_logs
+WHERE tenant_id = '00000000-0000-4000-8000-000000000002'   -- the sentinel tenant (name/slug: __system__)
+GROUP BY action, actor_type
+ORDER BY n DESC;
+```
+
+**Group by `action`; do not filter on `actor_type`.** Both populations under this
+tenant emit `SYSTEM` — the anchor publisher, the retention GC, and also
+`emitAuthLoginFailure`, `emitBridgeCodeIssueFailure` and the DCR registration —
+so an `actor_type <> 'SYSTEM'` predicate would hide almost every unattributable
+event rather than isolate it. `ip` does not separate them either: the retention
+GC forwards a row's `last_used_ip` on some sweeps.
+
+Routine rows to expect: `AUDIT_ANCHOR_*` (the anchor publisher) and
+`RETENTION_GC_SWEEP` (the GC heartbeat). **Anything else under this tenant is an
+event whose owning tenant could not be resolved** — a first-ever sign-in denial,
+a claim refusal, a pre-auth emission. A rising count of one of those actions is
+what replaced the old `audit-dead-letter` alert.
+
+No tenant can read these rows: the sentinel has zero `tenant_members` and
+`/api/tenant/audit-logs` scopes by membership. That is an unenforced invariant,
+not a constraint — see the note below.
+
+**What replaces the alert.** A broad tenant-resolution failure used to fire
+`audit-dead-letter`. It now shows up as a rising count from the query above
+rather than as a log-line alert — quieter, but the record survives, which it did
+not before. Alert on that count if you relied on the old signal.
+
+**The two remaining reasons** — `logAuditAsync_failed` and
+`logAuditBulkAsync_failed` — mean the **database was unreachable**, so the
+recovery action is different: check DB connectivity and the `audit_outbox` write
+path, not tenant mapping. No durable record is possible for them by any design,
+because the write that would carry it is the one that failed.
+
+> **Note on the forwarder.** `infra/fluent-bit/fluent-bit.conf` still carries
+> `Exclude _logType ^audit-dead-letter$`, and that is now harmless: the two
+> remaining reasons fire only when the database is unreachable, and in that state
+> nothing durable can be written anyway. Container logs remain capped at
+> `max-size: 20m` × `max-file: 5` (`docker-compose.yml`). Removing the exclusion
+> is an operator decision, not a required fix.
+
+> **Sentinel-tenant growth.** `__system__` has no `audit_log_retention_days`, so
+> `sweepAuditLogs` skips it and these rows are never purged. Two pre-auth routes
+> (`/api/extension/token`, `/api/mcp/register`) emit under it, bounded only by
+> their per-IP rate limiters. Setting a retention on `__system__` would bound the
+> growth but incurs the documented chain-verify interaction (a purge does not
+> renumber `chain_seq`, so a default `fromSeq=1` verify reports a false TAMPER —
+> see `docs/security/audit-chain-threat-model.md#retention-purge-interaction`).
+> Left unset deliberately; revisit with whoever owns that threat model.
 
 ## `delivery.dead_lettered` / `webhook_delivery.dead_lettered`
 

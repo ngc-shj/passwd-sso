@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
-import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { ANONYMOUS_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 const {
   mockEnqueueAudit,
@@ -121,8 +121,9 @@ describe("logAuditAsync", () => {
     );
   });
 
-  it("dead-letters sentinel userId when tenantId is absent AND user lookup fails", async () => {
-    // Sentinel IDs are not in the users table, so resolveTenantId returns null
+  it("records a sentinel userId under SYSTEM_TENANT_ID when no users row matches", async () => {
+    // Sentinel IDs are not in the users table. That used to end the emit — the
+    // function returned before enqueuing and the log line was the only record.
     mockUserFindUnique.mockResolvedValue(null);
 
     await logAuditAsync({
@@ -134,11 +135,9 @@ describe("logAuditAsync", () => {
     });
 
     expect(mockAuditLogCreate).not.toHaveBeenCalled();
-    expect(mockEnqueueAudit).not.toHaveBeenCalled();
-    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "tenant_not_found" }),
-      "audit.dead_letter",
-    );
+    expect(mockEnqueueAudit).toHaveBeenCalledOnce();
+    expect(mockEnqueueAudit.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(mockDeadLetterWarn).not.toHaveBeenCalled();
   });
 
   it("resolves tenantId from userId when not provided", async () => {
@@ -195,15 +194,14 @@ describe("logAuditAsync", () => {
       userId: "00000000-0000-4000-8000-0000000000ff",
     });
 
-    expect(mockEnqueueAudit).not.toHaveBeenCalled();
-    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "tenant_not_found" }),
-      "audit.dead_letter",
-    );
+    expect(mockEnqueueAudit).toHaveBeenCalledOnce();
+    expect(mockEnqueueAudit.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(mockDeadLetterWarn).not.toHaveBeenCalled();
   });
 
-  it("dead-letters UUID userId when user lookup returns null (tenant_not_found)", async () => {
-    // UUID userId that doesn't exist in DB — resolveTenantId returns null
+  it("records a UUID userId with no users row under SYSTEM_TENANT_ID", async () => {
+    // UUID userId that does not exist in the DB — resolveTenantId finds no
+    // owning tenant and encodes that, rather than dropping the entry.
     mockUserFindUnique.mockResolvedValue(null);
 
     await logAuditAsync({
@@ -212,11 +210,9 @@ describe("logAuditAsync", () => {
       userId: "00000000-0000-4000-8000-00000000ffff",
     });
 
-    expect(mockEnqueueAudit).not.toHaveBeenCalled();
-    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "tenant_not_found" }),
-      "audit.dead_letter",
-    );
+    expect(mockEnqueueAudit).toHaveBeenCalledOnce();
+    expect(mockEnqueueAudit.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+    expect(mockDeadLetterWarn).not.toHaveBeenCalled();
   });
 
   it("catches enqueueAudit rejection and logs to dead letter (never throws)", async () => {
@@ -268,7 +264,13 @@ describe("logAuditAsync", () => {
   });
 
   it("dead letter output does not contain raw metadata", async () => {
-    mockUserFindUnique.mockResolvedValue(null);
+    // Driven through the reason that still dead-letters. The tenant_not_found
+    // arm no longer does, so seeding it here would assert nothing.
+    mockUserFindUnique.mockResolvedValue({
+      id: "00000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-1",
+    } as never);
+    mockEnqueueAudit.mockRejectedValueOnce(new Error("DB unreachable"));
 
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -280,6 +282,8 @@ describe("logAuditAsync", () => {
     const deadLetterCall = mockDeadLetterWarn.mock.calls[0][0];
     expect(deadLetterCall).not.toHaveProperty("auditEntry");
     expect(deadLetterCall).not.toHaveProperty("metadata");
-    expect(deadLetterCall).toHaveProperty("reason", "tenant_not_found");
+    expect(deadLetterCall).toHaveProperty("reason", "logAuditAsync_failed");
+    expect(JSON.stringify(deadLetterCall)).not.toContain("secret");
+    expect(JSON.stringify(deadLetterCall)).not.toContain("bearer-xyz");
   });
 });

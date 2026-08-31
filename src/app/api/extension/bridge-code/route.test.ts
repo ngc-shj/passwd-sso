@@ -223,23 +223,42 @@ describe("POST /api/extension/bridge-code", () => {
     }
   }
 
-  it("emits failure audit with ip_rate_limit when IP rate-limit returns 429", async () => {
+  // The IP-limiter arm writes NO audit row. The limiter refuses the response,
+  // not the emit, so this fired once per request past the limit — and since
+  // resolveTenantId began encoding "no owning tenant" rather than returning
+  // null, each became a durable audit_logs row under the sentinel tenant, which
+  // has no retention and no application-reachable delete path. Exceeding the
+  // limit would increase persistent work instead of shedding it.
+  it("writes NO audit row when the IP rate-limit returns 429", async () => {
     mockIpCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
-    expectFailureEmit("ip_rate_limit");
+    expect(mockLogAudit).not.toHaveBeenCalled();
     expect(mockAuth).not.toHaveBeenCalled();
   });
 
-  it("emits failure audit with ip_rate_limit_redis_fail when IP limiter Redis-fails", async () => {
+  it("writes NO audit row when the IP limiter Redis-fails closed", async () => {
     mockIpCheck.mockResolvedValueOnce({ allowed: false, redisErrored: true });
     const res = await POST(makeRequest());
     const { status, json } = await parseResponse(res);
     expect(status).toBe(503);
     expect(json.error).toBe("SERVICE_UNAVAILABLE");
-    expectFailureEmit("ip_rate_limit_redis_fail");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("still emits on the arms the IP limiter has already ALLOWED", async () => {
+    // The allow side. Without it, a route that emitted nothing at all would
+    // satisfy the two cases above — and the pre-auth diagnostics those arms
+    // carry (origin_disallowed, dpop_invalid, ...) are why the route audits.
+    const reqWithBadOrigin = createRequest("POST", "http://localhost:3000/api/extension/bridge-code", {
+      headers: { Origin: "https://evil.example.com", DPoP: "x" },
+      body: {},
+    });
+    const res = await POST(reqWithBadOrigin);
+    expect(res.status).toBe(403);
+    expectFailureEmit("origin_disallowed");
   });
 
   it("emits failure audit with origin_disallowed when Origin is not in allowlist", async () => {

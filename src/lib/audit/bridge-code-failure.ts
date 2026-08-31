@@ -3,11 +3,13 @@
  * POST /api/extension/bridge-code route.
  *
  * Mirrors `emitAuthLoginFailure` for pre-auth (`userId === null`) cases:
- * the audit row is attributed to `SYSTEM_ACTOR_ID` with `actorType: SYSTEM`,
- * and the `tenantId` resolution dead-letters when no real user/tenant can
- * be associated. The synchronous pino structured-log emit at
- * `audit.ts:233-251` still fires for these dead-lettered rows, providing
- * the operational visibility for pre-auth failures.
+ * the audit row is attributed to `SYSTEM_ACTOR_ID` with `actorType: SYSTEM`.
+ * When no real user/tenant can be associated, `resolveTenantId` records the
+ * row under SYSTEM_TENANT_ID rather than dead-lettering it, so these are
+ * durable audit_logs rows and not stdout-only records. Volume therefore
+ * matters: the route's caller must not emit on an arm the rate limiter has
+ * already refused — see the comment on the IP-limiter arm in
+ * app/api/extension/bridge-code/route.ts.
  *
  * The `extra` shape is narrowed by discriminated union on `reason` so the
  * only field that can ever land in `metadata` (besides `reason` itself) is

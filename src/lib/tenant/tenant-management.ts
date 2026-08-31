@@ -275,16 +275,23 @@ export function claimRefusalOf(
  * Every arm carries a `tenantId`, including the one where it is `null`. That
  * is not decoration: on a first-ever sign-in there is no user row, so
  * `emitAuthLoginFailure` runs with `userId = SYSTEM_ACTOR_ID`, and
- * `logAuditAsync`'s `resolveTenantId` (src/lib/audit/audit.ts:167) can only
- * find a tenant through `params.tenantId`, the team, or a `users` row — the
- * sentinel matches none, so the denial DEAD-LETTERS: no `audit_logs` row, no
- * `audit_outbox` row, and `tenant-domain unmapped` (which groups by
- * `tenant_id` on both tables) shows nothing. Both refusals that HAVE an owning
- * tenant already know it at the point they are constructed, so they carry it
- * out rather than making the caller re-query. `claim_invalid` is `null`
- * because no tenant owns an unregistrable claim — spelled explicitly so a
- * future arm has to state which case it is rather than inheriting an
- * `undefined`.
+ * `logAuditAsync`'s `resolveTenantId` can only find a tenant through
+ * `params.tenantId`, the team, or a `users` row — the sentinel matches none.
+ *
+ * This used to say the denial then DEAD-LETTERS, writing neither an
+ * `audit_logs` nor an `audit_outbox` row and leaving `tenant-domain unmapped`
+ * (which groups by `tenant_id` on both tables) showing nothing. That is no
+ * longer true: `resolveTenantId` returns `SYSTEM_TENANT_ID` for the
+ * unattributable case, so the row is written and `unmapped` shows it under
+ * `__system__` rather than not at all.
+ *
+ * Carrying the tenant still matters, and now for the sharper reason: an arm
+ * that knows its owning tenant must say so, or its denial is filed under
+ * "no owning tenant" when one exists. Both refusals that HAVE an owning tenant
+ * already know it at the point they are constructed, so they carry it out
+ * rather than making the caller re-query. `claim_invalid` is `null` because no
+ * tenant owns an unregistrable claim — spelled explicitly so a future arm has
+ * to state which case it is rather than inheriting an `undefined`.
  */
 export type ClaimTenantResolution =
   | { kind: "tenant"; id: string }
@@ -351,12 +358,14 @@ export async function findOrCreateTenantForClaim(
     return row.revokedAt === null
       ? { kind: "tenant", id: row.tenantId }
       // The owning tenant rides on the refusal so the caller can emit an
-      // audit row that resolveTenantId() can actually bind. Without it the
-      // emit dead-letters: a first-ever sign-in has no user row, so
-      // logAuditAsync -> resolveTenantId falls back to a users lookup on
-      // SYSTEM_ACTOR_ID, finds nothing, and returns without enqueuing —
-      // leaving the denial invisible to `tenant-domain unmapped`, which is
-      // the whole point of distinguishing this refusal.
+      // audit row that resolveTenantId() binds to the RIGHT tenant. Without
+      // it, a first-ever sign-in has no user row, the lookup on
+      // SYSTEM_ACTOR_ID finds nothing, and the row is filed under
+      // SYSTEM_TENANT_ID — so `tenant-domain unmapped`, which groups by
+      // tenant_id, shows the denial under the sentinel rather than under the
+      // tenant it is about, which is the whole point of distinguishing this
+      // refusal. (Before the encoding landed the emit dead-lettered and the
+      // denial was invisible entirely.)
       : { kind: "claim_taken", tenantId: row.tenantId };
   }
 

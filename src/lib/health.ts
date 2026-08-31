@@ -39,7 +39,16 @@ export interface HealthResponse {
   };
 }
 
-const CHECK_TIMEOUT_MS = 3 * MS_PER_SECOND;
+/**
+ * The budget for one check, and the outer bound every check must respect.
+ *
+ * Exported so the tests can assert the outbox transaction's `maxWait + timeout`
+ * against the real value instead of re-typing 3000 — a re-typed bound lets the
+ * expectation and the production constant drift apart while agreeing with each
+ * other, which is the same reason BYPASS_PURPOSE is imported rather than
+ * literal in both health suites.
+ */
+export const CHECK_TIMEOUT_MS = 3 * MS_PER_SECOND;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -95,6 +104,22 @@ async function checkRedis(): Promise<CheckResult> {
 // artifact rather than a fault, and the only one this check degrades to "warn".
 const PG_UNDEFINED_TABLE = "42P01";
 
+// CHECK_TIMEOUT_MS is the check's HARD outer bound, so Prisma has to enforce it
+// too. `withTimeout` only rejects the race; the interactive transaction below
+// goes on holding its pooled connection to Prisma's 5 s default, so a database
+// slow enough to blow the budget was still occupying a connection two seconds
+// after the check had already reported "fail" — during exactly the incident
+// where connections are the scarce resource. Handing the budget to
+// `$transaction` makes the engine end it and release the connection.
+//
+// Prisma bounds the two phases separately (maxWait to START the transaction,
+// timeout to RUN it), so the outer bound is their SUM. Only
+// `maxWait + timeout <= CHECK_TIMEOUT_MS` is load-bearing; the split below
+// gives the larger share to execution because the statement is one indexed
+// aggregate and the queue is the cheaper phase to give up on.
+const OUTBOX_DEPTH_MAX_WAIT_MS = Math.floor(CHECK_TIMEOUT_MS / 3);
+const OUTBOX_DEPTH_TIMEOUT_MS = CHECK_TIMEOUT_MS - OUTBOX_DEPTH_MAX_WAIT_MS;
+
 /**
  * Backlog depth across the whole outbox — an operator signal, deliberately not
  * scoped to one tenant, so it needs a bypass context. Read on the top-level
@@ -126,6 +151,7 @@ export async function readAuditOutboxDepth(
         WHERE status = 'PENDING'
       `,
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    { timeout: OUTBOX_DEPTH_TIMEOUT_MS, maxWait: OUTBOX_DEPTH_MAX_WAIT_MS },
   );
   return {
     pending: Number(rows[0]?.pending ?? 0),
