@@ -241,9 +241,11 @@ describe("findOrCreateTenantForClaim", () => {
     // claim_taken, NOT claim_invalid: src/auth.ts maps this one to
     // tenant_claim_unmapped so `tenant-domain unmapped` can see the lockout.
     // The owning tenant rides along so the caller's emitAuthLoginFailure can
-    // bind the audit row. Without it logAuditAsync dead-letters on a
-    // first-ever sign-in (no user row for SYSTEM_ACTOR_ID) and the denial
-    // never reaches `tenant-domain unmapped`.
+    // bind the audit row. Without it logAuditAsync files the row under
+    // SYSTEM_TENANT_ID on a first-ever sign-in (no user row for
+    // SYSTEM_ACTOR_ID) and the denial never reaches `tenant-domain unmapped`
+    // — which groups by tenant_id, so it shows under `__system__` instead of
+    // under the tenant that owns the contested claim.
     expect(result).toEqual({ kind: "claim_taken", tenantId: "tenant-owner" });
     // No fallback either — a revoked row is taken, not "not found".
     expect(mockPrisma.tenant.findUnique).not.toHaveBeenCalled();

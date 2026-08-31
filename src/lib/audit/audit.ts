@@ -33,20 +33,34 @@
  *
  * The following contexts cannot use the helpers because no NextRequest is
  * available at the call site:
- *   - NextAuth event/jwt callbacks (src/auth.ts, src/lib/auth-adapter.ts)
+ *   - NextAuth event/jwt callbacks (src/auth.ts,
+ *     src/lib/auth/session/auth-adapter.ts)
  *   - Library functions invoked outside HTTP context
- *     (src/lib/access-restriction.ts, src/lib/account-lockout.ts when
- *      request is undefined, src/lib/delegation.ts post-response cleanup,
- *      src/lib/team-policy.ts, src/lib/extension-token.ts, src/lib/notification.ts)
+ *     (src/lib/auth/policy/access-restriction.ts,
+ *      src/lib/auth/policy/account-lockout.ts when request is undefined,
+ *      src/lib/auth/access/delegation.ts post-response cleanup,
+ *      src/lib/team/team-policy.ts, src/lib/auth/tokens/extension-token.ts,
+ *      src/lib/notification.ts)
  *   - MCP tool execution (src/lib/mcp/tools.ts)
  *   - Background workers (src/workers/audit-outbox-worker.ts,
  *     src/lib/directory-sync/engine.ts, src/lib/webhook-dispatcher.ts)
- *   - Constants validation (src/lib/constants/audit.ts)
- *   - TENANT-scope routes where tenantId is not available without an extra
- *     DB lookup (e.g., src/app/api/internal/audit-emit/route.ts,
- *     src/app/api/mcp/register/route.ts during DCR registration before
- *     tenant binding) — resolveTenantId() looks up tenant from userId
- *     internally; using the helper would require redundant lookups.
+ *   - Constants validation (src/lib/constants/audit/audit.ts)
+ *   - TENANT-scope routes with no NextRequest-derived tenant to hand the
+ *     helper. Two are here for DIFFERENT reasons, and the difference is the
+ *     one this list gets asked about:
+ *       src/app/api/internal/audit-emit/route.ts — leaves tenantId unset and
+ *       lets resolveTenantId() derive it from userId, so using the helper
+ *       would cost a redundant lookup.
+ *       src/app/api/mcp/register/route.ts — DCR registration happens before
+ *       tenant binding, so there is no tenant to derive. It does NOT rely on
+ *       resolveTenantId: it states `tenantId: SYSTEM_TENANT_ID` outright,
+ *       because "no owning tenant" is the honest answer there and stating it
+ *       is better than resolving to it by accident.
+ *
+ * Every path above is checked by `test -f` when this list is touched; the
+ * seven that named the pre-reorganisation `src/lib/*` spellings were corrected
+ * together, since a register a contributor consults to decide whether they may
+ * skip the helpers is worth nothing if its entries point at nothing.
  */
 
 import { prisma } from "@/lib/prisma";

@@ -408,10 +408,11 @@ describe("emitAuthLoginFailure", () => {
 // argument. resolveTenantId returns params.tenantId directly when present;
 // when it is absent it falls back to a users lookup on the caller's userId —
 // and for a claim refusal on a FIRST-EVER sign-in that userId is
-// SYSTEM_ACTOR_ID, for which no users row exists, so logAuditAsync
-// dead-letters and writes neither an audit_logs nor an audit_outbox row.
-// The denial then stays invisible to `tenant-domain unmapped`, which groups
-// by tenant_id on both tables. Round 2 wired the tenant all the way to this
+// SYSTEM_ACTOR_ID, for which no users row exists, so logAuditAsync records the
+// row under SYSTEM_TENANT_ID. The denial is then filed under `__system__`
+// rather than under the tenant whose claim was refused, so `tenant-domain
+// unmapped`, which groups by tenant_id on both tables, cannot point the
+// operator at anything actionable. Round 2 wired the tenant all the way to this
 // function and asserted the emit's arguments against a mocked module — which
 // is precisely why the dropped hop went unnoticed for a whole round.
 describe("emitAuthLoginFailure — tenant binding reaches logAuditAsync", () => {

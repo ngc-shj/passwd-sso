@@ -377,8 +377,10 @@ export function createCustomAdapter(): Adapter {
             reason: CLAIM_REFUSAL_REASON[error.kind],
             claim: pendingClaim,
             claimRefusal: error.refusal,
-            // Binds the row so logAuditAsync enqueues instead of
-            // dead-lettering (see TenantClaimUnusableError.tenantId).
+            // Binds the row to the tenant that OWNS the contested claim. The
+            // row is enqueued either way — without this it lands under
+            // SYSTEM_TENANT_ID — so what this buys is attribution, not
+            // existence (see TenantClaimUnusableError.tenantId).
             tenantId: error.tenantId,
           });
         }

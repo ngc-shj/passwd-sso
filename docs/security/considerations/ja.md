@@ -162,7 +162,7 @@ Client(valid時):
 - AAD: 暗号文は `share-data:v1:<tenantId>` で所有テナントにバインドし、共有マスターキー下でのテナント間の暗号文すり替えを防止。AAD バインド導入前のレコードは AAD なしのフォールバックで復号
 - サーバー暗号化される共有リンク / Send の暗号化に利用
 
-### エクスポート暗号化（`src/lib/export-crypto.ts`）
+### エクスポート暗号化（`src/lib/crypto/export-crypto.ts`）
 
 - cipher: `AES-256-GCM`
 - kdf: `PBKDF2-HMAC-SHA256`

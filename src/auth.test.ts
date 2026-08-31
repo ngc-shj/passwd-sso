@@ -386,9 +386,10 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(result).toEqual({
       ok: false,
       reason: "tenant_mismatch",
-      // Bound to the tenant the user is actually in, so logAuditAsync can
-      // resolve a tenant and the denial reaches audit_logs instead of
-      // dead-lettering (CR-3).
+      // Bound to the tenant the user is actually in, so logAuditAsync files
+      // the denial under a tenant an operator can act on rather than under
+      // `__system__` (CR-3). The row reaches audit_logs either way; what the
+      // binding buys is the attribution.
       tenantId: TENANT_OTHER,
       // The diagnosis lands in its OWN field (round-5 S2). `claim` is null:
       // the ingest boundary refused the asserted value, so there is no value
@@ -724,8 +725,9 @@ describe("ensureTenantMembershipForSignIn", () => {
     // Filed under the tenant that OWNS the contested claim, not under `null`
     // (round-3 F7). Two consequences: `tenant-domain unmapped` groups by
     // tenant_id, so this is the group the operator can act on; and a
-    // tenant-less emit dead-letters in logAuditAsync, so `null` here would
-    // mean the denial reaches neither audit_logs nor audit_outbox.
+    // tenant-less emit resolves to SYSTEM_TENANT_ID, so `null` here would put
+    // the denial under `__system__` — recorded, but in the one group that
+    // names no tenant to go fix.
     expect(result).toEqual({
       ok: false,
       reason: "tenant_claim_unmapped",

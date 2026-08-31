@@ -87,7 +87,7 @@ Rationale: for personal bootstrap users, the normal browsing session is treated 
 The extension holds its own bearer token, distinct from the Auth.js cookie. This design treats the extension as a "Machine Identity" surface, parallel to MCP / SA / API keys.
 
 - **Access token TTL** derived from `extensionTokenIdleTimeoutMinutes` — short enough that server-side revocation propagates within ≤5 min.
-- **Refresh token** derived from `extensionTokenAbsoluteTimeoutMinutes` — rotated on every use, revoked as a family on replay (reusing `src/lib/mcp/token-rotation.ts` patterns).
+- **Refresh token** derived from `extensionTokenAbsoluteTimeoutMinutes` — rotated on every use, revoked as a family on replay (reusing `src/lib/mcp/oauth-server.ts` patterns).
 - **Stolen-laptop defense is NOT TTL.** The real defense is requiring local unlock (PRF / biometric) on extension wake after N minutes of inactivity. That control is orthogonal to the token TTL and lives in the extension side.
 - **"Sign out everywhere"** must enumerate and revoke the user's extension refresh-token families in addition to deleting web sessions.
 
