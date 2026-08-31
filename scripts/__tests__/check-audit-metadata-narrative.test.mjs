@@ -29,16 +29,32 @@ let root;
  * property.
  *
  * Load-bearing, not decoration: the gate refuses when it recognises zero catch
- * clauses OR zero metadata properties (both refusals are their own cases
- * below), so a fixture missing either would exit non-zero for a reason that has
- * nothing to do with its subject.
+ * clauses OR zero properties for ANY ONE of its sink fields (both refusals are
+ * their own cases below), so a fixture missing either would exit non-zero for a
+ * reason that has nothing to do with its subject.
+ *
+ * The floor is per-sink, so the anchor must carry EVERY sink the gate watches.
+ * When the sink set was one field this was a single property; widening the set
+ * without widening the anchor makes every case in this file refuse on the
+ * missing sinks rather than exercise its subject — and the fix that presents
+ * itself then is a floor over the SUM, which is exactly the blindness the
+ * per-sink floor was introduced to remove. Each value below is a constant, not
+ * a narrative, so the anchor stays a PASSES fixture.
  */
 const ANCHOR = `
 declare const errorLogFields: (e: unknown) => { name: string; code: string };
 declare const emit: (o: object) => void;
 export function anchor() {
   try { /* noop */ } catch (x) {
-    emit({ metadata: { reason: \`ANCHOR_FAILED:\${errorLogFields(x).code}\` } });
+    emit({
+      metadata: { reason: \`ANCHOR_FAILED:\${errorLogFields(x).code}\` },
+      targetType: "ANCHOR",
+      targetId: "anchor-id",
+      userAgent: "anchor-agent",
+      ip: "203.0.113.1",
+      teamId: "anchor-team",
+      serviceAccountId: "anchor-sa",
+    });
   }
 }
 `;
@@ -87,7 +103,13 @@ function runGate(source, { dirs = "src", withAnchor = true } = {}) {
     // code cannot tell "the gate found a defect" from "the gate could not run",
     // and the second reads as the first in a pre-pr log that shows only a code.
     refused: /recognised 0|scanned 0|resolved to no source file/.test(stderr),
-    violated: /reaching an audit `metadata` field/.test(stderr),
+    violated: /reaching an audit sink field/.test(stderr),
+    // Per-sink, because the gate now watches seven fields and `violated` alone
+    // cannot tell which one fired. A predicate that answers "some sink" for a
+    // targetId violation is the same lossy channel as one boolean over three
+    // distinct refusals — asserting it would pass on the wrong sink.
+    violatedSink: (name) =>
+      new RegExp(String.raw`^\s+\S+:\d+\s+\`${name}\``, "m").test(stderr),
   };
 }
 
@@ -280,17 +302,52 @@ export function f() {
     expect(r.stderr).toContain("recognised 0 catch clauses");
   });
 
-  it("REFUSES when it recognises no metadata property", () => {
+  it("REFUSES when it recognises no property for a sink field, naming that sink", () => {
     // The other half of the subject. A gate that sees every catch and no sink
     // prints the same OK as one with nothing to report — this is what fires if
-    // the audit payload field is ever renamed.
+    // an audit payload field is ever renamed.
+    //
+    // The floor is PER SINK and the message names the missing ones, because a
+    // floor over the sum cannot see one field go to zero: on the real tree,
+    // dropping `ip` still leaves 886 of the 957 properties, so a summed floor
+    // stays silent while the gate has stopped watching a sink entirely.
     const r = runGate(`${DECLS}export function f() { try { risky(); } catch (err) { log(err); } }`, {
       withAnchor: false,
     });
     expect(r.refused).toBe(true);
     expect(r.violated).toBe(false);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("recognised 0 `metadata` properties");
+    expect(r.stderr).toContain("recognised 0");
+    // Every sink is named, not just the first — the anchor is what supplies
+    // them all, so its absence must account for all seven.
+    for (const sink of ["metadata", "targetType", "targetId", "userAgent", "ip", "teamId", "serviceAccountId"]) {
+      expect(r.stderr).toContain(`\`${sink}\``);
+    }
+  });
+
+  it.each([
+    ["targetType", `emit({ targetType: String(err) })`],
+    ["targetId", `emit({ targetId: err.message })`],
+    ["userAgent", `emit({ userAgent: \`UA:\${err.message}\` })`],
+    ["ip", `emit({ ip: \`denied:\${err.message}\` })`],
+    ["teamId", `emit({ teamId: err.message })`],
+    ["serviceAccountId", `emit({ serviceAccountId: String(err) })`],
+  ])("CAUGHT: narrative reaching the `%s` sink", (sink, body) => {
+    // One case per field the sink set gained. A single case covering all six
+    // would redden for any one of them and prove none.
+    //
+    // teamId and serviceAccountId are uuid columns, so the insert raises 22P02
+    // rather than storing the text — and Postgres puts the offending value IN
+    // that message, which the outbox worker's recordError then writes to
+    // audit_logs.metadata.lastError. The narrative reaches the same
+    // tenant-readable row, just 8 attempts later.
+    const r = runGate(`${DECLS}export function f() { try { risky(); } catch (err) { ${body}; } }`);
+    expect(r.status).not.toBe(0);
+    expect(r.violated).toBe(true);
+    expect(r.violatedSink(sink)).toBe(true);
+    // The report names WHICH sink fired: a predicate that cannot distinguish
+    // them would pass on the wrong one.
+    expect(r.violatedSink("metadata")).toBe(false);
   });
 
   it("REFUSES when a scan target resolves to no file", () => {

@@ -125,7 +125,9 @@ const REDUCER = "errorLogFields";
  * It also covers a few non-audit `metadata` fields, which is a cost worth
  * paying: free-form caught-error text does not belong in any of them.
  */
-const SINK_PROPERTY = "metadata";
+const SINK_PROPERTIES = ["metadata", "targetType", "targetId", "userAgent", "ip", "teamId", "serviceAccountId"];
+const SINK_SET = new Set(SINK_PROPERTIES);
+const SINK_LABEL = SINK_PROPERTIES.map((p) => `\`${p}\``).join(", ");
 
 const FN_KINDS = new Set([
   SyntaxKind.FunctionDeclaration,
@@ -297,15 +299,15 @@ function carriesNarrative(node, seeds, taintedDecls) {
   return false;
 }
 
-/** The value node of a `metadata` property, or null if the property is not one. */
+/** The value node of a sink property, or null if the property is not one. */
 function metadataValue(prop) {
   if (prop.getKind() === SyntaxKind.PropertyAssignment) {
-    if (prop.getName() !== SINK_PROPERTY) return null;
+    if (!SINK_SET.has(prop.getName())) return null;
     return prop.getInitializer() ?? null;
   }
   if (prop.getKind() === SyntaxKind.ShorthandPropertyAssignment) {
     // `logAuditAsync({ …, metadata })` — the value is the binding itself.
-    if (prop.getName() !== SINK_PROPERTY) return null;
+    if (!SINK_SET.has(prop.getName())) return null;
     return prop.getNameNode();
   }
   return null;
@@ -327,6 +329,10 @@ const violations = [];
 let scanned = 0;
 let catchClauses = 0;
 let metadataProps = 0;
+// Per-sink, because the floor below is per-sink. Object.fromEntries rather than
+// a bare object so adding a member to SINK_PROPERTIES cannot leave a counter
+// undefined and its floor silently un-checkable.
+const sinkCounts = Object.fromEntries(SINK_PROPERTIES.map((p) => [p, 0]));
 
 for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)) {
   if (
@@ -341,10 +347,12 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
   // Counted over the WHOLE file, not only inside tainted functions: this is the
   // gate's subject floor, and it must not move with the findings.
   for (const prop of sf.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
-    if (prop.getName() === SINK_PROPERTY) metadataProps++;
+    const n = prop.getName();
+    if (SINK_SET.has(n)) { metadataProps++; sinkCounts[n]++; }
   }
   for (const prop of sf.getDescendantsOfKind(SyntaxKind.ShorthandPropertyAssignment)) {
-    if (prop.getName() === SINK_PROPERTY) metadataProps++;
+    const n = prop.getName();
+    if (SINK_SET.has(n)) { metadataProps++; sinkCounts[n]++; }
   }
 
   for (const clause of sf.getDescendantsOfKind(SyntaxKind.CatchClause)) {
@@ -395,6 +403,11 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
         line: prop.getStartLineNumber(),
         bound: boundDecl.getNameNode().getText(),
         via,
+        // Which sink matched. Without it the report names one field while the
+        // gate refuses on seven, and the self-test's detection predicate cannot
+        // tell a targetId violation from a metadata one — the lossy-channel
+        // shape this gate's own refusal booleans were split to remove.
+        sink: prop.getName(),
       });
     }
   }
@@ -412,34 +425,54 @@ if (catchClauses === 0) {
       `not seeing half its subject`,
   );
 }
-if (metadataProps === 0) {
-  // The other half. A gate that recognises every catch and no sink prints the
-  // same OK as one with nothing to report, and the two mean opposite things.
+// The other half, and it is PER SINK rather than over the total. A sum cannot
+// see one field go to zero: rename `ip` and 610 of the other properties keep the
+// aggregate comfortably non-zero, so the floor stays silent while the gate has
+// quietly stopped watching a sink. Measured, not assumed — that is the shape
+// this floor exists to catch.
+const unseenSinks = SINK_PROPERTIES.filter((p) => sinkCounts[p] === 0);
+if (unseenSinks.length > 0) {
   fail(
-    `recognised 0 \`${SINK_PROPERTY}\` properties under ${SEARCH_DIRS.join(", ")} — ` +
-      `the audit payload field was renamed, or the gate is not seeing its sink`,
+    `recognised 0 ${unseenSinks.map((p) => `\`${p}\``).join(", ")} ` +
+      `properties under ${SEARCH_DIRS.join(", ")} — the audit payload field was ` +
+      `renamed, or the gate is not seeing that sink`,
   );
 }
 
 console.log(
   `check-audit-metadata-narrative: scanned ${scanned} files, ${catchClauses} ` +
-    `catch clauses, ${metadataProps} ${SINK_PROPERTY} properties`,
+    `catch clauses, ${metadataProps} sink properties (` +
+    SINK_PROPERTIES.map((p) => `${p} ${sinkCounts[p]}`).join(", ") +
+    `)`,
 );
 
 if (violations.length > 0) {
   console.error(
     `\ncheck-audit-metadata-narrative: ${violations.length} caught-error ` +
-      `narrative(s) reaching an audit \`${SINK_PROPERTY}\` field:\n`,
+      `narrative(s) reaching an audit sink field (${SINK_LABEL}):\n`,
   );
   for (const v of violations) {
-    console.error(`  ${v.path}:${v.line}  catch (${v.bound})  ->  via ${v.via}`);
+    console.error(`  ${v.path}:${v.line}  \`${v.sink}\`  catch (${v.bound})  ->  via ${v.via}`);
   }
   console.error(
-    `\naudit_logs.metadata is durable and tenant-readable (/api/tenant/audit-logs),
-and neither control on that path reads the value's text: sanitizeMetadata drops
-blocklisted KEYS, truncateMetadata bounds SIZE. A pg error's message names the DB
-role and host; a Prisma error's names the failing statement and its bound
-parameters. Reduce it to a token:
+    `\nEvery field above lands in a durable, tenant-readable audit_logs row
+(/api/tenant/audit-logs). What differs is only HOW it gets there, and none of
+the routes is safe:
+
+  metadata          — sanitizeMetadata drops blocklisted KEYS and
+                      truncateMetadata bounds SIZE; neither reads the text.
+  targetType/targetId — unbounded text columns, no sanitizer at all.
+  userAgent         — length-bounded only.
+  ip                — VarChar(45): under that length it lands verbatim; over it
+                      the insert raises 22001 and the audit event is LOST.
+  teamId/serviceAccountId — uuid columns, so the insert raises 22P02 — and
+                      Postgres puts the offending text IN the error message,
+                      which the outbox worker's recordError then writes to
+                      audit_logs.metadata.lastError. It arrives anyway, 8
+                      attempts later, under AUDIT_OUTBOX_DEAD_LETTER.
+
+A pg error's message names the DB role and host; a Prisma error's names the
+failing statement and its bound parameters. Reduce it to a token:
 
     SOMETHING_FAILED:\${${REDUCER}(err).code}      // from @/lib/logger/error-fields
 
