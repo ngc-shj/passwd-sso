@@ -64,6 +64,24 @@ const SENTINEL_PASSWORD = "S3NT1NEL-p@ss";
  * first pid that reports ESRCH. Refuse rather than return a value that might be
  * live: a fixture that seeds a live pid exercises the opposite branch and says
  * nothing about the one it names.
+ *
+ * The two paths give guarantees of different strength, and the throw below is
+ * reachable only from the second. Linux: unallocatable given the `pid_max` read
+ * at module load — `pid_max` is root-writable at runtime (`sysctl
+ * kernel.pid_max`) and GONE_PID is computed once, so the guarantee is scoped to
+ * that read, not to the kernel for the run's duration. macOS: shown absent by
+ * probe, which is a tripwire rather than a boundary — a pid absent at probe time
+ * could in principle be allocated before the fixture is read, bounded only by
+ * the probe starting at the signed-32-bit ceiling, far from where the allocator
+ * hands out pids.
+ *
+ * TODO(audit-sentinel-verification-gaps): the probe path is unexercised. It runs
+ * only where /proc is absent — every macOS run of this suite, no Linux run and
+ * no CI run — and it cannot be forced from a test: this function is
+ * module-private and evaluates at import, in a file that reads the filesystem
+ * for real ~50 times, so faking the /proc read means mocking `node:fs` for a
+ * suite whose subject IS filesystem behaviour. Covering it needs the function
+ * extracted behind an injected reader.
  */
 function unallocatablePid() {
   try {
