@@ -413,6 +413,15 @@ for (const { rel: path, sf } of sourceFilesFrom(project, SEARCH_DIRS, REPO_ROOT)
   }
 }
 
+// Reachable, but only by one construction — worth stating, because the obvious
+// reading is that this floor is dead code and the obvious next edit is to delete
+// it. It fires when every collected file is skipped IN-LOOP, which today means a
+// root whose files all sit under a `__fixtures__` segment: the walker excludes
+// `*.test.*` and `__tests__/` at collection time, so those never reach `scanned`
+// at all. Every other way of getting here is caught earlier or later:
+// upstream by `unresolvedTargets` (a target that collects zero files refuses
+// before the loop, so "point it at an empty directory" lands there, not here),
+// downstream by the catch-clause floor. The self-test pins the one live path.
 if (scanned === 0) {
   fail(
     `scanned 0 source files under ${SEARCH_DIRS.join(", ")} — scan root is ` +

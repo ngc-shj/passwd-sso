@@ -102,7 +102,21 @@ function runGate(source, { dirs = "src", withAnchor = true } = {}) {
     // A REFUSAL and a VIOLATION both exit non-zero. Asserting only on the exit
     // code cannot tell "the gate found a defect" from "the gate could not run",
     // and the second reads as the first in a pre-pr log that shows only a code.
-    refused: /recognised 0|scanned 0|resolved to no source file/.test(stderr),
+    // FOUR refusals, not three: the gate has four fail() sites and the previous
+    // `recognised 0` alternative covered two of them (catch clauses AND sink
+    // properties). One boolean over four distinct refusals is the same lossy
+    // channel one rung above the exit code — a case asserting "it refused" can
+    // pass on a refusal it was not testing, which is how a floor gets reported
+    // as covered while nothing exercises it.
+    refusedNoSourceFile: /resolved to no source file/.test(stderr),
+    refusedScanZero: /scanned 0 source files/.test(stderr),
+    refusedNoCatch: /recognised 0 catch clauses/.test(stderr),
+    refusedNoSink: /recognised 0 (?!catch clauses)/.test(stderr),
+    // Retained as their disjunction so every existing assertion in this file is
+    // literally unchanged. The split adds precision; it does not move the cases
+    // that were already right.
+    refused:
+      /resolved to no source file|scanned 0 source files|recognised 0/.test(stderr),
     violated: /reaching an audit sink field/.test(stderr),
     // Per-sink, because the gate now watches seven fields and `violated` alone
     // cannot tell which one fired. A predicate that answers "some sink" for a
@@ -352,9 +366,49 @@ export function f() {
 
   it("REFUSES when a scan target resolves to no file", () => {
     const r = runGate(null, { dirs: "src/does-not-exist" });
-    expect(r.refused).toBe(true);
+    expect(r.refusedNoSourceFile).toBe(true);
+    expect(r.refusedScanZero).toBe(false);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("src/does-not-exist");
+  });
+
+  it("REFUSES an existing-but-empty scan target, on the target-resolution floor", () => {
+    // The sibling of the case above, and the distinction is worth a case: a
+    // MISSING path and a PRESENT-but-empty one reach `unresolvedTargets`
+    // through different branches — a thrown statSync versus a walk that returns
+    // [] — and only the second is what an operator produces by pointing the
+    // gate at a directory that has been emptied.
+    //
+    // Both land on the SAME floor, and the assertion says so. That is the point
+    // of the split: "it refused" is true for four different reasons here, and a
+    // case that cannot say which one would pass on the scan-zero floor below
+    // while testing nothing about it.
+    mkdirSync(join(root, "src/emptydir"), { recursive: true });
+    const r = runGate(null, { dirs: "src/emptydir" });
+    expect(r.refusedNoSourceFile).toBe(true);
+    expect(r.refusedScanZero).toBe(false);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("src/emptydir");
+  });
+
+  it("REFUSES on the scan-zero floor when every collected file is skipped in-loop", () => {
+    // The ONE construction that reaches `scanned === 0`. The walker drops
+    // `*.test.*` and `__tests__/` before collection, so those yield an
+    // unresolved TARGET (the case above) rather than a scanned-zero RUN. A file
+    // under `__fixtures__` is collected — the target resolves — and then skipped
+    // inside the loop, which is the only way to arrive here.
+    //
+    // SEARCH_DIRS points at the fixtures directory itself, not its parent: with
+    // the parent, a leftover src/subject.ts from any earlier case in this file
+    // would be scanned and the floor would not fire, making the case pass or
+    // fail on test ORDER rather than on the gate.
+    mkdirSync(join(root, "src/__fixtures__"), { recursive: true });
+    writeFileSync(join(root, "src/__fixtures__/a.ts"), "export const a = 1;\n", "utf8");
+    const r = runGate(null, { dirs: "src/__fixtures__" });
+    expect(r.refusedScanZero).toBe(true);
+    expect(r.refusedNoSourceFile).toBe(false);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("scanned 0 source files");
   });
 
   it("REFUSES scan-scope overrides in CI without fixture mode", () => {
