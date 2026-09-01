@@ -89,17 +89,28 @@ import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
  * dead-letter line, nothing. That is the silent loss this whole chain of work
  * exists to remove, on a narrower trigger than the one it started from.
  *
- * The event still goes out; only the metadata is replaced. `errorLogFields` is
- * the tree's bounded reducer, so the marker carries a code rather than a
- * narrative.
+ * The event still goes out; only the metadata is replaced. The marker is a fixed
+ * token, not an error-derived one: both triggers throw a plain `TypeError`
+ * carrying no SQLSTATE, so `errorLogFields(err).code` reduces to `"unknown"` for
+ * every case that can reach here — a field that cannot discriminate is worse
+ * than none, because it reads as though it did.
+ *
+ * IT CHANGES `logAuditInTx` TOO, and that is a deliberate second decision rather
+ * than a side effect. On that path the throw used to propagate and roll the
+ * caller's business transaction back, so unserializable metadata failed the
+ * MUTATION as well as the audit. Now the transaction commits and the audit row
+ * carries the marker. That is the right direction for the same reason the async
+ * path takes it — losing the business write because a metadata field held a
+ * BigInt is a worse outcome than an audit row that says so — but it IS a
+ * behaviour change on the atomic path, and it is pinned by its own case.
  */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
   let json: string;
   try {
     json = JSON.stringify(metadata);
-  } catch (err) {
-    return { _unserializable: true, _reason: errorLogFields(err).code };
+  } catch {
+    return { _unserializable: true, _reason: "stringify_failed" };
   }
   return json.length <= METADATA_MAX_BYTES
     ? metadata

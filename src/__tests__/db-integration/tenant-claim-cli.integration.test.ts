@@ -2678,6 +2678,28 @@ describe("tenant-domain CLI (C7)", () => {
      * tenant_claim_events row.
      */
     async function dropSentinelClaim(claim: string): Promise<void> {
+      // Re-checked HERE, not only in beforeEach. The precondition is read at the
+      // start of the case and the purge runs at the end, and the dev database is
+      // shared between working copies — so a start-of-case reading narrows the
+      // window rather than closing it. This is the reading that decides whether
+      // the purge is entitled to run.
+      const before = await sentinelClaimState();
+      const mine = await ctx.su.prisma.tenantClaim.count({
+        where: { tenantId: SYSTEM_TENANT_ID, claim },
+      });
+      // Every event on the sentinel must be attributable to this claim: the ones
+      // the audited commands appended, plus the `deregister` the DELETE below
+      // will add. Anything beyond that arrived from elsewhere while the case ran.
+      const attributable = await ctx.su.prisma.tenantClaimEvent.count({ where: { claim } });
+      if (before.events > attributable || before.claims > mine) {
+        throw new Error(
+          `[sentinel C12] refusing to purge: the sentinel holds ${before.claims} claim(s) and ` +
+            `${before.events} claim event(s), of which only ${mine} and ${attributable} are this ` +
+            `run's. tenant_claim_events_purge_for_tenant has no per-claim scope, so purging now ` +
+            `would destroy rows another working copy wrote. Leave them and see ` +
+            `docs/operations/sentinel-tenant-membership.md.`,
+        );
+      }
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(`DELETE FROM tenant_claims WHERE claim = $1`, claim);
@@ -2801,25 +2823,26 @@ describe("tenant-domain CLI (C7)", () => {
         data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "seed" },
       });
       try {
-        expect((await cmdList({ tenant: SYSTEM_TENANT_ID })).ok).toBe(true);
+        const listed = await cmdList({ tenant: SYSTEM_TENANT_ID });
+        expect(listed.ok).toBe(true);
+        // Observe what the COMMAND returned, not the row this test just wrote.
+        // Re-reading the seed through prisma would be a tautology over the
+        // fixture: `cmdList` could return an empty set and the assertion would
+        // still hold, which is the vacuity this case exists to avoid rather than
+        // to relocate.
+        expect((listed.rows as { claim: string }[]).map((r) => r.claim)).toContain(claim);
+
         // `--tenant` alone: history refuses both selectors together, which is
         // itself the reason the placement proof uses the tenant one — it is the
         // spelling an operator has when all they know is "something points at
         // the sentinel".
-        expect((await cmdHistory({ tenant: SYSTEM_TENANT_ID })).ok).toBe(true);
-
-        // Observe what was seeded, not merely that the commands did not error:
-        // `ok === true` alone passes against an empty result set, which would
-        // make this a check that the commands run rather than that they DIAGNOSE.
-        // Scoped to this run's claim so a concurrent working copy cannot decide it.
-        const rows = await ctx.su.prisma.tenantClaim.findMany({
-          where: { tenantId: SYSTEM_TENANT_ID, claim },
-          select: { claim: true },
-        });
-        expect(rows.map((r) => r.claim)).toEqual([claim]);
-        // No `tenant_claim_events` assertion: this claim was seeded directly,
-        // and only the audited commands append an event. The `remove` case
-        // above is where the event is the subject.
+        const history = await cmdHistory({ tenant: SYSTEM_TENANT_ID });
+        expect(history.ok).toBe(true);
+        // Zero events is the CORRECT answer here — the claim was seeded
+        // directly, and only the audited commands append one — so the message is
+        // what carries the observation. The `remove` case above is where an
+        // event is the subject.
+        expect(history.message).toBeDefined();
       } finally {
         await dropSentinelClaim(claim);
       }

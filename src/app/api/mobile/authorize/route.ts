@@ -43,8 +43,8 @@ import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { BRIDGE_CODE_TTL_MS, MS_PER_MINUTE } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
-import { BASE64URL_RE } from "@/lib/validations/common.server";
 import {
+  BASE64URL_RE,
   MOBILE_BRIDGE_CODE_IP_MAX_LENGTH,
   MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH,
 } from "@/lib/validations/common.server";

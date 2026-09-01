@@ -506,10 +506,12 @@ describe("parsePayload — edge cases", () => {
   }, 15000);
 
   it("bounds an over-length userAgent to its column width, and passes a short one through", async () => {
-    // The `ip` slice's sibling, added in the same edit and covered by nothing:
-    // no gate watches `userAgent` (check-ip-column-bounds keys on the IP
-    // properties), so deleting it left the whole suite green while restoring the
-    // 22001-loses-the-event path for the 512-wide column.
+    // The `ip` slice's sibling. Same reason as the `ip` case above: this is the
+    // last hop before the INSERT, and the payload is a jsonb blob written by
+    // whatever version enqueued it — including one from before the producers
+    // bounded the field. check-ip-column-bounds watches this property too, so
+    // the two controls agree; the case is what pins the behaviour rather than
+    // the gate's opinion of it.
     const overLong = "A".repeat(USER_AGENT_MAX_LENGTH + 40);
     const row = makeRow({
       payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, userAgent: overLong },

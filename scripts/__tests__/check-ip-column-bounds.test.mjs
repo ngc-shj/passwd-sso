@@ -46,6 +46,15 @@ const MEMBERS = {
 };
 const MEMBER_NAMES = Object.keys(MEMBERS);
 
+/**
+ * Every fixture imports the constants from the real module path, because the
+ * gate now requires the slice bound to RESOLVE there and not merely to be
+ * spelled right. A fixture that omitted this would read as unbounded
+ * everywhere — which is how this line came to exist.
+ */
+const CONSTANT_IMPORT =
+  `import {\n${[...new Set(Object.values(MEMBERS))].map((c) => `  ${c},`).join("\n")}\n} from "@/lib/validations/common.server";\n`;
+
 const roots = [];
 
 function propsFor(model, { unbound, omit } = {}) {
@@ -78,14 +87,15 @@ function makeRoot(opts = {}) {
     .join("\n");
   writeFileSync(
     join(root, "src/a.ts"),
-    `export async function f(tx: any, raw: string | null) {\n${writes}\n}\n`,
+    `${CONSTANT_IMPORT}export async function f(tx: any, raw: string | null) {\n${writes}\n}\n`,
     "utf8",
   );
 
   const payloadProps = propsFor("payload", opts);
   writeFileSync(
     join(root, "src/b.ts"),
-    `import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";\n` +
+    CONSTANT_IMPORT +
+      `import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";\n` +
       `export function build(raw: string | null): AuditOutboxPayload {\n` +
       `  return { scope: "PERSONAL"${payloadProps ? `, ${payloadProps}` : ""} } as AuditOutboxPayload;\n}\n`,
     "utf8",
@@ -108,11 +118,11 @@ function runGate(root, extraEnv = {}) {
 }
 
 /** A one-file root for the shape cases, which do not need every member. */
-function makeShapeRoot(body, { withPayload = true } = {}) {
+function makeShapeRoot(body, { withPayload = true, withConstantImport = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ip-column-shape-"));
   roots.push(root);
   mkdirSync(join(root, "src"), { recursive: true });
-  writeFileSync(join(root, "src/shape.ts"), body, "utf8");
+  writeFileSync(join(root, "src/shape.ts"), (withConstantImport ? CONSTANT_IMPORT : "") + body, "utf8");
   if (withPayload) {
     // The floors demand every member be seen; the shape cases are about one
     // property, so the rest of the manifest is supplied here.
@@ -122,7 +132,8 @@ function makeShapeRoot(body, { withPayload = true } = {}) {
       .join("\n");
     writeFileSync(
       join(root, "src/rest.ts"),
-      `import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";\n` +
+      CONSTANT_IMPORT +
+        `import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";\n` +
         `export async function f(tx: any, raw: string | null) {\n${writes}\n}\n` +
         `export function build(raw: string | null): AuditOutboxPayload {\n` +
         `  return { ${propsFor("payload")} } as AuditOutboxPayload;\n}\n`,
@@ -271,6 +282,69 @@ describe("check-ip-column-bounds", () => {
     );
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("payload.ip");
+  });
+
+  it("resolves `data: <identifier>` built from a local const plus later assignments", () => {
+    // The shape validate-token-dpop.ts uses, and the one the first rewrite
+    // skipped: reverting that file's slice left the gate at exit 0, because the
+    // per-member floor still saw the property at three OTHER sites.
+    const r = runGate(
+      makeShapeRoot(
+        `import { SESSION_IP_MAX_LENGTH } from "@/lib/validations/common.server";\n` +
+          `export async function f(tx: any, raw: string | null) {\n` +
+          `  const updateData: Record<string, unknown> = { userAgent: null };\n` +
+          `  updateData.ipAddress = raw;\n` +
+          `  await tx.session.update({ where: { id: "x" }, data: updateData });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("session.ipAddress");
+  });
+
+  it("PASSES the same shape when the assignment IS bounded", () => {
+    // The allow arm: resolution must not turn every indirected write into a
+    // violation, or the fix is a refusal dressed as coverage.
+    const r = runGate(
+      makeShapeRoot(
+        `import { SESSION_IP_MAX_LENGTH } from "@/lib/validations/common.server";\n` +
+          `export async function f(tx: any, raw: string | null) {\n` +
+          `  const updateData: Record<string, unknown> = { userAgent: null };\n` +
+          `  updateData.ipAddress = raw?.slice(0, SESSION_IP_MAX_LENGTH) ?? null;\n` +
+          `  await tx.session.update({ where: { id: "x" }, data: updateData });\n}\n`,
+      ),
+    );
+    expect(r.status).toBe(0);
+  });
+
+  it("REFUSES a data object it cannot resolve, rather than skipping the site", () => {
+    // "I looked and it was wrong" and "I could not look" need different repairs.
+    // Skipping was the first rewrite's behaviour and it is what hid the site
+    // above.
+    const r = runGate(
+      makeShapeRoot(
+        `declare const build: () => Record<string, unknown>;\n` +
+          `export async function f(tx: any) {\n` +
+          `  await tx.session.update({ where: { id: "x" }, data: build() });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("could not read the row data");
+  });
+
+  it("CATCHES a same-named constant that is declared locally rather than imported", () => {
+    // The name is necessary and not sufficient. Accepting any binding spelled
+    // right makes the per-column constants decorative — a local
+    // `const SESSION_IP_MAX_LENGTH = 100000` would license any width at all.
+    const r = runGate(
+      makeShapeRoot(
+        `const SESSION_IP_MAX_LENGTH = 100000;\n` +
+          `export async function f(tx: any, raw: string | null) {\n` +
+          `  await tx.session.create({ data: { ipAddress: raw?.slice(0, SESSION_IP_MAX_LENGTH) ?? null } });\n}\n`,
+        { withConstantImport: false },
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("session.ipAddress");
   });
 
   it("IGNORES a write to a model with no length-bounded request column", () => {

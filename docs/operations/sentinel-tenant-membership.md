@@ -17,10 +17,11 @@ covered by the CHECK below: `requireTenantPermission` → `getTenantMembership`,
 and `withUserTenantRls` → `resolveUserTenantIdFromClient`. The third,
 `resolveTeamTenantId`, reads **`teams.tenant_id`** and consults no membership at
 all — it is covered only transitively, because every writer of that column
-(`/api/teams` POST, SCIM Groups POST, and two seed files) derives the tenant from
-a membership. The migration's own header states this in the shorter, looser form
-"all three resolvers key on `tenant_members`"; it is applied and checksummed, so
-this is the copy that gets corrected. A future writer that sets `teams.tenant_id`
+(`/api/teams` POST and two seed SQL files) derives the tenant from a membership.
+SCIM Groups POST only *reads* an existing team; it creates none. The migration's
+own header states the invariant in the shorter, looser form "all three resolvers
+key on `tenant_members`" — it is applied and checksummed, so this is the copy
+that gets corrected. A future writer that sets `teams.tenant_id`
 from a non-membership source would reopen the read path without touching
 `tenant_members` — see the follow-up recorded in
 `docs/archive/review/audit-sentinel-verification-gaps-plan.md` (CF12).

@@ -1183,8 +1183,9 @@ Three findings are carried forward rather than fixed:
 - **CF12 — `teams.tenant_id` has no parallel CHECK.** `resolveTeamTenantId` reads
   that column and feeds it to `withTenantRls` without consulting membership, so
   the sentinel's read-side invariant holds only transitively, through the derived
-  set of `teams` writers (`/api/teams` POST, SCIM Groups POST, two seed files) —
-  all of which happen to derive their tenant from a membership. *Anti-Deferral:
+  set of `teams` writers (`/api/teams` POST and two seed SQL files; SCIM Groups
+  POST reads a team but writes none) — all of which derive their tenant from a
+  membership. *Anti-Deferral:
   acceptable risk. Worst case — a future writer sets `teams.tenant_id` from a
   non-membership source and reopens `app.tenant_id = <sentinel>` without touching
   `tenant_members`. Likelihood — low near-term; no such writer exists. Cost — one

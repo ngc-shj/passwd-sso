@@ -219,7 +219,10 @@ describe("buildOutboxPayload", () => {
     // dead-letter line. The event must still be built; only the metadata is
     // replaced.
     const payload = buildOutboxPayload({ ...baseParams, metadata: metadata as Record<string, unknown> });
-    expect(payload.metadata).toEqual(expect.objectContaining({ _unserializable: true }));
+    // Exact match, not objectContaining: `_reason` is a fixed token precisely
+    // because an error-derived one reduced to "unknown" for every reachable
+    // trigger, and a field nothing asserts is how that went unnoticed.
+    expect(payload.metadata).toEqual({ _unserializable: true, _reason: "stringify_failed" });
     // The rest of the row survives — an event whose metadata did not serialize
     // is still an event, and the actor/action are what a reader needs.
     expect(payload.action).toBe(baseParams.action);
@@ -272,8 +275,11 @@ describe("buildOutboxPayload", () => {
     // which is what common.server.ts's own note says. An earlier version of this
     // comment claimed "with a zone id"; that is false, and it mattered, because
     // it implied a zone-carrying address fits when in fact this slice truncates
-    // one. The constant is imported rather than spelled, so widening the column
-    // moves both sides together.
+    // one. The constant is imported rather than spelled, but the length
+    // assertion below is a deliberate TRIP-WIRE rather than something that
+    // moves with it: widening the column must force a new `widest` fixture,
+    // because the widest legal address for an arbitrary width cannot be
+    // synthesised.
     const widest = "0000:0000:0000:0000:0000:ffff:255.255.255.255";
     expect(widest.length).toBe(AUDIT_IP_MAX_LENGTH);
     expect(buildOutboxPayload({ ...baseParams, ip: widest }).ip).toBe(widest);
@@ -303,6 +309,30 @@ describe("logAuditInTx", () => {
       userId: USER_A,
       actorType: ACTOR_TYPE.HUMAN,
     });
+  });
+
+  it("still enqueues when metadata cannot be serialized, rather than aborting the caller's transaction", async () => {
+    // The atomic path's half of truncateMetadata's catch, and a real behaviour
+    // change: the throw used to propagate out of buildOutboxPayload and roll the
+    // caller's BUSINESS transaction back, so a BigInt in a metadata field failed
+    // the mutation too. It now commits with the marker.
+    const tx = {} as Parameters<typeof logAuditInTx>[0];
+    await logAuditInTx(tx, TENANT_A, { ...baseParams, metadata: { n: 1n } });
+
+    expect(mockedEnqueueInTx).toHaveBeenCalledOnce();
+    expect(mockedEnqueueInTx.mock.calls[0][2]).toMatchObject({
+      metadata: { _unserializable: true, _reason: "stringify_failed" },
+      action: AUDIT_ACTION.AUTH_LOGIN,
+    });
+  });
+
+  it("passes serializable metadata through on the same path", async () => {
+    // The allow arm: the catch must not have turned every metadata object into
+    // a marker.
+    const tx = {} as Parameters<typeof logAuditInTx>[0];
+    await logAuditInTx(tx, TENANT_A, { ...baseParams, metadata: { keep: 1 } });
+
+    expect(mockedEnqueueInTx.mock.calls[0][2]).toMatchObject({ metadata: { keep: 1 } });
   });
 });
 
