@@ -1208,6 +1208,118 @@ Three findings are carried forward rather than fixed:
   membership writers and route it to the existing refusal path with its own
   reason.* The runbook covers the migration-time symptom; this is the runtime one.
 
+### Phase 3 Round 3 — the ip-column gate is withdrawn
+
+Round 3 put **seven** findings on the gate (one Critical), all constructed and
+executed, and the decisive one was not any single defect. It was this:
+
+```
+| mutation to the gate                          | self-test | real tree |
+| drop "updateMany" from WRITE_METHODS          | 48 pass   | exit 0    |
+| payload builders: FunctionDeclaration only    | 48 pass   | exit 0    |
+| drop paren/as/non-null unwrapping             | 48 pass   | exit 0    |
+| drop the `||` arm                             | 48 pass   | exit 0    |
+| drop quoted-key normalisation                 | 48 pass   | exit 0    |
+| drop the template-literal arm                 | 48 pass   | exit 0    |
+| drop the `obj.prop =` sweep                   | 47 / 1 fail |         |
+```
+
+Six of seven clauses could be deleted with no signal from the self-test or from
+CI. A 48-case suite that reads as completeness and kills one mutation in seven is
+worse than no gate, because it is the thing a later contributor would trust.
+
+The Critical was the recorded lesson **AST gate binding resolution must be
+scope-aware** recurring verbatim inside the code written to close Round 2's
+finding: `dataEntries` resolved `data: <identifier>` with a file-wide `.find()`,
+so declaring one bounded `const updateData` earlier in a file launders every
+unbounded write after it. Reproduced: `session.ipAddress 3`, exit 0.
+
+Also found: `data: { ...spread }` silently passes while `data: build()` is loudly
+refused (one brace apart, and the spread idiom is used at five production sites);
+`createManyAndReturn` unmodelled; nested relation writes invisible; a
+`metadata: { ip }` sub-object — a `Json` column with no width — adjudicated as a
+bounded column AND able to satisfy the payload floors after the real columns are
+gone; and nothing tying either the manifest or the constants' values to
+`prisma/schema.prisma`, so editing `SESSION_IP_MAX_LENGTH` to 100000 is approved.
+
+**Withdrawn rather than iterated, and the count is why.** Seventeen findings
+across three rounds, every round's Majors sitting inside the previous round's
+remedy: eight on v1 (rewritten), two red-proved on v2 (patched), seven on v3.
+That is the shape the recorded rule names — a change that keeps seeding its own
+defects is the wrong scope, and the remedy is to discard it, not to iterate. The
+user's call.
+
+**What stays**: the nine production slices and the per-column constants. Those
+are the part that closes the actual exposure, each was red-proved individually
+against real file content, and none of them depends on the gate.
+
+- **CF14 — the ip-column completeness gate.** *Anti-Deferral: acceptable risk,
+  quantified. Worst case — a NEW write of a request-derived value into one of the
+  eleven bounded columns joins without a slice and nothing static notices; it is
+  caught in review or not at all. Likelihood — moderate; these columns gain
+  writers rarely, but four independent enumerations of this class have already
+  been incomplete. Cost to fix — a gate whose scope is chosen so it can be
+  verified: the R3 report's seven findings and its seven-mutation table are the
+  specification, and the mutation table is the acceptance criterion (every clause
+  must have a case that dies with it).* **What would settle it**: scope-aware
+  binding resolution, a schema-derived member set rather than a hand-list, an
+  explicit REFUSE for every unmodelled write shape, and a self-test that kills
+  every clause mutation — proved by running them.
+
+### Phase 3 Round 3 — findings outside the gate
+
+- **The teardown wedged on the one run it exists for.** Round 2's per-claim
+  attributable-count guard compared a tenant-wide count against a single claim's.
+  Four of the five sentinel cases own one claim; the fifth owns two, and on its
+  FAILURE path — the run where the `add` refusal has regressed and `fresh` exists
+  — the first call refused *because* `fresh` existed, so the second call never
+  ran and the row stayed on the shared sentinel, after which `beforeEach` blocked
+  every subsequent run. Fixed by taking the claim set, and red-proved: with the
+  refusal removed on a worktree the deny arms redden and both claims are still
+  dropped, zero leaked.
+- **A tautology and a false claim in the placement proof.**
+  `expect(history.message).toBeDefined()` cannot fail once `ok` is true —
+  `message` is set on every return path — so Round 2's fix for a vacuous
+  assertion had relocated it again. And "moving the refusal into
+  `resolveTenantRef` reddens both assertions" is false for one of them:
+  `cmdHistory` with a UUID short-circuits at `UUID_RE.test(ref)` and never calls
+  the resolver. Both fixed, with the per-assertion mutation now stated.
+
+Three adjacent findings, all pre-existing and outside this branch's scope,
+recorded rather than fixed:
+
+- **CF15 — MCP consent `code_challenge` is presence-checked into `VarChar(128)`.**
+  `src/app/api/mcp/authorize/consent/route.ts:138` reads it from a form capped at
+  1 MB with no length, charset or shape validation, while
+  `src/app/api/mobile/authorize/route.ts` validates the identical parameter as
+  `min(43).max(64).regex(BASE64URL_RE)`. Two OAuth ingress points, one predicate,
+  two semantics, and no `22001`/`P2000` handler anywhere in `src/`. *Anti-Deferral:
+  worst case — an unhandled 500 after the DCR claim transaction has committed.
+  Likelihood — needs a client sending an over-length challenge. Cost — parse the
+  consent form through the schema the mobile route already imports.*
+- **CF16 — unbounded, non-deduped scope arrays join into `VarChar` CSV columns.**
+  Four ingress schemas use `z.array(z.enum(...)).min(1)` with no `.max()`. The
+  sharpest case is cross-actor: `AccessRequest.requestedScope` is `@db.Text`, so
+  an oversized value from a service-account bearer token STORES, and the width
+  check then happens in a different actor's request — inside the transaction that
+  already flipped the row to APPROVED, rolling it back on every retry. The
+  request becomes permanently un-approvable and the admin sees a 500. *Cost — a
+  `.max(N)` and a dedup at each ingress, with N derived from the column width;
+  the allow arm must pin that the full legitimate scope set still fits.*
+- **CF17 — `METADATA_MAX_BYTES` is compared against UTF-16 code units.**
+  `src/lib/audit/audit.ts` uses `json.length` against a constant named `_BYTES`,
+  so non-ASCII metadata stores up to ~3× the intended budget into a
+  tenant-readable `Json` column that rejects nothing. Pre-existing, in the
+  function this branch modified. *Cost — `Buffer.byteLength(json, "utf8")`, or
+  rename the constant; either is a behaviour change on a hot path and wants its
+  own arm.*
+
+CF12 is extended: `users.tenant_id` feeds `app.tenant_id` through
+`withUserTenantRls` the same way `teams.tenant_id` does, and carries no CHECK
+either. The sentinel is unreachable through it today only because its row has a
+NULL `external_id`, so `resolveTenantByClaim` can never return it — an
+application-level fact protecting a database invariant.
+
 ### Phase 3 Round 2 — 9 findings, 4 Major, all in the Round-1 fixes
 
 Round 2 reviewed only `46cdbf49f..HEAD`, i.e. the fixes themselves. Every Major

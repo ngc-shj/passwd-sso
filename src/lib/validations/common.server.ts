@@ -120,15 +120,21 @@ export const IP_ADDRESS_MAX_LENGTH = 45;        // IPv6 max, matches @db.VarChar
 // The class these bound: `extractClientIp` performs NO length or format
 // validation — `normalizeIp` trims and unwraps brackets and otherwise returns
 // its input — so behind a trusted proxy an `X-Forwarded-For` segment reaches
-// these columns verbatim. scripts/checks/check-ip-column-bounds.mjs enumerates
-// the write sites so a new one cannot join the class silently.
+// these columns verbatim.
+//
+// There is NO gate enumerating the write sites. One was written for this and
+// withdrawn — three review rounds put seventeen findings on it, and its own
+// self-test could be shown to survive six of seven clause mutations, so it read
+// as completeness it did not provide. Until it is rebuilt (CF14), a new write
+// to one of these columns is caught by review or not at all: slice it here.
 export const SHARE_ACCESS_IP_MAX_LENGTH = 45;   // matches share_access_logs.ip @db.VarChar(45)
 export const SESSION_IP_MAX_LENGTH = 45;        // matches sessions.ip_address @db.VarChar(45)
 
 // The 64-wide half of the same class. These three columns were missed on the
 // first derivation, which silently collapsed "length-bounded column" to
-// "VarChar(45)" — the widths differ, the class does not, and the gate's
-// member set is now taken from the schema rather than from that reading.
+// "VarChar(45)" — the widths differ, the class does not. The member set below
+// is a transcript of prisma/schema.prisma, taken column by column rather than
+// from that reading.
 export const EXTENSION_BRIDGE_CODE_IP_MAX_LENGTH = 64;      // extension_bridge_codes.ip @db.VarChar(64)
 export const MOBILE_BRIDGE_CODE_IP_MAX_LENGTH = 64;         // mobile_bridge_codes.ip @db.VarChar(64)
 export const EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH = 64;  // extension_tokens.last_used_ip @db.VarChar(64)
