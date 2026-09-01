@@ -9,7 +9,7 @@ import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
-import { USER_AGENT_MAX_LENGTH, RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { USER_AGENT_MAX_LENGTH, SHARE_ACCESS_IP_MAX_LENGTH, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 import {
   createThrottledErrorLogger,
   REDIS_FALLBACK_LOG_THROTTLE_MS,
@@ -139,7 +139,7 @@ export default async function SharePage({ params }: Props) {
         data: {
           shareId: share.id,
           tenantId: share.tenantId,
-          ip,
+          ip: ip?.slice(0, SHARE_ACCESS_IP_MAX_LENGTH) ?? null,
           userAgent: ua?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         },
       })

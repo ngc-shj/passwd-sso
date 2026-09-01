@@ -430,6 +430,7 @@ queue_step "Static: caught-error-logging" node scripts/checks/check-caught-error
 # size cap can sanitize.
 queue_step "Static: audit-metadata-narrative" node scripts/checks/check-audit-metadata-narrative.mjs
 queue_step "Static: sentinel-tenant-literal-parity" node scripts/checks/check-sentinel-tenant-literal-parity.mjs
+queue_step "Static: ip-column-bounds" node scripts/checks/check-ip-column-bounds.mjs
 queue_step "Static: count-then-create-lock" node scripts/checks/check-count-then-create-lock.mjs
 queue_step "Static: null-tenant-fail-closed" node scripts/checks/check-null-tenant-fail-closed.mjs
 queue_step "Static: runtime-image-assets" node scripts/checks/check-runtime-image-assets.mjs

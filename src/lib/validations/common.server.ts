@@ -111,6 +111,20 @@ export const BOOTSTRAP_SLUG_HASH_LENGTH = 24;
 // is a column width on an unvalidated write path. See its note.
 export const IP_ADDRESS_MAX_LENGTH = 45;        // IPv6 max, matches @db.VarChar(45)
 
+// Column widths for the two OTHER tables that store a request IP. One constant
+// per destination column, deliberately, rather than reusing AUDIT_IP_MAX_LENGTH:
+// they are equal today and are three independent schema decisions, so sharing
+// one would let a future widening of any single column go unnoticed at the other
+// two write paths. Same reasoning as AUDIT_CREDENTIAL_ID_MAX_LENGTH's.
+//
+// The class these bound: `extractClientIp` performs NO length or format
+// validation — `normalizeIp` trims and unwraps brackets and otherwise returns
+// its input — so behind a trusted proxy an `X-Forwarded-For` segment reaches
+// these columns verbatim. scripts/checks/check-ip-column-bounds.mjs enumerates
+// the write sites so a new one cannot join the class silently.
+export const SHARE_ACCESS_IP_MAX_LENGTH = 45;   // matches share_access_logs.ip @db.VarChar(45)
+export const SESSION_IP_MAX_LENGTH = 45;        // matches sessions.ip_address @db.VarChar(45)
+
 // ─── Directory Sync ─────────────────────────────────────────
 export const DIRECTORY_SYNC_MAX_PAGES = 1000;
 export const DIRECTORY_SYNC_SANITIZE_MAX_LENGTH = 1_000;

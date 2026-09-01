@@ -9,6 +9,7 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { WEBAUTHN_RESPONSE_MAX } from "@/lib/validations/common";
+import { SESSION_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { assertOrigin } from "@/lib/auth/session/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { CHALLENGE_ID_RE } from "@/lib/auth/webauthn/webauthn-server";
@@ -150,8 +151,8 @@ async function handlePOST(req: NextRequest) {
         userId: user.id,
         tenantId: existingUser.tenantId,
         expires,
-        ipAddress: meta.ip ?? null,
-        userAgent: meta.userAgent?.slice(0, 512) ?? null,
+        ipAddress: meta.ip?.slice(0, SESSION_IP_MAX_LENGTH) ?? null,
+        userAgent: meta.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         passkeyVerifiedAt: verifiedAt,
         provider: "webauthn",
         authCredentialId: user.credentialRowId,

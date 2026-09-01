@@ -32,7 +32,7 @@ import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/
 // must surface before any prisma init). `type WebhookRecord` is a type-only import
 // (erased at compile time, no runtime module load).
 import type { WebhookRecord } from "@/lib/webhook-dispatcher";
-import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_DELIVERY_CONCURRENCY } from "@/lib/validations/common.server";
+import { WEBHOOK_MAX_RETRIES, WEBHOOK_AUTO_DISABLE_THRESHOLD, WEBHOOK_DELIVERY_CONCURRENCY, AUDIT_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { maskUrlForDisplay } from "@/lib/url/url-validation";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -100,8 +100,15 @@ function parsePayload(raw: unknown): AuditOutboxPayload {
       p.metadata !== null && typeof p.metadata === "object"
         ? (p.metadata as Record<string, unknown>)
         : null,
-    ip: typeof p.ip === "string" ? p.ip : null,
-    userAgent: typeof p.userAgent === "string" ? p.userAgent : null,
+    // Sliced HERE as well as at the producers, and that is not redundancy: this
+    // is the last hop before `INSERT INTO audit_logs`, and the payload it reads
+    // is a jsonb blob off the table — written by whatever version enqueued it,
+    // including one from before the producers bounded the field. Every other
+    // field on this row is already re-checked at this boundary for the same
+    // reason; `ip` was the one read back on trust.
+    ip: typeof p.ip === "string" ? p.ip.slice(0, AUDIT_IP_MAX_LENGTH) : null,
+    userAgent:
+      typeof p.userAgent === "string" ? p.userAgent.slice(0, USER_AGENT_MAX_LENGTH) : null,
   };
 }
 
