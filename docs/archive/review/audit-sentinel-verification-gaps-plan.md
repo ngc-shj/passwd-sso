@@ -1208,6 +1208,36 @@ Three findings are carried forward rather than fixed:
   membership writers and route it to the existing refusal path with its own
   reason.* The runbook covers the migration-time symptom; this is the runtime one.
 
+### Phase 3 Round 2 — 9 findings, 4 Major, all in the Round-1 fixes
+
+Round 2 reviewed only `46cdbf49f..HEAD`, i.e. the fixes themselves. Every Major
+was in the rewritten gate or in a test written to close a Round-1 finding, and
+two were red-proved by execution against copies:
+
+- **The gate could not SEE `data: <identifier>`.** `validate-token-dpop.ts`
+  builds `const updateData` and assigns `updateData.lastUsedIp` — a line this
+  branch added — and the gate skipped the whole site. Reverting that slice left
+  it at exit 0, and the per-member floor could not compensate because the
+  property is seen at three other sites. Local bindings are resolved now, and an
+  unresolvable `data:` is refused rather than skipped.
+- **The constant was compared by spelling only.** A local
+  `const SESSION_IP_MAX_LENGTH = 100000` satisfied it — the failure the gate's
+  own docblock claims name-comparison prevents. The name must resolve to an
+  import now.
+- **The list/history fix relocated its vacuity instead of removing it.** It
+  re-read through prisma the row the test had just seeded, which is a tautology
+  over the fixture: `cmdList` could return nothing and the assertion still held.
+  It asserts the command's return value now.
+- **`truncateMetadata`'s `_reason` could not discriminate.** Both reachable
+  triggers throw a bare `TypeError`, so `errorLogFields(err).code` was
+  `"unknown"` every time, and no case asserted the field. Fixed token, asserted
+  exactly.
+
+The trend across rounds — 22 distinct findings, then 9 — is converging but has
+not converged. Round 2's own Majors were all in Round 1's remedies, which is the
+signature that says another round is worth its cost rather than that the work is
+done.
+
 ### The `trackTenant` guard's red proof cost the dev database its sentinel row
 
 Recorded because the guard's value is now measured rather than argued, and
