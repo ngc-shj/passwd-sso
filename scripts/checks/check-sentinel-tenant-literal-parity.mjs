@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 /**
- * The sentinel tenant's UUID is written down in three places that must agree,
- * and two of them are SQL that cannot dereference the third.
+ * The sentinel tenant's UUID is written down in five places that must agree, and
+ * four of them cannot dereference the fifth.
  *
  *   src/lib/constants/app.ts          SYSTEM_TENANT_ID  (the definition)
  *   prisma/migrations/…_add_dcr_cleanup_worker_role_and_system_tenant
  *                                     the `tenants` row itself
  *   prisma/migrations/…_forbid_system_tenant_membership
  *                                     the CHECK that keeps it memberless
+ *   docs/operations/alerts.md         the unattributable-event query
+ *   docs/operations/sentinel-tenant-membership.md
+ *                                     the membership incident runbook
  *
  * Why the `tenants` row is in scope and not just the CHECK: that row is the FK
  * target of audit_logs.tenant_id and audit_outbox.tenant_id. A gate watching
@@ -89,6 +92,21 @@ const SQL_SITES = [
   },
 ];
 
+/**
+ * Operator-facing copies. These are not SQL the engine runs — they are queries a
+ * human pastes during an incident, which is what makes their drift dangerous in
+ * a quieter way: a stale UUID here counts rows for a tenant nothing writes to
+ * and returns a reassuring zero, at the one moment somebody is asking whether
+ * unattributable events are piling up.
+ *
+ * docs/archive/review/** is deliberately OUT of scope: those are historical
+ * records of what was true when written, annotated rather than rewritten.
+ */
+const DOC_SITES = [
+  { path: "docs/operations/alerts.md", what: "the unattributable-event diagnostic query" },
+  { path: "docs/operations/sentinel-tenant-membership.md", what: "the membership incident runbook" },
+];
+
 function fail(msg) {
   console.error(`check-sentinel-tenant-literal-parity: ${msg}`);
   process.exit(1);
@@ -161,9 +179,25 @@ for (const site of SQL_SITES) {
   }
 }
 
+for (const site of DOC_SITES) {
+  const file = join(REPO_ROOT, site.path);
+  if (!existsSync(file)) {
+    problems.push(`MISSING  ${site.path} (${site.what})`);
+    continue;
+  }
+  checked++;
+  if (!readFileSync(file, "utf8").includes(sentinelValue)) {
+    problems.push(
+      `MISMATCH  ${site.path} does not contain ${sentinelValue}\n` +
+        `           (${site.what})\n` +
+        `           ${CONSTANT_NAME} in ${CONSTANT_FILE} is ${sentinelValue}`,
+    );
+  }
+}
+
 if (checked === 0) {
   fail(
-    `examined 0 SQL sites — every named site is missing, so this run proves ` +
+    `examined 0 named sites — every one is missing, so this run proves ` +
       `nothing about parity`,
   );
 }
@@ -191,6 +225,6 @@ CHECK.\n`,
 
 console.log(
   `check-sentinel-tenant-literal-parity: ${CONSTANT_NAME} = ${sentinelValue}, ` +
-    `${checked} SQL site(s) in parity`,
+    `${checked} site(s) in parity`,
 );
 console.log("check-sentinel-tenant-literal-parity: OK");

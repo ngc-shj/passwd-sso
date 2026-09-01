@@ -1,9 +1,10 @@
 /**
  * Self-test for check-sentinel-tenant-literal-parity.mjs.
  *
- * The gate ties SYSTEM_TENANT_ID (src/lib/constants/app.ts) to the two SQL sites
- * that spell the same UUID and cannot dereference it: the sentinel `tenants` row
- * and the CHECK that keeps that tenant memberless.
+ * The gate ties SYSTEM_TENANT_ID (src/lib/constants/app.ts) to the four sites
+ * that spell the same UUID and cannot dereference it: the sentinel `tenants`
+ * row, the CHECK that keeps that tenant memberless, and the two operator-facing
+ * docs whose queries a human pastes during an incident.
  *
  * Every case runs the gate against a SYNTHETIC repo root, so none depends on the
  * state of the real tree and none can be made green by editing the real
@@ -27,6 +28,7 @@ const OTHER_UUID = "00000000-0000-4000-8000-000000000099";
 
 const ROW_DIR = "20260428170853_add_dcr_cleanup_worker_role_and_system_tenant";
 const CHECK_DIR = "20260901090000_forbid_system_tenant_membership";
+const DOC_FILES = ["alerts.md", "sentinel-tenant-membership.md"];
 
 let root;
 const roots = [];
@@ -39,9 +41,17 @@ const roots = [];
  * does not apply to ESM either. The override is the same mechanism the sibling
  * narrative gate uses, and it carries the same CI pollution guard.
  */
-function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
+function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, docs = REAL_UUID, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
   root = mkdtempSync(join(tmpdir(), "sentinel-parity-"));
   roots.push(root);
+
+  // Operator-facing copies. Not SQL the engine runs — queries a human pastes
+  // during an incident, where a stale UUID returns a reassuring zero.
+  mkdirSync(join(root, "docs/operations"), { recursive: true });
+  for (const d of DOC_FILES) {
+    if (omit.includes(d)) continue;
+    writeFileSync(join(root, "docs/operations", d), `WHERE tenant_id = '${docs}'\n`, "utf8");
+  }
 
   mkdirSync(join(root, "src/lib/constants"), { recursive: true });
   writeFileSync(
@@ -102,7 +112,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     // satisfiable by a gate that refuses unconditionally.
     const r = runGate(makeRoot());
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("2 SQL site(s) in parity");
+    expect(r.stdout).toContain("4 site(s) in parity");
   });
 
   it("REDS when the constant moves away from both SQL sites", () => {
@@ -146,13 +156,24 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.stderr).toContain(CHECK_DIR.replace(/^\d+/, ""));
   });
 
-  it("REFUSES when every named SQL site is missing, rather than passing vacuously", () => {
-    // The floor. With both sites gone the mismatch list is empty, and a gate
-    // that reported OK there would be green precisely when it had checked
-    // nothing.
-    const r = runGate(makeRoot({ omit: ["row", "check"] }));
+  it("REDS when an operator-facing copy drifts, naming that doc", () => {
+    // Not SQL the engine runs — a query a human pastes mid-incident. A stale
+    // UUID here counts rows for a tenant nothing writes to and returns a
+    // reassuring zero, at the one moment somebody is asking whether
+    // unattributable events are piling up.
+    const r = runGate(makeRoot({ docs: OTHER_UUID }));
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("examined 0 SQL sites");
+    expect(r.stderr).toContain("docs/operations/alerts.md");
+    expect(r.stderr).not.toContain(ROW_DIR);
+  });
+
+  it("REFUSES when every named site is missing, rather than passing vacuously", () => {
+    // The floor. With every site gone the mismatch list still has entries, but
+    // `checked` is 0 — and a gate that reported OK on an empty examination
+    // would be green precisely when it had checked nothing.
+    const r = runGate(makeRoot({ omit: ["row", "check", ...DOC_FILES] }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("examined 0 named sites");
   });
 
   it("is wired into scripts/pre-pr.sh", () => {
