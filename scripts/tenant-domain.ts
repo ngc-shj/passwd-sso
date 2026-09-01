@@ -904,9 +904,13 @@ export async function cmdAdd(args: {
         // undo, and refusing it would strand any deployment where the accident
         // already happened.
         //
-        // Keyed on the RESOLVED id, not on the ref string: the sentinel's slug
-        // and externalId resolve to the same tenant, and a check on the spelling
-        // would pass for two of the three ways to name it.
+        // Keyed on the RESOLVED id, not on the ref string. resolveTenantRef
+        // takes UUID → existing claim → external_id, so the sentinel has TWO
+        // spellings that reach here: its UUID, and any claim already pointing
+        // at it — which is the spelling an operator uses during exactly the
+        // incident this refusal is about. A check on the ref string would pass
+        // for the second. (Its slug is not a third: slug is deliberately not a
+        // resolution path, and the sentinel carries no external_id.)
         //
         // `add` is the only creator of a sentinel claim. The sign-in JIT path
         // builds its claim as a nested write inside tenant.create, so it always

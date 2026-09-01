@@ -30,6 +30,15 @@ const ROW_DIR = "20260428170853_add_dcr_cleanup_worker_role_and_system_tenant";
 const CHECK_DIR = "20260901090000_forbid_system_tenant_membership";
 const DOC_FILES = ["alerts.md", "sentinel-tenant-membership.md"];
 
+/**
+ * How many times each doc fixture spells the literal — mirroring the gate's own
+ * manifest, because the count is now part of what the gate checks. A fixture
+ * that always wrote ONE occurrence could not distinguish "present" from
+ * "present the right number of times", which is the whole subject of the
+ * partial-drift case below.
+ */
+const DOC_OCCURRENCES = { "alerts.md": 1, "sentinel-tenant-membership.md": 4 };
+
 let root;
 const roots = [];
 
@@ -41,16 +50,23 @@ const roots = [];
  * does not apply to ESM either. The override is the same mechanism the sibling
  * narrative gate uses, and it carries the same CI pollution guard.
  */
-function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, docs = REAL_UUID, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
+function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, docs = REAL_UUID, driftOneOf, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
   root = mkdtempSync(join(tmpdir(), "sentinel-parity-"));
   roots.push(root);
 
   // Operator-facing copies. Not SQL the engine runs — queries a human pastes
-  // during an incident, where a stale UUID returns a reassuring zero.
+  // during an incident, where a stale UUID returns a reassuring zero. Each is
+  // written with the number of occurrences the gate's manifest declares, so a
+  // partial drift is expressible: `driftOneOf` moves exactly the first one.
   mkdirSync(join(root, "docs/operations"), { recursive: true });
   for (const d of DOC_FILES) {
     if (omit.includes(d)) continue;
-    writeFileSync(join(root, "docs/operations", d), `WHERE tenant_id = '${docs}'\n`, "utf8");
+    const lines = [];
+    for (let i = 0; i < DOC_OCCURRENCES[d]; i++) {
+      const value = driftOneOf === d && i === 0 ? OTHER_UUID : docs;
+      lines.push(`WHERE tenant_id = '${value}'`);
+    }
+    writeFileSync(join(root, "docs/operations", d), `${lines.join("\n")}\n`, "utf8");
   }
 
   mkdirSync(join(root, "src/lib/constants"), { recursive: true });
@@ -165,6 +181,39 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("docs/operations/alerts.md");
     expect(r.stderr).not.toContain(ROW_DIR);
+  });
+
+  it("REDS when ONE of the runbook's four occurrences drifts and the other three do not", () => {
+    // The case presence-checking cannot reach, and the reason the manifest
+    // carries a count. That runbook spells the UUID four times — once in prose
+    // and three times in queries — so a `.includes()` gate stays green while
+    // the query an operator actually pastes points at a tenant nothing writes
+    // to. The message names the counts, not just the file.
+    const r = runGate(makeRoot({ driftOneOf: "sentinel-tenant-membership.md" }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("docs/operations/sentinel-tenant-membership.md");
+    expect(r.stderr).toContain("3 time(s), expected 4");
+    // Scoped: the sibling doc is untouched and must not be named.
+    expect(r.stderr).not.toContain("docs/operations/alerts.md");
+  });
+
+  it("REFUSES a scan-root override in CI without fixture mode", () => {
+    // The env-pollution guard, which every other case in this file runs with
+    // FIXTURE_MODE set and therefore never enters. Left unproven, the override
+    // is a way to point CI's parity check at a tree that trivially agrees with
+    // itself — the gate would print OK having examined the wrong repo.
+    const r = spawnSync("node", [GATE], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CI: "true",
+        SENTINEL_PARITY_ROOT: makeRoot(),
+        SENTINEL_PARITY_FIXTURE_MODE: "",
+      },
+      timeout: 60_000,
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("SENTINEL_PARITY_ROOT must not be set");
   });
 
   it("REFUSES when every named site is missing, rather than passing vacuously", () => {

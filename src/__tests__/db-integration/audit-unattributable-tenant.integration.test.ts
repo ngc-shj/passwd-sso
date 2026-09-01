@@ -51,17 +51,37 @@ describe("unattributable audit events", () => {
   });
 
   afterAll(async () => {
+    // Last chance for anything `reclaimEmitted` could not remove. Every marker
+    // it reclaims leaves the registry; one whose DELETE threw is still in it,
+    // and without this the file's final case would strand it. Failures are
+    // reported, not thrown — an afterAll throw buries the real failure.
+    try {
+      const stranded = await reclaimEmitted();
+      if (stranded.length > 0) {
+        console.warn(`[audit-unattributable] ${stranded.length} marker(s) unreclaimed:\n  ${stranded.join("\n  ")}`);
+      }
+    } catch (e) {
+      console.warn(`[audit-unattributable] final reclaim failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
     await ctx.cleanup();
   });
 
-  afterEach(async () => {
-    // In afterEach, not at the end of each case: a trailing statement does not
-    // run once an assertion above it throws, and a failed case is exactly when
-    // rows have been written and nothing has removed them.
-    const pending = emitted.splice(0);
+  /**
+   * Reclaim every registered marker, returning the problems found.
+   *
+   * A marker leaves `emitted` only once its own DELETE has committed. Emptying
+   * the registry up front instead — `emitted.splice(0)` — reads the same until
+   * a query in the loop throws, at which point every marker after it is gone
+   * from the registry with its rows still on the database. Those rows sit under
+   * the sentinel, which is the one tenant `ctx.deleteTestData` is never handed
+   * and `trackTenant` now refuses, on a database shared between working copies:
+   * there is no second sweep that would find them.
+   */
+  async function reclaimEmitted(): Promise<string[]> {
     const problems: string[] = [];
 
-    for (const { marker, tenantId } of pending) {
+    for (const entry of [...emitted]) {
+      const { marker, tenantId } = entry;
       const rows = await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         return tx.$queryRawUnsafe<{ id: string }[]>(
@@ -101,6 +121,7 @@ describe("unattributable audit events", () => {
         problems.push(
           `the emit for marker ${marker} landed no audit_outbox row under tenant ${tenantId}`,
         );
+        emitted.splice(emitted.indexOf(entry), 1);
         continue;
       }
 
@@ -116,7 +137,18 @@ describe("unattributable audit events", () => {
         );
         await tx.$executeRawUnsafe(`DELETE FROM audit_outbox WHERE id = ANY($1::uuid[])`, ids);
       });
+      // Only now: the rows this entry names are gone.
+      emitted.splice(emitted.indexOf(entry), 1);
     }
+
+    return problems;
+  }
+
+  afterEach(async () => {
+    // In afterEach, not at the end of each case: a trailing statement does not
+    // run once an assertion above it throws, and a failed case is exactly when
+    // rows have been written and nothing has removed them.
+    const problems = await reclaimEmitted();
 
     for (const tenantId of createdTenants.splice(0)) {
       await ctx.deleteTestData(tenantId);
@@ -209,14 +241,21 @@ describe("unattributable audit events", () => {
     expect(await outboxTenantsForMarker(marker)).toEqual([tenantId]);
   });
 
-  it("trackTenant refuses the sentinel tenant and accepts an ordinary one", async () => {
-    // ctx.cleanup() ends in `DELETE FROM tenants`. Handing it the sentinel
-    // would remove the FK target the first case asserts, for every working copy
-    // sharing this database — so the helper refuses rather than sweeping it.
+  it("both roads to `DELETE FROM tenants` refuse the sentinel, and neither refuses an ordinary tenant", async () => {
+    // The class is "a caller-supplied id reaching that DELETE", so both entry
+    // points are arms here. trackTenant is the registration road (cleanup()
+    // sweeps what it holds); deleteTestData is the direct one, and every file
+    // in this suite calls it with an id of its own — guarding only the first
+    // would leave the shorter road open.
     expect(() => ctx.trackTenant(SYSTEM_TENANT_ID)).toThrow(/sentinel tenant/);
-    // The allow arm: the guard must be keyed on the sentinel, not on tracking.
+    await expect(ctx.deleteTestData(SYSTEM_TENANT_ID)).rejects.toThrow(/sentinel tenant/);
+
+    // The allow arms: the guard is keyed on the sentinel, not on the operation.
     const ordinary = await newTenant();
     expect(() => ctx.trackTenant(ordinary)).not.toThrow();
+    await expect(ctx.deleteTestData(ordinary)).resolves.not.toThrow();
+    // deleteTestData already removed it; afterEach must not run it twice.
+    createdTenants.splice(createdTenants.indexOf(ordinary), 1);
   });
 
   it("no tenant membership grants access to the sentinel tenant", async () => {
@@ -254,6 +293,13 @@ describe("unattributable audit events", () => {
     const denied = await insertMembership(SYSTEM_TENANT_ID).catch((e: unknown) => e);
     expect(sqlStateOf(denied)).toBe("23514");
     expect(String(denied)).toContain("tenant_members_not_system_tenant");
+    // The mutation, not only the verdict: the row this user would have held is
+    // the whole subject, so read it back rather than inferring it from the code.
+    const sentinelMembers = await ctx.su.prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT COUNT(*)::bigint AS n FROM tenant_members
+      WHERE tenant_id = ${SYSTEM_TENANT_ID}::uuid AND user_id = ${userId}::uuid
+    `;
+    expect(Number(sentinelMembers[0]!.n)).toBe(0);
 
     await expect(insertMembership(otherTenantId)).resolves.not.toThrow();
   });

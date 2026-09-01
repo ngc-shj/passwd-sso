@@ -31,10 +31,19 @@
  * way: SYSTEM_ACTOR_ID is also there, twice, and would mismatch on an unmodified
  * tree.
  *
- * So the sites are NAMED, and the gate asserts two things about each: the file
- * exists, and the anchor line in it carries the constant's value. A site that
- * has moved or been renamed is a refusal, not a silent pass — "examined nothing"
- * must not be spelled the same as "found nothing".
+ * So the sites are NAMED, and the gate asserts three things about each: the file
+ * exists, it carries the constant's value, and it carries it exactly as many
+ * times as the manifest says. A site that has moved or been renamed is a
+ * refusal, not a silent pass — "examined nothing" must not be spelled the same
+ * as "found nothing".
+ *
+ * The COUNT is what makes a multi-occurrence site checkable. Presence alone is
+ * enough for a file that spells the UUID once, and silently wrong for one that
+ * spells it more: docs/operations/sentinel-tenant-membership.md carries it four
+ * times — once in prose and three times in queries an operator pastes — and a
+ * gate asking only "does this file contain the value" stays green while three of
+ * the four drift. Adding a legitimate fifth occurrence reds the gate too; the
+ * fix is to update the number here, which is the point of a named manifest.
  *
  * ─── Direction of repair ───────────────────────────────────────────────────
  *
@@ -77,17 +86,19 @@ const CONSTANT_FILE = "src/lib/constants/app.ts";
 const CONSTANT_NAME = "SYSTEM_TENANT_ID";
 
 /**
- * Named sites, each with the substring that identifies its anchor line. The
+ * Named sites, each with how many times it must spell the literal. The
  * migration directories are matched by suffix because their timestamps are not
  * ours to predict; the suffix is the part a human chose and will not drift.
  */
 const SQL_SITES = [
   {
     dirSuffix: "_add_dcr_cleanup_worker_role_and_system_tenant",
+    occurrences: 1,
     what: "the sentinel `tenants` row (FK target of audit_logs / audit_outbox)",
   },
   {
     dirSuffix: "_forbid_system_tenant_membership",
+    occurrences: 1,
     what: "the CHECK that keeps the sentinel memberless",
   },
 ];
@@ -103,13 +114,26 @@ const SQL_SITES = [
  * records of what was true when written, annotated rather than rewritten.
  */
 const DOC_SITES = [
-  { path: "docs/operations/alerts.md", what: "the unattributable-event diagnostic query" },
-  { path: "docs/operations/sentinel-tenant-membership.md", what: "the membership incident runbook" },
+  {
+    path: "docs/operations/alerts.md",
+    occurrences: 1,
+    what: "the unattributable-event diagnostic query",
+  },
+  {
+    path: "docs/operations/sentinel-tenant-membership.md",
+    occurrences: 4,
+    what: "the membership incident runbook (prose + three operator queries)",
+  },
 ];
 
 function fail(msg) {
   console.error(`check-sentinel-tenant-literal-parity: ${msg}`);
   process.exit(1);
+}
+
+/** How many times `text` spells `value`. Plain substring count — the value is a UUID. */
+function countOccurrences(text, value) {
+  return text.split(value).length - 1;
 }
 
 // ─── Read the constant by AST ──────────────────────────────────────────────
@@ -167,12 +191,12 @@ for (const site of SQL_SITES) {
     continue;
   }
   checked++;
-  const sql = readFileSync(file, "utf8");
   // Comments in these files legitimately mention the constant's NAME; what must
   // match is the value, so look for the literal itself.
-  if (!sql.includes(sentinelValue)) {
+  const found = countOccurrences(readFileSync(file, "utf8"), sentinelValue);
+  if (found !== site.occurrences) {
     problems.push(
-      `MISMATCH  ${matches[0]}/migration.sql does not contain ${sentinelValue}\n` +
+      `MISMATCH  ${matches[0]}/migration.sql spells ${sentinelValue} ${found} time(s), expected ${site.occurrences}\n` +
         `           (${site.what})\n` +
         `           ${CONSTANT_NAME} in ${CONSTANT_FILE} is ${sentinelValue}`,
     );
@@ -186,9 +210,10 @@ for (const site of DOC_SITES) {
     continue;
   }
   checked++;
-  if (!readFileSync(file, "utf8").includes(sentinelValue)) {
+  const found = countOccurrences(readFileSync(file, "utf8"), sentinelValue);
+  if (found !== site.occurrences) {
     problems.push(
-      `MISMATCH  ${site.path} does not contain ${sentinelValue}\n` +
+      `MISMATCH  ${site.path} spells ${sentinelValue} ${found} time(s), expected ${site.occurrences}\n` +
         `           (${site.what})\n` +
         `           ${CONSTANT_NAME} in ${CONSTANT_FILE} is ${sentinelValue}`,
     );

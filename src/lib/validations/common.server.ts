@@ -24,11 +24,23 @@ export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB
 export const USER_AGENT_MAX_LENGTH = 512;      // matches @db.VarChar(512)
 // Matches audit_logs.ip @db.VarChar(45) — the widest an IPv4-mapped IPv6
-// address with a zone id gets. Bounding here rather than trusting the column:
-// an over-length value raises 22001 in the outbox worker's insert, and unlike
-// 22P02 that error does not echo the value, so the row cycles through
-// max_attempts and the audit event behind it is lost silently. The column
-// rejects; this truncates, which keeps the event.
+// address gets WITHOUT a zone id ("0000:…:ffff:255.255.255.255"). A zone id
+// pushes past it, so such an address is truncated here rather than fitted; that
+// is the column's decision, not this constant's, and the cap exists to make the
+// truncation happen where it is visible.
+//
+// Bounding here rather than trusting the column: an over-length value raises
+// 22001 in the outbox worker's insert, and unlike 22P02 that error does not
+// echo the value, so the row cycles through max_attempts and the audit event
+// behind it is lost silently. The column rejects; this truncates, which keeps
+// the event.
+//
+// Deliberately NOT IP_ADDRESS_MAX_LENGTH below, which is the same number: that
+// one bounds an operator-entered CIDR string in the tenant IP-restriction
+// policy, where the input is validated as a CIDR and the length is a form
+// constraint. This one is a column width on a write path with no validation in
+// front of it. Same number today, different concepts — see
+// AUDIT_CREDENTIAL_ID_MAX_LENGTH for the same call made once already.
 export const AUDIT_IP_MAX_LENGTH = 45;
 export const MAX_JSON_BODY_BYTES = 1_048_576;  // 1 MB default stream cap for parseBody
 // Bound for WebAuthn credential ids recorded in audit metadata (e.g. the
@@ -94,6 +106,9 @@ export const MAX_TENANT_CLAIM_LENGTH = 255;
 export const BOOTSTRAP_SLUG_HASH_LENGTH = 24;
 
 // ─── IP Address ─────────────────────────────────────────────
+// Form bound on an operator-entered CIDR in the tenant IP-restriction policy.
+// Distinct from AUDIT_IP_MAX_LENGTH above despite the shared value — that one
+// is a column width on an unvalidated write path. See its note.
 export const IP_ADDRESS_MAX_LENGTH = 45;        // IPv6 max, matches @db.VarChar(45)
 
 // ─── Directory Sync ─────────────────────────────────────────

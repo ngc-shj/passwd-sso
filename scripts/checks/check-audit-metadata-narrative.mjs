@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
  * CI guard (AST, ts-morph): narrative taken from a caught value must not reach
- * an audit `metadata` field. Reduce it to a token first — the convention in
+ * any of the audit payload's free-text fields (SINK_PROPERTIES below — seven of
+ * them, not `metadata` alone). Reduce it to a token first — the convention in
  * this tree is `SOMETHING_FAILED:${errorLogFields(err).code}`.
  *
  * THE SECOND SINK. check-caught-error-logging.mjs covers one audience: a caught
- * value handed to a structured LOGGER, read by operators. `audit_logs.metadata`
- * is a second one with a WIDER audience — tenants read it through
+ * value handed to a structured LOGGER, read by operators. The audit row is a
+ * second one with a WIDER audience — tenants read it through
  * /api/tenant/audit-logs — and it is durable rather than rotated. Neither of the
  * two controls on that path reaches the value's text: `sanitizeMetadata` removes
  * keys in METADATA_BLOCKLIST by NAME at any depth, and `truncateMetadata` only
  * bounds the JSON's size. That is the same shape as pino's redact-by-key, and it
- * is why a message can pass both untouched.
+ * is why a message can pass both untouched — and both controls act on `metadata`
+ * only, so for the other six sinks there is no control on the path at all.
  *
  * WHY THIS GATE RATHER THAN THE SIBLING'S SCAN. The sibling anchors on a logger
  * CALL and reads its field object, so it cannot see a value that leaves the
@@ -48,7 +50,7 @@
  *            through a builder call.
  *   PASSES   `errorLogFields(err)` and tokens derived from it; a sentinel
  *            comparison or `switch` on `err.message`; a narrative that never
- *            reaches a `metadata` field; and — the case that made the resolution
+ *            reaches ANY sink field; and — the case that made the resolution
  *            rule load-bearing — a DIFFERENT binding of the same name declared
  *            in a nested scope. The anchor publisher has an inner
  *            `catch (uploadErr) { const reason = `${dest.name}_UPLOAD_FAILED` }`
@@ -62,9 +64,17 @@
  *            note); through an object PROPERTY (`o.reason = err.message`) or an
  *            array element; through a helper's return value, which needs a call
  *            graph this gate runs without; and a `metadata` object assembled by
- *            a function in another file. Narrative reaching an HTTP response
- *            body is out of scope by audience, not by oversight — that is a
- *            different threat model and is not adjudicated here.
+ *            a function in another file. Also the POSITIONAL-ARGUMENT shape: an
+ *            object built under one name and passed to a callee whose PARAMETER
+ *            is the sink. The live instance is the outbox worker's error
+ *            recorder — it assembles the object itself and passes it positionally
+ *            — so neither the sink-property anchor nor the catch-bounded taint
+ *            walk sees it, and that path is how a `22P02` message carrying a
+ *            narrative from `teamId`/`serviceAccountId` reaches `audit_logs`
+ *            after max attempts. It is the reason those two fields are sinks
+ *            here at all. Narrative reaching an HTTP response body is out of
+ *            scope by audience, not by oversight — a different threat model,
+ *            not adjudicated here.
  *
  * Runs without a Program (in-memory project).
  */
@@ -114,16 +124,33 @@ const SEARCH_DIRS = (
 const REDUCER = "errorLogFields";
 
 /**
- * The sink is any property named `metadata`, not the argument of a named list
- * of audit emitters.
+ * The sinks are PROPERTY NAMES, not the arguments of a named list of audit
+ * emitters.
  *
  * Keying on `logAuditAsync` / `logAuditInTx` / `logAuditBulkAsync` would make
  * the member set a hand-maintained list — the failure mode this whole line of
- * work exists to stop, and one a new wrapper silently escapes. `metadata` is the
- * field name the payload carries all the way to the column, so anchoring on it
+ * work exists to stop, and one a new wrapper silently escapes. These are the
+ * field names the payload carries all the way to the row, so anchoring on them
  * covers the emitters, their wrappers, and the outbox payload builders alike.
- * It also covers a few non-audit `metadata` fields, which is a cost worth
+ * They also cover a few non-audit fields of the same name, which is a cost worth
  * paying: free-form caught-error text does not belong in any of them.
+ *
+ * WHY SEVEN AND NOT ONE. `metadata` was the original anchor, on the argument
+ * that it is the field the payload carries to the column. True, and not
+ * exclusive — `buildOutboxPayload` carries six more free-text fields to the same
+ * tenant-readable row. Two of them, `teamId` and `serviceAccountId`, were
+ * adjudicated OUT twice on "a narrative there raises 22P02, so no row reaches
+ * audit_logs": the premise holds and the conclusion does not, because PostgreSQL
+ * embeds the offending text in the 22P02 message and the worker's error recorder
+ * writes that message into `metadata.lastError` once attempts are exhausted. The
+ * narrative arrives at the same sink, eight attempts later.
+ *
+ * OUT, each for a mechanism that actually holds: `scope`, `action`, `actorType`
+ * are enum-typed on both sides; `userId` reaches the worker's own guards, which
+ * hand the error recorder a CONSTRUCTED constant rather than the input; and
+ * `tenantId` fails at the app-side enqueue — inside `logAuditAsync`'s try, whose
+ * catch is log-only, or by aborting the caller's transaction — so it never
+ * reaches a tenant-readable row. `tenantId`'s reason is not the others'.
  */
 const SINK_PROPERTIES = ["metadata", "targetType", "targetId", "userAgent", "ip", "teamId", "serviceAccountId"];
 const SINK_SET = new Set(SINK_PROPERTIES);

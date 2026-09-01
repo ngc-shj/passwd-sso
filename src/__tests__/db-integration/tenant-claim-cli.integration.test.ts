@@ -39,6 +39,7 @@ import {
   SIGNIN_ACTOR_LABEL,
   DEREGISTER_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -2620,6 +2621,153 @@ describe("tenant-domain CLI (C7)", () => {
       expect(row?.revokedAt).not.toBeNull();
 
       await ctx.deleteTestData(tenantId);
+    });
+  });
+
+  describe("sentinel tenant (C12)", () => {
+    /**
+     * Remove a claim written against the sentinel, and the append-only events
+     * it produced.
+     *
+     * `ctx.deleteTestData` cannot be used here and `trackTenant` refuses the
+     * sentinel outright — deleting that tenants row is what the guard in
+     * helpers.ts exists to prevent. So the cleanup is written by hand and
+     * scoped to the one claim this test created: the claim row (whose DELETE
+     * fires the trigger that appends a `deregister` event), then the purge
+     * routine, which is the only sanctioned way to remove a tenant_claim_events
+     * row. Purging for the sentinel is safe to scope this way because the
+     * sentinel holds no claims of its own — a deployment where it did is the
+     * incident docs/operations/sentinel-tenant-membership.md is written for.
+     */
+    async function dropSentinelClaim(claim: string): Promise<void> {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(`DELETE FROM tenant_claims WHERE claim = $1`, claim);
+        await tx.$executeRawUnsafe(
+          `SELECT tenant_claim_events_purge_for_tenant($1::uuid)`,
+          SYSTEM_TENANT_ID,
+        );
+      });
+    }
+
+    it.skipIf(SKIP)("add refuses the sentinel named by UUID, writing nothing", async () => {
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      // The cleanup runs even though the assertion below says nothing was
+      // written, and that is deliberate: the state this case exists to forbid
+      // is a sentinel claim, so the run in which it FAILS is the run that
+      // creates one — on a shared database, with no tenant-scoped teardown
+      // able to reach it. A deny case whose teardown assumes the deny held
+      // cleans up on exactly the runs that do not need it.
+      try {
+        const result = await cmdAdd({
+          tenant: SYSTEM_TENANT_ID,
+          domain: claim,
+          by: "test-op",
+          yes: true,
+        });
+
+        expect(result.ok).toBe(false);
+        expect(result.code).not.toBe(0);
+        // Pins WHICH refusal (round-3 T12's reasoning): `ok === false` is also
+        // what a missing --by or an unresolvable --tenant produces, and either
+        // would keep this green with the sentinel check deleted.
+        expect(result.message).toContain("Refusing to register a claim against the sentinel tenant");
+        expect(await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } })).toBeNull();
+      } finally {
+        await dropSentinelClaim(claim);
+      }
+    });
+
+    it.skipIf(SKIP)("add refuses the sentinel named by a claim that already points at it", async () => {
+      // The second road into resolveTenantRef, and the one an operator takes
+      // during the incident: a claim already resolves to the sentinel, and the
+      // next `add` names the tenant by that claim rather than by its UUID. A
+      // refusal keyed on the ref STRING rather than the resolved id passes the
+      // case above and fails here.
+      const existing = `${runToken()}-ref.${PRIMARY_CLAIM}`;
+      const fresh = `${runToken()}-new.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({
+        data: { tenantId: SYSTEM_TENANT_ID, claim: existing, createdBy: "seed" },
+      });
+      try {
+        const result = await cmdAdd({ tenant: existing, domain: fresh, by: "test-op", yes: true });
+
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain("Refusing to register a claim against the sentinel tenant");
+        expect(await ctx.su.prisma.tenantClaim.findUnique({ where: { claim: fresh } })).toBeNull();
+      } finally {
+        // `fresh` too: on the run where the refusal is gone, it is the row this
+        // case just created. See the UUID arm above for why teardown here does
+        // not assume the assertion held.
+        await dropSentinelClaim(existing);
+        await dropSentinelClaim(fresh);
+      }
+    });
+
+    it.skipIf(SKIP)("the sentinel's slug reaches no tenant at all, so it never reaches the refusal", async () => {
+      // Recorded because the obvious third spelling is not a road:
+      // resolveTenantRef takes UUID → claim → external_id, and deliberately not
+      // slug (see "--tenant resolution" above for why). The sentinel carries no
+      // external_id either, so UUID and an existing claim are the only two ways
+      // to name it — which is the member set the two cases above cover.
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+
+      try {
+        const result = await cmdAdd({ tenant: "__system__", domain: claim, by: "test-op", yes: true });
+
+        expect(result.ok).toBe(false);
+        expect(result.message).toBe("Tenant not found: __system__");
+        expect(await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } })).toBeNull();
+      } finally {
+        await dropSentinelClaim(claim);
+      }
+    });
+
+    it.skipIf(SKIP)("remove against a sentinel claim still succeeds, and records its revoke event", async () => {
+      // The allow arm the refusal's placement exists to preserve. `remove` is
+      // the audited undo: a deployment that already has a sentinel claim needs
+      // it, and refusing there would strand exactly the case this contract is
+      // about. Reinstating a sentinel refusal in cmdRemove reddens this.
+      const claim = `${runToken()}-undo.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({
+        data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "seed" },
+      });
+      try {
+        const result = await cmdRemove({
+          tenant: SYSTEM_TENANT_ID,
+          domain: claim,
+          by: "ops-oncall",
+          yes: true,
+        });
+
+        expect(result.ok).toBe(true);
+        const row = await ctx.su.prisma.tenantClaim.findUniqueOrThrow({ where: { claim } });
+        expect(row.revokedAt).not.toBeNull();
+        const events = await ctx.su.prisma.tenantClaimEvent.findMany({ where: { claim } });
+        expect(events).toHaveLength(1);
+        expect(events[0].operation).toBe(TENANT_CLAIM_EVENT_OPERATION.REVOKE);
+        expect(events[0].newTenantId).toBe(SYSTEM_TENANT_ID);
+      } finally {
+        await dropSentinelClaim(claim);
+      }
+    });
+
+    it.skipIf(SKIP)("list and history against the sentinel succeed — they are the diagnosis path", async () => {
+      // The placement proof. The refusal sits in cmdAdd and NOT in the shared
+      // resolver, because these two commands are how an operator finds out a
+      // claim points at the sentinel in the first place. Moving the refusal
+      // into resolveTenantRef reddens both assertions below.
+      const claim = `${runToken()}-diag.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({
+        data: { tenantId: SYSTEM_TENANT_ID, claim, createdBy: "seed" },
+      });
+      try {
+        expect((await cmdList({ tenant: SYSTEM_TENANT_ID })).ok).toBe(true);
+        expect((await cmdHistory({ tenant: SYSTEM_TENANT_ID })).ok).toBe(true);
+      } finally {
+        await dropSentinelClaim(claim);
+      }
     });
   });
 });

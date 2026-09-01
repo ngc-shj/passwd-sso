@@ -406,23 +406,34 @@ export async function createTestContext(): Promise<TestContext> {
     return id;
   }
 
+  /**
+   * The sentinel is the one tenant id teardown must never receive.
+   *
+   * `__system__` is the FK target that makes an unattributable audit emit
+   * writable at all (src/lib/audit/audit.ts, resolveTenantId), and
+   * `deleteTestData` ends in `DELETE FROM tenants` — so handing it the sentinel
+   * takes the encoding down for every working copy sharing this database. That
+   * is not hypothetical: proving this guard reddens its own case did exactly
+   * that once, and the row had to be restored from its seeding migration.
+   *
+   * Both entry points are guarded, because the class is "a caller-supplied id
+   * reaching that DELETE", not "a call to trackTenant". `deleteTestData` is
+   * exported on TestContext and every file in this suite calls it directly with
+   * an id of its own; guarding only the registration path leaves the shorter
+   * road open. `createTenant` is not a member — its id is a fresh randomUUID().
+   */
+  function refuseSentinel(tenantId: string, fn: string): void {
+    if (tenantId !== SYSTEM_TENANT_ID) return;
+    throw new Error(
+      `[db-integration] ${fn} refuses the sentinel tenant: teardown would DELETE the ` +
+        "row that every unattributable audit emit FKs to. Reclaim rows written under " +
+        "it by a per-run marker (a targetId this test generated), never by tenant_id " +
+        "alone.",
+    );
+  }
+
   function trackTenant(tenantId: string): void {
-    // The sentinel is the one tenant id this sweep must never receive. Every
-    // other id here is disposable; `__system__` is the FK target that makes an
-    // unattributable audit emit writable at all (src/lib/audit/audit.ts,
-    // resolveTenantId), so `deleteTestData`'s terminal `DELETE FROM tenants`
-    // would take the encoding down for every working copy sharing this
-    // database. Refused here rather than filtered inside the sweep, because a
-    // test that reaches this line has already decided to hand the sentinel to
-    // teardown and should be told so, not silently ignored.
-    if (tenantId === SYSTEM_TENANT_ID) {
-      throw new Error(
-        "[db-integration] trackTenant refuses the sentinel tenant: cleanup() would " +
-          "DELETE the row that every unattributable audit emit FKs to. Reclaim rows " +
-          "written under it by a per-run marker (a targetId this test generated), " +
-          "never by tenant_id alone.",
-      );
-    }
+    refuseSentinel(tenantId, "trackTenant");
     outstandingTenantIds.add(tenantId);
   }
 
@@ -450,6 +461,7 @@ export async function createTestContext(): Promise<TestContext> {
   }
 
   async function deleteTestData(tenantId: string): Promise<void> {
+    refuseSentinel(tenantId, "deleteTestData");
     await withCleanupConflictRetry(() => su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       // FK-safe deletion order
