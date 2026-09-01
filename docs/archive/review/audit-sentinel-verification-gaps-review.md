@@ -5,6 +5,15 @@ Review rounds: 3 (Phase 1 closed at round 3 by user decision — see "Phase 1 ex
 
 Rounds 2 and 3 are recorded at the end of this file. Round 1 follows immediately.
 
+**Every `file:line` citation below is anchored at `e3f50de5e`** — the tree the
+three rounds read — not at this branch's head. Phase 2 then edited several of the
+cited files, so fourteen of these citations point at a line that has since moved;
+the citation-rot gate reports them as SHIFTED against `main`. They are left as
+written: this file is the record of what each round observed, and renumbering it
+to a later tree would make the rounds cite evidence they did not have. Read a
+citation here as `git show e3f50de5e:<path>`. The plan document, which Phase 3
+reviews against rather than reads as history, is corrected in place.
+
 ---
 
 # Round 1

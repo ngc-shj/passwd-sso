@@ -952,7 +952,7 @@ OR still equals today's boolean).
 the neighbouring refusals already do · `createTenant` / `trackTenant` / `cleanup`
 (`src/__tests__/db-integration/helpers.ts`) · the existing AST helpers under
 `scripts/checks/lib/` for the parity gate · `errorLogFields` / `pgErrorCode` · the sibling gate
-`scripts/__tests__/check-audit-metadata-narrative.test.mjs:321-327` as the template for the parity
+`scripts/__tests__/check-audit-metadata-narrative.test.mjs:432-437` as the template for the parity
 gate's anchored wiring assertion · `USER_AGENT_MAX_LENGTH` (`src/lib/validations/common.server.ts`)
 as the precedent for the `ip` slice.
 
