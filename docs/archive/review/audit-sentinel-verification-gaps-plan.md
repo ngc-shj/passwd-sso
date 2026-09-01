@@ -1087,6 +1087,65 @@ mechanically obeyed:
 R30 (bare `#806` / `#805` in this plan and the review artifact) fired 18 times
 and was fixed rather than dispositioned.
 
+### Step 2-5 self-R-check — seven fires, all closed
+
+Three sub-agents (functionality, security, testing) ran against `main...HEAD`.
+Their findings are recorded here rather than summarised, because two of them
+corrected this plan and one of them corrected the branch's own scope.
+
+Fixed in `8bc5edd0c`:
+
+- **C12's operator-tool arms did not exist.** The acceptance criteria named four
+  cases; the diff contained none, and no test anywhere greps the refusal. Writing
+  them corrected the contract: **"refuses by slug" is unsatisfiable**, because
+  `resolveTenantRef` takes UUID → existing claim → external_id and deliberately
+  not slug. The sentinel has no external_id, so its two spellings are its UUID
+  and a claim already pointing at it — the second being the one an operator uses
+  during the incident. The code comment claiming "the sentinel's slug and
+  externalId resolve to the same tenant" was wrong about both halves and is
+  corrected. All three placement red-proofs run.
+- **Deny arms that trusted their own assertion for teardown.** The run in which
+  a deny case FAILS is the run that writes a sentinel claim. Observed: the first
+  red proof leaked two.
+- **`deleteTestData` was a second, unguarded road to `DELETE FROM tenants`.**
+  The class is "a caller-supplied id reaching that DELETE"; guarding
+  `trackTenant` alone left the shorter road open, and every file in the suite
+  calls `deleteTestData` directly.
+- **The marker reclaim emptied its registry before doing the work.** A throw
+  mid-loop discarded the only handle to rows under the sentinel.
+- **The parity gate claimed per-anchor-line checking and implemented a
+  whole-file `.includes()`.** Silently wrong for the runbook, which spells the
+  UUID four times: drifting the query an operator pastes left the gate green
+  because the prose still matched. Sites now carry an expected occurrence count.
+- **The parity gate's CI env-pollution guard had no case** — every case ran with
+  fixture mode set, so it was never entered. The sibling gate has one.
+- **The narrative gate's docblock still described a one-field sink** after C14
+  widened it to seven, including a PASSES entry that had become false, and was
+  missing the positional-argument shape C14 explicitly required in MISSED.
+
+One finding was rejected on inspection: the security agent reported C14's
+per-field adjudication as unrecorded. It is recorded, in this plan at the
+"mechanism that does not hold" list above.
+
+### The `ip` class — the finding that was larger than the branch
+
+Both the functionality and security agents fired R3 on CF4, and **each
+enumerated a different, incomplete member set** (four writers and two, with only
+one in common; neither had the share-link page). Re-deriving from the primitive —
+"a write of a header-derived IP into a length-bounded column" — gave eight, and
+the gate written to enforce it found a ninth on its first run: the outbox
+worker's `parsePayload`, the last hop before the INSERT, which reads the value
+back off jsonb and had been trusting it.
+
+That progression is the finding. A hand-list failed three times in a row on one
+class, including mine. `scripts/checks/check-ip-column-bounds.mjs` is the
+convergence artifact — the same remedy `project_bound_unknown_ip_class` recorded
+as still pending for the sibling `boundUnknownIp` class.
+
+Scope call: this is production code outside the 14 contracts. Raised with the
+user with three options and the trade-offs; the user chose to fix the class here
+rather than defer it. Landed in `8e7f28295`.
+
 ### The `trackTenant` guard's red proof cost the dev database its sentinel row
 
 Recorded because the guard's value is now measured rather than argued, and
