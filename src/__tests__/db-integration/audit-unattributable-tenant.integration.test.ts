@@ -304,12 +304,62 @@ describe("unattributable audit events", () => {
     await expect(insertMembership(otherTenantId)).resolves.not.toThrow();
   });
 
+  it("the AFTER INSERT trigger still provisions a membership from a lone users insert", async () => {
+    // The writer whose blast radius differs from every other: a 23514 raised
+    // inside ensure_tenant_owner_membership_after_user_insert() aborts the
+    // PARENT `users` INSERT, so the symptom is a failed account creation with no
+    // visible link to tenant_members.
+    //
+    // Firing it takes work, which is why the case below it does not: the
+    // predicate is `NEW.tenant_id = md5(NEW.id::text)::uuid`, and two
+    // independent randomUUID()s never satisfy it. So the tenant id is DERIVED
+    // from the user id here, and only the `users` row is inserted — the
+    // membership that appears is the trigger's.
+    const userId = randomUUID();
+    const [{ tid }] = await ctx.su.prisma.$queryRaw<{ tid: string }[]>`
+      SELECT md5(${userId}::text)::uuid::text AS tid
+    `;
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO tenants (id, name, slug, created_at, updated_at)
+         VALUES ($1::uuid, $2, $3, now(), now())`,
+        tid,
+        `trigger-tenant-${tid.slice(0, 8)}`,
+        `trigger-${tid.replace(/-/g, "").slice(0, 16)}`,
+      );
+    });
+    ctx.trackTenant(tid);
+    createdTenants.push(tid);
+
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO users (id, tenant_id, email, name, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3, $4, now(), now())`,
+        userId,
+        tid,
+        `trigger-${userId.slice(0, 8)}@example.com`,
+        `Trigger User ${userId.slice(0, 8)}`,
+      );
+    });
+
+    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT COUNT(*)::bigint AS n FROM tenant_members WHERE user_id = $1::uuid`,
+        userId,
+      );
+    });
+    // The membership exists and nothing but the trigger wrote it.
+    expect(Number(rows[0]!.n)).toBe(1);
+  });
+
   it("the sign-up writer still completes: a users row and its membership in one transaction", async () => {
-    // The constraint's blast radius, and the reason this arm is not optional.
-    // ensure_tenant_owner_membership_after_user_insert() writes tenant_members
-    // from an AFTER INSERT trigger on `users`, so a CHECK violation there
-    // aborts the parent INSERT — account creation fails with no visible link to
-    // this table. ctx.createUser is that shape: both rows, one transaction.
+    // The highest-traffic shape — an explicit `tenant_members` INSERT in the
+    // same transaction as the `users` row, which is what ctx.createUser does and
+    // what the sign-in paths do. NOT the trigger: see the case above for that
+    // one, and for why this fixture cannot fire it.
     const tenantId = await newTenant();
     const userId = await ctx.createUser(tenantId);
 

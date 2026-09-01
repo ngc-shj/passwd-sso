@@ -1,12 +1,18 @@
 /**
  * Self-test for check-ip-column-bounds.mjs.
  *
- * The gate exists because a hand-list failed at this exact class twice: the
- * audit emitter was bounded on its own, and two independent reviews of that fix
- * each enumerated a different, incomplete subset of the remaining writers. So
- * the arms below are per-SHAPE, not per-file — each of the three shapes the gate
- * recognises gets its own deny case, because one case covering all three passes
- * on a gate that models only one of them.
+ * The gate exists because a hand-list failed at this class four times, so the
+ * arms here are PER MEMBER rather than per shape: every (model, property) pair
+ * the gate watches gets its own deny case and its own floor case, generated from
+ * the manifest below. A single case covering several members proves none of
+ * them — that is the defect the first version of this file shipped with, where
+ * no fixture spelled `ipAddress` at all and deleting it from the gate left both
+ * the self-test and the real tree green.
+ *
+ * MEMBERS below is deliberately a SECOND statement of the gate's own manifest,
+ * not an import of it. A test that reads the subject's list can only ever agree
+ * with it; the last case asserts the two agree exactly, so a member added to one
+ * and not the other is a failure rather than a silent gap.
  *
  * Every case runs against a SYNTHETIC root, so none depends on the real tree and
  * none can be made green by editing a real write site.
@@ -22,17 +28,68 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "../..");
 const GATE = join(REPO_ROOT, "scripts/checks/check-ip-column-bounds.mjs");
 
+/** member → the constant that member's column must be sliced to. */
+const MEMBERS = {
+  "auditLog.ip": "AUDIT_IP_MAX_LENGTH",
+  "auditLog.userAgent": "USER_AGENT_MAX_LENGTH",
+  "shareAccessLog.ip": "SHARE_ACCESS_IP_MAX_LENGTH",
+  "shareAccessLog.userAgent": "USER_AGENT_MAX_LENGTH",
+  "session.ipAddress": "SESSION_IP_MAX_LENGTH",
+  "session.userAgent": "USER_AGENT_MAX_LENGTH",
+  "extensionBridgeCode.ip": "EXTENSION_BRIDGE_CODE_IP_MAX_LENGTH",
+  "extensionBridgeCode.userAgent": "EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH",
+  "mobileBridgeCode.ip": "MOBILE_BRIDGE_CODE_IP_MAX_LENGTH",
+  "mobileBridgeCode.userAgent": "MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH",
+  "extensionToken.lastUsedIp": "EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH",
+  "payload.ip": "AUDIT_IP_MAX_LENGTH",
+  "payload.userAgent": "USER_AGENT_MAX_LENGTH",
+};
+const MEMBER_NAMES = Object.keys(MEMBERS);
+
 const roots = [];
 
-/** A synthetic src/ tree holding exactly the files given. */
-function makeRoot(files) {
+function propsFor(model, { unbound, omit } = {}) {
+  return MEMBER_NAMES.filter((m) => m.startsWith(`${model}.`))
+    .filter((m) => m !== omit)
+    .map((m) => {
+      const prop = m.slice(model.length + 1);
+      if (m === unbound) return `${prop}: raw`;
+      return `${prop}: raw?.slice(0, ${MEMBERS[m]}) ?? null`;
+    })
+    .join(", ");
+}
+
+/**
+ * A synthetic src/ tree carrying every member exactly once, with at most one
+ * member either unbounded or omitted.
+ */
+function makeRoot(opts = {}) {
   const root = mkdtempSync(join(tmpdir(), "ip-column-bounds-"));
   roots.push(root);
-  for (const [rel, body] of Object.entries(files)) {
-    const full = join(root, "src", rel);
-    mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, body, "utf8");
-  }
+  mkdirSync(join(root, "src"), { recursive: true });
+
+  const prismaModels = ["auditLog", "shareAccessLog", "session", "extensionBridgeCode", "mobileBridgeCode", "extensionToken"];
+  const writes = prismaModels
+    .map((m) => {
+      const props = propsFor(m, opts);
+      return props ? `  await tx.${m}.create({ data: { ${props} } });` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+  writeFileSync(
+    join(root, "src/a.ts"),
+    `export async function f(tx: any, raw: string | null) {\n${writes}\n}\n`,
+    "utf8",
+  );
+
+  const payloadProps = propsFor("payload", opts);
+  writeFileSync(
+    join(root, "src/b.ts"),
+    `import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";\n` +
+      `export function build(raw: string | null): AuditOutboxPayload {\n` +
+      `  return { scope: "PERSONAL"${payloadProps ? `, ${payloadProps}` : ""} } as AuditOutboxPayload;\n}\n`,
+    "utf8",
+  );
   return root;
 }
 
@@ -50,129 +107,187 @@ function runGate(root, extraEnv = {}) {
   return { status: res.status, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
-/** Shape (a): a Prisma write on one of the three bounded models. */
-const prismaWrite = (value) => `
-export async function f(tx: any, ip: string | null) {
-  await tx.shareAccessLog.create({ data: { shareId: "s", ip: ${value} } });
+/** A one-file root for the shape cases, which do not need every member. */
+function makeShapeRoot(body, { withPayload = true } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "ip-column-shape-"));
+  roots.push(root);
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, "src/shape.ts"), body, "utf8");
+  if (withPayload) {
+    // The floors demand every member be seen; the shape cases are about one
+    // property, so the rest of the manifest is supplied here.
+    const prismaModels = ["auditLog", "shareAccessLog", "session", "extensionBridgeCode", "mobileBridgeCode", "extensionToken"];
+    const writes = prismaModels
+      .map((m) => `  await tx.${m}.create({ data: { ${propsFor(m)} } });`)
+      .join("\n");
+    writeFileSync(
+      join(root, "src/rest.ts"),
+      `import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";\n` +
+        `export async function f(tx: any, raw: string | null) {\n${writes}\n}\n` +
+        `export function build(raw: string | null): AuditOutboxPayload {\n` +
+        `  return { ${propsFor("payload")} } as AuditOutboxPayload;\n}\n`,
+      "utf8",
+    );
+  }
+  return root;
 }
-`;
-
-/** Shape (b): an object literal returned from a `: AuditOutboxPayload` function. */
-const payloadBuilder = (value) => `
-import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
-export function build(ip: string | null): AuditOutboxPayload {
-  return { scope: "PERSONAL", ip: ${value} } as AuditOutboxPayload;
-}
-`;
-
-/** Shape (c): an object-literal argument to an `enqueueAudit*` call. */
-const enqueueArg = (value) => `
-declare function enqueueAuditInWorkerTx(tx: any, t: string, p: any): Promise<void>;
-export async function f(tx: any, ip: string | null) {
-  await enqueueAuditInWorkerTx(tx, "t", { scope: "TENANT", ip: ${value} });
-}
-`;
-
-const BOUND = "ip?.slice(0, SHARE_ACCESS_IP_MAX_LENGTH) ?? null";
-const AUDIT_BOUND = "ip?.slice(0, AUDIT_IP_MAX_LENGTH) ?? null";
 
 afterAll(() => {
   for (const r of roots) rmSync(r, { recursive: true, force: true });
 });
 
 describe("check-ip-column-bounds", () => {
-  it("PASSES when every recognised shape slices to a named column-width constant", () => {
-    // The allow arm, and it carries all three shapes: every deny case below is
-    // satisfiable by a gate that refuses unconditionally.
-    const r = runGate(
-      makeRoot({
-        "a.ts": prismaWrite(BOUND),
-        "b.ts": payloadBuilder(AUDIT_BOUND),
-        "c.ts": enqueueArg(AUDIT_BOUND),
-      }),
-    );
+  it("PASSES when every member slices to its own column's constant", () => {
+    // The allow arm. Every deny arm below is satisfiable by a gate that refuses
+    // unconditionally, and every floor by one that refuses on any absence.
+    const r = runGate(makeRoot());
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("3 write site(s)");
-    expect(r.stdout).toContain("3 ip propert(ies)");
+    for (const m of MEMBER_NAMES) expect(r.stdout).toContain(`${m} 1`);
   });
 
-  it("CATCHES an unbounded ip in a Prisma write on a bounded model", () => {
-    const r = runGate(makeRoot({ "a.ts": prismaWrite("ip") }));
+  it.each(MEMBER_NAMES)("CATCHES an unbounded %s", (member) => {
+    const r = runGate(makeRoot({ unbound: member }));
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("a.ts");
-    expect(r.stderr).toContain("unbounded IP write");
+    expect(r.stderr).toContain(member);
+    expect(r.stderr).toContain(MEMBERS[member]);
+    // Scoped: only the mutated member is reported, so the cases are separable.
+    expect(r.stderr).toContain("1 unbounded write(s)");
   });
 
-  it("CATCHES an unbounded ip in an AuditOutboxPayload builder", () => {
-    // The shape the audit emitter itself has. A gate anchored only on Prisma
-    // writes reports OK here — which is the site the whole class started at.
-    const r = runGate(makeRoot({ "b.ts": payloadBuilder("ip") }));
+  it.each(MEMBER_NAMES)("REFUSES when %s is never seen, naming that member", (member) => {
+    // The per-member floor. A summed floor passes every one of these: the other
+    // twelve members keep the total non-zero, which is exactly how the first
+    // version of this gate stayed green with a whole model unwatched.
+    const r = runGate(makeRoot({ omit: member }));
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("b.ts");
+    expect(r.stderr).toContain("never saw");
+    expect(r.stderr).toContain(member);
   });
 
-  it("CATCHES an unbounded ip in an enqueueAudit* argument object", () => {
-    // The retention sweep's shape: a payload assembled at the call site and
-    // handed straight to the worker enqueue, never passing the emitter.
-    const r = runGate(makeRoot({ "c.ts": enqueueArg("ip") }));
+  it("CATCHES a slice to a SIBLING column's constant, not just a missing one", () => {
+    // The three 45-wide constants are equal today. Accepting any of them makes
+    // them decorative and defeats the reason they are separate: the day one
+    // column widens, the mis-sliced write is a 22001 the gate approved.
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, raw: string | null) {\n` +
+          `  await tx.shareAccessLog.create({ data: { ip: raw?.slice(0, SESSION_IP_MAX_LENGTH) ?? null } });\n}\n`,
+      ),
+    );
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("c.ts");
+    expect(r.stderr).toContain("shareAccessLog.ip");
+    expect(r.stderr).toContain("SHARE_ACCESS_IP_MAX_LENGTH");
   });
 
   it("CATCHES a slice to a bare number, which is the tie to the schema being cut", () => {
-    // `.slice(0, 45)` bounds the value and passes review; it also detaches the
-    // number from the column, so widening the column leaves the write clamped
-    // at the old width with nothing pointing at the reason.
-    const r = runGate(makeRoot({ "a.ts": prismaWrite("ip?.slice(0, 45) ?? null") }));
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("a.ts");
-  });
-
-  it("PASSES a literal null, which is not an IP the caller supplied", () => {
-    // The boundary-adjacent allow case for the clause above: several real write
-    // sites pass `ip: null` outright, and a gate that demanded a slice there
-    // would be refusing correct code.
-    const r = runGate(makeRoot({ "a.ts": prismaWrite("null"), "c.ts": enqueueArg(AUDIT_BOUND) }));
-    expect(r.status).toBe(0);
-  });
-
-  it("IGNORES a Prisma write on a model with no bounded IP column", () => {
-    // Scope, stated as a case: `users` has no VarChar(45) IP, and a gate that
-    // fired on every `ip:` anywhere would be un-adoptable noise.
     const r = runGate(
-      makeRoot({
-        "d.ts": `export async function f(tx: any, ip: string) {
-          await tx.user.create({ data: { ip } });
-        }`,
-        "c.ts": enqueueArg(AUDIT_BOUND),
-      }),
+      makeShapeRoot(
+        `export async function f(tx: any, raw: string | null) {\n` +
+          `  await tx.session.create({ data: { ipAddress: raw?.slice(0, 45) ?? null } });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("session.ipAddress");
+  });
+
+  it("CATCHES a ternary with only ONE bounded arm", () => {
+    // A descendant search for `.slice(` accepts this — the slice IS somewhere
+    // underneath — while one path through the value reaches the column raw.
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, raw: string | null, flag: boolean) {\n` +
+          `  await tx.session.create({ data: { ipAddress: flag ? raw : raw?.slice(0, SESSION_IP_MAX_LENGTH) ?? null } });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("session.ipAddress");
+  });
+
+  it("PASSES a conditional whose every arm is bounded", () => {
+    // The boundary-adjacent allow case for the clause above, and a real shape:
+    // sweep.ts writes `cond ? String(x).slice(0, C) : null`.
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, raw: string | null) {\n` +
+          `  await tx.session.create({ data: { ipAddress: raw != null ? String(raw).slice(0, SESSION_IP_MAX_LENGTH) : null } });\n}\n`,
+      ),
     );
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("1 write site(s)");
   });
 
-  it("REFUSES when it recognises no write site, rather than passing vacuously", () => {
-    // The floor. A file with no recognised shape leaves the violation list
-    // empty — which is indistinguishable from a clean tree unless the count of
-    // things EXAMINED is checked too.
-    const r = runGate(makeRoot({ "e.ts": "export const x = 1;\n" }));
+  it("CATCHES a shorthand property, whose binding it cannot see", () => {
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, ipAddress: string | null) {\n` +
+          `  await tx.session.create({ data: { ipAddress } });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("shorthand");
+  });
+
+  it("PASSES an authored string literal, which is not a request-derived value", () => {
+    // sweep.ts writes `userAgent: "retention-gc-worker"`. A constant in the
+    // source is neither caller-controlled nor able to change at runtime;
+    // demanding a slice there would be refusing correct code.
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any) {\n` +
+          `  await tx.session.create({ data: { userAgent: "retention-gc-worker" } });\n}\n`,
+      ),
+    );
+    expect(r.status).toBe(0);
+  });
+
+  it("reads upsert's create and update, which carry no `data` key", () => {
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, raw: string | null) {\n` +
+          `  await tx.session.upsert({ where: { id: "x" }, create: { ipAddress: raw }, update: { ipAddress: raw } });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("2 unbounded write(s)");
+  });
+
+  it("reads createMany's array elements", () => {
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, raw: string | null) {\n` +
+          `  await tx.session.createMany({ data: [{ ipAddress: raw }, { ipAddress: raw }] });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("2 unbounded write(s)");
+  });
+
+  it("CATCHES an unbounded value in an enqueueAudit* argument object", () => {
+    const r = runGate(
+      makeShapeRoot(
+        `declare function enqueueAuditInWorkerTx(tx: any, t: string, p: any): Promise<void>;\n` +
+          `export async function f(tx: any, raw: string | null) {\n` +
+          `  await enqueueAuditInWorkerTx(tx, "t", { ip: raw });\n}\n`,
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("payload.ip");
+  });
+
+  it("IGNORES a write to a model with no length-bounded request column", () => {
+    // Scope, stated as a case: a gate that fired on every `ip:` anywhere would
+    // be un-adoptable noise.
+    const r = runGate(
+      makeShapeRoot(
+        `export async function f(tx: any, ip: string) {\n  await tx.user.create({ data: { ip } });\n}\n`,
+      ),
+    );
+    expect(r.status).toBe(0);
+  });
+
+  it("REFUSES when it recognises no write site at all", () => {
+    const r = runGate(makeShapeRoot("export const x = 1;\n", { withPayload: false }));
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("recognised 0 write sites");
-  });
-
-  it("REFUSES when it recognises write sites but no ip property, naming that separately", () => {
-    // The second floor, and it must be its own message: the field being renamed
-    // is a different failure from the write shape moving, and a summed floor
-    // cannot tell them apart.
-    const r = runGate(
-      makeRoot({
-        "f.ts": `export async function f(tx: any) {
-          await tx.session.create({ data: { userId: "u" } });
-        }`,
-      }),
-    );
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("0 ip properties");
   });
 
   it("REFUSES when the scan root holds no source files", () => {
@@ -183,27 +298,59 @@ describe("check-ip-column-bounds", () => {
     expect(r.stderr).toContain("scanned 0 source files");
   });
 
-  it("REFUSES a scan-root override in CI without fixture mode", () => {
-    // The env-pollution guard. Without a case it is never entered, because
-    // every other case here sets fixture mode.
+  it("REFUSES a scan-ROOT override in CI without fixture mode", () => {
+    const res = spawnSync("node", [GATE], {
+      encoding: "utf8",
+      env: { ...process.env, CI: "true", IP_COLUMN_BOUNDS_ROOT: makeRoot(), IP_COLUMN_BOUNDS_FIXTURE_MODE: "" },
+      timeout: 60_000,
+    });
+    expect(res.status).not.toBe(0);
+    expect(res.stderr).toContain("must not be set in CI");
+  });
+
+  it("REFUSES a scan-DIRS override in CI without fixture mode", () => {
+    // The second override, and the half the first version of this guard omitted.
+    // Narrowing is the same attack as redirecting: pointing CI at a handful of
+    // files satisfies every floor and prints OK.
     const res = spawnSync("node", [GATE], {
       encoding: "utf8",
       env: {
         ...process.env,
         CI: "true",
-        IP_COLUMN_BOUNDS_ROOT: makeRoot({ "a.ts": prismaWrite(BOUND) }),
+        IP_COLUMN_BOUNDS_DIRS: "src/lib/auth/session",
         IP_COLUMN_BOUNDS_FIXTURE_MODE: "",
       },
       timeout: 60_000,
     });
     expect(res.status).not.toBe(0);
-    expect(res.stderr).toContain("IP_COLUMN_BOUNDS_ROOT must not be set");
+    expect(res.stderr).toContain("must not be set in CI");
+  });
+
+  it("still runs under CI when fixture mode is set — the override exists for this file", () => {
+    // The allow arm for both guard clauses. A guard that refused unconditionally
+    // in CI would make every case above unrunnable there.
+    const r = runGate(makeRoot(), { CI: "true" });
+    expect(r.status).toBe(0);
+  });
+
+  it("watches exactly the members this file knows about", () => {
+    // The two manifests are stated independently; this is what makes the
+    // duplication load-bearing rather than redundant. A member added to the gate
+    // without a case here fails, and vice versa.
+    const r = runGate(makeRoot());
+    expect(r.status).toBe(0);
+    // Anchored past `write site(s)` — an unanchored `\(([^)]+)\)` matches that
+    // literal `(s)` first and compares the manifest against ["s"].
+    const printed = (r.stdout.match(/write site\(s\) \(([^)]+)\)/)?.[1] ?? "")
+      .split(", ")
+      .map((s) => s.replace(/ \d+$/, ""))
+      .sort();
+    expect(printed).toEqual([...MEMBER_NAMES].sort());
   });
 
   it("is wired into scripts/pre-pr.sh", () => {
     // The gate's only execution path. Anchored at line start so a commented-out
-    // `# DISABLED: queue_step …` does not satisfy it — that is disarming, not
-    // deletion, and `toContain` returns true for both.
+    // `# DISABLED: queue_step …` does not satisfy it.
     const prePr = readFileSync(join(REPO_ROOT, "scripts/pre-pr.sh"), "utf8");
     expect(prePr).toMatch(/^queue_step .*check-ip-column-bounds\.mjs\s*$/m);
   });

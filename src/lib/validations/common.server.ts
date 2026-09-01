@@ -125,6 +125,24 @@ export const IP_ADDRESS_MAX_LENGTH = 45;        // IPv6 max, matches @db.VarChar
 export const SHARE_ACCESS_IP_MAX_LENGTH = 45;   // matches share_access_logs.ip @db.VarChar(45)
 export const SESSION_IP_MAX_LENGTH = 45;        // matches sessions.ip_address @db.VarChar(45)
 
+// The 64-wide half of the same class. These three columns were missed on the
+// first derivation, which silently collapsed "length-bounded column" to
+// "VarChar(45)" — the widths differ, the class does not, and the gate's
+// member set is now taken from the schema rather than from that reading.
+export const EXTENSION_BRIDGE_CODE_IP_MAX_LENGTH = 64;      // extension_bridge_codes.ip @db.VarChar(64)
+export const MOBILE_BRIDGE_CODE_IP_MAX_LENGTH = 64;         // mobile_bridge_codes.ip @db.VarChar(64)
+export const EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH = 64;  // extension_tokens.last_used_ip @db.VarChar(64)
+
+// The two bridge-code tables store the user agent beside the IP, in a bounded
+// column, and both writers passed it through raw as well. Same class, same
+// remedy; kept per-column for the same reason the IP constants are.
+// NOT applicable to extension_tokens.last_used_user_agent, which is @db.Text —
+// the `512` at those two call sites is a self-imposed budget, not a column
+// width, and tying it to a VarChar constant would be the value-equality-is-not-
+// meaning-equality mistake AUDIT_CREDENTIAL_ID_MAX_LENGTH already records.
+export const EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH = 512;  // @db.VarChar(512)
+export const MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH = 512;     // @db.VarChar(512)
+
 // ─── Directory Sync ─────────────────────────────────────────
 export const DIRECTORY_SYNC_MAX_PAGES = 1000;
 export const DIRECTORY_SYNC_SANITIZE_MAX_LENGTH = 1_000;

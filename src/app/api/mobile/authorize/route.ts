@@ -44,6 +44,10 @@ import { BRIDGE_CODE_TTL_MS, MS_PER_MINUTE } from "@/lib/constants";
 import { generateShareToken } from "@/lib/crypto/crypto-server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { BASE64URL_RE } from "@/lib/validations/common.server";
+import {
+  MOBILE_BRIDGE_CODE_IP_MAX_LENGTH,
+  MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH,
+} from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import {
@@ -219,8 +223,8 @@ async function handleGET(req: NextRequest): Promise<Response> {
           codeChallenge,
           deviceJkt,
           expiresAt,
-          ip: meta.ip,
-          userAgent: meta.userAgent,
+          ip: meta.ip?.slice(0, MOBILE_BRIDGE_CODE_IP_MAX_LENGTH) ?? null,
+          userAgent: meta.userAgent?.slice(0, MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
         },
       }),
     BYPASS_PURPOSE.TOKEN_LIFECYCLE,

@@ -2625,19 +2625,57 @@ describe("tenant-domain CLI (C7)", () => {
   });
 
   describe("sentinel tenant (C12)", () => {
+    async function sentinelClaimState(): Promise<{ claims: number; events: number }> {
+      const rows = await ctx.su.prisma.$queryRaw<{ claims: bigint; events: bigint }[]>`
+        SELECT
+          (SELECT COUNT(*)::bigint FROM tenant_claims
+             WHERE tenant_id = ${SYSTEM_TENANT_ID}::uuid) AS claims,
+          (SELECT COUNT(*)::bigint FROM tenant_claim_events
+             WHERE old_tenant_id = ${SYSTEM_TENANT_ID}::uuid
+                OR new_tenant_id = ${SYSTEM_TENANT_ID}::uuid) AS events
+      `;
+      return { claims: Number(rows[0]!.claims), events: Number(rows[0]!.events) };
+    }
+
     /**
-     * Remove a claim written against the sentinel, and the append-only events
-     * it produced.
+     * The precondition that makes this block's teardown safe, checked before
+     * every case rather than assumed once.
      *
-     * `ctx.deleteTestData` cannot be used here and `trackTenant` refuses the
-     * sentinel outright — deleting that tenants row is what the guard in
-     * helpers.ts exists to prevent. So the cleanup is written by hand and
-     * scoped to the one claim this test created: the claim row (whose DELETE
-     * fires the trigger that appends a `deregister` event), then the purge
-     * routine, which is the only sanctioned way to remove a tenant_claim_events
-     * row. Purging for the sentinel is safe to scope this way because the
-     * sentinel holds no claims of its own — a deployment where it did is the
-     * incident docs/operations/sentinel-tenant-membership.md is written for.
+     * `tenant_claim_events_purge_for_tenant` deletes by
+     * `old_tenant_id = p OR new_tenant_id = p` — it is scoped to the TENANT, not
+     * to a claim, and there is no narrower routine (a bare DELETE is blocked by
+     * the append-only trigger). So the teardown below can only be justified by
+     * the sentinel holding nothing of its own when the case starts: then
+     * everything the purge removes is what this run wrote.
+     *
+     * A non-zero reading is not something to clean up on the way past. Those
+     * rows are the evidence of how a sentinel claim came to exist, which
+     * docs/operations/sentinel-tenant-membership.md's step 5 says not to delete
+     * without sign-off — so this refuses and names the runbook instead of
+     * purging. It is the same rule `refuseSentinel` enforces one file over, and
+     * these cases reach past that guard by writing raw SQL.
+     */
+    beforeEach(async () => {
+      if (SKIP) return;
+      const { claims, events } = await sentinelClaimState();
+      if (claims !== 0 || events !== 0) {
+        throw new Error(
+          `[sentinel C12] refusing to run: the sentinel tenant already holds ` +
+            `${claims} claim(s) and ${events} claim event(s). This block's teardown purges ` +
+            `tenant_claim_events for the WHOLE sentinel tenant — the routine has no ` +
+            `per-claim scope — so running now would destroy rows it did not create. ` +
+            `Those rows are the record of how the claim came to exist: see ` +
+            `docs/operations/sentinel-tenant-membership.md before removing anything.`,
+        );
+      }
+    });
+
+    /**
+     * Remove a claim written against the sentinel, and the append-only events it
+     * produced. Safe only under the precondition above: the claim row (whose
+     * DELETE fires the trigger that appends a `deregister` event), then the
+     * purge routine, which is the only sanctioned way to remove a
+     * tenant_claim_events row.
      */
     async function dropSentinelClaim(claim: string): Promise<void> {
       await ctx.su.prisma.$transaction(async (tx) => {
@@ -2764,7 +2802,24 @@ describe("tenant-domain CLI (C7)", () => {
       });
       try {
         expect((await cmdList({ tenant: SYSTEM_TENANT_ID })).ok).toBe(true);
+        // `--tenant` alone: history refuses both selectors together, which is
+        // itself the reason the placement proof uses the tenant one — it is the
+        // spelling an operator has when all they know is "something points at
+        // the sentinel".
         expect((await cmdHistory({ tenant: SYSTEM_TENANT_ID })).ok).toBe(true);
+
+        // Observe what was seeded, not merely that the commands did not error:
+        // `ok === true` alone passes against an empty result set, which would
+        // make this a check that the commands run rather than that they DIAGNOSE.
+        // Scoped to this run's claim so a concurrent working copy cannot decide it.
+        const rows = await ctx.su.prisma.tenantClaim.findMany({
+          where: { tenantId: SYSTEM_TENANT_ID, claim },
+          select: { claim: true },
+        });
+        expect(rows.map((r) => r.claim)).toEqual([claim]);
+        // No `tenant_claim_events` assertion: this claim was seeded directly,
+        // and only the audited commands append an event. The `remove` case
+        // above is where the event is the subject.
       } finally {
         await dropSentinelClaim(claim);
       }
