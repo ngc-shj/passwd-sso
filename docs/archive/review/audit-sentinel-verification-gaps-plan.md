@@ -967,3 +967,113 @@ different invocation (script path rather than npm-script name) or via `tsc`.
 | `npm run licenses:check:strict` / `:cli:strict` / `:ext:strict` | **Deferred parity gap** — same reasoning, and they cannot fire here: this branch adds no dependency. Run locally in Step 2-4. *Anti-Deferral: worst case — a licence violation reaches CI; likelihood — nil for this diff (no `package.json` dependency change); cost to fix — three `queue_step` lines plus a network-dependent runtime in a script that is otherwise offline.* |
 
 Both entries are copied to the deviation log so Phase 3 reads them.
+
+---
+
+## Phase 2 Implementation Status (as of `ba69628e6`)
+
+Recorded from the tree and the commit log, not from this plan's contract list —
+the previous handoff in this chain was written from a Phase 3 list and dropped
+members, and that is the failure this section exists to avoid.
+
+| Contract | Status | Commit |
+|---|---|---|
+| C1 | done | `565b75991` |
+| C2 | done | `565b75991` |
+| C3 | **NOT DONE** | — |
+| C4 | **NOT DONE** | — |
+| C5 | done | `fae306d71` |
+| C6 | done (deleted, per the revision-3 decision) | `565b75991` |
+| C7 | done | `7b7f24ee1` |
+| C8 | done (scoping clause + SC9 TODO) | `565b75991` |
+| C9 | closed in Phase 1, no code change | — |
+| C10 | done | `fae306d71` |
+| C11 | done | `1db849558` |
+| C12 | **partial** — migration, parity gate, self-test, pre-pr wiring and the `tenant-domain add` refusal all landed; the **integration test arms did not** | `96c071600` |
+| C13 | done, and the parity gate extended over `docs/operations` | `ba69628e6` |
+| C14 | done, including the `ip` slice (CF4) | `153fba2aa`, `8e8d265b4` |
+
+### What the implementation changed about the plan
+
+Two contracts were larger than their Phase 1 form, both found by running a
+derivation rather than by reading:
+
+- **C14's sink class is seven fields, not five.** `teamId` and
+  `serviceAccountId` were adjudicated out across two review rounds on the
+  reasoning "a narrative raises 22P02, so no row reaches `audit_logs`". The
+  first clause is true and the second is false: Postgres embeds the offending
+  text in the 22P02 message, the worker catches it, and at max attempts
+  `recordError` writes it to `audit_logs.metadata.lastError`. Real-tree figures
+  after the widening: 1040 files, 315 catch clauses, 957 sink properties
+  (metadata 244, targetType 158, targetId 154, userAgent 54, ip 71, teamId 230,
+  serviceAccountId 46), zero violations, exit 0.
+- **C10's stale-path half is its own class**, and C10's own primitive cannot
+  find it: a citation goes stale when a file moves, whether or not the sentence
+  around it says "dead-letter". Deriving over "a `src/…` citation that does not
+  resolve" surfaced nine more in `docs/operations` and `docs/security`, both
+  already inside C10's declared scope. Four apparent misses are correct as
+  written — they are relative to the extension and CLI package roots, and the
+  rule is to adjudicate by ROLE, not by spelling.
+
+### Verification already on record
+
+- Every commit: `npx tsc --noEmit` clean, and the test files it touches green.
+- C1's deny arm re-proved by the orchestrator independently of the sub-agent:
+  deleting the field reddens `POST /api/extension/token > emits
+  ANONYMOUS_ACTOR_ID audit row with EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED +
+  ip/userAgent`.
+- C14's per-sink floor red-proved: renaming `ip` leaves 886 of 957 properties,
+  so the old summed floor stayed green while the gate had stopped watching a
+  sink; the per-sink floor refuses and names it.
+- C7's scan-zero floor red-proved: `if (scanned === 0)` → `if (false)` reddens
+  exactly one case, the new one — which is what shows the two new cases are
+  anchored on different floors.
+- C12's parity gate red-proved on all three clauses separately, **exit codes read
+  unpiped** (an earlier reading through `head -6` reported the pipe tail's status,
+  which is the R44 trap this branch also fixes elsewhere).
+- C12's constraint proved on the live dev database inside `BEGIN … ROLLBACK`:
+  the sentinel insert raises `23514 tenant_members_not_system_tenant`, an insert
+  under a normal tenant succeeds. Nothing persisted.
+- C12 pre-flight on the dev database: **0 rows** for both sentinel
+  `tenant_members` and unrevoked `tenant_claims`.
+- Migration applied to the dev database (`prisma migrate` timed out at its
+  post-apply prompt; the DDL landed and `_prisma_migrations` records it).
+
+## Carried-Forward Plan Findings — Phase 2 residue
+
+CF1-CF6 from Phase 1 are superseded by the implementation except where noted.
+CF1 (parity-gate discovery predicate) is **settled**: the gate uses a named
+expected-site manifest, for the reason CF1 anticipated — a value-anchored grep
+makes a mutated literal drop out of the match set, so the gate exits 0 on the
+drift it exists to catch. CF2, CF3 and CF4 are all implemented. CF5's pre-edit
+validations both ran and passed. CF6 is unchanged and still belongs to SC1/SC6.
+
+New residue, for the session that picks this up:
+
+- **CF7 — C3 and C4 are not implemented.** These are the contracts that make the
+  integration file prove what its docblock claims. *Anti-Deferral: acceptable
+  risk, quantified. Worst case — the file still contains three read-only SELECTs
+  asserting a docblock that says it proves FK acceptance by writing, which is the
+  original defect #806's Phase 3 filed, unfixed. Likelihood — certain, it is
+  simply not done. Cost to fix — one integration file plus a `trackTenant`
+  sentinel guard in the helpers, under VC2.* **What would settle it**: writing
+  them and running `npm run test:integration` with the compose workers stopped.
+- **CF8 — C12's integration arms are not implemented.** The constraint is proved
+  by a live psql probe (recorded above) but not by a committed test, so nothing
+  re-proves it on the next change. *Anti-Deferral: acceptable risk. Worst case —
+  the CHECK is dropped or the migration edited and no test reds; the parity gate
+  covers the literal's drift but not the constraint's existence. Likelihood — low
+  near-term. Cost — one integration case per arm, plus the allow arm for the
+  highest-traffic writer (a `users` row and a `tenant_members` row created in one
+  transaction under an isolated tenant).*
+- **CF9 — Step 2-4 and Step 2-5 have not run.** No full `npx vitest run`, no
+  `npx next build`, no `npm run lint`, no `bash scripts/pre-pr.sh`, and no
+  self-R-check sub-agent pass. Each commit ran a targeted subset only.
+  *Anti-Deferral: this is not a deferral, it is unfinished work — the branch is
+  not merge-ready until all four pass.*
+- **CF10 — the CI parity gaps are recorded but unwired.** Four CI gates are
+  absent from `scripts/pre-pr.sh`
+  (`check-state-mutation-centralization.sh`, three `licenses:check:*:strict`).
+  Neither can fire on this diff — it adds no state-transition code and no
+  dependency — but both must be run locally in Step 2-4. *Anti-Deferral entry as
+  recorded in the Implementation Checklist above.*
