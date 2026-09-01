@@ -7,10 +7,23 @@ sign-in denial, a claim refusal, a pre-auth emission. See the
 those rows.
 
 **It must have zero members.** That is not a convention; it is what keeps every
-unattributable audit row in the deployment out of every tenant's view. All three
-tenant resolvers key on `tenant_members`, and the RLS policies on `audit_logs`
-and `audit_outbox` gate on `app.tenant_id`, which is only ever set from those
-resolvers. A single membership row is a read grant over the lot.
+unattributable audit row in the deployment out of every tenant's view. The RLS
+policies on `audit_logs` and `audit_outbox` gate on `app.tenant_id`, which is
+only ever set from a tenant resolver. A single membership row is a read grant
+over the lot.
+
+Two of the three resolvers key on `tenant_members` directly and are therefore
+covered by the CHECK below: `requireTenantPermission` → `getTenantMembership`,
+and `withUserTenantRls` → `resolveUserTenantIdFromClient`. The third,
+`resolveTeamTenantId`, reads **`teams.tenant_id`** and consults no membership at
+all — it is covered only transitively, because every writer of that column
+(`/api/teams` POST, SCIM Groups POST, and two seed files) derives the tenant from
+a membership. The migration's own header states this in the shorter, looser form
+"all three resolvers key on `tenant_members`"; it is applied and checksummed, so
+this is the copy that gets corrected. A future writer that sets `teams.tenant_id`
+from a non-membership source would reopen the read path without touching
+`tenant_members` — see the follow-up recorded in
+`docs/archive/review/audit-sentinel-verification-gaps-plan.md` (CF12).
 
 Since `20260901090000_forbid_system_tenant_membership`, the database enforces
 this with a CHECK constraint (`tenant_members_not_system_tenant`). This page is
@@ -115,9 +128,25 @@ re-run the migration.
 ## Preventing it
 
 `tenant-domain add --tenant <sentinel>` now refuses, keyed on the resolved tenant
-id rather than the spelling — the sentinel's slug and `externalId` reach the same
-tenant, and a check on the ref string would pass for two of the three ways to
-name it.
+id rather than the spelling.
+
+There are exactly **two** spellings that reach that refusal, because
+`resolveTenantRef` resolves a `--tenant` ref by UUID, then by an existing claim,
+then by `external_id`:
+
+- the sentinel's **UUID**, and
+- **any claim already pointing at it** — which is the spelling you will actually
+  have during this incident, since the claim is the thing you are trying to
+  remove.
+
+Its **slug is not a third**: slug is deliberately not a resolution path (a
+squatted sign-in could otherwise pre-empt the slug an operator types), and the
+sentinel row carries no `external_id`. So `--tenant __system__` is refused, but
+with `Tenant not found: __system__` — the ref resolved to nothing and the
+sentinel check was never reached. Do not read that message as the guard firing.
+
+`remove`, `list` and `history` all still work against the sentinel, and that is
+deliberate: they are the diagnosis and the audited undo this page depends on.
 
 The UUID in this page, in `src/lib/constants/app.ts`, and in the two migrations
 that spell it are tied together by

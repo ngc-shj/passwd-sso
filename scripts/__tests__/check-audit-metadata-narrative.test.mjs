@@ -59,6 +59,32 @@ export function anchor() {
 }
 `;
 
+/** The sinks the anchor supplies, in the order it spells them. */
+const ANCHOR_SINKS = [
+  "metadata",
+  "targetType",
+  "targetId",
+  "userAgent",
+  "ip",
+  "teamId",
+  "serviceAccountId",
+];
+
+/**
+ * The anchor with exactly one sink withheld.
+ *
+ * This is what tells a PER-SINK floor from a SUMMED one, and nothing else in
+ * this file does: every existing floor case removes the anchor entirely, so all
+ * seven sinks go to zero at once and a floor written over the total passes it
+ * byte for byte — the wrong fix the plan explicitly warns about. With six sinks
+ * present the total stays comfortably non-zero, so only a per-sink floor refuses.
+ */
+function anchorWithout(sink) {
+  return ANCHOR.split("\n")
+    .filter((line) => !new RegExp(`^\\s*${sink}:`).test(line))
+    .join("\n");
+}
+
 const DECLS = `
 declare const emit: (o: object) => void;
 declare const log: (s: unknown) => void;
@@ -76,11 +102,11 @@ afterAll(() => {
   if (root) rmSync(root, { recursive: true, force: true });
 });
 
-function runGate(source, { dirs = "src", withAnchor = true } = {}) {
+function runGate(source, { dirs = "src", withAnchor = true, anchor = ANCHOR } = {}) {
   if (source !== null) {
     writeFileSync(
       join(root, "src/subject.ts"),
-      (withAnchor ? ANCHOR : "") + source,
+      (withAnchor ? anchor : "") + source,
       "utf8",
     );
   }
@@ -307,6 +333,13 @@ export function f() {
       withAnchor: false,
     });
     expect(r.refused).toBe(true);
+    // The four-way split, used: this refusal is the no-catch one and NOT the
+    // no-sink one. Asserting only the disjunction is the pre-split state — a
+    // case can pass on a refusal it was not testing, which is the lossy channel
+    // the split exists to remove, and until this line the two narrow predicates
+    // were defined and never read.
+    expect(r.refusedNoCatch).toBe(true);
+    expect(r.refusedNoSink).toBe(false);
     expect(r.violated).toBe(false);
     // The exit status is the ONLY channel queue_step reads. Asserting stderr
     // alone leaves fail() free to exit 0 — measured: the message is
@@ -329,15 +362,43 @@ export function f() {
       withAnchor: false,
     });
     expect(r.refused).toBe(true);
+    // The mirror of the case above: this is the no-sink refusal, not the
+    // no-catch one. The fixture has a catch clause precisely so the two are
+    // separable.
+    expect(r.refusedNoSink).toBe(true);
+    expect(r.refusedNoCatch).toBe(false);
     expect(r.violated).toBe(false);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("recognised 0");
     // Every sink is named, not just the first — the anchor is what supplies
     // them all, so its absence must account for all seven.
-    for (const sink of ["metadata", "targetType", "targetId", "userAgent", "ip", "teamId", "serviceAccountId"]) {
+    for (const sink of ANCHOR_SINKS) {
       expect(r.stderr).toContain(`\`${sink}\``);
     }
   });
+
+  it.each(ANCHOR_SINKS)(
+    "REFUSES when only `%s` goes unseen, which a summed floor cannot detect",
+    (sink) => {
+      // The deny arm C14's "rename each sink in turn" criterion asks for, and
+      // the one the all-sinks-absent case above cannot supply: with six sinks
+      // still present the total is non-zero, so a floor over the sum prints OK
+      // while the gate has stopped watching this one field entirely.
+      const r = runGate(
+        `${DECLS}export function f() { try { risky(); } catch (err) { log(err); } }`,
+        { anchor: anchorWithout(sink) },
+      );
+      expect(r.status).not.toBe(0);
+      expect(r.refusedNoSink).toBe(true);
+      expect(r.refusedNoCatch).toBe(false);
+      expect(r.stderr).toContain(`\`${sink}\``);
+      // Scoped: the six sinks the anchor still supplies must NOT be named, or
+      // the message cannot say which one went unseen.
+      for (const other of ANCHOR_SINKS.filter((s) => s !== sink)) {
+        expect(r.stderr).not.toContain(`\`${other}\``);
+      }
+    },
+  );
 
   it.each([
     ["targetType", `emit({ targetType: String(err) })`],

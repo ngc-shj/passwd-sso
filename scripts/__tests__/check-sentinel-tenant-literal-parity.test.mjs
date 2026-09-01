@@ -69,12 +69,14 @@ function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UU
     writeFileSync(join(root, "docs/operations", d), `${lines.join("\n")}\n`, "utf8");
   }
 
-  mkdirSync(join(root, "src/lib/constants"), { recursive: true });
-  writeFileSync(
-    join(root, "src/lib/constants/app.ts"),
-    `export const ${constantName} = "${constant}" as const;\n`,
-    "utf8",
-  );
+  if (!omit.includes("constantFile")) {
+    mkdirSync(join(root, "src/lib/constants"), { recursive: true });
+    writeFileSync(
+      join(root, "src/lib/constants/app.ts"),
+      `export const ${constantName} = "${constant}" as const;\n`,
+      "utf8",
+    );
+  }
 
   // Always present, even when both sites are omitted: an absent migrations
   // directory is its own refusal one level up, and pinning that instead would
@@ -139,6 +141,11 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain(ROW_DIR);
     expect(r.stderr).toContain(CHECK_DIR);
+    // BOTH values, not just the constant's: "the CONSTANT is what moves" is
+    // useless without saying what to move it to, and the other value lives in a
+    // checksummed migration the reader must not open to find out.
+    expect(r.stderr).toContain(OTHER_UUID);
+    expect(r.stderr).toContain(REAL_UUID);
   });
 
   it("REDS when only the CHECK literal moves, naming that site alone", () => {
@@ -146,6 +153,8 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain(CHECK_DIR);
     expect(r.stderr).not.toContain(ROW_DIR);
+    expect(r.stderr).toContain(OTHER_UUID);
+    expect(r.stderr).toContain(REAL_UUID);
   });
 
   it("REDS when only the tenants-row literal moves, naming that site alone", () => {
@@ -156,6 +165,8 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain(ROW_DIR);
     expect(r.stderr).not.toContain(CHECK_DIR);
+    expect(r.stderr).toContain(OTHER_UUID);
+    expect(r.stderr).toContain(REAL_UUID);
   });
 
   it("REFUSES when the constant declaration is absent, rather than reporting parity", () => {
@@ -223,6 +234,33 @@ describe("check-sentinel-tenant-literal-parity", () => {
     const r = runGate(makeRoot({ omit: ["row", "check", ...DOC_FILES] }));
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("examined 0 named sites");
+  });
+
+  it("REFUSES when the constant's FILE is gone, distinctly from the declaration being gone", () => {
+    // Two different failures with two different repairs: the file moved (fix the
+    // path) versus the export was renamed (fix the name). A shared message sends
+    // the reader to the wrong one.
+    const r = runGate(makeRoot({ omit: ["constantFile"] }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("does not exist");
+    expect(r.stderr).not.toContain("no string-literal declaration");
+  });
+
+  it("REFUSES when two migration directories share one suffix, rather than picking one", () => {
+    // The suffix is a human-chosen name, so a copied migration can duplicate it.
+    // Picking either would make the gate's answer depend on readdir order.
+    const r0 = makeRoot();
+    mkdirSync(join(r0, "prisma/migrations", `20990101000000${CHECK_DIR.replace(/^\d+/, "")}`), {
+      recursive: true,
+    });
+    writeFileSync(
+      join(r0, "prisma/migrations", `20990101000000${CHECK_DIR.replace(/^\d+/, "")}`, "migration.sql"),
+      `-- copy\n`,
+      "utf8",
+    );
+    const r = runGate(r0);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("AMBIGUOUS");
   });
 
   it("is wired into scripts/pre-pr.sh", () => {

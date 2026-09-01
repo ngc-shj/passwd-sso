@@ -74,6 +74,7 @@ import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx } from "@/lib/audit/au
 // From the REAL module, not re-typed: an expectation that spells the sentinel
 // itself agrees with the test rather than with production.
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { AUDIT_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 
 const TENANT_A = "550e8400-e29b-41d4-a716-446655440000";
@@ -209,6 +210,22 @@ describe("buildOutboxPayload", () => {
     expect(payload.metadata).not.toHaveProperty("huge");
   });
 
+  it.each([
+    ["a BigInt", { n: 1n }],
+    ["a circular reference", (() => { const o: Record<string, unknown> = {}; o.self = o; return o; })()],
+  ])("survives metadata that JSON.stringify refuses (%s)", (_label, metadata) => {
+    // buildOutboxPayload runs OUTSIDE logAuditAsync's try, so a throw here
+    // reached the caller and skipped the dead-letter arm — no outbox row, no
+    // dead-letter line. The event must still be built; only the metadata is
+    // replaced.
+    const payload = buildOutboxPayload({ ...baseParams, metadata: metadata as Record<string, unknown> });
+    expect(payload.metadata).toEqual(expect.objectContaining({ _unserializable: true }));
+    // The rest of the row survives — an event whose metadata did not serialize
+    // is still an event, and the actor/action are what a reader needs.
+    expect(payload.action).toBe(baseParams.action);
+    expect(payload.userId).toBe(baseParams.userId);
+  });
+
   it("passes through metadata unchanged when within byte limit", () => {
     const payload = buildOutboxPayload({
       ...baseParams,
@@ -233,7 +250,7 @@ describe("buildOutboxPayload", () => {
     // narrower column of the two AND the one fed from a request header, which
     // is why it was the asymmetry worth closing.
     const payload = buildOutboxPayload({ ...baseParams, ip: "9".repeat(200) });
-    expect(payload.ip?.length).toBe(45);
+    expect(payload.ip?.length).toBe(AUDIT_IP_MAX_LENGTH);
   });
 
   it("preserves ip and userAgent when supplied", () => {
@@ -249,16 +266,25 @@ describe("buildOutboxPayload", () => {
     expect(payload.userAgent).toBe("Mozilla");
   });
 
-  it("preserves the longest address the column is sized for", () => {
-    // The boundary, stated rather than left to the cap's arithmetic: 45 is the
-    // width of an IPv4-mapped IPv6 address with a zone id, which is the widest
-    // legitimate value. It must survive intact — a cap set one short would pass
-    // both arms above and silently corrupt exactly the addresses the column was
-    // sized for.
-    const widest = "0000:0000:0000:0000:0000:ffff:192.168.100.228%eth0";
-    const payload = buildOutboxPayload({ ...baseParams, ip: widest.slice(0, 45) });
-    expect(payload.ip).toBe(widest.slice(0, 45));
-    expect(payload.ip?.length).toBe(45);
+  it("preserves the longest address the column is sized for, and truncates one character past it", () => {
+    // The boundary, stated rather than left to the cap's arithmetic. 45 is the
+    // width of an IPv4-mapped IPv6 address WITHOUT a zone id — the form below —
+    // which is what common.server.ts's own note says. An earlier version of this
+    // comment claimed "with a zone id"; that is false, and it mattered, because
+    // it implied a zone-carrying address fits when in fact this slice truncates
+    // one. The constant is imported rather than spelled, so widening the column
+    // moves both sides together.
+    const widest = "0000:0000:0000:0000:0000:ffff:255.255.255.255";
+    expect(widest.length).toBe(AUDIT_IP_MAX_LENGTH);
+    expect(buildOutboxPayload({ ...baseParams, ip: widest }).ip).toBe(widest);
+
+    // One past it truncates — the arm that tells "bounds at the column width"
+    // from "clamps everything", which the pass-through case above starts and
+    // this one finishes.
+    const zoned = `${widest}%eth0`;
+    const truncated = buildOutboxPayload({ ...baseParams, ip: zoned }).ip;
+    expect(truncated).toBe(widest);
+    expect(truncated?.length).toBe(AUDIT_IP_MAX_LENGTH);
   });
 });
 

@@ -76,10 +76,31 @@ import { AUDIT_IP_MAX_LENGTH, METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
 
-/** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
+/**
+ * Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within
+ * limits.
+ *
+ * The `catch` is what makes `logAuditAsync`'s "never throws" contract true.
+ * `JSON.stringify` throws on a `BigInt` and on a circular reference, `metadata`
+ * is typed `Record<string, unknown>` so neither is stopped at the type level,
+ * and a raw `COUNT(*)::bigint` read is ordinary in this tree. This runs inside
+ * `buildOutboxPayload`, which `logAuditAsync` calls BEFORE its try — so a throw
+ * here reached the caller AND skipped the dead-letter arm: no outbox row, no
+ * dead-letter line, nothing. That is the silent loss this whole chain of work
+ * exists to remove, on a narrower trigger than the one it started from.
+ *
+ * The event still goes out; only the metadata is replaced. `errorLogFields` is
+ * the tree's bounded reducer, so the marker carries a code rather than a
+ * narrative.
+ */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
-  const json = JSON.stringify(metadata);
+  let json: string;
+  try {
+    json = JSON.stringify(metadata);
+  } catch (err) {
+    return { _unserializable: true, _reason: errorLogFields(err).code };
+  }
   return json.length <= METADATA_MAX_BYTES
     ? metadata
     : { _truncated: true, _originalSize: json.length };

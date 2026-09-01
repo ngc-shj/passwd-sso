@@ -101,6 +101,12 @@ describe("logAuditAsync", () => {
       }),
       "audit.AUTH_LOGIN",
     );
+    // `user-1` is not a UUID, so assertEnqueueableUserId dead-letters it and
+    // logAuditAsync returns BEFORE the outbox. Stated rather than left implicit:
+    // every case in this group reads as end-to-end and stops at the structured
+    // line, and C2's fail-loud clause is that an enqueue mock called zero times
+    // without an assertion saying so is a failure, not coverage.
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("includes tenantId in structured emit when provided", async () => {
@@ -121,6 +127,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.AUTH_LOGIN",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("passes optional fields to the auditLogger", async () => {
@@ -154,6 +161,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.ENTRY_CREATE",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("truncates metadata larger than 10KB before emitting", async () => {
@@ -181,6 +189,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.ENTRY_UPDATE",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("truncates user-agent to 512 chars", async () => {
@@ -202,6 +211,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.AUTH_LOGIN",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("does not throw when auditLogger.info throws", async () => {
@@ -216,9 +226,10 @@ describe("logAuditAsync", () => {
         userId: "user-1",
       })
     ).resolves.toBeUndefined();
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
-  it("does not throw when enqueueAudit rejects", async () => {
+  it("does not throw when enqueueAudit rejects, and dead-letters the entry", async () => {
     mockEnqueueAudit.mockRejectedValueOnce(new Error("outbox write failed"));
 
     await expect(
@@ -229,6 +240,15 @@ describe("logAuditAsync", () => {
         tenantId: "tenant-1",
       })
     ).resolves.toBeUndefined();
+
+    // "Did not throw" alone passes against a catch arm that swallows silently,
+    // and a silent swallow is precisely what C10's still-log-only security
+    // argument rests on NOT having become. The reason string is the channel that
+    // says which catch ran.
+    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "logAuditAsync_failed" }),
+      "audit.dead_letter",
+    );
   });
 
   it("enqueues under the explicitly supplied tenantId, without resolving", async () => {
@@ -315,6 +335,7 @@ describe("logAuditAsync", () => {
       }),
       expect.any(String),
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 });
 

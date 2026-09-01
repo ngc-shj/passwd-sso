@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { validateWebhookDeliveryLease, WEBHOOK_WORST_CASE_PER_ITEM_MS, WEBHOOK_DELIVERY_BATCH_SIZE } from "@/lib/constants/audit/webhook-delivery-lease.server";
-import { WEBHOOK_DELIVERY_CONCURRENCY, AUDIT_IP_MAX_LENGTH } from "@/lib/validations/common.server";
+import {
+  WEBHOOK_DELIVERY_CONCURRENCY,
+  AUDIT_IP_MAX_LENGTH,
+  USER_AGENT_MAX_LENGTH,
+} from "@/lib/validations/common.server";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
 
@@ -499,6 +503,45 @@ describe("parsePayload — edge cases", () => {
     );
     expect(insertCall).toBeDefined();
     expect(insertCall![11]).toBe(ip);
+  }, 15000);
+
+  it("bounds an over-length userAgent to its column width, and passes a short one through", async () => {
+    // The `ip` slice's sibling, added in the same edit and covered by nothing:
+    // no gate watches `userAgent` (check-ip-column-bounds keys on the IP
+    // properties), so deleting it left the whole suite green while restoring the
+    // 22001-loses-the-event path for the 512-wide column.
+    const overLong = "A".repeat(USER_AGENT_MAX_LENGTH + 40);
+    const row = makeRow({
+      payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, userAgent: overLong },
+    });
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    // userAgent is $12, so call[12].
+    expect((insertCall![12] as string).length).toBe(USER_AGENT_MAX_LENGTH);
+  }, 15000);
+
+  it("passes a userAgent that already fits through unchanged", async () => {
+    // The allow arm: a guard that clamped every value satisfies the case above
+    // on its own.
+    const userAgent = "Mozilla/5.0 (integration-test)";
+    const row = makeRow({
+      payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, userAgent },
+    });
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall![12]).toBe(userAgent);
   }, 15000);
 
   it("rejects malformed userId (null with SYSTEM actorType) via UUID_RE guard — no INSERT, warn log emitted", async () => {

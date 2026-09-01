@@ -952,7 +952,7 @@ OR still equals today's boolean).
 the neighbouring refusals already do · `createTenant` / `trackTenant` / `cleanup`
 (`src/__tests__/db-integration/helpers.ts`) · the existing AST helpers under
 `scripts/checks/lib/` for the parity gate · `errorLogFields` / `pgErrorCode` · the sibling gate
-`scripts/__tests__/check-audit-metadata-narrative.test.mjs:432-437` as the template for the parity
+`scripts/__tests__/check-audit-metadata-narrative.test.mjs:493-499` as the template for the parity
 gate's anchored wiring assertion · `USER_AGENT_MAX_LENGTH` (`src/lib/validations/common.server.ts`)
 as the precedent for the `ip` slice.
 
@@ -1145,6 +1145,67 @@ as still pending for the sibling `boundUnknownIp` class.
 Scope call: this is production code outside the 14 contracts. Raised with the
 user with three options and the trade-offs; the user chose to fix the class here
 rather than defer it. Landed in `8e7f28295`.
+
+### Phase 3 Round 1 — 31 findings across three experts, 22 distinct
+
+Everything Major or Critical is fixed. Two reviewer claims were rejected on
+inspection and are recorded with the reason: C14's per-field adjudication IS
+recorded (in this plan, in the "mechanism that does not hold" list), and
+`USER_AGENT_MAX_LENGTH` must NOT be adopted at the two remaining bare
+`.slice(0, 512)` sites — `extension_tokens.last_used_user_agent` is `@db.Text`,
+so that `512` is a self-imposed budget and not a column width. Tying it to a
+`VarChar(512)` constant is the value-equality-is-not-meaning-equality mistake
+`AUDIT_CREDENTIAL_ID_MAX_LENGTH` already records.
+
+Three findings are carried forward rather than fixed:
+
+- **CF11 — `ip` remains an unvalidated free-text sink BELOW 45 characters.** C14
+  derived the exposure in two regimes; this branch closed the over-length one
+  (22001 loses the record) and not the short one (an arbitrary ≤45-character
+  string lands verbatim in a tenant-readable column). The truncation also makes
+  every over-length value exactly 45 characters, indistinguishable from a
+  legitimate max-width IPv4-mapped IPv6, so a forgery reads as an address.
+  *Anti-Deferral: acceptable risk, quantified. Worst case — a caller behind a
+  trusted proxy writes a short arbitrary string into `audit_logs.ip`,
+  `sessions.ip_address` or `share_access_logs.ip`; it is a display/forensics
+  integrity problem, not an access-control one, and rate-limit keys are computed
+  pre-truncation so they are unaffected. Likelihood — requires
+  `TRUST_PROXY_HEADERS=true` or a proxy that forwards rather than replaces
+  `X-Forwarded-For`. Cost to fix — validate at the boundary in
+  `extractClientIpFromHeaders` using the `parseIpv6Bytes`/`parseIpv4` helpers
+  already in that file, returning `null` (the codebase's existing "unknown IP"
+  encoding).* **Why not here**: that changes fail-closed behaviour on the
+  IP-restriction path, where `null` means deny — a different blast radius from
+  a test-and-gate branch, and the user's scope call was to keep it separate.
+  **What would settle it**: the boundary validation plus its allow arms
+  (`192.168.100.228`, `::ffff:…`, `2001:db8::1`, and the rightmost-untrusted
+  walk's real result all unchanged), and an explicit decision on zone-id forms.
+- **CF12 — `teams.tenant_id` has no parallel CHECK.** `resolveTeamTenantId` reads
+  that column and feeds it to `withTenantRls` without consulting membership, so
+  the sentinel's read-side invariant holds only transitively, through the derived
+  set of `teams` writers (`/api/teams` POST, SCIM Groups POST, two seed files) —
+  all of which happen to derive their tenant from a membership. *Anti-Deferral:
+  acceptable risk. Worst case — a future writer sets `teams.tenant_id` from a
+  non-membership source and reopens `app.tenant_id = <sentinel>` without touching
+  `tenant_members`. Likelihood — low near-term; no such writer exists. Cost — one
+  migration of the same shape as C12's, its parity-gate site, and a deny/allow
+  pair.* The runbook now states the transitive chain instead of the looser "all
+  three resolvers" claim, so the argument a reviewer checks against is the one
+  that actually holds.
+- **CF13 — a sentinel-pointing `tenant_claims` row denies sign-in without an
+  audit row.** On first-ever sign-in the adapter's catch emits `AUTH_LOGIN_FAILURE`
+  only for `TenantClaimUnusableError`; a `23514` from the new CHECK rethrows as a
+  Prisma error and nothing audits it. For a returning user it IS audited, but as
+  `reason: "provider_error"` — deployment/IdP vocabulary, and outside
+  `tenant-domain unmapped`'s filter. Verified: both membership writers put the
+  `tenant_members` write in the same transaction as the `users` write, so the
+  23514 rolls back cleanly and no estate is left pointing at the sentinel. *
+  Anti-Deferral: acceptable risk. Worst case — the runtime window between a
+  sentinel claim existing and an operator revoking it is diagnosable only from
+  logs, not from `audit_logs`. Likelihood — requires the C12 incident to have
+  happened at all. Cost — detect the constraint by name via `pgErrorCode` at both
+  membership writers and route it to the existing refusal path with its own
+  reason.* The runbook covers the migration-time symptom; this is the runtime one.
 
 ### The `trackTenant` guard's red proof cost the dev database its sentinel row
 

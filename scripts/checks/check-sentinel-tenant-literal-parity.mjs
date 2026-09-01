@@ -136,6 +136,35 @@ function countOccurrences(text, value) {
   return text.split(value).length - 1;
 }
 
+const UUID_LITERAL_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * The UUID-shaped literals a site spells that are NOT the expected value.
+ *
+ * Reported alongside the count because "the constant is what moves" is useless
+ * advice without saying what to move it TO: the SQL half is checksummed, so a
+ * reader who has to open an applied migration to find the other value is being
+ * sent to the one file they must not edit. Deduplicated and sorted so a site
+ * carrying two different wrong values lists both rather than the first.
+ */
+function foreignUuids(text, expected) {
+  const found = new Set();
+  for (const m of text.match(UUID_LITERAL_RE) ?? []) {
+    if (m.toLowerCase() !== expected.toLowerCase()) found.add(m.toLowerCase());
+  }
+  return [...found].sort();
+}
+
+function mismatchLine(label, found, site, text) {
+  const foreign = foreignUuids(text, sentinelValue);
+  return (
+    `MISMATCH  ${label} spells ${sentinelValue} ${found} time(s), expected ${site.occurrences}\n` +
+    `           (${site.what})\n` +
+    `           ${CONSTANT_NAME} in ${CONSTANT_FILE} is ${sentinelValue}\n` +
+    `           this site also spells: ${foreign.length > 0 ? foreign.join(", ") : "no other UUID literal"}`
+  );
+}
+
 // ─── Read the constant by AST ──────────────────────────────────────────────
 
 const constantPath = join(REPO_ROOT, CONSTANT_FILE);
@@ -193,13 +222,10 @@ for (const site of SQL_SITES) {
   checked++;
   // Comments in these files legitimately mention the constant's NAME; what must
   // match is the value, so look for the literal itself.
-  const found = countOccurrences(readFileSync(file, "utf8"), sentinelValue);
+  const sql = readFileSync(file, "utf8");
+  const found = countOccurrences(sql, sentinelValue);
   if (found !== site.occurrences) {
-    problems.push(
-      `MISMATCH  ${matches[0]}/migration.sql spells ${sentinelValue} ${found} time(s), expected ${site.occurrences}\n` +
-        `           (${site.what})\n` +
-        `           ${CONSTANT_NAME} in ${CONSTANT_FILE} is ${sentinelValue}`,
-    );
+    problems.push(mismatchLine(`${matches[0]}/migration.sql`, found, site, sql));
   }
 }
 
@@ -210,13 +236,10 @@ for (const site of DOC_SITES) {
     continue;
   }
   checked++;
-  const found = countOccurrences(readFileSync(file, "utf8"), sentinelValue);
+  const text = readFileSync(file, "utf8");
+  const found = countOccurrences(text, sentinelValue);
   if (found !== site.occurrences) {
-    problems.push(
-      `MISMATCH  ${site.path} spells ${sentinelValue} ${found} time(s), expected ${site.occurrences}\n` +
-        `           (${site.what})\n` +
-        `           ${CONSTANT_NAME} in ${CONSTANT_FILE} is ${sentinelValue}`,
-    );
+    problems.push(mismatchLine(site.path, found, site, text));
   }
 }
 
