@@ -11,7 +11,7 @@ Rounds 2 and 3 are recorded at the end of this file. Round 1 follows immediately
 
 ## Changes from Previous Round
 
-Initial review. Plan written from a re-derivation of the #806 handoff's classes
+Initial review. Plan written from a re-derivation of the `#806` handoff's classes
 rather than from its lists; three expert agents (Functionality, Security, Testing)
 reviewed it in parallel, each verifying claims by execution against the tree at
 `e3f50de5e`.
@@ -23,7 +23,7 @@ Local LLM pre-screening (`pre-review.sh plan`, gpt-oss:120b): **No issues found.
 Three results reframe the branch and are recorded first because they change what
 the rest means.
 
-1. **Requirement 1 is already satisfied for the #806 sentinel branch.** Testing
+1. **Requirement 1 is already satisfied for the `#806` sentinel branch.** Testing
    re-derived the `logAuditAsync` suite set with
    `grep -rln 'describe("logAuditAsync"' src --include="*.test.ts"` and found
    **three** suites, not two. `src/lib/audit/audit.test.ts:350,366,382,532` and
@@ -102,7 +102,7 @@ the exit code.
 *(c) C7's R44 premise is already-satisfied state.* Testing enumerated the self-test's
 refusal cases: `:179`, `:279`, `:292`, `:299`, `:317` all assert `status`, and `:275`
 carries the comment "The exit status is the ONLY channel queue_step reads." Zero
-cases read stderr alone. The three stderr-only cases #806 found were in a different
+cases read stderr alone. The three stderr-only cases `#806` found were in a different
 gate's self-test.
 
 *(d) C7's forbidden pattern matches correct code and its own fix.* The literal
@@ -113,7 +113,7 @@ must itself use — `feedback_forbidden_pattern_must_not_match_its_fix`.
 
 **Impact.** The plan's highest-value new-gate contract, in a branch whose whole
 subject is verification gaps, specifies a test that provably cannot fail for the
-reason it names — the exact shape #806 existed to remove, reintroduced by its remedy.
+reason it names — the exact shape `#806` existed to remove, reintroduced by its remedy.
 
 **Disposition: fixed in the plan.** C7 rewritten — see the revised contract.
 
@@ -376,7 +376,7 @@ clause that proves the *placement*, not just the behaviour.
 
 ---
 
-### R1-10 — Major — C9's premise is false; the count reconciles and #806's figure is correct
+### R1-10 — Major — C9's premise is false; the count reconciles and `#806`'s figure is correct
 
 Filed by **Testing (F6)**, independently confirmed by **Functionality**.
 
@@ -386,7 +386,7 @@ $ npx vitest run scripts/__tests__/backup-db.test.mjs
       Tests  237 passed (237)
 ```
 
-Exactly #806's figure (3 red + 234 green). The 218/237 gap is dynamic generation:
+Exactly `#806`'s figure (3 red + 234 green). The 218/237 gap is dynamic generation:
 `grep -cE '^\s*it\('` → 218, `grep -c '\.each'` → 0, and the extra 19 come from
 `describe`-level `for` loops calling `it()` per iteration —
 `scripts/__tests__/backup-db.test.mjs:1022` (`for (const {re, why, control} of forbidden)`)
@@ -576,8 +576,8 @@ C4's differential is sound, but both stated mutations act on the test's `$queryR
 template. What C4's first arm pins is a *data decision* — that the sentinel's
 `audit_log_retention_days IS NULL` — and the only mutation that reddens it for the
 reason claimed is setting a retention on the sentinel row, which SC5 forbids. So the
-plan's correction of #806's claim is right for the differential and **wrong for the
-decision arm**: #806's original statement was accurate about the arm it was made
+plan's correction of `#806`'s claim is right for the differential and **wrong for the
+decision arm**: `#806`'s original statement was accurate about the arm it was made
 against. Correcting it as written would repeat C9's error.
 
 Security adds that `src/workers/retention-gc-worker/registry.ts:485-494` clamps to
@@ -586,7 +586,7 @@ values can differ; the assertion must name the specific value it set, not
 `not.toBeNull()`.
 
 **Disposition: fixed in the plan.** The two arms separated and labelled; the decision arm
-recorded `blocked-deferred` with its cost; the correction of #806 narrowed to the half
+recorded `blocked-deferred` with its cost; the correction of `#806` narrowed to the half
 that is actually wrong.
 
 ---
@@ -608,7 +608,7 @@ own table.
 Testing also adjudicated the plan's three "to adjudicate" rows: `v1/tags/route.test.ts:38`
 and `v1/vault/status/route.test.ts:38` **legitimate** (they describe an unmocked
 `tenantAuditBase` throwing into the catch arm, still accurate);
-`audit-fifo-flusher.test.ts:267` **legitimate** (already post-#806 and correct).
+`audit-fifo-flusher.test.ts:267` **legitimate** (already post-`#806` and correct).
 
 **Disposition: fixed in the plan.** Row restated as "partially stale", the surviving
 clause named, and a paired grep added that must still match `tenant-domain unmapped`
@@ -624,7 +624,7 @@ finding because it is a distinct subject with its own scope question.
 `src/workers/audit-anchor-publisher.ts:118,197,232,360,449` each state
 `tenantId: SYSTEM_TENANT_ID`, and neither `src/workers/audit-anchor-publisher.test.ts`
 nor the integration twin names `SYSTEM_TENANT_ID` anywhere. They pre-date `e3f50de5e`
-(`git show --stat` does not touch that file), so they are outside "#806's changes" —
+(`git show --stat` does not touch that file), so they are outside "`#806`'s changes" —
 but they are members of the class C1 defines, and excluding them by a `grep -v` rather
 than by an adjudication is the failure the plan exists to avoid.
 
@@ -876,7 +876,7 @@ recorded rather than corrected, since re-labelling would misrepresent what was f
 - RT4: Checked — no issue; the plan's reasoning verified (C12 is DDL, C3/C4 are single statements). No race test proposed, so no vacuous-pass guard owed.
 - RT5: Findings F3, F4. C2 names the right obligation and aims it at the wrong primitive.
 - RT7: Finding F1; also bears on F9 and F12.
-- RT8: Finding F2. The vacuity is correctly measured by #806; the plan's remedy misdiagnoses the cause.
+- RT8: Finding F2. The vacuity is correctly measured by `#806`; the plan's remedy misdiagnoses the cause.
 - RT9: Finding F5. Three suites, not two.
 - RT10: Findings F2, F3, F7. **C12 handles RT10 correctly and explicitly — both arms carry an allow side; the plan's best contract on this axis.**
 - RT11: Finding F7. C3's `ctx.cleanup()` cannot reach the row; C4's fixture *is* genuinely covered (`helpers.ts:627-629` sweeps on the failure path), so the plan is right about C4 and wrong about C3. C12's allow-arm row is covered by `deleteTestData`.
@@ -897,7 +897,7 @@ recorded rather than corrected, since re-labelling would misrepresent what was f
 - C12's writer derivation is exact: 6 create/upsert, 8 update sites across 3 files
   ("Update-only sites (4)" is a labelling slip, not a member-set miss), nested-write
   command returns zero rows.
-- C7's production counts: 1040 / 315 / 244, exit 0. Matches #806.
+- C7's production counts: 1040 / 315 / 244, exit 0. Matches `#806`.
 - C11's narrow derivation: exactly the 10 files listed.
 - `worker-error-log-fields-code-review.md:249`'s three items (F-M4/F-M5/F-m3) are all
   closed in current code — independently re-verified by Functionality and Testing.
@@ -968,7 +968,7 @@ decision (see "Phase 1 exit").
   literal's other load-bearing SQL occurrence is the `tenants` row that is the FK target of
   `audit_logs`/`audit_outbox`. A gate scoped to the CHECK goes green on a change that leaves
   no `tenants` row for the new UUID, at which point every unattributable emit FK-fails into
-  the log-only catch arm — #806's gap reopened silently with the new gate reporting OK.
+  the log-only catch arm — `#806`'s gap reopened silently with the new gate reporting OK.
   **Fixed.**
 - **R2-08 — Major — the parity gate had no execution path.** No `queue_step` line, no wiring
   self-test, in a tree where seven `scripts/checks/*.mjs` are unreferenced by `pre-pr.sh`.

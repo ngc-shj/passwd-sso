@@ -1,6 +1,6 @@
 # Plan: audit-sentinel-verification-gaps
 
-Follow-ups to #806 (`e3f50de5e`). **Revision 4 — final for Phase 1.**
+Follow-ups to `#806` (`e3f50de5e`). **Revision 4 — final for Phase 1.**
 
 Three review rounds. Round 3 confirmed that revision 3's de-specification **worked**: for
 C1, C10's Bucket C, C11 and C12, an implementer following the derivation obligation alone
@@ -38,13 +38,13 @@ The litigation for all three rounds is in `audit-sentinel-verification-gaps-revi
 
 ## Objective
 
-Close the verification gaps #806's Phase 3 identified, correct the prose that still asserts
-pre-#806 behaviour, reconcile the review-artifact chain's stale `Open` sections, enforce the
+Close the verification gaps `#806`'s Phase 3 identified, correct the prose that still asserts
+pre-`#806` behaviour, reconcile the review-artifact chain's stale `Open` sections, enforce the
 read-side invariant the sentinel encoding depends on, and widen the narrative gate's sink set
 to every field that carries caller-supplied text into a tenant-readable `audit_logs` row.
 
 **Established across three rounds, by execution** (so Phase 2 need not re-derive):
-the #806 sentinel branch is mutation-proved twice already, so C2 repairs a misleading third
+the `#806` sentinel branch is mutation-proved twice already, so C2 repairs a misleading third
 twin rather than closing a gap; membership is the only gate on `audit_logs` (13 readers,
 three resolvers); both `logAuditAsync` catch arms are still log-only, which keeps C10's
 three protected security arguments true; and C14's cost premise reproduces — the widened
@@ -52,7 +52,7 @@ sink produces zero violations on the current tree.
 
 ## Requirements
 
-1. Every behavioural change #806 made has a test that reddens when it is reverted, proved by
+1. Every behavioural change `#806` made has a test that reddens when it is reverted, proved by
    execution, with the failing test **name** recorded.
 2. No prose **a reader acts on** — production code, `docs/operations`, `docs/security`, infra
    config, scripts — asserts that an unattributable audit emit writes no row, except where
@@ -141,7 +141,7 @@ forbidden-pattern list.
 ### C2 — `src/__tests__/audit.mocked.test.ts` stops misleading
 
 **Scope**: repairs or retires a third twin whose mocks make its cases assert less than they
-appear to. It is not closing a #806 gap.
+appear to. It is not closing a `#806` gap.
 
 **Two blockers, in order**: most `logAuditAsync` calls use a non-UUID actor, so the actor guard
 returns before tenant resolution — `withBypassRls` is reached zero times today; behind that,
@@ -246,7 +246,7 @@ test cannot reach `DELETE FROM tenants` on it.
   claimed is writing a retention onto the sentinel row on the shared live database.
 - **Fail loud**: a query returning zero rows fails the case.
 
-**Correction to #806, narrowed**: its claim that the red-proof "needs a write to the shared dev
+**Correction to `#806`, narrowed**: its claim that the red-proof "needs a write to the shared dev
 database" is **wrong for the differential** and **right for the decision arm**. Record both halves.
 
 **Signature**: names the file and case at implementation time; recorded in the deviation log.
@@ -555,7 +555,7 @@ value-anchored grep does not** (round 3 constructed both failures):
 side must include the `tenants`-row INSERT that is the FK target of `audit_logs`/`audit_outbox`, not
 only the new `CHECK` — a gate scoped to the `CHECK` alone goes green on a change that leaves no
 `tenants` row for the new UUID, at which point every unattributable emit FK-fails into the log-only
-catch arm and #806's gap reopens silently. The `docs/operations` side is required because the
+catch arm and `#806`'s gap reopens silently. The `docs/operations` side is required because the
 operator diagnostic query embeds the literal; drift there returns 0 rows and reads as "no
 unattributable events". `docs/archive/review/**` is out of scan set under Requirement 2.
 
@@ -669,7 +669,7 @@ instantiation.
 
 **Why in-branch**: widening the sink is a constant and a handful of comparisons, it produces zero
 violations on the current tree, and the existing fixtures use `metadata`, which stays in the set.
-Anti-Deferral rule 7 applies — these are uncovered members of the class #805/#806 closed for
+Anti-Deferral rule 7 applies — these are uncovered members of the class `#805`/`#806` closed for
 `metadata`.
 
 **The class is derived, not listed.** Rule: a field is **in class** when a caller-supplied narrative
@@ -970,7 +970,7 @@ Both entries are copied to the deviation log so Phase 3 reads them.
 
 ---
 
-## Phase 2 Implementation Status (as of `ba69628e6`)
+## Phase 2 Implementation Status (as of `0bc06e844`)
 
 Recorded from the tree and the commit log, not from this plan's contract list —
 the previous handoff in this chain was written from a Phase 3 list and dropped
@@ -980,8 +980,8 @@ members, and that is the failure this section exists to avoid.
 |---|---|---|
 | C1 | done | `565b75991` |
 | C2 | done | `565b75991` |
-| C3 | **NOT DONE** | — |
-| C4 | **NOT DONE** | — |
+| C3 | done | `0bc06e844` |
+| C4 | done | `0bc06e844` |
 | C5 | done | `fae306d71` |
 | C6 | done (deleted, per the revision-3 decision) | `565b75991` |
 | C7 | done | `7b7f24ee1` |
@@ -989,7 +989,7 @@ members, and that is the failure this section exists to avoid.
 | C9 | closed in Phase 1, no code change | — |
 | C10 | done | `fae306d71` |
 | C11 | done | `1db849558` |
-| C12 | **partial** — migration, parity gate, self-test, pre-pr wiring and the `tenant-domain add` refusal all landed; the **integration test arms did not** | `96c071600` |
+| C12 | done — migration, parity gate, self-test, pre-pr wiring and the `tenant-domain add` refusal in `96c071600`; the integration arms in `0bc06e844` | `96c071600`, `0bc06e844` |
 | C13 | done, and the parity gate extended over `docs/operations` | `ba69628e6` |
 | C14 | done, including the `ip` slice (CF4) | `153fba2aa`, `8e8d265b4` |
 
@@ -1048,32 +1048,60 @@ makes a mutated literal drop out of the match set, so the gate exits 0 on the
 drift it exists to catch. CF2, CF3 and CF4 are all implemented. CF5's pre-edit
 validations both ran and passed. CF6 is unchanged and still belongs to SC1/SC6.
 
-New residue, for the session that picks this up:
+New residue, all four closed in `0bc06e844` and the run recorded below:
 
-- **CF7 — C3 and C4 are not implemented.** These are the contracts that make the
-  integration file prove what its docblock claims. *Anti-Deferral: acceptable
-  risk, quantified. Worst case — the file still contains three read-only SELECTs
-  asserting a docblock that says it proves FK acceptance by writing, which is the
-  original defect #806's Phase 3 filed, unfixed. Likelihood — certain, it is
-  simply not done. Cost to fix — one integration file plus a `trackTenant`
-  sentinel guard in the helpers, under VC2.* **What would settle it**: writing
-  them and running `npm run test:integration` with the compose workers stopped.
-- **CF8 — C12's integration arms are not implemented.** The constraint is proved
-  by a live psql probe (recorded above) but not by a committed test, so nothing
-  re-proves it on the next change. *Anti-Deferral: acceptable risk. Worst case —
-  the CHECK is dropped or the migration edited and no test reds; the parity gate
-  covers the literal's drift but not the constraint's existence. Likelihood — low
-  near-term. Cost — one integration case per arm, plus the allow arm for the
-  highest-traffic writer (a `users` row and a `tenant_members` row created in one
-  transaction under an isolated tenant).*
-- **CF9 — Step 2-4 and Step 2-5 have not run.** No full `npx vitest run`, no
-  `npx next build`, no `npm run lint`, no `bash scripts/pre-pr.sh`, and no
-  self-R-check sub-agent pass. Each commit ran a targeted subset only.
-  *Anti-Deferral: this is not a deferral, it is unfinished work — the branch is
-  not merge-ready until all four pass.*
-- **CF10 — the CI parity gaps are recorded but unwired.** Four CI gates are
-  absent from `scripts/pre-pr.sh`
-  (`check-state-mutation-centralization.sh`, three `licenses:check:*:strict`).
-  Neither can fire on this diff — it adds no state-transition code and no
-  dependency — but both must be run locally in Step 2-4. *Anti-Deferral entry as
-  recorded in the Implementation Checklist above.*
+- **CF7 — settled.** C3 and C4 are implemented. The file emits through
+  `logAuditAsync` and reads the row back; reclaim is a marker-scoped `afterEach`;
+  the VC2 detector reads `audit_logs` back under the same marker.
+- **CF8 — settled.** C12's deny and allow arms and the sign-up (`users` +
+  `tenant_members`, one transaction) arm are committed tests.
+- **CF9 — settled.** Full `npx vitest run` (1025 files / 15066), full
+  `npm run test:integration` under VC2 (103 files / 639), `npx next build`,
+  `npm run lint`, and `bash scripts/pre-pr.sh` (77 checks) all exit 0. The
+  Step 2-5 mechanical pre-steps ran; dispositions below.
+- **CF10 — settled.** All four gates run locally at exit 0. One correction: the
+  state-mutation gate lives at `scripts/check-state-mutation-centralization.sh`,
+  not under `scripts/checks/` as CF10 recorded — the wrong path exits 127, which
+  reads as "ran and failed" rather than "never ran".
+
+### Step 2-5 pre-step dispositions
+
+Twelve mechanical hooks ran. Three fired and were dispositioned rather than
+mechanically obeyed:
+
+- **R2 `365` vs `DAYS_PER_YEAR`** (`audit-unattributable-tenant.integration.test.ts`)
+  — not adopted. The retention differential needs two values that *differ*; 90
+  and 365 are operator-chosen policy day-counts, and the sibling 90 collides with
+  nothing, which is what shows the 365 match is bytes rather than meaning.
+  Importing the time constant would assert the fixture means "a year".
+- **R2 `"docs/operations/alerts.md"` vs `ALERTS_DOC`** — not adopted. Both are
+  module-local `const`s in standalone `.mjs` gate scripts, with different roles
+  (a scan-set entry vs the alert-namespace source). There is no shared module for
+  gate-script paths, and creating one to hold a single string is the wrong
+  abstraction.
+- **RT7b orphaned check scripts** — false positives. Both flagged self-tests run
+  under `npx vitest run`, which `scripts/pre-pr.sh` executes: `vitest.config.ts`
+  includes `scripts/__tests__/**/*.test.mjs` by glob, and the hook searches for
+  the basename, which a glob never spells.
+
+R30 (bare `#806` / `#805` in this plan and the review artifact) fired 18 times
+and was fixed rather than dispositioned.
+
+### The `trackTenant` guard's red proof cost the dev database its sentinel row
+
+Recorded because the guard's value is now measured rather than argued, and
+because the method that measured it is the one not to repeat. Removing the guard
+on a throwaway worktree and running the suite let `ctx.cleanup()` sweep the
+sentinel: `deleteTestData` removed its `audit_logs` rows and its
+`audit_chain_anchors` row, then `DELETE FROM tenants` took the row every
+unattributable emit FKs to. The row was restored from the `INSERT` in
+`20260428170853_add_dcr_cleanup_worker_role_and_system_tenant`, byte-identical
+in `name`/`slug`/retention with a new `created_at`; the resulting state (zero
+sentinel `audit_logs`, zero anchors) is the same self-consistent state a fresh
+database has, so no chain verify can report a false TAMPER over it. The
+retention-GC heartbeat rows that were there are gone.
+
+The lesson is narrower than "do not red-prove": a red proof whose *failure mode
+is the destruction the guard prevents* must not run against a shared database,
+worktree isolation notwithstanding — the worktree isolates the source tree, and
+`DATABASE_URL` still points at the same engine.
