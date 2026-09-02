@@ -103,9 +103,10 @@ const SQL_SITES = [
   },
   {
     dirSuffix: "_set_system_tenant_audit_retention",
-    // Two: the guard reads audit_chain_enabled for this tenant, then the UPDATE
-    // targets it. Both must move together if the constant ever does.
-    occurrences: 2,
+    // Three: the guard reads audit_chain_enabled for this tenant, the
+    // absent-row refusal names it in its message, and the UPDATE targets it.
+    // All three must move together if the constant ever does.
+    occurrences: 3,
     what: "the retention that bounds the sentinel's audit growth, and its chain-off guard",
   },
 ];
@@ -123,11 +124,11 @@ const SQL_SITES = [
 const DOC_SITES = [
   {
     path: "docs/operations/alerts.md",
-    // Two: the unattributable-event diagnostic query, and the capture query an
-    // operator runs before the first retention sweep drops rows older than the
-    // window. Both are pasted mid-incident, which is what puts them in scope.
-    occurrences: 2,
-    what: "the unattributable-event diagnostic and pre-sweep capture queries",
+    // Three: the unattributable-event diagnostic, the read of the tenant's own
+    // retention value, and the pre-sweep query that computes what will drop from
+    // it. All three are pasted mid-incident, which is what puts them in scope.
+    occurrences: 3,
+    what: "the unattributable-event diagnostic, retention read, and pre-sweep queries",
   },
   {
     path: "docs/operations/sentinel-tenant-membership.md",

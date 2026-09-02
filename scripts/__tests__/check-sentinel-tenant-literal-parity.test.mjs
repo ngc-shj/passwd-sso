@@ -38,7 +38,7 @@ const DOC_FILES = ["alerts.md", "sentinel-tenant-membership.md"];
  * "present the right number of times", which is the whole subject of the
  * partial-drift case below.
  */
-const DOC_OCCURRENCES = { "alerts.md": 2, "sentinel-tenant-membership.md": 4 };
+const DOC_OCCURRENCES = { "alerts.md": 3, "sentinel-tenant-membership.md": 4 };
 
 let root;
 const roots = [];
@@ -105,9 +105,10 @@ function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UU
     mkdirSync(join(root, "prisma/migrations", RETENTION_DIR), { recursive: true });
     writeFileSync(
       join(root, "prisma/migrations", RETENTION_DIR, "migration.sql"),
-      // Two occurrences, matching the real site: the chain-off guard reads the
-      // tenant, then the UPDATE targets it.
+      // Three occurrences, matching the real site: the chain-off guard reads the
+      // tenant, the absent-row refusal names it, and the UPDATE targets it.
       `SELECT "audit_chain_enabled" FROM "tenants" WHERE "id" = '${retentionSql}'::uuid;\n` +
+        `-- refusal names '${retentionSql}'\n` +
         `UPDATE "tenants" SET "audit_log_retention_days" = 365 WHERE "id" = '${retentionSql}'::uuid;\n`,
       "utf8",
     );

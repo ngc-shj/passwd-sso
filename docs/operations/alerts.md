@@ -149,8 +149,13 @@ a claim refusal, a pre-auth emission. A rising count of one of those actions is
 what replaced the old `audit-dead-letter` alert.
 
 No tenant can read these rows: the sentinel has zero `tenant_members` and
-`/api/tenant/audit-logs` scopes by membership. That is an unenforced invariant,
-not a constraint — see the note below.
+`/api/tenant/audit-logs` scopes by membership. Since
+`20260901090000_forbid_system_tenant_membership` that is enforced by a `CHECK`
+(`tenant_members_not_system_tenant`) rather than left to convention — it used to
+say "unenforced invariant, not a constraint" here, and a single membership row
+would have handed its holder every unattributable audit row in the deployment.
+The runbook for a deployment where such a row already exists is
+`docs/operations/sentinel-tenant-membership.md`.
 
 **What replaces the alert.** A broad tenant-resolution failure used to fire
 `audit-dead-letter`. It now shows up as a rising count from the query above
@@ -170,25 +175,41 @@ because the write that would carry it is the one that failed.
 > `max-size: 20m` × `max-file: 5` (`docker-compose.yml`). Removing the exclusion
 > is an operator decision, not a required fix.
 
-> **Sentinel-tenant growth.** `__system__` is retained for **365 days**
-> (`20260902120000_set_system_tenant_audit_retention`). It previously had no
-> `audit_log_retention_days` at all, which meant `sweepAuditLogs` — it enumerates
-> only tenants with a non-NULL value — skipped it and these rows were never
-> purged, while two pre-auth routes (`/api/extension/token`,
+> **Sentinel-tenant growth.** `__system__` now has an
+> `audit_log_retention_days`, so `sweepAuditLogs` — which enumerates only tenants
+> with a non-NULL value — no longer skips it. It previously had none, so these
+> rows were never purged, while two pre-auth routes (`/api/extension/token`,
 > `/api/mcp/register`) emit under it bounded only by their per-IP rate limiters.
 > Rate limits cap the inflow, not the total; a retention is what makes the total
 > finite.
 >
-> **On first sweep after that migration, sentinel rows older than 365 days are
-> deleted.** On a deployment that has been running long enough to have them, that
-> is a one-off drop. If any are under investigation, copy them out before the
-> next `retention-gc-worker` run:
+> **The value is not 365 everywhere.**
+> `20260902120000_set_system_tenant_audit_retention` sets 365 **only where the
+> column was NULL** — a deployment that had already chosen a value for
+> `__system__` keeps it. Read the actual number before acting on anything below:
 >
 > ```sql
-> SELECT * FROM audit_logs
-> WHERE tenant_id = '00000000-0000-4000-8000-000000000002'
->   AND created_at < now() - interval '365 days';
+> SELECT audit_log_retention_days, audit_chain_enabled
+> FROM tenants WHERE id = '00000000-0000-4000-8000-000000000002';
 > ```
+>
+> **On the first sweep after that migration, sentinel rows older than that window
+> are deleted.** On a deployment that has been running long enough to have them,
+> that is a one-off drop. To see what will go — computed from the tenant's own
+> value, not from an assumed 365:
+>
+> ```sql
+> SELECT count(*), min(a.created_at), max(a.created_at)
+> FROM audit_logs a
+> JOIN tenants t ON t.id = a.tenant_id
+> WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002'
+>   AND a.created_at < now() - make_interval(days => t.audit_log_retention_days);
+> ```
+>
+> If any of it is under investigation, **export it** — a `SELECT` in a session is
+> not a copy. `\copy (…) TO 'sentinel-audit-<date>.csv' CSV HEADER` from `psql`,
+> or `pg_dump --data-only --table=audit_logs` with the same predicate, before the
+> next `retention-gc-worker` run.
 >
 > The retention is safe here only because `__system__` has
 > `audit_chain_enabled = false`: a purge does not renumber `chain_seq`, so on a

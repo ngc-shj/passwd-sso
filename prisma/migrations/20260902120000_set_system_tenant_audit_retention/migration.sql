@@ -31,18 +31,29 @@
 -- retention anyway would arm a false TAMPER at their next verify.
 DO $$
 DECLARE
+  v_found BOOLEAN;
   v_chain_enabled BOOLEAN;
 BEGIN
-  SELECT "audit_chain_enabled" INTO v_chain_enabled
+  SELECT TRUE, "audit_chain_enabled" INTO v_found, v_chain_enabled
     FROM "tenants"
    WHERE "id" = '00000000-0000-4000-8000-000000000002'::uuid;
 
-  -- No sentinel row: nothing to set, and not this migration's business to
-  -- create one (20260428170853 owns that). Leave it to the gate that ties the
-  -- literal to the constant.
-  IF v_chain_enabled IS NULL THEN
-    RAISE NOTICE 'sentinel tenant row absent; skipping retention set';
-    RETURN;
+  -- A missing sentinel row is a FAILURE, not a no-op. Creating one is
+  -- 20260428170853's job and not this file's — but succeeding without it is
+  -- worse than either: the migration would be recorded as applied, and a later
+  -- restore of the sentinel would come back with no retention and nothing left
+  -- to notice. That is not hypothetical; this row has been deleted by accident
+  -- once already (see the plan's incident note).
+  --
+  -- Nothing else covers it. The parity gate compares the literal against the TS
+  -- constant; it does not read the database, so it cannot see an absent row.
+  IF NOT COALESCE(v_found, FALSE) THEN
+    RAISE EXCEPTION
+      'sentinel tenant row (%) is absent; refusing to record this migration as applied. %',
+      '00000000-0000-4000-8000-000000000002',
+      'It is the FK target of audit_logs.tenant_id and audit_outbox.tenant_id, so its absence '
+      'is its own incident: restore it from 20260428170853_add_dcr_cleanup_worker_role_and_system_tenant '
+      'and re-run. See docs/operations/sentinel-tenant-membership.md.';
   END IF;
 
   IF v_chain_enabled THEN
