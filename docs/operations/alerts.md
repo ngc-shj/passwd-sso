@@ -203,13 +203,25 @@ because the write that would carry it is the one that failed.
 > FROM audit_logs a
 > JOIN tenants t ON t.id = a.tenant_id
 > WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002'
->   AND a.created_at < now() - make_interval(days => t.audit_log_retention_days);
+>   AND a.created_at < now()
+>       - make_interval(days => GREATEST(t.audit_log_retention_days, 30));
 > ```
 >
-> If any of it is under investigation, **export it** — a `SELECT` in a session is
-> not a copy. `\copy (…) TO 'sentinel-audit-<date>.csv' CSV HEADER` from `psql`,
-> or `pg_dump --data-only --table=audit_logs` with the same predicate, before the
-> next `retention-gc-worker` run.
+> `GREATEST(…, 30)` because the sweep does: `sweepAuditLogs` clamps with
+> `Math.max(retention, AUDIT_LOG_RETENTION_MIN)` (`sweep.ts`), so a value below 30
+> deletes nothing extra. The API refuses one, but this migration preserves a value
+> set directly in the database, so the two can differ — and a preview that used
+> the stored number would over-report what is about to go.
+>
+> If any of it is under investigation, **export it first** — a `SELECT` in a
+> session is not a copy. From `psql`, with the predicate spelled out:
+>
+> ```
+> \copy (SELECT * FROM audit_logs a JOIN tenants t ON t.id = a.tenant_id WHERE a.tenant_id = '00000000-0000-4000-8000-000000000002' AND a.created_at < now() - make_interval(days => GREATEST(t.audit_log_retention_days, 30))) TO 'sentinel-audit-export.csv' CSV HEADER
+> ```
+>
+> Not `pg_dump`: it has no row predicate, so `--table=audit_logs` would write
+> **every tenant's** audit rows to that file.
 >
 > The retention is safe here only because `__system__` has
 > `audit_chain_enabled = false`: a purge does not renumber `chain_seq`, so on a

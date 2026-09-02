@@ -124,11 +124,13 @@ const SQL_SITES = [
 const DOC_SITES = [
   {
     path: "docs/operations/alerts.md",
-    // Three: the unattributable-event diagnostic, the read of the tenant's own
-    // retention value, and the pre-sweep query that computes what will drop from
-    // it. All three are pasted mid-incident, which is what puts them in scope.
-    occurrences: 3,
-    what: "the unattributable-event diagnostic, retention read, and pre-sweep queries",
+    // Four: the unattributable-event diagnostic, the read of the tenant's own
+    // retention value, the pre-sweep query that computes what will drop, and the
+    // \copy that exports it. All four are pasted mid-incident, which is what
+    // puts them in scope — and the export is the one where a stale UUID would
+    // write the wrong tenant's rows to a file.
+    occurrences: 4,
+    what: "the unattributable-event diagnostic, retention read, pre-sweep and export queries",
   },
   {
     path: "docs/operations/sentinel-tenant-membership.md",
