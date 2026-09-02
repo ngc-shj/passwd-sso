@@ -101,6 +101,11 @@ const SQL_SITES = [
     occurrences: 1,
     what: "the CHECK that keeps the sentinel memberless",
   },
+  {
+    dirSuffix: "_set_system_tenant_audit_retention",
+    occurrences: 1,
+    what: "the retention that bounds the sentinel's audit growth",
+  },
 ];
 
 /**

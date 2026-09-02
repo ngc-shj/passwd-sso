@@ -1242,25 +1242,35 @@ half is removed from the test comment, because a rationale that will not survive
 being checked is the defect C5 and C10 exist to close, and leaving one in place
 while fixing eleven others is not a position worth holding.
 
-- **CF18 — the sentinel's audit rows are never purged, and pre-auth paths can
-  produce them.** `sweepAuditLogs` enumerates only tenants with
-  `auditLogRetentionDays IS NOT NULL` (`sweep.ts:372`), so a NULL sentinel is
-  permanently excluded. `/api/extension/token` and `/api/mcp/register` can emit
-  sentinel rows without authentication; per-IP limits bound the rate, not the
-  total. The outbox drain is a single all-tenant FIFO claimed with
-  `FOR UPDATE SKIP LOCKED` over the whole table, so a sustained inflow also
-  delays other tenants' audit delivery. *Anti-Deferral: acceptable risk,
-  quantified. Worst case — storage growth an operator must notice by monitoring
-  rather than by a bound, plus audit-delivery latency for other tenants under a
-  sustained flood. Likelihood — needs deliberate abuse of two pre-auth endpoints;
-  the sentinel currently holds four rows. Cost to fix — set a retention on the
-  sentinel row and change C4's decision arm to assert that value.* **Why not
-  here**: the number is an operations decision that wants the sentinel's real
-  volume and the incident-investigation window behind it, and picking one to
-  close a review finding is how a policy value gets set by accident. **What
-  would settle it**: that number, plus — if the chain is ever enabled on the
-  sentinel — the chain-verify fix first, since the interaction C4 named would
-  become real at that point rather than being the reason it was avoided.
+**CF18 — closed by setting the retention, not by recording it.** The first
+disposition was to carry it forward, on the grounds that the number is an
+operations decision. The reviewer pressed that a documented risk acceptance is
+not a mitigation, and that is right: `sweepAuditLogs` enumerates only tenants
+with `auditLogRetentionDays IS NOT NULL` (`sweep.ts:372`), so a NULL sentinel was
+excluded from retention permanently, while `/api/extension/token` and
+`/api/mcp/register` emit under it with no authentication — the per-IP limiter
+bounds the rate, not the total — and the outbox drain is a single all-tenant FIFO
+claimed `FOR UPDATE SKIP LOCKED` over the whole table, so a sustained inflow also
+delays other tenants' delivery.
+
+`20260902120000_set_system_tenant_audit_retention` sets **365 days**, the value
+the user chose: it matches the only tenant in this deployment that had set one,
+and the GC clamps anything below `AUDIT_LOG_RETENTION_MIN` (30) up to it, so a
+shorter number would not have meant what it said. Retention does not stop the
+inflow — it converts "unbounded forever" into "bounded by rate × window", which
+is the property that was missing.
+
+C4's decision arm changes with it, and that is the contract's own instruction:
+"if this assertion is ever changed, the change is that decision being revisited,
+not a test being updated." It now asserts 365 **and** `audit_chain_enabled =
+false`, because the false half of the original rationale — that a retention would
+incur the chain-verify false-TAMPER interaction — is exactly what that flag
+decides. Asserting it means the day someone enables the chain on the sentinel,
+this case is where the now-real interaction surfaces, rather than the retention
+silently becoming unsafe. Red-proved: clearing the retention reddens the case;
+restored afterwards.
+
+The new migration is added to the parity gate's manifest (five sites, in parity).
 
 ### Phase 3 Round 3 — the ip-column gate is withdrawn
 

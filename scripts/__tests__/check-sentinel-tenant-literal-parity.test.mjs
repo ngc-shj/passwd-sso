@@ -28,6 +28,7 @@ const OTHER_UUID = "00000000-0000-4000-8000-000000000099";
 
 const ROW_DIR = "20260428170853_add_dcr_cleanup_worker_role_and_system_tenant";
 const CHECK_DIR = "20260901090000_forbid_system_tenant_membership";
+const RETENTION_DIR = "20260902120000_set_system_tenant_audit_retention";
 const DOC_FILES = ["alerts.md", "sentinel-tenant-membership.md"];
 
 /**
@@ -50,7 +51,7 @@ const roots = [];
  * does not apply to ESM either. The override is the same mechanism the sibling
  * narrative gate uses, and it carries the same CI pollution guard.
  */
-function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, docs = REAL_UUID, driftOneOf, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
+function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, retentionSql = REAL_UUID, docs = REAL_UUID, driftOneOf, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
   root = mkdtempSync(join(tmpdir(), "sentinel-parity-"));
   roots.push(root);
 
@@ -100,6 +101,14 @@ function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UU
       "utf8",
     );
   }
+  if (!omit.includes("retention")) {
+    mkdirSync(join(root, "prisma/migrations", RETENTION_DIR), { recursive: true });
+    writeFileSync(
+      join(root, "prisma/migrations", RETENTION_DIR, "migration.sql"),
+      `UPDATE "tenants" SET "audit_log_retention_days" = 365 WHERE "id" = '${retentionSql}'::uuid;\n`,
+      "utf8",
+    );
+  }
   return root;
 }
 
@@ -130,7 +139,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     // satisfiable by a gate that refuses unconditionally.
     const r = runGate(makeRoot());
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("4 site(s) in parity");
+    expect(r.stdout).toContain("5 site(s) in parity");
   });
 
   it("REDS when the constant moves away from both SQL sites", () => {
@@ -141,6 +150,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain(ROW_DIR);
     expect(r.stderr).toContain(CHECK_DIR);
+    expect(r.stderr).toContain(RETENTION_DIR);
     // BOTH values, not just the constant's: "the CONSTANT is what moves" is
     // useless without saying what to move it to, and the other value lives in a
     // checksummed migration the reader must not open to find out.
@@ -231,7 +241,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     // The floor. With every site gone the mismatch list still has entries, but
     // `checked` is 0 — and a gate that reported OK on an empty examination
     // would be green precisely when it had checked nothing.
-    const r = runGate(makeRoot({ omit: ["row", "check", ...DOC_FILES] }));
+    const r = runGate(makeRoot({ omit: ["row", "check", "retention", ...DOC_FILES] }));
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("examined 0 named sites");
   });
