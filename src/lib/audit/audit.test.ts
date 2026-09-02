@@ -220,6 +220,14 @@ describe("buildOutboxPayload", () => {
     //   overflows sanitizeMetadata's recursion over the ORIGINAL object.
     // Both escaped buildOutboxPayload, which runs before logAuditAsync's try.
     ["a toJSON that returns undefined", { toJSON: () => undefined }],
+    // A `toJSON()` may return ANY shape, and the round-trip then yields
+    // something this function does not declare. Casting them through was silent
+    // both ways: the outbox worker coerces a non-object to null, so the metadata
+    // vanished while the event was still delivered; and an array passed its
+    // `typeof === "object"` check and reached the column as a JSON array.
+    ["a toJSON that returns a string", { toJSON: () => "value" }],
+    ["a toJSON that returns a number", { toJSON: () => 42 }],
+    ["a toJSON that returns an array", { toJSON: () => [1, 2] }],
   ])("survives metadata that JSON.stringify refuses (%s)", (_label, metadata) => {
     // buildOutboxPayload runs OUTSIDE logAuditAsync's try, so a throw here
     // reached the caller and skipped the dead-letter arm — no outbox row, no

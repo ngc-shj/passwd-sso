@@ -103,14 +103,26 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
   // the same escape as a throw and is how the first version of this catch left
   // the contract broken.
   if (typeof json !== "string") return { ...UNSERIALIZABLE_METADATA };
-  return json.length <= METADATA_MAX_BYTES
-    ? // The PARSED value, not the original object. `sanitizeMetadata` walks it
-      // recursively, and a cycle whose `toJSON()` returns something safe passes
-      // stringify and then overflows that walk — so the acyclic round-trip is
-      // what makes the sanitize step total. It also costs nothing semantically:
-      // whatever stringify dropped was never going to reach the column.
-      (JSON.parse(json) as Record<string, unknown>)
-    : { _truncated: true, _originalSize: json.length };
+  if (json.length > METADATA_MAX_BYTES) return { _truncated: true, _originalSize: json.length };
+
+  // The PARSED value, not the original object. `sanitizeMetadata` walks it
+  // recursively, and a cycle whose `toJSON()` returns something safe passes
+  // stringify and then overflows that walk — so the acyclic round-trip is what
+  // makes the sanitize step total. It also costs nothing semantically: whatever
+  // stringify dropped was never going to reach the column.
+  const parsed: unknown = JSON.parse(json);
+  // CHECKED, not cast. `toJSON()` may return anything, so the round-trip can
+  // yield a string, a number or an array — all outside this function's declared
+  // return type, and casting them through was silent in both directions: the
+  // outbox worker coerces a non-object to `null`, so the metadata vanished with
+  // the event still delivered, and an array passed its `typeof === "object"`
+  // check and reached the column as a JSON array the payload type does not
+  // admit. A shape that cannot be stored as metadata is unserializable FOR THIS
+  // PURPOSE, which is what the marker says.
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ...UNSERIALIZABLE_METADATA };
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /**
