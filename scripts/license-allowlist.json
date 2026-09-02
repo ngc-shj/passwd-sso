@@ -189,7 +189,7 @@
       "category": "review-required",
       "reason": "Data-only package (browser compatibility data). CC-BY-4.0 requires attribution only — no copyleft obligations. Attribution provided via package.json metadata.",
       "scope": "saas-only",
-      "packageVersion": "1.0.30001769",
+      "packageVersion": "1.0.30001810",
       "approvedBy": "ngc-shj",
       "reviewedAt": "2026-02-17",
       "expiresAt": "2027-02-17",
