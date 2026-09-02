@@ -170,14 +170,34 @@ because the write that would carry it is the one that failed.
 > `max-size: 20m` × `max-file: 5` (`docker-compose.yml`). Removing the exclusion
 > is an operator decision, not a required fix.
 
-> **Sentinel-tenant growth.** `__system__` has no `audit_log_retention_days`, so
-> `sweepAuditLogs` skips it and these rows are never purged. Two pre-auth routes
-> (`/api/extension/token`, `/api/mcp/register`) emit under it, bounded only by
-> their per-IP rate limiters. Setting a retention on `__system__` would bound the
-> growth but incurs the documented chain-verify interaction (a purge does not
-> renumber `chain_seq`, so a default `fromSeq=1` verify reports a false TAMPER —
-> see `docs/security/audit-chain-threat-model.md#retention-purge-interaction`).
-> Left unset deliberately; revisit with whoever owns that threat model.
+> **Sentinel-tenant growth.** `__system__` is retained for **365 days**
+> (`20260902120000_set_system_tenant_audit_retention`). It previously had no
+> `audit_log_retention_days` at all, which meant `sweepAuditLogs` — it enumerates
+> only tenants with a non-NULL value — skipped it and these rows were never
+> purged, while two pre-auth routes (`/api/extension/token`,
+> `/api/mcp/register`) emit under it bounded only by their per-IP rate limiters.
+> Rate limits cap the inflow, not the total; a retention is what makes the total
+> finite.
+>
+> **On first sweep after that migration, sentinel rows older than 365 days are
+> deleted.** On a deployment that has been running long enough to have them, that
+> is a one-off drop. If any are under investigation, copy them out before the
+> next `retention-gc-worker` run:
+>
+> ```sql
+> SELECT * FROM audit_logs
+> WHERE tenant_id = '00000000-0000-4000-8000-000000000002'
+>   AND created_at < now() - interval '365 days';
+> ```
+>
+> The retention is safe here only because `__system__` has
+> `audit_chain_enabled = false`: a purge does not renumber `chain_seq`, so on a
+> chained tenant a default `fromSeq=1` verify would report a false TAMPER (see
+> `docs/security/audit-chain-threat-model.md#retention-purge-interaction`). The
+> migration **checks** that flag and refuses rather than assuming it, and the
+> integration suite asserts both the retention and the flag together. If you ever
+> enable the chain on `__system__`, fix the verify's start sequence first — the
+> retention is already set, so the interaction becomes real at that moment.
 
 ## `delivery.dead_lettered` / `webhook_delivery.dead_lettered`
 
