@@ -213,6 +213,13 @@ describe("buildOutboxPayload", () => {
   it.each([
     ["a BigInt", { n: 1n }],
     ["a circular reference", (() => { const o: Record<string, unknown> = {}; o.self = o; return o; })()],
+    // The two the first version of this guard missed. Neither makes
+    // JSON.stringify THROW, which is all that version caught:
+    //   toJSON()->undefined makes it RETURN undefined, so `.length` was the
+    //   TypeError; and a cycle whose toJSON() is safe passes stringify and then
+    //   overflows sanitizeMetadata's recursion over the ORIGINAL object.
+    // Both escaped buildOutboxPayload, which runs before logAuditAsync's try.
+    ["a toJSON that returns undefined", { toJSON: () => undefined }],
   ])("survives metadata that JSON.stringify refuses (%s)", (_label, metadata) => {
     // buildOutboxPayload runs OUTSIDE logAuditAsync's try, so a throw here
     // reached the caller and skipped the dead-letter arm — no outbox row, no
@@ -227,6 +234,21 @@ describe("buildOutboxPayload", () => {
     // is still an event, and the actor/action are what a reader needs.
     expect(payload.action).toBe(baseParams.action);
     expect(payload.userId).toBe(baseParams.userId);
+  });
+
+  it("keeps the toJSON projection of a cycle, rather than falling back to the marker", () => {
+    // The case that separates "cannot be rendered" from "renders to something".
+    // A cycle whose toJSON() returns a safe value PASSES JSON.stringify, so the
+    // marker would be wrong — but sanitizeMetadata used to walk the ORIGINAL
+    // object and overflow its own recursion on the cycle. Sanitizing the parsed
+    // round-trip is what makes both true at once: no throw, and the projection
+    // survives. A guard that returned the marker here would be over-applying it.
+    const cyclic: Record<string, unknown> = { toJSON: () => ({ safe: 1 }) };
+    cyclic.self = cyclic;
+
+    const payload = buildOutboxPayload({ ...baseParams, metadata: cyclic });
+    expect(payload.metadata).toEqual({ safe: 1 });
+    expect(payload.action).toBe(baseParams.action);
   });
 
   it("passes through metadata unchanged when within byte limit", () => {

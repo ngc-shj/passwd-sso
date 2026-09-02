@@ -410,12 +410,24 @@ describe("unattributable audit events", () => {
 
   it("the sentinel tenant has no audit-log retention, and that is a recorded decision", async () => {
     // Pins the option (a) decision so a later migration cannot adopt (b)
-    // silently. Setting a retention here would bound the growth AND incur the
-    // documented chain-verify interaction: audit_log_purge does not renumber
-    // chain_seq, so a default fromSeq=1 verify reports a false TAMPER at the
-    // first retained row (docs/security/audit-chain-threat-model.md
-    // #retention-purge-interaction). If this assertion is ever changed, the
-    // change is that decision being revisited, not a test being updated.
+    // silently. If this assertion is ever changed, the change is that decision
+    // being revisited, not a test being updated.
+    //
+    // The decision's recorded rationale was HALF WRONG and is corrected here.
+    // It said a retention would incur the chain-verify interaction —
+    // audit_log_purge does not renumber chain_seq, so a default fromSeq=1
+    // verify reports a false TAMPER at the first retained row
+    // (docs/security/audit-chain-threat-model.md #retention-purge-interaction).
+    // That interaction is real, and it does NOT apply to this tenant: the
+    // sentinel's audit_chain_enabled is false (the schema default), so it has no
+    // chain to falsify. Measured, not assumed.
+    //
+    // What the NULL actually costs, stated plainly because the rationale above
+    // used to obscure it: sweepAuditLogs enumerates only tenants with
+    // auditLogRetentionDays IS NOT NULL, so these rows are never purged — and
+    // pre-auth paths can produce them. That is unbounded growth this branch
+    // accepts rather than solves; see CF18 in the plan for the derivation and
+    // for what setting a retention would need first.
     //
     // Detection only, and deliberately so: the mutation that would redden it
     // for the reason it claims is writing a retention onto the sentinel row of

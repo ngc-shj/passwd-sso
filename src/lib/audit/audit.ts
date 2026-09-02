@@ -77,44 +77,68 @@ import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPaylo
 import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
 
 /**
- * Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within
- * limits.
+ * Reduce metadata to what may be stored: the original when it fits, a
+ * `_truncated` marker when it does not, and an `_unserializable` marker when it
+ * cannot be rendered at all.
  *
- * The `catch` is what makes `logAuditAsync`'s "never throws" contract true.
- * `JSON.stringify` throws on a `BigInt` and on a circular reference, `metadata`
- * is typed `Record<string, unknown>` so neither is stopped at the type level,
- * and a raw `COUNT(*)::bigint` read is ordinary in this tree. This runs inside
- * `buildOutboxPayload`, which `logAuditAsync` calls BEFORE its try — so a throw
- * here reached the caller AND skipped the dead-letter arm: no outbox row, no
- * dead-letter line, nothing. That is the silent loss this whole chain of work
- * exists to remove, on a narrower trigger than the one it started from.
+ * Total by construction rather than by catching: see `safeMetadata` below for
+ * the boundary and for why per-step catching was not enough.
  *
- * The event still goes out; only the metadata is replaced. The marker is a fixed
- * token, not an error-derived one: both triggers throw a plain `TypeError`
- * carrying no SQLSTATE, so `errorLogFields(err).code` reduces to `"unknown"` for
- * every case that can reach here — a field that cannot discriminate is worse
- * than none, because it reads as though it did.
- *
- * IT CHANGES `logAuditInTx` TOO, and that is a deliberate second decision rather
- * than a side effect. On that path the throw used to propagate and roll the
- * caller's business transaction back, so unserializable metadata failed the
- * MUTATION as well as the audit. Now the transaction commits and the audit row
- * carries the marker. That is the right direction for the same reason the async
- * path takes it — losing the business write because a metadata field held a
- * BigInt is a worse outcome than an audit row that says so — but it IS a
- * behaviour change on the atomic path, and it is pinned by its own case.
+ * Note it also changes `logAuditInTx`, deliberately. On that path an
+ * unserializable metadata field used to roll the caller's BUSINESS transaction
+ * back — the mutation failed because its audit record could not be rendered.
+ * Now the transaction commits and the audit row carries the marker, which is the
+ * right direction for the same reason the async path takes it, and is pinned by
+ * its own case.
  */
+const UNSERIALIZABLE_METADATA = { _unserializable: true, _reason: "stringify_failed" } as const;
+
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
-  let json: string;
-  try {
-    json = JSON.stringify(metadata);
-  } catch {
-    return { _unserializable: true, _reason: "stringify_failed" };
-  }
+  const json = JSON.stringify(metadata);
+  // `JSON.stringify` does not only THROW — it returns `undefined` when the value
+  // reduces to nothing (a `toJSON()` that returns undefined, a function, a
+  // symbol). TypeScript types the object overload as `string`, so the guard has
+  // to be a runtime one; without it the `.length` below is a TypeError, which is
+  // the same escape as a throw and is how the first version of this catch left
+  // the contract broken.
+  if (typeof json !== "string") return { ...UNSERIALIZABLE_METADATA };
   return json.length <= METADATA_MAX_BYTES
-    ? metadata
+    ? // The PARSED value, not the original object. `sanitizeMetadata` walks it
+      // recursively, and a cycle whose `toJSON()` returns something safe passes
+      // stringify and then overflows that walk — so the acyclic round-trip is
+      // what makes the sanitize step total. It also costs nothing semantically:
+      // whatever stringify dropped was never going to reach the column.
+      (JSON.parse(json) as Record<string, unknown>)
     : { _truncated: true, _originalSize: json.length };
+}
+
+/**
+ * The whole metadata transformation under ONE exception boundary.
+ *
+ * `buildOutboxPayload` is called BEFORE `logAuditAsync`'s try (and before the
+ * bulk path's), so anything that throws in here reaches the caller AND skips the
+ * dead-letter arm: no outbox row, no dead-letter line, nothing. On
+ * `logAuditInTx` it also rolls the caller's business transaction back.
+ *
+ * Catching per-step was the first attempt and it closed one trigger of three:
+ * `JSON.stringify` throwing on a BigInt or a cycle. It missed stringify
+ * RETURNING undefined, and it missed `sanitizeMetadata` overflowing its own
+ * recursion on a cycle that stringify had accepted. The boundary belongs around
+ * the transformation, not around the call inside it that was noticed first.
+ *
+ * The event still goes out; only the metadata is replaced. The marker is a fixed
+ * token rather than an error-derived one: the reachable failures are plain
+ * TypeErrors and RangeErrors carrying no SQLSTATE, so a code would read
+ * "unknown" every time — a field that cannot discriminate is worse than none.
+ */
+function safeMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  try {
+    const truncated = truncateMetadata(metadata);
+    return (sanitizeMetadata(truncated) as Record<string, unknown> | null | undefined) ?? null;
+  } catch {
+    return { ...UNSERIALIZABLE_METADATA };
+  }
 }
 
 // Re-export from constants for backward compatibility
@@ -187,8 +211,7 @@ export function sanitizeMetadata(value: unknown): unknown {
 // ─── AuditLogParams → AuditOutboxPayload mapping ─────────────────
 
 export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
-  const safeMetadata = truncateMetadata(params.metadata);
-  const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+  const sanitized = safeMetadata(params.metadata);
   const actorType = params.actorType ?? ACTOR_TYPE.HUMAN;
   return {
     scope: params.scope,

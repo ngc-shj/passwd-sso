@@ -1208,6 +1208,60 @@ Three findings are carried forward rather than fixed:
   membership writers and route it to the existing refusal path with its own
   reason.* The runbook covers the migration-time symptom; this is the runtime one.
 
+### Post-review security pass — two findings, one of them a correction to C4
+
+Run against `1b624b0c2` after Round 3, before the PR.
+
+**The `logAuditAsync` "never throws" repair closed one trigger of three.** The
+`catch` added in Round 1 wrapped only the `JSON.stringify` CALL, and two
+reachable inputs do not go through it. `JSON.stringify` does not only throw — it
+RETURNS `undefined` when the value reduces to nothing (`toJSON()` returning
+undefined), and the `json.length` on the next line was outside the try, so that
+is a `TypeError`. Separately, a cycle whose `toJSON()` returns something safe
+PASSES stringify, and `sanitizeMetadata` then walked the ORIGINAL object and
+overflowed its own recursion — a `RangeError`. Both escaped
+`buildOutboxPayload`, which runs before the try, so both reached the caller with
+no outbox row and no dead-letter line, and on `logAuditInTx` both rolled the
+caller's business transaction back. Measured: `A=THROWS TypeError B=THROWS
+RangeError` against the code as it stood.
+
+The boundary now wraps the whole metadata transformation rather than the call
+inside it that was noticed first, the non-string return is guarded explicitly,
+and the sanitize step runs over the parsed round-trip, which is acyclic by
+construction. A side effect worth pinning, and pinned: a cycle whose `toJSON()`
+is safe keeps its projection instead of being replaced by the marker — the
+guard must not over-apply.
+
+**C4's recorded rationale for the sentinel's NULL retention is half wrong.** The
+decision said setting a retention would bound the growth AND incur the
+chain-verify interaction. The second clause does not hold for this tenant:
+`audit_chain_enabled` is `false` for the sentinel (the schema default), so there
+is no chain to report a false TAMPER on. Verified on the dev database, not
+inferred. The decision itself stands for this branch — see CF18 — but the false
+half is removed from the test comment, because a rationale that will not survive
+being checked is the defect C5 and C10 exist to close, and leaving one in place
+while fixing eleven others is not a position worth holding.
+
+- **CF18 — the sentinel's audit rows are never purged, and pre-auth paths can
+  produce them.** `sweepAuditLogs` enumerates only tenants with
+  `auditLogRetentionDays IS NOT NULL` (`sweep.ts:372`), so a NULL sentinel is
+  permanently excluded. `/api/extension/token` and `/api/mcp/register` can emit
+  sentinel rows without authentication; per-IP limits bound the rate, not the
+  total. The outbox drain is a single all-tenant FIFO claimed with
+  `FOR UPDATE SKIP LOCKED` over the whole table, so a sustained inflow also
+  delays other tenants' audit delivery. *Anti-Deferral: acceptable risk,
+  quantified. Worst case — storage growth an operator must notice by monitoring
+  rather than by a bound, plus audit-delivery latency for other tenants under a
+  sustained flood. Likelihood — needs deliberate abuse of two pre-auth endpoints;
+  the sentinel currently holds four rows. Cost to fix — set a retention on the
+  sentinel row and change C4's decision arm to assert that value.* **Why not
+  here**: the number is an operations decision that wants the sentinel's real
+  volume and the incident-investigation window behind it, and picking one to
+  close a review finding is how a policy value gets set by accident. **What
+  would settle it**: that number, plus — if the chain is ever enabled on the
+  sentinel — the chain-verify fix first, since the interaction C4 named would
+  become real at that point rather than being the reason it was avoided.
+
 ### Phase 3 Round 3 — the ip-column gate is withdrawn
 
 Round 3 put **seven** findings on the gate (one Critical), all constructed and
