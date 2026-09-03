@@ -41,9 +41,13 @@ import {
  *   20260901090000_forbid_system_tenant_membership     tenant_members
  *   20260904120000_forbid_system_tenant_on_users_and_teams  users, teams
  *
- * The tie to those files is checked by execution rather than by grep —
- * `src/__tests__/db-integration/audit-unattributable-tenant.integration.test.ts`
- * reads `pg_constraint` and reds if a name here names nothing.
+ * The tie to those files is checked by execution rather than by grep, in
+ * `src/__tests__/db-integration/audit-unattributable-tenant.integration.test.ts`,
+ * two ways that fail differently: two of the three names are raised by real
+ * refused INSERTs and asserted by value, and the whole set is read back from
+ * `pg_constraint`. The second is what scales with the set — a fourth name added
+ * here that names nothing would never be raised by any case, so nothing but the
+ * catalog read would notice that this classifier could never match it.
  */
 export const SENTINEL_TENANT_CONSTRAINTS: ReadonlySet<string> = new Set([
   "users_not_system_tenant",

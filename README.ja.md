@@ -322,7 +322,7 @@ ADMIN_API_TOKEN=op_<token> TARGET_VERSION=<int> scripts/rotate-master-key.sh
 | `tenant_mismatch` | `claimRefusal` あり、かつ `claim` あり | 値は取り込みを通ったが**保存できない** — 印字可能 ASCII ではなく、レジストリの `CHECK` 制約が拒否する（後述の `preflight` を参照） | **IdP 側を修正**するか、そのテナントに ASCII のクレームを登録してください。`add` は同じ述語でこの値を拒否します |
 | `tenant_claim_system_tenant` | クレーム値 | クレームは**登録済み**だが、登録先が sentinel テナント（`__system__`）— 「所有テナント無し」を表す予約テナントで、アカウントを持ってはいけないため、サインイン時の書き込みを `CHECK` が拒否する。この状態を作る運用コマンドは存在しない（`add` は sentinel を登録先として拒否するので、帯域外で書き込まれた行） | クレームを実在テナントに付け替える。`unmapped` では *Unregistered claims* の見出しに出るので、そこが示す `tenant-domain add --tenant <ref> --domain <claim> --by <label>` を実行すると、`add` が拒否したうえで付け直すべき `--from <現在の所有者>` 付きコマンドをそのまま提示します |
 
-後半 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 4 つの原因を 3 つの見出しで報告します — `claimRefusal` を持つ 2 つは対処が同じなので同じ見出しにまとめています。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
+`claimRefusal` を持つ 2 つは文言ではなく**フィールドの有無**で判別してください。`claimRefusal` はこのデプロイ自身の拒否判定だけが書き込みますが、`claim` の中身は IdP が指定した値なので、読み手が信頼するよう指示された形に見せかけることができます。`unmapped` は 5 つの原因を 3 つの見出しで報告します — `claimRefusal` を持つ 2 つは対処が同じなので同じ見出しにまとめており、sentinel の行も対処が `tenant-domain` である点で未登録の見出しに入ります。オフライン運用 CLI `scripts/tenant-domain.ts`（`npm run tenant-domain`）で診断・復旧します — 特権接続文字列 `MIGRATION_DATABASE_URL` が必要です（アプリ本体の `DATABASE_URL` ロールはこのテーブルの行レベルセキュリティを回避できません）:
 
 ```bash
 # 最近拒否された未登録クレームを確認（既定の期間: 30 日）

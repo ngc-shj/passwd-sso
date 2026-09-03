@@ -234,7 +234,47 @@ with `node_modules` symlinked, where the 200-repetition seeded case then threw
 `APPROVED`* — the permanently-un-approvable state CF16 describes — while the
 maximum-size case stayed green. The worktree was removed.
 
-## Citation drift caused by Phase 2 (R29, mechanical half)
+### D10 — a gate matched a comment, and the comment was reworded rather than the allowlist widened
+
+`scripts/checks/check-raw-sql-usage.mjs` failed on `src/lib/prisma/prisma-error.ts`
+with `MISSING_FROM_ALLOWLIST`. The file issues no SQL: the gate matched the raw
+primitive's name **inside a docblock** explaining which Prisma error code each
+write path produces, because the gate is a regex over file text.
+
+Allowlisting it was rejected. The allowlist's own contract is "every production
+file that calls a raw-SQL primitive", and the gate carries a `STALE_EXEMPT` arm
+that fails when a listed file *stops* matching — so an entry that exists only
+because of prose would fail the day somebody reworded the comment. The comment
+now names the primitive without its `$` sigil and says why, which keeps both the
+comment's meaning and the allowlist's.
+
+### D11 — two mechanical-hook findings dispositioned, neither a defect
+
+- **R3 (propagation)** — three sites still spell `"tenant-xyz"`, a literal C2's
+  fixture rename removed elsewhere: `src/app/api/vault/status/route.test.ts:204`
+  and `:230`, `src/app/api/vault/unlock/data/route.test.ts:122`. Read rather than
+  assumed: both files `vi.mock("@/lib/tenant-rls")` wholesale, so the value never
+  reaches the guard that now requires a canonical UUID. The rename was forced by
+  the real guard; theirs is a mocked argument. Not a propagation gap.
+- **R2 (hardcoded reuse)** — `"team-1"` in `team-policy.test.ts` and three UUIDs
+  in `tenant-rls.test.ts` match constants named `TEAM_ID` / `OTHER_TENANT_ID` /
+  `OTHER_TEAM_ID`. All four of those are **non-exported, file-local test
+  constants** in unrelated suites (`src/__tests__/api/teams/audit-logs.test.ts`,
+  `src/lib/crypto/webhook-aad.test.ts`). The values coincide; the concepts do
+  not — one set is AAD-binding fixtures, the other is "an ordinary tenant" for the
+  RLS guard. Importing across two independent suites to share a coincidence is
+  what R2's value-equality-is-not-meaning-equality clause forbids. Kept separate.
+
+### D12 — `refactor-phase-verify --force` fails locally for an environment reason
+
+The gate reports `Branch is stale vs origin/main` naming an `expected` SHA of
+`88c8a859e…`. Verified: `origin/main` **is** this branch's base `1628b97fe`
+(`git rev-list --count 1628b97fe..origin/main` = 0). The `expected` value comes
+from `.refactor-phase-verify-baseline`, a **git-ignored local file** dated months
+ago. The script's own docblock names this exact false positive as the reason
+`scripts/pre-pr.sh` invokes it with `--skip-merge-queue-guards`, and states that
+CI's fresh checkout is always a first run and records the baseline instead. The
+stale local file was left in place — it is the operator's, not this branch's.
 
 `verify-references.sh --base 1628b97fe --strict` over the plan and this log
 reports 75 citations: 6 OK, 4 SHIFTED, and 65 unresolvable because the Phase-1
@@ -318,3 +358,51 @@ dispatches needs its own manifest assertion and red proof. That is a change to
 shared release tooling, not to this branch's contract set, and bundling it here
 would put an unreviewed gate-harness edit inside a six-contract security branch.
 What would settle it: a separate PR adding the four with the manifest assertion.*
+
+---
+
+## Step 2-5 self-R-check — three findings, all fixed in Phase 2
+
+Three sub-agents ran a focused pass over R1–R57 (+RS*/RT*). Security returned
+**No findings**. Functionality and Testing returned one Major each, plus a second
+Major from Testing. All three were fixed here rather than carried to Phase 3.
+
+### F1 (Testing, RT10) — the `teams` CHECK had no boundary-adjacent allow arm
+
+The `users` deny case paired with a near-miss tenant (`…0003`), proving the CHECK
+is an equality rather than a blanket refusal on the column. The `teams` case
+paired with a freshly-generated random tenant — a value a blanket refusal would
+also accept, so it could not distinguish the two. The two CHECKs are textually
+identical predicates added in one migration, so the failure mode is symmetric and
+proving it on one half left the other unmeasured.
+
+**Fixed**: the near-miss creation is now a shared `ensureNearMissTenant()` helper
+and both cases use it, each reclaiming its own row in a `finally`.
+
+### F2 (Testing, R29) — a docblock claimed a mechanism that did not exist
+
+`src/lib/tenant/sentinel-tenant-constraint.ts` said the constraint-name set's tie
+to the migrations "is checked by execution — the integration test reads
+`pg_constraint`". No file read `pg_constraint` for these names. What existed was
+two deny cases asserting a raised constraint name by value, which is a real
+execution check but a different one, and which **cannot scale with the set**: a
+fourth name added to `SENTINEL_TENANT_CONSTRAINTS` that names nothing would never
+be raised by any case, so the classifier would silently never match it.
+
+**Fixed by making the claim true rather than by softening it**: a case now reads
+`pg_constraint` for the whole set and asserts the names round-trip. The docblock
+names both mechanisms and says which one scales.
+
+### F3 (Functionality, R29) — the READMEs' narration went stale against their own new row
+
+The cause table gained a fifth row, so the paragraph under it — "Key the **last
+two** cases on the field" and "`unmapped` reports the **four** causes under three
+headings" — became wrong in both languages: the field-discriminated pair is no
+longer positionally last, and the count is five. This is the runbook an operator
+reads during the exact lockout C3 exists to make legible.
+
+**Fixed**: the sentence now names the pair by its field (`claimRefusal`) rather
+than by position, the count is five, and the sentinel row's heading is stated.
+
+Re-verified after the three fixes: typecheck, lint, the affected unit trees
+(234), and the two affected integration suites (16) all green.

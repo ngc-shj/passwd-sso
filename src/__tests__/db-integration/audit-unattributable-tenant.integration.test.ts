@@ -32,6 +32,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { SYSTEM_TENANT_ID, ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { SENTINEL_TENANT_CONSTRAINTS } from "@/lib/tenant/sentinel-tenant-constraint";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { logAuditAsync, type AuditLogParams } from "@/lib/audit/audit";
 import { createTestContext, setBypassRlsGucs, sqlStateOf, type TestContext } from "./helpers";
@@ -161,6 +162,40 @@ describe("unattributable audit events", () => {
     const id = await ctx.createTenant();
     createdTenants.push(id);
     return id;
+  }
+
+  /**
+   * A tenant whose id differs from the sentinel's in ONE character.
+   *
+   * The allow arm of each sentinel CHECK has to be boundary-ADJACENT to say
+   * anything: a freshly-generated random tenant id is accepted by a constraint
+   * that refuses the sentinel AND by one that refuses every value resembling
+   * it, so it cannot tell "equality" from "blanket refusal on this column".
+   * `…0003` can.
+   *
+   * The dev database is shared between working copies, so the fixed id may
+   * already be there. Registered for teardown only when THIS call created it —
+   * `deleteTestData` is tenant-scoped, and reclaiming a row another copy is
+   * using would take its data with it.
+   */
+  async function ensureNearMissTenant(): Promise<string> {
+    const nearMiss = SYSTEM_TENANT_ID.replace(/2$/, "3");
+    expect(nearMiss).not.toBe(SYSTEM_TENANT_ID);
+    const inserted = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$executeRawUnsafe(
+        `INSERT INTO tenants (id, name, slug, created_at, updated_at)
+         VALUES ($1::uuid, $2, $3, now(), now())
+         ON CONFLICT (id) DO NOTHING`,
+        nearMiss,
+        "near-miss-sentinel",
+        `near-miss-${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      );
+    });
+    if (inserted === 1 && !createdTenants.includes(nearMiss)) {
+      createdTenants.push(nearMiss);
+    }
+    return nearMiss;
   }
 
   /**
@@ -316,24 +351,7 @@ describe("unattributable audit events", () => {
     // on this column. A distant tenant id would pass on a constraint that
     // refused every sentinel-shaped value.
     //
-    // The dev database is shared between working copies, so the fixed id may
-    // already be there. Register it for teardown only when THIS run created it
-    // — `deleteTestData` is tenant-scoped, and reclaiming a row another copy is
-    // using would take its data with it.
-    const nearMiss = SYSTEM_TENANT_ID.replace(/2$/, "3");
-    expect(nearMiss).not.toBe(SYSTEM_TENANT_ID);
-    const inserted = await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      return tx.$executeRawUnsafe(
-        `INSERT INTO tenants (id, name, slug, created_at, updated_at)
-         VALUES ($1::uuid, $2, $3, now(), now())
-         ON CONFLICT (id) DO NOTHING`,
-        nearMiss,
-        "near-miss-sentinel",
-        `near-miss-${randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      );
-    });
-    if (inserted === 1) createdTenants.push(nearMiss);
+    const nearMiss = await ensureNearMissTenant();
 
     const insertUser = (tenantId: string, userId: string) =>
       ctx.su.prisma.$transaction(async (tx) => {
@@ -374,36 +392,73 @@ describe("unattributable audit events", () => {
     }
   });
 
-  it("the engine refuses a teams row naming the sentinel, and accepts the same row elsewhere", async () => {
+  it("the engine refuses a teams row naming the sentinel, and accepts a near-miss UUID", async () => {
     // No sign-in path writes a `teams` row, so this clause is unfalsifiable
     // from the application. It is here because the CHECK survives the
     // out-of-band write that is the only way to reach the state at all, and
     // because a constraint nothing exercises is a constraint nobody notices was
     // dropped.
-    const otherTenantId = await newTenant();
+    //
+    // The allow arm is the same NEAR MISS the `users` case uses, not a fresh
+    // random tenant. The two CHECKs are textually identical predicates added in
+    // one migration, so the failure they share — a predicate that refuses more
+    // than the sentinel — is symmetric; proving equality on one and not the
+    // other left half of it unmeasured.
+    const nearMiss = await ensureNearMissTenant();
 
-    const insertTeam = (tenantId: string) =>
+    const insertTeam = (tenantId: string, teamId: string) =>
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
           `INSERT INTO teams (id, name, slug, tenant_id, created_at, updated_at)
            VALUES ($1::uuid, $2, $3, $4::uuid, now(), now())`,
-          randomUUID(),
+          teamId,
           "c2-probe-team",
           `c2-${randomUUID().replace(/-/g, "").slice(0, 16)}`,
           tenantId,
         );
       });
 
-    const denied = await insertTeam(SYSTEM_TENANT_ID).catch((e: unknown) => e);
+    const deniedTeamId = randomUUID();
+    const denied = await insertTeam(SYSTEM_TENANT_ID, deniedTeamId).catch(
+      (e: unknown) => e,
+    );
     expect(sqlStateOf(denied)).toBe("23514");
     expect(String(denied)).toContain("teams_not_system_tenant");
+    // Scoped by the row's own id, not by the sentinel: the sentinel's other
+    // rows belong to other working copies.
     const sentinelTeams = await ctx.su.prisma.$queryRaw<{ n: bigint }[]>`
-      SELECT COUNT(*)::bigint AS n FROM teams WHERE tenant_id = ${SYSTEM_TENANT_ID}::uuid
+      SELECT COUNT(*)::bigint AS n FROM teams WHERE id = ${deniedTeamId}::uuid
     `;
     expect(Number(sentinelTeams[0]!.n)).toBe(0);
 
-    await expect(insertTeam(otherTenantId)).resolves.not.toThrow();
+    const allowedTeamId = randomUUID();
+    try {
+      await expect(insertTeam(nearMiss, allowedTeamId)).resolves.not.toThrow();
+    } finally {
+      // Reclaimed here rather than through `deleteTestData`: when the near-miss
+      // tenant pre-existed, it is not ours to hand to a tenant-scoped teardown.
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(`DELETE FROM teams WHERE id = $1::uuid`, allowedTeamId);
+      });
+    }
+  });
+
+  it("every name in SENTINEL_TENANT_CONSTRAINTS exists in pg_constraint", async () => {
+    // The tie between the TypeScript set and the migrations that create it.
+    // The two deny cases above prove two of the three names by raising them,
+    // but neither can catch a FOURTH name added to the set that names nothing —
+    // `classifySentinelTenantConstraint` would then silently never match it and
+    // the denial would surface as `provider_error`. Reading the catalog is the
+    // only check that scales with the set rather than with the cases.
+    const rows = await ctx.su.prisma.$queryRaw<{ conname: string }[]>`
+      SELECT conname FROM pg_constraint
+       WHERE conname = ANY(${[...SENTINEL_TENANT_CONSTRAINTS]}::text[])
+    `;
+    expect(rows.map((r) => r.conname).sort()).toEqual(
+      [...SENTINEL_TENANT_CONSTRAINTS].sort(),
+    );
   });
 
   it("the AFTER INSERT trigger still provisions a membership from a lone users insert", async () => {
