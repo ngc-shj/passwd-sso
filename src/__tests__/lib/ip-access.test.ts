@@ -276,6 +276,75 @@ describe("extractClientIp", () => {
       expect(extractClientIp(req)).toBeNull();
     });
   });
+
+  // C1 (CF11) — extractClientIp returns null or a normalizeIp'd value that
+  // isValidIpAddress accepts. NextRequest exposes no socket peer here, so
+  // TRUST_PROXY_HEADERS=true (set in the outer beforeEach) is what makes the
+  // header-derived sources (b: x-real-ip, c: XFF walk, d: all-trusted
+  // leftmost) reachable through this entry point; the socket-only sources
+  // (a, e) are covered in the co-located src/lib/auth/policy/ip-access.test.ts,
+  // which passes an explicit socketIp.
+  describe("C1 boundary validation (CF11)", () => {
+    const ALLOW_ARMS: ReadonlyArray<readonly [string, string]> = [
+      ["192.168.100.228", "192.168.100.228"],
+      ["::ffff:192.168.100.228", "192.168.100.228"],
+      ["2001:db8::1", "2001:db8::1"],
+      ["[::1]", "::1"],
+      ["100.64.1.2", "100.64.1.2"],
+    ];
+
+    const DENY_ARMS: readonly string[] = [
+      "not-an-ip",
+      "'; DROP TABLE audit_logs;--",
+      "192.168.1.1:8080",
+      "fe80::1%eth0",
+      "192.168.001.1",
+      "1e2.64.0.1",
+      "::ffff:1e2.64.0.1",
+      "<script>alert(1)</script>",
+      "0000:0000:0000:0000:0000:ffff:255.255.255.255%25eth0",
+      "unknown",
+      "",
+      "1:2:3:4:5:6:7:8::",
+      "1:2:3:4:5:6:7:1.2.3.4",
+    ];
+
+    describe("allow arms, by value", () => {
+      it.each(ALLOW_ARMS)("x-real-ip (b): %s -> %s", (raw, expected) => {
+        const req = makeReq("/api/test", { "x-real-ip": raw });
+        expect(extractClientIp(req)).toBe(expected);
+      });
+
+      it.each(ALLOW_ARMS)("XFF rightmost-untrusted (c): %s -> %s", (raw, expected) => {
+        const req = makeReq("/api/test", { "x-forwarded-for": raw });
+        expect(extractClientIp(req)).toBe(expected);
+      });
+
+      it("the rightmost-untrusted walk itself is unchanged (multi-hop)", () => {
+        const req = makeReq("/api/test", {
+          "x-forwarded-for": "1.2.3.4, 9.9.9.9",
+        });
+        expect(extractClientIp(req)).toBe("9.9.9.9");
+      });
+    });
+
+    describe("deny arms — thirteen malformed/hostile values", () => {
+      it.each(DENY_ARMS)("x-real-ip (b): %j -> null", (raw) => {
+        const req = makeReq("/api/test", { "x-real-ip": raw });
+        expect(extractClientIp(req)).toBeNull();
+      });
+
+      it.each(DENY_ARMS)("XFF rightmost-untrusted (c): %j -> null", (raw) => {
+        const req = makeReq("/api/test", { "x-forwarded-for": raw });
+        expect(extractClientIp(req)).toBeNull();
+      });
+
+      // As in the co-located twin: a deny value can never survive to the
+      // all-trusted leftmost fallback (d) — reaching it requires every
+      // walked XFF entry to have already passed the trusted-CIDR match,
+      // which a malformed value always fails first, inside the walk loop.
+    });
+  });
 });
 
 describe("rateLimitKeyFromIp", () => {

@@ -170,6 +170,12 @@ describe("logAuditAsync", () => {
     const largeMetadata: Record<string, unknown> = {
       data: "x".repeat(15_000),
     };
+    // R19 twin of src/lib/audit/audit.test.ts's C6 (CF17) criteria: the exact
+    // byte count, not `expect.any(Number)` — the two trees must agree that
+    // `_originalSize` is bytes, not UTF-16 code units. ASCII here, so the two
+    // measures happen to coincide; the multi-byte case that tells them apart
+    // is pinned in the co-located tree.
+    const expectedOriginalSize = Buffer.byteLength(JSON.stringify(largeMetadata), "utf8");
 
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -183,7 +189,7 @@ describe("logAuditAsync", () => {
         audit: expect.objectContaining({
           metadata: expect.objectContaining({
             _truncated: true,
-            _originalSize: expect.any(Number),
+            _originalSize: expectedOriginalSize,
           }),
         }),
       }),

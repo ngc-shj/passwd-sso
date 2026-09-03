@@ -44,11 +44,28 @@ export type ClaimIngestRefusalKind = "claim_malformed";
  */
 export type ClaimPropagationFailureKind = "store_unavailable";
 
+/**
+ * The claim resolved to a tenant that must not own accounts: `SYSTEM_TENANT_ID`.
+ * The adjudicator is not in this process — it is a PostgreSQL CHECK on `users`
+ * and `tenant_members`, raised at the write.
+ *
+ * A TABLE KEY ONLY. It is never passed as a `claimRefusal` VALUE, because
+ * `claimRefusal` is reserved for a `ClaimRefusalDiagnosis` this deployment's own
+ * refusal adjudicators produced, and a CHECK violation produces none. So
+ * `bucketOf`'s first branch (`claim_refusal !== null → REFUSED`) cannot fire for
+ * it, and `REFUSAL_BUCKET.claim_system_tenant = UNREGISTERED` is the declaration
+ * that decides its heading. Without the never-emitted property those two would
+ * be jointly unsatisfiable — which is the shape that made this arm worth writing
+ * down rather than inferring.
+ */
+export type ClaimTargetForbiddenKind = "claim_system_tenant";
+
 /** Every arm that can deny a sign-in over a claim, from any adjudicator. */
 export type ClaimRefusalKind =
   | ClaimResolutionRefusalKind
   | ClaimIngestRefusalKind
-  | ClaimPropagationFailureKind;
+  | ClaimPropagationFailureKind
+  | ClaimTargetForbiddenKind;
 
 /**
  * Deny reason per refusal arm of `findOrCreateTenantForClaim` (round-1 M2).
@@ -87,6 +104,16 @@ export type ClaimRefusalKind =
  *                   this deployment already uses for "the sign-in machinery
  *                   failed", and the producer side was already emitting it —
  *                   round-6 F3/SEC-R6-1 was that the CONSUMER was not.
+ *   claim_system_tenant — the claim resolved to SYSTEM_TENANT_ID and a CHECK
+ *                   refused the write (CF13). Its OWN reason, not
+ *                   tenant_claim_unmapped's: `bucketOf` decides the heading from
+ *                   the reason, and the remedy differs — the claim IS
+ *                   registered, to a tenant that must not own accounts, so the
+ *                   operator re-points the `tenant_claims` row rather than
+ *                   creating one. Reachable only out of band (`tenant-domain
+ *                   add` refuses a sentinel target), which is why this arm is
+ *                   observability rather than the denial; the denial is the
+ *                   CHECK's.
  *
  * The `satisfies` below is what forces a new arm to be classified here rather
  * than defaulting to whatever an index lookup happens to return — it is how
@@ -100,11 +127,15 @@ export const CLAIM_REFUSAL_REASON = {
   claim_invalid: "tenant_mismatch",
   claim_malformed: "tenant_mismatch",
   store_unavailable: "provider_error",
+  claim_system_tenant: "tenant_claim_system_tenant",
 } as const satisfies Record<
   ClaimRefusalKind,
   Extract<
     AuthLoginFailureReason,
-    "tenant_mismatch" | "tenant_claim_unmapped" | "provider_error"
+    | "tenant_mismatch"
+    | "tenant_claim_unmapped"
+    | "provider_error"
+    | "tenant_claim_system_tenant"
   >
 >;
 

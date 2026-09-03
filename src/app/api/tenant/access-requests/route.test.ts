@@ -94,6 +94,7 @@ vi.mock("@/lib/auth/policy/access-restriction", () => ({
 import { GET, POST } from "@/app/api/tenant/access-requests/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MS_PER_HOUR } from "@/lib/constants/time";
+import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 
 // Module-scope snapshot (route.ts:23 `const accessRequestCreateLimiter =
 // createRateLimiter(...)` runs at import time, above). See fail-closed.ts
@@ -260,6 +261,71 @@ describe("POST /api/tenant/access-requests", () => {
     expect(status).toBe(400);
   });
 
+  it("admin path: dedups requestedScope — N distinct plus one duplicate stored once", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+    });
+    mockAccessRequestCreate.mockResolvedValue({
+      id: "req-dedup",
+      serviceAccountId: SA_ID,
+      requestedScope: SA_TOKEN_SCOPES.join(","),
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
+      createdAt: new Date(),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: [...SA_TOKEN_SCOPES, SA_TOKEN_SCOPES[0]],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(mockAccessRequestCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requestedScope: SA_TOKEN_SCOPES.join(",") }),
+      }),
+    );
+  });
+
+  it("admin path: accepts the full SA_TOKEN_SCOPES set", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+    });
+    mockAccessRequestCreate.mockResolvedValue({
+      id: "req-full",
+      serviceAccountId: SA_ID,
+      requestedScope: SA_TOKEN_SCOPES.join(","),
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
+      createdAt: new Date(),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: [...SA_TOKEN_SCOPES],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+  });
+
   it("returns 404 for non-existent service account", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
@@ -398,6 +464,63 @@ describe("POST /api/tenant/access-requests", () => {
 
     expect(status).toBe(201);
     expect(json.id).toBe("req-sa-1");
+  });
+
+  it("SA self-service: dedups requestedScope — N distinct plus one duplicate stored once", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-dedup",
+      scopes: ["access-request:create"],
+    });
+    mockServiceAccountFindUnique.mockResolvedValue({
+      isActive: true,
+      createdById: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+    });
+    mockAccessRequestCreate.mockResolvedValue({
+      id: "req-sa-dedup",
+      serviceAccountId: SA_ID,
+      requestedScope: SA_TOKEN_SCOPES.join(","),
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
+      createdAt: new Date(),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
+      body: { requestedScope: [...SA_TOKEN_SCOPES, SA_TOKEN_SCOPES[0]] },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(mockAccessRequestCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ requestedScope: SA_TOKEN_SCOPES.join(",") }),
+      }),
+    );
+  });
+
+  it("SA self-service: rejects invalid scope values not in SA_TOKEN_SCOPES", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-badscope",
+      scopes: ["access-request:create"],
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      headers: { Authorization: "Bearer sa_sometoken" },
+      body: { requestedScope: ["vault:unlock"] },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(mockAccessRequestCreate).not.toHaveBeenCalled();
   });
 
   it("returns SA_NOT_FOUND when the SA's tenantId differs from the token's tenantId", async () => {

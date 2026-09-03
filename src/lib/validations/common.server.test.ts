@@ -23,6 +23,7 @@ import {
   PASSWORD_HISTORY_SNIPPET_LENGTH,
   SESSION_CACHE_TTL_MS,
   TOMBSTONE_TTL_MS,
+  PKCE_CODE_CHALLENGE_SCHEMA,
 } from "@/lib/validations/common.server";
 
 // ─── KDF constants ───────────────────────────────────────────
@@ -140,5 +141,42 @@ describe("Query limit constants are positive numbers", () => {
   ] as const)("%s is a positive integer", (name, value) => {
     expect(value).toBeGreaterThan(0);
     expect(Number.isInteger(value)).toBe(true);
+  });
+});
+
+// ─── PKCE code_challenge schema (C4, CF15) ────────────────────
+//
+// SSoT for all three PKCE ingress points (mcp/authorize GET,
+// mcp/authorize/consent POST, mobile/authorize GET). Each boundary case
+// asserts WHICH clause rejected — min, max, or the base64url charset — not
+// merely that the value failed, so a future edit that widens one clause but
+// narrows another cannot pass by accident.
+
+describe("PKCE_CODE_CHALLENGE_SCHEMA", () => {
+  it("rejects 42 characters (one under the real S256 challenge length) via min", () => {
+    const result = PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(42));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].code).toBe("too_small");
+  });
+
+  it("accepts 43 characters (base64url(SHA-256(verifier)), unpadded)", () => {
+    expect(PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(43)).success).toBe(true);
+  });
+
+  it("accepts 64 characters (the upper bound)", () => {
+    expect(PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(64)).success).toBe(true);
+  });
+
+  it("rejects 65 characters (one over the upper bound) via max", () => {
+    const result = PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(65));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].code).toBe("too_big");
+  });
+
+  it("rejects a 64-character value containing a non-base64url character via the charset regex", () => {
+    // "+" is valid standard base64 but NOT base64url (RFC 4648 §5 uses "-"/"_").
+    const result = PKCE_CODE_CHALLENGE_SCHEMA.safeParse(`${"A".repeat(63)}+`);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].code).toBe("invalid_format");
   });
 });

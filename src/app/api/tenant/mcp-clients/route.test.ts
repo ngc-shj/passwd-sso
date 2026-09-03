@@ -91,7 +91,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 
 import { GET, POST } from "@/app/api/tenant/mcp-clients/route";
 import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
-import { MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/auth/mcp";
+import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/auth/mcp";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 
@@ -270,6 +270,49 @@ describe("POST /api/tenant/mcp-clients", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(400);
+  });
+
+  it("accepts and dedups allowedScopes: N distinct plus one duplicate stored once", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientCount.mockResolvedValue(0);
+    mockMcpClientFindFirst.mockResolvedValue(null);
+    mockMcpClientCreate.mockResolvedValue(makeClient({ id: "client-dedup" }));
+
+    const req = createRequest("POST", "http://localhost/api/tenant/mcp-clients", {
+      body: {
+        name: "dedup-client",
+        redirectUris: ["https://example.com/callback"],
+        allowedScopes: [...MCP_SCOPES, MCP_SCOPES[0]],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(mockMcpClientCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ allowedScopes: MCP_SCOPES.join(",") }),
+      }),
+    );
+  });
+
+  it("returns 400 for an unrecognized allowedScopes value", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+
+    const req = createRequest("POST", "http://localhost/api/tenant/mcp-clients", {
+      body: {
+        name: "bad-scope-client",
+        redirectUris: ["https://example.com/callback"],
+        allowedScopes: ["not-a-real-scope"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(mockMcpClientCreate).not.toHaveBeenCalled();
   });
 
   it("returns 409 for name conflict", async () => {

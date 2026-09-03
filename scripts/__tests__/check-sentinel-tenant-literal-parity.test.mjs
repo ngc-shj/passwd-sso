@@ -1,9 +1,10 @@
 /**
  * Self-test for check-sentinel-tenant-literal-parity.mjs.
  *
- * The gate ties SYSTEM_TENANT_ID (src/lib/constants/app.ts) to the four sites
- * that spell the same UUID and cannot dereference it: the sentinel `tenants`
- * row, the CHECK that keeps that tenant memberless, and the two operator-facing
+ * The gate ties SYSTEM_TENANT_ID (src/lib/constants/app.ts) to the sites that
+ * spell the same UUID and cannot dereference it: the sentinel `tenants` row, the
+ * CHECK that keeps that tenant memberless, the pair of CHECKs that keep it out
+ * of `users` and `teams`, the retention migration, and the two operator-facing
  * docs whose queries a human pastes during an incident.
  *
  * Every case runs the gate against a SYNTHETIC repo root, so none depends on the
@@ -28,6 +29,7 @@ const OTHER_UUID = "00000000-0000-4000-8000-000000000099";
 
 const ROW_DIR = "20260428170853_add_dcr_cleanup_worker_role_and_system_tenant";
 const CHECK_DIR = "20260901090000_forbid_system_tenant_membership";
+const USERS_TEAMS_DIR = "20260904120000_forbid_system_tenant_on_users_and_teams";
 const RETENTION_DIR = "20260902120000_set_system_tenant_audit_retention";
 const DOC_FILES = ["alerts.md", "sentinel-tenant-membership.md"];
 
@@ -51,7 +53,7 @@ const roots = [];
  * does not apply to ESM either. The override is the same mechanism the sibling
  * narrative gate uses, and it carries the same CI pollution guard.
  */
-function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, retentionSql = REAL_UUID, docs = REAL_UUID, driftOneOf, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
+function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UUID, usersTeamsSql = REAL_UUID, retentionSql = REAL_UUID, docs = REAL_UUID, driftOneOf, driftOneUsersTeamsCheck = false, constantName = "SYSTEM_TENANT_ID", omit = [] } = {}) {
   root = mkdtempSync(join(tmpdir(), "sentinel-parity-"));
   roots.push(root);
 
@@ -101,6 +103,21 @@ function makeRoot({ constant = REAL_UUID, rowSql = REAL_UUID, checkSql = REAL_UU
       "utf8",
     );
   }
+  if (!omit.includes("usersTeams")) {
+    mkdirSync(join(root, "prisma/migrations", USERS_TEAMS_DIR), { recursive: true });
+    // TWO occurrences, matching the real site: one CHECK per table, added in one
+    // transaction. `driftOneUsersTeamsCheck` moves only the `teams` one, which is
+    // the state a presence test cannot distinguish from parity.
+    const teamsValue = driftOneUsersTeamsCheck ? OTHER_UUID : usersTeamsSql;
+    writeFileSync(
+      join(root, "prisma/migrations", USERS_TEAMS_DIR, "migration.sql"),
+      `BEGIN;\n` +
+        `ALTER TABLE "teams" ADD CONSTRAINT "teams_not_system_tenant" CHECK ("tenant_id" <> '${teamsValue}'::uuid);\n` +
+        `ALTER TABLE "users" ADD CONSTRAINT "users_not_system_tenant" CHECK ("tenant_id" <> '${usersTeamsSql}'::uuid);\n` +
+        `COMMIT;\n`,
+      "utf8",
+    );
+  }
   if (!omit.includes("retention")) {
     mkdirSync(join(root, "prisma/migrations", RETENTION_DIR), { recursive: true });
     writeFileSync(
@@ -143,7 +160,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     // satisfiable by a gate that refuses unconditionally.
     const r = runGate(makeRoot());
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("5 site(s) in parity");
+    expect(r.stdout).toContain("6 site(s) in parity");
   });
 
   it("REDS when the constant moves away from both SQL sites", () => {
@@ -154,6 +171,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain(ROW_DIR);
     expect(r.stderr).toContain(CHECK_DIR);
+    expect(r.stderr).toContain(USERS_TEAMS_DIR);
     expect(r.stderr).toContain(RETENTION_DIR);
     // BOTH values, not just the constant's: "the CONSTANT is what moves" is
     // useless without saying what to move it to, and the other value lives in a
@@ -181,6 +199,36 @@ describe("check-sentinel-tenant-literal-parity", () => {
     expect(r.stderr).not.toContain(CHECK_DIR);
     expect(r.stderr).toContain(OTHER_UUID);
     expect(r.stderr).toContain(REAL_UUID);
+  });
+
+  it("REDS when only the users/teams CHECK literals move, naming that site alone", () => {
+    const r = runGate(makeRoot({ usersTeamsSql: OTHER_UUID }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(USERS_TEAMS_DIR);
+    expect(r.stderr).not.toContain(CHECK_DIR);
+    expect(r.stderr).not.toContain(ROW_DIR);
+    expect(r.stderr).toContain(OTHER_UUID);
+    expect(r.stderr).toContain(REAL_UUID);
+  });
+
+  it("REDS when ONE of the users/teams migration's two CHECKs drifts and the other does not", () => {
+    // The reason that site's manifest entry carries `occurrences: 2`. The two
+    // CHECKs are added in one transaction and must move together; a presence
+    // test stays green while `teams` points at a tenant nothing writes to and
+    // `users` is still guarded, which is the half-open state the pair exists to
+    // make impossible.
+    const r = runGate(makeRoot({ driftOneUsersTeamsCheck: true }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain(USERS_TEAMS_DIR);
+    expect(r.stderr).toContain("1 time(s), expected 2");
+    expect(r.stderr).not.toContain(CHECK_DIR);
+  });
+
+  it("REFUSES when the users/teams SQL site is missing, rather than skipping it", () => {
+    const r = runGate(makeRoot({ omit: ["usersTeams"] }));
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("MISSING");
+    expect(r.stderr).toContain(USERS_TEAMS_DIR.replace(/^\d+/, ""));
   });
 
   it("REFUSES when the constant declaration is absent, rather than reporting parity", () => {
@@ -245,7 +293,7 @@ describe("check-sentinel-tenant-literal-parity", () => {
     // The floor. With every site gone the mismatch list still has entries, but
     // `checked` is 0 — and a gate that reported OK on an empty examination
     // would be green precisely when it had checked nothing.
-    const r = runGate(makeRoot({ omit: ["row", "check", "retention", ...DOC_FILES] }));
+    const r = runGate(makeRoot({ omit: ["row", "check", "usersTeams", "retention", ...DOC_FILES] }));
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("examined 0 named sites");
   });

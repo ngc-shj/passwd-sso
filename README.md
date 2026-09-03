@@ -313,7 +313,7 @@ See [Admin Token Setup](docs/operations/admin-tokens.md) for token minting and r
 
 ### IdP domain changed / tenant locked out
 
-Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **four** causes, and only the first two are fixed with this tool:
+Symptom: after an IdP starts asserting a different tenant claim (a Google Workspace domain rename, a SAML attribute change), existing tenant members are denied at sign-in, visible in `audit_logs` as `AUTH_LOGIN_FAILURE`. There are **five** causes, and only the first two are fixed with this tool:
 
 | `metadata.reason` | claim fields (`metadata.claim` / `metadata.claimRefusal`) | Cause | Remedy |
 |---|---|---|---|
@@ -321,6 +321,7 @@ Symptom: after an IdP starts asserting a different tenant claim (a Google Worksp
 | `tenant_mismatch` | the claim | registered to a *different* tenant | investigate the user, or `add --from` to move the claim |
 | `tenant_mismatch` | `claimRefusal` set (`claim` absent) | the IdP's asserted value was **refused at ingest** — an unpaired surrogate, a control/bidi/zero-width character, over 255 characters, or whitespace the storage layer cannot round-trip | **fix it at the IdP.** `add` cannot register the value, so the tool cannot repair this one; `claimRefusal` names the rule the value broke |
 | `tenant_mismatch` | `claimRefusal` set **and** `claim` present | the asserted value passed ingest but **cannot be stored** — it is not printable ASCII, which the registry's `CHECK` constraint rejects (see `preflight` below) | **fix it at the IdP**, or register an ASCII claim for the tenant. `add` refuses this value on the same predicate |
+| `tenant_claim_system_tenant` | the claim | the claim **is** registered — to the sentinel tenant (`__system__`), which encodes "no owning tenant" and must hold no accounts, so a `CHECK` refuses the sign-in's write. No operator command creates this state: `add` refuses a sentinel target, so such a row was written out of band | re-point the claim at a real tenant. `unmapped` lists it under *Unregistered claims*; run the `tenant-domain add --tenant <ref> --domain <claim> --by <label>` it names, and `add` will refuse and print back the exact `--from <current-owner>` command to repeat with |
 
 Key the last two cases on the **field**, not on the text: `claimRefusal` is written only by this deployment's own refusal adjudicators, whereas anything inside `claim` was supplied by the IdP and can be made to look like whatever the reader is told to trust. `unmapped` reports the four causes under three headings — the two `claimRefusal` cases share one, because they share a remedy. Diagnose and recover offline with `scripts/tenant-domain.ts` (`npm run tenant-domain`) — it needs `MIGRATION_DATABASE_URL` (a privileged connection string; the app's own `DATABASE_URL` role cannot bypass the table's row-level security):
 

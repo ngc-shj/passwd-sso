@@ -6,6 +6,7 @@ import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
+import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
@@ -382,6 +383,31 @@ export function createCustomAdapter(): Adapter {
             // SYSTEM_TENANT_ID — so what this buys is attribution, not
             // existence (see TenantClaimUnusableError.tenantId).
             tenantId: error.tenantId,
+          });
+        }
+        // The other refusal this catch can see, and it is not one this process
+        // decided: the claim RESOLVED, to SYSTEM_TENANT_ID, and
+        // `users_not_system_tenant` refused the `user.create` above — before
+        // the `tenantMember.create` below it, which is why the users CHECK is
+        // the one that fires on a first-ever sign-in and not the membership
+        // one. Reachable only out of band (`tenant-domain add` refuses a
+        // sentinel target), so this is the observability half: without it the
+        // throw reaches Auth.js as an opaque AdapterError, no
+        // AUTH_LOGIN_FAILURE row is written at all — the signIn callback
+        // returns early when no user row exists yet — and `tenant-domain
+        // unmapped` shows nothing.
+        else if (classifySentinelTenantConstraint(error).kind === "sentinel") {
+          await emitAuthLoginFailure({
+            email: user.email ?? null,
+            provider: toAuditProvider(sessionMetaStorage.getStore()?.provider),
+            reason: CLAIM_REFUSAL_REASON.claim_system_tenant,
+            // Required, not decorative: `tenant-domain unmapped` drops a row
+            // carrying neither `claim` nor `claimRefusal`, and a CHECK
+            // violation produces no `ClaimRefusalDiagnosis` to carry.
+            claim: pendingClaim,
+            // No tenantId to bind to — there is no user row yet, so this lands
+            // under SYSTEM_TENANT_ID, the same limit `claim_malformed` has on
+            // this path and for the same reason.
           });
         }
         throw error;

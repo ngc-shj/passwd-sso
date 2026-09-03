@@ -40,12 +40,14 @@ vi.mock("@/lib/auth/policy/ip-access", () => ({
 }));
 
 import { prisma } from "@/lib/prisma";
+import type { NextRequest } from "next/server";
 import {
   getTeamPolicy,
   assertPolicyAllowsExport,
   assertPolicyAllowsSharing,
   assertPolicySharePassword,
   checkTeamAccessRestriction,
+  withTeamIpRestriction,
   PolicyViolationError,
   type TeamPolicyData,
 } from "./team-policy";
@@ -294,5 +296,90 @@ describe("checkTeamAccessRestriction — inherit fail-closed on null tenant", ()
     await expect(
       checkTeamAccessRestriction("team-1", "5.6.7.8", "user-xyz", inheritOnlyPolicy),
     ).resolves.toBeUndefined();
+  });
+});
+
+// C1 (CF11) — withTeamIpRestriction's null-clientIp branch. Pre-C1, an
+// unparseable IP reached checkTeamAccessRestriction and emitted an
+// ACCESS_DENIED row before the caller ever saw the throw; the old inline
+// `throw new PolicyViolationError(...)` for teamAllowedCidrs.length > 0 lost
+// that row. C1 delegates instead, so this arm now emits the same as the
+// sibling inheritTenantCidrs arm below it. Matrix over
+// (teamAllowedCidrs, inheritTenantCidrs, tenantAllowedCidrs); each
+// zero-emit arm is paired with a `.resolves` assertion — a positive control
+// that the call actually returned rather than an early throw silently
+// starving the mock of a call.
+describe("withTeamIpRestriction — audit-emit matrix (teamAllowedCidrs, inheritTenantCidrs, tenantAllowedCidrs)", () => {
+  const request = {} as NextRequest; // extractClientIp is module-mocked; the request value is never read.
+
+  beforeEach(async () => {
+    mockLogAudit.mockReset();
+    mockFindUnique.mockReset();
+    const { extractClientIp } = await import("@/lib/auth/policy/ip-access");
+    (extractClientIp as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    const { resolveTeamTenantId } = await import("@/lib/tenant-context");
+    (resolveTeamTenantId as ReturnType<typeof vi.fn>).mockReset();
+    (prisma.tenant.findUnique as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  it("(non-empty teamAllowedCidrs, *, *) -> 1 emit: delegates instead of throwing inline", async () => {
+    mockFindUnique.mockResolvedValue({
+      ...fullPolicy,
+      inheritTenantCidrs: false,
+      teamAllowedCidrs: ["192.168.0.0/24"],
+    });
+    await expect(
+      withTeamIpRestriction("team-1", request, "user-xyz"),
+    ).rejects.toThrow(/Access denied/);
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ teamId: "team-1", userId: "user-xyz" }),
+    );
+  });
+
+  it("(empty teamAllowedCidrs, inheritTenantCidrs=false, *) -> 0 emit, call resolves", async () => {
+    mockFindUnique.mockResolvedValue({
+      ...fullPolicy,
+      inheritTenantCidrs: false,
+      teamAllowedCidrs: [],
+    });
+    await expect(
+      withTeamIpRestriction("team-1", request, "user-xyz"),
+    ).resolves.toBeUndefined();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("(empty teamAllowedCidrs, inheritTenantCidrs=true, tenant has no CIDRs) -> 0 emit, call resolves", async () => {
+    mockFindUnique.mockResolvedValue({
+      ...fullPolicy,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
+    });
+    const { resolveTeamTenantId } = await import("@/lib/tenant-context");
+    (resolveTeamTenantId as ReturnType<typeof vi.fn>).mockResolvedValueOnce("tenant-x");
+    (prisma.tenant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      allowedCidrs: [],
+    });
+    await expect(
+      withTeamIpRestriction("team-1", request, "user-xyz"),
+    ).resolves.toBeUndefined();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("(empty teamAllowedCidrs, inheritTenantCidrs=true, tenant has CIDRs) -> 1 emit via the inherit branch", async () => {
+    mockFindUnique.mockResolvedValue({
+      ...fullPolicy,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
+    });
+    const { resolveTeamTenantId } = await import("@/lib/tenant-context");
+    (resolveTeamTenantId as ReturnType<typeof vi.fn>).mockResolvedValueOnce("tenant-x");
+    (prisma.tenant.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      allowedCidrs: ["10.0.0.0/8"],
+    });
+    await expect(
+      withTeamIpRestriction("team-1", request, "user-xyz"),
+    ).rejects.toThrow(/Access denied/);
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
   });
 });

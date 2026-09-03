@@ -31,10 +31,12 @@ const {
   // RECORDING vi.fn with a mockReturnValueOnce chain in route-creation
   // order: first call -> token limiter, second call -> ip limiter.
   // mockTokenLimiterCheck is kept as an alias to mockTokenLimiterCheck so
-  // every PRE-EXISTING test in this file (which only ever exercises the
-  // client-scoped token limiter — createRequest() sets no client IP, so
-  // the `if (ip)` gate is never entered) continues to compile/pass
-  // unchanged.
+  // every PRE-EXISTING test in this file (which only ever exercised the
+  // client-scoped token limiter — createRequest() sets no client IP)
+  // continues to compile/pass unchanged. Post-C1 (CF11) the `if (ip)` guard
+  // around the ip limiter is gone, so it now runs on every request
+  // regardless of IP; mockIpLimiterCheck defaults to {allowed:true} below so
+  // those pre-existing tests are unaffected by it also being consulted.
   const mockTokenLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
   const mockIpLimiterCheck = vi.fn().mockResolvedValue({ allowed: true });
   return {
@@ -242,6 +244,39 @@ describe("POST /api/mcp/token", () => {
     );
   });
 
+  // C1 (CF11): the `if (ip)` guard around the ip limiter is removed, so a
+  // request with no resolvable client IP (createRequest() sets none, and
+  // ip-access is unmocked here) is still consulted against the limiter —
+  // under the shared `rateLimitKeyFromIp(ip ?? "unknown")` bucket, matching
+  // the `?? "unknown"` idiom already used at mcp/authorize and mcp/register
+  // — rather than skipped entirely (the pre-C1 fail-open).
+  it("null client IP still hits the ip limiter under the 'unknown' bucket, and a legitimate exchange still succeeds", async () => {
+    mockExchangeCodeForToken.mockResolvedValue({
+      ok: true,
+      data: {
+        accessToken: "mcp_access_token_abc",
+        tokenType: "Bearer",
+        expiresIn: 3600,
+        scope: "credentials:list",
+        tokenId: "token-id-123",
+        clientDbId: "client-uuid-123",
+        tenantId: "tenant-uuid-123",
+        userId: "user-uuid-123",
+        serviceAccountId: null,
+      },
+    });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(mockIpLimiterCheck).toHaveBeenCalledWith("rl:mcp:token:ip:unknown");
+    expect(status).toBe(200);
+    expect(json.access_token).toBe("mcp_access_token_abc");
+  });
+
   it("returns 400 for invalid grant_type", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/token", {
       body: { ...VALID_BODY, grant_type: "client_credentials" },
@@ -283,10 +318,12 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    // Rejected at the boundary before either rate-limiter call. (The IP-scoped
-    // check is skipped here because the test request carries no client IP, so
-    // the limiter must not fire at all — the client-scoped
-    // `mcp:token:<client_id>` key is never built from the oversized value.)
+    // Rejected at the client_id boundary before the CLIENT-scoped limiter's
+    // key is built from it. (The IP-scoped limiter runs unconditionally
+    // ahead of this branch post-C1 and defaults to {allowed:true} in
+    // beforeEach — it is not what this assertion is about; only
+    // `mcp:token:<client_id>`, keyed off the oversized value, must never be
+    // reached.)
     expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeCodeForToken).not.toHaveBeenCalled();
   });
@@ -529,10 +566,10 @@ describe("POST /api/mcp/token", () => {
   });
 
   it("fails closed (503, no mutation) when Redis is unavailable — ip", async () => {
-    // Case A (plan case map): the IP-scoped limiter (route.ts:68, checked
-    // BEFORE grant-type dispatch) errors. Requires a client IP on the
-    // request so the `if (ip)` gate is entered — existing tests in this file
-    // never set one, so this is the only case that exercises the ip limiter.
+    // Case A (plan case map): the IP-scoped limiter (route.ts:66-67, checked
+    // BEFORE grant-type dispatch) errors. C1 (CF11) removed the `if (ip)`
+    // guard, so the limiter now runs unconditionally — a request with a
+    // resolvable client IP still exercises it identically to one without.
     // The oauth envelope check confirms the production checkRateLimitOrFail
     // mapping stayed in path.
     await assertRedisFailClosed({
@@ -554,9 +591,9 @@ describe("POST /api/mcp/token", () => {
   it("fails closed (503, no mutation) when Redis is unavailable — token (authorization_code)", async () => {
     // Case B (plan case map): ip limiter allows, token limiter (route.ts:122)
     // errors inside the authorization_code branch. No client IP on the
-    // request, so the ip gate is skipped entirely (mcpIpRateLimiter.check
-    // is not even reached) — arranging it to allow is defensive parity with
-    // the plan's "arrange the sibling ip check {allowed:true}" instruction.
+    // request, but post-C1 the ip limiter still runs (keyed on the "unknown"
+    // bucket) — arranging it to allow is required, not merely defensive, now
+    // that the `if (ip)` guard is gone.
     mockIpLimiterCheck.mockResolvedValue({ allowed: true });
     await assertRedisFailClosed({
       invoke: () => POST(createRequest("POST", "http://localhost/api/mcp/token", { body: VALID_BODY })),
@@ -773,8 +810,8 @@ describe("POST /api/mcp/token", () => {
   it("fails closed (503, no mutation) when Redis is unavailable — token (refresh_token)", async () => {
     // Case C (plan case map): ip limiter allows, token limiter (route.ts:237)
     // errors inside the refresh_token branch. No client IP on the request,
-    // so the ip gate is skipped — arranging it to allow is defensive parity
-    // with the plan's "arrange the sibling ip check {allowed:true}" instruction.
+    // but post-C1 the ip limiter still runs — arranging it to allow is
+    // required so the sibling ip check does not itself fail the request first.
     mockIpLimiterCheck.mockResolvedValue({ allowed: true });
     await assertRedisFailClosed({
       invoke: () =>
@@ -844,10 +881,12 @@ describe("POST /api/mcp/token", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("invalid_request");
-    // Rejected at the boundary before any rate-limiter call. (The IP-scoped
-    // check is skipped here because the test request carries no client IP, so
-    // the limiter must not fire at all — the client-scoped
-    // `mcp:token:<client_id>` key is never built from the oversized value.)
+    // Rejected at the client_id boundary before the CLIENT-scoped limiter's
+    // key is built from it. (The IP-scoped limiter runs unconditionally
+    // ahead of this branch post-C1 and defaults to {allowed:true} in
+    // beforeEach — it is not what this assertion is about; only
+    // `mcp:token:<client_id>`, keyed off the oversized value, must never be
+    // reached.)
     expect(mockTokenLimiterCheck).not.toHaveBeenCalled();
     expect(mockExchangeRefreshToken).not.toHaveBeenCalled();
     expect(mockLogAudit).not.toHaveBeenCalled();

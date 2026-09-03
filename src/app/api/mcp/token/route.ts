@@ -62,30 +62,30 @@ async function handlePOST(req: NextRequest) {
 
   const grantType = body.grant_type;
 
-  // IP rate limit applies to all grant types
+  // IP rate limit applies to all grant types. A null IP (unparseable/unknown)
+  // still hits the limiter under a shared "unknown" bucket — skipping it would
+  // let a spoofed or missing IP bypass rate limiting entirely.
   const ip = extractClientIp(req);
-  if (ip) {
-    const blocked = await checkRateLimitOrFail({
-      req,
-      limiter: ipRateLimiter,
-      key: `rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`,
-      scope: "mcp.token_ip",
-      userId: null,
-      envelope: "oauth",
-      rateLimitedEnvelope: (retryAfterMs) =>
-        NextResponse.json(
-          { error: "slow_down" },
-          {
-            status: 429,
-            headers:
-              retryAfterMs != null && retryAfterMs > 0
-                ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
-                : {},
-          },
-        ),
-    });
-    if (blocked) return blocked;
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: ipRateLimiter,
+    key: `rl:mcp:token:ip:${rateLimitKeyFromIp(ip ?? "unknown")}`,
+    scope: "mcp.token_ip",
+    userId: null,
+    envelope: "oauth",
+    rateLimitedEnvelope: (retryAfterMs) =>
+      NextResponse.json(
+        { error: "slow_down" },
+        {
+          status: 429,
+          headers:
+            retryAfterMs != null && retryAfterMs > 0
+              ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
+              : {},
+        },
+      ),
+  });
+  if (blocked) return blocked;
 
   if (grantType === "authorization_code") {
     const { code, redirect_uri, client_id, client_secret, code_verifier } = body;

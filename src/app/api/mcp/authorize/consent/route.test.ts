@@ -127,6 +127,8 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
 import { POST } from "@/app/api/mcp/authorize/consent/route";
 import { Prisma } from "@prisma/client";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
+import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
 
@@ -167,11 +169,16 @@ function createFormRequest(url: string, fields: Record<string, string>, headers:
   });
 }
 
+// 43 chars — the real base64url(SHA-256(verifier)) length (RFC 7636 §4.2),
+// and the floor PKCE_CODE_CHALLENGE_SCHEMA (C4/CF15) now enforces at this
+// route. A shorter placeholder (as this fixture used to be) is rejected.
+const VALID_CODE_CHALLENGE = "A".repeat(43);
+
 const VALID_FORM_FIELDS = {
   client_id: "mcpc_testclient",
   redirect_uri: "https://example.com/callback",
   scope: "credentials:list credentials:use",
-  code_challenge: "test-challenge-value-base64url",
+  code_challenge: VALID_CODE_CHALLENGE,
   code_challenge_method: "S256",
   state: "random-state-value",
 };
@@ -364,11 +371,31 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("access_denied");
   });
 
-  it("returns 302 with error=invalid_scope when no granted scopes overlap", async () => {
-    // Request a scope not in client's allowedScopes
+  // C4: the client-independent gate refuses a scope set that cannot overlap
+  // MCP_SCOPES at all, BEFORE any client is looked up — "admin:delete" is not
+  // a member of MCP_SCOPES, so this is that gate, not the residual
+  // (post-claim) invalid_scope arm below.
+  it("returns 400 invalid_scope when no requested scope is a member of MCP_SCOPES (client-independent gate, before any client lookup)", async () => {
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
       { ...VALID_FORM_FIELDS, scope: "admin:delete" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_scope");
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  // The residual arm: "vault:status" IS a member of MCP_SCOPES (passes the
+  // client-independent gate above) but is NOT in VALID_CLIENT.allowedScopes,
+  // so grantedScopes is empty only after the post-claim intersection —
+  // I4.1's one stated exception, because it reads effectiveClient.
+  it("returns 302 with error=invalid_scope when the requested scope is MCP_SCOPES-valid but not in this client's allowlist (residual arm)", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: "vault:status" },
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 
@@ -380,16 +407,203 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(url.searchParams.get("state")).toBe("random-state-value");
   });
 
-  it("returns 400 when code_challenge_method is not S256", async () => {
+  it("residual invalid_scope (after claim) still consumes exactly one client slot — the invariant's one stated exception", async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockTxFindFirst.mockResolvedValueOnce(null);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: "vault:status" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const url = new URL(res.headers.get("location") ?? "");
+    expect(url.searchParams.get("error")).toBe("invalid_scope");
+    // Exactly one slot consumed: the CAS claim ran once — unlike the
+    // pre-claim scope=openid-only refusal, which never reaches it at all.
+    expect(mockMcpClientUpdateMany).toHaveBeenCalledTimes(1);
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // CFP2: the consent-time S256 check is removed (one adjudicator) —
+  // enforcement is now solely oauth-server.ts's exchangeAuthorizationCode,
+  // unconditional at redemption time. This pins that the consent route no
+  // longer refuses a non-S256 method itself; it mints a code and forwards the
+  // method through unchanged.
+  it("passes a non-S256 code_challenge_method through to createAuthorizationCode (CFP2: enforcement moved to token exchange)", async () => {
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
       { ...VALID_FORM_FIELDS, code_challenge_method: "plain" },
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 
+    expect(res.status).toBe(302);
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
+      expect.objectContaining({ codeChallengeMethod: "plain" }),
+    );
+  });
+
+  // ── C4 (CF15): PKCE code_challenge validated at this ingress ─────────────
+
+  it("returns 400 invalid_request when code_challenge fails PKCE_CODE_CHALLENGE_SCHEMA, before any client lookup", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, code_challenge: "too-short" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("invalid_request");
+    expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  it("deny + stale step-up bounces to the authorize GET without validating code_challenge, and writes no MCP_CONSENT_DENY row", async () => {
+    // The deny arm is exempt from the PKCE gate (action === "deny"), so a
+    // malformed code_challenge rides along unvalidated in the stale-session
+    // echo — the authorize GET is what refuses it (see the co-located
+    // GET route.test.ts), and MCP_CONSENT_DENY is never written because the
+    // deny arm itself never runs on a stale session.
+    mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
+      { error: "SESSION_STEP_UP_REQUIRED" },
+      { status: 403 },
+    ));
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      {
+        action: "deny",
+        client_id: "mcpc_testclient",
+        redirect_uri: "https://example.com/callback",
+        state: "random-state-value",
+        code_challenge: "too-short",
+      },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(303);
+    const url = new URL(res.headers.get("location") ?? "");
+    expect(url.pathname).toBe("/api/mcp/authorize");
+    expect(url.searchParams.get("code_challenge")).toBe("too-short");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // ── C4: scope cap + client-independent gate (both at the same ingress) ───
+
+  it("accepts the full MCP_SCOPES set as requested scope (at, not over, the cap)", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: MCP_SCOPES.join(" ") },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("code=");
+  });
+
+  it("accepts MCP_SCOPES plus one standard OAuth scope", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: `${MCP_SCOPES.join(" ")} openid` },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("code=");
+  });
+
+  it("accepts exactly MCP_SCOPES + all 3 standard OAuth extras (AT the cap)", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: `${MCP_SCOPES.join(" ")} openid profile offline_access` },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("code=");
+  });
+
+  it("rejects one scope token over the cap (MCP_SCOPES + 3 standard extras) with 400 and no slot consumed", async () => {
+    // Same MCP scope repeated past the cap — the cap counts RAW tokens, no
+    // dedup (SC's own withdrawal ground: after the cap, grantedScopes is
+    // already a subset of a 9-member set, so a dedup criterion could never
+    // red on removal).
+    const overCap = Array(MCP_SCOPES.length + 4).fill(MCP_SCOPES[0]).join(" ");
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: overCap },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_request");
+    // Before ANY client interaction — proves no slot could have been consumed.
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("refuses scope=openid alone BEFORE the claim, asserted by client count (no DCR claim attempted)", async () => {
+    // Note: no client fixture is even set up as unclaimed-DCR here — the
+    // point is that the gate refuses before the client lookup runs at all.
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      { ...VALID_FORM_FIELDS, scope: "openid" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_scope");
+    // By client count: the claim's count-check and CAS update never ran, so
+    // zero clients were claimed — not merely "the response looks refused".
+    expect(mockMcpClientCount).not.toHaveBeenCalled();
+    expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  // ── C4: pre-mint gate ordering (passkey gate is now BEFORE the claim) ────
+
+  it("a passkey-enforced user with no passkey is refused BEFORE any DCR client is claimed, asserted by client count", async () => {
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: true,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+    });
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const url = new URL(res.headers.get("location") ?? "");
+    expect(url.searchParams.get("error")).toBe("access_denied");
+    // By client count: the claim's count-check and CAS update never ran.
+    expect(mockMcpClientCount).not.toHaveBeenCalled();
+    expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  // ── C4 acceptance 7: all three PKCE ingress points share ONE schema object ──
+
+  it("consent POST validates code_challenge through the shared PKCE_CODE_CHALLENGE_SCHEMA object (reference identity)", async () => {
+    const spy = vi.spyOn(PKCE_CODE_CHALLENGE_SCHEMA, "safeParse");
+    try {
+      const req = createFormRequest(
+        "http://localhost/api/mcp/authorize/consent",
+        VALID_FORM_FIELDS,
+      );
+      await POST(req as unknown as import("next/server").NextRequest);
+      // If this route held its own copy of the schema (same min/max/regex,
+      // different object) rather than importing this exported binding, the
+      // spy on the SHARED object would never fire.
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("calls createAuthorizationCode with correct params", async () => {
@@ -406,7 +620,7 @@ describe("POST /api/mcp/authorize/consent", () => {
         tenantId: VALID_USER.tenantId,
         userId: VALID_SESSION.user.id,
         redirectUri: "https://example.com/callback",
-        codeChallenge: "test-challenge-value-base64url",
+        codeChallenge: VALID_CODE_CHALLENGE,
         scope: expect.stringContaining("credentials:list"),
       }),
     );

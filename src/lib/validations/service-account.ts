@@ -23,7 +23,8 @@ export const serviceAccountUpdateSchema = z.object({
 
 export const saTokenCreateSchema = z.object({
   name: z.string().min(1).max(NAME_MAX_LENGTH),
-  scope: z.array(z.enum(SA_TOKEN_SCOPES)).min(1),
+  scope: z.array(z.enum(SA_TOKEN_SCOPES)).min(1)
+    .transform((v) => [...new Set(v)]),
   expiresAt: z.coerce.date().refine(
     (d) => {
       const maxDate = new Date();

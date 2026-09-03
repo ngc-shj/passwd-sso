@@ -12,6 +12,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { MCP_CLIENT_ID_MAX_LENGTH } from "@/lib/constants/auth/mcp";
+import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import {
   derivePasskeyState,
   passkeyEnforcementBlocks,
@@ -128,7 +129,12 @@ export async function GET(req: NextRequest) {
   const codeChallengeMethod = sp.get("code_challenge_method") ?? "S256";
 
   // Validate required params before redirecting to consent page
-  if (!clientId || !redirectUri || responseType !== "code" || !codeChallenge) {
+  if (!clientId || !redirectUri || responseType !== "code") {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  // C4 (CF15): shared schema, SSoT with the other two PKCE ingress points
+  // (mcp/authorize/consent POST, mobile/authorize GET) — was presence-only.
+  if (!PKCE_CODE_CHALLENGE_SCHEMA.safeParse(codeChallenge ?? "").success) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   if (codeChallengeMethod !== "S256") {

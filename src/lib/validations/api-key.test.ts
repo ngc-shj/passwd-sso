@@ -34,6 +34,21 @@ describe("apiKeyCreateSchema", () => {
       scope: [...API_KEY_SCOPES],
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scope).toHaveLength(API_KEY_SCOPES.length);
+    }
+  });
+
+  it("dedups a duplicate scope, storing each value once", () => {
+    const result = apiKeyCreateSchema.safeParse({
+      ...validInput(),
+      scope: [...API_KEY_SCOPES, API_KEY_SCOPES[0]],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scope).toHaveLength(API_KEY_SCOPES.length);
+      expect(new Set(result.data.scope).size).toBe(API_KEY_SCOPES.length);
+    }
   });
 
   it("coerces an ISO datetime string into a Date", () => {

@@ -59,6 +59,19 @@ Every number ships its command, run on `1628b97fe`. **The only place a number ma
 | `MCP_SCOPES` cardinality | `node -e` over `src/lib/constants/auth/mcp.ts` | **9**, joining to ~140 characters |
 | sentinel rows, dev, 2026-09-03 | C2 pre-flight | `teams`/`users`/`tenant_members` **0**; `audit_logs` **5**, `audit_outbox` **5**, `tenant_claims` **0** |
 
+**Phase 2 additions.** Measured on `b4fa914f2`, same rule: no number outside this table.
+
+| claim | command | value |
+|---|---|---|
+| sentinel rows, dev, 2026-09-04 (C2 pre-flight, re-run) | `docker compose exec -T db psql -U passwd_user -d passwd_sso -At -c "SELECT count(*) FROM <t> WHERE tenant_id = '…-002'::uuid"` over the six tables | unchanged: `teams`/`users`/`tenant_members` **0**, `audit_logs` **5**, `audit_outbox` **5**, `tenant_claims` **0** |
+| `app.tenant_id` policy readers that cast | `grep -rhoE "current_setting\('app\.tenant_id'[^)]*\)(::uuid)?" prisma/migrations/*/migration.sql \| sort \| uniq -c` | **112** cast to `uuid`, 78 read raw |
+| a non-canonical `app.tenant_id` is already fatal | `docker compose exec -T db psql -U passwd_app -d passwd_sso -c "SELECT set_config('app.tenant_id','tenant-abc',true); SELECT count(*) FROM audit_logs;"` | `ERROR: invalid input syntax for type uuid: "tenant-abc"` — so C2's canonical-form arm denies nothing that worked; it moves an existing failure to the context open. The nine `tenant-rls.test.ts` fixtures that passed non-UUID strings passed only because Prisma is mocked |
+| a sentinel RLS context returns the unattributable rows | same, with the sentinel as the value | **5** rows — the exposure C2 closes, observed rather than argued |
+| CI gates vs `scripts/pre-pr.sh` | `bash ~/.claude/hooks/extract-ci-checks.sh`, each key grepped against `scripts/pre-pr.sh` | **15** gates, **11** covered, **4** gaps — exactly N3's four |
+| Prisma code for a 23514, by path | probe raising both, `npx tsx` | ORM (`user.create`) **P2039**; raw (`$executeRawUnsafe`) **P2010**. Both nest at `meta.driverAdapterError.cause`; that cause carries **no `constraint` field**, so the name is only in the message text |
+| C5 criterion 4's sizes — **the plan's "500 before, 200 after" was wrong** | computed over `SA_TOKEN_SCOPES` and confirmed in the integration run | full legitimate set (**10** scopes) joins to **158** characters against `VarChar(1024)`; 200 repetitions of `passwords:read` join to **2999**, which overflows it; after `parseSaTokenScopes`' dedup, **14** |
+| CFP1 — the `unmapped` chain, measured | rolled-back probe seeding three `audit_logs` rows and running the query's own predicates with `$3` spelled both ways | with today's `$3`: **1** of 3 returned (the control only). With the new reason registered: **2** of 3 — the row carrying the new reason **without** `metadata.claim` is dropped by `claim IS NOT NULL OR claim_refusal IS NOT NULL`. Both halves of CFP1 confirmed |
+
 The last row is why C3's fixture cannot use absolute-zero preconditions: sentinel-scoped audit rows are the **normal steady state** of a live deployment — the sentinel is what unattributable emits FK to.
 
 ## Contracts
@@ -323,3 +336,92 @@ Phase 1 exited by decision rather than by saturation; these remain open and Phas
 - **CFP2 — C4's `:141`/`:145` redundancy is undecided.** Removing them gives one adjudicator; keeping them gives two spellings of one rule (R48). *Anti-Deferral: acceptable risk. Worst case — the two drift. Likelihood — low. Cost — one line either way. What would settle it: pick in Phase 2 and record which.*
 - **CFP3 — `/api/mcp/token`'s allow arm names a capacity property no harness measures.** *Anti-Deferral: acceptable risk. Worst case — C1 converts a fail-open into a fleet-wide shared bucket and no test can red on the limit being too low. Likelihood — moderate. Cost — assert the bucket identity and drive a real limiter to `limit`/`limit+1`, with the number read from the limiter's configuration. What would settle it: that pair, plus recording the configured number as a judgement rather than a test.*
 - **CFP4 — C1's `isIpInCidr` normalization is a change to a shipped policy primitive.** It is the right fix and it widens what the policy accepts on the raw domain. *Anti-Deferral: acceptable risk. Worst case — a tenant whose allowlist relied on the raw-form rejection sees a request allowed. Likelihood — very low; the rejected forms are bracketed and whitespace-padded spellings of addresses the tenant already listed. Cost — the parity criterion (C1 acceptance 4). What would settle it: that criterion executed over both a v4 and a v6 CIDR.*
+
+## Implementation Checklist
+
+Authored in Phase 2 Step 2-1 from the impact analysis, on `b4fa914f2`. Separate
+artifact from the Carried-Forward Plan Findings above; Phase 3 reads this as the
+set of files that must appear in the diff.
+
+### Files to modify, by contract
+
+| Contract | File | What |
+|---|---|---|
+| C1 | `src/lib/auth/policy/ip-access.ts` | validate at the five value sources of `extractClientIpFromHeaders`; `normalizedIp` into `parseIpv6` in `isIpInCidr` and `isIpInParsedCidr` |
+| C1 | `src/lib/team/team-policy.ts` | `withTeamIpRestriction`'s `teamAllowedCidrs.length > 0` arm delegates instead of throwing |
+| C1 | `src/app/api/mcp/token/route.ts` | drop the `if (ip)` guard around the IP limiter |
+| C2 | `src/lib/tenant-rls.ts` | case-folded sentinel refusal after the nesting guard; `RlsSentinelContextRefused`; `getLogger()` event |
+| C2 | `prisma/migrations/<ts>_forbid_system_tenant_on_users_and_teams/migration.sql` | two CHECKs in one `BEGIN;…COMMIT;` |
+| C2 | `scripts/checks/check-sentinel-tenant-literal-parity.mjs` | new `SQL_SITES` entry, `occurrences: 2` |
+| C3 | `src/lib/audit/auth-failure.ts` | seventh `AuthLoginFailureReason` member |
+| C3 | `src/lib/audit/auth-failure-mapping.ts` | `claim_system_tenant` as a fourth `ClaimRefusalKind` constituent (table key only); `CLAIM_REFUSAL_REASON` entry; the `Extract<>` at `:104-108` |
+| C3 | `scripts/lib/tenant-domain-buckets.ts` | `UNMAPPED_SELECTED_REASONS`; `REFUSAL_BUCKET`; `bucketOf` widened to a reason→bucket membership test; many-to-one injectivity guard |
+| C3 | `src/auth.ts` | the `Extract<>` on `SignInTenantResult.reason` (`:74`) and on `lookupRefusalReason` (`:171`) |
+| C3 | `src/lib/prisma/prisma-error.ts` | the constraint-name extractor `pgConstraintName`, beside `pgErrorCode`, plus `SQLSTATE_CHECK_VIOLATION` so no SQLSTATE literal is spelled outside this module |
+| C3 | `src/lib/tenant/sentinel-tenant-constraint.ts` (**new**) | `SENTINEL_TENANT_CONSTRAINTS` + `classifySentinelTenantConstraint`, the three-way verdict the two catch sites read |
+| C3 | `src/lib/auth/session/auth-adapter.ts` | recognise the constraint at the `createUser` catch |
+| C3 | `README.md`, `README.ja.md` | the cause table |
+| C4 | `src/lib/validations/common.server.ts` | `PKCE_CODE_CHALLENGE_SCHEMA` |
+| C4 | `src/app/api/mcp/authorize/consent/route.ts` | adopt the schema at `:67`; client-independent scope gate; passkey gate relocated into `(:135, :152)` |
+| C4 | `src/app/api/mcp/authorize/route.ts` | adopt the schema at the `code_challenge` read |
+| C4 | `src/app/api/mobile/authorize/route.ts` | adopt the schema in place of the inline `min(43).max(64).regex(BASE64URL_RE)` |
+| C5 | `src/app/api/tenant/mcp-clients/route.ts`, `.../[id]/route.ts`, `src/app/api/tenant/access-requests/route.ts` (×2), `src/lib/validations/service-account.ts`, `src/lib/validations/api-key.ts`, `src/lib/validations/share.ts` | dedup transform on each scope array |
+| C5 | `src/lib/auth/tokens/service-account-token.ts` | `parseSaTokenScopes` dedups |
+| C6 | `src/lib/audit/audit.ts` | `Buffer.byteLength`; retained `reason` in the marker |
+| C6 | `src/lib/validations/common.server.ts` | `TRUNCATED_REASON_MAX_BYTES` |
+
+### Test trees (R19 — every tree that references a changed symbol)
+
+- `extractClientIp*`: **34** files across three trees. The two that reach the
+  function's own behaviour are the twins named in C1 —
+  `src/lib/auth/policy/ip-access.test.ts` (passes an explicit `socketIp`) and
+  `src/__tests__/lib/ip-access.test.ts` (through `NextRequest`). The other 32 mock it.
+- `isIpInCidr`: the same two twins, and no other tree.
+- `withTenantRls`: **69** files. `src/lib/tenant-rls.test.ts` is the only one
+  testing the function itself; the rest mock it. Four `scripts/__tests__/*.mjs`
+  gates parse its call sites.
+- `buildOutboxPayload` / `METADATA_MAX_BYTES`: `src/lib/audit/audit.test.ts` and
+  the twin `src/__tests__/audit.mocked.test.ts:186` (`expect.any(Number)` →
+  exact byte count).
+- `parseSaTokenScopes`: `src/lib/auth/tokens/service-account-token.test.ts` plus
+  three integration/route trees.
+- `bucketOf` / `CLAIM_REFUSAL_REASON` / `UNMAPPED_SELECTED_REASONS`:
+  `scripts/__tests__/tenant-domain-buckets.test.ts`,
+  `src/lib/audit/auth-failure-mapping.test.ts`,
+  `src/lib/auth/session/auth-adapter.test.ts`,
+  `src/__tests__/db-integration/tenant-claim-cli.integration.test.ts`.
+
+### Shared utilities that MUST be reused (no reimplementation)
+
+- `getLogger()` (`src/lib/logger.ts:64`) — C2's sink. Not `auditLogger`.
+- `pgErrorCode` (`src/lib/prisma/prisma-error.ts`) — C3's extractor goes beside
+  it and follows its enumerate-the-adapter-nestings precedent. No second
+  SQLSTATE reader.
+- `UUID_RE`, `SYSTEM_TENANT_ID` (`src/lib/constants/app.ts`) — C2's comparison.
+- `BASE64URL_RE` (`src/lib/validations/common.server.ts:54`) — C4's schema.
+- `normalizeIp`, `isValidIpAddress` (`ip-access.ts`) — C1 validates with the
+  existing pair; no new parser.
+- `checkTeamAccessRestriction` (`team-policy.ts`) — C1's team path delegates to
+  the shape `:205` already uses.
+- `advisoryXactLock`, `withBypassRls`, `BYPASS_PURPOSE` — unchanged; C4 must not
+  reintroduce a nested `$transaction` in the claim block.
+
+### Derived figures re-run on `b4fa914f2` (Step 2-1 verification)
+
+Every row of the plan's Derived-figures table reproduces: 31 expressions / 28
+files, 9 slice sites at 45-wide, 8 `set_config` sites, `MCP_SCOPES` = 9 joining
+to 142 characters, `check-bound-unknown-ip.mjs` → 13 scopes (12 bound, 1
+exclusion). C2's pre-flight re-run on dev 2026-09-04: `teams` 0, `users` 0,
+`tenant_members` 0, `audit_logs` 5, `audit_outbox` 5, `tenant_claims` 0 —
+unchanged from 2026-09-03, so the migration's precondition holds and the
+baseline-not-zero rule for C3's fixture stands.
+
+### CI gate parity (Step 2-1 item 7)
+
+`extract-ci-checks.sh` yields 15 gate commands. Eleven are covered by
+`scripts/pre-pr.sh` (`typecheck` via its own `npx tsc --noEmit` step). **Four are
+not**, and they are exactly the four N3 already names:
+`scripts/check-state-mutation-centralization.sh`, `licenses:check:strict`,
+`licenses:check:cli:strict`, `licenses:check:ext:strict`. Disposition: run
+manually at Step 2-4 rather than extending `pre-pr.sh` — see the deviation log's
+deferred-parity entry.

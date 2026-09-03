@@ -17,6 +17,7 @@ import {
   type ClaimLookup,
 } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
+import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
@@ -71,7 +72,10 @@ export type SignInTenantResult =
   | { ok: true }
   | {
       ok: false;
-      reason: Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped">;
+      reason: Extract<
+        AuthLoginFailureReason,
+        "tenant_mismatch" | "tenant_claim_unmapped" | "tenant_claim_system_tenant"
+      >;
       tenantId: string | null;
       /** The value the IdP asserted, or null when it asserted nothing usable. */
       claim: string | null;
@@ -168,7 +172,10 @@ function lookupOwnerId(lookup: ClaimLookup): string | null {
  */
 function lookupRefusalReason(
   lookup: Exclude<ClaimLookup, { kind: "tenant" }>,
-): Extract<AuthLoginFailureReason, "tenant_mismatch" | "tenant_claim_unmapped"> {
+): Extract<
+  AuthLoginFailureReason,
+  "tenant_mismatch" | "tenant_claim_unmapped" | "tenant_claim_system_tenant"
+> {
   // The reported production bug: the IdP is sending a claim this deployment has
   // not registered, and registering it IS the remedy. Every other arm reads the
   // shared table through the shared mapping.
@@ -275,6 +282,62 @@ export async function ensureTenantMembershipForSignIn(
   }
   const tenantClaim = extraction.value;
 
+  try {
+    return await claimedTenantMembership(userId, tenantClaim);
+  } catch (error) {
+    // The claim resolved to SYSTEM_TENANT_ID and a CHECK refused the write
+    // (CF13). Two writers below can reach it: the `tenantMember.upsert` on the
+    // no-membership path and the `user.update` on the migration path, raising
+    // `tenant_members_not_system_tenant` and `users_not_system_tenant`
+    // respectively. Turned into a REFUSAL rather than emitted here, so the
+    // single emit at the signIn callback stays the only one — a second emit
+    // site is what round 1 of #812 spent itself on.
+    //
+    // The state is reachable only out of band: `tenant-domain add` refuses a
+    // sentinel target on the resolved id, so no operator command creates the
+    // `tenant_claims` row this needs. What C3 buys is that the denial says so
+    // instead of arriving as `provider_error`.
+    const verdict = classifySentinelTenantConstraint(error);
+    if (verdict.kind === "unnamed_check") {
+      // A check violation whose constraint could not be read — the reachable
+      // cause is a server with a non-English `lc_messages`, where the name is
+      // in the message but not in a shape the extractor matches. Rethrown, so
+      // the callback's catch files it as `provider_error`; logged here because
+      // that reason is indistinguishable from a dozen others and this is the
+      // only place that knows a CHECK was involved.
+      getLogger().error(
+        { error: errorLogFields(error) },
+        "auth.signin.check_violation_constraint_unnamed",
+      );
+      throw error;
+    }
+    if (verdict.kind !== "sentinel") throw error;
+    return {
+      ok: false,
+      reason: CLAIM_REFUSAL_REASON.claim_system_tenant,
+      // Left to logAuditAsync's own resolveTenantId, which reads the user's
+      // `users.tenantId`: for both reachable paths the user already has a
+      // tenant, and that is the tenant an operator can act on. Naming the
+      // sentinel here would instead file the denial under `__system__`, where
+      // the same comment on the extraction branch above explains it is not
+      // wanted when a real tenant is known.
+      tenantId: null,
+      // Load-bearing, and measured. `tenant-domain unmapped` filters
+      // `claim IS NOT NULL OR claim_refusal IS NOT NULL` after the reason
+      // predicate, and this arm carries no `claimRefusal` — a CHECK produces no
+      // `ClaimRefusalDiagnosis`. Without the claim the row passes the reason
+      // filter and is then dropped by that gate, so Objective 3 would be false
+      // while every unit assertion passed.
+      claim: tenantClaim,
+      claimRefusal: null,
+    };
+  }
+}
+
+async function claimedTenantMembership(
+  userId: string,
+  tenantClaim: string,
+): Promise<SignInTenantResult> {
   return withBypassRls(prisma, async (tx) => {
     // Both lookups run inside this single withBypassRls callback, in this
     // order, and neither may move. Resolving before creating is D2: the old

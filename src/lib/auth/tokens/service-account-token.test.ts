@@ -57,6 +57,16 @@ describe("parseSaTokenScopes", () => {
       "tags:read",
     ]);
   });
+
+  it("dedups repeated scopes, storing each value once", () => {
+    // Approval-time adjudicator (C5/CF16): rows written before the ingress
+    // dedup landed can carry a pathological CSV of one scope repeated many
+    // times, which would exceed service_account_tokens.scope's VarChar(1024)
+    // once re-joined. This is what makes such a row approvable again.
+    expect(
+      parseSaTokenScopes(Array(200).fill("passwords:read").join(",")),
+    ).toEqual(["passwords:read"]);
+  });
 });
 
 describe("hasSaTokenScope", () => {

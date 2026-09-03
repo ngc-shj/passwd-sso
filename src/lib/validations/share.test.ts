@@ -168,6 +168,21 @@ describe("createShareLinkSchema (personal)", () => {
       permissions: [...SHARE_PERMISSION_VALUES],
     });
     expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.permissions).toHaveLength(SHARE_PERMISSION_VALUES.length);
+    }
+  });
+
+  it("dedups a duplicate permission, storing each value once", () => {
+    const result = createShareLinkSchema.safeParse({
+      ...valid(),
+      permissions: [...SHARE_PERMISSION_VALUES, SHARE_PERMISSION_VALUES[0]],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.permissions).toHaveLength(SHARE_PERMISSION_VALUES.length);
+      expect(new Set(result.data.permissions).size).toBe(SHARE_PERMISSION_VALUES.length);
+    }
   });
 
   it("rejects permissions containing an unknown value", () => {

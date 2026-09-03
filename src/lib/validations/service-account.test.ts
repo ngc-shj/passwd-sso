@@ -157,10 +157,26 @@ describe("saTokenCreateSchema", () => {
   });
 
   it("accepts every supported scope in one token", () => {
-    expect(
-      saTokenCreateSchema.safeParse({ ...valid(), scope: [...SA_TOKEN_SCOPES] })
-        .success,
-    ).toBe(true);
+    const result = saTokenCreateSchema.safeParse({
+      ...valid(),
+      scope: [...SA_TOKEN_SCOPES],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scope).toHaveLength(SA_TOKEN_SCOPES.length);
+    }
+  });
+
+  it("dedups a duplicate scope, storing each value once", () => {
+    const result = saTokenCreateSchema.safeParse({
+      ...valid(),
+      scope: [...SA_TOKEN_SCOPES, SA_TOKEN_SCOPES[0]],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.scope).toHaveLength(SA_TOKEN_SCOPES.length);
+      expect(new Set(result.data.scope).size).toBe(SA_TOKEN_SCOPES.length);
+    }
   });
 
   it("coerces ISO datetime into Date", () => {

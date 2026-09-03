@@ -103,7 +103,8 @@ export const createShareLinkSchema = z.object({
   entryType: entryTypeSchema.optional(),
   expiresIn: z.enum(EXPIRY_PERIODS),
   maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
-  permissions: z.array(z.enum(SHARE_PERMISSION_VALUES)).optional(),
+  permissions: z.array(z.enum(SHARE_PERMISSION_VALUES))
+    .transform((v) => [...new Set(v)]).optional(),
   requirePassword: z.boolean().optional(),
 }).refine(
   (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),

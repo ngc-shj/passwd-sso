@@ -106,6 +106,12 @@ const VALID_CLIENT = {
   isActive: true,
 };
 
+// 43 chars — the real base64url(SHA-256(verifier)) length (RFC 7636 §4.2).
+// PKCE_CODE_CHALLENGE_SCHEMA (C4/CF15) now validates this at ingress, so a
+// short placeholder like "abc" is rejected before ever reaching the tests
+// below that target a LATER failure mode (inactive client, bad redirect_uri).
+const VALID_CODE_CHALLENGE = "A".repeat(43);
+
 function createRequest(url: string) {
   const req = new Request(url, { method: "GET" }) as Request & {
     nextUrl: URL;
@@ -136,7 +142,7 @@ describe("GET /api/mcp/authorize", () => {
 
   it("redirects authenticated users to consent when checks pass", async () => {
     const req = createRequest(
-      "https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=abc",
+      `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
     );
     const res = await GET(req as unknown as import("next/server").NextRequest);
 
@@ -166,7 +172,7 @@ describe("GET /api/mcp/authorize", () => {
         : { redirectUris: ["https://client.example/callback"], isActive: false };
     });
     const req = createRequest(
-      "https://example.test/api/mcp/authorize?client_id=revoked&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=abc",
+      `https://example.test/api/mcp/authorize?client_id=revoked&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
     );
     const res = await GET(req as unknown as import("next/server").NextRequest);
 
@@ -183,7 +189,7 @@ describe("GET /api/mcp/authorize", () => {
   it("A07-4 T-5b: nonexistent client returns identical envelope to inactive", async () => {
     mockFindFirst.mockResolvedValue(null);
     const req = createRequest(
-      "https://example.test/api/mcp/authorize?client_id=nonexistent&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=abc",
+      `https://example.test/api/mcp/authorize?client_id=nonexistent&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
     );
     const res = await GET(req as unknown as import("next/server").NextRequest);
 
@@ -198,13 +204,47 @@ describe("GET /api/mcp/authorize", () => {
       isActive: true,
     });
     const req = createRequest(
-      "https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://attacker.example/callback&response_type=code&scope=credentials:list&code_challenge=abc",
+      `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://attacker.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
     );
     const res = await GET(req as unknown as import("next/server").NextRequest);
 
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json).toEqual({ error: "invalid_request" });
+  });
+
+  // ── C4 (CF15): PKCE code_challenge validated at this ingress ─────────────
+
+  it("rejects a present but malformed code_challenge (too short) via PKCE_CODE_CHALLENGE_SCHEMA, before any client lookup", async () => {
+    // Exercises the deny-arm hand-off from consent/route.ts: a malformed
+    // code_challenge that rode through the consent route's stale-session echo
+    // unvalidated is refused HERE, on the authorize GET (the third ingress).
+    const req = createRequest(
+      "https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=too-short",
+    );
+    const res = await GET(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json).toEqual({ error: "invalid_request" });
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  it("validates code_challenge through the shared PKCE_CODE_CHALLENGE_SCHEMA object (reference identity)", async () => {
+    const { PKCE_CODE_CHALLENGE_SCHEMA } = await import("@/lib/validations/common.server");
+    const spy = vi.spyOn(PKCE_CODE_CHALLENGE_SCHEMA, "safeParse");
+    try {
+      const req = createRequest(
+        `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
+      );
+      await GET(req as unknown as import("next/server").NextRequest);
+      // If this route held its own copy of the schema (same min/max/regex,
+      // different object) rather than importing this exported binding, the
+      // spy on the SHARED object would never fire.
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   // @browser-redirect-recovery-test
@@ -215,7 +255,7 @@ describe("GET /api/mcp/authorize", () => {
     ));
 
     const req = createRequest(
-      "https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=abc",
+      `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`,
     );
     const res = await GET(req as unknown as import("next/server").NextRequest);
 
@@ -237,7 +277,7 @@ describe("GET /api/mcp/authorize", () => {
   // ── C6 (GET): Passkey enforcement gate ───────────────────────────────────
 
   const VALID_AUTHZ_URL =
-    "https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=abc";
+    `https://example.test/api/mcp/authorize?client_id=cli&redirect_uri=https://client.example/callback&response_type=code&scope=credentials:list&code_challenge=${VALID_CODE_CHALLENGE}`;
 
   it("C6 GET: off (requirePasskey=false) → redirects to consent", async () => {
     mockDerivePasskeyState.mockResolvedValue({

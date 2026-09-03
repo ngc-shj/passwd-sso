@@ -304,6 +304,108 @@ describe("unattributable audit events", () => {
     await expect(insertMembership(otherTenantId)).resolves.not.toThrow();
   });
 
+  it("the engine refuses a users row naming the sentinel, and accepts a near-miss UUID", async () => {
+    // The other half of the membership invariant, and the one an IdP-influenced
+    // path can reach: `auth-adapter.ts`'s `user.create` writes `tenant_id` from
+    // whatever tenant the asserted claim resolved to, and it runs BEFORE the
+    // membership insert. Without this CHECK a sentinel-pointing claim would file
+    // a real account under "no owning tenant".
+    //
+    // The allow arm is a NEAR MISS — the same UUID with its last digit moved —
+    // so it proves the constraint is an equality rather than a blanket refusal
+    // on this column. A distant tenant id would pass on a constraint that
+    // refused every sentinel-shaped value.
+    //
+    // The dev database is shared between working copies, so the fixed id may
+    // already be there. Register it for teardown only when THIS run created it
+    // — `deleteTestData` is tenant-scoped, and reclaiming a row another copy is
+    // using would take its data with it.
+    const nearMiss = SYSTEM_TENANT_ID.replace(/2$/, "3");
+    expect(nearMiss).not.toBe(SYSTEM_TENANT_ID);
+    const inserted = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$executeRawUnsafe(
+        `INSERT INTO tenants (id, name, slug, created_at, updated_at)
+         VALUES ($1::uuid, $2, $3, now(), now())
+         ON CONFLICT (id) DO NOTHING`,
+        nearMiss,
+        "near-miss-sentinel",
+        `near-miss-${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      );
+    });
+    if (inserted === 1) createdTenants.push(nearMiss);
+
+    const insertUser = (tenantId: string, userId: string) =>
+      ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO users (id, email, tenant_id, created_at, updated_at)
+           VALUES ($1::uuid, $2, $3::uuid, now(), now())`,
+          userId,
+          `c2-${userId}@example.invalid`,
+          tenantId,
+        );
+      });
+
+    const deniedUserId = randomUUID();
+    const denied = await insertUser(SYSTEM_TENANT_ID, deniedUserId).catch(
+      (e: unknown) => e,
+    );
+    expect(sqlStateOf(denied)).toBe("23514");
+    expect(String(denied)).toContain("users_not_system_tenant");
+    // The mutation, not only the verdict: read back the row this INSERT would
+    // have written, scoped by its own id rather than by the sentinel alone —
+    // the sentinel's other rows belong to other working copies.
+    const sentinelUsers = await ctx.su.prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT COUNT(*)::bigint AS n FROM users WHERE id = ${deniedUserId}::uuid
+    `;
+    expect(Number(sentinelUsers[0]!.n)).toBe(0);
+
+    const allowedUserId = randomUUID();
+    try {
+      await expect(insertUser(nearMiss, allowedUserId)).resolves.not.toThrow();
+    } finally {
+      // Reclaimed here rather than through `deleteTestData`: when the near-miss
+      // tenant pre-existed, it is not ours to hand to a tenant-scoped teardown.
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, allowedUserId);
+      });
+    }
+  });
+
+  it("the engine refuses a teams row naming the sentinel, and accepts the same row elsewhere", async () => {
+    // No sign-in path writes a `teams` row, so this clause is unfalsifiable
+    // from the application. It is here because the CHECK survives the
+    // out-of-band write that is the only way to reach the state at all, and
+    // because a constraint nothing exercises is a constraint nobody notices was
+    // dropped.
+    const otherTenantId = await newTenant();
+
+    const insertTeam = (tenantId: string) =>
+      ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO teams (id, name, slug, tenant_id, created_at, updated_at)
+           VALUES ($1::uuid, $2, $3, $4::uuid, now(), now())`,
+          randomUUID(),
+          "c2-probe-team",
+          `c2-${randomUUID().replace(/-/g, "").slice(0, 16)}`,
+          tenantId,
+        );
+      });
+
+    const denied = await insertTeam(SYSTEM_TENANT_ID).catch((e: unknown) => e);
+    expect(sqlStateOf(denied)).toBe("23514");
+    expect(String(denied)).toContain("teams_not_system_tenant");
+    const sentinelTeams = await ctx.su.prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT COUNT(*)::bigint AS n FROM teams WHERE tenant_id = ${SYSTEM_TENANT_ID}::uuid
+    `;
+    expect(Number(sentinelTeams[0]!.n)).toBe(0);
+
+    await expect(insertTeam(otherTenantId)).resolves.not.toThrow();
+  });
+
   it("the AFTER INSERT trigger still provisions a membership from a lone users insert", async () => {
     // The writer whose blast radius differs from every other: a 23514 raised
     // inside ensure_tenant_owner_membership_after_user_insert() aborts the
