@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   isIpInCidr,
@@ -153,29 +153,20 @@ describe("isValidIpAddress", () => {
 });
 
 describe("extractClientIp", () => {
-  const originalProxies = process.env.TRUSTED_PROXIES;
-  const originalTrustHeaders = process.env.TRUST_PROXY_HEADERS;
-
   beforeEach(() => {
     _resetTrustedProxyCache();
-    delete process.env.TRUSTED_PROXIES;
+    // vi.stubEnv, not a direct assignment: setup.ts wires vi.unstubAllEnvs()
+    // into afterEach, so the save/restore this used to do by hand is both
+    // redundant and a leak when a case throws between the two halves.
+    vi.stubEnv("TRUSTED_PROXIES", undefined);
     // NextRequest in the test env does not expose a socket peer IP, so XFF /
     // x-real-ip extraction requires the explicit opt-in. Tests that verify
     // the fail-closed path unset this flag locally.
-    process.env.TRUST_PROXY_HEADERS = "true";
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
   });
 
   afterEach(() => {
-    if (originalProxies !== undefined) {
-      process.env.TRUSTED_PROXIES = originalProxies;
-    } else {
-      delete process.env.TRUSTED_PROXIES;
-    }
-    if (originalTrustHeaders !== undefined) {
-      process.env.TRUST_PROXY_HEADERS = originalTrustHeaders;
-    } else {
-      delete process.env.TRUST_PROXY_HEADERS;
-    }
+    // Only the module-level cache: the env stubs are unwound by setup.ts.
     _resetTrustedProxyCache();
   });
 
@@ -207,7 +198,7 @@ describe("extractClientIp", () => {
   });
 
   it("skips trusted proxies in x-forwarded-for", () => {
-    process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+    vi.stubEnv("TRUSTED_PROXIES", "10.0.0.0/8");
     _resetTrustedProxyCache();
 
     const req = makeReq("/api/test", {
@@ -218,7 +209,7 @@ describe("extractClientIp", () => {
   });
 
   it("returns leftmost when all IPs are trusted", () => {
-    process.env.TRUSTED_PROXIES = "0.0.0.0/0";
+    vi.stubEnv("TRUSTED_PROXIES", "0.0.0.0/0");
     _resetTrustedProxyCache();
 
     const req = makeReq("/api/test", {
@@ -247,7 +238,7 @@ describe("extractClientIp", () => {
     // forwarded headers MUST be ignored — otherwise any client can spoof
     // their IP via X-Forwarded-For or X-Real-IP.
     beforeEach(() => {
-      delete process.env.TRUST_PROXY_HEADERS;
+      vi.stubEnv("TRUST_PROXY_HEADERS", undefined);
       _resetTrustedProxyCache();
     });
 
@@ -268,7 +259,7 @@ describe("extractClientIp", () => {
     it("rejects XFF spoofing even with explicit trusted proxy CIDR", () => {
       // Without socket IP verification, TRUSTED_PROXIES alone cannot
       // distinguish a real proxy from a spoofed header.
-      process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+      vi.stubEnv("TRUSTED_PROXIES", "10.0.0.0/8");
       _resetTrustedProxyCache();
       const req = makeReq("/api/test", {
         "x-forwarded-for": "203.0.113.99, 10.0.0.1",

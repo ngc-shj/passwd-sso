@@ -406,3 +406,33 @@ than by position, the count is five, and the sentinel row's heading is stated.
 
 Re-verified after the three fixes: typecheck, lint, the affected unit trees
 (234), and the two affected integration suites (16) all green.
+
+### F4 (pre-PR gate, R36-adjacent) — direct `process.env` mutation in a touched test file
+
+`scripts/checks/check-test-hygiene.sh` refused
+`src/__tests__/lib/ip-access.test.ts` for six direct `process.env.X = …`
+assignments where the repo requires `vi.stubEnv` (setup.ts wires
+`vi.unstubAllEnvs()` into `afterEach`). All six are **pre-existing** — the diff
+adds none — but the gate scans whole changed files, so C1 touching this one
+surfaced them, and CLAUDE.md's rule is to fix them rather than dismiss them as
+unrelated.
+
+**Fixed**: converted to `vi.stubEnv`, matching what the co-located twin
+`src/lib/auth/policy/ip-access.test.ts` already did. The hand-rolled
+save-and-restore `afterEach` went with them — it was not only redundant but a
+leak, since a case throwing between the save and the restore left the env
+mutated for the rest of the file. 289 tests across both twins green after.
+
+### A gate that was vacuous until the work was committed
+
+Worth recording as process rather than as a defect. The first full
+`scripts/pre-pr.sh` run reported **69 passed / 0 failed** while the Phase 2 work
+was still uncommitted. The run after committing reported **76 passed / 1
+failed** — and the failure above is what the extra steps found.
+
+The cause: several pre-PR gates, `check-test-hygiene.sh` among them, scope
+themselves to `git diff --name-only main...HEAD`. With the work uncommitted that
+set is empty, so those gates report OK having examined nothing. The same applies
+to the Step 2-5 mechanical hooks, which reported "Changed files: 2" on the same
+tree. **A green pre-PR run on an uncommitted tree proves less than it appears
+to**; the numbers to trust are the ones from after the commit.
