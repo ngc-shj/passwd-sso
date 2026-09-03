@@ -128,6 +128,7 @@ import { POST } from "@/app/api/mcp/authorize/consent/route";
 import { Prisma } from "@prisma/client";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { API_PATH } from "@/lib/constants/auth/api-path";
 import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
@@ -274,7 +275,11 @@ describe("POST /api/mcp/authorize/consent", () => {
     // callback target is a self-origin app path, never the client redirect_uri.
     expect(res.status).toBe(303);
     const url = new URL(res.headers.get("location") ?? "");
-    expect(url.pathname).toBe("/api/mcp/authorize");
+    // API_PATH, not the literal: the route builds this URL from the same
+    // constant, so asserting the string pins a second spelling of one route
+    // path rather than the property under test — that the stale step-up
+    // bounce lands on the authorize endpoint.
+    expect(url.pathname).toBe(API_PATH.MCP_AUTHORIZE);
     expect(url.searchParams.get("client_id")).toBe(VALID_FORM_FIELDS.client_id);
     expect(url.searchParams.get("redirect_uri")).toBe(VALID_FORM_FIELDS.redirect_uri);
     expect(url.searchParams.get("code_challenge")).toBe(VALID_FORM_FIELDS.code_challenge);
@@ -486,7 +491,11 @@ describe("POST /api/mcp/authorize/consent", () => {
 
     expect(res.status).toBe(303);
     const url = new URL(res.headers.get("location") ?? "");
-    expect(url.pathname).toBe("/api/mcp/authorize");
+    // API_PATH, not the literal: the route builds this URL from the same
+    // constant, so asserting the string pins a second spelling of one route
+    // path rather than the property under test — that the stale step-up
+    // bounce lands on the authorize endpoint.
+    expect(url.pathname).toBe(API_PATH.MCP_AUTHORIZE);
     expect(url.searchParams.get("code_challenge")).toBe("too-short");
     expect(mockLogAudit).not.toHaveBeenCalled();
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();

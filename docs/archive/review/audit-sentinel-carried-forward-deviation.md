@@ -457,3 +457,21 @@ R3 "stale reference to `arrange`" hits are a common test-helper word, and the
 log cap, not a column width — the hook's own guidance is that small numbers
 collide, and importing one concept's constant for the other is what R2 forbids.
 The bare `#2` this hook found in this log is now backticked.
+
+### F6 (Step 2-5 mechanical, RT3) — one route path spelled twice, and sixteen placeholders that are not
+
+`check-hardcoded-reuse` reported 17 Major hits. Sixteen are the repo's ubiquitous
+test placeholders — `"tenant-1"`, `"user-1"`, `"team-1"`, and four fixture UUIDs
+— each matching a **non-exported, file-local `const`** in an unrelated suite
+(`dcr-cleanup/route.test.ts`, `share-links/mine/route.test.ts`,
+`team-empty-trash.test.ts`, `webhook-aad.test.ts`). Importing a placeholder
+across two independent suites to share a coincidence is what R2's
+value-equality-is-not-meaning-equality clause forbids; they are left alone.
+
+The seventeenth is real and was fixed: `consent/route.test.ts` asserted
+`url.pathname` against the literal `"/api/mcp/authorize"` at two sites while the
+route builds that URL from `API_PATH.MCP_AUTHORIZE`. The hook pointed at
+`cli/src/lib/oauth.ts`'s copy, which is a separate package and not importable
+here — but the app's own `src/lib/constants/auth/api-path.ts` is, and using it
+makes the assertion say what is under test (the stale step-up bounce lands on
+the authorize endpoint) rather than pinning a second spelling of the path.
