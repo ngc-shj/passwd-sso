@@ -37,7 +37,7 @@ import {
   type PerTenantTrashEntry,
   type PerTenantAgeEntry,
 } from "./registry";
-import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { AUDIT_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import {
   collectEntryAttachmentRefs,
   deleteAttachmentBlobs,
@@ -334,7 +334,10 @@ export async function sweepAuditProvenanceEntry(
       metadata: provenance,
       // Surface the credential's last-used network provenance in the dedicated
       // audit columns when the table carries them (extension_tokens).
-      ip: row["last_used_ip"] != null ? String(row["last_used_ip"]) : null,
+      ip:
+        row["last_used_ip"] != null
+          ? String(row["last_used_ip"]).slice(0, AUDIT_IP_MAX_LENGTH)
+          : null,
       userAgent:
         row["last_used_user_agent"] != null
           ? String(row["last_used_user_agent"]).slice(0, USER_AGENT_MAX_LENGTH)

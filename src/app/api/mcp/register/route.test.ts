@@ -80,7 +80,7 @@ vi.mock("@/lib/audit/audit", () => ({
 }));
 
 import { POST } from "@/app/api/mcp/register/route";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { SYSTEM_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { MAX_UNCLAIMED_DCR_CLIENTS } from "@/lib/constants/auth/mcp";
 
 // Module-scope snapshot (route.ts:27 `const dcrRateLimiter = createRateLimiter(...)`
@@ -480,6 +480,7 @@ describe("POST /api/mcp/register", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         actorType: "SYSTEM",
+        tenantId: SYSTEM_TENANT_ID,
         targetId: MOCK_CREATED_CLIENT.id,
         metadata: expect.objectContaining({ client_name: "Test MCP Client" }),
       }),

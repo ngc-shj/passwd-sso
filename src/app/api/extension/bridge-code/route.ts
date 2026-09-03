@@ -27,6 +27,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import {
+  EXTENSION_BRIDGE_CODE_IP_MAX_LENGTH,
+  EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH,
+} from "@/lib/validations/common.server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
@@ -305,8 +309,8 @@ async function handlePOST(req: NextRequest) {
           scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
           expiresAt,
           cnfJkt,
-          ip: meta.ip,
-          userAgent: meta.userAgent,
+          ip: meta.ip?.slice(0, EXTENSION_BRIDGE_CODE_IP_MAX_LENGTH) ?? null,
+          userAgent: meta.userAgent?.slice(0, EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH) ?? null,
         },
       });
     }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);

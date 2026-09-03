@@ -1,19 +1,52 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import type { PrismaClient } from "@prisma/client";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
-const { mockAuditInfo, mockEnqueueAudit } = vi.hoisted(() => ({
+const {
+  mockAuditInfo,
+  mockDeadLetterWarn,
+  mockEnqueueAudit,
+  mockUserFindUnique,
+  mockTeamFindUnique,
+  mockTransaction,
+  mockExecuteRaw,
+} = vi.hoisted(() => ({
   mockAuditInfo: vi.fn(),
+  mockDeadLetterWarn: vi.fn(),
   mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
+  mockUserFindUnique: vi.fn(),
+  mockTeamFindUnique: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockExecuteRaw: vi.fn().mockResolvedValue(0),
 }));
 
-vi.mock("@/lib/prisma", () => ({
-  prisma: {
-    team: { findUnique: vi.fn() },
-    user: { findUnique: vi.fn() },
-  },
-}));
+// Nested form, not a flat `Pick<PrismaClient, "user" | "team" | ...>` — the flat
+// form selects whole delegate members and demands every method on them (TS2740).
+// This form compiles, and renaming a mocked member (or the Pick<> key it comes
+// from) fails to compile, which is what pins the mock to the real signature.
+type MockPrisma = Pick<PrismaClient, "$transaction" | "$executeRaw"> & {
+  user: Pick<PrismaClient["user"], "findUnique">;
+  team: Pick<PrismaClient["team"], "findUnique">;
+};
 
+vi.mock("@/lib/prisma", () => {
+  const mockPrismaClient: MockPrisma = {
+    $transaction: mockTransaction,
+    $executeRaw: mockExecuteRaw,
+    user: { findUnique: mockUserFindUnique },
+    team: { findUnique: mockTeamFindUnique },
+  };
+  // withBypassRls (real implementation, see the tenant-rls mock below) calls
+  // prisma.$transaction(async (tx) => {...}); tx must be this same mock client
+  // so the $executeRaw / user / team calls made inside land on these spies.
+  mockTransaction.mockImplementation((fn: (tx: MockPrisma) => unknown) => fn(mockPrismaClient));
+  return { prisma: mockPrismaClient };
+});
+
+// The REAL withBypassRls — it is what turns the $transaction/$executeRaw mock
+// above into a path that actually reaches resolveTenantId's DB lookups.
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
 }));
@@ -28,12 +61,19 @@ vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
   return {
     ...actual,
     auditLogger: { info: mockAuditInfo, enabled: true },
+    deadLetterLogger: { warn: mockDeadLetterWarn },
   };
 });
 
 import { logAuditAsync, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit/audit";
 
 describe("logAuditAsync", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnqueueAudit.mockResolvedValue(undefined);
+    mockExecuteRaw.mockResolvedValue(0);
+  });
+
   it("emits structured JSON to auditLogger", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
@@ -61,6 +101,12 @@ describe("logAuditAsync", () => {
       }),
       "audit.AUTH_LOGIN",
     );
+    // `user-1` is not a UUID, so assertEnqueueableUserId dead-letters it and
+    // logAuditAsync returns BEFORE the outbox. Stated rather than left implicit:
+    // every case in this group reads as end-to-end and stops at the structured
+    // line, and C2's fail-loud clause is that an enqueue mock called zero times
+    // without an assertion saying so is a failure, not coverage.
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("includes tenantId in structured emit when provided", async () => {
@@ -81,6 +127,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.AUTH_LOGIN",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("passes optional fields to the auditLogger", async () => {
@@ -114,6 +161,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.ENTRY_CREATE",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("truncates metadata larger than 10KB before emitting", async () => {
@@ -141,6 +189,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.ENTRY_UPDATE",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("truncates user-agent to 512 chars", async () => {
@@ -162,6 +211,7 @@ describe("logAuditAsync", () => {
       }),
       "audit.AUTH_LOGIN",
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
   it("does not throw when auditLogger.info throws", async () => {
@@ -176,9 +226,10 @@ describe("logAuditAsync", () => {
         userId: "user-1",
       })
     ).resolves.toBeUndefined();
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 
-  it("does not throw when enqueueAudit rejects", async () => {
+  it("does not throw when enqueueAudit rejects, and dead-letters the entry", async () => {
     mockEnqueueAudit.mockRejectedValueOnce(new Error("outbox write failed"));
 
     await expect(
@@ -189,9 +240,21 @@ describe("logAuditAsync", () => {
         tenantId: "tenant-1",
       })
     ).resolves.toBeUndefined();
+
+    // "Did not throw" alone passes against a catch arm that swallows silently,
+    // and a silent swallow is precisely what C10's still-log-only security
+    // argument rests on NOT having become. The reason string is the channel that
+    // says which catch ran.
+    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "logAuditAsync_failed" }),
+      "audit.dead_letter",
+    );
   });
 
-  it("calls enqueueAudit for normal UUID userId flow", async () => {
+  it("enqueues under the explicitly supplied tenantId, without resolving", async () => {
+    // tenantId is supplied, so resolveTenantId's early return short-circuits
+    // before either DB lookup — this is the allow arm for the sentinel cases
+    // below: an explicit tenant must never be overridden by SYSTEM_TENANT_ID.
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
@@ -199,12 +262,56 @@ describe("logAuditAsync", () => {
       tenantId: "tenant-1",
     });
 
+    expect(mockDeadLetterWarn).not.toHaveBeenCalled();
+    expect(mockUserFindUnique).not.toHaveBeenCalled();
     expect(mockEnqueueAudit).toHaveBeenCalledWith(
       "tenant-1",
       expect.objectContaining({
         scope: AUDIT_SCOPE.PERSONAL,
         action: AUDIT_ACTION.AUTH_LOGIN,
       }),
+    );
+    expect(mockEnqueueAudit.mock.calls[0][0]).not.toBe(SYSTEM_TENANT_ID);
+  });
+
+  it("records a UUID userId with no users row under SYSTEM_TENANT_ID", async () => {
+    // Exercises the branch that used to be unreachable in this suite: a
+    // well-formed UUID actor with no owning `users` row must resolve through
+    // withBypassRls (real implementation) and the mocked $transaction /
+    // $executeRaw / user.findUnique chain, landing under the sentinel rather
+    // than dead-lettering.
+    mockUserFindUnique.mockResolvedValue(null);
+
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: "00000000-0000-4000-8000-00000000ffff",
+    });
+
+    // Asserted first: a mock-completeness regression (e.g. a missing
+    // $executeRaw) throws inside withBypassRls and is caught by
+    // logAuditAsync's outer try, which dead-letters instead of enqueuing —
+    // this assertion is what tells that failure apart from a resolution-logic
+    // regression, which instead fails the enqueue assertions below.
+    expect(mockDeadLetterWarn).not.toHaveBeenCalled();
+    expect(mockEnqueueAudit).toHaveBeenCalledOnce();
+    expect(mockEnqueueAudit.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
+  });
+
+  it("dead-letters a non-UUID actor with reason invalid_user_id", async () => {
+    // The outbox worker refuses any payload whose userId fails UUID_RE —
+    // assertEnqueueableUserId enforces that invariant before resolveTenantId
+    // (and therefore before withBypassRls) ever runs.
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: "user-1",
+    });
+
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "invalid_user_id" }),
+      "audit.dead_letter",
     );
   });
 
@@ -228,6 +335,7 @@ describe("logAuditAsync", () => {
       }),
       expect.any(String),
     );
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
   });
 });
 

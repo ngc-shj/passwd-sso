@@ -185,20 +185,6 @@ describe("logAuditAsync", () => {
     );
   });
 
-  it("dead-letters entry when tenantId cannot be resolved", async () => {
-    mockUserFindUnique.mockResolvedValue(null);
-
-    await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.AUTH_LOGIN,
-      userId: "00000000-0000-4000-8000-0000000000ff",
-    });
-
-    expect(mockEnqueueAudit).toHaveBeenCalledOnce();
-    expect(mockEnqueueAudit.mock.calls[0][0]).toBe(SYSTEM_TENANT_ID);
-    expect(mockDeadLetterWarn).not.toHaveBeenCalled();
-  });
-
   it("records a UUID userId with no users row under SYSTEM_TENANT_ID", async () => {
     // UUID userId that does not exist in the DB — resolveTenantId finds no
     // owning tenant and encodes that, rather than dropping the entry.

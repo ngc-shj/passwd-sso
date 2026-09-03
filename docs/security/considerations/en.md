@@ -162,7 +162,7 @@ Client(on valid):
 - AAD: ciphertext is bound to the owning tenant via `share-data:v1:<tenantId>` to prevent transplanting a ciphertext across tenant rows under the shared master key; rows created before AAD binding decrypt via a legacy no-AAD fallback
 - Used for server-encrypted share links and sends
 
-### Export Encryption (`src/lib/export-crypto.ts`)
+### Export Encryption (`src/lib/crypto/export-crypto.ts`)
 
 - cipher: `AES-256-GCM`
 - kdf: `PBKDF2-HMAC-SHA256`

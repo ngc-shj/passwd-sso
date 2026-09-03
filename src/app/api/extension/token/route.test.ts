@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "@/__tests__/helpers/mock-auth";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
-import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { ANONYMOUS_ACTOR_ID, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
@@ -156,6 +156,7 @@ describe("POST /api/extension/token", () => {
         action: AUDIT_ACTION.EXTENSION_TOKEN_LEGACY_ISSUANCE_BLOCKED,
         userId: ANONYMOUS_ACTOR_ID,
         actorType: ACTOR_TYPE.ANONYMOUS,
+        tenantId: SYSTEM_TENANT_ID,
         ip: "1.2.3.4",
         userAgent: "test-agent/1.0",
       }),

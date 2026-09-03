@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { decryptShareData } from "@/lib/crypto/crypto-server";
 import { verifyShareAccessToken } from "@/lib/auth/tokens/share-access-token";
-import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { USER_AGENT_MAX_LENGTH, SHARE_ACCESS_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
@@ -155,7 +155,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         data: {
           shareId: share.id,
           tenantId: share.tenantId,
-          ip: accessIp,
+          ip: accessIp?.slice(0, SHARE_ACCESS_IP_MAX_LENGTH) ?? null,
           userAgent: ua?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         },
       })

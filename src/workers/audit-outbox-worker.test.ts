@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { validateWebhookDeliveryLease, WEBHOOK_WORST_CASE_PER_ITEM_MS, WEBHOOK_DELIVERY_BATCH_SIZE } from "@/lib/constants/audit/webhook-delivery-lease.server";
-import { WEBHOOK_DELIVERY_CONCURRENCY } from "@/lib/validations/common.server";
+import {
+  WEBHOOK_DELIVERY_CONCURRENCY,
+  AUDIT_IP_MAX_LENGTH,
+  USER_AGENT_MAX_LENGTH,
+} from "@/lib/validations/common.server";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
 
@@ -451,6 +455,94 @@ describe("parsePayload — edge cases", () => {
     expect(insertCall).toBeDefined();
     // metadata JSON param (index 10) should be null when payload.metadata is null
     expect(insertCall![10]).toBeNull();
+  }, 15000);
+
+  it("bounds an over-length ip to the column width instead of letting the INSERT raise 22001", async () => {
+    // The last hop before `INSERT INTO audit_logs`. The payload is a jsonb blob
+    // read back off the table, so it can carry a value written by a producer
+    // that did not bound it — including one from before the producers did. An
+    // over-length value here raises 22001, which (unlike 22P02) does NOT echo
+    // the offending text, so the row cycles to max_attempts and the audit event
+    // is lost with nothing in the error to recognise it by.
+    const overLong = "2001:db8:".repeat(30);
+    expect(overLong.length).toBeGreaterThan(AUDIT_IP_MAX_LENGTH);
+    const row = makeRow({
+      payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, ip: overLong },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    // ip is $11, so call[11] — same indexing as the metadata case above.
+    expect(insertCall![11]).toBe(overLong.slice(0, AUDIT_IP_MAX_LENGTH));
+    expect((insertCall![11] as string).length).toBe(AUDIT_IP_MAX_LENGTH);
+  }, 15000);
+
+  it("passes an ip that already fits through unchanged", async () => {
+    // The allow arm. A guard that truncated at the wrong boundary — or that
+    // clamped every value to 45 characters — satisfies the case above on its
+    // own, and this is what tells the two apart.
+    const ip = "192.168.100.228";
+    const row = makeRow({
+      payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, ip },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall![11]).toBe(ip);
+  }, 15000);
+
+  it("bounds an over-length userAgent to its column width, and passes a short one through", async () => {
+    // The `ip` slice's sibling. Same reason as the `ip` case above: this is the
+    // last hop before the INSERT, and the payload is a jsonb blob written by
+    // whatever version enqueued it — including one from before the producers
+    // bounded the field. Nothing static watches this — the gate that would have
+    // was withdrawn (CF14) — so this case is the only thing holding the slice.
+    const overLong = "A".repeat(USER_AGENT_MAX_LENGTH + 40);
+    const row = makeRow({
+      payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, userAgent: overLong },
+    });
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    // userAgent is $12, so call[12].
+    expect((insertCall![12] as string).length).toBe(USER_AGENT_MAX_LENGTH);
+  }, 15000);
+
+  it("passes a userAgent that already fits through unchanged", async () => {
+    // The allow arm: a guard that clamped every value satisfies the case above
+    // on its own.
+    const userAgent = "Mozilla/5.0 (integration-test)";
+    const row = makeRow({
+      payload: { action: AUDIT_ACTION.ENTRY_CREATE, userId: USER_ID, userAgent },
+    });
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const insertCall = mockAuditLogsInsert.mock.calls.find(
+      (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall![12]).toBe(userAgent);
   }, 15000);
 
   it("rejects malformed userId (null with SYSTEM actorType) via UUID_RE guard — no INSERT, warn log emitted", async () => {

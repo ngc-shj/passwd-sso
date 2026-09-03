@@ -33,20 +33,34 @@
  *
  * The following contexts cannot use the helpers because no NextRequest is
  * available at the call site:
- *   - NextAuth event/jwt callbacks (src/auth.ts, src/lib/auth-adapter.ts)
+ *   - NextAuth event/jwt callbacks (src/auth.ts,
+ *     src/lib/auth/session/auth-adapter.ts)
  *   - Library functions invoked outside HTTP context
- *     (src/lib/access-restriction.ts, src/lib/account-lockout.ts when
- *      request is undefined, src/lib/delegation.ts post-response cleanup,
- *      src/lib/team-policy.ts, src/lib/extension-token.ts, src/lib/notification.ts)
+ *     (src/lib/auth/policy/access-restriction.ts,
+ *      src/lib/auth/policy/account-lockout.ts when request is undefined,
+ *      src/lib/auth/access/delegation.ts post-response cleanup,
+ *      src/lib/team/team-policy.ts, src/lib/auth/tokens/extension-token.ts,
+ *      src/lib/notification.ts)
  *   - MCP tool execution (src/lib/mcp/tools.ts)
  *   - Background workers (src/workers/audit-outbox-worker.ts,
  *     src/lib/directory-sync/engine.ts, src/lib/webhook-dispatcher.ts)
- *   - Constants validation (src/lib/constants/audit.ts)
- *   - TENANT-scope routes where tenantId is not available without an extra
- *     DB lookup (e.g., src/app/api/internal/audit-emit/route.ts,
- *     src/app/api/mcp/register/route.ts during DCR registration before
- *     tenant binding) — resolveTenantId() looks up tenant from userId
- *     internally; using the helper would require redundant lookups.
+ *   - Constants validation (src/lib/constants/audit/audit.ts)
+ *   - TENANT-scope routes with no NextRequest-derived tenant to hand the
+ *     helper. Two are here for DIFFERENT reasons, and the difference is the
+ *     one this list gets asked about:
+ *       src/app/api/internal/audit-emit/route.ts — leaves tenantId unset and
+ *       lets resolveTenantId() derive it from userId, so using the helper
+ *       would cost a redundant lookup.
+ *       src/app/api/mcp/register/route.ts — DCR registration happens before
+ *       tenant binding, so there is no tenant to derive. It does NOT rely on
+ *       resolveTenantId: it states `tenantId: SYSTEM_TENANT_ID` outright,
+ *       because "no owning tenant" is the honest answer there and stating it
+ *       is better than resolving to it by accident.
+ *
+ * Every path above is checked by `test -f` when this list is touched; the
+ * seven that named the pre-reorganisation `src/lib/*` spellings were corrected
+ * together, since a register a contributor consults to decide whether they may
+ * skip the helpers is worth nothing if its entries point at nothing.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -58,17 +72,85 @@ import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/session/auth-or-token";
-import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { AUDIT_IP_MAX_LENGTH, METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
 
-/** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
+/**
+ * Reduce metadata to what may be stored: the original when it fits, a
+ * `_truncated` marker when it does not, and an `_unserializable` marker when it
+ * cannot be rendered at all.
+ *
+ * Total by construction rather than by catching: see `safeMetadata` below for
+ * the boundary and for why per-step catching was not enough.
+ *
+ * Note it also changes `logAuditInTx`, deliberately. On that path an
+ * unserializable metadata field used to roll the caller's BUSINESS transaction
+ * back — the mutation failed because its audit record could not be rendered.
+ * Now the transaction commits and the audit row carries the marker, which is the
+ * right direction for the same reason the async path takes it, and is pinned by
+ * its own case.
+ */
+const UNSERIALIZABLE_METADATA = { _unserializable: true, _reason: "stringify_failed" } as const;
+
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
   const json = JSON.stringify(metadata);
-  return json.length <= METADATA_MAX_BYTES
-    ? metadata
-    : { _truncated: true, _originalSize: json.length };
+  // `JSON.stringify` does not only THROW — it returns `undefined` when the value
+  // reduces to nothing (a `toJSON()` that returns undefined, a function, a
+  // symbol). TypeScript types the object overload as `string`, so the guard has
+  // to be a runtime one; without it the `.length` below is a TypeError, which is
+  // the same escape as a throw and is how the first version of this catch left
+  // the contract broken.
+  if (typeof json !== "string") return { ...UNSERIALIZABLE_METADATA };
+  if (json.length > METADATA_MAX_BYTES) return { _truncated: true, _originalSize: json.length };
+
+  // The PARSED value, not the original object. `sanitizeMetadata` walks it
+  // recursively, and a cycle whose `toJSON()` returns something safe passes
+  // stringify and then overflows that walk — so the acyclic round-trip is what
+  // makes the sanitize step total. It also costs nothing semantically: whatever
+  // stringify dropped was never going to reach the column.
+  const parsed: unknown = JSON.parse(json);
+  // CHECKED, not cast. `toJSON()` may return anything, so the round-trip can
+  // yield a string, a number or an array — all outside this function's declared
+  // return type, and casting them through was silent in both directions: the
+  // outbox worker coerces a non-object to `null`, so the metadata vanished with
+  // the event still delivered, and an array passed its `typeof === "object"`
+  // check and reached the column as a JSON array the payload type does not
+  // admit. A shape that cannot be stored as metadata is unserializable FOR THIS
+  // PURPOSE, which is what the marker says.
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ...UNSERIALIZABLE_METADATA };
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * The whole metadata transformation under ONE exception boundary.
+ *
+ * `buildOutboxPayload` is called BEFORE `logAuditAsync`'s try (and before the
+ * bulk path's), so anything that throws in here reaches the caller AND skips the
+ * dead-letter arm: no outbox row, no dead-letter line, nothing. On
+ * `logAuditInTx` it also rolls the caller's business transaction back.
+ *
+ * Catching per-step was the first attempt and it closed one trigger of three:
+ * `JSON.stringify` throwing on a BigInt or a cycle. It missed stringify
+ * RETURNING undefined, and it missed `sanitizeMetadata` overflowing its own
+ * recursion on a cycle that stringify had accepted. The boundary belongs around
+ * the transformation, not around the call inside it that was noticed first.
+ *
+ * The event still goes out; only the metadata is replaced. The marker is a fixed
+ * token rather than an error-derived one: the reachable failures are plain
+ * TypeErrors and RangeErrors carrying no SQLSTATE, so a code would read
+ * "unknown" every time — a field that cannot discriminate is worse than none.
+ */
+function safeMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  try {
+    const truncated = truncateMetadata(metadata);
+    return (sanitizeMetadata(truncated) as Record<string, unknown> | null | undefined) ?? null;
+  } catch {
+    return { ...UNSERIALIZABLE_METADATA };
+  }
 }
 
 // Re-export from constants for backward compatibility
@@ -141,8 +223,7 @@ export function sanitizeMetadata(value: unknown): unknown {
 // ─── AuditLogParams → AuditOutboxPayload mapping ─────────────────
 
 export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
-  const safeMetadata = truncateMetadata(params.metadata);
-  const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+  const sanitized = safeMetadata(params.metadata);
   const actorType = params.actorType ?? ACTOR_TYPE.HUMAN;
   return {
     scope: params.scope,
@@ -154,7 +235,15 @@ export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
     targetType: params.targetType ?? null,
     targetId: params.targetId ?? null,
     metadata: sanitized ?? null,
-    ip: params.ip ?? null,
+    // Both bounded to their column widths. `ip` used to be passed through raw
+    // while `userAgent` was sliced — an asymmetry with a sharp edge, because
+    // `ip` is the narrower column (45 vs 512) and the one whose value comes
+    // from a request header. An over-length value does not truncate at the
+    // column, it raises 22001 in the outbox worker's insert; that error, unlike
+    // 22P02, does not echo the offending value, so the row cycles through
+    // max_attempts and the audit event behind it is lost with nothing to say
+    // what it was. Truncating keeps the event.
+    ip: params.ip?.slice(0, AUDIT_IP_MAX_LENGTH) ?? null,
     userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
   };
 }

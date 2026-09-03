@@ -416,4 +416,6 @@ Single atomic PR (helper + matrix + route migrations + tests + CI guard + ci-int
 ## Open questions / deferrals
 
 - **EXPIRED status (out of scope per Issue)**: `PENDING → EXPIRED (SYSTEM)` registered in matrix but no caller. A future PR adds the cron. TODO marker `// TODO(centralize-state-transitions-followup): no caller transitions to EXPIRED yet — implement cron in a follow-up PR`.
+  **Closed by `90aec86d6`** (the caller exists: `src/workers/retention-gc-worker/sweep.ts:639` `sweepExpiredAccessRequests()` drives `PENDING → EXPIRED` under the retention GC, matching `src/lib/access-request/access-request-state.ts:33`'s `SYSTEM` actor entry; the `TODO(centralize-state-transitions-followup)` marker is gone from the tree).
 - **`expiresAt` precondition on `PENDING → APPROVED`**: pre-existing latent issue (admin can approve already-expired requests). NOT regressed by this PR. Documented as a separate follow-up.
+  **Closed by `4265725d7`** (`src/app/api/tenant/access-requests/[id]/approve/route.ts:112` rejects an already-expired request with `API_ERROR.SA_ACCESS_REQUEST_EXPIRED`, and line 169 additionally gates the `transition()` `where` on `expiresAt: { gt: new Date() }` to close the TOCTOU).

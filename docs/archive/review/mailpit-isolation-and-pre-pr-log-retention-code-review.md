@@ -277,6 +277,11 @@ Pin the allow side by asserting `app` keeps `networks: [internal]` — compose
 *replaces* rather than merges a `ports:` sequence, so an override entry becomes the
 whole published set.
 
+**Still open** — `docker-compose.yml:49` still publishes `app` as `"3000:3000"` with no `host_ip`,
+and `docker-compose.override.yml` still has no `app` entry to pin it, while `db`/`jackson`/`redis`/
+`mailpit`/`minio` remain `127.0.0.1`-pinned there. The reason is unchanged: it is a requirement about
+a file that branch did not touch, and the bind may be deliberate.
+
 ## Resolution Status
 
 Round 1: 6 Major and 7 Minor findings. Fixed 10, rejected 1 with evidence, raised

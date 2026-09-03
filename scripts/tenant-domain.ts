@@ -87,7 +87,7 @@ import {
   operatorDomainSchema,
   NON_PRINTABLE_ASCII_SQL_CLASS,
 } from "@/lib/tenant/tenant-claim-registry";
-import { UUID_RE } from "@/lib/constants/app";
+import { UUID_RE, SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import {
   escapeUnsafeDisplayChars,
   UNSAFE_DISPLAY_CHARS_RE,
@@ -894,6 +894,42 @@ export async function cmdAdd(args: {
         const tenant = await resolveTenantRef(tx, args.tenant);
         if (!tenant) {
           return { ok: false, code: 1, message: `Tenant not found: ${escapeUnsafeDisplayChars(args.tenant)}` };
+        }
+
+        // Refused HERE and not in resolveTenantRef, which `list` and `history`
+        // also call: those are how an operator DIAGNOSES a claim pointed at the
+        // sentinel, and denying them would remove the diagnosis this refusal
+        // exists to make unnecessary. `remove` is likewise left working — it is
+        // a soft revoke that records a tenant_claim_event, i.e. the audited
+        // undo, and refusing it would strand any deployment where the accident
+        // already happened.
+        //
+        // Keyed on the RESOLVED id, not on the ref string. resolveTenantRef
+        // takes UUID → existing claim → external_id, so the sentinel has TWO
+        // spellings that reach here: its UUID, and any claim already pointing
+        // at it — which is the spelling an operator uses during exactly the
+        // incident this refusal is about. A check on the ref string would pass
+        // for the second. (Its slug is not a third: slug is deliberately not a
+        // resolution path, and the sentinel carries no external_id.)
+        //
+        // `add` is the only creator of a sentinel claim. The sign-in JIT path
+        // builds its claim as a nested write inside tenant.create, so it always
+        // targets a NEW tenant, and the backfill filters on external_id, which
+        // the sentinel row does not have.
+        if (tenant.id === SYSTEM_TENANT_ID) {
+          return {
+            ok: false,
+            code: 1,
+            message:
+              `Refusing to register a claim against the sentinel tenant ` +
+              `(${tenant.slug}). It is the encoding of "no owning tenant" for ` +
+              `audit rows that cannot be attributed, and its read-side safety ` +
+              `rests on it having zero members. A claim here would route the ` +
+              `next SSO sign-in from that domain into it, and the database now ` +
+              `refuses that membership (tenant_members_not_system_tenant), so ` +
+              `the sign-in would fail rather than succeed quietly.\n` +
+              `Use "tenant-domain list" to find the tenant you meant.`,
+          };
         }
 
         // The ONE tenantClaim.findUnique call site outside

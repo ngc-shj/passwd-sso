@@ -345,12 +345,13 @@ describe("createCustomAdapter", () => {
       ).rejects.toThrow("TENANT_CLAIM_UNUSABLE");
 
       expect(mockEmitAuthLoginFailure).toHaveBeenCalledTimes(1);
-      // tenantId is what makes the denial OBSERVABLE rather than merely
-      // emitted. logAuditAsync -> resolveTenantId returns params.tenantId
+      // tenantId is what makes the denial ATTRIBUTABLE rather than merely
+      // recorded. logAuditAsync -> resolveTenantId returns params.tenantId
       // directly when present; without it, a first-ever sign-in falls through
-      // to a users lookup on SYSTEM_ACTOR_ID (no such row), and logAuditAsync
-      // dead-letters without enqueuing — so nothing reaches audit_logs or
-      // audit_outbox and `tenant-domain unmapped` stays blind.
+      // to a users lookup on SYSTEM_ACTOR_ID (no such row) and the row lands
+      // under SYSTEM_TENANT_ID — so it reaches audit_logs, but `tenant-domain
+      // unmapped` groups it under `__system__` instead of under the tenant the
+      // refusal is about.
       expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
         email: "user@alias.example",
         provider: "saml",
@@ -363,7 +364,7 @@ describe("createCustomAdapter", () => {
     });
 
     // The two operator-reachable arms must carry a BINDABLE tenant, not just
-    // any tenantId field: a null here is the dead-letter above.
+    // any tenantId field: a null here is the `__system__` filing above.
     it.each([
       ["claim_taken", "tenant-owner"],
       ["claim_collision", "tenant-folded-owner"],

@@ -481,20 +481,35 @@ Two experts reached the Critical independently.
 Recorded here rather than implied. Every one is grounded in a named file:line by
 the reviewer who filed it.
 
+**Reconciliation note (C11).** This section was written as part of `e3f50de5e` itself, and no commit
+since has touched the source it names — so every item below is **still open**, verified individually
+rather than assumed from that fact.
+
 **Test coverage** — the branch's weakest axis, and the findings are correct:
 - **TE-T2** `tenantId: SYSTEM_TENANT_ID` at both pre-auth sites is asserted by nothing. `objectContaining` ignores extra keys and `AuditLogParams.tenantId` is optional, so deleting it compiles and leaves three tests green.
+  **Still open** — `src/app/api/extension/token/route.test.ts:155` and `src/app/api/mcp/register/route.test.ts:481` both still assert through `expect.objectContaining({ tenantId: SYSTEM_TENANT_ID, ... })`, which remains extra-key-tolerant.
 - **TE-T3** A THIRD suite drives `logAuditAsync` (`src/__tests__/audit.mocked.test.ts`); it spreads the real `@/lib/tenant-rls` over a `prisma` mock with no `$transaction`, so every no-`tenantId` case dies as a `TypeError` inside `resolveTenantId` and lands in the catch arm. The "both suites" claim in the previous commit undercounted. (FN-m4 notes the same file never asserted the old branch, so it needed no change — both are true: it needs a mock fix, not a behavioural one.)
+  **Still open** — `src/__tests__/audit.mocked.test.ts:17` still spreads the real `@/lib/tenant-rls` via `importOriginal` over a `prisma` mock carrying no `$transaction`.
 - **TE-T4 / FN-M3** The new integration file proves FK acceptance by proxy: three read-only SELECTs, no `logAuditAsync`, no INSERT. The plan's own acceptance criterion (`plan:158`) asked for the write.
+  **Still open** — `src/__tests__/db-integration/audit-unattributable-tenant.integration.test.ts` still contains exactly three read-only `it` blocks (`SELECT id`, `SELECT COUNT(*)`, `SELECT audit_log_retention_days`); no `logAuditAsync` call and no INSERT.
 - **TE-T5** The `audit_log_retention_days IS NULL` pin has no differential. The previous commit claimed its red-proof needs a write to the shared dev database; the reviewer showed that is wrong — `ctx.createTenant()` hands out an isolated tenant swept by `cleanup()` even on the failure path.
+  **Still open** — unchanged; the pin in the integration file above still has no differential.
 - **TE-T6** Five test comments still carry the pre-change premise.
+  **Still open** — no commit since `e3f50de5e` has touched those comments.
 - **TE-T7/T8/T10/T11** A stale test name that now states the opposite of its body; the `scanned 0` refusal unreached by any case; `unallocatablePid()`'s Linux path returning without the probe its docblock promises; and a question about the backup-db red-proof's count.
+  **Still open** — no commit since `e3f50de5e` has touched these sites.
 
 **Design questions, deliberately not decided here:**
 - **SE-S3** Sentinel rows are never purged AND `claimBatch` is a global FIFO, so sentinel volume delays every tenant's audit delivery. Two independent fixes; the retention half is the `TODO(audit-dead-letter-durability)` already in `audit.ts`, and it is entangled with the chain-verify false-TAMPER interaction.
+  **Still open** — both `TODO(audit-dead-letter-durability)` markers remain verbatim at `src/lib/audit/audit.ts:196-199`.
 - **SE-S4** "Zero `tenant_members`" is the load-bearing read-side invariant and nothing enforces it — `scripts/tenant-domain.ts`'s `resolveTenantRef` accepts a bare UUID with no sentinel refusal. Pre-existing, and this change is what makes it worth closing.
+  **Still open** — `scripts/tenant-domain.ts:198` still returns `tx.tenant.findUnique(...)` for any UUID-shaped ref; the file contains no sentinel/`SYSTEM_TENANT_ID` refusal. (C12 on the `audit-sentinel-verification-gaps` branch takes the write-side half of this invariant; the read-side refusal named here is not in that scope.)
 - **SE-S6** If `audit_chain_enabled` is ever set fleet-wide, the sentinel's unbounded chain passes `MAX_ROWS_PER_TENANT` and pins `CHAIN_VERIFY_FAILED`.
+  **Still open** — no bound was added; `MAX_ROWS_PER_TENANT` has no sentinel-aware handling in `src/workers`.
 - **SE-S7** The gate anchors on `metadata`; `targetType`/`targetId`/`userAgent` reach the same row unmodelled.
+  **Still open** — `scripts/checks/check-audit-metadata-narrative.mjs:128` still pins the single property `const SINK_PROPERTY = "metadata";`.
 - **FN-a1** The synchronous audit line logs the SUPPLIED tenant, not the resolved one, so it says `null` where the row says the sentinel. Fixing it means moving the emit after `resolveTenantId`, which changes the documented "synchronous, before outbox write" ordering — a design decision, not a one-liner.
+  **Still open** — `src/lib/audit/audit.ts:314` still emits `tenantId: params.tenantId ?? null` before `resolveTenantId(params)` runs at `:341`.
 
 **Remaining stale prose** — re-derived rather than taken from the reviewers'
 lists, which surfaced sites neither named:
@@ -509,3 +524,20 @@ Derivation:
 
 That the member set grew each time it was re-derived — two sites, then five,
 then ten — is the finding, not the count.
+
+**Still open, and the member set is now mixed** — re-checked site by site rather than as a block:
+- `docker-compose.yml:21-22` and `infra/fluent-bit/fluent-bit.conf:47` are **genuinely stale**:
+  neither file is in `e3f50de5e`'s changed-file list, and the compose comment still claims the
+  app-side path "returns without enqueuing anything, making stdout the only copy" — exactly the
+  behaviour that commit removed at its cause.
+- `src/lib/audit/audit.ts`'s Bucket C list (FN-m2) is **still inaccurate**: it names
+  `/api/mcp/register` as relying on `resolveTenantId`, but `src/app/api/mcp/register/route.ts:200`
+  now passes `tenantId: SYSTEM_TENANT_ID` directly and never calls it.
+- `auth-adapter.ts`, `tenant-management.ts` and `auth-failure.ts` were rewritten by `e3f50de5e`
+  itself and already carry post-fix language, so they are **no longer stale** — the original entry
+  over-collected. Their line numbers have drifted by 2-5 lines (`auth-adapter.ts` → `:381`,
+  `tenant-management.ts` → `:367`); both still land inside the intended comment block, so the
+  citations are left as filed.
+- `src/auth.ts:111`, `:227`, `:640` and `unsafe-display-chars.ts:81` are untouched by `e3f50de5e`
+  and read as historical incident narrative rather than claims about current behaviour; not
+  adjudicated stale here.

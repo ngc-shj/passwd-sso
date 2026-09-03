@@ -9,7 +9,7 @@ import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
-import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
+import { USER_AGENT_MAX_LENGTH, SESSION_IP_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { emitAuthLoginFailure } from "@/lib/audit/auth-failure";
 import {
@@ -377,8 +377,10 @@ export function createCustomAdapter(): Adapter {
             reason: CLAIM_REFUSAL_REASON[error.kind],
             claim: pendingClaim,
             claimRefusal: error.refusal,
-            // Binds the row so logAuditAsync enqueues instead of
-            // dead-lettering (see TenantClaimUnusableError.tenantId).
+            // Binds the row to the tenant that OWNS the contested claim. The
+            // row is enqueued either way — without this it lands under
+            // SYSTEM_TENANT_ID — so what this buys is attribution, not
+            // existence (see TenantClaimUnusableError.tenantId).
             tenantId: error.tenantId,
           });
         }
@@ -525,7 +527,7 @@ export function createCustomAdapter(): Adapter {
             userId: session.userId,
             tenantId,
             expires: resolvedExpires,
-            ipAddress: meta?.ip ?? null,
+            ipAddress: meta?.ip?.slice(0, SESSION_IP_MAX_LENGTH) ?? null,
             userAgent: meta?.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
             provider: meta?.provider ?? null,
           },

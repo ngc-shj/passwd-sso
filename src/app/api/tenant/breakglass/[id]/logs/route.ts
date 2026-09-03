@@ -8,7 +8,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { extractRequestMeta } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized, notFound, validationError } from "@/lib/http/api-response";
-import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import { AUDIT_IP_MAX_LENGTH, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUPS_PERSONAL, AUDIT_SCOPE } from "@/lib/constants";
 import {
   VALID_ACTIONS,
@@ -174,7 +174,7 @@ async function handleGET(
               grantId,
               targetUserId: grant.targetUserId,
             } as never,
-            ip: ip ?? null,
+            ip: ip?.slice(0, AUDIT_IP_MAX_LENGTH) ?? null,
             userAgent: userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
           },
         }),

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { ExtensionTokenClientKind } from "@prisma/client";
+import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
@@ -83,7 +84,8 @@ export async function validateExtensionTokenDpop(args: {
   // lastUsedIp / lastUsedUserAgent only for IOS_APP (preserves existing behavior).
   const updateData: Record<string, unknown> = { lastUsedAt: new Date() };
   if (row.clientKind === "IOS_APP") {
-    updateData.lastUsedIp = extractClientIp(req);
+    updateData.lastUsedIp =
+      extractClientIp(req)?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null;
     updateData.lastUsedUserAgent =
       req.headers.get("user-agent")?.slice(0, 512) ?? null;
   }

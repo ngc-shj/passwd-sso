@@ -776,6 +776,7 @@ against it. An entry with no test in the delivered diff is not done.
   stripping, assert the outgoing authority has no `:` before its `@`. Prefer removing
   the question entirely by handing the conninfo to libpq through a mode-0600
   `PGPASSFILE` removed in the trap.
+  **Closed by `16a663c28`** — `parse_url()` makes the strip mandatory (`scripts/backup-db.sh:927-980`); the credential reaches libpq only through a mode-0600 `PGPASSFILE` (`:1640-1664`), so no password reaches `argv`.
 - **S-01 Critical (escalate) — the TLS floor is regex-adjudicated and loses to the
   URL.** Measured: `PGSSLMODE=require` + `?sslmode=disable` connects in cleartext;
   libpq percent-decodes both keyword and value, so `?%73slmode=disable` evades any
@@ -785,39 +786,47 @@ against it. An entry with no test in the delivered diff is not done.
   verify the achieved transport rather than the requested one: record
   `SELECT ssl, version, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid()` in
   MANIFEST and fail when `ssl` is false. Reject `gssencmode` alongside `sslmode`.
+  **Closed by `16a663c28`** — `conninfo_for()` appends `sslmode=<floor>`/`gssencmode=disable` last so libpq's last-occurrence-wins settles it (`scripts/backup-db.sh:1107-1120`), and `verify_transport()` records `pg_stat_ssl` and fails closed when `ssl` is false (`:1198-1212`).
 - **N1 Critical — `pg_restore --list /dev/stdin` fails on every valid archive.**
   Measured: `did not find magic string in file header`; without the filename, 33 lines
   / 18 non-comment entries. Correction: `docker compose exec -T -- "$svc" pg_restore
   --list < "$file"`, no filename argument.
+  **Closed by `16a663c28`** — `toc_entries()` runs `pg_restore --list < "$archive"`, no filename argument (`scripts/backup-db.sh:1764`).
 - **N2 Critical — URL mode cannot address a second database.** Measured: `PGDATABASE`
   loses to the URL's path; `?dbname=jackson` wins. Correction: append `dbname=<target>`
   per target, choosing `?`/`&`, and reject a URL that already carries `dbname=`.
   Acceptance: `select current_database()` per target in strategy 4.
+  **Closed by `16a663c28`** — `conninfo_for()` appends `dbname=<db>` per target (`scripts/backup-db.sh:1119`) and rejects a URL already carrying `dbname=` (`:1095`).
 - **N3 / S-13 Critical — `flock(1)` is absent on macOS**, the declared primary
   operator host, and has no in-repo precedent. Correction: `mkdir "$BACKUP_DIR/.lock.d"`
   — atomic on POSIX, no external binary, PID written inside for staleness, removal in
   the existing trap. Add it to the portability derivation.
+  **Closed by `16a663c28`** — the lock is `mkdir -- "$LOCK_CANDIDATE"` (`scripts/backup-db.sh:1480-1546`); `flock` appears nowhere, and the portability-floor test bans it with a positive control (`scripts/__tests__/backup-db.test.mjs:1075-1082`).
 - **N-01 Critical — Group B re-stubs its own adjudicator in Compose mode**, and CI and
   local silently test different modes under one name. Correction: fix the mode and the
   reader per case as an explicit asserted input; cover both sites, with a `docker` stub
   that *delegates* the `pg_restore` subcommand to real docker and logs the delegation.
+  **Closed by `16a663c28`** — `delegatingStub()` routes the `pg_restore` subcommand to the real binary/`docker` and logs the delegation (`scripts/__tests__/backup-db.test.mjs:1155-1235`), covering both modes explicitly.
 - **S-07 / N4 Major — `pg_dumpall --globals-only` does not carry database-level ACLs.**
   Measured: 31 lines, all `CREATE ROLE`/`ALTER ROLE`. The `REVOKE CONNECT ON DATABASE`
   that C3's rationale cites is in neither member. Correction: add `--create` to each
   `pg_dump -Fc` so the `DATABASE` TOC entry carries the ACL, correct C3's rationale to
   what `--globals-only` actually covers, and restate the restore order in C8.
   (`--no-role-passwords` was verified correct and stands.)
+  **Closed by `16a663c28`** — `--create` added to each `pg_dump -Fc` so the `DATABASE` TOC entry carries the ACL (`scripts/backup-db.sh:1736,1739`).
 - **S-04 Major (regression) — `!scripts/__tests__/fixtures/**` un-ignores every
   secret class** (`.env`, `*.pem`, `*.key`, `*.p12`) for that subtree, because
   `.gitignore` is last-match-wins. Correction: delete the negation outright — INV-C9f's
   `*.pgdump` naming already keeps the fixtures committable. If a negation is ever
   needed, follow `.gitignore:98-101`: one named file, one comment. Extend
   `check-env-gitignore.test.mjs` with `scripts/__tests__/fixtures/.env` as the red-proof.
+  **Closed by `16a663c28`** — the `!scripts/__tests__/fixtures/**` negation is absent from `.gitignore`; only named single-file exceptions remain (`.gitignore:100-101`).
 - **S-06 Major — the libpq env member set is hand-listed and went 5 → 20 by
   accretion**, omitting `PGGSSENCMODE` (a transport `PGSSLMODE` does not govern) and
   `PGSSLMINPROTOCOLVERSION`. Correction: allowlist instead of denylist — build the
   child environment with `env -i` plus exactly what the script needs, so an unlisted
   `PG*` cannot exist by construction.
+  **Closed by `16a663c28`** — `run_pg()` builds the child environment with `env -i` plus exactly what it needs, so an unlisted `PG*` cannot exist by construction (`scripts/backup-db.sh:1720-1724`).
 - **S-05 Major — INV-C4a does not establish the owner-exclusivity C6's control class
   is declared conditional on.** POSIX/macOS ACLs are invisible to the mode bits;
   macOS `noowners` volumes (the default for external media — scenario 2's own case)
@@ -826,124 +835,160 @@ against it. An entry with no test in the delivered diff is not done.
   option in the message; walk the ancestor chain; do the check and every create
   descriptor-relative from one `cd`. If not all are taken, re-class C6 as a tripwire
   and say so in SC3.
+  **Still open** — the detection half landed (`has_extended_acl` at `scripts/backup-db.sh:251-271`, the `noowners`/mount-option parse at `:284-338`, the ancestor walk at `:1327-1355`), but the creates are still absolute-path rather than descriptor-relative from one `cd` (`scripts/backup-db.sh:1701`) — only the deletions got that treatment. The named fallback (re-class C6 as a tripwire and say so in SC3) was also not taken: SC3 (`plan:688-691`) still speaks only to encryption-at-rest scope.
 - **S-10 Major — INV-C6e's `st_dev:st_ino` check is tautological.** `.` resolves
   through the cwd handle and cannot change. Correction: compare `stat .` against
   `stat "$BACKUP_DIR"` (path-resolved) each iteration; a divergence is the swap. Add a
   C9 case that renames the root mid-prune and asserts `PRUNE_ABORTED`.
+  **Closed by `16a663c28`** — `assert_root_unchanged()` compares a path-resolved `stat` of `$BACKUP_ROOT` against the recorded identity before every removal (`scripts/backup-db.sh:1430-1435`), and a rename-mid-prune case asserts `PRUNE_ABORTED` (`scripts/__tests__/backup-db.test.mjs:241`).
 - **N9 / S-11 Major — `.FAILED` pruning is gated behind publication**, so a
   persistently failing deployment accumulates full plaintext corpora forever.
   Correction: prune `.FAILED` at the **start** of every invocation, inside the lock,
   before any dump; bound by age and count; state the retention in C8 and SC3.
+  **Closed by `16a663c28`** — `prune_failed` runs at `scripts/backup-db.sh:1699`, inside the lock and before `mkdir -- "$RUN_PARTIAL"` (`:1701`), i.e. before any dump.
 - **N7 / S-11 Major — the trap's preconditions, disposition and error identity are
   undefined.** Correction: initialise every variable the trap reads to `""`; a single
   `fail <CODE> <msg>` function so the trap only normalises; add `INTERRUPTED` and
   `INTERNAL` to the closed code set; name which codes produce `.FAILED`
   (`VALIDATE_FAILED` only) and which delete the partial; correct scenario 4, which as
   written describes a dump failure that INV-C5c does not cover.
+  **Closed by `16a663c28`** — trap-read variables initialised to `""` (`scripts/backup-db.sh:85-93`), a single `fail()` (`:70-75`), `ERR_CODES` carrying `INTERRUPTED INTERNAL` (`:65`), and `KEEP_PARTIAL_AS_FAILED` set only around `VALIDATE_FAILED` (`:1948-1975`).
 - **N8 Major — `cd "$BACKUP_DIR"` has no declared scope** and would break every
   subsequent `docker compose` (which resolves its config from cwd). Correction: scope
   the `cd` to the pruning step in a subshell; capture the original cwd once for
   INV-C2b's message.
+  **Closed by `16a663c28`** — every pruning removal runs in a subshell `( cd -- "$BACKUP_ROOT" && rm -rf -- "$g" )` (`scripts/backup-db.sh:2026`), with `ORIGINAL_CWD` captured once (`:93`).
 - **N10 Major — first-run creation of `$BACKUP_DIR` is undefined**, so scenario 1 and
   every default-path test exit `DEST_UNSAFE`. Correction: `mkdir -m 0700` under
   `umask 077` when absent, read back, then run the full verification; order the lock
   after it.
+  **Closed by `16a663c28`** — `umask 077` then `mkdir -m 0700 -- "$BACKUP_DIR"` on first run (`scripts/backup-db.sh:1274-1277`), ordered before the lock (`:1486`).
 - **N11 Major — "restore `globals.sql` first" contradicts the runbook's initdb-first
   invariant.** Correction: `globals.sql` is for a cluster rebuilt *without* initdb
   (the RDS/bare-cluster path); for the Compose migration it is a cross-check that the
   target's roles match the source. Note that `dev-host-migration.md` is currently
   untracked, so INV-C8b depends on this PR committing it.
+  **Closed by `16a663c28`** — `docs/operations/dev-host-migration.md:291-294` now states that `globals.sql` is for a cluster rebuilt *without* initdb (the RDS/bare-cluster path) and must not be restored in the Compose migration. The doc was committed by this same commit, settling INV-C8b's dependency.
 - **S-12 Major — the percent-decode mechanism is unspecified**, and the natural bash
   idioms range from lossy (`printf '%b'` mangles backslashes) to `eval` RCE.
   Correction: a byte-exact `%XX` loop; forbid `eval` as a C7 forbidden pattern; extend
   the sentinel to include `\`, `$(id)`, a trailing newline and a bare `%`.
+  **Closed by `16a663c28`** — `percent_decode()` is a byte-exact `%XX` loop with no `printf '%b'` and no `eval` (`scripts/backup-db.sh:887-907`); `eval` is a forbidden pattern with a positive control (`scripts/__tests__/backup-db.test.mjs:1009`).
 - **S-03 Major — `verify-full` is unreachable without an operator CA**, and libpq's
   own error text steers the operator to the escape that disables verification.
   Correction: drop `require` from the value set (floor `verify-ca`); require an
   explicit CA and fail preflight with `BACKUP_ERR:NO_CA` before any dump; document
   where the RDS CA bundle comes from; record a downgraded run in MANIFEST.
+  **Closed by `16a663c28`** — the `BACKUP_TLS_MODE` case admits only `verify-full|verify-ca` (`scripts/backup-db.sh:842-848`), and the `NO_CA` preflight fails before any dump (`:1122-1134`).
 - **S-08 Major — `globals.sql` is exempt from C5's reader-validation** while INV-C5a
   claims universal coverage. Correction: record SHA-256 and byte count, assert the
   trailing `-- PostgreSQL database cluster dump complete` marker and a captured
   `^CREATE ROLE` count ≥ 1, and state plainly in C5 and the docs that this member
   carries structural assurance only.
+  **Closed by `16a663c28`** — the trailing-marker assertion and a `role_count -ge 1` check are recorded with `structural_check_only=true` in MANIFEST (`scripts/backup-db.sh:1969-1977`).
 - **S-09 Major — the `*.dump` rule leaves `globals.sql` and `MANIFEST` committable**
   and inside the build context. Correction: ignore the directory shape, not the
   extension; use `check-dockerignore-secrets.sh`'s `DIR_CLASSES` (designed so one line
   extends both checks); assert `git check-ignore` for all three member names.
+  **Closed by `16a663c28`** — the ignore rules key on the directory shape rather than the extension (`.gitignore:146-166`, mirrored in `.dockerignore:53-64`), covering `globals.sql` and `MANIFEST` too.
 - **N12 Major — the required-binary set is under-derived** (`pg_dumpall` and `pg_dump`
   are not preflighted). Correction: derive from the invocation sites; preflight each
   with `command -v` into `NO_CLIENT` naming the missing binary; C9 re-derives and
   asserts equality.
+  **Closed by `16a663c28`** — `require_binary` preflights `pg_dump`, `pg_dumpall`, `pg_restore` and `psql` in URL mode and `docker` in Compose mode, before any spawn (`scripts/backup-db.sh:1150-1161`).
 - **N13 Major — `BACKUP_DRY_RUN` previews one generation too few.** The real run adds
   a generation before pruning. Correction: insert a synthetic entry; report "would
   delete N of G+1"; add the `G == R` case where the preview says "nothing" and the real
   run deletes one.
+  **Closed by `16a663c28`** — the dry run inserts a synthetic generation before computing what it would delete (`scripts/backup-db.sh:1552-1564`).
 - **N6 Major — the TLS floor's rejection half has no adjudicator** (see S-01).
+  **Closed by `16a663c28`** — same mechanism as S-01; `gssencmode` is additionally rejected as a query parameter (`scripts/backup-db.sh:1093-1094`).
 - **N-02 Major — INV-C8b's "both files changed" is a diff property no content test can
   observe.** Correction: restate as a content property both files must hold; assert on
   the invocation line, not the bare path; derive the file list from one constant.
+  **Closed by `16a663c28`** — the test asserts a content property both files must hold, on the invocation line and derived from one `DOCS` constant, not a diff property (`scripts/__tests__/backup-db.test.mjs:1251,1297-1304`).
 - **N-03 Major — the env allowlist starves Group B's docker fallback** (`DOCKER_HOST`,
   `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `XDG_RUNTIME_DIR`). Correction: a separate, named
   Group B allowlist; state that the two groups do not share a spawn env.
+  **Closed by `16a663c28`** — structurally, not by a second allowlist: `compose()` (`scripts/backup-db.sh:1166`) is never routed through `run_pg()`'s `env -i`, so Docker's ambient variables are never starved and the two groups do not share a spawn env.
 - **N-04 Major — INV-C9d's positive controls prove non-vacuity only.** `chmod 0?[0-7]{3}`
   is blind to `chmod u=rwx,go=`, `install -m`, `mkdir -m`; `find … -delete` to
   `-exec rm -rf {} +`; `\| *grep -q` is narrower than the gate it mirrors
   (`-qxF`, `-iqE`). Correction: enumerate the spellings per pattern or state the
   residual; make each control a plausible implementation line.
+  **Still open** — the forbidden-pattern block ships positive controls only for `set -e`, `| grep -q`, `rm -rf $BACKUP_DIR`, `eval`, the credential-to-sink and `pg_dump` argv classes, and `mapfile`/`readarray`/`readlink -f`/`flock` (`scripts/__tests__/backup-db.test.mjs:1006-1029,1071-1082`). No test enumerates the `chmod u=rwx,go=` / `install -m` / `mkdir -m` spellings or `find … -delete` versus `-exec rm -rf {} +`, and no residual is stated.
 - **N-05 / N15 / S-17 Major — VE3's "CI has no Postgres client" is false**
   (`ci.yml:616-628`, `ci-integration.yml:140` run bare `psql`). Correction: drop the
   install step unless a probe shows it is needed; pin the client major version; record
   how each fixture was produced and at which server version.
+  **Closed by `16a663c28`** — no `postgresql-client` install step exists in `ci.yml` or `ci-integration.yml` (the premise was indeed false); fixture provenance and the producing server version are recorded in `scripts/__tests__/fixtures/backup-db/README.md`, and Group B asserts a client major `>= 16` (`scripts/__tests__/backup-db.test.mjs:1129`).
 - **N-06 Major — Group B belongs in `vitest.integration.config.ts` + `ci-integration.yml`**,
   whose path filter already includes `scripts/**` and which already carries Postgres.
   Correction: split Group B there rather than adding an environment dependency to the
   suite every contributor runs.
+  **Still open** — Group B still lives in `scripts/__tests__/backup-db.test.mjs`, which the default suite's include pattern matches (`vitest.config.ts:11`), so plain `npm test` runs it. It was never moved under `vitest.integration.config.ts` (whose include is only `src/**/*.integration.test.ts`, `:8`) nor gated behind `ci-integration.yml`'s Postgres service — the environment dependency the finding wanted removed is still carried by the suite every contributor runs.
 - **N-07 Major — the `flock` stub can null out the entire script**, and the LOCKED
   case has no synchronisation mechanism. Correction: subsumed by N3's `mkdir` lock;
   for the contention test, block the stubbed `pg_dump` on a fifo, assert the second
   run's code, release, then await the first child in `afterEach`.
+  **Still open in part** — the `flock`-stub half is moot, subsumed by N3's `mkdir` lock. The synchronisation half was not taken: the two lock-contention cases still use `sleep 1`/`sleep 2` timing races rather than blocking the stubbed `pg_dump` on a fifo and awaiting the child in `afterEach` (`scripts/__tests__/backup-db.test.mjs:2065-2124`).
 - **N-08 Major — the C3 derivation regex cannot match `docker-compose.yml:68`**, the
   URL spelling it was added for: `[^ ]*` cannot cross the spaces inside
   `${PASSWD_JACKSON_PASSWORD:?…}`. The set-equality test passes today for the wrong
   reason. Correction: parse the YAML structurally or tolerate `${…}` with spaces;
   exclude build-arg blocks; paste the output before writing the test; have the test
   shell out to the same command rather than re-implement it.
+  **Still open** — moot only because the whole check is absent: nothing in `scripts/__tests__/backup-db.test.mjs` re-derives the default `BACKUP_DATABASES` set from `docker-compose*.yml`, so the promised C9 set-equality self-test was never implemented and the regex was never corrected.
 - **N4 Major — the role enumeration does not reproduce against the live cluster**
   (`jackson_user` absent; seven other roles present). Correction: re-derive against a
   live cluster and record the command.
+  **Still open** — no role-enumeration derivation reproducible against a live cluster exists anywhere under `scripts/`; same root cause as N-08.
 - **N5 Major — `globals.sql`'s check 3 collapses into check 2** (see S-08).
+  **Closed by `16a663c28`** — the two `globals.sql` checks are genuinely distinct: the trailing-marker match (`scripts/backup-db.sh:1971`) and the `role_count -ge 1` assertion (`:1975`).
 
 ### Smaller corrections
 
 - **N14 / N-08 Minor** — the published derivation returns four build-arg placeholder
   URLs and no extraction rule; the `[a-z_]*` class misses digits and uppercase.
+  **Still open** — inherits N-08's absence: the derivation mechanism was never implemented, so neither the build-arg placeholder extraction rule nor the `[a-z_]*` character-class gap was addressed.
 - **N16 Minor** — no per-member digest in MANIFEST; nothing detects corruption between
   take and restore. Add SHA-256 and a verification one-liner to C8. Note `globals.sql`
   contains `\restrict`/`\unrestrict`, a recent psql addition — state the client floor.
+  **Still open** — no digest is computed anywhere in `scripts/backup-db.sh`; MANIFEST records only `size=`/`entries=`/`roles=` (`:1956,1976-1977`). The `\restrict`/`\unrestrict` client-floor half *was* documented (`docs/operations/dev-host-migration.md:286-287`); the per-member SHA-256 was not.
 - **N17 Minor** — name `cd "$dir" >/dev/null && pwd -P` as the path resolver, since
   `readlink -f` is forbidden by the portability floor; state that it resolves ancestors.
+  **Closed by `16a663c28`** — `resolve_path()` is `( cd -- "$1" >/dev/null 2>&1 && pwd -P )` (`scripts/backup-db.sh:181-183`), with the comment naming why `readlink -f` is not used (`:172-173`).
 - **N18 Minor** — an undefined Compose service exits non-zero with empty stdout and is
   reported as `DB_NOT_RUNNING`. Capture status alongside output and distinguish.
+  **Closed by `16a663c28`** — status and output are captured separately, distinguishing `UNKNOWN_SERVICE` (nonzero status) from `DB_NOT_RUNNING` (empty output, zero status) (`scripts/backup-db.sh:1185-1193`).
 - **S-14 Minor** — scope `PGPASSWORD` to the invocation (subshell or command prefix)
   rather than exporting it across the whole dump-and-validate phase.
+  **Closed by `16a663c28`, by removing the question** — `PGPASSWORD` is not used at all; the credential travels in a mode-0600 `PGPASSFILE` scoped to the run and removed in the trap (`scripts/backup-db.sh:1640-1664`, `:126`).
 - **S-15 Minor** — set `IFS=$' \t\n'` explicitly beside `set -euo pipefail`;
   `BACKUP_DATABASES` is word-split and `IFS` is inherited.
+  **Closed by `16a663c28`** — `IFS=$' \t\n'` is set explicitly alongside the shell options (`scripts/backup-db.sh:56`).
 - **S-16 Minor** — SC6 names the deferred class as "argv" while
   `set-outbox-worker-password.sh:81` echoes the whole URL to stderr. Restate as the
   credential-egress class (`argv` **and** log sinks) and cite both lines.
+  **Still open** — SC6 (`plan:699-704`) still names the deferred class as "argv" only and cites `set-outbox-worker-password.sh:94`; the log-sink half at `scripts/set-outbox-worker-password.sh:81`, which echoes the whole URL to stderr, is still not named.
 - **S-18 Minor** — a caller-set `BACKUP_DATABASES` removes INV-C3a's quantifier.
   Enumerate the cluster's visible non-template databases and warn for each one not in
   the set, in MANIFEST and on stderr.
+  **Closed by `16a663c28`** — the run enumerates the cluster's visible non-template databases and warns for each one absent from `BACKUP_DATABASES`, on stderr and as MANIFEST's `not_backed_up:` (`scripts/backup-db.sh:1813-1911`).
 - **N-09 Minor** — the RT7 mutation proof needs a script-path seam
   (`BACKUP_DB_SCRIPT`, read only by the test) to be reproducible; better, commit it as
   a test that copies, mutates and asserts the code is absent.
+  **Closed by `16a663c28`** — the `BACKUP_DB_SCRIPT` seam exists and is read only by the test (`scripts/__tests__/backup-db.test.mjs:44`).
 - **N-10 Minor** — `RUN_VANISHED` is reachable only under mutation; declare it
   verifiable-by-mutation-only and list the mutation, or drop the code.
+  **Closed by `16a663c28`, and the premise disproved** — `RUN_VANISHED` is reached through an ordinary stub (a `pg_dumpall` stub deleting a sibling archive mid-run), not source mutation (`scripts/__tests__/backup-db.test.mjs:3811-3831`), so the code stands and needs no verifiable-by-mutation-only declaration.
 - **N-11 Minor** — nothing notices if `backup-db.test.mjs` is deleted
   (`check-gate-selftest-coverage.sh` scans `scripts/checks/` only). Record as `SC7`
   with an owner.
+  **Still open** — `scripts/checks/check-gate-selftest-coverage.sh` still scans `scripts/checks/` only (`:14-16`), and `backup-db.sh` sits directly under `scripts/`, so deleting `backup-db.test.mjs` is still unnoticed. No `SC7` entry with an owner was recorded.
 - **N-12 Minor** — give spawns an explicit timeout under vitest's `testTimeout: 10000`,
   since `spawnSync` blocks the event loop and a hung child otherwise reports nothing.
+  **Closed by `16a663c28`** — every script-invoking `spawnSync` carries `timeout: 8000` (`scripts/__tests__/backup-db.test.mjs:186,416,960,4217`), inside vitest's `testTimeout: 10000` (`vitest.config.ts:90`).
 - **N-13 Minor [Adjacent]** — normalising SIGINT's 130 to 1 loses the interrupt signal
   for a supervisor; assert the `BACKUP_ERR` code rather than the status.
+  **Closed by `16a663c28`** — the interrupt case asserts the `BACKUP_ERR:INTERRUPTED` stderr identity and the on-disk cleanup, never the exit status (`scripts/__tests__/backup-db.test.mjs:1982-2004`).

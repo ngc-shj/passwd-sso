@@ -17,6 +17,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
 import { randomUUID, randomBytes } from "node:crypto";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 // ─── Role connection strings ────────────────────────────────────
 
@@ -405,7 +406,44 @@ export async function createTestContext(): Promise<TestContext> {
     return id;
   }
 
+  /**
+   * The sentinel is the one tenant id teardown must never receive.
+   *
+   * `__system__` is the FK target that makes an unattributable audit emit
+   * writable at all (src/lib/audit/audit.ts, resolveTenantId), and
+   * `deleteTestData` ends in `DELETE FROM tenants` — so handing it the sentinel
+   * takes the encoding down for every working copy sharing this database. That
+   * is not hypothetical: proving this guard reddens its own case did exactly
+   * that once, and the row had to be restored from its seeding migration.
+   *
+   * Both of THIS CONTEXT'S entry points are guarded, because the class is "a
+   * caller-supplied id reaching that DELETE through TestContext", not "a call to
+   * trackTenant". `deleteTestData` is exported and every file in this suite
+   * calls it directly with an id of its own; guarding only the registration path
+   * leaves the shorter road open. `createTenant` is not a member — its id is a
+   * fresh randomUUID().
+   *
+   * Scoped to TestContext deliberately, and the scope is worth stating because
+   * it is narrower than the sentence above sounds: seven cases across three
+   * files (and `e2e/helpers/db.ts`) issue `DELETE FROM tenants` as raw SQL,
+   * bypassing both guards. Every one passes an id it created itself or the fixed
+   * E2E tenant, so none can reach the sentinel today — but a guard at this layer
+   * cannot stop one that does. A test writing raw SQL against the sentinel is
+   * carrying its own precondition; see the `sentinel tenant (C12)` block in
+   * tenant-claim-cli.integration.test.ts, which does exactly that and states it.
+   */
+  function refuseSentinel(tenantId: string, fn: string): void {
+    if (tenantId !== SYSTEM_TENANT_ID) return;
+    throw new Error(
+      `[db-integration] ${fn} refuses the sentinel tenant: teardown would DELETE the ` +
+        "row that every unattributable audit emit FKs to. Reclaim rows written under " +
+        "it by a per-run marker (a targetId this test generated), never by tenant_id " +
+        "alone.",
+    );
+  }
+
   function trackTenant(tenantId: string): void {
+    refuseSentinel(tenantId, "trackTenant");
     outstandingTenantIds.add(tenantId);
   }
 
@@ -433,6 +471,7 @@ export async function createTestContext(): Promise<TestContext> {
   }
 
   async function deleteTestData(tenantId: string): Promise<void> {
+    refuseSentinel(tenantId, "deleteTestData");
     await withCleanupConflictRetry(() => su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       // FK-safe deletion order

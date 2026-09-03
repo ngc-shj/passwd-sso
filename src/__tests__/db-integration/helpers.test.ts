@@ -191,9 +191,15 @@ describe("withCleanupConflictRetry", () => {
     // Source-text, because the wrapper takes a thunk: no observable output of
     // `deleteTestData` differs between wrapped and unwrapped on the happy
     // path, and driving a real deadlock is not something a unit test can do.
+    //
+    // The optional `refuseSentinel(...)` is the ONE statement admitted before
+    // the wrapper, and it is spelled out rather than allowed as "any prefix":
+    // it throws before any database work, so it cannot be the thing a deadlock
+    // retries, and widening this to `[\s\S]*?` would let a future unwrapped
+    // statement slip in front of the retry with the gate still green.
     const source = readFileSync(resolve(__dirname, "helpers.ts"), "utf8");
     expect(source).toMatch(
-      /async function deleteTestData\([^)]*\)[^{]*\{\s*await withCleanupConflictRetry\(/,
+      /async function deleteTestData\([^)]*\)[^{]*\{\s*(refuseSentinel\([^)]*\);\s*)?await withCleanupConflictRetry\(/,
     );
   });
 });

@@ -29,19 +29,61 @@ let root;
  * property.
  *
  * Load-bearing, not decoration: the gate refuses when it recognises zero catch
- * clauses OR zero metadata properties (both refusals are their own cases
- * below), so a fixture missing either would exit non-zero for a reason that has
- * nothing to do with its subject.
+ * clauses OR zero properties for ANY ONE of its sink fields (both refusals are
+ * their own cases below), so a fixture missing either would exit non-zero for a
+ * reason that has nothing to do with its subject.
+ *
+ * The floor is per-sink, so the anchor must carry EVERY sink the gate watches.
+ * When the sink set was one field this was a single property; widening the set
+ * without widening the anchor makes every case in this file refuse on the
+ * missing sinks rather than exercise its subject — and the fix that presents
+ * itself then is a floor over the SUM, which is exactly the blindness the
+ * per-sink floor was introduced to remove. Each value below is a constant, not
+ * a narrative, so the anchor stays a PASSES fixture.
  */
 const ANCHOR = `
 declare const errorLogFields: (e: unknown) => { name: string; code: string };
 declare const emit: (o: object) => void;
 export function anchor() {
   try { /* noop */ } catch (x) {
-    emit({ metadata: { reason: \`ANCHOR_FAILED:\${errorLogFields(x).code}\` } });
+    emit({
+      metadata: { reason: \`ANCHOR_FAILED:\${errorLogFields(x).code}\` },
+      targetType: "ANCHOR",
+      targetId: "anchor-id",
+      userAgent: "anchor-agent",
+      ip: "203.0.113.1",
+      teamId: "anchor-team",
+      serviceAccountId: "anchor-sa",
+    });
   }
 }
 `;
+
+/** The sinks the anchor supplies, in the order it spells them. */
+const ANCHOR_SINKS = [
+  "metadata",
+  "targetType",
+  "targetId",
+  "userAgent",
+  "ip",
+  "teamId",
+  "serviceAccountId",
+];
+
+/**
+ * The anchor with exactly one sink withheld.
+ *
+ * This is what tells a PER-SINK floor from a SUMMED one, and nothing else in
+ * this file does: every existing floor case removes the anchor entirely, so all
+ * seven sinks go to zero at once and a floor written over the total passes it
+ * byte for byte — the wrong fix the plan explicitly warns about. With six sinks
+ * present the total stays comfortably non-zero, so only a per-sink floor refuses.
+ */
+function anchorWithout(sink) {
+  return ANCHOR.split("\n")
+    .filter((line) => !new RegExp(`^\\s*${sink}:`).test(line))
+    .join("\n");
+}
 
 const DECLS = `
 declare const emit: (o: object) => void;
@@ -60,11 +102,11 @@ afterAll(() => {
   if (root) rmSync(root, { recursive: true, force: true });
 });
 
-function runGate(source, { dirs = "src", withAnchor = true } = {}) {
+function runGate(source, { dirs = "src", withAnchor = true, anchor = ANCHOR } = {}) {
   if (source !== null) {
     writeFileSync(
       join(root, "src/subject.ts"),
-      (withAnchor ? ANCHOR : "") + source,
+      (withAnchor ? anchor : "") + source,
       "utf8",
     );
   }
@@ -86,8 +128,28 @@ function runGate(source, { dirs = "src", withAnchor = true } = {}) {
     // A REFUSAL and a VIOLATION both exit non-zero. Asserting only on the exit
     // code cannot tell "the gate found a defect" from "the gate could not run",
     // and the second reads as the first in a pre-pr log that shows only a code.
-    refused: /recognised 0|scanned 0|resolved to no source file/.test(stderr),
-    violated: /reaching an audit `metadata` field/.test(stderr),
+    // FOUR refusals, not three: the gate has four fail() sites and the previous
+    // `recognised 0` alternative covered two of them (catch clauses AND sink
+    // properties). One boolean over four distinct refusals is the same lossy
+    // channel one rung above the exit code — a case asserting "it refused" can
+    // pass on a refusal it was not testing, which is how a floor gets reported
+    // as covered while nothing exercises it.
+    refusedNoSourceFile: /resolved to no source file/.test(stderr),
+    refusedScanZero: /scanned 0 source files/.test(stderr),
+    refusedNoCatch: /recognised 0 catch clauses/.test(stderr),
+    refusedNoSink: /recognised 0 (?!catch clauses)/.test(stderr),
+    // Retained as their disjunction so every existing assertion in this file is
+    // literally unchanged. The split adds precision; it does not move the cases
+    // that were already right.
+    refused:
+      /resolved to no source file|scanned 0 source files|recognised 0/.test(stderr),
+    violated: /reaching an audit sink field/.test(stderr),
+    // Per-sink, because the gate now watches seven fields and `violated` alone
+    // cannot tell which one fired. A predicate that answers "some sink" for a
+    // targetId violation is the same lossy channel as one boolean over three
+    // distinct refusals — asserting it would pass on the wrong sink.
+    violatedSink: (name) =>
+      new RegExp(String.raw`^\s+\S+:\d+\s+\`${name}\``, "m").test(stderr),
   };
 }
 
@@ -271,6 +333,13 @@ export function f() {
       withAnchor: false,
     });
     expect(r.refused).toBe(true);
+    // The four-way split, used: this refusal is the no-catch one and NOT the
+    // no-sink one. Asserting only the disjunction is the pre-split state — a
+    // case can pass on a refusal it was not testing, which is the lossy channel
+    // the split exists to remove, and until this line the two narrow predicates
+    // were defined and never read.
+    expect(r.refusedNoCatch).toBe(true);
+    expect(r.refusedNoSink).toBe(false);
     expect(r.violated).toBe(false);
     // The exit status is the ONLY channel queue_step reads. Asserting stderr
     // alone leaves fail() free to exit 0 — measured: the message is
@@ -280,24 +349,127 @@ export function f() {
     expect(r.stderr).toContain("recognised 0 catch clauses");
   });
 
-  it("REFUSES when it recognises no metadata property", () => {
+  it("REFUSES when it recognises no property for a sink field, naming that sink", () => {
     // The other half of the subject. A gate that sees every catch and no sink
     // prints the same OK as one with nothing to report — this is what fires if
-    // the audit payload field is ever renamed.
+    // an audit payload field is ever renamed.
+    //
+    // The floor is PER SINK and the message names the missing ones, because a
+    // floor over the sum cannot see one field go to zero: on the real tree,
+    // dropping `ip` still leaves 886 of the 957 properties, so a summed floor
+    // stays silent while the gate has stopped watching a sink entirely.
     const r = runGate(`${DECLS}export function f() { try { risky(); } catch (err) { log(err); } }`, {
       withAnchor: false,
     });
     expect(r.refused).toBe(true);
+    // The mirror of the case above: this is the no-sink refusal, not the
+    // no-catch one. The fixture has a catch clause precisely so the two are
+    // separable.
+    expect(r.refusedNoSink).toBe(true);
+    expect(r.refusedNoCatch).toBe(false);
     expect(r.violated).toBe(false);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toContain("recognised 0 `metadata` properties");
+    expect(r.stderr).toContain("recognised 0");
+    // Every sink is named, not just the first — the anchor is what supplies
+    // them all, so its absence must account for all seven.
+    for (const sink of ANCHOR_SINKS) {
+      expect(r.stderr).toContain(`\`${sink}\``);
+    }
+  });
+
+  it.each(ANCHOR_SINKS)(
+    "REFUSES when only `%s` goes unseen, which a summed floor cannot detect",
+    (sink) => {
+      // The deny arm C14's "rename each sink in turn" criterion asks for, and
+      // the one the all-sinks-absent case above cannot supply: with six sinks
+      // still present the total is non-zero, so a floor over the sum prints OK
+      // while the gate has stopped watching this one field entirely.
+      const r = runGate(
+        `${DECLS}export function f() { try { risky(); } catch (err) { log(err); } }`,
+        { anchor: anchorWithout(sink) },
+      );
+      expect(r.status).not.toBe(0);
+      expect(r.refusedNoSink).toBe(true);
+      expect(r.refusedNoCatch).toBe(false);
+      expect(r.stderr).toContain(`\`${sink}\``);
+      // Scoped: the six sinks the anchor still supplies must NOT be named, or
+      // the message cannot say which one went unseen.
+      for (const other of ANCHOR_SINKS.filter((s) => s !== sink)) {
+        expect(r.stderr).not.toContain(`\`${other}\``);
+      }
+    },
+  );
+
+  it.each([
+    ["targetType", `emit({ targetType: String(err) })`],
+    ["targetId", `emit({ targetId: err.message })`],
+    ["userAgent", `emit({ userAgent: \`UA:\${err.message}\` })`],
+    ["ip", `emit({ ip: \`denied:\${err.message}\` })`],
+    ["teamId", `emit({ teamId: err.message })`],
+    ["serviceAccountId", `emit({ serviceAccountId: String(err) })`],
+  ])("CAUGHT: narrative reaching the `%s` sink", (sink, body) => {
+    // One case per field the sink set gained. A single case covering all six
+    // would redden for any one of them and prove none.
+    //
+    // teamId and serviceAccountId are uuid columns, so the insert raises 22P02
+    // rather than storing the text — and Postgres puts the offending value IN
+    // that message, which the outbox worker's recordError then writes to
+    // audit_logs.metadata.lastError. The narrative reaches the same
+    // tenant-readable row, just 8 attempts later.
+    const r = runGate(`${DECLS}export function f() { try { risky(); } catch (err) { ${body}; } }`);
+    expect(r.status).not.toBe(0);
+    expect(r.violated).toBe(true);
+    expect(r.violatedSink(sink)).toBe(true);
+    // The report names WHICH sink fired: a predicate that cannot distinguish
+    // them would pass on the wrong one.
+    expect(r.violatedSink("metadata")).toBe(false);
   });
 
   it("REFUSES when a scan target resolves to no file", () => {
     const r = runGate(null, { dirs: "src/does-not-exist" });
-    expect(r.refused).toBe(true);
+    expect(r.refusedNoSourceFile).toBe(true);
+    expect(r.refusedScanZero).toBe(false);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("src/does-not-exist");
+  });
+
+  it("REFUSES an existing-but-empty scan target, on the target-resolution floor", () => {
+    // The sibling of the case above, and the distinction is worth a case: a
+    // MISSING path and a PRESENT-but-empty one reach `unresolvedTargets`
+    // through different branches — a thrown statSync versus a walk that returns
+    // [] — and only the second is what an operator produces by pointing the
+    // gate at a directory that has been emptied.
+    //
+    // Both land on the SAME floor, and the assertion says so. That is the point
+    // of the split: "it refused" is true for four different reasons here, and a
+    // case that cannot say which one would pass on the scan-zero floor below
+    // while testing nothing about it.
+    mkdirSync(join(root, "src/emptydir"), { recursive: true });
+    const r = runGate(null, { dirs: "src/emptydir" });
+    expect(r.refusedNoSourceFile).toBe(true);
+    expect(r.refusedScanZero).toBe(false);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("src/emptydir");
+  });
+
+  it("REFUSES on the scan-zero floor when every collected file is skipped in-loop", () => {
+    // The ONE construction that reaches `scanned === 0`. The walker drops
+    // `*.test.*` and `__tests__/` before collection, so those yield an
+    // unresolved TARGET (the case above) rather than a scanned-zero RUN. A file
+    // under `__fixtures__` is collected — the target resolves — and then skipped
+    // inside the loop, which is the only way to arrive here.
+    //
+    // SEARCH_DIRS points at the fixtures directory itself, not its parent: with
+    // the parent, a leftover src/subject.ts from any earlier case in this file
+    // would be scanned and the floor would not fire, making the case pass or
+    // fail on test ORDER rather than on the gate.
+    mkdirSync(join(root, "src/__fixtures__"), { recursive: true });
+    writeFileSync(join(root, "src/__fixtures__/a.ts"), "export const a = 1;\n", "utf8");
+    const r = runGate(null, { dirs: "src/__fixtures__" });
+    expect(r.refusedScanZero).toBe(true);
+    expect(r.refusedNoSourceFile).toBe(false);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("scanned 0 source files");
   });
 
   it("REFUSES scan-scope overrides in CI without fixture mode", () => {

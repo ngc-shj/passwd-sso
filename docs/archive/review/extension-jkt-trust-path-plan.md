@@ -428,6 +428,22 @@ Each phase = its own commit; one PR.
 
 (All Round-1 open questions resolved.)
 
+**Reconciled 2026-09 (audit-sentinel-verification-gaps, C11).** This file matched
+C11's Tier-1 derivation — a `## Open questions` heading — and was the one member
+of that set the reconciliation missed, which C11's own fail-loud criterion is
+written to catch: a heading with zero disposition rows means the extraction
+found nothing, and "nothing to disposition" and "extraction failed" must not be
+spelled the same way. They are not the same here. The line above is accurate: the
+round-1 questions were resolved in round 2, and nothing under this heading is
+open.
+
+What IS open lives under its own headings and is deliberately not moved here:
+**C14** (`EXTENSION_BRIDGE_CODE_ISSUE_FAILURE` audit emission) and **C15**
+(`userActivation.isActive` gating on `EXT_CONNECT_REQUEST`), both carrying
+`TODO(extension-jkt-trust-path-followup)` markers in the tree. Their decisions
+and acceptance criteria are recorded where they were taken; annotated, not
+rewritten.
+
 ## Non-goals
 
 - iOS / mobile DPoP path rewrite (uses different routes).

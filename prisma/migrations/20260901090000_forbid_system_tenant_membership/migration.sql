@@ -1,0 +1,35 @@
+-- The sentinel tenant must have zero members, and until now nothing enforced it.
+--
+-- `__system__` is the encoding of "no owning tenant" for audit rows that cannot
+-- be attributed (src/lib/audit/audit.ts, resolveTenantId). What keeps those rows
+-- out of every tenant's view is not a policy on the rows — it is that the
+-- sentinel has no members: all three tenant resolvers key on `tenant_members`
+-- (requireTenantPermission -> getTenantMembership, withUserTenantRls ->
+-- resolveUserTenantIdFromClient, and the team resolver), and the RLS policies on
+-- audit_logs / audit_outbox gate on `app.tenant_id`, which is only ever set from
+-- those resolvers. One membership row would hand its holder every unattributable
+-- audit row in the deployment.
+--
+-- Enforced in the engine rather than in the application because there are
+-- fourteen Prisma writers, an installed AFTER INSERT trigger on `users`, raw SQL
+-- in a seeder and in the e2e helpers, and any future migration. A CHECK is
+-- decided regardless of caller, is not deferrable (SET CONSTRAINTS applies only
+-- to deferrable FK/UNIQUE), and COPY cannot skip it.
+--
+-- Blast radius worth stating, because one writer differs from the rest:
+-- ensure_tenant_owner_membership_after_user_insert() inserts into tenant_members
+-- from an AFTER INSERT trigger on `users`. Its predicate is
+-- `NEW.tenant_id = md5(NEW.id::text)::uuid`, so it cannot reach the sentinel —
+-- but if it ever did, the 23514 would abort the parent `users` INSERT, and the
+-- symptom would be a failed account creation with no visible link to this table.
+--
+-- The literal is SYSTEM_TENANT_ID in src/lib/constants/app.ts. Applied
+-- migrations are checksummed, so this file is the immutable side of that pair:
+-- if the two ever diverge, the constant is what moves.
+-- scripts/checks/check-sentinel-tenant-literal-parity.mjs enforces the tie.
+--
+-- Operator runbook for a rollout where this fails to apply:
+-- docs/operations/sentinel-tenant-membership.md
+ALTER TABLE "tenant_members"
+  ADD CONSTRAINT "tenant_members_not_system_tenant"
+  CHECK ("tenant_id" <> '00000000-0000-4000-8000-000000000002'::uuid);

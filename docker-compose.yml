@@ -14,12 +14,17 @@
 #     only docker-compose.logging.yml sets, and that overlay moves app off
 #     json-file onto fluentd. So the cap governs it in no shipped config.
 #   - app and worker stdout always carry deadLetterLogger (_logType
-#     "audit-dead-letter", src/lib/audit/audit-logger.ts:93-96) — the record of
+#     "audit-dead-letter", src/lib/audit/audit-logger.ts) — the record of
 #     an audit event that never reached audit_outbox. Most have a durable
 #     AUDIT_OUTBOX_DEAD_LETTER row behind them, so rotation costs alerting
-#     latency rather than the record; the exception is the app-side
-#     tenant_not_found path (src/lib/audit/audit.ts:259-264), which returns
-#     without enqueuing anything, making stdout the only copy.
+#     latency rather than the record. The former exception — an app-side
+#     tenant_not_found path that returned without enqueuing, making stdout the
+#     only copy — no longer exists: resolveTenantId encodes "no owning tenant"
+#     as SYSTEM_TENANT_ID and the row reaches audit_logs like any other.
+#     What remains stdout-only is narrower and unavoidable: the two catch arms
+#     in logAuditAsync/logAuditBulkAsync, which fire only when the database is
+#     unreachable — the one state in which no durable write can succeed by any
+#     design.
 #
 # docker-compose.logging.yml ships the APP stream off-host, but do not read that
 # as a way to retain dead-letters past the rotation window: its Fluent Bit filter

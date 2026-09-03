@@ -74,6 +74,7 @@ import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx } from "@/lib/audit/au
 // From the REAL module, not re-typed: an expectation that spells the sentinel
 // itself agrees with the test rather than with production.
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { AUDIT_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 
 const TENANT_A = "550e8400-e29b-41d4-a716-446655440000";
@@ -209,6 +210,55 @@ describe("buildOutboxPayload", () => {
     expect(payload.metadata).not.toHaveProperty("huge");
   });
 
+  it.each([
+    ["a BigInt", { n: 1n }],
+    ["a circular reference", (() => { const o: Record<string, unknown> = {}; o.self = o; return o; })()],
+    // The two the first version of this guard missed. Neither makes
+    // JSON.stringify THROW, which is all that version caught:
+    //   toJSON()->undefined makes it RETURN undefined, so `.length` was the
+    //   TypeError; and a cycle whose toJSON() is safe passes stringify and then
+    //   overflows sanitizeMetadata's recursion over the ORIGINAL object.
+    // Both escaped buildOutboxPayload, which runs before logAuditAsync's try.
+    ["a toJSON that returns undefined", { toJSON: () => undefined }],
+    // A `toJSON()` may return ANY shape, and the round-trip then yields
+    // something this function does not declare. Casting them through was silent
+    // both ways: the outbox worker coerces a non-object to null, so the metadata
+    // vanished while the event was still delivered; and an array passed its
+    // `typeof === "object"` check and reached the column as a JSON array.
+    ["a toJSON that returns a string", { toJSON: () => "value" }],
+    ["a toJSON that returns a number", { toJSON: () => 42 }],
+    ["a toJSON that returns an array", { toJSON: () => [1, 2] }],
+  ])("survives metadata that JSON.stringify refuses (%s)", (_label, metadata) => {
+    // buildOutboxPayload runs OUTSIDE logAuditAsync's try, so a throw here
+    // reached the caller and skipped the dead-letter arm — no outbox row, no
+    // dead-letter line. The event must still be built; only the metadata is
+    // replaced.
+    const payload = buildOutboxPayload({ ...baseParams, metadata: metadata as Record<string, unknown> });
+    // Exact match, not objectContaining: `_reason` is a fixed token precisely
+    // because an error-derived one reduced to "unknown" for every reachable
+    // trigger, and a field nothing asserts is how that went unnoticed.
+    expect(payload.metadata).toEqual({ _unserializable: true, _reason: "stringify_failed" });
+    // The rest of the row survives — an event whose metadata did not serialize
+    // is still an event, and the actor/action are what a reader needs.
+    expect(payload.action).toBe(baseParams.action);
+    expect(payload.userId).toBe(baseParams.userId);
+  });
+
+  it("keeps the toJSON projection of a cycle, rather than falling back to the marker", () => {
+    // The case that separates "cannot be rendered" from "renders to something".
+    // A cycle whose toJSON() returns a safe value PASSES JSON.stringify, so the
+    // marker would be wrong — but sanitizeMetadata used to walk the ORIGINAL
+    // object and overflow its own recursion on the cycle. Sanitizing the parsed
+    // round-trip is what makes both true at once: no throw, and the projection
+    // survives. A guard that returned the marker here would be over-applying it.
+    const cyclic: Record<string, unknown> = { toJSON: () => ({ safe: 1 }) };
+    cyclic.self = cyclic;
+
+    const payload = buildOutboxPayload({ ...baseParams, metadata: cyclic });
+    expect(payload.metadata).toEqual({ safe: 1 });
+    expect(payload.action).toBe(baseParams.action);
+  });
+
   it("passes through metadata unchanged when within byte limit", () => {
     const payload = buildOutboxPayload({
       ...baseParams,
@@ -224,7 +274,22 @@ describe("buildOutboxPayload", () => {
     expect(payload.userAgent?.length).toBeLessThanOrEqual(512);
   });
 
+  it("truncates ip at AUDIT_IP_MAX_LENGTH", () => {
+    // The DENY arm of the pair below. audit_logs.ip is @db.VarChar(45), and an
+    // over-length value does not truncate at the column — it raises 22001 in
+    // the outbox worker's insert. Unlike 22P02 that error does not echo the
+    // offending value, so the row cycles through max_attempts and the audit
+    // event is lost with nothing left to say what it was. `ip` is also the
+    // narrower column of the two AND the one fed from a request header, which
+    // is why it was the asymmetry worth closing.
+    const payload = buildOutboxPayload({ ...baseParams, ip: "9".repeat(200) });
+    expect(payload.ip?.length).toBe(AUDIT_IP_MAX_LENGTH);
+  });
+
   it("preserves ip and userAgent when supplied", () => {
+    // The ALLOW arm: a real address is longer than nothing and shorter than the
+    // cap, and must pass through byte-identical. A truncation that fired on
+    // every value would satisfy the deny arm above on its own.
     const payload = buildOutboxPayload({
       ...baseParams,
       ip: "10.0.0.1",
@@ -232,6 +297,30 @@ describe("buildOutboxPayload", () => {
     });
     expect(payload.ip).toBe("10.0.0.1");
     expect(payload.userAgent).toBe("Mozilla");
+  });
+
+  it("preserves the longest address the column is sized for, and truncates one character past it", () => {
+    // The boundary, stated rather than left to the cap's arithmetic. 45 is the
+    // width of an IPv4-mapped IPv6 address WITHOUT a zone id — the form below —
+    // which is what common.server.ts's own note says. An earlier version of this
+    // comment claimed "with a zone id"; that is false, and it mattered, because
+    // it implied a zone-carrying address fits when in fact this slice truncates
+    // one. The constant is imported rather than spelled, but the length
+    // assertion below is a deliberate TRIP-WIRE rather than something that
+    // moves with it: widening the column must force a new `widest` fixture,
+    // because the widest legal address for an arbitrary width cannot be
+    // synthesised.
+    const widest = "0000:0000:0000:0000:0000:ffff:255.255.255.255";
+    expect(widest.length).toBe(AUDIT_IP_MAX_LENGTH);
+    expect(buildOutboxPayload({ ...baseParams, ip: widest }).ip).toBe(widest);
+
+    // One past it truncates — the arm that tells "bounds at the column width"
+    // from "clamps everything", which the pass-through case above starts and
+    // this one finishes.
+    const zoned = `${widest}%eth0`;
+    const truncated = buildOutboxPayload({ ...baseParams, ip: zoned }).ip;
+    expect(truncated).toBe(widest);
+    expect(truncated?.length).toBe(AUDIT_IP_MAX_LENGTH);
   });
 });
 
@@ -250,6 +339,30 @@ describe("logAuditInTx", () => {
       userId: USER_A,
       actorType: ACTOR_TYPE.HUMAN,
     });
+  });
+
+  it("still enqueues when metadata cannot be serialized, rather than aborting the caller's transaction", async () => {
+    // The atomic path's half of truncateMetadata's catch, and a real behaviour
+    // change: the throw used to propagate out of buildOutboxPayload and roll the
+    // caller's BUSINESS transaction back, so a BigInt in a metadata field failed
+    // the mutation too. It now commits with the marker.
+    const tx = {} as Parameters<typeof logAuditInTx>[0];
+    await logAuditInTx(tx, TENANT_A, { ...baseParams, metadata: { n: 1n } });
+
+    expect(mockedEnqueueInTx).toHaveBeenCalledOnce();
+    expect(mockedEnqueueInTx.mock.calls[0][2]).toMatchObject({
+      metadata: { _unserializable: true, _reason: "stringify_failed" },
+      action: AUDIT_ACTION.AUTH_LOGIN,
+    });
+  });
+
+  it("passes serializable metadata through on the same path", async () => {
+    // The allow arm: the catch must not have turned every metadata object into
+    // a marker.
+    const tx = {} as Parameters<typeof logAuditInTx>[0];
+    await logAuditInTx(tx, TENANT_A, { ...baseParams, metadata: { keep: 1 } });
+
+    expect(mockedEnqueueInTx.mock.calls[0][2]).toMatchObject({ metadata: { keep: 1 } });
   });
 });
 

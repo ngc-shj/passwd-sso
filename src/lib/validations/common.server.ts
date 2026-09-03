@@ -23,6 +23,25 @@ export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB
 export const USER_AGENT_MAX_LENGTH = 512;      // matches @db.VarChar(512)
+// Matches audit_logs.ip @db.VarChar(45) — the widest an IPv4-mapped IPv6
+// address gets WITHOUT a zone id ("0000:…:ffff:255.255.255.255"). A zone id
+// pushes past it, so such an address is truncated here rather than fitted; that
+// is the column's decision, not this constant's, and the cap exists to make the
+// truncation happen where it is visible.
+//
+// Bounding here rather than trusting the column: an over-length value raises
+// 22001 in the outbox worker's insert, and unlike 22P02 that error does not
+// echo the value, so the row cycles through max_attempts and the audit event
+// behind it is lost silently. The column rejects; this truncates, which keeps
+// the event.
+//
+// Deliberately NOT IP_ADDRESS_MAX_LENGTH below, which is the same number: that
+// one bounds an operator-entered CIDR string in the tenant IP-restriction
+// policy, where the input is validated as a CIDR and the length is a form
+// constraint. This one is a column width on a write path with no validation in
+// front of it. Same number today, different concepts — see
+// AUDIT_CREDENTIAL_ID_MAX_LENGTH for the same call made once already.
+export const AUDIT_IP_MAX_LENGTH = 45;
 export const MAX_JSON_BODY_BYTES = 1_048_576;  // 1 MB default stream cap for parseBody
 // Bound for WebAuthn credential ids recorded in audit metadata (e.g. the
 // step-up reauth mismatch/unavailable events). Deliberately NOT
@@ -87,7 +106,48 @@ export const MAX_TENANT_CLAIM_LENGTH = 255;
 export const BOOTSTRAP_SLUG_HASH_LENGTH = 24;
 
 // ─── IP Address ─────────────────────────────────────────────
+// Form bound on an operator-entered CIDR in the tenant IP-restriction policy.
+// Distinct from AUDIT_IP_MAX_LENGTH above despite the shared value — that one
+// is a column width on an unvalidated write path. See its note.
 export const IP_ADDRESS_MAX_LENGTH = 45;        // IPv6 max, matches @db.VarChar(45)
+
+// Column widths for the two OTHER tables that store a request IP. One constant
+// per destination column, deliberately, rather than reusing AUDIT_IP_MAX_LENGTH:
+// they are equal today and are three independent schema decisions, so sharing
+// one would let a future widening of any single column go unnoticed at the other
+// two write paths. Same reasoning as AUDIT_CREDENTIAL_ID_MAX_LENGTH's.
+//
+// The class these bound: `extractClientIp` performs NO length or format
+// validation — `normalizeIp` trims and unwraps brackets and otherwise returns
+// its input — so behind a trusted proxy an `X-Forwarded-For` segment reaches
+// these columns verbatim.
+//
+// There is NO gate enumerating the write sites. One was written for this and
+// withdrawn — three review rounds put seventeen findings on it, and its own
+// self-test could be shown to survive six of seven clause mutations, so it read
+// as completeness it did not provide. Until it is rebuilt (CF14), a new write
+// to one of these columns is caught by review or not at all: slice it here.
+export const SHARE_ACCESS_IP_MAX_LENGTH = 45;   // matches share_access_logs.ip @db.VarChar(45)
+export const SESSION_IP_MAX_LENGTH = 45;        // matches sessions.ip_address @db.VarChar(45)
+
+// The 64-wide half of the same class. These three columns were missed on the
+// first derivation, which silently collapsed "length-bounded column" to
+// "VarChar(45)" — the widths differ, the class does not. The member set below
+// is a transcript of prisma/schema.prisma, taken column by column rather than
+// from that reading.
+export const EXTENSION_BRIDGE_CODE_IP_MAX_LENGTH = 64;      // extension_bridge_codes.ip @db.VarChar(64)
+export const MOBILE_BRIDGE_CODE_IP_MAX_LENGTH = 64;         // mobile_bridge_codes.ip @db.VarChar(64)
+export const EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH = 64;  // extension_tokens.last_used_ip @db.VarChar(64)
+
+// The two bridge-code tables store the user agent beside the IP, in a bounded
+// column, and both writers passed it through raw as well. Same class, same
+// remedy; kept per-column for the same reason the IP constants are.
+// NOT applicable to extension_tokens.last_used_user_agent, which is @db.Text —
+// the `512` at those two call sites is a self-imposed budget, not a column
+// width, and tying it to a VarChar constant would be the value-equality-is-not-
+// meaning-equality mistake AUDIT_CREDENTIAL_ID_MAX_LENGTH already records.
+export const EXTENSION_BRIDGE_CODE_USER_AGENT_MAX_LENGTH = 512;  // @db.VarChar(512)
+export const MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH = 512;     // @db.VarChar(512)
 
 // ─── Directory Sync ─────────────────────────────────────────
 export const DIRECTORY_SYNC_MAX_PAGES = 1000;

@@ -107,8 +107,9 @@ export type SignInTenantResult =
  * 8b filed it under `null`, and the bootstrap branch filed it under the user's
  * EXISTING tenant. `tenant-domain unmapped` groups by tenant_id, so the same
  * incident arrived as three unrelated groups — two of them pointing at tenants
- * the operator cannot act on, and the `null` one not arriving at all
- * (logAuditAsync dead-letters a tenant-less emit).
+ * the operator cannot act on, and the `null` one arriving under `__system__`
+ * (logAuditAsync records a tenant-less emit under SYSTEM_TENANT_ID), which is
+ * a fourth group the operator cannot act on either.
  *
  * The refusal's own tenant wins wherever it exists, because it is the tenant
  * that OWNS the contested claim and therefore the one the operator's
@@ -224,8 +225,10 @@ export async function ensureTenantMembershipForSignIn(
     //
     // Both arms still need the user's current tenant: the allow to validate
     // single-tenancy (unchanged), the refusal to BIND its audit row —
-    // emitAuthLoginFailure without a tenantId dead-letters (CR-3), which
-    // would make the new denial invisible rather than merely unobserved.
+    // emitAuthLoginFailure without a tenantId is recorded under
+    // SYSTEM_TENANT_ID (CR-3), so the denial is filed under "no owning tenant"
+    // when one exists, and `tenant-domain unmapped` shows it against
+    // `__system__` instead of against the tenant it is about.
     // Carried into BOTH exits below. Round-4 F8/T1: the MULTI_TENANT exit used
     // to drop it, so a multi-tenant user whose IdP was mangling the claim got
     // a bare `tenant_mismatch` with no indication of why — and the two exits
@@ -637,12 +640,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         //
         // Observability limit, stated rather than assumed (CR-3's lesson):
         // there is no user row and no tenant here, so this emit resolves no
-        // tenantId and logAuditAsync DEAD-LETTERS it — the synchronous
-        // structured log line is the durable record, not an audit_logs row.
+        // tenantId and logAuditAsync records it under SYSTEM_TENANT_ID. The
+        // row IS written; what is lost is the attribution, so `tenant-domain
+        // unmapped` (which groups by tenant_id) shows the refusal under
+        // `__system__` rather than under any tenant an operator can act on.
         // That is inherent to a refusal with no tenant (claim_invalid has the
         // same limit), not an oversight: there is nothing to bind to. The
         // existing-user path above does bind, because there the user's tenant
         // is known.
+        //
+        // This comment used to say the emit DEAD-LETTERS and that the
+        // synchronous structured log line was the durable record. That was the
+        // premise #806 closed: the shipped forwarder excludes
+        // `audit-dead-letter` and the container log cap can rotate it out, so
+        // the line was not durable and the event had no record at all.
         if (extraction.kind === "malformed") {
           await emitAuthLoginFailure({
             email: emailForAudit,

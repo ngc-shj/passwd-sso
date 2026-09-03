@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { createHash, randomUUID } from "node:crypto";
+import { EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
@@ -173,7 +174,7 @@ export async function issueIosToken(
           clientKind: "IOS_APP",
           // devicePubkey: omitted — cnfJkt is the device-binding SoT.
           cnfJkt,
-          lastUsedIp: ip ?? null,
+          lastUsedIp: ip?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
           lastUsedUserAgent: userAgent ?? null,
         },
         select: { id: true, expiresAt: true, familyId: true, familyCreatedAt: true },
@@ -194,7 +195,7 @@ export async function issueIosToken(
           clientKind: "IOS_APP",
           // devicePubkey: omitted — cnfJkt is the device-binding SoT.
           cnfJkt,
-          lastUsedIp: ip ?? null,
+          lastUsedIp: ip?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
           lastUsedUserAgent: userAgent ?? null,
         },
       });
@@ -373,7 +374,7 @@ export async function validateIosTokenDpop(
       where: { id: row.id },
       data: {
         lastUsedAt: new Date(),
-        lastUsedIp: ip,
+        lastUsedIp: ip?.slice(0, EXTENSION_TOKEN_LAST_USED_IP_MAX_LENGTH) ?? null,
         lastUsedUserAgent: userAgent,
       },
     }),
