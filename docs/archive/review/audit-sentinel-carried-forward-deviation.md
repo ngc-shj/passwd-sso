@@ -87,7 +87,7 @@ unparseable entry is returned at (c) the moment the walk finds it untrusted, and
 an unparseable socket is returned at (a).
 
 What sources (d) and (e) *can* carry is a **non-normalized** spelling of an
-otherwise-valid trusted address, which is precisely what forbidden pattern #2
+otherwise-valid trusted address, which is precisely what forbidden pattern `#2`
 (`return leftmost || socketIp`) targets. That is covered by the plan's own
 witness and verified by execution: `TRUSTED_PROXIES=::1/128`, socket `[::1]`,
 XFF `","` now returns `"::1"` rather than `"[::1]"`. The orchestrator re-ran all
@@ -436,3 +436,24 @@ set is empty, so those gates report OK having examined nothing. The same applies
 to the Step 2-5 mechanical hooks, which reported "Changed files: 2" on the same
 tree. **A green pre-PR run on an uncommitted tree proves less than it appears
 to**; the numbers to trust are the ones from after the commit.
+
+### F5 (Step 2-5 mechanical, R2) — one column width spelled two ways
+
+`src/lib/validations/scope-column-fit.test.ts` reads
+`ServiceAccountToken.scope`'s `@db.VarChar(N)` out of `prisma/schema.prisma`;
+`src/__tests__/db-integration/access-request-approve-scope-dedup.integration.test.ts`
+spelled the same width as a literal `1024` at both of its bounds. Widening the
+column would leave the integration case asserting the old bound — and its
+"this value overflows the column" assertion would go on passing while claiming
+an overflow that no longer happens.
+
+**Fixed**: the reader moved to `src/__tests__/helpers/schema-column-width.ts` and
+both files use it. It throws rather than returning null, so a renamed column
+fails loudly instead of handing its caller a reason to skip.
+
+Two other mechanical hits were dispositioned as coincidences and left alone: the
+R3 "stale reference to `arrange`" hits are a common test-helper word, and the
+`1024` matching `MAX_TOTAL_BYTES` in `check-compose-log-caps.mjs` is a compose
+log cap, not a column width — the hook's own guidance is that small numbers
+collide, and importing one concept's constant for the other is what R2 forbids.
+The bare `#2` this hook found in this log is now backticked.

@@ -42,6 +42,10 @@ import {
   parseResponse,
 } from "@/__tests__/helpers/request-builder";
 import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
+import { varCharWidth } from "@/__tests__/helpers/schema-column-width";
+
+/** service_account_tokens.scope's width — the bound CF16's failure mode crosses. */
+const SCOPE_COLUMN_WIDTH = varCharWidth("ServiceAccountToken", "scope");
 
 const hasDatabase = !!process.env.DATABASE_URL;
 
@@ -125,7 +129,10 @@ describe.skipIf(!hasDatabase)("access-request approve: scope dedup (real DB)", (
       where: { serviceAccountId: saId },
     });
     expect(token?.scope).toBe(SA_TOKEN_SCOPES.join(","));
-    expect(token!.scope.length).toBeLessThan(1024);
+    // Width read from prisma/schema.prisma, not spelled here: a literal is a
+    // second copy of one schema decision, and widening the column would leave
+    // this asserting the old bound while staying green.
+    expect(token!.scope.length).toBeLessThan(SCOPE_COLUMN_WIDTH);
 
     const request = await ctx.su.prisma.accessRequest.findUnique({ where: { id: created.id } });
     expect(request?.status).toBe("APPROVED");
@@ -134,9 +141,11 @@ describe.skipIf(!hasDatabase)("access-request approve: scope dedup (real DB)", (
   it("approves a PENDING row seeded with 200 repetitions of one legal scope, via the parseSaTokenScopes dedup", async () => {
     const repeated = Array(200).fill(SA_TOKEN_SCOPE.PASSWORDS_READ).join(",");
     // The un-deduped join already exceeds service_account_tokens.scope's
-    // VarChar(1024) — this is the shape that rolls back the approval
-    // transition without the parseSaTokenScopes dedup (CF16).
-    expect(repeated.length).toBeGreaterThan(1024);
+    // width — this is the shape that rolls back the approval transition
+    // without the parseSaTokenScopes dedup (CF16). Read from the schema for
+    // the same reason as above: widen the column and a hardcoded bound would
+    // make this case claim an overflow that no longer happens.
+    expect(repeated.length).toBeGreaterThan(SCOPE_COLUMN_WIDTH);
 
     const reqId = randomUUID();
     await ctx.su.prisma.$transaction(async (tx) => {

@@ -9,40 +9,11 @@
  * `PasswordShare.permissions` (site 7) is `String[]` with no width and is
  * excluded — it gets the dedup with no bound.
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { API_KEY_SCOPES } from "@/lib/constants/auth/api-key";
-
-const schema = readFileSync(
-  resolve(__dirname, "../../../prisma/schema.prisma"),
-  "utf-8",
-);
-
-/** Extracts the VarChar(N) width for model.field from schema.prisma. Throws — never returns null — so a renamed/removed column fails loudly instead of silently skipping the check. */
-function getVarCharWidth(modelName: string, fieldName: string): number {
-  const modelRegex = new RegExp(
-    `model\\s+${modelName}\\s+\\{([^}]+(?:\\{[^}]*\\}[^}]*)*)\\}`,
-    "s",
-  );
-  const modelMatch = schema.match(modelRegex);
-  if (!modelMatch) {
-    throw new Error(`model ${modelName} not found in prisma/schema.prisma`);
-  }
-  const fieldRegex = new RegExp(
-    `^\\s+${fieldName}\\s+\\S.*?@db\\.VarChar\\((\\d+)\\)`,
-    "m",
-  );
-  const fieldMatch = modelMatch[1].match(fieldRegex);
-  if (!fieldMatch) {
-    throw new Error(
-      `${modelName}.${fieldName} has no @db.VarChar(N) annotation in prisma/schema.prisma`,
-    );
-  }
-  return parseInt(fieldMatch[1], 10);
-}
+import { varCharWidth } from "@/__tests__/helpers/schema-column-width";
 
 describe.each([
   ["MCP_SCOPES", MCP_SCOPES, "McpClient", "allowedScopes"],
@@ -54,7 +25,7 @@ describe.each([
   });
 
   it("the full enum, comma-joined, fits inside the column width", () => {
-    const width = getVarCharWidth(model, field);
+    const width = varCharWidth(model, field);
     const joined = [...scopes].join(",");
     expect(
       joined.length,
