@@ -50,22 +50,53 @@ figures table with its command. **No deferral.**
   that can never be redeemed. It is behind a session, a step-up and the origin
   gate, and the row expires on its own TTL.
 
-### CFP3 — `/api/mcp/token`'s capacity property — **PARTIALLY closed, and the remainder is named**
+### CFP3 — `/api/mcp/token`'s capacity property — **CLOSED in Phase 3**
 
-The bucket-identity half is done: with a null IP the limiter **is** consulted, at
-`rl:mcp:token:ip:unknown`, and a legitimate exchange still succeeds.
+Phase 2 closed the bucket-identity half (with a null IP the limiter **is**
+consulted, at `rl:mcp:token:ip:unknown`, and a legitimate exchange still
+succeeds) and recorded the `limit`/`limit+1` half as deferred, on the ground
+that "this route has no harness for [driving the real limiter against Redis];
+building one means unpicking a module-scope mock the rest of the file depends
+on."
 
-The `limit` / `limit+1` half is **not reachable in this harness and was not
-faked**: `src/app/api/mcp/token/route.test.ts` mocks `@/lib/security/rate-limit`
-at module scope with a recording factory returning canned `check` functions, so
-there is no real counter to advance. *Anti-Deferral: worst case — C1 converts a
-fail-open into a fleet-wide shared `unknown-ip` bucket and no test reds if that
-bucket's configured limit is too low for the aggregate traffic that now lands in
-it. Likelihood — moderate; this is a real capacity change, not a theoretical one.
-Cost — an integration case that drives the real limiter against Redis, which this
-route has no harness for; building one means unpicking a module-scope mock the
-rest of the file depends on. What would settle it: that case, plus recording the
-configured number as an operator judgement rather than a test assertion.*
+**That justification was wrong, and Phase 3's Testing review said so.** Vitest
+mocks are per file: `route.test.ts`'s module-scope mock never had to be touched.
+The repo already had both halves of the pattern —
+`src/__tests__/db-integration/rate-limit-fail-closed-chain.integration.test.ts`
+imports `createRateLimiter` unmocked and drives `.check()` directly, and
+`rate-limit-fail-closed-routes.integration.test.ts` drives two REAL route
+handlers with no mock of `@/lib/security/rate-limit`. The recorded cost
+overstated the work, which is exactly how a deferral outlives its reason.
+
+**Closed by** `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts`,
+which drives the real handler against the real limiter to `max` and `max + 1`.
+Two decisions in it are worth stating:
+
+- **The bound is read from configuration, not duplicated.** `MCP_TOKEN_IP_RATE_MAX`
+  and `MCP_TOKEN_IP_RATE_WINDOW_MS` moved to `src/lib/constants/auth/mcp.ts`, and
+  both the route and the test read them. CFP3 asked for "the number read from
+  the limiter's configuration"; a second literal would let the two drift and the
+  test would then pin a bound nobody applies.
+- **It does NOT exhaust the `unknown` bucket.** That key is fixed, so driving it
+  to its cap would race every other working copy on this shared dev Redis and
+  leave the endpoint limited for them for the rest of the window. The capacity
+  property runs on a per-run RFC 5737 address instead; the `unknown` bucket's
+  identity stays pinned by the unit test. Neither half is sufficient alone and
+  the file says so.
+
+**Red-proved by execution, one mutation per clause**, in a detached worktree —
+production source was never mutated:
+
+| Mutation | Expected | Observed |
+|---|---|---|
+| the constant moved 30 → 3 | **green** — both sides read it, so the test tracks configuration | green |
+| the route's bound decoupled from the constant (`+ 5`) | the bound clause reds | **both** cases red |
+| the bucket key made global instead of per-IP | only the per-IP clause reds | exactly that case red, the bound case green |
+
+The allow arm is load-bearing rather than decorative: `ipRateLimiter` is
+`failClosedOnRedisError: true`, so an unreachable Redis refuses everything and
+would satisfy the deny assertion on its own. The first request being allowed is
+what rules that out.
 
 ### CFP4 — `isIpInCidr` normalization — **CLOSED**
 
@@ -289,7 +320,7 @@ re-read in the working tree, not inferred from a diff offset.
 
 | Cited (at `1628b97fe`) | What it names | Now |
 |---|---|---|
-| `tenant-rls.ts:47` | the nesting guard | `src/lib/tenant-rls.ts:129` |
+| `tenant-rls.ts:47` | the nesting guard | `src/lib/tenant-rls.ts:128` (its condition; the sentinel refusal follows at `:136`) |
 | `tenant-rls.ts:53` | the caller-supplied `set_config` | `src/lib/tenant-rls.ts:138` |
 | `tenant-domain-buckets.ts:9-32` | the "why the mapping is a table" docblock | unchanged, `:9` |
 | `tenant-domain-buckets.ts:55-58` | `UNMAPPED_SELECTED_REASONS` | `:55-59` (a third reason) |

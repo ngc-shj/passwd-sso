@@ -24,6 +24,8 @@ import {
   MCP_CLIENT_ID_MAX_LENGTH,
   MCP_CLIENT_SECRET_MAX_LENGTH,
   MCP_PRESENTED_TOKEN_MAX_LENGTH,
+  MCP_TOKEN_IP_RATE_MAX,
+  MCP_TOKEN_IP_RATE_WINDOW_MS,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -36,8 +38,8 @@ const tokenRateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 const ipRateLimiter = createRateLimiter({
-  windowMs: MS_PER_MINUTE,
-  max: 30,
+  windowMs: MCP_TOKEN_IP_RATE_WINDOW_MS,
+  max: MCP_TOKEN_IP_RATE_MAX,
   failClosedOnRedisError: true,
 });
 

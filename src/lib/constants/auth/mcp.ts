@@ -26,6 +26,21 @@ export const MCP_CLIENT_SECRET_MAX_LENGTH = 256;
 // are ignored by the revocation endpoint, but still need a bounded wire shape.
 export const MCP_TOKEN_TYPE_HINT_MAX_LENGTH = 256;
 
+/**
+ * Per-IP capacity of `/api/mcp/token`, named rather than spelled at the
+ * `createRateLimiter` call.
+ *
+ * CF11 closed a fail-open here: the limiter used to be skipped entirely when
+ * the client IP was unparseable, so an unbounded share of traffic now lands in
+ * the shared `unknown` bucket instead. That makes the number a capacity
+ * DECISION rather than an implementation detail, and it is exported so the test
+ * that drives the endpoint to its bound reads the same value the route enforces
+ * — a duplicated literal would let the two drift and the test would then pin a
+ * bound nobody applies.
+ */
+export const MCP_TOKEN_IP_RATE_WINDOW_MS = MS_PER_MINUTE;
+export const MCP_TOKEN_IP_RATE_MAX = 30;
+
 // MCP scope values (subset of SA scopes, read-only for safety)
 export const MCP_SCOPE = {
   CREDENTIALS_LIST: "credentials:list",
