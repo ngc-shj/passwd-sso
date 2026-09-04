@@ -433,21 +433,48 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 
-  // CFP2: the consent-time S256 check is removed (one adjudicator) —
-  // enforcement is now solely oauth-server.ts's exchangeAuthorizationCode,
-  // unconditional at redemption time. This pins that the consent route no
-  // longer refuses a non-S256 method itself; it mints a code and forwards the
-  // method through unchanged.
-  it("passes a non-S256 code_challenge_method through to createAuthorizationCode (CFP2: enforcement moved to token exchange)", async () => {
+  // The consent-time S256 check is BACK, and above the DCR claim. CFP2 removed
+  // it on the ground that redemption enforces the method unconditionally; that
+  // is true and decides only whether a code can be USED. It says nothing about
+  // what the request commits on the way to minting one, and the claim commits
+  // first.
+  it.each([
+    ["a short non-S256 method mints an unredeemable code", "plain"],
+    ["a method longer than the VarChar(10) column", "S256-but-far-too-long"],
+  ])("refuses %s before the DCR claim, consuming no slot", async (_label, method) => {
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
-      { ...VALID_FORM_FIELDS, code_challenge_method: "plain" },
+      { ...VALID_FORM_FIELDS, code_challenge_method: method },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("invalid_request");
+    // The mutation, not only the verdict, and it is the whole point of the
+    // position: the CAS claim must not have run. Before this gate moved above
+    // the claim block, `plain` spent a slot on a code that could never be
+    // redeemed, and the over-length value spent one and then 500'd when the
+    // uncaught 22001 came back from a VarChar(10) column.
+    expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+  });
+
+  it("accepts an ABSENT code_challenge_method as S256 and mints a code", async () => {
+    // The allow arm, and the boundary the gate has to get right: RFC 7636 makes
+    // an absent method mean `plain`, this deployment reads it as S256, and every
+    // real client of this endpoint omits it. A gate that refused the absent case
+    // would satisfy both deny arms above and break every caller.
+    const { code_challenge_method: _omitted, ...withoutMethod } = VALID_FORM_FIELDS;
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      withoutMethod,
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 
     expect(res.status).toBe(302);
     expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
-      expect.objectContaining({ codeChallengeMethod: "plain" }),
+      expect.objectContaining({ codeChallengeMethod: "S256" }),
     );
   });
 

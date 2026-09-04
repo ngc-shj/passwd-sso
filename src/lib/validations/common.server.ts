@@ -63,14 +63,23 @@ export const AUDIT_CREDENTIAL_ID_MAX_LENGTH = 512;
 export const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
 
 // PKCE code_challenge (RFC 7636 §4.2): base64url(SHA-256(verifier)), no
-// padding — 32 raw bytes encode to exactly 43 chars. 64 is generous headroom
-// for a future digest, not a real S256 challenge's length. SSoT for all three
+// padding — 32 raw bytes encode to EXACTLY 43 characters. SSoT for all three
 // PKCE ingress points (mcp/authorize GET, mcp/authorize/consent POST,
-// mobile/authorize GET), stated against the NARROWER of the two write
-// destinations those routes feed — mobile_bridge_codes.code_challenge
-// @db.VarChar(64) — so a value this schema accepts always fits it and, a
-// fortiori, mcp_authorization_codes.code_challenge @db.VarChar(128).
-export const PKCE_CODE_CHALLENGE_SCHEMA = z.string().min(43).max(64).regex(BASE64URL_RE);
+// mobile/authorize GET).
+//
+// `.length(43)`, not `min(43).max(64)`. Every one of those ingresses is
+// S256-only — the two MCP routes reject any other method outright, and
+// mobile/authorize has no method parameter at all, its exchange calling
+// `verifyPkceS256` unconditionally — so 44 to 64 characters is not headroom for
+// a future digest, it is a range no S256 client can produce. Accepting it lets
+// a caller mint an authorization code whose challenge can never verify: the
+// per-tenant client slot is spent and the code is unredeemable, the same
+// unusable-artifact class as a non-S256 method. Widen this the day a second
+// method is supported, together with the checks that enforce S256 — not before.
+//
+// Both write destinations fit it comfortably: mobile_bridge_codes.code_challenge
+// @db.VarChar(64) and mcp_authorization_codes.code_challenge @db.VarChar(128).
+export const PKCE_CODE_CHALLENGE_SCHEMA = z.string().length(43).regex(BASE64URL_RE);
 
 // ─── Rate Limits ─────────────────────────────────────────────
 export const CSP_REPORT_RATE_MAX = 60;

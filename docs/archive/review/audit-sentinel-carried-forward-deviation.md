@@ -46,9 +46,55 @@ figures table with its command. **No deferral.**
   reachable. What changes is *when* a client sending a non-S256 method finds
   out: at token exchange rather than at consent. The browser-facing GET
   (`mcp/authorize/route.ts`) still refuses it early.
-- Residual accepted: such a request now mints an `mcp_authorization_codes` row
-  that can never be redeemed. It is behind a session, a step-up and the origin
-  gate, and the row expires on its own TTL.
+- **This decision was wrong, and was reversed on the user's review.** The
+  residual recorded here — "such a request mints a row that can never be
+  redeemed" — understated it twice over, and the understatement came from
+  reasoning about the check's REDUNDANCY without reasoning about its POSITION.
+
+  `mcp_authorization_codes.code_challenge_method` is `@db.VarChar(10)`. A method
+  longer than that makes `createAuthorizationCode` raise 22001 — uncaught —
+  **after** the DCR claim block has committed: a 500, with a per-tenant client
+  slot spent against `MAX_MCP_CLIENTS_PER_TENANT`. And a short value like
+  `plain` is not merely "a row that expires": the slot is spent, the code cannot
+  be redeemed, and the client can never complete, so the slot does not come back
+  within the flow that consumed it.
+
+  Redemption's unconditional S256 check decides whether a code can be **used**.
+  It says nothing about what a request may **commit** on the way to minting one,
+  and the claim commits first. That is the same class C4's own invariant I4.1
+  states — "no request that a client-independent gate can refuse reaches the
+  claim block" — and the method check is exactly such a gate. Removing it left
+  I4.1 false while the plan recorded it as satisfied.
+
+  **The check is restored, above the DCR claim**, in the same gate as the
+  challenge and scope checks, accepting an absent method as S256. Redemption's
+  check stays as the defence in depth it always was. The presence check
+  (`!scope || !codeChallenge`) remains removed — it is genuinely dead code once
+  the gate above refuses those inputs.
+
+  A test of mine had pinned the defect as correct behaviour
+  (`"passes a non-S256 code_challenge_method through to createAuthorizationCode"`).
+  It is replaced by two deny cases — a short `plain` and an over-length value —
+  each asserting the CAS claim did not run, plus an allow case for the absent
+  method. Red-proved: removing the gate reds exactly those two and leaves the
+  allow case green.
+
+### D13 — the shared PKCE schema is an exact length, not a range
+
+Raised in the same review. `PKCE_CODE_CHALLENGE_SCHEMA` was
+`min(43).max(64)`, described as "generous headroom for a future digest".
+
+Measured: `computeS256Challenge` emits base64url of a 32-byte digest — **exactly
+43 characters**, every time. All three ingresses the schema serves are S256-only:
+the two MCP routes reject any other method outright, and `mobile/authorize` has
+no method parameter at all, its exchange calling `verifyPkceS256`
+unconditionally. Every `code_challenge` fixture in the repo is already 43.
+
+So 44–64 was not headroom; it was a range no client of these routes can produce,
+and accepting it admits the same unusable-artifact class as a non-S256 method —
+a challenge that can never verify, minted against a spent slot. Now
+`.length(43)`, with the widening tied to the day a second method is supported.
+Red-proved: restoring `min(43).max(64)` reds the 44-character case alone.
 
 ### CFP3 — `/api/mcp/token`'s capacity property — **CLOSED in Phase 3**
 

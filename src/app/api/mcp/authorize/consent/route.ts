@@ -73,6 +73,11 @@ export async function POST(req: NextRequest) {
   const state = formData.get("state") ?? "";
   const action = formData.get("action") ?? "";
   const scope = formData.get("scope") ?? "";
+  // ONE read, used by the gate below and by the code mint. A second read with
+  // the same default would be a second adjudicator of one rule, which is what
+  // CFP2 removed. The stale-session echo further down keeps its own read
+  // deliberately: it forwards what the client actually SENT, absent included.
+  const codeChallengeMethod = formData.get("code_challenge_method") || "S256";
 
   // C4 (CF15): PKCE + scope validated as early as possible — before the
   // stale-session echo below, which otherwise forwards code_challenge and
@@ -96,6 +101,26 @@ export async function POST(req: NextRequest) {
     // invalid_scope redirect below, consuming a slot per attempt.
     if (!requestedScopes.some((s) => (MCP_SCOPES as readonly string[]).includes(s))) {
       return NextResponse.json({ error: "invalid_scope" }, { status: 400 });
+    }
+    // BEFORE the DCR claim, and this is the position that matters rather than
+    // the check itself. `mcp_authorization_codes.code_challenge_method` is
+    // `VarChar(10)`, so a longer value makes `createAuthorizationCode` raise
+    // 22001 — uncaught — AFTER the claim has committed: a 500 with a per-tenant
+    // client slot spent and nothing to show for it. A SHORT non-S256 value like
+    // `plain` fails more quietly and just as expensively: the code mints, the
+    // slot is spent, and `exchangeAuthorizationCode` refuses the method at
+    // redemption, so the client can never complete and the slot never returns.
+    //
+    // CFP2 removed the consent-time check on the ground that redemption
+    // enforces it unconditionally. That is true and it is not sufficient: it
+    // decides whether a code can be USED, and says nothing about what the
+    // request may COMMIT on its way to minting one. Redemption's check stays as
+    // the defence in depth it always was.
+    if (codeChallengeMethod !== "S256") {
+      return NextResponse.json(
+        { error: "invalid_request", error_description: "Only S256 code_challenge_method is supported" },
+        { status: 400 },
+      );
     }
   }
 
@@ -167,18 +192,13 @@ export async function POST(req: NextRequest) {
   }
 
   const codeChallenge = formData.get("code_challenge") ?? "";
-  const codeChallengeMethod = formData.get("code_challenge_method") || "S256";
   // CFP2 (one adjudicator): the presence check this used to be
-  // (`!scope || !codeChallenge`) and the S256-method check are both removed
-  // rather than kept as defense in depth. Presence is now dead code by
-  // construction — the gate above already refused any non-deny request with
-  // an empty/malformed code_challenge or a scope that cannot overlap
-  // MCP_SCOPES. The S256 check's authoritative enforcement was always
-  // oauth-server.ts's exchangeAuthorizationCode (unconditional, redemption
-  // time); this was a second, early spelling of that one rule, and removing
-  // it just moves the failure from "invalid_request at consent" to
-  // "invalid_request at token exchange" for a method no legitimate client
-  // sends.
+  // (`!scope || !codeChallenge`) is removed rather than kept as defence in
+  // depth — it is dead code by construction now that the gate above refuses any
+  // non-deny request with an empty or malformed code_challenge, or a scope that
+  // cannot overlap MCP_SCOPES. The S256 check was removed with it on the same
+  // reasoning and that was wrong: it MOVED, up into the same gate, because its
+  // position was load-bearing and its redundancy was not. See the gate.
 
   // Passkey enforcement gate — authoritative boundary for MCP OAuth issuance.
   // Re-derives from DB (fail-closed); a throw propagates and refuses
