@@ -98,6 +98,22 @@ function perRunIpDistinctFrom(other: string): string {
   );
 }
 
+/**
+ * What each status this endpoint can answer with MEANS, stated once.
+ *
+ * Every assertion below carries one. The first version of this file gave the
+ * loop a message and left the other six bare, so a fail-closed limiter red at
+ * `expected 503 to be 429` — naming neither the arm nor what 503 signified.
+ * That is the same defect the loop's message exists to prevent, surviving in
+ * the assertions nobody had looked at: fixing the instance and not the class.
+ */
+function diagnose(what: string): string {
+  return (
+    `${what} — 400 = admitted and refused downstream by the grant-type switch, ` +
+    `429 = rate-limited, 503 = the limiter failed closed (Redis unreachable)`
+  );
+}
+
 function tokenRequest(ip: string): NextRequest {
   const req = createRequest("POST", "http://localhost:3000/api/mcp/token", {
     headers: { "x-forwarded-for": ip },
@@ -142,18 +158,22 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
       const { status, json } = await parseResponse(await mcpTokenPOST(tokenRequest(ip)));
       expect(
         status,
-        `request ${i} of ${MCP_TOKEN_IP_RATE_MAX} did not reach the handler ` +
-          `(429 = rate-limited, 503 = limiter failed closed)`,
+        diagnose(`request ${i} of ${MCP_TOKEN_IP_RATE_MAX} was not admitted`),
       ).toBe(400);
-      expect(json.error).toBe("unsupported_grant_type");
+      expect(json.error, diagnose(`request ${i} reached a different handler`)).toBe(
+        "unsupported_grant_type",
+      );
     }
 
     // The boundary and its tie: the cap is the number of requests ADMITTED, so
     // request max is the last allowed one and max+1 is the first refused.
     const res = await mcpTokenPOST(tokenRequest(ip));
     const { status, json } = await parseResponse(res);
-    expect(status).toBe(429);
-    expect(json.error).toBe("slow_down");
+    expect(
+      status,
+      diagnose(`request ${MCP_TOKEN_IP_RATE_MAX + 1} was not refused — the bucket is unbounded`),
+    ).toBe(429);
+    expect(json.error, diagnose("the refusal used a different envelope")).toBe("slow_down");
   });
 
   it("bounds each IP separately — a second address is unaffected by the first's exhaustion", async () => {
@@ -168,7 +188,10 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
       await mcpTokenPOST(tokenRequest(exhausted));
     }
     const { status: blocked } = await parseResponse(await mcpTokenPOST(tokenRequest(exhausted)));
-    expect(blocked).toBe(429);
+    expect(
+      blocked,
+      diagnose("the exhausted address was not refused, so the precondition for this case never held"),
+    ).toBe(429);
 
     // The concrete admitted status again, for the same reason: `not 429` would
     // also accept the 503 a fail-closed limiter returns, and this arm's whole
@@ -176,7 +199,12 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
     const { status: allowed, json } = await parseResponse(
       await mcpTokenPOST(tokenRequest(fresh)),
     );
-    expect(allowed).toBe(400);
-    expect(json.error).toBe("unsupported_grant_type");
+    expect(
+      allowed,
+      diagnose("the second address was refused, so the bound is not per-IP"),
+    ).toBe(400);
+    expect(json.error, diagnose("the second address reached a different handler")).toBe(
+      "unsupported_grant_type",
+    );
   });
 });

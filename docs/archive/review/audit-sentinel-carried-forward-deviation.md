@@ -92,7 +92,7 @@ production source was never mutated:
 | the constant moved 30 → 3 | **green** — both sides read it, so the test tracks configuration | green |
 | the route's bound decoupled from the constant (`+ 5`) | the bound clause reds | **both** cases red |
 | the bucket key made global instead of per-IP | only the per-IP clause reds | exactly that case red, the bound case green |
-| `getRedis()` forced to null, so the limiter fails closed | the ALLOW clause reds, at the first request | both cases red at `request 1 of 30 … expected 503 to be 400` |
+| `getRedis()` forced to null, so the limiter fails closed | the ALLOW clause reds, at the first request | case 1 at `request 1 of 30 was not admitted … expected 503 to be 400`; case 2 at `the exhausted address was not refused, so the precondition for this case never held … expected 503 to be 429`. Round 3 found this row had claimed ONE shared message — see below |
 
 The allow arm is load-bearing rather than decorative: `ipRateLimiter` is
 `failClosedOnRedisError: true`, so an unreachable Redis refuses everything and
@@ -108,11 +108,18 @@ it proved it.
 
 The allow arm now asserts the concrete status an ADMITTED request produces:
 `400 unsupported_grant_type`, the outcome of a request that reached the limiter,
-was let through, and then failed at the grant-type switch. Red-proved by a
-fourth mutation — `getRedis()` forced to null, so the limiter fails closed —
-which now reds at `request 1 of 30 did not reach the handler (429 =
-rate-limited, 503 = limiter failed closed): expected 503 to be 400`, exactly the
-failure the prose describes.
+was let through, and then failed at the grant-type switch.
+
+**Round 3 then found that fix had closed the instance and not the class**
+(F-R30-1). The loop got a diagnostic message; the file's other six assertions
+stayed bare, so under the same fail-closed mutation the SECOND case red at
+`expected 503 to be 429` — naming neither the arm nor what 503 meant, which is
+precisely the defect T-F10 was written up to remove. The row above had recorded
+one shared message for both cases and was overclaiming.
+
+Every assertion in the file now carries a diagnosis, rendered by one `diagnose()`
+helper so the meaning of 400/429/503 is stated once rather than seven times.
+Re-running the mutation reds both cases with their own self-describing message.
 
 ### CFP4 — `isIpInCidr` normalization — **CLOSED**
 

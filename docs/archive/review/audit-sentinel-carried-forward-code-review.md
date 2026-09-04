@@ -424,3 +424,121 @@ Four findings this round: one Critical (T-F10), two Major (T-F11, F-R29-1), one
 Minor (F-R29-2). All fixed. Round 3 is required — T-F10 is Critical and both
 testing findings sit on a rate-limiting path, which the tightening-only skip's
 closed list names as a security boundary.
+
+---
+
+# Round 3 (incremental)
+
+Date: 2026-09-04 · Reviewed at `424de1c20` · Changes since Round 2: `61fc67077..HEAD`, three files, **no production code**.
+
+## Changes from Previous Round
+
+Round 2's four findings were fixed. **Security and Testing returned No findings;
+Functionality returned one Major** — again inside the previous round's own
+remedy, the third round running.
+
+## Security Findings
+
+**No findings.** The one item with a security dimension was the test's new
+address range, and it was run down rather than assumed: `198.18.0.0/15` **is**
+listed in the SSRF blocklist (`src/lib/http/external-http.ts:39`), but that list
+gates **outbound** fetch targets only — `webhook-dispatcher`, the audit-delivery
+and outbox workers, the two favicon proxies — and is never consulted by
+`extractClientIp`, `isIpAllowed`, or the limiter this suite exercises. The
+coincidence is real and inert, and the two uses share the same "never a real
+client" rationale. No overlap with `TRUSTED_PROXIES`' defaults or the Tailscale
+ranges. R43: confirmed by reading the diff that no production predicate changed.
+
+Round 2's declined Minor advisory was re-assessed and the decline accepted, with
+both supporting facts re-verified.
+
+## Testing Findings
+
+**No findings.** Both Round 2 fixes were verified by independent execution, not
+by reading:
+
+- The T-F10 red proof was reproduced byte-for-byte in the reviewer's own detached
+  worktree.
+- `perRunIp()` was run **200,000 times** against the real `isValidIpAddress`: 0
+  invalid, 0 out of range, 102,531 distinct — the birthday-paradox expectation
+  for a uniform ~131,072-value space, so the docblock's distribution claim holds
+  under execution rather than by arithmetic.
+- `perRunIpDistinctFrom` was run 100,000 times: 0 throws. The 8-attempt bound is
+  unreachable under a working RNG (~1e-40), which is correct for a
+  broken-entropy guard.
+- All four of Round 2's corrected numbers were re-run and matched.
+
+The reviewer also asked whether asserting `400` over-constrains the allow arm by
+coupling it to the grant-type switch, and answered it by checking: `checkRateLimitOrFail`
+returns `null` on allow and attaches nothing to the response, so there is no
+nearer observable of admission without either mocking (which this file exists to
+avoid) or adding production instrumentation. The coupling is narrow — nothing
+sits between the limiter and that switch — and stands.
+
+## Functionality Findings
+
+### F-R30-1 — Major — the fourth-mutation row overclaimed, and the overclaim hid a live instance of the defect it described
+
+`docs/archive/review/audit-sentinel-carried-forward-deviation.md`. The row read
+"both cases red at `request 1 of 30 … expected 503 to be 400`". The reviewer ran
+the mutation and found case 2 reds at a bare `expected 503 to be 429` instead —
+an assertion carrying **no message at all**.
+
+The prose error is the smaller half. The substance is that **T-F10's fix closed
+the instance and not the class**: the loop received a diagnostic message and the
+file's other six assertions did not, so the exact defect T-F10 was written up to
+remove — a generic `expected N to be M` naming neither the arm nor what the
+observed status meant — was still live in the same file, masked only by case 1
+failing first and by this row overstating what case 2 produced.
+
+**Status: fixed.**
+
+## Adjacent Findings
+
+None.
+
+## Quality Warnings
+
+None.
+
+## Recurring Issue Check — Round 3
+
+### Security expert
+R43 [Checked — no production predicate changed, confirmed by reading the diff] · R29 [Checked — the 503 rationale verified against `api-response.ts:187-194`, `rate-limit-audit.ts:254-257`, and all three `envelope: "oauth"` call sites in the route] · all others [N/A — no production code in the diff]
+
+### Functionality expert
+**R29 [Fired — F-R30-1]**, plus nine other numeric and citation claims re-run and matched. All others [N/A or unchanged].
+
+### Testing expert
+RT7 [Checked — the red proof independently reproduced] · RT10 [Checked — the allow arm is the nearest observable available to a no-mock design] · RT11 [Checked — `usedKeys` is pushed before any request that could increment the bucket, so a mid-test throw still leaves everything reclaimable; no residue observed after the reviewer's own run] · RT4 [Checked — `perRunIp`'s distribution measured over 200k draws] · R29 [Checked]
+
+## Resolution Status — Round 3
+
+### F-R30-1 Major — the instance was fixed, the class was not
+
+- **Action, taken over the class rather than the two assertions the finding
+  named**: all seven assertions in the file now carry a diagnosis, rendered by a
+  single `diagnose()` helper so what 400/429/503 each mean is stated once instead
+  of seven times. Each message names the arm that failed — "request N of 30 was
+  not admitted", "the exhausted address was not refused, so the precondition for
+  this case never held", "the second address was refused, so the bound is not
+  per-IP".
+- **Allow paired with deny**: unchanged; the suite still passes green, verified.
+- **Red-proved by execution**, same mutation, in a detached worktree: `getRedis()`
+  forced to null now reds **both** cases with their own self-describing messages —
+  case 1 `request 1 of 30 was not admitted … expected 503 to be 400`, case 2
+  `the exhausted address was not refused … expected 503 to be 429`. Previously
+  case 2 produced a bare `expected 503 to be 429`.
+- **Fails loudly**: a future status outside {400, 429, 503} now fails with a
+  message that says what the three known ones would have meant.
+- **Nothing deleted**: only messages added; every assertion and its subject are
+  unchanged.
+- **The deviation log's row corrected** to state the two cases' actual, different
+  signatures rather than one shared string, with a note recording that it had
+  overclaimed.
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:101-115, 159-165, 172-176, 191-195, 202-208`; the CFP3 entry in the deviation log.
+
+## Termination Check — Round 3
+
+One Major, fixed. It sits on a rate-limiting path, so the tightening-only skip is
+unavailable and **Round 4 is required**.
