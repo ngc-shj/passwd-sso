@@ -106,6 +106,13 @@ function perRunIpDistinctFrom(other: string): string {
  * `expected 503 to be 429` — naming neither the arm nor what 503 signified.
  * That is the same defect the loop's message exists to prevent, surviving in
  * the assertions nobody had looked at: fixing the instance and not the class.
+ *
+ * Used at the STATUS assertions only. The `json.error` assertions each run after
+ * a status assertion in the same statement sequence, and `expect().toBe()`
+ * throws on mismatch — so by the time one of them fails the status is already
+ * pinned, and reciting what three statuses would each have meant answers a
+ * question the test has settled. Those carry a shorter message naming the
+ * already-known status and the mismatch actually being pinned.
  */
 function diagnose(what: string): string {
   return (
@@ -160,9 +167,10 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
         status,
         diagnose(`request ${i} of ${MCP_TOKEN_IP_RATE_MAX} was not admitted`),
       ).toBe(400);
-      expect(json.error, diagnose(`request ${i} reached a different handler`)).toBe(
-        "unsupported_grant_type",
-      );
+      expect(
+        json.error,
+        `request ${i} was admitted (400) but the handler answered with a different error`,
+      ).toBe("unsupported_grant_type");
     }
 
     // The boundary and its tie: the cap is the number of requests ADMITTED, so
@@ -173,7 +181,10 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
       status,
       diagnose(`request ${MCP_TOKEN_IP_RATE_MAX + 1} was not refused — the bucket is unbounded`),
     ).toBe(429);
-    expect(json.error, diagnose("the refusal used a different envelope")).toBe("slow_down");
+    expect(
+      json.error,
+      "the request was refused (429) but not through the oauth slow_down envelope",
+    ).toBe("slow_down");
   });
 
   it("bounds each IP separately — a second address is unaffected by the first's exhaustion", async () => {
@@ -203,8 +214,9 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
       allowed,
       diagnose("the second address was refused, so the bound is not per-IP"),
     ).toBe(400);
-    expect(json.error, diagnose("the second address reached a different handler")).toBe(
-      "unsupported_grant_type",
-    );
+    expect(
+      json.error,
+      "the second address was admitted (400) but the handler answered with a different error",
+    ).toBe("unsupported_grant_type");
   });
 });

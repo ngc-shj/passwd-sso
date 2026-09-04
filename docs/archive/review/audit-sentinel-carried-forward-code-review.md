@@ -536,9 +536,126 @@ RT7 [Checked — the red proof independently reproduced] · RT10 [Checked — th
 - **The deviation log's row corrected** to state the two cases' actual, different
   signatures rather than one shared string, with a note recording that it had
   overclaimed.
-- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:101-115, 159-165, 172-176, 191-195, 202-208`; the CFP3 entry in the deviation log.
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:101-115, 159-165, 172-176, 191-194, 202-208`; the CFP3 entry in the deviation log.
 
 ## Termination Check — Round 3
 
 One Major, fixed. It sits on a rate-limiting path, so the tightening-only skip is
 unavailable and **Round 4 is required**.
+
+---
+
+# Round 4 (incremental)
+
+Date: 2026-09-05 · Reviewed at `900b983e2` · Changes since Round 3: `424de1c20..HEAD`, two files, **no production code**.
+
+## Changes from Previous Round
+
+Round 3's Major (F-R30-1) was fixed by closing the class rather than the two
+assertions the finding named. **All three experts found the fix correct and
+complete.** Two Minors surfaced, and the two experts converged on the same one.
+
+## Security Findings
+
+**No findings.** Two narrow checks, both established rather than assumed:
+
+- **No production code in the diff** — confirmed by reading `--stat`: nothing
+  under `src/lib/`, `src/app/`, `prisma/` or `scripts/`.
+- **The new assertion messages leak nothing into CI logs.** `diagnose()` and its
+  call sites interpolate only the loop index, `MCP_TOKEN_IP_RATE_MAX`, and fixed
+  prose — no token, no bucket key, no address, no response body.
+
+Round 3's SSRF-blocklist conclusion was independently re-derived from the code
+rather than read back from the log: `BLOCKED_CIDRS` has **zero** references
+outside `external-http.ts`, and its five consumers are exactly
+`webhook-dispatcher.ts`, the audit-delivery and outbox workers, and the two
+favicon **routes** (`favicon-proxy.ts` mentions the helper only in a comment).
+The record matches.
+
+## Functionality Findings
+
+### F-R31-1 — Minor — a line-range citation overreached by one blank line
+
+`docs/archive/review/audit-sentinel-carried-forward-code-review.md`. The Round 3
+"Modified" list cited `:191-195`; the edited statement ends at `:194` and `:195`
+is an untouched blank line, while every other range in the same list stops at its
+statement's closing `;`. **Status: fixed** — the same class the document had
+already fixed once as F-R29-2, one round after promising a sweep.
+
+The expert also reproduced the Round 3 mutation independently (isolated worktree,
+`getRedis()` → null) and matched both messages verbatim, re-derived `perRunIp()`'s
+distinctness over 200,000 draws (**102,464** distinct against the doc's 102,531 —
+both inside the birthday-paradox band of ≈102,585 for a 131,072-value space, i.e.
+a re-rolled random draw rather than a discrepancy), and confirmed
+`perRunIpDistinctFrom` throws 0 times in 100,000 runs.
+
+## Testing Findings
+
+### T-R31-1 — Minor — `diagnose()`'s status legend is inert at the three `json.error` sites
+
+`src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts`.
+The three-status legend is live information at the four **status** assertions,
+where the status is genuinely unknown before the call. At the three **`json.error`**
+assertions it is not: each runs only because the status assertion above it
+already passed, and `expect().toBe()` throws synchronously — so the status is
+already pinned and the legend answers a settled question. Not misleading today,
+but it stops being inert the moment the grant-type switch grows a second 400.
+
+**Both experts raised this independently** — the Functionality expert reached it
+from the "is `diagnose()` the right shape?" question and the Testing expert from
+the assertion sweep. Perspective convergence on a Minor.
+
+**Status: fixed** — the three `json.error` assertions now carry a short message
+naming the already-known status and the mismatch actually being pinned; the
+helper's docblock records why it is used at some sites and not others.
+
+The expert also swept the six sibling test files this branch touched for the same
+class and found none — and said why the one near-miss
+(`access-request-approve-scope-dedup.integration.test.ts`'s bare status
+assertions) is not the same shape: CF16's failure surfaces as a thrown Prisma
+error carrying the constraint name, not as a status the test could misread.
+
+## Adjacent Findings
+
+None.
+
+## Quality Warnings
+
+None.
+
+## Recurring Issue Check — Round 4
+
+### Security expert
+R29 [Checked — every claim in the added prose re-derived from code] · all others [N/A — no production code in the diff]
+
+### Functionality expert
+**R29 [Fired — F-R31-1]**, with the mutation reproduced and three numeric claims re-derived · all others [N/A or unchanged]
+
+### Testing expert
+RT7 [Checked — red proof independently reproduced byte for byte] · RT9 [Checked — the class swept across all six sibling files this branch touched] · **R37 [Fired — T-R31-1: a message that does not characterise what it pins]** · R29 [Checked] · all others [Checked or N/A]
+
+## Resolution Status — Round 4
+
+### F-R31-1 Minor — citation overreach
+- **Action**: `:191-195` → `:191-194`, verified by re-reading the file.
+
+### T-R31-1 Minor — the status legend at the `json.error` sites
+- **Action**: the three `json.error` assertions take a site-specific message
+  naming the already-confirmed status and the string mismatch being pinned. The
+  four status assertions keep `diagnose()` unchanged.
+- **Nothing deleted**: every assertion, subject and matcher is unchanged; this is
+  message text only.
+- **Verified by execution**: the suite is green, and re-running the `getRedis()`
+  → null mutation produces byte-identical messages at the two status assertions —
+  confirming the change is confined to the sites it names.
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:104-115, 170-173, 184-187, 217-220`
+
+## Termination Check — Round 4
+
+Two Minors, both fixed. The tightening-only skip's first two conditions hold —
+both findings sit inside Round 3's fix scope, and both are inline minors (a
+document line number and assertion message text, which the skip's own list names).
+**Condition 3 does not hold**: the file under change is the rate-limiting
+capacity suite, and the skip's closed list names rate-limiting explicitly. The
+skip is unavailable by the letter of its own rule, whatever the composition risk
+of a message string actually is. **Round 5 is required.**
