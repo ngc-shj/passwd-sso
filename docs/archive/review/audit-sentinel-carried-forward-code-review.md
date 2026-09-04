@@ -3,7 +3,7 @@
 Date: 2026-09-04
 Review round: 1
 Branch: `fix/audit-sentinel-carried-forward-cf11-cf17`
-Base: `1628b97fe` · Reviewed at `429d13533` (5 commits: `b4fa914f2` plan, `f4e50a70b` implementation, three Phase-2 self-check fixes)
+Base: `1628b97fe` · Reviewed at `429d13533` (**6** commits: `b4fa914f2` plan, `f4e50a70b` implementation, **four** Phase-2 self-check fixes — `383e378f5`, `a2c387214`, `975f30d08`, `429d13533`)
 
 ## Changes from Previous Round
 
@@ -28,8 +28,9 @@ Verification performed rather than asserted: every Implementation Checklist file
 diffed and read; every re-runnable "Derived figures" command re-executed (31
 expressions / 28 files, 9 slice sites, 8 `set_config` sites, `MCP_SCOPES` 9/142,
 `SA_TOKEN_SCOPES` 10/158, the 200-repeat 2999, the 112/78 policy-cast split, the
-15/11/4 CI-gate parity) and matched; `npx tsc --noEmit` clean; targeted
-`vitest run` across 23 changed test files (854 tests) green; the parity,
+15/11/4 CI-gate parity) and matched; `npx tsc --noEmit` clean; the
+**26** non-integration changed test files run together — **921 tests**, green (re-measured
+by the orchestrator; the reviewer's own subset figure is not reproduced here); the parity,
 migration-transaction, destructive-migration and bound-unknown-ip gates run
 directly against the tree. The forbidden patterns have zero residue in `src/`.
 The CFP1–CFP4 / D1–D12 / F1–F6 dispositions all check out against the code.
@@ -116,7 +117,7 @@ R1 [Checked] · R2 [Checked — F5 already fixed the one real hit] · R3 [Checke
 
 ### Security expert
 
-R1 [Checked] · R2 [N/A] · R3 [Checked — no other raw IP-header reader, no other PKCE ingress, no un-deduped scope site with a security consequence] · R4–R8 [N/A] · R9 [Checked — SC7 not reintroduced] · R10–R16 [N/A] · R17 [Checked] · R18 [N/A] · R19 [Checked — twin trees run, 433 green] · R20–R28 [N/A] · R29 [Checked — derived figures re-run; `oauth-server.ts:270-271` read directly] · R30–R41 [N/A] · R42 [Checked — no fourth sentinel constraint exists] · R43 [Checked — the normalization widening is the plan's accepted, parity-guarded decision] · R44–R46 [N/A] · R47 [Checked — gated behind the real SQLSTATE, detection-only] · R48 [N/A — one adjudicator per predicate after CFP2] · R49 [Checked] · R50 [Checked — gates executed, not inferred] · R51–R54 [N/A] · R55 [Checked] · R56, R57 [N/A] · RS1 [N/A] · RS2 [Checked — the limiter was strengthened] · RS3 [Checked] · RS4, RS5 [N/A] · RS6 [Checked — the CSV path is structurally immune]
+R1 [Checked] · R2 [N/A] · R3 [Checked — no other raw IP-header reader, no other PKCE ingress, no un-deduped scope site with a security consequence] · R4–R8 [N/A] · R9 [Checked — SC7 not reintroduced] · R10–R16 [N/A] · R17 [Checked] · R18 [N/A] · R19 [Checked — twin trees run, 289 green] · R20–R28 [N/A] · R29 [Checked — derived figures re-run; `oauth-server.ts:270-271` read directly] · R30–R41 [N/A] · R42 [Checked — no fourth sentinel constraint exists] · R43 [Checked — the normalization widening is the plan's accepted, parity-guarded decision] · R44–R46 [N/A] · R47 [Checked — gated behind the real SQLSTATE, detection-only] · R48 [N/A — one adjudicator per predicate after CFP2] · R49 [Checked] · R50 [Checked — gates executed, not inferred] · R51–R54 [N/A] · R55 [Checked] · R56, R57 [N/A] · RS1 [N/A] · RS2 [Checked — the limiter was strengthened] · RS3 [Checked] · RS4, RS5 [N/A] · RS6 [Checked — the CSV path is structurally immune]
 
 ### Testing expert
 
@@ -129,8 +130,8 @@ acceptance paths classify as:
 
 | Constraint | Subject | Status |
 |---|---|---|
-| **VC1** — no reverse proxy in dev | C1's trusted-proxy XFF paths as a full proxied request | `blocked-deferred` → Phase 1 VC1; C1 adds no parsing path, and every XFF value source is `verified-local` at the unit level (`src/lib/auth/policy/ip-access.test.ts`, `src/__tests__/lib/ip-access.test.ts`, 433 tests) |
-| **VC2** — integration tests and the compose workers cannot share a database | every C2/C3/C5 acceptance path touching `audit_outbox` | `verified-local` — `docker compose stop audit-outbox-worker retention-gc-worker` then `npm run test:integration`, 105 files / 649 tests. The Testing expert enumerated the new assertions and confirmed every emit-side one reads `audit_outbox`, never `audit_logs` |
+| **VC1** — no reverse proxy in dev | C1's trusted-proxy XFF paths as a full proxied request | `blocked-deferred` → Phase 1 VC1; C1 adds no parsing path, and every XFF value source is `verified-local` at the unit level (`src/lib/auth/policy/ip-access.test.ts`, `src/__tests__/lib/ip-access.test.ts`, 289 tests) |
+| **VC2** — integration tests and the compose workers cannot share a database | every C2/C3/C5 acceptance path touching `audit_outbox` | `verified-local` — `docker compose stop audit-outbox-worker retention-gc-worker` then `npm run test:integration`, 106 files / 651 tests. The Testing expert enumerated the new assertions and confirmed every emit-side one reads `audit_outbox`, never `audit_logs` |
 | **VC3** — the dev database is shared and live | C2's constraint-drop red proofs; any fixture that can COMMIT sentinel-scoped rows | `verified-local` — the deny arms are rejected INSERTs that write nothing (run on dev); the two red proofs that mutate source ran in **detached git worktrees**, and both were removed |
 | **VC4** — `prisma migrate dev` times out on its post-apply prompt | C2's migration rollout | `verified-local` — the migration applied, then the run timed out on the prompt exactly as predicted; verified via `pg_constraint` (all three CHECK names present) and `_prisma_migrations` |
 | **VC5** — no SAML IdP in dev | C3 as a real SSO round trip | `blocked-deferred` → Phase 1 VC5, and the plan's own Anti-Deferral (the state is unreachable in-app, SC8). C3 is `verified-local` at unit and integration level: both constraint-firing paths are driven by value against a real database |
@@ -374,3 +375,52 @@ Two findings, both fixed, both inside Round 1's own remedy. The tightening-only
 skip is **unavailable**: T-F10 is Critical, and both findings sit on a
 rate-limiting path, which the skip's closed list names as a security boundary.
 **Round 3 is required.**
+
+## Round 2 — Functionality Findings
+
+### F-R29-1 — Major — the code-review log stated a test count that was false, twice
+
+`docs/archive/review/audit-sentinel-carried-forward-code-review.md`. Both the
+Security Recurring-Issue Check and the Environment Verification Report's VC1 row
+cited **433 tests** for the two `ip-access` twin trees. Measured: **289** — which
+this branch's own deviation log had already recorded correctly for the identical
+pair. The conclusion (the twins pass; VC1 is `verified-local`) was true; the
+number offered as its evidence was not.
+
+**Root cause, and it is not a typo.** 433 was a real measurement — the Round 1
+Security expert ran it "across the touched trees", a wider set — and it was
+copied into a sentence about a narrower subject. That is the same mistake three
+more times over in the same document, found by sweeping every stated number
+after this one surfaced:
+
+| Claim | Stated | Measured |
+|---|---|---|
+| the `ip-access` twins | 433 tests | **289** |
+| the integration suite, VC2 row | 105 files / 649 tests | **106 / 651** (a file was added after the row was written) |
+| commits under review at `429d13533` | 5 ("three Phase-2 fixes") | **6** (four fixes) |
+| changed test files run | "23 changed test files (854 tests)" | **26** non-integration changed test files, **921 tests** — the reviewer's 23/854 was a subset it chose, not the changed set |
+
+**Fix**: all four corrected against a live measurement, and the changed-test-file
+figure replaced with one the orchestrator re-ran itself rather than one inherited
+from a sub-agent's differently-scoped run. The general repair is the rule the
+plan already applies to its own Derived figures — **a number is stated only with
+the command that produces it, and only about the subject that command measured**
+— which this document was not holding itself to.
+
+**Status: fixed.**
+
+### F-R29-2 — Minor — off-by-one in the D12 citation table
+
+`docs/archive/review/audit-sentinel-carried-forward-deviation.md`. The row for
+`audit.mocked.test.ts:186` pointed its "now" column at `:192`, which is
+`_truncated: true`; the exact-byte-count assertion it describes is at `:193`.
+Pre-existing since Phase 2 and not among the twelve citations Round 1 re-verified.
+
+**Fix**: corrected to `:193`. **Status: fixed.**
+
+## Termination Check — Round 2 (final)
+
+Four findings this round: one Critical (T-F10), two Major (T-F11, F-R29-1), one
+Minor (F-R29-2). All fixed. Round 3 is required — T-F10 is Critical and both
+testing findings sit on a rate-limiting path, which the tightening-only skip's
+closed list names as a security boundary.

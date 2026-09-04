@@ -349,7 +349,7 @@ re-read in the working tree, not inferred from a diff offset.
 | `mcp/authorize/route.ts:127` | the `code_challenge` read | `:128` |
 | `audit.ts:106` | the `json.length` comparison | `src/lib/audit/audit.ts:145`, now `Buffer.byteLength` |
 | `common.server.ts:54` | `BASE64URL_RE` | `:63` (the `import { z }` and the new constants sit above it) |
-| `src/__tests__/audit.mocked.test.ts:186` | the `expect.any(Number)` | `:192`, now the exact byte count |
+| `src/__tests__/audit.mocked.test.ts:186` | the `expect.any(Number)` | `:193`, now the exact byte count |
 | `consent/route.ts:67` | where `action` is read | `:74`; the new gates sit immediately below |
 | `consent/route.ts:117`/`:118` | `userTenantId` bound / guarded | `:149`/`:150-151` |
 | `consent/route.ts:135` | end of the deny arm | `:155` opens it; the passkey gate now follows it |
