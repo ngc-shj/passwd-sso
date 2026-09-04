@@ -152,7 +152,7 @@ No `blocked-deferred` path lacks a Phase 1 constraint link.
   `src/lib/audit/audit.ts`'s `Buffer.byteLength` to `json.length` reds **exactly
   the new case** (1 failed / 29 passed) and leaves the ASCII case green —
   confirming the finding's diagnosis as well as the fix.
-- **Modified**: `src/__tests__/audit.mocked.test.ts:174-178, 202-247`
+- **Modified**: `src/__tests__/audit.mocked.test.ts` — the ASCII truncation case's comment, and a new multi-byte truncation case beside it.
 
 ### T-F2 Major — CFP3's Anti-Deferral cost claim was inaccurate
 
@@ -177,7 +177,7 @@ No `blocked-deferred` path lacks a Phase 1 constraint link.
   moving the constant alone stays green (both sides read it — the property CFP3
   asked for); decoupling the route's bound from the constant reds both cases;
   making the bucket key global reds only the per-IP case.
-- **Modified**: `src/lib/constants/auth/mcp.ts`, `src/app/api/mcp/token/route.ts:40-43`,
+- **Modified**: `src/lib/constants/auth/mcp.ts` (the two new capacity constants), `src/app/api/mcp/token/route.ts` (`ipRateLimiter`'s config),
   `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts` (new),
   `docs/archive/review/audit-sentinel-carried-forward-deviation.md` (CFP3 rewritten as closed)
 
@@ -356,7 +356,7 @@ R43 [Checked — values unchanged, no coupling introduced, residency verified by
   `request 1 of 30 did not reach the handler (429 = rate-limited, 503 = limiter
   failed closed): expected 503 to be 400` — the exact failure the prose
   describes, which the previous form did not produce.
-- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:33-49, 104-113, 136-148, 168-180`; the CFP3 entry in the deviation log corrected to record that its own claim had been false.
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts` — the docblock's "What a failure means" section, the capacity case's loop assertions, and the isolation case's allow assertion; the CFP3 entry in the deviation log corrected to record that its own claim had been false.
 
 ### T-F11 Major — `perRunIp()` had no collision guard
 
@@ -367,7 +367,7 @@ R43 [Checked — values unchanged, no coupling introduced, residency verified by
 - **Fails loudly**: bounded at eight attempts rather than looping forever, and
   it throws naming the broken entropy source rather than hanging or reporting a
   verdict it cannot support.
-- **Modified**: same file, `:62-99, 165-166`
+- **Modified**: same file — `perRunIp()`, the new `perRunIpDistinctFrom()` helper, and the isolation case's second-address draw.
 
 ## Termination Check — Round 2
 
@@ -536,7 +536,7 @@ RT7 [Checked — the red proof independently reproduced] · RT10 [Checked — th
 - **The deviation log's row corrected** to state the two cases' actual, different
   signatures rather than one shared string, with a note recording that it had
   overclaimed.
-- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:101-115, 159-165, 172-176, 191-194, 202-208`; the CFP3 entry in the deviation log.
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts` — the new `diagnose()` helper, and all seven assertions across both cases; the CFP3 entry in the deviation log.
 
 ## Termination Check — Round 3
 
@@ -648,7 +648,7 @@ RT7 [Checked — red proof independently reproduced byte for byte] · RT9 [Check
 - **Verified by execution**: the suite is green, and re-running the `getRedis()`
   → null mutation produces byte-identical messages at the two status assertions —
   confirming the change is confined to the sites it names.
-- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:104-115, 170-173, 184-187, 217-220`
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts` — `diagnose()`'s docblock, and the three `json.error` assertion messages.
 
 ## Termination Check — Round 4
 
@@ -659,3 +659,126 @@ document line number and assertion message text, which the skip's own list names
 capacity suite, and the skip's closed list names rate-limiting explicitly. The
 skip is unavailable by the letter of its own rule, whatever the composition risk
 of a message string actually is. **Round 5 is required.**
+
+---
+
+# Round 5 (incremental)
+
+Date: 2026-09-05 · Reviewed at `c3eca5921` · Changes since Round 4: `900b983e2..HEAD`, two files, **no production code**.
+
+## Changes from Previous Round
+
+Round 4's two Minors were fixed. Security and Functionality found the fixes
+correct. Testing found the same defect class for the **third time** — and this
+time it was introduced in the very commit that fixed its second occurrence.
+
+## Security Findings
+
+**No findings.** Scope established by reading `--stat`: nothing under `src/lib/`,
+`src/app/`, `prisma/` or `scripts/`. The three rewritten messages interpolate only
+a loop counter and fixed status literals — no token, bucket key, IP address or
+response body. The Round 4 log's `BLOCKED_CIDRS` claim was re-derived rather than
+read back, and the "five consumers" count was confirmed **including** the
+indirect one: `audit-outbox-worker.ts` does not import the guard, but reaches it
+through `DELIVERERS` imported from `audit-delivery.ts`.
+
+## Testing Findings
+
+All four checks the round asked for held: no assertion's subject, matcher or
+strictness moved (only message arguments changed, confirmed by `git diff -U0`);
+each of the three new messages describes a state genuinely already pinned by the
+status assertion above it, with no intervening code; the docblock's
+synchronous-throw premise was verified against this project's actual config
+(`vitest.config.ts` and `setup.ts` carry no `expect.soft`, `expect.configure` or
+`expect.extend` override); and the birthday-paradox band was recomputed
+independently — for N = 131,072 and n = 200,000 the expected distinct count is
+**102,573** with σ ≈ **113**, so the two cited figures sit 109 and 42 from the
+mean, inside one σ.
+
+### T-R32-1 / F-R32-2 — Minor — two more "Modified" citations, the third and fourth instances of one class
+
+`docs/archive/review/audit-sentinel-carried-forward-code-review.md`. Round 4's
+Resolution Status cited `:104-115` for the `diagnose()` docblock change; the diff
+is a pure insertion at `109`, and `104-108` is untouched prose from a different
+paragraph. Correct range: `109-115`.
+
+The Functionality expert independently found a **fourth**: the `:191-194` range
+Round 4 had just corrected was already stale against HEAD, moved by this round's
+own edits to the same file.
+
+**Both fixed by changing the mechanism, not the numbers** — see below.
+
+## Functionality Findings
+
+**F-R32-1** (the `:104-115` overreach, converging with Testing's T-R32-1) and
+**F-R32-2** (the `:191-194` range gone stale within the round that corrected it).
+Both Minor, both members of the class disposed of below. The expert also
+re-derived the birthday-paradox expectation independently — 131,072 ×
+(1 − e^(−200000/131072)) = **102,573** — and corrected its own first pass on the
+`BLOCKED_CIDRS` consumer count before reporting, having initially found four and
+then traced the outbox worker's indirect route through `DELIVERERS`.
+
+## Adjacent Findings
+
+None.
+
+## Quality Warnings
+
+None.
+
+## Resolution Status — Round 5
+
+### T-R32-1 Minor — and the class behind it
+
+- **What happened four times.** F-R29-2 (Round 2), F-R31-1 (Round 4), T-R32-1
+  and F-R32-2 (both Round 5) are one defect: a hand-written line range in this
+  document's `Modified:` entries that does not match what was edited. The third
+  instance was introduced **in the commit that fixed the second**.
+- **The fourth is the sharpest evidence, and it is not a miscount at all.**
+  F-R32-2 is the range `:191-194` — the one Round 4 corrected from `:191-195`
+  after careful re-reading. It was right for the commit it was written against
+  and had already gone stale by the end of the same round, because this round's
+  own edits to that file inserted seven lines above it and moved the statement to
+  `:202-205`. No amount of care at write time prevents that. A citation that
+  correct-at-write-time cannot keep is not a citation with a bug; it is the wrong
+  kind of citation.
+- **Why fixing the number again would be wrong.** Three occurrences is the signal
+  that the anchor is a symptom. And the deeper problem is not miscounting: a
+  post-change line range describes a file *as it was at the end of one round*, in
+  a document that outlives every later round. Four of the six `Modified:` entries
+  point at the same file, which subsequent rounds edited twice more — so the
+  Round 1 and Round 2 ranges were already stale before anyone looked, and would
+  go stale again on the next edit no matter how carefully each was checked.
+  Perpetually re-verifying them is the treadmill; the citation gate cannot help,
+  because these are post-change positions and it compares against the base ref.
+- **Mechanism change**: all six `Modified:` entries now name **what** was changed
+  — the helper, the docblock section, the loop's assertions, the isolation case's
+  draw — instead of where. A name does not drift when a line is inserted above
+  it, and it tells a reader more than an offset does. The class is closed by
+  construction rather than by another correction.
+- **Nothing deleted**: every entry still says which files changed and which part
+  of each; only the perishable coordinate is gone.
+- **Boundary stated**: this applies to `Modified:` entries, which describe
+  post-change state. The deviation log's citation-drift **mapping table** keeps
+  its line numbers deliberately — that table's whole subject is where things
+  moved, and it is explicitly anchored to two named commits.
+
+## Termination Check — Round 5
+
+One Minor, closed at the class level. The change is confined to this review
+document's own prose — it touches no test, no production code, and no security
+boundary — so the tightening-only skip's three conditions all hold: inside the
+prior round's fix scope, inline minor (documentation wording), and no
+security-boundary contact.
+
+**Skip taken. No Round 6.**
+
+## Tightening-only skip — Round 5
+
+Findings applied directly (no Round 6 review):
+- [T-R32-1] [F-R32-1] [F-R32-2] [Minor] `Modified:` line-range citations replaced by named subjects across all six entries — `docs/archive/review/audit-sentinel-carried-forward-code-review.md` — applied as one class-level mechanism change rather than the three single-range corrections the findings proposed.
+
+Justification: the finding is scoped within Round 4's fix range, is an inline
+minor (documentation wording only), and touches no item on the security-boundary
+list — the edited artifact is the review log itself, not the rate-limiting suite
+it describes.
