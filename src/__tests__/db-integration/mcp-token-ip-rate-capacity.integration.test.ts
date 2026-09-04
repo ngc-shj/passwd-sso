@@ -30,12 +30,23 @@
  * from `rate-limit-fail-closed-routes.integration.test.ts` — so the value
  * reaches `extractClientIp` regardless of `TRUST_PROXY_HEADERS`.
  *
- * ─── What a failure means ──────────────────────────────────────────────────
+ * ─── What a failure means, and why the allow arm asserts a STATUS ──────────
  *
- * The first request must be ALLOWED. `ipRateLimiter` is
- * `failClosedOnRedisError: true`, so an unreachable Redis denies immediately —
- * this suite then reds on its first assertion with a message naming the
- * allowed arm, rather than passing for the wrong reason or skipping silently.
+ * The allowed arm asserts `400 unsupported_grant_type` — the concrete outcome
+ * of a request that reached the limiter, was admitted, and then failed
+ * downstream on its own terms — rather than the weaker `not 429`.
+ *
+ * The weaker form was the first version of this file and it could not fail for
+ * the reason this comment used to claim. `ipRateLimiter` is
+ * `failClosedOnRedisError: true`, and `checkRateLimitOrFail` renders that
+ * refusal as `oauthTemporarilyUnavailable()` — **503**, not 429
+ * (`src/lib/http/api-response.ts:187-194`). A totally unreachable Redis
+ * therefore returns 503 on every iteration, `not.toBe(429)` accepts all thirty,
+ * and the suite only reds at the final boundary with a generic
+ * `expected 503 to be 429` naming neither the request index nor the arm. The
+ * property this file exists to prove — the endpoint is not silently
+ * fail-closed — went unasserted. Asserting the status the allow arm actually
+ * produces is what makes the failure loud and specific.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
@@ -49,23 +60,52 @@ import { POST as mcpTokenPOST } from "@/app/api/mcp/token/route";
 const redisAvailable = !!process.env.REDIS_URL;
 
 /**
- * An address in TEST-NET-1 (RFC 5737, reserved for documentation), randomised
- * per run so two concurrent working copies cannot share a bucket. It must be a
- * value C1's boundary ACCEPTS — an unparseable one would collapse into the
- * shared `unknown` bucket, which is the key this file exists to stay out of.
+ * An address in 198.18.0.0/15 — RFC 2544's benchmarking range, reserved for
+ * exactly this kind of device testing and never routed to a real client.
+ *
+ * Randomised per run so two concurrent working copies cannot share a bucket.
+ * The range matters as much as the randomisation: RFC 5737's documentation
+ * blocks are a /24 each, so drawing from one gives 254 values and a collision
+ * between two unrelated runs on this shared dev Redis is a live probability
+ * rather than a remote one. /15 gives ~131k.
+ *
+ * It must be a value C1's boundary ACCEPTS — an unparseable one would collapse
+ * into the shared `unknown` bucket, which is the key this file exists to stay
+ * out of.
  */
 function perRunIp(): string {
-  const n = parseInt(randomUUID().replace(/-/g, "").slice(0, 8), 16);
-  return `192.0.2.${(n % 254) + 1}`;
+  const hex = randomUUID().replace(/-/g, "");
+  const second = 18 + (parseInt(hex.slice(0, 2), 16) % 2);
+  return `198.${second}.${parseInt(hex.slice(2, 4), 16)}.${parseInt(hex.slice(4, 6), 16)}`;
+}
+
+/**
+ * A per-run address distinct from `other`, retried rather than asserted.
+ *
+ * A bare `expect(fresh).not.toBe(exhausted)` is a self-inflicted failure at the
+ * collision rate — noise that looks like a defect and is not one. Bounded and
+ * loud rather than a `while (true)`: eight identical draws means the entropy
+ * source is broken, which must say so instead of hanging the suite.
+ */
+function perRunIpDistinctFrom(other: string): string {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const ip = perRunIp();
+    if (ip !== other) return ip;
+  }
+  throw new Error(
+    "perRunIp() returned the same address 8 times — its entropy source is broken, " +
+      "so this suite cannot distinguish two buckets and must not report a verdict",
+  );
 }
 
 function tokenRequest(ip: string): NextRequest {
   const req = createRequest("POST", "http://localhost:3000/api/mcp/token", {
     headers: { "x-forwarded-for": ip },
-    // No grant_type: the limiter runs immediately after the body read, so the
-    // request reaches it and then fails downstream on its own terms. What is
-    // asserted below is only whether the LIMITER refused, never the domain
-    // outcome — a body that succeeded would mint tokens this file has no
+    // No grant_type, deliberately: the limiter runs immediately after the body
+    // read, so the request reaches it and then fails downstream at the
+    // grant-type switch with `400 unsupported_grant_type`. That 400 is what the
+    // allow arm asserts — it is the nearest observable evidence that a request
+    // was ADMITTED, and it is reachable without minting tokens this file has no
     // business creating.
     body: {},
   });
@@ -96,10 +136,16 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
 
     // The allow arm, and it is the load-bearing half: a limiter that refused
     // everything — which is what `failClosedOnRedisError` does against an
-    // unreachable Redis — satisfies the deny assertion below on its own.
+    // unreachable Redis — satisfies a `not 429` assertion on its own, because
+    // that refusal is a 503. So assert the status an ADMITTED request produces.
     for (let i = 1; i <= MCP_TOKEN_IP_RATE_MAX; i++) {
-      const { status } = await parseResponse(await mcpTokenPOST(tokenRequest(ip)));
-      expect(status, `request ${i} of ${MCP_TOKEN_IP_RATE_MAX} was rate-limited`).not.toBe(429);
+      const { status, json } = await parseResponse(await mcpTokenPOST(tokenRequest(ip)));
+      expect(
+        status,
+        `request ${i} of ${MCP_TOKEN_IP_RATE_MAX} did not reach the handler ` +
+          `(429 = rate-limited, 503 = limiter failed closed)`,
+      ).toBe(400);
+      expect(json.error).toBe("unsupported_grant_type");
     }
 
     // The boundary and its tie: the cap is the number of requests ADMITTED, so
@@ -115,8 +161,7 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
     // nothing at all (a global counter), which would take the whole endpoint
     // down for every caller once any one of them crossed the bound.
     const exhausted = perRunIp();
-    const fresh = perRunIp();
-    expect(fresh).not.toBe(exhausted);
+    const fresh = perRunIpDistinctFrom(exhausted);
     usedKeys.push(`rl:mcp:token:ip:${exhausted}`, `rl:mcp:token:ip:${fresh}`);
 
     for (let i = 0; i <= MCP_TOKEN_IP_RATE_MAX; i++) {
@@ -125,7 +170,13 @@ describe.skipIf(!redisAvailable)("/api/mcp/token per-IP rate limit capacity (CFP
     const { status: blocked } = await parseResponse(await mcpTokenPOST(tokenRequest(exhausted)));
     expect(blocked).toBe(429);
 
-    const { status: allowed } = await parseResponse(await mcpTokenPOST(tokenRequest(fresh)));
-    expect(allowed).not.toBe(429);
+    // The concrete admitted status again, for the same reason: `not 429` would
+    // also accept the 503 a fail-closed limiter returns, and this arm's whole
+    // claim is that the SECOND address was admitted.
+    const { status: allowed, json } = await parseResponse(
+      await mcpTokenPOST(tokenRequest(fresh)),
+    );
+    expect(allowed).toBe(400);
+    expect(json.error).toBe("unsupported_grant_type");
   });
 });

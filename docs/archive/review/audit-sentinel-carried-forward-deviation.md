@@ -92,11 +92,27 @@ production source was never mutated:
 | the constant moved 30 → 3 | **green** — both sides read it, so the test tracks configuration | green |
 | the route's bound decoupled from the constant (`+ 5`) | the bound clause reds | **both** cases red |
 | the bucket key made global instead of per-IP | only the per-IP clause reds | exactly that case red, the bound case green |
+| `getRedis()` forced to null, so the limiter fails closed | the ALLOW clause reds, at the first request | both cases red at `request 1 of 30 … expected 503 to be 400` |
 
 The allow arm is load-bearing rather than decorative: `ipRateLimiter` is
 `failClosedOnRedisError: true`, so an unreachable Redis refuses everything and
-would satisfy the deny assertion on its own. The first request being allowed is
-what rules that out.
+would satisfy the deny assertion on its own.
+
+**Round 2 found that the first version of this file did not actually rule that
+out** (T-F10, Critical). Its allow arm asserted `not 429`, and
+`checkRateLimitOrFail` renders a fail-closed refusal as `oauthTemporarilyUnavailable()`
+— **503**, not 429 — so all thirty iterations accepted it silently and only the
+final boundary red, with a message naming neither the arm nor the request. The
+property the file exists to prove went unasserted while the file read as though
+it proved it.
+
+The allow arm now asserts the concrete status an ADMITTED request produces:
+`400 unsupported_grant_type`, the outcome of a request that reached the limiter,
+was let through, and then failed at the grant-type switch. Red-proved by a
+fourth mutation — `getRedis()` forced to null, so the limiter fails closed —
+which now reds at `request 1 of 30 did not reach the handler (429 =
+rate-limited, 503 = limiter failed closed): expected 503 to be 400`, exactly the
+failure the prose describes.
 
 ### CFP4 — `isIpInCidr` normalization — **CLOSED**
 

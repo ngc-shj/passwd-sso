@@ -211,3 +211,166 @@ Re-read against the working tree, each resolving to what the prose claims:
 by this pass: the nesting-guard citation pointed at the `throw` rather than at
 the `if` that decides it, so it now names `:128` with the sentinel refusal's own
 line beside it.
+
+---
+
+# Round 2 (incremental)
+
+Date: 2026-09-04 · Reviewed at `61fc67077` · Changes since Round 1: `429d13533..HEAD`, 6 files, +463/-24.
+
+## Changes from Previous Round
+
+Round 1's two Majors were fixed and the fixes reviewed. **Testing found one
+Critical and one Major, both inside Round 1's own remedy** — the shape this
+branch's Phase 1 recorded as its most expensive recurring failure, arriving once
+more. Functionality and Security each returned **No findings**; Security added one
+Minor advisory that predates the round.
+
+## Security Findings
+
+**No findings.** Verified by execution rather than inspection:
+
+- **R43** — `windowMs`/`max` are byte-for-byte the previous values, now sourced
+  from the new constants. Only the route, the constants file and the new test
+  reference them, so nothing couples this limit to another; `tokenRateLimiter`'s
+  `max: 10` stays a separate untouched literal.
+- **Residency** — the constants file is already imported by two client
+  components for unrelated exports. The app was built and `.next/static` grepped
+  for `MCP_TOKEN_IP_RATE`: no match, while a sibling string from the same module
+  (`credentials:list`) does appear in two client chunks — which validates the
+  methodology rather than assuming it. The constant is tree-shaken out.
+- **Shared Redis** — after the suite, `redis-cli keys "rl:mcp:token:ip:192.0.2.*"`
+  was empty and `rl:mcp:token:ip:unknown` was nil: cleanup works and the shared
+  bucket was never touched. `vitest.integration.config.ts` sets `isolate: true`,
+  so `__resetThrottleForTests()`'s in-process Map cannot bleed across files.
+  Both CI workflows set `REDIS_URL`, so `skipIf(!redisAvailable)` does not
+  silently no-op the property in CI — read from the workflow files.
+
+**Minor advisory (declined, with reason).** The new constants — and the
+pre-existing `DCR_RATE_LIMIT_*` beside them — live in a module client components
+already import. A `.server.ts` split would make the current tree-shaking
+guarantee structural rather than incidental. Not taken: the split would be
+partial while `DCR_RATE_LIMIT_*` stays, which is a worse state than either end;
+a rate-limit capacity is not secret (an attacker measures it by probing, and the
+`Retry-After` header discloses the window anyway); and the cited precedent,
+`verifier-version.ts`, guards crypto-material versioning, a different
+sensitivity class. Recorded here rather than silently dropped.
+
+## Functionality Findings
+
+**No findings.** (See the Round 2 Recurring Issue Check.)
+
+## Testing Findings
+
+### T-F10 — **Critical** — the capacity test's allow arm could not fail for the reason both documents claimed
+
+`src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts`.
+The loop asserted `not.toBe(429)`. But `checkRateLimitOrFail` renders a
+fail-closed refusal as `oauthTemporarilyUnavailable()` — **503**
+(`src/lib/http/api-response.ts:187-194`) — which satisfies `not 429` on every
+one of the thirty iterations. The file's docblock and the CFP3 entry both
+claimed "an unreachable Redis denies immediately — this suite then reds on its
+first assertion with a message naming the allowed arm". **False.** The suite red
+only at the final boundary, with a generic `expected 503 to be 429` naming
+neither the request index nor the arm.
+
+The property the file exists to prove — *the endpoint is not silently
+fail-closed* — was therefore asserted nowhere in it. It still failed under a
+total outage by luck (503 ≠ 429), but said nothing diagnostic, and a partial
+outage or any future non-429 refusal envelope would have passed it vacuously.
+
+The reviewer verified this by execution, short-circuiting `checkRedis()` in a
+detached worktree: both cases failed at the boundary assertion, not on request 1
+— exactly as predicted and not as documented.
+
+**Status: fixed.**
+
+### T-F11 — Major — `perRunIp()` had no collision guard
+
+Same file. `exhausted` and `fresh` were each one draw from a 254-value space
+(`192.0.2.x`), compared with a bare `expect(fresh).not.toBe(exhausted)` and no
+retry — a ~0.4% self-inflicted failure per run. The same 254 values also
+undercut the file's own claim that randomisation keeps two concurrent working
+copies out of each other's buckets: at that width a cross-run collision is a
+live probability, not a remote one. Leaked buckets self-heal on the 60 s TTL, so
+the consequence is a spurious verdict rather than corruption — but it is a flake
+source with no mitigation.
+
+**Status: fixed.**
+
+### Round 1 findings — both re-verified by re-running the claimed proofs
+
+The reviewer re-ran every mutation the Round 1 Resolution Status claimed, in
+detached worktrees against the real route and the real dev Redis, and all three
+reproduced precisely: the constant moved 30 → 3 stays green; decoupling the
+route's bound (`+ 5`) reds both cases; the global bucket key reds only the
+per-IP case. T-F1's proof likewise reproduced — 1 failed / 29 passed, the ASCII
+case green. **T-F1 and T-F2 are resolved.**
+
+### RT4 / window rollover — measured, no finding
+
+Thirty sequential real requests complete in ~30 ms against a 60,000 ms window —
+roughly 2000× headroom, so the rollover RT4 asks about is not reachable at
+current request cost. Not asserted anywhere, so a future change adding
+synchronous work before the limiter could start flaking with no test-side
+signal; recorded rather than filed.
+
+## Adjacent Findings
+
+None new this round.
+
+## Quality Warnings
+
+None.
+
+## Recurring Issue Check — Round 2
+
+### Functionality expert
+Round 2's diff is two production lines and otherwise tests and prose; R-rules were checked against that surface. R29 was the round's focus for this expert (every intra-repo citation and derived number in the new prose re-read or re-run).
+
+### Security expert
+R43 [Checked — values unchanged, no coupling introduced, residency verified by building and grepping the bundle] · R29 [Checked — every cited location read directly] · RS2 [Checked — the limiter is strengthened, not weakened] · RS3, RS6 [Checked] · all others [N/A or unchanged from Round 1]
+
+### Testing expert
+**RT7 [Fired — T-F10: a guard that could not fail for its stated reason]** · **RT4 [Fired — T-F11: a self-flaking draw]** · RT10 [Checked — the allow arm is now boundary-adjacent AND asserts a concrete status] · RT11 [Checked — `afterAll` reclaims every key it created, including the isolation case's two] · RT1, RT5 [Checked — the limiter is genuinely reached; proved by the fail-closed mutation changing the observed status] · R29 [Checked]
+
+## Resolution Status — Round 2
+
+### T-F10 Critical — the allow arm could not distinguish an admitted request from a fail-closed 503
+
+- **Action**: the allow arm now asserts the concrete admitted outcome —
+  `400 unsupported_grant_type` — in both cases, with a message naming the
+  request index and what each other status would have meant. The docblock's
+  "What a failure means" section was rewritten to state what the old form could
+  not do, so the record says why the assertion is shaped this way.
+- **Boundary and tie**: unchanged and still stated — request `max` is the last
+  admitted, `max + 1` the first refused.
+- **Allow paired with deny**: this IS the repair to the allow side.
+- **Fails loudly**: a fail-closed limiter now reds at the first request rather
+  than at the boundary.
+- **Nothing deleted that made the defect visible**: the deny assertions and the
+  per-IP isolation case are untouched.
+- **Red-proved by execution**, one mutation, in a detached worktree: `getRedis()`
+  forced to null makes the limiter fail closed, and the suite now reds at
+  `request 1 of 30 did not reach the handler (429 = rate-limited, 503 = limiter
+  failed closed): expected 503 to be 400` — the exact failure the prose
+  describes, which the previous form did not produce.
+- **Modified**: `src/__tests__/db-integration/mcp-token-ip-rate-capacity.integration.test.ts:33-49, 104-113, 136-148, 168-180`; the CFP3 entry in the deviation log corrected to record that its own claim had been false.
+
+### T-F11 Major — `perRunIp()` had no collision guard
+
+- **Action**: the draw moved from a single RFC 5737 /24 (254 values) to
+  198.18.0.0/15, RFC 2544's benchmarking range (~131k values, and semantically
+  the range reserved for exactly this kind of device testing). The bare
+  inequality assertion became `perRunIpDistinctFrom()`, which retries.
+- **Fails loudly**: bounded at eight attempts rather than looping forever, and
+  it throws naming the broken entropy source rather than hanging or reporting a
+  verdict it cannot support.
+- **Modified**: same file, `:62-99, 165-166`
+
+## Termination Check — Round 2
+
+Two findings, both fixed, both inside Round 1's own remedy. The tightening-only
+skip is **unavailable**: T-F10 is Critical, and both findings sit on a
+rate-limiting path, which the skip's closed list names as a security boundary.
+**Round 3 is required.**
