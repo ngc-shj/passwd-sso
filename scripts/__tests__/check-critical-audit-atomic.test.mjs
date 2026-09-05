@@ -44,6 +44,7 @@ const ALL = [
   "RECOVERY_PASSPHRASE_RESET",
   "VAULT_RESET_EXECUTED",
   "ADMIN_VAULT_RESET_EXECUTE",
+  "EMERGENCY_ACCESS_ACTIVATE",
 ];
 
 const inTx = (a) =>
@@ -66,7 +67,7 @@ describe("check-critical-audit-atomic.mjs", () => {
     ALL.forEach((a, i) => writeRoute(`crit-${i}/route.ts`, inTx(a)));
     const { exitCode, stdout } = runGuard();
     expect(exitCode, stdout).toBe(0);
-    expect(stdout).toContain("all 7 security-critical actions");
+    expect(stdout).toContain("all 8 security-critical actions");
   });
 
   it("recognizes an action written via an atomic-audit descriptor (delegated to a helper)", () => {

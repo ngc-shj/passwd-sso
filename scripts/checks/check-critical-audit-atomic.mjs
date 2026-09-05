@@ -53,6 +53,11 @@ const CRITICAL_ACTIONS = new Set([
   "RECOVERY_PASSPHRASE_RESET",
   "VAULT_RESET_EXECUTED",
   "ADMIN_VAULT_RESET_EXECUTE",
+  // Releases the vault owner's escrowed key material to a grantee. Two
+  // emitters (auto-promotion and the owner's early approval); this gate is
+  // action-scoped and is satisfied by either, so it does not close the class
+  // on its own — both sites are pinned individually.
+  "EMERGENCY_ACCESS_ACTIVATE",
 ]);
 
 const project = createAstProject();
