@@ -9,6 +9,7 @@ const {
   mockQueryRaw,
   mockExecuteRaw,
   mockTransaction,
+  mockProxiedTransaction,
 } = vi.hoisted(() => {
   const mockAuditOutboxCreate = vi.fn().mockResolvedValue({});
   const mockQueryRaw = vi.fn();
@@ -25,16 +26,31 @@ const {
     async (fn: (tx: typeof txClient) => Promise<unknown>) => fn(txClient),
   );
 
+  // The PROXIED client's $transaction. Nothing in this module may reach it:
+  // under an active RLS context the Proxy folds it into the caller's
+  // transaction, which is the defect prismaBase exists to make unreachable.
+  const mockProxiedTransaction = vi.fn(
+    async (fn: (tx: typeof txClient) => Promise<unknown>) => fn(txClient),
+  );
+
   return {
     mockAuditOutboxCreate,
     mockQueryRaw,
     mockExecuteRaw,
     mockTransaction,
+    mockProxiedTransaction,
   };
 });
 
+// Two distinct spies, deliberately. `mockTransaction` is prismaBase's — the one
+// the openers must use — and `mockProxiedTransaction` is the Proxy's, asserted
+// untouched below. A single shared spy would make the client choice
+// unobservable, which is the whole property C1 buys.
 vi.mock("@/lib/prisma", () => ({
   prisma: {
+    $transaction: mockProxiedTransaction,
+  },
+  prismaBase: {
     $transaction: mockTransaction,
   },
 }));
@@ -178,6 +194,17 @@ describe("enqueueAudit", () => {
     mockQueryRaw
       .mockResolvedValueOnce([{ bypass_rls: "on", tenant_id: "" }])
       .mockResolvedValueOnce([{ ok: true }]);
+  });
+
+  it("opens its transaction on the un-proxied client, never the Proxy", async () => {
+    // I1.1. The Proxy folds $transaction into an active RLS context; the
+    // un-proxied client cannot be folded. Which client the openers use is the
+    // whole content of that invariant, and it is invisible to every static gate
+    // in the tree — so it is pinned here and, against a real database, by a
+    // txid_current() comparison in the integration suite.
+    await enqueueAudit("tenant-1", SAMPLE_PAYLOAD);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockProxiedTransaction).not.toHaveBeenCalled();
   });
 
   it("opens a transaction", async () => {
