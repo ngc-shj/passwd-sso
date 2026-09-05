@@ -80,14 +80,19 @@ export class RlsSentinelContextRefused extends Error {
  * `invalid input syntax for type uuid`. This moves that failure to the context
  * open, where it names itself.
  *
- * It does NOT write an audit row, deliberately, and this is F3's stated
- * exception. Both spellings are unsafe from this position: `enqueueAudit` with
- * an explicit tenantId opens a raw `$transaction` that the Prisma Proxy folds
- * into the caller's, turning RLS off for its remainder; without one,
- * `resolveTenantId`'s `withBypassRls` is refused by the nesting guard and the
- * row is swallowed. There is also no `req`, `userId` or `ip` here to attribute
- * a row with. The sink is `getLogger()` and not `auditLogger`, which ships
- * disabled (`AUDIT_LOG_FORWARD` defaults to `false`).
+ * It does NOT write an audit row, and the two reasons this used to give are both
+ * gone — recorded here because a stale reason is what stops the next editor
+ * noticing. `enqueueAudit` no longer folds into the caller's transaction (it
+ * opens on the un-proxied client), and `resolveTenantId`'s `withBypassRls` is no
+ * longer "refused by the nesting guard" from this position: the guard runs
+ * BEFORE this function, so reaching here means no context is active at all.
+ *
+ * What remains true is narrower: there is no `req`, `userId` or `ip` here to
+ * attribute a row with, and the sink is `getLogger()` rather than `auditLogger`,
+ * which ships disabled (`AUDIT_LOG_FORWARD` defaults to `false`). Whether this
+ * refusal — an attempt to open a context on the tenant that owns every
+ * unattributable audit row — should itself be audited is an open question, not a
+ * settled "no".
  */
 function assertOpenableTenantContext(tenantId: string): void {
   const canonical = UUID_RE.test(tenantId);
@@ -101,6 +106,34 @@ function assertOpenableTenantContext(tenantId: string): void {
     "withTenantRls refused to open an RLS context",
   );
   throw new RlsSentinelContextRefused(refusal);
+}
+
+/**
+ * Refuse to open an RLS context while another is active — in ALL FOUR
+ * combinations, which is what the guard's comment used to claim while it
+ * implemented two.
+ *
+ * AsyncLocalStorage does NOT roll a PostgreSQL GUC back when its scope exits,
+ * and the Prisma Proxy folds a nested `$transaction` into the outer one — so a
+ * `set_config` issued by an inner context persists for the OUTER transaction's
+ * remainder, whichever direction the nesting runs. The same-kind pairs were
+ * benign only because no live site nested two DIFFERENT tenants; that is a
+ * property of today's call sites, not of the mechanism.
+ *
+ * The message names both halves so a failure says which nesting occurred, and
+ * keeps the `INVALID_RLS_NESTING:` prefix the existing assertions match on.
+ *
+ * This is fail-closed for callers that propagate. Callers that swallow — the
+ * best-effort notification and lockout paths — see a skipped side effect
+ * instead, which is why a missed site is not uniformly "a denied request".
+ */
+function assertNoActiveRlsContext(opening: "withTenantRls" | "withBypassRls"): void {
+  const ctx = getTenantRlsContext();
+  if (ctx === undefined) return;
+  const active = ctx.bypass ? "withBypassRls" : "withTenantRls";
+  throw new Error(
+    `INVALID_RLS_NESTING: ${opening} inside ${active} is forbidden`,
+  );
 }
 
 export function getTenantRlsContext(): TenantRlsContext | undefined {
@@ -121,15 +154,7 @@ export async function withTenantRls<T>(
   // sized by an operator-tunable cap, for instance.
   options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
-  // Symmetric nesting guard: AsyncLocalStorage does NOT roll back PostgreSQL
-  // GUCs, and the Prisma Proxy folds nested $transaction into the outer tx,
-  // so set_config() from either direction persists for the outer transaction's
-  // remainder. Rejecting nesting in both directions is the only correct fix.
-  if (getTenantRlsContext()?.bypass === true) {
-    throw new Error(
-      "INVALID_RLS_NESTING: withTenantRls inside withBypassRls is forbidden",
-    );
-  }
+  assertNoActiveRlsContext("withTenantRls");
   // AFTER the nesting guard, so a nested call keeps reporting the nesting —
   // the outer defect — rather than being reclassified by whatever tenant id it
   // happened to carry.
@@ -152,11 +177,7 @@ export async function withBypassRls<T>(
   // single quick statement.
   options?: { timeout?: number; maxWait?: number },
 ): Promise<T> {
-  if (getTenantRlsContext()?.bypass === false) {
-    throw new Error(
-      "INVALID_RLS_NESTING: withBypassRls inside withTenantRls is forbidden",
-    );
-  }
+  assertNoActiveRlsContext("withBypassRls");
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
     await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${purpose}, true)`;

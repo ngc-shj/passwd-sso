@@ -10,7 +10,6 @@ import {
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withTenantRls } from "@/lib/tenant-rls";
 import {
   collectEntryAttachmentRefs,
   deleteAttachmentBlobs,
@@ -153,22 +152,25 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
   let attachmentRefs: AttachmentBlobRef[];
   try {
-    attachmentRefs = await withTeamTenantRls(teamId, async (tenantId) =>
-      withTenantRls(prisma, tenantId, async (tx) => {
-        const entries = await tx.teamPasswordEntry.findMany({
-          where: { teamId },
-          select: { id: true },
-        });
-        // Capture external blob refs before the cascade delete removes the rows
-        const refs = await collectEntryAttachmentRefs(tx, {
-          kind: "team",
-          teamId,
-          entryIds: entries.map((e) => e.id),
-        });
-        await tx.team.delete({ where: { id: teamId } });
-        return refs;
-      }),
-    );
+    // `withTeamTenantRls` has already opened the tenant context; re-opening it
+    // with the same id was a nesting the guard now refuses. Under an active
+    // context the Proxy delegates plain `prisma.<model>` calls to the open
+    // transaction, so these statements still run inside it — the wrapper was
+    // never what put them there.
+    attachmentRefs = await withTeamTenantRls(teamId, async () => {
+      const entries = await prisma.teamPasswordEntry.findMany({
+        where: { teamId },
+        select: { id: true },
+      });
+      // Capture external blob refs before the cascade delete removes the rows
+      const refs = await collectEntryAttachmentRefs(prisma, {
+        kind: "team",
+        teamId,
+        entryIds: entries.map((e) => e.id),
+      });
+      await prisma.team.delete({ where: { id: teamId } });
+      return refs;
+    });
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;
