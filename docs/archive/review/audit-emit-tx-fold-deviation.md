@@ -28,3 +28,75 @@ landing C2 with I2.4's module-load assertion and reading which test files fail a
 import. Revision 3's static list was wrong in both directions, so reproducing a
 list here would repeat the error. The 15 candidates recorded in the checklist are
 the expected superset, not the answer.
+
+## Implementation deviations
+
+### D1 — I0.2 and I0.4 could not both be satisfied at the placement I0.2 named
+
+I0.2 specified the emit "immediately after `transition()` returns `{ok:true}`,
+before the re-fetch"; I0.4, added in the same revision, requires the row to carry
+`metadata.outcome`. At the placement I0.2 names the outcome is not yet known.
+
+Resolved by keeping I0.2's *property* — the emit covers every path the CAS
+succeeded on — and moving the call to after the outcome is classified, with
+`ownerId` read from the pre-CAS select. That is what makes the `!updated` arm
+safe, which was I0.2's stated reason for preferring the earlier placement, so the
+reason survives the move. I0.3 is unaffected: the classification and the emit are
+both after `promoted.ok`.
+
+### D2 — `metadata.outcome` is a named constant, not an inline union
+
+Three literals with a derived type (`EA_ACTIVATE_OUTCOME`), exported from
+`vault-auto-promote.ts` and used by the approve route. The plan wrote the union
+inline.
+
+### D3 — the forwarder carve-out is a separate `_logType`, not a fluent-bit rule
+
+I2.5 said to "carve the new reason out of the exclusion". The first attempt used
+`rewrite_tag` to move the record past `Exclude _logType ^audit-dead-letter$` —
+and every OUTPUT in that config matches `app.*`, so the re-tagged record reaches
+none of them. A carve-out that forwards nothing while reading as correct is the
+class of defect this PR exists to remove, so it was discarded rather than
+adjusted.
+
+The refusal ships under `_logType: "audit-refused"` on a sibling logger instead.
+The exclusion's justification — dead-letter records carry caller error text —
+does not apply: the refusal payload has no `error` field, because it reports a
+control decision rather than a failure. `docs/operations/alerts.md` gains the
+signal with its recovery action, and its "two remaining reasons" enumeration is
+corrected.
+
+### D4 — the C0 forbidden pattern became a standalone gate, not an inline step
+
+The plan specified a `run_step` in `pre-pr.sh`'s grep idiom. That satisfied the
+step but not `check-gate-selftest-coverage.sh`, which requires every inline gate
+to carry a sibling self-test or a debt entry — a constraint the plan did not
+anticipate for inline steps, only for new `scripts/checks/*.mjs`.
+
+Four existing inline gates take the debt-entry route. This one is extracted to
+`scripts/checks/check-emergency-activate-atomic.mjs` with a self-test instead:
+the gate's whole value is that it examines one specific file, so "the file moved"
+must be distinguishable from "the file is clean", and that arm needs a test to
+be worth claiming. Adding a fifth debt entry would have deferred the same work
+onto a list the repo is evidently trying to shrink.
+
+The pattern matches `logAuditAsync(`, not `logAuditAsync`: run against the
+corrected file first, the word-shaped form flagged the file's own comments
+explaining what it used to do.
+
+### D5 — CF2's member set, as derived by running
+
+The plan's disposition was to derive it by landing C2 with I2.4's module-load
+assertion and repairing what failed at import. Result: **four** files, three of
+which review had predicted and one — `src/app/api/vault/unlock/data/route.test.ts`
+— which no list contained. `src/lib/tenant/tenant-management.test.ts`, named in
+revision 3's list, did not fail: it is not a member, as Round 3 found. Each was
+repaired with `importOriginal` spread plus its existing opener override; none
+received a bare `getTenantRlsContext` stub.
+
+### D6 — deferred CI-parity gaps, both run locally
+
+Recorded in Step 2-1 and discharged here rather than deferred to CI:
+`bash scripts/check-state-mutation-centralization.sh` (in scope — this diff
+changes `transition()`'s `db` argument) exits 0, and the three license gates
+exit 0 with no dependency change.

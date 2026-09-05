@@ -530,17 +530,7 @@ else
 fi
 run_step "Static: no-deprecated-logAudit" bash -c 'hits=$(grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" || true); if [ -n "$hits" ]; then echo "Residual logAudit() calls found:"; printf "%s\n" "$hits"; exit 1; fi'
 
-# The emergency-access auto-promotion writes its activation audit atomically
-# (logAuditInTx) because that row is the only record the owner's escrowed key
-# material moved. Reverting it to logAuditAsync would put the row back on a
-# post-commit best-effort path, and check-critical-audit-atomic.mjs would NOT
-# notice: that gate is action-scoped and the sibling emitter in the approve
-# route satisfies it on its own.
-#
-# The pattern matches the CALL, not the word: the file's own comments explain
-# what it used to do, and a word-shaped pattern flags its own documentation.
-# `test -f` first, so a moved file fails loudly instead of passing as "no match".
-run_step "Static: emergency-activate-atomic" bash -c 'f=src/lib/emergency-access/vault-auto-promote.ts; if [ ! -f "$f" ]; then echo "emergency-activate-atomic: $f not found — move the check with the file"; exit 1; fi; hits=$(grep -n "logAuditAsync(" "$f" || true); if [ -n "$hits" ]; then echo "Atomic activation audit reverted to logAuditAsync:"; printf "%s\n" "$hits"; exit 1; fi'
+run_step "Static: emergency-activate-atomic" node scripts/checks/check-emergency-activate-atomic.mjs
 
 # C21 / C10: forbid imports of Auth.js builtin WebAuthn providers. The project
 # uses Auth.js Credentials provider with a custom authorize() flow that calls
