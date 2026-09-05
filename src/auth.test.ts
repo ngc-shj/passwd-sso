@@ -11,6 +11,7 @@ const {
   mockSessionMetaGetStore,
   mockLogAudit,
   mockLoggerWarn,
+  mockLoggerError,
   mockEmitAuthLoginFailure,
 } = vi.hoisted(() => {
   const mockPrisma = {
@@ -116,6 +117,10 @@ const {
     // so session-callback tests can observe getLogger().warn(...) (a fresh spy
     // per getLogger() call would be unobservable).
     mockLoggerWarn: vi.fn(),
+    // Same reasoning, for the "unnamed check violation" log line C3 adds
+    // inside ensureTenantMembershipForSignIn's catch — a fresh vi.fn() per
+    // getLogger() call would make that line unobservable too.
+    mockLoggerError: vi.fn(),
     mockEmitAuthLoginFailure: vi.fn(),
   };
 });
@@ -188,7 +193,7 @@ vi.mock("@/lib/audit/auth-failure", () => ({
 }));
 
 vi.mock("@/lib/logger", () => ({
-  getLogger: () => ({ info: vi.fn(), warn: mockLoggerWarn, error: vi.fn() }),
+  getLogger: () => ({ info: vi.fn(), warn: mockLoggerWarn, error: mockLoggerError }),
 }));
 
 vi.mock("./auth.config", () => ({
@@ -240,6 +245,27 @@ function extraction(e: TenantClaimExtraction) {
 
 function lookup(l: ClaimLookup) {
   return l;
+}
+
+/**
+ * A 23514 shaped exactly like sentinel-tenant-constraint.test.ts's own
+ * `checkViolation` fixture — `meta.driverAdapterError.cause` carrying the
+ * SQLSTATE, the constraint name only in the message text, the nesting
+ * measured against this repo's own CHECKs. Shared by the C3 routing tests in
+ * both the `ensureTenantMembershipForSignIn` and `signIn callback` describe
+ * blocks below, which need the identical shape at two different layers of
+ * the same call.
+ */
+function checkViolation(message: string): Error {
+  return Object.assign(new Error(`Database error. Code: \`23514\`. Message: \`${message}\``), {
+    code: "P2010",
+    meta: {
+      driverAdapterError: {
+        message,
+        cause: { code: "23514", originalCode: "23514", originalMessage: message, message },
+      },
+    },
+  });
 }
 
 // Capture the NextAuth call args at import time, before beforeEach clears mocks
@@ -905,6 +931,56 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockFindOrCreateTenantForClaim).not.toHaveBeenCalled();
     expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
+
+  // ─── C3 (CF13) — routing of a 23514 that is NOT the sentinel arm ───────
+  //
+  // `classifySentinelTenantConstraint`'s own classification is pinned by
+  // sentinel-tenant-constraint.test.ts and not re-tested here (its "other"
+  // and "unnamed_check" arms are fixtures identical in shape to the ones
+  // below, by design — this file exists to prove what happens NEXT). What is
+  // untested elsewhere is the CONSUMER: given each of those two verdicts,
+  // does `ensureTenantMembershipForSignIn`'s catch route to the SAME place a
+  // generic unexpected error does (rethrow, mapped to provider_error one
+  // layer up — see the "signIn callback" describe block below), or does it
+  // misroute into the sentinel-deny arm? `@/lib/tenant/sentinel-tenant-
+  // constraint` is deliberately NOT mocked in this file, so the fixtures
+  // below run through the REAL classifier, parsing a REAL-shaped Prisma
+  // error — only the DB write that produces such an error is mocked.
+  it("rethrows a 23514 from a DIFFERENT check constraint unchanged, without logging it as unnamed", async () => {
+    const error = checkViolation(
+      'new row for relation "audit_logs" violates check constraint "audit_logs_outbox_id_actor_type_check"',
+    );
+    mockPrisma.tenantMember.upsert.mockRejectedValueOnce(error);
+
+    // Same object, not merely "some rejection": a routing bug that wrapped
+    // or replaced the error would still satisfy .rejects.toThrow() but would
+    // no longer be the value the outer signIn callback's catch logs and
+    // classifies from.
+    await expect(ensureTenantMembershipForSignIn("user-1", null, {})).rejects.toBe(error);
+    // The distinguishing log line belongs to the OTHER arm (unnamed_check)
+    // only — a different constraint has a name, just not one of ours, so
+    // there is nothing here for that branch to say.
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+
+  it("rethrows an unnamed check violation unchanged, and logs it distinctly before doing so", async () => {
+    // Localised message: the constraint name is present but not in the
+    // `constraint "…"` shape pgConstraintName parses (a non-English
+    // lc_messages server, per that function's own KNOWN LIMIT).
+    const error = checkViolation("リレーションの新しい行はチェック制約に違反しています");
+    mockPrisma.tenantMember.upsert.mockRejectedValueOnce(error);
+
+    await expect(ensureTenantMembershipForSignIn("user-1", null, {})).rejects.toBe(error);
+    // The ONE place this deployment records that a CHECK was involved at
+    // all: the reason the outer catch's emit will carry (provider_error) is
+    // indistinguishable from a dozen unrelated failures, and only this line
+    // says which one it was.
+    expect(mockLoggerError).toHaveBeenCalledTimes(1);
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ error: expect.anything() }),
+      "auth.signin.check_violation_constraint_unnamed",
+    );
+  });
 });
 
 describe("signIn callback", () => {
@@ -1233,6 +1309,50 @@ describe("signIn callback", () => {
       );
     },
   );
+
+  // C3 (CF13) — the other half of the routing proof. The
+  // `ensureTenantMembershipForSignIn` describe block above proves the error
+  // is rethrown UNCHANGED for these two verdicts; this proves what the outer
+  // catch here (src/auth.ts's signIn callback) does with that rethrow —
+  // which is where "surfaces as provider_error" is actually decided. Driven
+  // through the real signIn callback rather than asserted structurally,
+  // because a hard-coded `reason: "tenant_mismatch"` at this emit site (the
+  // exact class of bug T11 above exists to catch) would leave a unit
+  // assertion on ensureTenantMembershipForSignIn's own throw green while the
+  // audit trail said the wrong thing.
+  it.each([
+    [
+      "a different check constraint",
+      'new row for relation "audit_logs" violates check constraint "audit_logs_outbox_id_actor_type_check"',
+    ],
+    ["an unnamed check constraint", "リレーションの新しい行はチェック制約に違反しています"],
+  ])("routes a 23514 from %s to provider_error", async (_label, message) => {
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "claim", value: "tenant-acme" }));
+    mockResolveTenantByClaim.mockResolvedValue(
+      lookup({ kind: "tenant", id: "00000000-0000-4000-a000-000000000001" }),
+    );
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockRejectedValueOnce(checkViolation(message));
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "user@acme.com" },
+      account: { provider: "google" },
+      profile: { hd: "acme.com" },
+    });
+
+    expect(result).toBe(false);
+    // Not tenant_claim_system_tenant: neither fixture names one of the three
+    // sentinel constraints, so this must NOT be misrouted into C3's new deny
+    // arm — it has to fall through to the SAME generic mapping every other
+    // unexpected error gets.
+    expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+      email: "user@acme.com",
+      provider: "google",
+      reason: "provider_error",
+      userId: "real-db-id",
+    });
+  });
 
   describe("nodemailer provider", () => {
     it("returns true for new user (no existing DB record)", async () => {

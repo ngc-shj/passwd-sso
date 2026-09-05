@@ -14,7 +14,7 @@ import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { readFormWithCap } from "@/lib/http/parse-body";
-import { MAX_JSON_BODY_BYTES } from "@/lib/validations/common.server";
+import { MAX_JSON_BODY_BYTES, PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
 import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants/auth/api-path";
@@ -23,6 +23,13 @@ import {
   passkeyEnforcementBlocks,
   recordPasskeyAuditEmit,
 } from "@/lib/auth/policy/passkey-enforcement";
+
+// C4 (CF15): a NUMBER, not a list — MCP_SCOPES (9) plus the standard OAuth
+// extras a client may legitimately also request (openid, profile,
+// offline_access). Comparing a count keeps this cap independent of the
+// MCP_SCOPES `.includes()` allowlist below, so it cannot be widened by being
+// spread into that array one identifier away.
+const MAX_REQUESTED_SCOPES = MCP_SCOPES.length + 3;
 
 export async function POST(req: NextRequest) {
   // Origin presence guard (early return / defense-in-depth).
@@ -65,6 +72,57 @@ export async function POST(req: NextRequest) {
   const redirectUri = formData.get("redirect_uri") ?? "";
   const state = formData.get("state") ?? "";
   const action = formData.get("action") ?? "";
+  const scope = formData.get("scope") ?? "";
+  // ONE read, used by the gate below and by the code mint. A second read with
+  // the same default would be a second adjudicator of one rule, which is what
+  // CFP2 removed. The stale-session echo further down keeps its own read
+  // deliberately: it forwards what the client actually SENT, absent included.
+  const codeChallengeMethod = formData.get("code_challenge_method") || "S256";
+
+  // C4 (CF15): PKCE + scope validated as early as possible — before the
+  // stale-session echo below, which otherwise forwards code_challenge and
+  // scope to the authorize GET unvalidated, and before the DCR claim block,
+  // so a malformed or garbage request cannot consume a
+  // MAX_MCP_CLIENTS_PER_TENANT slot. Gated on action !== "deny": the deny arm
+  // never mints a code, and its own stale-session echo is protected instead
+  // by the authorize GET re-validating (the third PKCE ingress).
+  if (action !== "deny") {
+    if (!PKCE_CODE_CHALLENGE_SCHEMA.safeParse(formData.get("code_challenge") ?? "").success) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    const requestedScopes = scope.split(" ").filter(Boolean);
+    if (requestedScopes.length > MAX_REQUESTED_SCOPES) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    // Client-independent: refuses a request whose scopes cannot possibly
+    // overlap the client's allowlist (checked later, post-claim, against
+    // effectiveClient) — closing the scope=openid-only path that would
+    // otherwise commit a DCR claim and only THEN hit the residual
+    // invalid_scope redirect below, consuming a slot per attempt.
+    if (!requestedScopes.some((s) => (MCP_SCOPES as readonly string[]).includes(s))) {
+      return NextResponse.json({ error: "invalid_scope" }, { status: 400 });
+    }
+    // BEFORE the DCR claim, and this is the position that matters rather than
+    // the check itself. `mcp_authorization_codes.code_challenge_method` is
+    // `VarChar(10)`, so a longer value makes `createAuthorizationCode` raise
+    // 22001 — uncaught — AFTER the claim has committed: a 500 with a per-tenant
+    // client slot spent and nothing to show for it. A SHORT non-S256 value like
+    // `plain` fails more quietly and just as expensively: the code mints, the
+    // slot is spent, and `exchangeAuthorizationCode` refuses the method at
+    // redemption, so the client can never complete and the slot never returns.
+    //
+    // CFP2 removed the consent-time check on the ground that redemption
+    // enforces it unconditionally. That is true and it is not sufficient: it
+    // decides whether a code can be USED, and says nothing about what the
+    // request may COMMIT on its way to minting one. Redemption's check stays as
+    // the defence in depth it always was.
+    if (codeChallengeMethod !== "S256") {
+      return NextResponse.json(
+        { error: "invalid_request", error_description: "Only S256 code_challenge_method is supported" },
+        { status: 400 },
+      );
+    }
+  }
 
   if (!clientId || clientId.length > MCP_CLIENT_ID_MAX_LENGTH || !redirectUri) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -99,7 +157,6 @@ export async function POST(req: NextRequest) {
     if (state) authorizeUrl.searchParams.set("state", state);
     const codeChallenge = formData.get("code_challenge") ?? "";
     const codeChallengeMethod = formData.get("code_challenge_method") ?? "";
-    const scope = formData.get("scope") ?? "";
     if (codeChallenge) authorizeUrl.searchParams.set("code_challenge", codeChallenge);
     if (codeChallengeMethod) authorizeUrl.searchParams.set("code_challenge_method", codeChallengeMethod);
     if (scope) authorizeUrl.searchParams.set("scope", scope);
@@ -134,16 +191,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(denyUrl.toString(), 302);
   }
 
-  const scope = formData.get("scope") ?? "";
   const codeChallenge = formData.get("code_challenge") ?? "";
-  const codeChallengeMethod = formData.get("code_challenge_method") || "S256";
+  // CFP2 (one adjudicator): the presence check this used to be
+  // (`!scope || !codeChallenge`) is removed rather than kept as defence in
+  // depth — it is dead code by construction now that the gate above refuses any
+  // non-deny request with an empty or malformed code_challenge, or a scope that
+  // cannot overlap MCP_SCOPES. The S256 check was removed with it on the same
+  // reasoning and that was wrong: it MOVED, up into the same gate, because its
+  // position was load-bearing and its redundancy was not. See the gate.
 
-  if (!scope || !codeChallenge) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
-
-  if (codeChallengeMethod !== "S256") {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  // Passkey enforcement gate — authoritative boundary for MCP OAuth issuance.
+  // Re-derives from DB (fail-closed); a throw propagates and refuses
+  // issuance. Placed here (after the deny arm, before the claim block) so a
+  // passkey-enforced user with no passkey is refused before any DCR client is
+  // claimed into their tenant.
+  const pkState = await derivePasskeyState({ userId: session.user.id, tenantId: userTenantId });
+  if (passkeyEnforcementBlocks(pkState)) {
+    if (recordPasskeyAuditEmit(session.user.id, "/api/mcp/authorize/consent", Date.now())) {
+      await logAuditAsync({
+        ...tenantAuditBase(req, session.user.id, userTenantId),
+        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
+        metadata: { blockedPath: "/api/mcp/authorize/consent" },
+      });
+    }
+    const denyUrl = new URL(redirectUri);
+    denyUrl.searchParams.set("error", "access_denied");
+    denyUrl.searchParams.set("error_description", "passkey_required");
+    if (state) denyUrl.searchParams.set("state", state);
+    return NextResponse.redirect(denyUrl.toString(), 302);
   }
 
   // The effective client for authorization — may be replaced by reuse during claiming
@@ -277,29 +352,16 @@ export async function POST(req: NextRequest) {
     (s) => allowedScopes.includes(s) && (MCP_SCOPES as readonly string[]).includes(s),
   );
 
+  // Residual invalid_scope: all scopes well-formed and MCP_SCOPES-valid (the
+  // client-independent gate above already refused anything else), but NONE
+  // are in THIS client's allowlist. Reads effectiveClient — the claim block's
+  // own output — so unlike the gates above it CANNOT relocate before the
+  // claim; it is I4.1's one stated exception.
   if (grantedScopes.length === 0) {
     const url = new URL(redirectUri);
     url.searchParams.set("error", "invalid_scope");
     if (state) url.searchParams.set("state", state);
     return NextResponse.redirect(url.toString(), 302);
-  }
-
-  // Passkey enforcement gate — authoritative boundary for MCP OAuth issuance.
-  // Re-derives from DB (fail-closed); a throw propagates and refuses issuance.
-  const pkState = await derivePasskeyState({ userId: session.user.id, tenantId: userTenantId });
-  if (passkeyEnforcementBlocks(pkState)) {
-    if (recordPasskeyAuditEmit(session.user.id, "/api/mcp/authorize/consent", Date.now())) {
-      await logAuditAsync({
-        ...tenantAuditBase(req, session.user.id, userTenantId),
-        action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
-        metadata: { blockedPath: "/api/mcp/authorize/consent" },
-      });
-    }
-    const denyUrl = new URL(redirectUri);
-    denyUrl.searchParams.set("error", "access_denied");
-    denyUrl.searchParams.set("error_description", "passkey_required");
-    if (state) denyUrl.searchParams.set("state", state);
-    return NextResponse.redirect(denyUrl.toString(), 302);
   }
 
   // Create authorization code

@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { METADATA_MAX_BYTES } from "@/lib/validations/common.server";
 
 const {
   mockAuditInfo,
@@ -170,6 +171,12 @@ describe("logAuditAsync", () => {
     const largeMetadata: Record<string, unknown> = {
       data: "x".repeat(15_000),
     };
+    // The exact byte count, not `expect.any(Number)`. ASCII here, so the two
+    // measures coincide and this case cannot by itself tell bytes from code
+    // units — the case BELOW is the one that can, and it is what makes this
+    // tree an R19 twin of src/lib/audit/audit.test.ts's C6 rather than a
+    // weaker restatement of it.
+    const expectedOriginalSize = Buffer.byteLength(JSON.stringify(largeMetadata), "utf8");
 
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -183,13 +190,59 @@ describe("logAuditAsync", () => {
         audit: expect.objectContaining({
           metadata: expect.objectContaining({
             _truncated: true,
-            _originalSize: expect.any(Number),
+            _originalSize: expectedOriginalSize,
           }),
         }),
       }),
       "audit.ENTRY_UPDATE",
     );
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
+  });
+
+  it("truncates multi-byte metadata that fits METADATA_MAX_BYTES in code units but not in bytes (the CF17 pin, through this tree)", async () => {
+    // The R19 twin of the co-located tree's CF17 pin, and the reason this tree
+    // has one at all: the ASCII case above passes identically whether
+    // `truncateMetadata` measures `Buffer.byteLength` or `json.length`, so on
+    // its own it leaves this tree unable to disagree with the other about the
+    // units — which is exactly what the twin obligation exists to prevent.
+    //
+    // "あ" is ONE UTF-16 code unit and THREE UTF-8 bytes. Sized so the code-unit
+    // count stays UNDER the bound while the byte count is roughly 3x over it:
+    // under the reverted comparison nothing is truncated at all, so the marker
+    // is absent and this case reds on the assertion below rather than on a
+    // number.
+    mockAuditInfo.mockReturnValue(undefined);
+    const value = "あ".repeat(10_228);
+    const metadata: Record<string, unknown> = { value };
+    const json = JSON.stringify(metadata);
+    const codeUnitLength = json.length;
+    const byteLength = Buffer.byteLength(json, "utf8");
+    expect(codeUnitLength).toBeLessThanOrEqual(METADATA_MAX_BYTES);
+    expect(byteLength).toBeGreaterThan(METADATA_MAX_BYTES);
+
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.ENTRY_UPDATE,
+      userId: "user-1",
+      metadata,
+    });
+
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          metadata: expect.objectContaining({
+            _truncated: true,
+            _originalSize: byteLength,
+          }),
+        }),
+      }),
+      "audit.ENTRY_UPDATE",
+    );
+    // Bytes, not code units — the assertion the ASCII case cannot make.
+    const emitted = mockAuditInfo.mock.calls.at(-1)?.[0] as {
+      audit: { metadata: Record<string, unknown> };
+    };
+    expect(emitted.audit.metadata._originalSize).not.toBe(codeUnitLength);
   });
 
   it("truncates user-agent to 512 chars", async () => {

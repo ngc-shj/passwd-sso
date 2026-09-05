@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * The sentinel tenant's UUID is written down in five places that must agree, and
- * four of them cannot dereference the fifth.
+ * The sentinel tenant's UUID is written down in six places that must agree, and
+ * five of them cannot dereference the first.
  *
  *   src/lib/constants/app.ts          SYSTEM_TENANT_ID  (the definition)
  *   prisma/migrations/…_add_dcr_cleanup_worker_role_and_system_tenant
  *                                     the `tenants` row itself
  *   prisma/migrations/…_forbid_system_tenant_membership
  *                                     the CHECK that keeps it memberless
+ *   prisma/migrations/…_forbid_system_tenant_on_users_and_teams
+ *                                     the CHECKs that keep it out of users/teams
  *   docs/operations/alerts.md         the unattributable-event query
  *   docs/operations/sentinel-tenant-membership.md
  *                                     the membership incident runbook
@@ -100,6 +102,13 @@ const SQL_SITES = [
     dirSuffix: "_forbid_system_tenant_membership",
     occurrences: 1,
     what: "the CHECK that keeps the sentinel memberless",
+  },
+  {
+    dirSuffix: "_forbid_system_tenant_on_users_and_teams",
+    // Two: one CHECK per table. They are added in one transaction and must move
+    // together, which is what a count — rather than a presence test — pins.
+    occurrences: 2,
+    what: "the CHECKs keeping the sentinel out of `users` and `teams`",
   },
   {
     dirSuffix: "_set_system_tenant_audit_retention",

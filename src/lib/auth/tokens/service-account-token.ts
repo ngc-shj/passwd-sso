@@ -40,16 +40,16 @@ function extractBearer(req: NextRequest): string | null {
 
 const ALLOWED_SCOPES = new Set<string>(Object.values(SA_TOKEN_SCOPE));
 
-/** Parse CSV scope string into typed array. Unknown scopes are dropped. */
+/** Parse CSV scope string into typed array. Unknown scopes are dropped, duplicates deduped. */
 export function parseSaTokenScopes(csv: string): SaTokenScope[] {
-  const out: SaTokenScope[] = [];
+  const out = new Set<SaTokenScope>();
   for (const raw of csv.split(",")) {
     const s = raw.trim();
     if (s && ALLOWED_SCOPES.has(s)) {
-      out.push(s as SaTokenScope);
+      out.add(s as SaTokenScope);
     }
   }
-  return out;
+  return [...out];
 }
 
 export function hasSaTokenScope(

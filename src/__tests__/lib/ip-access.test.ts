@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import {
   isIpInCidr,
@@ -153,29 +153,20 @@ describe("isValidIpAddress", () => {
 });
 
 describe("extractClientIp", () => {
-  const originalProxies = process.env.TRUSTED_PROXIES;
-  const originalTrustHeaders = process.env.TRUST_PROXY_HEADERS;
-
   beforeEach(() => {
     _resetTrustedProxyCache();
-    delete process.env.TRUSTED_PROXIES;
+    // vi.stubEnv, not a direct assignment: setup.ts wires vi.unstubAllEnvs()
+    // into afterEach, so the save/restore this used to do by hand is both
+    // redundant and a leak when a case throws between the two halves.
+    vi.stubEnv("TRUSTED_PROXIES", undefined);
     // NextRequest in the test env does not expose a socket peer IP, so XFF /
     // x-real-ip extraction requires the explicit opt-in. Tests that verify
     // the fail-closed path unset this flag locally.
-    process.env.TRUST_PROXY_HEADERS = "true";
+    vi.stubEnv("TRUST_PROXY_HEADERS", "true");
   });
 
   afterEach(() => {
-    if (originalProxies !== undefined) {
-      process.env.TRUSTED_PROXIES = originalProxies;
-    } else {
-      delete process.env.TRUSTED_PROXIES;
-    }
-    if (originalTrustHeaders !== undefined) {
-      process.env.TRUST_PROXY_HEADERS = originalTrustHeaders;
-    } else {
-      delete process.env.TRUST_PROXY_HEADERS;
-    }
+    // Only the module-level cache: the env stubs are unwound by setup.ts.
     _resetTrustedProxyCache();
   });
 
@@ -207,7 +198,7 @@ describe("extractClientIp", () => {
   });
 
   it("skips trusted proxies in x-forwarded-for", () => {
-    process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+    vi.stubEnv("TRUSTED_PROXIES", "10.0.0.0/8");
     _resetTrustedProxyCache();
 
     const req = makeReq("/api/test", {
@@ -218,7 +209,7 @@ describe("extractClientIp", () => {
   });
 
   it("returns leftmost when all IPs are trusted", () => {
-    process.env.TRUSTED_PROXIES = "0.0.0.0/0";
+    vi.stubEnv("TRUSTED_PROXIES", "0.0.0.0/0");
     _resetTrustedProxyCache();
 
     const req = makeReq("/api/test", {
@@ -247,7 +238,7 @@ describe("extractClientIp", () => {
     // forwarded headers MUST be ignored — otherwise any client can spoof
     // their IP via X-Forwarded-For or X-Real-IP.
     beforeEach(() => {
-      delete process.env.TRUST_PROXY_HEADERS;
+      vi.stubEnv("TRUST_PROXY_HEADERS", undefined);
       _resetTrustedProxyCache();
     });
 
@@ -268,12 +259,81 @@ describe("extractClientIp", () => {
     it("rejects XFF spoofing even with explicit trusted proxy CIDR", () => {
       // Without socket IP verification, TRUSTED_PROXIES alone cannot
       // distinguish a real proxy from a spoofed header.
-      process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+      vi.stubEnv("TRUSTED_PROXIES", "10.0.0.0/8");
       _resetTrustedProxyCache();
       const req = makeReq("/api/test", {
         "x-forwarded-for": "203.0.113.99, 10.0.0.1",
       });
       expect(extractClientIp(req)).toBeNull();
+    });
+  });
+
+  // C1 (CF11) — extractClientIp returns null or a normalizeIp'd value that
+  // isValidIpAddress accepts. NextRequest exposes no socket peer here, so
+  // TRUST_PROXY_HEADERS=true (set in the outer beforeEach) is what makes the
+  // header-derived sources (b: x-real-ip, c: XFF walk, d: all-trusted
+  // leftmost) reachable through this entry point; the socket-only sources
+  // (a, e) are covered in the co-located src/lib/auth/policy/ip-access.test.ts,
+  // which passes an explicit socketIp.
+  describe("C1 boundary validation (CF11)", () => {
+    const ALLOW_ARMS: ReadonlyArray<readonly [string, string]> = [
+      ["192.168.100.228", "192.168.100.228"],
+      ["::ffff:192.168.100.228", "192.168.100.228"],
+      ["2001:db8::1", "2001:db8::1"],
+      ["[::1]", "::1"],
+      ["100.64.1.2", "100.64.1.2"],
+    ];
+
+    const DENY_ARMS: readonly string[] = [
+      "not-an-ip",
+      "'; DROP TABLE audit_logs;--",
+      "192.168.1.1:8080",
+      "fe80::1%eth0",
+      "192.168.001.1",
+      "1e2.64.0.1",
+      "::ffff:1e2.64.0.1",
+      "<script>alert(1)</script>",
+      "0000:0000:0000:0000:0000:ffff:255.255.255.255%25eth0",
+      "unknown",
+      "",
+      "1:2:3:4:5:6:7:8::",
+      "1:2:3:4:5:6:7:1.2.3.4",
+    ];
+
+    describe("allow arms, by value", () => {
+      it.each(ALLOW_ARMS)("x-real-ip (b): %s -> %s", (raw, expected) => {
+        const req = makeReq("/api/test", { "x-real-ip": raw });
+        expect(extractClientIp(req)).toBe(expected);
+      });
+
+      it.each(ALLOW_ARMS)("XFF rightmost-untrusted (c): %s -> %s", (raw, expected) => {
+        const req = makeReq("/api/test", { "x-forwarded-for": raw });
+        expect(extractClientIp(req)).toBe(expected);
+      });
+
+      it("the rightmost-untrusted walk itself is unchanged (multi-hop)", () => {
+        const req = makeReq("/api/test", {
+          "x-forwarded-for": "1.2.3.4, 9.9.9.9",
+        });
+        expect(extractClientIp(req)).toBe("9.9.9.9");
+      });
+    });
+
+    describe("deny arms — thirteen malformed/hostile values", () => {
+      it.each(DENY_ARMS)("x-real-ip (b): %j -> null", (raw) => {
+        const req = makeReq("/api/test", { "x-real-ip": raw });
+        expect(extractClientIp(req)).toBeNull();
+      });
+
+      it.each(DENY_ARMS)("XFF rightmost-untrusted (c): %j -> null", (raw) => {
+        const req = makeReq("/api/test", { "x-forwarded-for": raw });
+        expect(extractClientIp(req)).toBeNull();
+      });
+
+      // As in the co-located twin: a deny value can never survive to the
+      // all-trusted leftmost fallback (d) — reaching it requires every
+      // walked XFF entry to have already passed the trusted-CIDR match,
+      // which a malformed value always fails first, inside the walk loop.
     });
   });
 });

@@ -69,6 +69,13 @@ describe("CLAIM_REFUSAL_REASON", () => {
       // the consumer using `claim_invalid`'s word for a path where no
       // resolution runs.
       store_unavailable: "provider_error",
+      // CF13. Its OWN reason rather than a reuse of tenant_claim_unmapped's:
+      // `bucketOf` decides the heading from the reason, so sharing one would
+      // file this population under another's remedy — and the remedies differ.
+      // The claim IS registered here, to a tenant that must not own accounts,
+      // so the operator re-points the `tenant_claims` row rather than creating
+      // it.
+      claim_system_tenant: "tenant_claim_system_tenant",
     });
   });
 

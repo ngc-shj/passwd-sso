@@ -37,7 +37,20 @@ export type AuthLoginFailureReason =
   | "provider_error"
   | "magic_link_expired"
   | "credential_mismatch"
-  | "tenant_claim_unmapped";
+  | "tenant_claim_unmapped"
+  /**
+   * The claim resolved — to `SYSTEM_TENANT_ID`, the encoding of "no owning
+   * tenant". A PostgreSQL CHECK refuses the write at that point
+   * (`users_not_system_tenant` / `tenant_members_not_system_tenant`), so the
+   * sign-in denies and the reason has to say which denial it was.
+   *
+   * Its own member rather than a reuse of `tenant_claim_unmapped`: the two
+   * remedies differ, and `bucketOf` decides the heading from the reason, so
+   * borrowing one would file this under a population it is not in. Reachable
+   * only out of band — `tenant-domain add` refuses a sentinel target on the
+   * resolved id — which is why this member is observability, not a control.
+   */
+  | "tenant_claim_system_tenant";
 
 export type AuthProvider =
   | "google"

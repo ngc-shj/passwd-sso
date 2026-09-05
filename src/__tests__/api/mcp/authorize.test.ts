@@ -63,6 +63,12 @@ const VALID_CLIENT = {
   isActive: true,
 };
 
+// 43 chars — the real base64url(SHA-256(verifier)) length (RFC 7636 §4.2).
+// PKCE_CODE_CHALLENGE_SCHEMA (C4/CF15) now validates this at ingress, so a
+// short placeholder like "abc123challenge" is rejected before reaching the
+// later checks these fixtures target.
+const VALID_CODE_CHALLENGE = "A".repeat(43);
+
 // Convenience: build URL with common valid OAuth params
 function authorizeUrl(overrides: Record<string, string | undefined> = {}): string {
   const base = "http://localhost:3000/api/mcp/authorize";
@@ -70,7 +76,7 @@ function authorizeUrl(overrides: Record<string, string | undefined> = {}): strin
     client_id: "client-abc",
     redirect_uri: "https://example.com/callback",
     response_type: "code",
-    code_challenge: "abc123challenge",
+    code_challenge: VALID_CODE_CHALLENGE,
     code_challenge_method: "S256",
     scope: "credentials:list",
     state: "random-state",
@@ -93,7 +99,7 @@ function authorizeUrlWithout(...omit: string[]): string {
     client_id: "client-abc",
     redirect_uri: "https://example.com/callback",
     response_type: "code",
-    code_challenge: "abc123challenge",
+    code_challenge: VALID_CODE_CHALLENGE,
     code_challenge_method: "S256",
     scope: "credentials:list",
     state: "random-state",
@@ -233,6 +239,18 @@ describe("GET /api/mcp/authorize", () => {
       expect(json.error).toBe("invalid_request");
     });
 
+    // C4 (CF15): PKCE_CODE_CHALLENGE_SCHEMA now validates FORMAT, not just
+    // presence — a value shorter than the real S256 challenge length is
+    // refused before the DB lookup, same as a missing one.
+    it("returns 400 when codeChallenge is present but malformed (too short)", async () => {
+      const req = createRequest("GET", authorizeUrl({ code_challenge: "too-short" }));
+      const res = await GET(req);
+      expect(res.status).toBe(400);
+      const json = await res.json();
+      expect(json.error).toBe("invalid_request");
+      expect(mockMcpClientFindFirst).not.toHaveBeenCalled();
+    });
+
     it("returns 400 when codeChallengeMethod is not S256", async () => {
       const req = createRequest("GET", authorizeUrl({ code_challenge_method: "plain" }));
       const res = await GET(req);
@@ -279,7 +297,7 @@ describe("GET /api/mcp/authorize", () => {
       expect(url.searchParams.get("client_id")).toBe("client-abc");
       expect(url.searchParams.get("redirect_uri")).toBe("https://example.com/callback");
       expect(url.searchParams.get("response_type")).toBe("code");
-      expect(url.searchParams.get("code_challenge")).toBe("abc123challenge");
+      expect(url.searchParams.get("code_challenge")).toBe(VALID_CODE_CHALLENGE);
       expect(url.searchParams.get("state")).toBe("forward-me");
     });
 

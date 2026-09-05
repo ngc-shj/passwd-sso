@@ -24,6 +24,8 @@ import {
   MCP_CLIENT_ID_MAX_LENGTH,
   MCP_CLIENT_SECRET_MAX_LENGTH,
   MCP_PRESENTED_TOKEN_MAX_LENGTH,
+  MCP_TOKEN_IP_RATE_MAX,
+  MCP_TOKEN_IP_RATE_WINDOW_MS,
 } from "@/lib/constants/auth/mcp";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
@@ -36,8 +38,8 @@ const tokenRateLimiter = createRateLimiter({
   failClosedOnRedisError: true,
 });
 const ipRateLimiter = createRateLimiter({
-  windowMs: MS_PER_MINUTE,
-  max: 30,
+  windowMs: MCP_TOKEN_IP_RATE_WINDOW_MS,
+  max: MCP_TOKEN_IP_RATE_MAX,
   failClosedOnRedisError: true,
 });
 
@@ -62,30 +64,30 @@ async function handlePOST(req: NextRequest) {
 
   const grantType = body.grant_type;
 
-  // IP rate limit applies to all grant types
+  // IP rate limit applies to all grant types. A null IP (unparseable/unknown)
+  // still hits the limiter under a shared "unknown" bucket — skipping it would
+  // let a spoofed or missing IP bypass rate limiting entirely.
   const ip = extractClientIp(req);
-  if (ip) {
-    const blocked = await checkRateLimitOrFail({
-      req,
-      limiter: ipRateLimiter,
-      key: `rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`,
-      scope: "mcp.token_ip",
-      userId: null,
-      envelope: "oauth",
-      rateLimitedEnvelope: (retryAfterMs) =>
-        NextResponse.json(
-          { error: "slow_down" },
-          {
-            status: 429,
-            headers:
-              retryAfterMs != null && retryAfterMs > 0
-                ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
-                : {},
-          },
-        ),
-    });
-    if (blocked) return blocked;
-  }
+  const blocked = await checkRateLimitOrFail({
+    req,
+    limiter: ipRateLimiter,
+    key: `rl:mcp:token:ip:${rateLimitKeyFromIp(ip ?? "unknown")}`,
+    scope: "mcp.token_ip",
+    userId: null,
+    envelope: "oauth",
+    rateLimitedEnvelope: (retryAfterMs) =>
+      NextResponse.json(
+        { error: "slow_down" },
+        {
+          status: 429,
+          headers:
+            retryAfterMs != null && retryAfterMs > 0
+              ? { "Retry-After": String(Math.ceil(retryAfterMs / MS_PER_SECOND)) }
+              : {},
+        },
+      ),
+  });
+  if (blocked) return blocked;
 
   if (grantType === "authorization_code") {
     const { code, redirect_uri, client_id, client_secret, code_verifier } = body;

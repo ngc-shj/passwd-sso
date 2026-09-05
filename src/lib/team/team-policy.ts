@@ -195,7 +195,12 @@ export async function withTeamIpRestriction(teamId: string, request: NextRequest
     // For inheritTenantCidrs, defer to checkTeamAccessRestriction which resolves
     // actual tenant CIDRs; pass empty string so it can determine whether any CIDRs exist.
     if (policy.teamAllowedCidrs.length > 0) {
-      throw new PolicyViolationError("Access denied: client IP unknown; access restricted");
+      // Delegate rather than throw inline: checkTeamAccessRestriction is what
+      // emits the ACCESS_DENIED audit row (isIpAllowed("", combinedCidrs) is
+      // always false), so an inline throw here would deny with no audit trail.
+      // Same shape the inheritTenantCidrs branch below already uses.
+      await checkTeamAccessRestriction(teamId, "", userId, policy);
+      return;
     }
     if (!policy.inheritTenantCidrs) {
       return;

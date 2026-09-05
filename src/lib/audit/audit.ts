@@ -72,7 +72,12 @@ import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/session/auth-or-token";
-import { AUDIT_IP_MAX_LENGTH, METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import {
+  AUDIT_IP_MAX_LENGTH,
+  METADATA_MAX_BYTES,
+  TRUNCATED_REASON_MAX_BYTES,
+  USER_AGENT_MAX_LENGTH,
+} from "@/lib/validations/common.server";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
 
@@ -93,6 +98,37 @@ import { errorLogFields, type ErrorLogFields } from "@/lib/logger/error-fields";
  */
 const UNSERIALIZABLE_METADATA = { _unserializable: true, _reason: "stringify_failed" } as const;
 
+/**
+ * Cut `reason` to fit inside TRUNCATED_REASON_MAX_BYTES, for retention in the
+ * `_truncated` marker below.
+ *
+ * Measured on the JSON-ESCAPED form, not the raw string: `JSON.stringify`
+ * escapes quotes and control characters, which can expand a single character
+ * up to sixfold, so a byte budget checked against the raw value could still
+ * overflow once serialized.
+ *
+ * Cut at a Unicode CODE-POINT boundary, not a byte offset. `Array.from`
+ * splits a string into code points (never splitting a surrogate pair), so
+ * every prefix it produces is itself well-formed — a byte-offset cut through
+ * a multi-byte UTF-8 sequence would instead yield U+FFFD, which EXPANDS the
+ * output, the opposite of what a bound is for.
+ */
+function truncateReason(reason: string): string {
+  const codePoints = Array.from(reason);
+  let lo = 0;
+  let hi = codePoints.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = codePoints.slice(0, mid).join("");
+    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") <= TRUNCATED_REASON_MAX_BYTES) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return codePoints.slice(0, lo).join("");
+}
+
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!metadata) return undefined;
   const json = JSON.stringify(metadata);
@@ -103,7 +139,25 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
   // the same escape as a throw and is how the first version of this catch left
   // the contract broken.
   if (typeof json !== "string") return { ...UNSERIALIZABLE_METADATA };
-  if (json.length > METADATA_MAX_BYTES) return { _truncated: true, _originalSize: json.length };
+  // Bytes, not UTF-16 code units: `.length` let non-ASCII metadata (default
+  // locale is `ja`) store up to ~3x the intended budget into a column that
+  // rejects nothing (CF17).
+  const byteSize = Buffer.byteLength(json, "utf8");
+  if (byteSize > METADATA_MAX_BYTES) {
+    const marker: Record<string, unknown> = { _truncated: true, _originalSize: byteSize };
+    // Retain `reason` — the field an operator's grep over truncated rows
+    // depends on — but only when it is already a string. `reason` is
+    // caller-influenced at several call sites (e.g. rotate-master-key's
+    // approve/revoke, tenant/breakglass); coercing a hostile non-string shape
+    // could itself throw, which safeMetadata's outer catch would turn into
+    // losing `_truncated` and `_originalSize` along with it. Walking the
+    // original object for anything beyond this one field is deliberately not
+    // reintroduced — see the removed recursive walk this replaces.
+    if (typeof metadata.reason === "string") {
+      marker.reason = truncateReason(metadata.reason);
+    }
+    return marker;
+  }
 
   // The PARSED value, not the original object. `sanitizeMetadata` walks it
   // recursively, and a cycle whose `toJSON()` returns something safe passes

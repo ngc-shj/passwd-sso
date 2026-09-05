@@ -242,7 +242,7 @@ export function isIpInCidr(ip: string, cidr: string): boolean {
   if (parsed.version === 4) {
     ipBytes = parseIpv4(normalizedIp);
   } else {
-    ipBytes = parseIpv6(ip); // Use original for IPv6
+    ipBytes = parseIpv6(normalizedIp);
   }
   if (!ipBytes) return false;
 
@@ -280,7 +280,7 @@ function isIpInParsedCidr(ip: string, parsed: ParsedCidr): boolean {
   if (parsed.version === 4) {
     ipBytes = parseIpv4(normalizedIp);
   } else {
-    ipBytes = parseIpv6(ip);
+    ipBytes = parseIpv6(normalizedIp);
   }
   if (!ipBytes) return false;
   if (parsed.version === 4 && ipBytes.length !== 4) return false;
@@ -316,6 +316,18 @@ export function isValidCidr(cidr: string): boolean {
  */
 function trustProxyHeadersWithoutSocket(): boolean {
   return process.env.TRUST_PROXY_HEADERS === "true";
+}
+
+/**
+ * The single boundary check for every value `extractClientIpFromHeaders` can
+ * return: normalize, then require `isValidIpAddress`. All five value sources
+ * (socket, x-real-ip, XFF walk, and both all-trusted fallbacks) route through
+ * this so a request-derived string never reaches a caller un-validated.
+ */
+function validatedIp(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const normalized = normalizeIp(raw);
+  return isValidIpAddress(normalized) ? normalized : null;
 }
 
 /**
@@ -363,7 +375,7 @@ export function extractClientIpFromHeaders(
       isIpInParsedCidr(normalizedSocket, cidr),
     );
     if (!socketTrusted) {
-      return normalizedSocket;
+      return validatedIp(normalizedSocket);
     }
     headersTrusted = true;
   } else {
@@ -377,7 +389,7 @@ export function extractClientIpFromHeaders(
   }
 
   if (!xff) {
-    return xRealIp ? normalizeIp(xRealIp) : null;
+    return validatedIp(xRealIp);
   }
 
   // Rightmost-untrusted: walk from right to left
@@ -393,13 +405,13 @@ export function extractClientIpFromHeaders(
     );
 
     if (!isTrusted) {
-      return ip;
+      return validatedIp(ip);
     }
   }
 
   // All IPs in XFF are trusted proxies — use the leftmost non-empty
   const leftmost = ips.find((ip) => ip.length > 0);
-  return leftmost || socketIp || null;
+  return validatedIp(leftmost) ?? validatedIp(socketIp);
 }
 
 // ─── Tailscale IP detection ──────────────────────────────────

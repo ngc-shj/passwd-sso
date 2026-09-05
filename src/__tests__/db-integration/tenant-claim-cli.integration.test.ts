@@ -40,6 +40,13 @@ import {
   DEREGISTER_ACTOR_LABEL,
 } from "@/lib/tenant/tenant-claim-event";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+// C3 (CF13): bucketOf/UNMAPPED_BUCKET are imported directly rather than
+// through cmdUnmapped's own module — tenant-domain.ts imports them for its
+// own use but does not re-export them, and this file needs to assert the
+// BUCKET a row falls into, not only that the row was returned (that
+// distinction is the whole point of the "asserting bucketOf alone is
+// insufficient" note below).
+import { bucketOf, UNMAPPED_BUCKET } from "../../../scripts/lib/tenant-domain-buckets";
 
 const SKIP = !process.env.DATABASE_URL;
 
@@ -2266,6 +2273,90 @@ describe("tenant-domain CLI (C7)", () => {
             await tx.$executeRawUnsafe(`DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`, tenantId);
           });
 
+          await ctx.deleteTestData(tenantId);
+        }
+      },
+    );
+
+    // C3 (CF13): the new `tenant_claim_system_tenant` reason is a FOURTH
+    // adjudicator on this same query, per the plan's own accounting —
+    // UNMAPPED_SELECTED_REASONS ($3) first, then the `claim IS NOT NULL OR
+    // claim_refusal IS NOT NULL` predicate, then bucketOf. Without the reason
+    // registered in UNMAPPED_SELECTED_REASONS the row never comes back at
+    // all and bucketOf is never consulted — an assertion against a
+    // hand-built row would still pass, which is the round-4/#812 shape this
+    // case exists not to repeat. `mine.find(...)` being defined is therefore
+    // load-bearing on its own, before bucketOf is even called.
+    //
+    // The ordinary tenant_mismatch row alongside it is the differential the
+    // plan calls for: it proves the new arm did not fold the pre-existing
+    // OTHER_TENANT population into UNREGISTERED, the exact failure shape
+    // round-5 F1/S3 produced from a different direction.
+    it.skipIf(SKIP)(
+      "reports a sentinel-claim denial (tenant_claim_system_tenant) as unregistered, alongside an ordinary other-tenant mismatch",
+      async () => {
+        const tenantId = await ctx.createTenant();
+        const sentinelClaim = `${runToken()}.${ALIAS_CLAIM}`;
+        const otherTenantClaim = `${runToken()}.${ALIAS_CLAIM}`;
+
+        await ctx.su.prisma.$transaction(async (tx) => {
+          await setBypassRlsGucs(tx);
+          // C3's own shape: a CHECK violation produces no
+          // ClaimRefusalDiagnosis, so this row carries a claim and NO
+          // claim_refusal — matching what the real emit sites
+          // (auth-adapter.ts / auth.ts) actually write.
+          await tx.auditLog.create({
+            data: {
+              tenantId,
+              scope: AuditScope.PERSONAL,
+              action: AuditAction.AUTH_LOGIN_FAILURE,
+              userId: randomUUID(),
+              actorType: ActorType.SYSTEM,
+              metadata: { reason: "tenant_claim_system_tenant", claim: sentinelClaim, provider: "google" },
+            },
+          });
+          // The differential: unrelated to C3, must still return and still
+          // bucket OTHER_TENANT.
+          await tx.auditLog.create({
+            data: {
+              tenantId,
+              scope: AuditScope.PERSONAL,
+              action: AuditAction.AUTH_LOGIN_FAILURE,
+              userId: randomUUID(),
+              actorType: ActorType.SYSTEM,
+              metadata: { reason: "tenant_mismatch", claim: otherTenantClaim, provider: "google" },
+            },
+          });
+        });
+
+        try {
+          const result = await cmdUnmapped();
+          expect(result.ok).toBe(true);
+          const rows = (result.rows ?? []) as {
+            tenant_id: string;
+            claim: string | null;
+            claim_refusal: string | null;
+            reason: string;
+          }[];
+          const mine = rows.filter((r) => r.tenant_id === tenantId);
+
+          const sentinel = mine.find((r) => r.claim === sentinelClaim);
+          expect(sentinel, "the sentinel-claim denial must be returned by the real query").toBeDefined();
+          expect(sentinel?.reason).toBe("tenant_claim_system_tenant");
+          expect(sentinel?.claim_refusal).toBeNull();
+          // bucketOf alone is insufficient on a hand-built row (the plan's
+          // own words — that is exactly what let a missing
+          // UNMAPPED_SELECTED_REASONS entry look satisfiable in two earlier
+          // review rounds); `sentinel` being defined above is what proves
+          // this row actually survived the real SQL. This asserts what it
+          // survived TO.
+          expect(bucketOf(sentinel!)).toBe(UNMAPPED_BUCKET.UNREGISTERED);
+
+          const otherTenant = mine.find((r) => r.claim === otherTenantClaim);
+          expect(otherTenant, "the ordinary other-tenant mismatch must still be returned").toBeDefined();
+          expect(otherTenant?.claim_refusal).toBeNull();
+          expect(bucketOf(otherTenant!)).toBe(UNMAPPED_BUCKET.OTHER_TENANT);
+        } finally {
           await ctx.deleteTestData(tenantId);
         }
       },

@@ -6,7 +6,8 @@ import { NAME_MAX_LENGTH } from "./common";
 
 export const apiKeyCreateSchema = z.object({
   name: z.string().min(1).max(NAME_MAX_LENGTH),
-  scope: z.array(z.enum(API_KEY_SCOPES)).min(1),
+  scope: z.array(z.enum(API_KEY_SCOPES)).min(1)
+    .transform((v) => [...new Set(v)]),
   expiresAt: z.coerce.date().refine(
     (d) => {
       const maxDate = new Date();

@@ -278,6 +278,35 @@ describe("GET /api/mobile/authorize", () => {
     expect(res.status).toBe(400);
   });
 
+  // C4 (CF15) acceptance 7: all three PKCE ingress points share ONE schema
+  // object (mcp/authorize GET, mcp/authorize/consent POST, this route).
+  //
+  // Unlike the other two ingress points, this route embeds the field inside
+  // `AuthorizeQuerySchema = z.object({ code_challenge: PKCE_CODE_CHALLENGE_SCHEMA, ... })`,
+  // and z.object() drives each field through its internal `_zod.run` hook
+  // rather than the public `.safeParse()` method — spying on `.safeParse`
+  // here would never fire and give a false negative. `_zod.run` is the one
+  // hook Zod 4 invokes on a field schema regardless of whether it is called
+  // directly or nested inside another schema (verified against both call
+  // shapes before relying on it here).
+  it("validates code_challenge through the shared PKCE_CODE_CHALLENGE_SCHEMA object (reference identity)", async () => {
+    const { PKCE_CODE_CHALLENGE_SCHEMA } = await import("@/lib/validations/common.server");
+    const internals = PKCE_CODE_CHALLENGE_SCHEMA as unknown as {
+      _zod: { run: (...args: unknown[]) => unknown };
+    };
+    const spy = vi.spyOn(internals._zod, "run");
+    try {
+      const res = await GET(createRequest("GET", buildUrl(VALID)));
+      expect(res.status).not.toBe(400);
+      // If this route held its own copy of the schema (same min/max/regex,
+      // different object) rather than importing this exported binding, the
+      // spy on the SHARED object would never fire.
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("returns 400 when device_jkt is missing", async () => {
     const params = { ...VALID, device_jkt: undefined };
     const res = await GET(createRequest("GET", buildUrl(params)));

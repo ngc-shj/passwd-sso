@@ -2,6 +2,7 @@
 // These values are kept separate to avoid leaking server configuration
 // into the client bundle.
 
+import { z } from "zod";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── KDF Parameters ──────────────────────────────────────────
@@ -22,6 +23,14 @@ export const KDF_ARGON2_PARALLELISM_MAX = 16;
 export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
 export const METADATA_MAX_BYTES = 10_240;      // 10 KB
+// Byte budget for the `reason` string retained inside the `_truncated`
+// marker (audit.ts's truncateMetadata). Measured on the SERIALIZED marker
+// (JSON.stringify escapes can expand a quote/control character up to
+// sixfold), not the raw reason — the smaller of the two is the one that can
+// actually be exceeded. Deliberately much narrower than METADATA_MAX_BYTES:
+// the marker carries `_truncated`, `_originalSize` and this reason together,
+// and all three must still fit under the outer budget.
+export const TRUNCATED_REASON_MAX_BYTES = 500;
 export const USER_AGENT_MAX_LENGTH = 512;      // matches @db.VarChar(512)
 // Matches audit_logs.ip @db.VarChar(45) — the widest an IPv4-mapped IPv6
 // address gets WITHOUT a zone id ("0000:…:ffff:255.255.255.255"). A zone id
@@ -52,6 +61,25 @@ export const AUDIT_CREDENTIAL_ID_MAX_LENGTH = 512;
 // base64url (RFC 4648 §5), no padding. One-or-more: an empty string is not a
 // credential id, and `*` would let one through the charset check.
 export const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+// PKCE code_challenge (RFC 7636 §4.2): base64url(SHA-256(verifier)), no
+// padding — 32 raw bytes encode to EXACTLY 43 characters. SSoT for all three
+// PKCE ingress points (mcp/authorize GET, mcp/authorize/consent POST,
+// mobile/authorize GET).
+//
+// `.length(43)`, not `min(43).max(64)`. Every one of those ingresses is
+// S256-only — the two MCP routes reject any other method outright, and
+// mobile/authorize has no method parameter at all, its exchange calling
+// `verifyPkceS256` unconditionally — so 44 to 64 characters is not headroom for
+// a future digest, it is a range no S256 client can produce. Accepting it lets
+// a caller mint an authorization code whose challenge can never verify: the
+// per-tenant client slot is spent and the code is unredeemable, the same
+// unusable-artifact class as a non-S256 method. Widen this the day a second
+// method is supported, together with the checks that enforce S256 — not before.
+//
+// Both write destinations fit it comfortably: mobile_bridge_codes.code_challenge
+// @db.VarChar(64) and mcp_authorization_codes.code_challenge @db.VarChar(128).
+export const PKCE_CODE_CHALLENGE_SCHEMA = z.string().length(43).regex(BASE64URL_RE);
 
 // ─── Rate Limits ─────────────────────────────────────────────
 export const CSP_REPORT_RATE_MAX = 60;

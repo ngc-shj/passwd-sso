@@ -38,14 +38,16 @@ const VALID_ACCESS_REQUEST_STATUSES = [
 // Admin creates request on behalf of SA
 const adminCreateSchema = z.object({
   serviceAccountId: z.string().uuid(),
-  requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
+  requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1)
+    .transform((v) => [...new Set(v)]),
   justification: z.string().max(1000).optional(),
   expiresInMinutes: z.number().int().min(5).max(MIN_PER_DAY).default(MIN_PER_HOUR),
 });
 
 // SA self-service request (serviceAccountId inferred from token)
 const saCreateSchema = z.object({
-  requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
+  requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1)
+    .transform((v) => [...new Set(v)]),
   justification: z.string().max(1000).optional(),
   expiresInMinutes: z.number().int().min(5).max(MIN_PER_DAY).default(MIN_PER_HOUR),
 });

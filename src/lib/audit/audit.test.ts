@@ -74,7 +74,7 @@ import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx } from "@/lib/audit/au
 // From the REAL module, not re-typed: an expectation that spells the sentinel
 // itself agrees with the test rather than with production.
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
-import { AUDIT_IP_MAX_LENGTH } from "@/lib/validations/common.server";
+import { AUDIT_IP_MAX_LENGTH, METADATA_MAX_BYTES } from "@/lib/validations/common.server";
 import { prisma } from "@/lib/prisma";
 
 const TENANT_A = "550e8400-e29b-41d4-a716-446655440000";
@@ -208,6 +208,115 @@ describe("buildOutboxPayload", () => {
       expect.objectContaining({ _truncated: true }),
     );
     expect(payload.metadata).not.toHaveProperty("huge");
+  });
+
+  // ── C6 (CF17): the truncation bound is bytes, not UTF-16 code units ──────
+
+  it("truncates multi-byte metadata whose JSON sits within METADATA_MAX_BYTES code units but well over it in bytes — the CF17 pin, red under json.length", () => {
+    // "あ" (U+3042) is ONE UTF-16 code unit and THREE UTF-8 bytes — exactly the
+    // gap `json.length` missed. Sized so the code-unit count sits AT the old
+    // (wrong) threshold while the byte count is roughly 3x over it.
+    const value = "あ".repeat(10_228);
+    const json = JSON.stringify({ value });
+    const codeUnitLength = json.length;
+    const byteLength = Buffer.byteLength(json, "utf8");
+    // The pin itself: code units alone would NOT have crossed the bound...
+    expect(codeUnitLength).toBeLessThanOrEqual(METADATA_MAX_BYTES);
+    // ...but bytes do, by roughly 3x — proving the two measures disagree here.
+    expect(byteLength).toBeGreaterThan(METADATA_MAX_BYTES);
+    expect(byteLength).toBeGreaterThan(codeUnitLength * 2);
+
+    const payload = buildOutboxPayload({ ...baseParams, metadata: { value } });
+    expect(payload.metadata).toEqual(
+      expect.objectContaining({ _truncated: true, _originalSize: byteLength }),
+    );
+    // _originalSize reports BYTES: it must not equal the code-unit count.
+    expect(payload.metadata?._originalSize).not.toBe(codeUnitLength);
+  });
+
+  it("does not truncate a 10,240-byte ASCII payload, and truncates one byte past it", () => {
+    const overhead = JSON.stringify({ value: "" }).length; // `{"value":""}`.length
+    const atCap = "x".repeat(METADATA_MAX_BYTES - overhead);
+    const overCap = "x".repeat(METADATA_MAX_BYTES - overhead + 1);
+
+    const atPayload = buildOutboxPayload({ ...baseParams, metadata: { value: atCap } });
+    expect(atPayload.metadata).toEqual({ value: atCap });
+
+    const overPayload = buildOutboxPayload({ ...baseParams, metadata: { value: overCap } });
+    expect(overPayload.metadata).toEqual(
+      expect.objectContaining({ _truncated: true, _originalSize: METADATA_MAX_BYTES + 1 }),
+    );
+  });
+
+  // ── C6/F3: the `_truncated` marker retains `reason` under four constraints ──
+
+  describe("_truncated marker retains reason", () => {
+    // Padding alone pushes the metadata over METADATA_MAX_BYTES so truncation
+    // fires; `reason` is a separate field, asserted independently below.
+    function oversizedMetadata(reason: unknown): Record<string, unknown> {
+      return { padding: "x".repeat(METADATA_MAX_BYTES), reason };
+    }
+
+    it("retains a string reason inside the marker", () => {
+      const payload = buildOutboxPayload({
+        ...baseParams,
+        metadata: oversizedMetadata("insufficient_scope"),
+      });
+      expect(payload.metadata).toEqual(
+        expect.objectContaining({ _truncated: true, reason: "insufficient_scope" }),
+      );
+    });
+
+    it("drops a non-string reason rather than coercing it — no _unserializable escape", () => {
+      const payload = buildOutboxPayload({
+        ...baseParams,
+        metadata: oversizedMetadata({ nested: "object" }),
+      });
+      // Exact match: a coerced reason or a fallback to _unserializable would
+      // both add a key this does not expect.
+      expect(payload.metadata).toEqual({
+        _truncated: true,
+        _originalSize: expect.any(Number),
+      });
+      expect(payload.metadata).not.toHaveProperty("reason");
+    });
+
+    it("caps an escape-heavy reason so the serialized marker still fits METADATA_MAX_BYTES", () => {
+      // U+0001 escapes to `\u0001` under JSON.stringify — six ASCII bytes for
+      // one raw character — the sixfold-expansion case the byte cap has to
+      // survive. A raw-value-only bound would pass this fixture and still
+      // overflow once serialized.
+      const reason = "\u0001".repeat(2_000);
+      const payload = buildOutboxPayload({
+        ...baseParams,
+        metadata: oversizedMetadata(reason),
+      });
+      const markerBytes = Buffer.byteLength(JSON.stringify(payload.metadata), "utf8");
+      expect(markerBytes).toBeLessThanOrEqual(METADATA_MAX_BYTES);
+      const retained = (payload.metadata as Record<string, unknown>).reason as string;
+      expect(reason.startsWith(retained)).toBe(true);
+      expect(retained.length).toBeLessThan(reason.length);
+    });
+
+    it("caps a multi-byte reason so the serialized marker still fits METADATA_MAX_BYTES, with no introduced U+FFFD", () => {
+      // No escaping for these characters, so this exercises the byte cap on
+      // raw multi-byte WIDTH alone, distinct from the escape-heavy case above.
+      const reason = "リクエストされたスコープが不足しています。".repeat(50);
+      const payload = buildOutboxPayload({
+        ...baseParams,
+        metadata: oversizedMetadata(reason),
+      });
+      const markerBytes = Buffer.byteLength(JSON.stringify(payload.metadata), "utf8");
+      expect(markerBytes).toBeLessThanOrEqual(METADATA_MAX_BYTES);
+      const retained = (payload.metadata as Record<string, unknown>).reason as string;
+      // The property an operator's grep depends on: retained is a genuine
+      // prefix, not a byte-sliced fragment that happens to look similar.
+      expect(reason.startsWith(retained)).toBe(true);
+      expect(retained.length).toBeLessThan(reason.length);
+      // A byte-offset cut through a multi-byte character would surface as
+      // U+FFFD in the output. A code-point cut introduces none.
+      expect(retained).not.toContain("\uFFFD");
+    });
   });
 
   it.each([

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
+import { computeS256Challenge } from "@/lib/mcp/oauth-server";
 import {
   KDF_PBKDF2_ITERATIONS_MIN,
   KDF_PBKDF2_ITERATIONS_MAX,
@@ -23,6 +25,7 @@ import {
   PASSWORD_HISTORY_SNIPPET_LENGTH,
   SESSION_CACHE_TTL_MS,
   TOMBSTONE_TTL_MS,
+  PKCE_CODE_CHALLENGE_SCHEMA,
 } from "@/lib/validations/common.server";
 
 // ─── KDF constants ───────────────────────────────────────────
@@ -140,5 +143,53 @@ describe("Query limit constants are positive numbers", () => {
   ] as const)("%s is a positive integer", (name, value) => {
     expect(value).toBeGreaterThan(0);
     expect(Number.isInteger(value)).toBe(true);
+  });
+});
+
+// ─── PKCE code_challenge schema (C4, CF15) ────────────────────
+//
+// SSoT for all three PKCE ingress points (mcp/authorize GET,
+// mcp/authorize/consent POST, mobile/authorize GET). Each boundary case
+// asserts WHICH clause rejected — the exact length or the base64url charset —
+// not merely that the value failed, so a future edit that widens one clause
+// but narrows another cannot pass by accident.
+
+describe("PKCE_CODE_CHALLENGE_SCHEMA", () => {
+  it("rejects 42 characters (one under the real S256 challenge length) via min", () => {
+    const result = PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(42));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].code).toBe("too_small");
+  });
+
+  it("accepts 43 characters (base64url(SHA-256(verifier)), unpadded)", () => {
+    expect(PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(43)).success).toBe(true);
+  });
+
+  it("rejects 44 characters (one over) — the length is exact, not an upper bound", () => {
+    // The schema used to admit 43-64 as "headroom for a future digest". Every
+    // ingress it serves is S256-only, so 44-64 is a range no client can produce
+    // and accepting it lets a caller mint an authorization code whose challenge
+    // can never verify — a spent per-tenant slot and an unredeemable code.
+    const result = PKCE_CODE_CHALLENGE_SCHEMA.safeParse("A".repeat(44));
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].code).toBe("too_big");
+  });
+
+  it("rejects a 43-character value containing a non-base64url character via the charset regex", () => {
+    // "+" is valid standard base64 but NOT base64url (RFC 4648 §5 uses "-"/"_").
+    // Held at the exact length so the charset clause is what rejects, not the
+    // length one — which is the point of asserting the issue code.
+    const result = PKCE_CODE_CHALLENGE_SCHEMA.safeParse(`${"A".repeat(42)}+`);
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0].code).toBe("invalid_format");
+  });
+
+  it("accepts a real S256 challenge, computed rather than spelled", () => {
+    // The allow arm tied to the production primitive: if `computeS256Challenge`
+    // ever emitted a different width, this reds instead of the schema silently
+    // refusing every genuine challenge.
+    const challenge = computeS256Challenge(randomBytes(32).toString("base64url"));
+    expect(challenge).toHaveLength(43);
+    expect(PKCE_CODE_CHALLENGE_SCHEMA.safeParse(challenge).success).toBe(true);
   });
 });

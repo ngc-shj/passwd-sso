@@ -29,7 +29,8 @@ const updateSchema = z.object({
       { message: "redirect_uri must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/" },
     ),
   ).min(1).max(10).optional(),
-  allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1).optional(),
+  allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1)
+    .transform((v) => [...new Set(v)]).optional(),
   isActive: z.boolean().optional(),
 });
 

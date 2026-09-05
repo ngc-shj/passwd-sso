@@ -47,6 +47,7 @@ import {
   BASE64URL_RE,
   MOBILE_BRIDGE_CODE_IP_MAX_LENGTH,
   MOBILE_BRIDGE_CODE_USER_AGENT_MAX_LENGTH,
+  PKCE_CODE_CHALLENGE_SCHEMA,
 } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
@@ -82,7 +83,9 @@ const IOS_CALLBACK_URL = "passwd-sso://auth/callback";
 const AuthorizeQuerySchema = z.object({
   client_kind: z.literal("ios"),
   state: z.string().min(43).max(64).regex(BASE64URL_RE),
-  code_challenge: z.string().min(43).max(64).regex(BASE64URL_RE),
+  // C4 (CF15): SSoT shared with the other two PKCE ingress points
+  // (mcp/authorize GET, mcp/authorize/consent POST).
+  code_challenge: PKCE_CODE_CHALLENGE_SCHEMA,
   device_jkt: z.string().regex(JWK_THUMBPRINT_RE),
 });
 

@@ -55,6 +55,7 @@ export type UnmappedBucket = (typeof UNMAPPED_BUCKET)[keyof typeof UNMAPPED_BUCK
 export const UNMAPPED_SELECTED_REASONS = [
   "tenant_claim_unmapped",
   "tenant_mismatch",
+  "tenant_claim_system_tenant",
 ] as const;
 
 /** The three fields of an audit row that decide its bucket. */
@@ -71,12 +72,27 @@ export type BucketInput = {
  * forge: it is written only by this deployment's own refusal adjudicators, while
  * anything inside `claim` was supplied by the IdP and can be made to look like
  * whatever a runbook tells the reader to trust (round-5 S2 / D-41).
+ *
+ * The second branch is a membership test over `REFUSAL_BUCKET`, not a comparison
+ * against one arm's reason. Two things follow, and both were defects at some
+ * point in this branch's history:
+ *
+ *   - `REFUSAL_BUCKET` stops being decorative. It was referenced only by its own
+ *     test, so a declaration there decided nothing and CF13's arm could have
+ *     been added to it while `bucketOf` kept returning `OTHER_TENANT`.
+ *   - the membership is over `bucket === UNREGISTERED`, NOT over
+ *     `REFUSAL_BUCKET[kind] !== null`. The looser form pulls in `claim_invalid`
+ *     and `claim_malformed`, whose reason is `tenant_mismatch` — the reason the
+ *     resolved-elsewhere population also carries — and would move every genuine
+ *     "registered to a different tenant" denial under the wrong heading. That is
+ *     round-5 F1/S3, and it is reachable only from the else-branch because those
+ *     two arms always carry a `claim_refusal` and never get here.
  */
 export function bucketOf(row: BucketInput): UnmappedBucket {
   if (row.claim_refusal !== null) return UNMAPPED_BUCKET.REFUSED;
-  return row.reason === CLAIM_REFUSAL_REASON.claim_taken
+  return UNREGISTERED_REASONS.has(row.reason)
     ? UNMAPPED_BUCKET.UNREGISTERED
-    : UNMAPPED_BUCKET.OTHER_TENANT;
+    : RESOLVED_ELSEWHERE_BUCKET;
 }
 
 /**
@@ -95,6 +111,12 @@ export const REFUSAL_BUCKET = {
   claim_invalid: UNMAPPED_BUCKET.REFUSED,
   claim_malformed: UNMAPPED_BUCKET.REFUSED,
   store_unavailable: null,
+  // The claim IS registered — to the tenant that encodes "no owning tenant".
+  // UNREGISTERED because that heading's remedy is `tenant-domain`, which is
+  // where the operator has to go: the `tenant_claims` row must be re-pointed at
+  // a real tenant. `add` refuses a sentinel target, so no operator command
+  // created this row and none of the other two headings describes it.
+  claim_system_tenant: UNMAPPED_BUCKET.UNREGISTERED,
 } as const satisfies Record<ClaimRefusalKind, UnmappedBucket | null>;
 
 /**
@@ -106,3 +128,61 @@ export const REFUSAL_BUCKET = {
  * bucket's heading.
  */
 export const RESOLVED_ELSEWHERE_BUCKET: UnmappedBucket = UNMAPPED_BUCKET.OTHER_TENANT;
+
+/**
+ * `reason → bucket`, derived from `REFUSAL_BUCKET` through `CLAIM_REFUSAL_REASON`.
+ *
+ * The map is MANY-TO-ONE by design — `claim_taken` and `claim_collision` share
+ * `tenant_claim_unmapped`, `claim_invalid` and `claim_malformed` share
+ * `tenant_mismatch` — and `bucketOf` reads the row's `reason`, not its arm,
+ * because that is all an audit row carries. So the derivation is only sound
+ * while every arm sharing a reason also shares a bucket, and nothing in the type
+ * system says so. This throws at module load if that ever stops holding, which
+ * is the moment someone declares a bucket for a new arm without noticing it
+ * collides with an existing one's reason.
+ *
+ * Loud rather than silent: the alternative is a report that quietly files one of
+ * the two colliding populations under the other's remedy, which is the exact
+ * defect rounds 4, 5 and 6 each hit from a different direction.
+ */
+export function buildReasonBucketMap(
+  refusalBucket: Readonly<Record<string, UnmappedBucket | null>>,
+  reasonOf: Readonly<Record<string, string>>,
+): ReadonlyMap<string, UnmappedBucket> {
+  const map = new Map<string, UnmappedBucket>();
+  for (const [kind, bucket] of Object.entries(refusalBucket)) {
+    if (bucket === null) continue;
+    const reason = reasonOf[kind];
+    const existing = map.get(reason);
+    if (existing !== undefined && existing !== bucket) {
+      throw new Error(
+        `tenant-domain-buckets: reason "${reason}" resolves to two buckets ` +
+          `("${existing}" and "${bucket}"); an audit row carries the reason, not the arm, ` +
+          `so bucketOf cannot tell them apart. Give the new arm its own reason in ` +
+          `CLAIM_REFUSAL_REASON, or reconcile the two declarations in REFUSAL_BUCKET.`,
+      );
+    }
+    map.set(reason, bucket);
+  }
+  return map;
+}
+
+/**
+ * Taken over the real tables at module load, so a colliding declaration fails
+ * the CLI at startup rather than mis-filing one population at report time. The
+ * builder is a parameter-taking function so its refusal is reachable from a test
+ * without mutating this module — a guard nobody has watched fail is a guard
+ * nobody knows the shape of.
+ */
+const REASON_BUCKET = buildReasonBucketMap(REFUSAL_BUCKET, CLAIM_REFUSAL_REASON);
+
+/**
+ * The reasons `bucketOf` files under UNREGISTERED. Derived, so an arm added to
+ * `REFUSAL_BUCKET` reaches the report without a second edit here — the missing
+ * second edit being what round-4 F3 was.
+ */
+const UNREGISTERED_REASONS: ReadonlySet<string> = new Set(
+  [...REASON_BUCKET.entries()]
+    .filter(([, bucket]) => bucket === UNMAPPED_BUCKET.UNREGISTERED)
+    .map(([reason]) => reason),
+);

@@ -19,6 +19,13 @@ interface PrismaErrorMapping {
 const PRISMA_ERROR_CODE_RE = /^P[1-9]\d{3}$/;
 const SQLSTATE_RE = /^[0-9A-Z]{5}$/;
 
+/**
+ * `check_violation`. Exported from here rather than spelled at the call site so
+ * the SQLSTATE vocabulary stays in the module that already owns the reading of
+ * it — the same reason `pgErrorCode` is not re-derived per caller.
+ */
+export const SQLSTATE_CHECK_VIOLATION = "23514";
+
 function asSqlState(value: unknown): string | null {
   if (typeof value !== "string") return null;
   if (!SQLSTATE_RE.test(value)) return null;
@@ -80,6 +87,76 @@ export function pgErrorCode(err: unknown): string | null {
 
   const message = err instanceof Error ? err.message : String(err);
   return /Code:\s*`([0-9A-Z]{5})`/.exec(message)?.[1] ?? null;
+}
+
+/**
+ * `constraint "…"` — the quoted name PostgreSQL puts in the message.
+ *
+ * Anchored on the keyword rather than searched for a name we already have: a
+ * caller must be able to ask WHICH constraint fired and compare the answer by
+ * exact equality. A `message.includes("users_not_system_tenant")` reads true for
+ * any error that merely mentions the name — including one raised on a different
+ * table by a trigger that quotes it — and cannot report the name it did not
+ * expect.
+ */
+const CONSTRAINT_NAME_RE = /\bconstraint\s+"([^"]+)"/;
+
+/**
+ * The name of the constraint an error names, or null when there is none.
+ *
+ * The nestings below are MEASURED against real 23514s raised on this repo's own
+ * CHECKs, the same way `pgErrorCode`'s order was — not guessed. Three facts came
+ * out of that measurement and each one shapes this function:
+ *
+ *   1. There is NO structured field. The pg driver's native error carries
+ *      `.constraint`, but `@prisma/adapter-pg` normalises it away: the
+ *      `DriverAdapterError`'s cause carries `originalCode`, `originalMessage`,
+ *      `kind`, `code`, `severity`, `message` and `detail`, and nothing else. The
+ *      message text is the only channel, which is why this is a parse.
+ *   2. The ORM path and the raw-query path differ in Prisma's own code —
+ *      `user.create` surfaces as **P2039**, a raw-query call as **P2010** —
+ *      while both nest the driver error identically. A reader keyed on P2010
+ *      would see the raw path and miss every ORM write. (The raw primitive is
+ *      named without its sigil deliberately: `check-raw-sql-usage.mjs` matches
+ *      the spelling by regex, so writing it here would demand an allowlist
+ *      entry for a file that issues no SQL — and the gate's own STALE_EXEMPT
+ *      arm would then fail the day someone reworded this comment.)
+ *   3. `err.message` also renders the text, so it is kept as the last step: it
+ *      survives an adapter that changes the nesting.
+ *
+ * KNOWN LIMIT, stated rather than hidden: PostgreSQL localises its messages, so
+ * on a server with a non-English `lc_messages` the keyword does not appear and
+ * this returns null. That is a fail-CLOSED degradation for every caller intended
+ * here — an unrecognised constraint is handled as an unclassified error, not as
+ * a matched one — and it is why callers must pair a match with an explicit
+ * "could not extract" arm rather than treating null as "some other constraint".
+ */
+export function pgConstraintName(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+
+  const candidates: unknown[] = [];
+  const meta = (err as { meta?: unknown }).meta;
+  if (meta && typeof meta === "object") {
+    const adapter = (meta as { driverAdapterError?: unknown }).driverAdapterError;
+    if (adapter && typeof adapter === "object") {
+      const cause = (adapter as { cause?: unknown }).cause;
+      if (cause && typeof cause === "object") {
+        candidates.push(
+          (cause as { originalMessage?: unknown }).originalMessage,
+          (cause as { message?: unknown }).message,
+        );
+      }
+      candidates.push((adapter as { message?: unknown }).message);
+    }
+  }
+  candidates.push(err instanceof Error ? err.message : undefined);
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const name = CONSTRAINT_NAME_RE.exec(candidate)?.[1];
+    if (name) return name;
+  }
+  return null;
 }
 
 /**

@@ -66,6 +66,7 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/mcp-clients/[id]/route";
+import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 
@@ -220,6 +221,41 @@ describe("PUT /api/tenant/mcp-clients/[id]", () => {
     const { status } = await parseResponse(res);
 
     expect(status).toBe(400);
+  });
+
+  it("accepts and dedups allowedScopes: N distinct plus one duplicate stored once", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+    mockMcpClientUpdate.mockResolvedValue(makeClient({ allowedScopes: MCP_SCOPES.join(",") }));
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { allowedScopes: [...MCP_SCOPES, MCP_SCOPES[0]] },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(mockMcpClientUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ allowedScopes: MCP_SCOPES.join(",") }),
+      }),
+    );
+  });
+
+  it("returns 400 for an unrecognized allowedScopes value", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { allowedScopes: ["not-a-real-scope"] },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(mockMcpClientUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 409 on name conflict (P2002)", async () => {
