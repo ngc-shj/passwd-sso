@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.4.76](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.75...passwd-sso-v0.4.76) (2026-09-05)
+
+
+### Features
+
+* **audit:** enforce the sentinel's memberless invariant and bound request-derived writes ([#812](https://github.com/ngc-shj/passwd-sso/issues/812)) ([1628b97](https://github.com/ngc-shj/passwd-sso/commit/1628b97fe7b44d1360babc7bb592fd9fd031454a))
+
+
+### Bug Fixes
+
+* **audit:** bound caught-error narrative reaching tenant-readable audit logs, and gate the shapes that hid it ([#805](https://github.com/ngc-shj/passwd-sso/issues/805)) ([f5dacef](https://github.com/ngc-shj/passwd-sso/commit/f5dacefb39fa4410df256dfa685fbeaf03366997))
+* **audit:** close the unattributable-audit gap at its cause, and gate the narrative sink that hid it ([#806](https://github.com/ngc-shj/passwd-sso/issues/806)) ([e3f50de](https://github.com/ngc-shj/passwd-sso/commit/e3f50de5e99c82e28ed7127312d371f839df1d9c))
+* **checks:** keep the compose log-cap gate merge-key aware under js-yaml 5 ([#800](https://github.com/ngc-shj/passwd-sso/issues/800)) ([e87e405](https://github.com/ngc-shj/passwd-sso/commit/e87e405e829e5e7cacfc201a3ad63b23e4197961))
+* **checks:** stop the crypto/auth manifest scan reading test helpers as shipped code ([#792](https://github.com/ngc-shj/passwd-sso/issues/792)) ([b3e2404](https://github.com/ngc-shj/passwd-sso/commit/b3e24043ea44df1bd7dff697e787923ab2230719))
+* **dev:** pin mailpit from the advisory list, declare its isolation, and keep failed pre-pr logs ([#803](https://github.com/ngc-shj/passwd-sso/issues/803)) ([d7a8e6b](https://github.com/ngc-shj/passwd-sso/commit/d7a8e6bbe26cb853b4a0ebf1b3dca1fbe076009a))
+* **docker:** bump the pinned tar patch to 7.5.21 for CVE-2026-73566 ([#794](https://github.com/ngc-shj/passwd-sso/issues/794)) ([f5b08b1](https://github.com/ngc-shj/passwd-sso/commit/f5b08b1addf09d27eb425212cc9b8f1b64734cc7))
+* **docker:** cap container log growth and document the jackson_user upgrade path ([#795](https://github.com/ngc-shj/passwd-sso/issues/795)) ([2542779](https://github.com/ngc-shj/passwd-sso/commit/25427799ec81fe81fe5930dddd6fd85a778f8140))
+* **extension:** key team-entries' decryptData mock on the ciphertext ([#793](https://github.com/ngc-shj/passwd-sso/issues/793)) ([0832d78](https://github.com/ngc-shj/passwd-sso/commit/0832d787dba22acedba7a5bd6b66f2b8b55e1cf9))
+* **extension:** make the vitest suite order-independent and gate it with always-on shuffle ([#786](https://github.com/ngc-shj/passwd-sso/issues/786)) ([0d4daaf](https://github.com/ngc-shj/passwd-sso/commit/0d4daaf296b525fe66a340a5701aa5df50b73f66))
+* **rls:** close the last RLS-context member, its gate's fail-open, and the _logType alerting contract ([#801](https://github.com/ngc-shj/passwd-sso/issues/801)) ([4c100e3](https://github.com/ngc-shj/passwd-sso/commit/4c100e34a8c4f98d06aebce4caaa36b5d6aea912))
+* **security:** close the six CF11-CF17 carried-forward defects (audit sentinel follow-up) ([#818](https://github.com/ngc-shj/passwd-sso/issues/818)) ([e780c75](https://github.com/ngc-shj/passwd-sso/commit/e780c75fe698a5c0881a97ea365f4ad182aa7c91))
+* **vault:** report every copy outcome and close the re-prompt bypass ([#783](https://github.com/ngc-shj/passwd-sso/issues/783)) ([af1d003](https://github.com/ngc-shj/passwd-sso/commit/af1d003623d5ce1420c872d0cbd97f1cc8c1a5fd))
+* **worker:** give audit-chain verify an RLS context ([#798](https://github.com/ngc-shj/passwd-sso/issues/798)) ([3be42a7](https://github.com/ngc-shj/passwd-sso/commit/3be42a771d697bae67ae40ae04ac054233d755d1))
+* **worker:** read audit_outbox inside a bypass transaction ([#797](https://github.com/ngc-shj/passwd-sso/issues/797)) ([b40b9e9](https://github.com/ngc-shj/passwd-sso/commit/b40b9e93f1bb86a009d0522c541bce1df868f221))
+
 ## [0.4.75](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.74...passwd-sso-v0.4.75) (2026-08-19)
 
 
