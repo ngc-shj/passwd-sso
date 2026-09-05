@@ -442,6 +442,13 @@ describe("POST /api/mcp/authorize/consent", () => {
     ["a short non-S256 method mints an unredeemable code", "plain"],
     ["a method longer than the VarChar(10) column", "S256-but-far-too-long"],
   ])("refuses %s before the DCR claim, consuming no slot", async (_label, method) => {
+    // An UNCLAIMED DCR client, not VALID_CLIENT. The CAS claim only runs for
+    // `isDcr && !tenantId`, so with the default (claimed, non-DCR) fixture the
+    // zero-CAS assertion below is satisfied whatever the gate's position — it
+    // could move below the claim block and this test would stay green. The DCR
+    // fixture is what makes the assertion bite: the request WOULD claim if it
+    // got that far, so zero calls is evidence of position, not of fixture shape.
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
       { ...VALID_FORM_FIELDS, code_challenge_method: method },

@@ -79,6 +79,16 @@ figures table with its command. **No deferral.**
   method. Red-proved: removing the gate reds exactly those two and leaves the
   allow case green.
 
+  **A follow-up review found the CAS assertion was vacuous as first written**:
+  the deny cases used the default fixture — a claimed, non-DCR client — for
+  which the CAS never runs at any gate position, so `not.toHaveBeenCalled()`
+  proved the gate's existence and not its position. The cases now seed an
+  unclaimed DCR client (`isDcr: true, tenantId: null`), the one shape that WOULD
+  claim if the request got that far. Red-proved on the axis that matters this
+  time: MOVING the gate below the claim block — not deleting it — reds both deny
+  cases on the CAS assertion itself ("expected not to be called, called 1
+  times"), which is I4.1's position pinned directly.
+
 ### D13 — the shared PKCE schema is an exact length, not a range
 
 Raised in the same review. `PKCE_CODE_CHALLENGE_SCHEMA` was
