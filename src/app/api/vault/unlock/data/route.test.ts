@@ -41,7 +41,10 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+// Real module underneath so `getTenantRlsContext` resolves for audit.ts's
+// load-time assertion; the opener override stays.
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({

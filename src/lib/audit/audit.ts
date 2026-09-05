@@ -64,9 +64,9 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit/audit-logger";
+import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger, refusedEmitLogger } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withBypassRls, getTenantRlsContext, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
@@ -210,6 +210,28 @@ function safeMetadata(metadata: Record<string, unknown> | undefined): Record<str
 // Re-export from constants for backward compatibility
 export { OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit/audit";
 import { UUID_RE, SYSTEM_TENANT_ID } from "@/lib/constants/app";
+
+/**
+ * The refusal below reads `getTenantRlsContext()` from inside `logAuditAsync`'s
+ * never-throws `try`. If the symbol does not resolve — a test stubbing
+ * `@/lib/tenant-rls` with a factory that omits it — the call throws, the catch
+ * swallows it, and the emit is skipped with the same dead-letter reason a
+ * database outage produces. A control violation, a transport failure and a
+ * broken mock would all be spelled alike, and the emit would be silently
+ * disabled in whatever suite did it.
+ *
+ * Asserting at module load turns that into a named failure at import, before any
+ * emit runs, and costs nothing in production where the symbol is a real export.
+ * The alternative — writing `getTenantRlsContext?.()` at the call site — forbids
+ * the loud wrong answer while making the silent one the default.
+ */
+if (typeof getTenantRlsContext !== "function") {
+  throw new Error(
+    "audit: getTenantRlsContext is unavailable — @/lib/tenant-rls is mocked " +
+      "without it. Spread importOriginal() in the mock factory; do not add an " +
+      "optional call at the use site.",
+  );
+}
 
 export interface AuditLogParams {
   scope: AuditScope;
@@ -391,7 +413,7 @@ async function resolveTenantId(params: AuditLogParams): Promise<string> {
 function assertEnqueueableUserId(params: AuditLogParams): boolean {
   if (UUID_RE.test(params.userId)) return true;
   deadLetterLogger.warn(
-    deadLetterEntry(params, "invalid_user_id"),
+    deadLetterEntry(params, AUDIT_DEAD_LETTER_REASON.INVALID_USER_ID),
     "audit.dead_letter",
   );
   return false;
@@ -412,6 +434,60 @@ export async function logAuditInTx(
 }
 
 // ─── logAuditAsync ──────────────────────────────────────────────
+
+/**
+ * Why an entry reached the dead-letter stream instead of the outbox.
+ *
+ * Named rather than inline because operators alert on these: the forwarder
+ * (`infra/fluent-bit/fluent-bit.conf`) and the runbook
+ * (`docs/operations/alerts.md`) both enumerate them, and a reason that exists in
+ * one and not the others is an alert nobody receives.
+ *
+ * `EMIT_INSIDE_RLS_CONTEXT` is the one that fires with a HEALTHY database — the
+ * other three all mean the write could not have succeeded anyway. That
+ * distinction is why the forwarder carries a carve-out for it.
+ */
+export const AUDIT_DEAD_LETTER_REASON = {
+  INVALID_USER_ID: "invalid_user_id",
+  EMIT_INSIDE_RLS_CONTEXT: "emit_inside_rls_context",
+  ASYNC_FAILED: "logAuditAsync_failed",
+  BULK_ASYNC_FAILED: "logAuditBulkAsync_failed",
+} as const;
+
+export type AuditDeadLetterReason =
+  (typeof AUDIT_DEAD_LETTER_REASON)[keyof typeof AUDIT_DEAD_LETTER_REASON];
+
+/**
+ * Refuse to write an audit row while an RLS context is open.
+ *
+ * The Proxy folds a nested `$transaction` into the caller's, so an in-context
+ * emit used to write its outbox row inside the caller's transaction and forge
+ * that transaction's GUCs on the way. C1 removed the fold by moving the enqueue
+ * to the un-proxied client — which, on its own, would let the row COMMIT
+ * INDEPENDENTLY of the caller and therefore survive a rollback. A row asserting
+ * an action that did not happen is worse than a missing one: it is a false
+ * positive in an append-only forensic record, and nothing downstream can detect
+ * it. So the emit is refused instead.
+ *
+ * The predicate is the AsyncLocalStorage store, NOT the transaction. Work
+ * started inside an opener callback inherits the store and keeps reading it
+ * after the transaction has closed, so an emit there is refused even though an
+ * inline enqueue would have been correct. That is a known false-deny with no
+ * call site today; the remedy is `tenantRlsStorage.exit`, or not starting the
+ * work inside the callback — NOT "move the emit past the transaction", which
+ * does not clear the store.
+ *
+ * The correct in-context path is `logAuditInTx`, which writes on the caller's
+ * own transaction and is what every security-critical action uses.
+ */
+function refuseIfInsideRlsContext(params: AuditLogParams): boolean {
+  if (getTenantRlsContext() === undefined) return false;
+  refusedEmitLogger.warn(
+    deadLetterEntry(params, AUDIT_DEAD_LETTER_REASON.EMIT_INSIDE_RLS_CONTEXT),
+    "audit.refused",
+  );
+  return true;
+}
 
 /**
  * Minimal dead-letter payload — never includes raw metadata.
@@ -476,6 +552,11 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
     // refuses it, so enqueuing would cost a poison row instead of a log line.
     if (!assertEnqueueableUserId(params)) return;
 
+    // Refuse before resolving the tenant: `resolveTenantId` opens its own
+    // withBypassRls, which inside a context is a nesting the guard rejects, and
+    // reporting that as a generic failure would bury the reason.
+    if (refuseIfInsideRlsContext(params)) return;
+
     // No `if (!tenantId)` branch: resolveTenantId never returns null, so every
     // well-formed entry reaches the outbox. The KNOWN GAP that used to sit here
     // — return WITHOUT enqueuing, leaving one log line the shipped forwarder
@@ -485,7 +566,7 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
     await enqueueAudit(tenantId, payload);
   } catch (err) {
     deadLetterLogger.warn(
-      deadLetterEntry(params, "logAuditAsync_failed", errorLogFields(err)),
+      deadLetterEntry(params, AUDIT_DEAD_LETTER_REASON.ASYNC_FAILED, errorLogFields(err)),
       "audit.dead_letter",
     );
   }
@@ -559,6 +640,13 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
     const enqueueable = paramsList.filter(assertEnqueueableUserId);
     if (enqueueable.length === 0) return;
 
+    // One line per entry that would have been enqueued, matching the catch arm
+    // below — a batch that vanishes on one line reads as a single lost event.
+    if (getTenantRlsContext() !== undefined) {
+      for (const params of enqueueable) refuseIfInsideRlsContext(params);
+      return;
+    }
+
     // Resolve tenantId once; assume all entries share it. Never null — see
     // resolveTenantId's docblock for why the enqueue-less branch is gone.
     const tenantId = await resolveTenantId(enqueueable[0]);
@@ -567,7 +655,7 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
   } catch (err) {
     for (const params of paramsList) {
       deadLetterLogger.warn(
-        deadLetterEntry(params, "logAuditBulkAsync_failed", errorLogFields(err)),
+        deadLetterEntry(params, AUDIT_DEAD_LETTER_REASON.BULK_ASYNC_FAILED, errorLogFields(err)),
         "audit.dead_letter",
       );
     }

@@ -119,3 +119,38 @@ export const deadLetterLogger = pino({
     },
   },
 });
+
+/**
+ * Audit emits refused because an RLS context was open.
+ *
+ * A SEPARATE `_logType` rather than another `audit-dead-letter` reason, because
+ * the forwarder excludes that type wholesale (`infra/fluent-bit/fluent-bit.conf`)
+ * and every OUTPUT there matches `app.*`. A reason added under the excluded type
+ * would be dropped before any output saw it — and re-tagging it to escape the
+ * exclusion produces a record no output matches either, which reads as a working
+ * carve-out and forwards nothing.
+ *
+ * The exclusion's justification is that a dead-letter record carries whatever the
+ * failing caller passed, including error text. That does not apply here: this
+ * payload has no `error` field at all — the refusal is a control decision, not a
+ * failure — so it ships without re-opening the hole the exclusion protects.
+ *
+ * This is the one audit-loss reason that fires with a HEALTHY database, and it
+ * writes no row anywhere. Not forwarding it would make it unobservable.
+ * External alerting should monitor `_logType: "audit-refused"`.
+ */
+export const refusedEmitLogger = pino({
+  name: DEFAULT_APP_NAME,
+  level: "warn",
+  enabled: true,
+  timestamp: pino.stdTimeFunctions.isoTime,
+  base: {
+    _logType: "audit-refused",
+    _app: DEFAULT_APP_NAME,
+  },
+  formatters: {
+    level(label: string) {
+      return { level: label };
+    },
+  },
+});

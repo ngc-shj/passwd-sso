@@ -168,12 +168,48 @@ recovery action is different: check DB connectivity and the `audit_outbox` write
 path, not tenant mapping. No durable record is possible for them by any design,
 because the write that would carry it is the one that failed.
 
+A third reason, `emit_inside_rls_context`, exists but does **not** appear under
+this `_logType` — see `audit-refused` below. It is the one audit-loss reason that
+fires while the database is healthy, which is why it is not filed with the two
+above and why the forwarder note that follows does not cover it.
+
 > **Note on the forwarder.** `infra/fluent-bit/fluent-bit.conf` still carries
-> `Exclude _logType ^audit-dead-letter$`, and that is now harmless: the two
-> remaining reasons fire only when the database is unreachable, and in that state
-> nothing durable can be written anyway. Container logs remain capped at
-> `max-size: 20m` × `max-file: 5` (`docker-compose.yml`). Removing the exclusion
-> is an operator decision, not a required fix.
+> `Exclude _logType ^audit-dead-letter$`, and that is harmless **for the two
+> reasons above**: they fire only when the database is unreachable, and in that
+> state nothing durable can be written anyway. It is not harmless in general,
+> which is why `emit_inside_rls_context` ships under its own `_logType` rather
+> than as a third reason here — adding it under the excluded type would have
+> produced an alert no operator receives, and every OUTPUT in that config matches
+> `app.*`, so re-tagging to escape the exclusion forwards nothing either.
+> Container logs remain capped at `max-size: 20m` × `max-file: 5`
+> (`docker-compose.yml`). Removing the exclusion is an operator decision, not a
+> required fix.
+
+## `audit-refused`
+
+**What it means.** An audit emit was refused because it was issued while an RLS
+context was open. `logAuditAsync` / `logAuditBulkAsync` write nothing in that
+state: the Prisma Proxy would fold the outbox write into the caller's
+transaction, and writing it independently instead would let the row survive a
+rollback — a row asserting something that did not happen.
+
+**Why it is its own type.** It is the only audit-loss signal that fires with a
+**healthy** database, and it produces no `audit_logs` row, no `audit_outbox` row,
+and no movement in the sentinel-count query above. If it is not forwarded, it is
+not observable anywhere.
+
+**Query.** Datadog/Loki: `{ _logType="audit-refused" }` · Splunk:
+`_logType="audit-refused"`
+
+**Recovery action.** This is a code defect, not an operational one — it means a
+caller emits audit from inside a transaction. The fix is at that call site:
+`logAuditInTx` when the record must be atomic with the mutation, or issuing the
+emit outside the RLS scope when it need not be. Note the predicate is the
+AsyncLocalStorage store, not the transaction: work started inside an opener
+callback keeps reading the store after the transaction closes, and moving such an
+emit "past the transaction" does not clear it.
+
+**Expected volume.** Zero. Any occurrence is worth a ticket.
 
 > **Sentinel-tenant growth.** `__system__` now has an
 > `audit_log_retention_days`, so `sweepAuditLogs` — which enumerates only tenants
