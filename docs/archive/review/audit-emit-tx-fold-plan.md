@@ -663,3 +663,68 @@ Phase 2 with a cost, not findings resolved.
   *Anti-Deferral: settled by building. Worst case — the comment is rewritten and
   the poll left, leaving a vacuous "exactly one"; cost — none, this is a
   three-line change whose only risk is being mistaken for editorial.*
+
+## Implementation Checklist
+
+Authored in Phase 2 Step 2-1 from its own impact analysis. Phase 3 reads this as
+the list of files that must appear in the diff. Separate artifact from
+`## Carried-Forward Plan Findings` above.
+
+### Carried-forward disposition (provenance checked)
+
+Every `CF*` entry's underlying finding ID (`P1`–`P20`, `Q*`, `S*`, `F*`) was
+confirmed present in `audit-emit-tx-fold-review.md`. CF1, CF3, CF4, CF5 are fixed
+in this phase. **CF2 is fixed by running, not by listing** — see below.
+
+### Member sets, re-derived at Step 2-1 (all reproduce)
+
+| Set | Command | Result |
+|---|---|---|
+| C0 emitters | `grep -rn 'AUDIT_ACTION\.EMERGENCY_ACCESS_ACTIVATE' src --include='*.ts' \| grep -vE '\.test\.\|__tests__'` | 4 lines = 2 emitters + 2 registrations |
+| C1 openers | `grep -rnE 'prisma(Base)?\.\$transaction' src/lib/audit/` | 2, both `audit-outbox.ts` |
+| C1 callers | the `enqueueAudit\|enqueueAuditBulk` grep | 4 lines, `audit.ts` only + 1 docblock mention |
+| C2 functions | the emit-export grep | 3 |
+
+### Production files to modify
+
+- `src/lib/emergency-access/vault-auto-promote.ts` — C0/E1: widen the pre-CAS select with `ownerId`; emit via `logAuditInTx` immediately after `transition()` returns `{ok:true}`, carrying `metadata.outcome`; resolve the grantee's tenant with `tx.user.findUnique(...).tenantId` (I0.5).
+- `src/app/api/emergency-access/[id]/vault/route.ts` — C0/E1: pass the transaction and the resolved tenant into `autoPromoteIfElapsed`.
+- `src/app/api/emergency-access/[id]/approve/route.ts` — C0/E2: open `withUserTenantRls` into `resolveUserTenantId` + `withTenantRls(prisma, tenantId, tx => …)`; the callback holds **only** `transition()` and `logAuditInTx` (I0.7); the grantee lookup and `sendEmail` stay after it returns.
+- `scripts/checks/check-critical-audit-atomic.mjs` — C0: add the action.
+- `src/lib/audit/audit-outbox.ts` — C1: `prisma.$transaction` → `prismaBase.$transaction` at both openers. Nothing else.
+- `src/lib/audit/audit.ts` — C2: module-load assertion (I2.4); refusal after the synchronous prefix in `logAuditAsync` **and** `logAuditBulkAsync` (I2.2); dedicated reason constant (I2.3).
+- `infra/fluent-bit/fluent-bit.conf` + `docs/operations/alerts.md` — C2/I2.5: carve the new reason out of the `audit-dead-letter` exclusion and correct the "two remaining reasons" enumeration.
+- `src/lib/tenant-rls.ts` — C3: four-way guard, message rewording keeping the `INVALID_RLS_NESTING:` prefix, comment corrected (I3.2), `assertOpenableTenantContext` docblock corrected (I1.3).
+- `src/app/api/teams/[teamId]/route.ts` — C3/N1: drop the inner opener, rewrite three `tx.*` to `prisma.*`.
+- `src/lib/auth/session/auth-adapter.ts` — C3/N2: hoist `resolveEffectiveSessionTimeouts` above the opener.
+- `scripts/checks/check-rls-read-context.mjs` — C1: add the module to `SEARCH_DIRS`; correct the `health.ts`-is-the-only-one header comment.
+- `scripts/pre-pr.sh` — C0: `run_step "Static: emergency-activate-atomic"`, in the grep idiom of the existing `Static: no-deprecated-logAudit` step, asserting the file exists before grepping.
+
+### Test files to modify (R19 — all trees enumerated)
+
+Pre-declared, each with the break it takes:
+
+- `src/__tests__/audit-outbox.test.ts` — C1: add `prismaBase` to the `@/lib/prisma` mock.
+- `src/lib/audit/audit.test.ts` — C2: spread `importOriginal()` over `@/lib/tenant-rls` **and keep** the explicit `withBypassRls` override (a plain spread makes the opener real against a prisma mock with no `$transaction`).
+- `src/app/api/emergency-access/[id]/vault/route.test.ts` — C0: `logAuditInTx` in the audit factory; `user` + `$queryRaw` on the prisma mock; assert the call carries the transaction and the resolved tenant.
+- `src/app/api/emergency-access/[id]/approve/route.test.ts` — C0/E2, five breaks (CF1): `resolveUserTenantId` in the tenant-context factory as a `vi.fn` (**not** an `importOriginal` spread, which adds a second `withBypassRls` call and breaks two `toHaveBeenCalledTimes(1)` assertions); `$transaction`/`$executeRaw` on the prisma mock whose `tx` is the same spy object; `logAuditInTx` in the audit factory; `transition`'s `db` is now the transaction client. **The repair must not stub an opener.**
+- `scripts/__tests__/check-critical-audit-atomic.test.mjs` — C0: extend `ALL`, update the banner string. Edit the list first; the gate's count is already derived from `CRITICAL_ACTIONS.size`.
+- `src/__tests__/audit.mocked.test.ts` — C2/CF3: add `enqueueAuditBulk` to the audit-outbox factory; new routing cells across all three emit functions.
+- `src/lib/tenant-rls.test.ts` — C3: two new denials, two same-kind sequential allow cells, sibling-concurrency cell, two ordering cases in the newly-covered combination.
+- `src/__tests__/db-integration/centralize-state-transitions.integration.test.ts` — C0/CF4/CF5: extend `seedGrant` with `revokedAt` and a nullable escrow; extend `fetchGrant` with `activated_at`; the I0.6 fault injection uses a spy **delegating to the real `enqueueAuditInTx`** with `mockRejectedValueOnce` (a file-hoisted bare `vi.mock` would poison T17 and the atomic-audit rollback case); replace T17's `>= 1` poll with a single read after `Promise.all`.
+
+**New integration tests:** C1's two `txid`/GUC cells; C0's E2 atomicity cell; C3's
+cold-cache sign-in cell and the team-delete flatten cell.
+
+### CF2 — derived by running, not by listing
+
+The bare-`@/lib/tenant-rls`-factory set is **27 files**; those that also do not
+mock `@/lib/audit/audit` are **15**. Which of those actually load the real
+`audit.ts` is what decides membership, and I2.4's module-load assertion is the
+instrument: after C2 lands, every member fails **at import, by name**. So the
+procedure is: land C2 with I2.4, run `npx vitest run`, and repair exactly the
+files that fail — with the `importOriginal`-plus-override shape, never a bare
+`getTenantRlsContext` stub. Revision 3's static list was wrong in both directions
+(it named `tenant-management.test.ts`, which is not a member, and missed at least
+two that are); reproducing that list here would repeat the error. The 15
+candidates are the expected superset, not the answer.
