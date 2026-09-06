@@ -31,7 +31,15 @@
  * word-shaped pattern flags the subject's own comments explaining what it used
  * to do. Both were observed on the text version.
  *
- * KNOWN LIMIT: the callee is matched by NAME, so a call reached through an alias
+ * KNOWN LIMIT — WHICH CLIENT: this gate reads the callee name and the action,
+ * never the first argument. `logAuditInTx(prisma, …)` — an emit on the ambient
+ * module client rather than the promotion's transaction — passes it. That is the
+ * mutation Phase 3 used as its red proof, and it is caught by the route cells'
+ * `expect(txArg).toBe(bypassTx)` and the integration rollback cell, not here.
+ * The sibling `check-rls-read-context.mjs` states its equivalent limit the same
+ * way, and for the same reason: a gate that reads names cannot decide identity.
+ *
+ * KNOWN LIMIT — ALIASING: the callee is matched by NAME, so a call reached through an alias
  * (`const emit = logAuditAsync; emit({...})`) is not seen. Resolving that needs a
  * Program, which no gate in this tree carries; `check-bypass-rls.mjs`'s header
  * documents the same boundary. The runtime consequence of an aliased revert is
@@ -52,6 +60,32 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.EMERGENCY_ACTIVATE_ATOMIC_ROOT ?? join(__dirname, "..", "..");
 
 const ACTION = "EMERGENCY_ACCESS_ACTIVATE";
+
+/**
+ * The emitters a `banAsyncOutright` subject must not call, DERIVED rather than
+ * listed.
+ *
+ * The first version of the ban named `logAuditAsync` alone. The class is wider
+ * and two of its members are worse: `enqueueAudit` / `enqueueAuditBulk` open on
+ * `prismaBase`, so from inside the caller's transaction they commit
+ * INDEPENDENTLY and their row survives a rollback — the "row asserting an action
+ * that did not happen" outcome `refuseIfInsideRlsContext` calls worse than a
+ * missing one. `logAuditBulkAsync` and `logAuditAsyncBothScopes` are refused at
+ * runtime like `logAuditAsync`, but the gate could not see them either.
+ *
+ * Derived from the two audit modules' exports so a rename cannot silently shrink
+ * the ban; the floor below is what makes a failed derivation loud rather than
+ * permissive.
+ */
+const EMIT_SOURCES = ["src/lib/audit/audit.ts", "src/lib/audit/audit-outbox.ts"];
+const BANNED_FLOOR = [
+  "logAuditAsync",
+  "logAuditAsyncBothScopes",
+  "logAuditBulkAsync",
+  "enqueueAudit",
+  "enqueueAuditBulk",
+];
+const ATOMIC_EMITTER = "logAuditInTx";
 /**
  * `banAsyncOutright` marks a subject whose ENTIRE body runs inside the caller's
  * RLS context. After C2 an async emit there is refused and writes no row
@@ -101,8 +135,43 @@ const project = createAstProject();
 const failures = [];
 let scanned = 0;
 
+/** Non-atomic emit names exported by the audit modules. */
+function deriveBannedNames() {
+  const found = new Set();
+  for (const { sf } of sourceFilesFrom(createAstProject(), EMIT_SOURCES, REPO_ROOT)) {
+    for (const fn of sf.getFunctions()) {
+      const name = fn.getName();
+      if (!fn.isExported() || !name || name === ATOMIC_EMITTER) continue;
+      if (/^(logAudit|enqueueAudit)/.test(name) && !name.endsWith("InTx")) found.add(name);
+    }
+  }
+  return found;
+}
+
+const banned = deriveBannedNames();
+const missingFromDerivation = BANNED_FLOOR.filter((n) => !banned.has(n));
+if (missingFromDerivation.length > 0) {
+  // "Derived an empty (or shrunken) ban list" must not print OK. A rename is a
+  // legitimate reason for this to fire — update the floor deliberately.
+  console.error(
+    `\nFAIL: could not derive the emitter ban set from ${EMIT_SOURCES.join(", ")}.\n` +
+      `  missing: ${missingFromDerivation.join(", ")}\n` +
+      `  derived: ${[...banned].sort().join(", ") || "(none)"}\n` +
+      `If an emitter was renamed, update BANNED_FLOOR with it — a shrunken ban ` +
+      `must not be spelled the same as a clean tree.`,
+  );
+  process.exit(1);
+}
+
 for (const { rel, sf } of sourceFilesFrom(project, SUBJECT_PATHS, REPO_ROOT)) {
-  const subject = SUBJECTS.find((s) => rel.endsWith(s.path)) ?? { banAsyncOutright: false };
+  // No permissive fallback: "could not attribute this file to a subject" must
+  // not be spelled the same as "this subject is unrestricted". Unreachable with
+  // today's single-file subjects, reachable the moment one becomes a directory.
+  const subject = SUBJECTS.find((s) => rel.endsWith(s.path));
+  if (!subject) {
+    console.error(`\nFAIL: scanned ${rel}, which matches no entry in SUBJECTS.`);
+    process.exit(1);
+  }
   scanned += 1;
   const inTx = [];
   const async = [];
@@ -111,9 +180,25 @@ for (const { rel, sf } of sourceFilesFrom(project, SUBJECT_PATHS, REPO_ROOT)) {
     const callee = call.getExpression();
     if (callee.getKind() !== SyntaxKind.Identifier) continue;
     const name = callee.getText();
-    if (name !== "logAuditInTx" && name !== "logAuditAsync") continue;
+    const isAtomic = name === ATOMIC_EMITTER;
+    if (!isAtomic && !banned.has(name)) continue;
 
     const line = call.getStartLineNumber();
+
+    // The ban is checked BEFORE the action is read: a banned emitter in this
+    // subject is forbidden whatever action it carries, so reporting it as
+    // "cannot decide the action" would name the wrong requirement and the two
+    // arms would both claim the line.
+    if (!isAtomic && subject.banAsyncOutright) {
+      failures.push(
+        `${rel}:${line}: ${name} in a file whose whole body runs under the ` +
+          `caller's RLS context. An async emit there is refused and writes ` +
+          `nothing; enqueueAudit* would commit independently and survive the ` +
+          `caller's rollback. Use ${ATOMIC_EMITTER}.`,
+      );
+      continue;
+    }
+
     const action = actionOf(call);
 
     // Fail-CLOSED on an undecidable action. `actionOf` only reads an inline
@@ -123,22 +208,15 @@ for (const { rel, sf } of sourceFilesFrom(project, SUBJECT_PATHS, REPO_ROOT)) {
     if (action === null) {
       failures.push(
         `${rel}:${line}: cannot decide which action this ${name} call carries — ` +
-          `pass the action in an inline object literal so this gate can read it.`,
-      );
-      continue;
-    }
-
-    if (name === "logAuditAsync" && subject.banAsyncOutright) {
-      failures.push(
-        `${rel}:${line}: logAuditAsync in a file whose whole body runs under the ` +
-          `caller's RLS context. C2 refuses an in-context async emit, so this row ` +
-          `is written nowhere — whatever action it carries. Use logAuditInTx.`,
+          `write it as \`action: AUDIT_ACTION.<NAME>\` on an inline object ` +
+          `literal. Element access (AUDIT_ACTION["X"]), an aliased import and a ` +
+          `spread-supplied action are all unreadable to this gate.`,
       );
       continue;
     }
 
     if (action !== ACTION) continue;
-    (name === "logAuditInTx" ? inTx : async).push(line);
+    (isAtomic ? inTx : async).push(line);
   }
 
   if (inTx.length === 0) {

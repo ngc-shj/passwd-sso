@@ -36,8 +36,24 @@ function write(rel, body) {
   writeFileSync(join(root, rel), body);
 }
 
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+/**
+ * The gate derives its ban set from the audit modules' exports, so a synthetic
+ * root has to carry them. Copied from the repo rather than stubbed: a stub would
+ * let the derivation drift from the real export set without any test noticing,
+ * which is the failure the derivation replaced.
+ */
+function copyAuditModules() {
+  mkdirSync(join(root, "src/lib/audit"), { recursive: true });
+  for (const f of ["audit.ts", "audit-outbox.ts"]) {
+    writeFileSync(join(root, "src/lib/audit", f), readFileSync(join(REPO, "src/lib/audit", f), "utf8"));
+  }
+}
+
 /** Both emitters correct — the state every other case mutates away from. */
 function writeBothAtomic() {
+  copyAuditModules();
   write(E1, ATOMIC);
   write(E2, ATOMIC);
 }
@@ -157,7 +173,41 @@ describe("check-emergency-activate-atomic", () => {
     expect(prePr).toMatch(/^(queue|run)_step .*check-emergency-activate-atomic\.mjs/m);
   });
 
+  it.each([
+    "logAuditAsync",
+    "logAuditAsyncBothScopes",
+    "logAuditBulkAsync",
+    "enqueueAudit",
+    "enqueueAuditBulk",
+  ])("bans %s in the bypass-only subject, naming it", (fn) => {
+    // The ban is over a CLASS, derived from the audit modules' exports. Its
+    // first version named one member; `enqueueAudit`/`enqueueAuditBulk` are the
+    // two that matter most, because they open on the un-proxied client and their
+    // row survives the caller's rollback rather than merely being lost.
+    //
+    // `it.each` here is not the table-loop the C3 denials avoid: each row is a
+    // distinct member of a derived set, and each was red-proved individually to
+    // name its own function.
+    writeBothAtomic();
+    write(E1, `await ${fn}({ action: AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST });\n` + ATOMIC);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain(fn);
+  });
+
+  it("fails when the ban set cannot be derived", () => {
+    // "Derived an empty ban list" must not print OK. Reachable by a rename, so
+    // the message says to update the floor deliberately.
+    writeBothAtomic();
+    writeFileSync(join(root, "src/lib/audit/audit.ts"), "export const nothing = 1;\n");
+    writeFileSync(join(root, "src/lib/audit/audit-outbox.ts"), "export const nothing = 1;\n");
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("could not derive the emitter ban set");
+  });
+
   it("fails when a subject is missing, distinguishably from clean", () => {
+    copyAuditModules();
     write(E1, ATOMIC); // E2 absent
     const { code, out } = run();
     expect(code).toBe(1);

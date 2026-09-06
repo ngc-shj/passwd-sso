@@ -171,10 +171,18 @@ because the write that would carry it is the one that failed.
 **`invalid_user_id` is not like those two.** It fires with a healthy database —
 a caller passed an actor id that is not a UUID, so the entry was rejected before
 the outbox rather than lost to an outage — and it is excluded from forwarding
-along with them. That is a **known gap**: the event is recoverable only from
-container logs, which are capped. It is stated here rather than left implied,
-because the forwarder note below used to justify the exclusion on a premise that
-covers only the other two.
+along with them. That is a **known gap**, and it is worse with a forwarder than
+without one:
+
+- **Without** `docker-compose.logging.yml`: the line survives in `json-file`
+  container logs, capped at `max-size: 20m` × `max-file: 5`.
+- **With** it: that overlay switches the `app` service to the **fluentd** driver,
+  which replaces `json-file` rather than adding to it — so there is no local copy,
+  and the `Exclude` drops the record before any OUTPUT sees it. The event is
+  destroyed.
+
+It is stated here rather than left implied, because the forwarder note below used
+to justify the exclusion on a premise that covers only the other two.
 
 A further reason, `emit_inside_rls_context`, exists but does **not** appear under
 this `_logType` — see `audit-refused` below. It ships on its own logger
@@ -204,9 +212,10 @@ transaction, and writing it independently instead would let the row survive a
 rollback — a row asserting something that did not happen.
 
 **Why it is its own type.** It is the only audit-loss signal that fires with a
-**healthy** database, and it produces no `audit_logs` row, no `audit_outbox` row,
-and no movement in the sentinel-count query above. If it is not forwarded, it is
-not observable anywhere.
+**healthy** database **and is forwarded** — `invalid_user_id` also fires healthy
+but stays under the excluded type, which is the gap recorded above. It produces
+no `audit_logs` row, no `audit_outbox` row, and no movement in the sentinel-count
+query. If it is not forwarded, it is not observable anywhere.
 
 **Query.** Datadog/Loki: `{ _logType="audit-refused" }` · Splunk:
 `_logType="audit-refused"`

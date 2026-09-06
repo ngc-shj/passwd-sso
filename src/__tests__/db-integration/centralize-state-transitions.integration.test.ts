@@ -23,6 +23,7 @@ import {
   beforeEach,
   afterEach,
   vi,
+  onTestFinished,
 } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
@@ -551,7 +552,13 @@ describe("centralize-state-transitions — integration", () => {
     const before = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
 
     const outbox = await import("@/lib/audit/audit-outbox");
-    const spy = vi.spyOn(outbox, "enqueueAuditInTx").mockRejectedValueOnce(new Error("outbox down"));
+    // Registered for release BEFORE the assertions, not after them: an
+    // unconsumed `mockRejectedValueOnce` survives a failing assertion and arms
+    // the next cell that emits, which then reds with "outbox down" — a failure
+    // that does not name its cause.
+    const spy = vi.spyOn(outbox, "enqueueAuditInTx");
+    onTestFinished(() => spy.mockRestore());
+    spy.mockRejectedValueOnce(new Error("outbox down"));
 
     await expect(
       withBypassRls(ctx.app.prisma, async (tx) =>
@@ -574,7 +581,6 @@ describe("centralize-state-transitions — integration", () => {
     expect(retry.ok).toBe(true);
     expect((await fetchGrant(grantId))?.status).toBe("ACTIVATED");
     expect(await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE)).toBe(before + 1);
-    spy.mockRestore();
   });
 
   it.skipIf(SKIP)("C0: the withheld outcomes still commit ACTIVATED and still write their row", async () => {
@@ -588,6 +594,11 @@ describe("centralize-state-transitions — integration", () => {
     for (const [label, seedOpts] of [
       ["revoked", { revokedAt: new Date() }],
       ["no_escrow", { withKeyPair: false }],
+      // The OTHER disjunct. `no_escrow` is
+      // `!updated.encryptedSecretKey || !updated.granteeKeyPair`, and this is the
+      // arm the new "classified released but escrow is absent" throw keys on —
+      // the branch whose failure mode changed needs its own fixture.
+      ["no_escrow", { encryptedSecretKey: null }],
     ] as const) {
       const grantId = randomUUID();
       await seedEligible(grantId, seedOpts);
@@ -598,12 +609,22 @@ describe("centralize-state-transitions — integration", () => {
       BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
       expect(result.ok, label).toBe(false);
+      if (!result.ok) expect(result.reason, label).toBe(label);
       // Positive, and FIRST: the CAS did commit, which is what makes the missing
       // row a defect rather than an absence of anything to record.
       const grant = await fetchGrant(grantId);
       expect(grant?.status, label).toBe("ACTIVATED");
       expect(grant?.activated_at, label).not.toBeNull();
       expect(await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE), label).toBe(before + 1);
+      // The discriminator, on the real payload. Without it a mutation that
+      // labels every withheld path `released` — or collapses the two into one
+      // value — stays green in the only place the row is actually written.
+      const outcomeRow = await ctx.su.pool.query(
+        `SELECT payload->'metadata'->>'outcome' AS outcome FROM audit_outbox
+          WHERE tenant_id = $1::uuid AND payload->>'targetId' = $2`,
+        [tenantId, grantId],
+      );
+      expect(outcomeRow.rows.map((r) => r.outcome), label).toEqual([label]);
     }
   });
 

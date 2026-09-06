@@ -262,3 +262,132 @@ with Anti-Deferral entries above; the remaining thirteen fixed.
 Verification after fixes: `npx tsc --noEmit` clean · `npx eslint` 0 warnings ·
 unit 1028 files / 15384 tests · integration 108 files / 660 tests · `pre-pr.sh`
 78/78 · workers restarted.
+
+---
+
+# Round 2 (incremental)
+
+Date: 2026-09-06
+Subject: `git show 1841f44ca` — Round 1's fixes only.
+
+## Merged findings — 1 Critical, 3 Major, 13 Minor. All fixed.
+
+### C2 — **Critical** — two of the four cells Round 1's Critical enumerated were still unbuilt, and the round was recorded as closed
+
+Round 1's C1 named four unbuilt cells. The fix built the rollback cell, the
+retryability cell, and a **withheld-outcomes** cell — the last being a different
+plan criterion, not either of the two remaining. Neither **E2's in-transaction
+visibility cell** nor **the C3 team-delete cell** existed anywhere. The round
+nonetheless closed with "All Critical and Major findings fixed."
+
+That is R1-1's own shape one round later: a completion claim published ahead of
+the member set it was measured against. And the uncovered production change was
+real — the team DELETE dropped an explicit `withTenantRls` for ambient `prisma`
+calls, and nothing exercised it against a database.
+
+**Fixed** in `src/__tests__/db-integration/rls-flatten-atomicity.integration.test.ts`,
+four cells, each with its allow companion. Red-proved, one mutation each and each
+reddening only its own cell:
+
+| Mutation | Cell reddened |
+|---|---|
+| re-introduce the inner `withTenantRls` in the team callback | N1 rollback cell — fails with `INVALID_RLS_NESTING` |
+| emit on `prismaBase` inside the E2 callback | E2 rollback cell — the row survives |
+
+### M5 — **Major** — the "outright ban" named one member of a five-member class
+
+The Round-1 rationale was a class claim — *"any async emit there writes nothing
+whatever action it carries"* — and the implementation banned one function. The
+gate's callee filter dropped everything else before the ban could apply.
+
+Two of the four unseen members are worse than the one named: `enqueueAudit` and
+`enqueueAuditBulk` open on `prismaBase`, so from inside the caller's transaction
+they commit **independently and survive its rollback** — the "row asserting an
+action that did not happen" outcome `refuseIfInsideRlsContext`'s own docblock
+calls worse than a missing row. Red-proved: all three unseen emitters added to
+the subject left both gates at exit 0.
+
+**Fixed** by deriving the ban set from the two audit modules' exports, with a
+floor that fails loudly if the derivation shrinks — a rename must not silently
+narrow the ban. Each of the five members red-proved individually, naming itself;
+the approve route's other-action allow case stays green.
+
+### M6 — **Major** — `Prisma.TransactionClient` narrows nothing, and the comment claimed it did
+
+`Prisma.TransactionClient` is `Omit<PrismaClient, ITXClientDenyList>` — a
+**supertype** — so a bare client is assignable and `TxOrPrisma` accepted exactly
+the same argument set. Proved by a `tsc` probe with a deliberate sanity error to
+show the probe was being read.
+
+The change is still right (it removed a cast and documents intent); the sentence
+claiming compiler enforcement was not. The controls that actually bind are the
+route cells' `expect(txArg).toBe(bypassTx)` and the integration rollback cell.
+**Fixed** — the comment now says what the type does and names what binds.
+
+### M7 — **Major** — the scan-set assertion could not red on the mutation it existed for
+
+Round 1's fix for M3 asserted `toContain` against the **whole gate file text**.
+Both needles also appear in the gate's prose, so dropping a member from
+`SEARCH_DIRS` left both predicates true — zero delta on the exact mutation the
+case was written for. Red-proved.
+
+**Fixed** by asserting the gate's **effective** default, read from the banner it
+prints, with the override variable deleted rather than set to empty (the gate
+reads it with `??`, so an empty string is a legitimate "scan nothing"). Re-red-proved.
+
+### Minor findings (13) — all fixed
+
+The dominant pattern is worth naming: **R29 fired seven times across the two
+rounds, and every instance was a claim about a mechanism the author had not
+run.** The claims about *behaviour* have all held up under measurement.
+
+- The `refusedEmitLogger` uniqueness claim was fixed at one of its **two** sites;
+  `alerts.md` kept the uncorrected copy, contradicting a line 35 lines above it in
+  the same file. R42 applied to a prose class: the member set was two, both files
+  were open in the same commit.
+- The new `fluent-bit.conf` comment said `invalid_user_id` is "recoverable only
+  from container logs capped at 20m × 5". Under the overlay that **mounts that
+  config**, the app service switches to the fluentd driver, which replaces
+  `json-file` — so there is no local copy and the Exclude destroys the record.
+  Corrected in both files, and it is the stronger argument for removing the
+  exclusion.
+- The new `throw`'s justification said "the row committed above" — nothing has
+  committed there, because `withBypassRls` **is** the transaction. The throw is
+  still right, by a different mechanism: it is the *return* path that would
+  commit the contradiction.
+- The bounded-payload claim said more than it holds: `scope`/`action` are
+  TypeScript-only with no runtime check, `tenantId` is copied verbatim by the
+  `*AuditBase` helpers, and "a UUID-checked actor id" is false for
+  `deadLetterEntry`'s other caller. Restated as what it is — bounded today by
+  call-site discipline (115 sites swept, none request-derived) plus one gate that
+  happens to precede this one.
+- The gate's `KNOWN LIMIT` named aliasing and omitted the **client-identity**
+  limit — it never reads the first argument, so `logAuditInTx(prisma, …)`, the
+  very mutation Round 1's Critical was about, passes it. Now stated, with what
+  does catch it.
+- The per-subject flag defaulted to permissive on a lookup miss; unreachable
+  today, reachable the moment a subject becomes a directory. Now fails by name.
+- The undecidable-action message named the wrong requirement — element access,
+  an aliased import and a spread all hit it. Corrected.
+- The retryability cell's spy released after its assertions, so an unconsumed
+  `mockRejectedValueOnce` could arm the next cell. Moved to `onTestFinished`.
+- The integration cells never asserted `metadata.outcome` — the discriminator
+  they exist for. Added, and red-proved by collapsing the two withheld values.
+  **The first attempt at that red proof came up green because the mutation had
+  not applied** (the sed targeted the wrong ternary arm); the second verified the
+  file changed before running.
+- `no_escrow`'s first disjunct (`!encryptedSecretKey`) had a fixture parameter
+  and no case — the arm whose failure mode this PR changed to a throw. Added.
+- Plus: one bulk cell duplicated coverage in the co-located twin (the "exercised
+  nowhere" claim was false — `audit.test.ts` has a six-cell block), and the
+  `pre-pr.sh` wiring case pins existence rather than the `PRE_PR_STATIC_ONLY`
+  surface (verified unconditional today; recorded as a note).
+
+## Round 2 verification
+
+`npx tsc --noEmit` clean · `npx eslint` 0 warnings · unit **1028 files / 15390
+tests** · integration **109 files / 664 tests** · `pre-pr.sh` **78/78, exit 0** ·
+workers restarted.
+
+R43: clean. Every predicate the Round-1 fixes touched is identical, unreachable,
+or strictly tightening relative to Round 0 and to `main`; no boundary widened.

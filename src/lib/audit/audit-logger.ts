@@ -143,14 +143,20 @@ export const deadLetterLogger = pino({
  * It writes no row anywhere, so not forwarding it would make it unobservable.
  * External alerting should monitor `_logType: "audit-refused"`.
  *
- * No `redact` paths, for the same reason `deadLetterLogger` has none and with
- * MORE at stake: every field `deadLetterEntry` emits is BOUNDED — enum scope and
- * action, a UUID-checked actor id, a DB-derived tenant id, a constant reason —
- * and this call site passes no `error`, so no free text enters. That bound is
- * load-bearing here in a way it is not on the sibling, because this stream ships
- * by default. Adding a free-text field re-opens the hole silently; reduce it at
- * the call site rather than adding a redact path, which matches a key while the
- * leak lives in the value.
+ * No `redact` paths, and the bound that licenses that is worth stating precisely
+ * because this stream — unlike the sibling — ships by default.
+ *
+ * At THIS call site the actor id has already passed `UUID_RE` (the refusal runs
+ * after `assertEnqueueableUserId` on both emit paths), the reason is a constant,
+ * and no `error` is passed, so no free text enters. `scope` and `action` are
+ * TypeScript-only unions with no runtime check, and `tenantId` is copied verbatim
+ * by the `*AuditBase` helpers — its bound is a property of the current call sites
+ * (swept: none request-derived) rather than something this module enforces.
+ *
+ * So: bounded today, by call-site discipline plus one gate that happens to
+ * precede this one. Adding a free-text field re-opens the hole silently; reduce
+ * it at the call site rather than adding a redact path, which matches a key while
+ * the leak lives in the value.
  */
 export const refusedEmitLogger = pino({
   name: DEFAULT_APP_NAME,
