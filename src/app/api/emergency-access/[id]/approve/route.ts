@@ -66,10 +66,12 @@ async function handlePOST(
     });
     if (!result.ok) return result;
 
-    // Atomic with the CAS: this route releases the same escrowed key material
-    // the auto-promotion path does, and an approval whose audit row is lost to
-    // a crash between commit and enqueue is the case that made this action a
-    // CRITICAL_ACTIONS member.
+    // Atomic with the CAS. This route does NOT release the key material — it
+    // flips the grant to ACTIVATED and the grantee fetches it on a later
+    // request — so the row says `approved`, not `released`. It is still the
+    // only record that the owner authorised the release, which is what makes
+    // losing it to a crash between commit and enqueue the case that put this
+    // action in CRITICAL_ACTIONS.
     await logAuditInTx(tx, tenantId, {
       ...personalAuditBase(req, session.user.id),
       action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,
@@ -78,7 +80,7 @@ async function handlePOST(
       metadata: {
         granteeId: grant.granteeId,
         earlyApproval: true,
-        outcome: EA_ACTIVATE_OUTCOME.RELEASED,
+        outcome: EA_ACTIVATE_OUTCOME.APPROVED,
       },
     });
     return result;

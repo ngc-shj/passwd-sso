@@ -162,21 +162,31 @@ The runbook for a deployment where such a row already exists is
 rather than as a log-line alert — quieter, but the record survives, which it did
 not before. Alert on that count if you relied on the old signal.
 
-**The two remaining reasons** — `logAuditAsync_failed` and
+**Two of the remaining reasons** — `logAuditAsync_failed` and
 `logAuditBulkAsync_failed` — mean the **database was unreachable**, so the
 recovery action is different: check DB connectivity and the `audit_outbox` write
 path, not tenant mapping. No durable record is possible for them by any design,
 because the write that would carry it is the one that failed.
 
-A third reason, `emit_inside_rls_context`, exists but does **not** appear under
-this `_logType` — see `audit-refused` below. It is the one audit-loss reason that
-fires while the database is healthy, which is why it is not filed with the two
-above and why the forwarder note that follows does not cover it.
+**`invalid_user_id` is not like those two.** It fires with a healthy database —
+a caller passed an actor id that is not a UUID, so the entry was rejected before
+the outbox rather than lost to an outage — and it is excluded from forwarding
+along with them. That is a **known gap**: the event is recoverable only from
+container logs, which are capped. It is stated here rather than left implied,
+because the forwarder note below used to justify the exclusion on a premise that
+covers only the other two.
+
+A further reason, `emit_inside_rls_context`, exists but does **not** appear under
+this `_logType` — see `audit-refused` below. It ships on its own logger
+precisely because the forwarder filters on `_logType` and does not read `reason`,
+so a reason added here cannot be carved out of the exclusion.
 
 > **Note on the forwarder.** `infra/fluent-bit/fluent-bit.conf` still carries
 > `Exclude _logType ^audit-dead-letter$`, and that is harmless **for the two
-> reasons above**: they fire only when the database is unreachable, and in that
-> state nothing durable can be written anyway. It is not harmless in general,
+> database-unreachable reasons**: they fire only when the database is down, and
+> in that state nothing durable can be written anyway. It is NOT harmless for
+> `invalid_user_id`, which fires with a healthy database — see the gap noted
+> above. It is not harmless in general,
 > which is why `emit_inside_rls_context` ships under its own `_logType` rather
 > than as a third reason here — adding it under the excluded type would have
 > produced an alert no operator receives, and every OUTPUT in that config matches

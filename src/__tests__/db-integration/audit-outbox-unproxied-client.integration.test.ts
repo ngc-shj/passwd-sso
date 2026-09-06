@@ -82,7 +82,14 @@ describe("outbox openers run on the un-proxied client (C1)", () => {
   }
 
   async function txid(tx: { $queryRaw: typeof prisma.$queryRaw }): Promise<string> {
-    const [row] = await tx.$queryRaw<{ txid: string }[]>`SELECT txid_current()::text AS txid`;
+    // `pg_current_xact_id()::xid`, not `txid_current()`. The former is xid8
+    // (epoch-extended); the rows are compared against `xmin`, which is a 32-bit
+    // xid. They agree only while the xid epoch is 0 — after one wraparound the
+    // inequality assertion below would hold unconditionally, INCLUDING under the
+    // defect it exists to catch. Casting to `xid` truncates to the same width,
+    // so the comparison stays meaningful for the life of the database.
+    const [row] = await tx.$queryRaw<{ txid: string }[]>`
+      SELECT pg_current_xact_id()::xid::text AS txid`;
     return row.txid;
   }
 

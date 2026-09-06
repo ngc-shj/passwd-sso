@@ -651,10 +651,12 @@ function emitParams(overrides: Record<string, unknown> = {}) {
 /**
  * C2 — an audit emit issued while an RLS context is open is refused.
  *
- * These run against the REAL withTenantRls / withBypassRls / tenantRlsStorage
- * (only `@/lib/prisma` is mocked, and its $transaction invokes the callback), so
- * the store the refusal reads is the one production creates. A faked context
- * object would make every assertion here an identity.
+ * These run against the REAL withTenantRls / withBypassRls / tenantRlsStorage —
+ * the `@/lib/tenant-rls` mock is a bare `importOriginal` spread with no
+ * overrides, and `@/lib/prisma`'s $transaction invokes its callback — so the
+ * store the refusal reads is the one production creates. (`audit-outbox` and
+ * `audit-logger` are mocked too; they are the observation surface, not the
+ * subject.) A faked context object would make every assertion here an identity.
  */
 describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
   beforeEach(() => {
@@ -675,9 +677,13 @@ describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
 
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
     expect(mockRefusedWarn).toHaveBeenCalledTimes(1);
+    // The literal, not the constant compared to itself: this string is what
+    // docs/operations/alerts.md tells operators to query on, so a value change
+    // has to redden something rather than silently stale the runbook.
     expect(mockRefusedWarn.mock.calls[0][0]).toMatchObject({
-      reason: AUDIT_DEAD_LETTER_REASON.EMIT_INSIDE_RLS_CONTEXT,
+      reason: "emit_inside_rls_context",
     });
+    expect(AUDIT_DEAD_LETTER_REASON.EMIT_INSIDE_RLS_CONTEXT).toBe("emit_inside_rls_context");
     // The structured line still goes out — it runs before the check, and it is
     // the record meant to survive a database outage.
     expect(mockAuditInfo).toHaveBeenCalledTimes(1);
@@ -734,7 +740,7 @@ describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
     expect(mockRefusedWarn).not.toHaveBeenCalled();
     expect(mockDeadLetterWarn).toHaveBeenCalledTimes(1);
     expect(mockDeadLetterWarn.mock.calls[0][0]).toMatchObject({
-      reason: AUDIT_DEAD_LETTER_REASON.INVALID_USER_ID,
+      reason: "invalid_user_id",
     });
   });
 

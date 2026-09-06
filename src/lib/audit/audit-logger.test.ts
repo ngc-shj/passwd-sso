@@ -105,3 +105,36 @@ describe("METADATA_BLOCKLIST", () => {
     expect(line.audit.metadata.shareId).toBe("x");
   });
 });
+
+// ─── refusedEmitLogger (C2 / I2.5) ───────────────────────────────
+//
+// The whole reason this logger exists rather than a fourth `audit-dead-letter`
+// reason is its `_logType`: the shipped forwarder excludes that type wholesale
+// and filters on `_logType` alone, so a record carrying it is dropped before any
+// output. If this value drifts back to "audit-dead-letter", the refusal becomes
+// unobservable in a default deployment and every other test stays green.
+describe("refusedEmitLogger", () => {
+  it("ships under its own _logType, distinct from the excluded dead-letter stream", async () => {
+    const { refusedEmitLogger, deadLetterLogger } = await import("./audit-logger");
+    const refusedType = (refusedEmitLogger.bindings() as Record<string, unknown>)._logType;
+    const deadLetterType = (deadLetterLogger.bindings() as Record<string, unknown>)._logType;
+
+    expect(refusedType).toBe("audit-refused");
+    expect(refusedType).not.toBe(deadLetterType);
+  });
+
+  it("carries _app, which is what the forwarder's keep-filter matches on", async () => {
+    // fluent-bit keeps records via `Regex _app .` before the exclusion runs; a
+    // logger without it is filtered out for a different reason than the one
+    // this design reasoned about.
+    const { refusedEmitLogger } = await import("./audit-logger");
+    expect((refusedEmitLogger.bindings() as Record<string, unknown>)._app).toBeTruthy();
+  });
+
+  it("is enabled unconditionally, unlike auditLogger", async () => {
+    // auditLogger is gated on AUDIT_LOG_FORWARD, which defaults to false. A
+    // refusal that shared that gate would be silent in a default deployment.
+    const { refusedEmitLogger } = await import("./audit-logger");
+    expect(refusedEmitLogger.level).toBe("warn");
+  });
+});

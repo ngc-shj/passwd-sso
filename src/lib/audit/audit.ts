@@ -438,14 +438,18 @@ export async function logAuditInTx(
 /**
  * Why an entry reached the dead-letter stream instead of the outbox.
  *
- * Named rather than inline because operators alert on these: the forwarder
- * (`infra/fluent-bit/fluent-bit.conf`) and the runbook
- * (`docs/operations/alerts.md`) both enumerate them, and a reason that exists in
- * one and not the others is an alert nobody receives.
+ * Named rather than inline because operators alert on these, and the runbook
+ * (`docs/operations/alerts.md`) enumerates them per `_logType`. The forwarder
+ * (`infra/fluent-bit/fluent-bit.conf`) does NOT read `reason` at all — it
+ * filters on `_logType` — which is exactly why `EMIT_INSIDE_RLS_CONTEXT` ships
+ * on its own logger rather than as a fourth reason here.
  *
- * `EMIT_INSIDE_RLS_CONTEXT` is the one that fires with a HEALTHY database — the
- * other three all mean the write could not have succeeded anyway. That
- * distinction is why the forwarder carries a carve-out for it.
+ * The `_logType: "audit-dead-letter"` stream is excluded from forwarding by
+ * default. That is justified for `ASYNC_FAILED` / `BULK_ASYNC_FAILED`, which
+ * mean the database was unreachable and no durable record was possible anyway.
+ * It is NOT justified for `INVALID_USER_ID`, which fires with a healthy
+ * database — a pre-existing gap this change does not close, and one the runbook
+ * now states rather than leaving implied by a "two reasons" enumeration.
  */
 export const AUDIT_DEAD_LETTER_REASON = {
   INVALID_USER_ID: "invalid_user_id",

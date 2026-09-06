@@ -181,6 +181,37 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(mockWithBypassRls).toHaveBeenCalled();
   });
 
+  it("returns EMERGENCY_RECOVERY_KEY_MISSING and still records the activation when the promoted grant has no escrow", async () => {
+    // The third outcome. Like `revoked`, the CAS committed ACTIVATED and the
+    // route refuses the payload — so before the emit was hoisted this path
+    // produced no audit row at all. `no_escrow` is reachable through either disjunct; this
+    // fixture uses the missing key pair.
+    const requestedGrant = {
+      ...activatedGrant,
+      status: EA_STATUS.REQUESTED,
+      waitExpiresAt: new Date("2020-01-01"),
+    };
+    mockPrismaGrant.findUnique
+      .mockResolvedValueOnce(requestedGrant)
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1", ownerId: "owner-1" })
+      .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED, granteeKeyPair: null });
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault"),
+      createParams({ id: "grant-1" })
+    );
+    // 400, not 403 — this arm answers EMERGENCY_RECOVERY_KEY_MISSING while the
+    // revoked arm answers GRANT_REVOKED. The status is asserted so a change to
+    // the response shape is visible here, but the row is the point.
+    expect(res.status).toBe(400);
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
+      action: "EMERGENCY_ACCESS_ACTIVATE",
+      metadata: { ownerId: "owner-1", outcome: "no_escrow" },
+    });
+  });
+
   it("returns 403 with GRANT_REVOKED when promoted grant was revoked concurrently", async () => {
     const requestedGrant = {
       ...activatedGrant,

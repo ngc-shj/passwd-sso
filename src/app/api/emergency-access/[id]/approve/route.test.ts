@@ -175,7 +175,7 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     expect(params).toMatchObject({
       action: "EMERGENCY_ACCESS_ACTIVATE",
       targetId: "grant-1",
-      metadata: expect.objectContaining({ earlyApproval: true, outcome: "released" }),
+      metadata: expect.objectContaining({ earlyApproval: true, outcome: "approved" }),
     });
     // Cross-tenant grantee lookup uses withBypassRls — still exactly once, and
     // still OUTSIDE the transaction (a nested bypass would be refused).

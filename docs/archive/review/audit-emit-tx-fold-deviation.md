@@ -100,3 +100,73 @@ Recorded in Step 2-1 and discharged here rather than deferred to CI:
 `bash scripts/check-state-mutation-centralization.sh` (in scope — this diff
 changes `transition()`'s `db` argument) exits 0, and the three license gates
 exit 0 with no dependency change.
+
+## Step 2-5 — self-R-check findings, all fixed in this phase
+
+Three sub-agents ran the Recurring Issue Checklist against the committed diff.
+One Critical and seven Majors fired; every one was mine, and every one is fixed
+rather than deferred.
+
+- **R49 (Critical) — the new gate asserted only an absence.**
+  `check-emergency-activate-atomic.mjs` checked that `logAuditAsync(` was gone
+  and printed "written in-transaction" on the strength of it. Measured on
+  copies: deleting the emit **entirely** passed, and so did an aliased call and
+  a call split across lines. Its self-test's first case was satisfied by
+  `const x = 1;`. Rewritten AST-based, site-scoped over **both** emitters, with
+  the positive assertion (at least one `logAuditInTx` carrying the action) and a
+  scanned-subject refusal. The self-test grew from 4 cases to 7, including the
+  emit-deleted case the first version could not fail on. The name-alias limit is
+  declared rather than claimed closed.
+- **R29 — `check-critical-audit-atomic.mjs`'s comment claimed "both sites are
+  pinned individually"** while only one site had a gate. True now; the comment
+  names the companion gate and the measurement behind the action-scoped limit.
+- **R29 — the contract docblock in `vault-auto-promote.ts` still said the emit
+  fires "ONLY on the success path"** — the exact description this PR names as
+  the defect — while the file header above it said the opposite. Rewritten to
+  the implemented order; the duplicated `Step 6` renumbered.
+- **R29 — `AUDIT_DEAD_LETTER_REASON`'s docblock claimed the forwarder enumerates
+  the reasons.** It does not: it filters on `_logType` and never reads `reason`,
+  which is *why* the refusal needed its own logger. Corrected. The same read
+  exposed a further error in this PR's own runbook edit: `invalid_user_id` also
+  fires with a healthy database and is also excluded, so "the two remaining
+  reasons ... mean the database was unreachable" was wrong about a third one.
+  `alerts.md` now states that as a known gap rather than implying it away.
+- **R49 — E2 wrote `outcome: "released"` for a route that releases nothing.**
+  The approve route selects only `{ownerId, granteeId}`; it never reads
+  `encryptedSecretKey` or `granteeKeyPair`, and the actual handover happens on a
+  later vault GET. A grant E1 would label `no_escrow` was being labelled
+  `released` by E2. Added `EA_ACTIVATE_OUTCOME.APPROVED` and used it there.
+- **RT6 — `refusedEmitLogger`'s `_logType` was asserted nowhere**, and it is the
+  load-bearing value of the whole forwarder argument. Pinned, with distinctness
+  from `deadLetterLogger` and the presence of `_app`; red-proved by drifting the
+  value back to the excluded stream.
+- **R42 / RT10 — the `no_escrow` outcome had no test.** Added; red-proved
+  against the pre-fix emit placement.
+- **RT7 / R33 — `enqueueAuditBulk` was pinned by no always-running test.**
+  Reverting only that opener left the whole unit suite green. Added the
+  client-identity assertion for the bulk path, and added `src/lib/audit/**` to
+  `ci-integration.yml`'s `paths:` — without it a future PR touching only that
+  directory reaches no gate, no unit pin and not the integration job.
+- **Residual pinned as literals** — the dead-letter reason strings were asserted
+  as constant-against-itself, so a value change reddened nothing while staling
+  the runbook that tells operators to query them. Now pinned as wire values.
+
+### R50 — the C3 cold-cache cell, implemented rather than deferred
+
+The plan's `[D/C3]` sign-in criterion had no test and no deviation entry. It is
+now `session-create-cold-timeout-cache.integration.test.ts`, the only venue
+where the real guard, the real opener and the real resolver run together.
+
+Writing it surfaced a defect in its own first version: the warm cell was warmed
+by a first `createSession` call, which is itself a cache miss — so under the
+un-hoist mutation **both** cells reddened and the pair distinguished nothing.
+Warmed through the resolver directly, the mutation now reddens the cold cell and
+leaves the warm one green, which is what an allow-side companion is for.
+
+### One latent vacuity fixed in this PR's own integration test
+
+`audit-outbox-unproxied-client.integration.test.ts` compared `txid_current()`
+(xid8, epoch-extended) against `xmin` (32-bit xid). They agree only while the xid
+epoch is 0; after one wraparound the inequality assertion would hold
+unconditionally — including under the defect it exists to catch. Now
+`pg_current_xact_id()::xid`, which truncates to the same width.

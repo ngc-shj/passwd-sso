@@ -6,18 +6,20 @@ import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
 const {
   mockAuditOutboxCreate,
+  mockAuditOutboxCreateMany,
   mockQueryRaw,
   mockExecuteRaw,
   mockTransaction,
   mockProxiedTransaction,
 } = vi.hoisted(() => {
   const mockAuditOutboxCreate = vi.fn().mockResolvedValue({});
+  const mockAuditOutboxCreateMany = vi.fn().mockResolvedValue({ count: 0 });
   const mockQueryRaw = vi.fn();
   const mockExecuteRaw = vi.fn().mockResolvedValue(undefined);
 
   // tx object passed inside $transaction callback
   const txClient = {
-    auditOutbox: { create: mockAuditOutboxCreate },
+    auditOutbox: { create: mockAuditOutboxCreate, createMany: mockAuditOutboxCreateMany },
     $queryRaw: mockQueryRaw,
     $executeRaw: mockExecuteRaw,
   };
@@ -35,6 +37,7 @@ const {
 
   return {
     mockAuditOutboxCreate,
+    mockAuditOutboxCreateMany,
     mockQueryRaw,
     mockExecuteRaw,
     mockTransaction,
@@ -43,8 +46,8 @@ const {
 });
 
 // Two distinct spies, deliberately. `mockTransaction` is prismaBase's — the one
-// the openers must use — and `mockProxiedTransaction` is the Proxy's, asserted
-// untouched below. A single shared spy would make the client choice
+// BOTH openers must use — and `mockProxiedTransaction` is the Proxy's, asserted
+// untouched by each of them. A single shared spy would make the client choice
 // unobservable, which is the whole property C1 buys.
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -60,7 +63,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 
-import { enqueueAuditInTx, enqueueAudit } from "@/lib/audit/audit-outbox";
+import { enqueueAuditInTx, enqueueAudit, enqueueAuditBulk } from "@/lib/audit/audit-outbox";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -79,7 +82,7 @@ const SAMPLE_PAYLOAD: AuditOutboxPayload = {
 };
 
 const TX_CLIENT = {
-  auditOutbox: { create: mockAuditOutboxCreate },
+  auditOutbox: { create: mockAuditOutboxCreate, createMany: mockAuditOutboxCreateMany },
   $queryRaw: mockQueryRaw,
   $executeRaw: mockExecuteRaw,
 };
@@ -203,6 +206,15 @@ describe("enqueueAudit", () => {
     // in the tree — so it is pinned here and, against a real database, by a
     // txid_current() comparison in the integration suite.
     await enqueueAudit("tenant-1", SAMPLE_PAYLOAD);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockProxiedTransaction).not.toHaveBeenCalled();
+  });
+
+  it("enqueueAuditBulk opens on the un-proxied client too", async () => {
+    // I1.1 is quantified over BOTH openers. Reverting only this one left the
+    // whole unit suite green until this case existed — the singular pin says
+    // nothing about it, and no static gate can tell the two clients apart.
+    await enqueueAuditBulk("tenant-1", [SAMPLE_PAYLOAD, SAMPLE_PAYLOAD]);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
     expect(mockProxiedTransaction).not.toHaveBeenCalled();
   });

@@ -30,17 +30,29 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/cons
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
 /**
- * Which of the three post-CAS outcomes the activation reached.
+ * What the activation did about the owner's escrowed key material.
  *
- * The row is written on ALL of them, because all three follow a CAS that
- * committed `ACTIVATED` — but only `released` means the grantee actually
- * received the owner's escrowed key material, and this path emits no
- * `EMERGENCY_VAULT_ACCESS`, so this row is the only record either way.
+ * `EMERGENCY_ACCESS_ACTIVATE` is written on every path a CAS committed
+ * `ACTIVATED`, and those paths do not mean the same thing. This path emits no
+ * `EMERGENCY_VAULT_ACCESS` — the only emitter of that action is
+ * `/vault/entries` — so without a discriminator an auditor cannot tell a
+ * released escrow from a withheld one.
+ *
+ * `APPROVED` is the owner's early-approval row. That route changes state and
+ * nothing else: it does not read `encryptedSecretKey` or `granteeKeyPair`, and
+ * the release, if it happens, is a LATER request. Labelling it `RELEASED` would
+ * assert something the emitting route never checked, on a grant that may have
+ * no escrow at all.
  */
 export const EA_ACTIVATE_OUTCOME = {
+  /** The grantee received the escrowed key material in this response. */
   RELEASED: "released",
+  /** Promoted, then withheld: the grant was revoked concurrently. */
   REVOKED: "revoked",
+  /** Promoted, then withheld: no escrow to hand over. */
   NO_ESCROW: "no_escrow",
+  /** Owner-approved. State changed; no release attempted on this request. */
+  APPROVED: "approved",
 } as const;
 
 export type EaActivateOutcome =
@@ -85,11 +97,14 @@ export type AutoPromoteResult =
  *  2. If not eligible: returns { ok: false; reason: "not_eligible" }.
  *  3. Calls transition({ to: ACTIVATED, actor: SYSTEM }).
  *     On { ok: false }: returns "not_eligible" (concurrent winner already promoted).
- *  4. Re-fetches the grant under withBypassRls; validates revokedAt: null FIRST.
- *     - revokedAt set → { ok: false; reason: "revoked" }
- *     - encryptedSecretKey null → { ok: false; reason: "no_escrow" }
- *  5. Emits EMERGENCY_ACCESS_ACTIVATE audit ONLY on the success path.
- *  6. Returns { ok: true; grant }.
+ *  4. Re-fetches the grant under withBypassRls.
+ *  5. Classifies the outcome; revokedAt is checked before encryptedSecretKey
+ *     (F5/S15 ordering) — "revoked" | "no_escrow" | "released".
+ *  6. Emits EMERGENCY_ACCESS_ACTIVATE via logAuditInTx on EVERY outcome, because
+ *     all three follow a CAS that committed ACTIVATED. `metadata.outcome` is
+ *     what distinguishes a released escrow from a withheld one.
+ *  7. Returns { ok: false; reason } for the first two, { ok: true; grant } for
+ *     the third.
  *
  * Behavior note: replaces the former non-CAS update() in the route. Concurrent
  * requests now resolve deterministically — exactly one wins, the loser returns
@@ -218,7 +233,7 @@ export async function autoPromoteIfElapsed(args: {
     return { ok: false, reason: "no_escrow" };
   }
 
-  // Step 6: return crypto fields
+  // Step 7: return crypto fields
   return {
     ok: true,
     grant: {
