@@ -391,3 +391,48 @@ workers restarted.
 
 R43: clean. Every predicate the Round-1 fixes touched is identical, unreachable,
 or strictly tightening relative to Round 0 and to `main`; no boundary widened.
+
+## Phase 3 exit — recorded
+
+**Exited by user decision after Round 2**, not by the "all experts return No
+findings" condition. Recorded on the same terms Phase 1's exit was.
+
+The counts across the two rounds:
+
+| Round | Critical | Major | Minor |
+|---|---|---|---|
+| 1 | 1 | 4 | 16 |
+| 2 | 1 | 3 | 13 |
+
+Flat in count, and unchanged in character: **every Round-2 finding was against a
+Round-1 fix**, and R29 — a claim about a mechanism the author had not run —
+accounted for seven of them across both rounds. That is the same loop Phase 1
+exited from, one artifact down: the prose written to explain a change becomes the
+next round's defect surface.
+
+What is *not* in that loop, and is why exiting here is not a shortcut past
+unfinished work:
+
+- **No claim about behaviour has failed a measurement in either round.** Every
+  Round-2 correction was to a sentence, a gate's reach, or a test's
+  discriminating power — never to what the code does.
+- **The design has not moved since Phase 1 Round 2.** C0–C3's contracts, control
+  classes and member sets were re-derived independently by three experts in each
+  round and reproduce exactly.
+- **R43 is clean.** Every predicate the fixes touched is identical, unreachable,
+  or strictly tightening relative to both Round 0 and `main`.
+- **Verification is green at the exit**: `tsc` clean, `eslint` 0 warnings, unit
+  1028 files / 15390 tests, integration 109 files / 664 tests, `pre-pr.sh` 78/78
+  exit 0.
+
+Nothing is left open. The four Minor findings deferred in Round 1 carry
+Anti-Deferral entries; every Critical and Major from both rounds is fixed, not
+tracked. The residual risk this exit accepts is that a further round would find
+more prose defects of the same class — not that a behavioural defect is being
+carried.
+
+The one finding worth carrying into whoever picks this up next is Round 1's
+deferred E1 tenant-resolution asymmetry: the activation row is filed under
+`User.tenantId` while its only reader opens the `TenantMember` tenant, so on
+divergence the row is unreadable. The obvious remedy is wrong for a stated
+reason, which is why it is a follow-up rather than a fix.
