@@ -400,6 +400,18 @@ describe("check-rls-read-context", () => {
     expect(r.stderr).toContain("must not be set in CI");
   });
 
+  it("keeps both src/lib members in the default scan set", () => {
+    // SEARCH_DIRS is where this gate's coverage lives, and dropping an entry
+    // from it is silent: the gate stays green, its self-test stays green, and
+    // the module it stopped examining looks clean. Two src/lib files are here
+    // deliberately — health.ts runs outside any ALS transaction, and
+    // audit-outbox.ts opens on the un-proxied client — so neither is covered by
+    // the ambient-Proxy argument that keeps the rest of src/lib out.
+    const gate = readFileSync(GATE, "utf8");
+    expect(gate).toContain("src/lib/health.ts");
+    expect(gate).toContain("src/lib/audit/audit-outbox.ts");
+  });
+
   it("is wired into scripts/pre-pr.sh", () => {
     // The gate's only execution path (CI runs PRE_PR_STATIC_ONLY=1 pre-pr.sh).
     // Deleting that line disarms it in both places, and

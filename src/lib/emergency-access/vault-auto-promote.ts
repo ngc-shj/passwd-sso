@@ -23,7 +23,6 @@
  */
 
 import type { Prisma } from "@prisma/client";
-import type { TxOrPrisma } from "@/lib/prisma";
 import { transition } from "./emergency-access-state";
 import { logAuditInTx, type AuditLogParams } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/constants";
@@ -111,7 +110,11 @@ export type AutoPromoteResult =
  * "not_eligible" and the route falls through to the NOT_ACTIVATED 403 check.
  */
 export async function autoPromoteIfElapsed(args: {
-  db: TxOrPrisma;
+  // `Prisma.TransactionClient`, not `TxOrPrisma`: the audit row is written on
+  // this client, and a bare PrismaClient would put it outside the promotion's
+  // transaction — the one property this function exists to provide. The file
+  // header states the caller contract in prose; this states it to the compiler.
+  db: Prisma.TransactionClient;
   granteeId: string;
   grantId: string;
   now: Date;
@@ -210,7 +213,7 @@ export async function autoPromoteIfElapsed(args: {
     throw new Error(`autoPromoteIfElapsed: grantee ${granteeId} not found`);
   }
 
-  await logAuditInTx(db as Prisma.TransactionClient, grantee.tenantId, {
+  await logAuditInTx(db, grantee.tenantId, {
     ...auditBase,
     actorType: ACTOR_TYPE.SYSTEM,
     action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,
@@ -227,10 +230,18 @@ export async function autoPromoteIfElapsed(args: {
     return { ok: false, reason: "no_escrow" };
   }
 
-  // Narrowing for the success path: `outcome === RELEASED` already implies both,
-  // but the compiler cannot see it through the ternary chain above.
+  // Narrowing for the success path: `outcome === RELEASED` already implies all
+  // three, but the compiler cannot see it through the ternary chain above.
+  //
+  // THROW rather than return `no_escrow`: the row committed above says
+  // `released`, so returning a withheld reason here would answer the caller one
+  // thing while the append-only record says another — silently. If the
+  // classification is ever edited such that this becomes reachable, a 500 is the
+  // outcome that gets it noticed. Same treatment as the missing-grantee case.
   if (!updated || !updated.encryptedSecretKey || !updated.granteeKeyPair) {
-    return { ok: false, reason: "no_escrow" };
+    throw new Error(
+      `autoPromoteIfElapsed: classified ${EA_ACTIVATE_OUTCOME.RELEASED} but escrow is absent`,
+    );
   }
 
   // Step 7: return crypto fields

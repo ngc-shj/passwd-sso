@@ -36,7 +36,6 @@ describe("createSession with a cold session-timeout cache (C3/N2)", () => {
   let ctx: TestContext;
   let tenantId: string;
   let userId: string;
-  const createdTokens: string[] = [];
 
   beforeAll(async () => {
     ctx = await createTestContext();
@@ -50,15 +49,14 @@ describe("createSession with a cold session-timeout cache (C3/N2)", () => {
   });
   afterEach(async () => {
     // Registered here rather than at the end of each `it`, so it runs on the
-    // failure path too.
-    createdTokens.length = 0;
+    // failure path too. Sessions go with the user rows: `User.sessions` is
+    // `onDelete: Cascade`, so deleting the tenant's users takes them.
     await ctx.deleteTestData(tenantId);
   });
 
   async function createSession() {
     const adapter = createCustomAdapter();
     const sessionToken = randomUUID();
-    createdTokens.push(sessionToken);
     return adapter.createSession!({
       sessionToken,
       userId,

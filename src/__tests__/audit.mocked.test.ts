@@ -753,6 +753,47 @@ describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
     expect(mockRefusedWarn).not.toHaveBeenCalled();
   });
 
+  it("bulk: with no context, enqueues once with all payloads", async () => {
+    // The allow companion to the bulk refusal cell. Without it, a refusal that
+    // fires unconditionally on the bulk path passes every assertion above —
+    // exactly the argument the singular path's allow cell already carries.
+    // `logAuditBulkAsync`'s real body is exercised nowhere else in the tree.
+    await logAuditBulkAsync([
+      emitParams({ tenantId: CTX_TENANT_ID }),
+      emitParams({ tenantId: CTX_TENANT_ID }),
+    ]);
+
+    expect(mockEnqueueAuditBulk).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueAuditBulk.mock.calls[0][1]).toHaveLength(2);
+    expect(mockRefusedWarn).not.toHaveBeenCalled();
+  });
+
+  it("bulk: a mixed batch enqueues only the well-formed entry", async () => {
+    // Per-entry accounting, no context. Two structured lines (one per entry,
+    // malformed included), exactly one invalid_user_id dead-letter, and exactly
+    // one payload enqueued.
+    await logAuditBulkAsync([
+      emitParams({ userId: "not-a-uuid", tenantId: CTX_TENANT_ID }),
+      emitParams({ tenantId: CTX_TENANT_ID }),
+    ]);
+
+    expect(mockAuditInfo).toHaveBeenCalledTimes(2);
+    expect(mockDeadLetterWarn).toHaveBeenCalledTimes(1);
+    expect(mockDeadLetterWarn.mock.calls[0][0]).toMatchObject({ reason: "invalid_user_id" });
+    expect(mockEnqueueAuditBulk).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueAuditBulk.mock.calls[0][1]).toHaveLength(1);
+  });
+
+  it("bulk: a batch of one malformed entry enqueues nothing at all", async () => {
+    // The empty-batch early return — a different cell from the mixed batch, and
+    // the one that distinguishes "filtered to zero" from "enqueued an empty
+    // array".
+    await logAuditBulkAsync([emitParams({ userId: "not-a-uuid" })]);
+
+    expect(mockDeadLetterWarn).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueAuditBulk).not.toHaveBeenCalled();
+  });
+
   it("leaves logAuditInTx alone — it is the correct in-context path", async () => {
     await withTenantRls(mockedPrisma as never, CTX_TENANT_ID, async (tx) => {
       await logAuditInTx(tx, CTX_TENANT_ID, emitParams());

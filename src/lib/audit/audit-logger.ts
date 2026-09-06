@@ -135,9 +135,22 @@ export const deadLetterLogger = pino({
  * payload has no `error` field at all — the refusal is a control decision, not a
  * failure — so it ships without re-opening the hole the exclusion protects.
  *
- * This is the one audit-loss reason that fires with a HEALTHY database, and it
- * writes no row anywhere. Not forwarding it would make it unobservable.
+ * This is the only audit-loss reason that fires with a healthy database AND is
+ * forwarded. `invalid_user_id` also fires healthy, but it is a caller error and
+ * remains under the excluded type — recorded as a known forwarding gap in
+ * docs/operations/alerts.md rather than silently implied away here.
+ *
+ * It writes no row anywhere, so not forwarding it would make it unobservable.
  * External alerting should monitor `_logType: "audit-refused"`.
+ *
+ * No `redact` paths, for the same reason `deadLetterLogger` has none and with
+ * MORE at stake: every field `deadLetterEntry` emits is BOUNDED — enum scope and
+ * action, a UUID-checked actor id, a DB-derived tenant id, a constant reason —
+ * and this call site passes no `error`, so no free text enters. That bound is
+ * load-bearing here in a way it is not on the sibling, because this stream ships
+ * by default. Adding a free-text field re-opens the hole silently; reduce it at
+ * the call site rather than adding a redact path, which matches a key while the
+ * leak lives in the value.
  */
 export const refusedEmitLogger = pino({
   name: DEFAULT_APP_NAME,

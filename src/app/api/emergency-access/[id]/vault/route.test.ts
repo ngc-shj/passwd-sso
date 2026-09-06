@@ -19,10 +19,21 @@ const {
     updateMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn() },
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // A DISTINCT object, not the module client. `logAuditInTx` must be called
+  // with the client the bypass callback received; handing it `prisma` itself
+  // would make that assertion an identity and pass on a non-atomic emit.
+  mockWithBypassRls: vi.fn(),
   mockLogAuditInTx: vi.fn(),
   mockPersonalAuditBase: vi.fn((_, userId: string) => ({ scope: "PERSONAL", userId })),
 }));
+
+// Built after the hoisted block so the tx can reference the model spies.
+const bypassTx = {
+  emergencyAccessGrant: mockPrismaGrant,
+  user: mockPrismaUser,
+  $queryRaw: vi.fn(),
+};
+mockWithBypassRls.mockImplementation(async (_p: unknown, fn: (tx: unknown) => unknown) => fn(bypassTx));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 // `user` and `$queryRaw` are here because the promotion now resolves the
@@ -153,7 +164,10 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     // The activation row is written on the promotion's own client, under the
     // grantee's tenant, and says the escrow was actually released.
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
-    const [, tenantArg, params] = mockLogAuditInTx.mock.calls[0];
+    const [txArg, tenantArg, params] = mockLogAuditInTx.mock.calls[0];
+    // The client, not just the tenant: this is what separates a row written on
+    // the promotion's own transaction from one written beside it.
+    expect(txArg).toBe(bypassTx);
     expect(tenantArg).toBe(GRANTEE_TENANT_ID);
     expect(params).toMatchObject({
       action: "EMERGENCY_ACCESS_ACTIVATE",
@@ -205,7 +219,15 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     // revoked arm answers GRANT_REVOKED. The status is asserted so a change to
     // the response shape is visible here, but the row is the point.
     expect(res.status).toBe(400);
+    // The CAS committed, asserted FIRST — that is what makes a missing row a
+    // defect rather than an absence of anything to record.
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
+      }),
+    );
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][0]).toBe(bypassTx);
     expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
       action: "EMERGENCY_ACCESS_ACTIVATE",
       metadata: { ownerId: "owner-1", outcome: "no_escrow" },
@@ -234,7 +256,15 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     // was withheld — this path produced NO audit row before, which is the defect
     // the emit's placement fixes. `outcome` is what keeps the record honest
     // about the fact that nothing was released.
+    // The CAS committed, asserted FIRST — that is what makes a missing row a
+    // defect rather than an absence of anything to record.
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
+      }),
+    );
     expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][0]).toBe(bypassTx);
     expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
       action: "EMERGENCY_ACCESS_ACTIVATE",
       metadata: { ownerId: "owner-1", outcome: "revoked" },

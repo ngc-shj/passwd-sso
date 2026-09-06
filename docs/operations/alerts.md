@@ -211,6 +211,12 @@ not observable anywhere.
 **Query.** Datadog/Loki: `{ _logType="audit-refused" }` · Splunk:
 `_logType="audit-refused"`
 
+> This signal reaches a SIEM only where a forwarder is running.
+> `infra/fluent-bit/fluent-bit.conf` is mounted by `docker-compose.logging.yml`,
+> an **opt-in overlay** — without it (or an equivalent) the refusal lives only in
+> container logs capped at `max-size: 20m` × `max-file: 5`. The control is
+> loud by design; whether anyone hears it is a deployment choice.
+
 **Recovery action.** This is a code defect, not an operational one — it means a
 caller emits audit from inside a transaction. The fix is at that call site:
 `logAuditInTx` when the record must be atomic with the mutation, or issuing the

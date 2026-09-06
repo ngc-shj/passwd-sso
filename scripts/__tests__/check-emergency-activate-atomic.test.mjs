@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,12 +109,52 @@ describe("check-emergency-activate-atomic", () => {
     expect(run().code).toBe(1);
   });
 
-  it("ignores emits of a DIFFERENT action", () => {
-    // The allow side of the action predicate: these files emit other actions,
-    // and a gate keyed on the function name alone would flag them.
+  it("fails when an emit's action cannot be read from an inline literal", () => {
+    // Fail-CLOSED on the undecidable case. `actionOf` reads an inline object
+    // literal only, so before this arm an ordinary "extract the params object"
+    // refactor made a logAuditAsync invisible while the banner still said OK.
+    writeBothAtomic();
+    write(
+      E2,
+      `const params = { action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE };\n` +
+        `await logAuditAsync(params);\n` + ATOMIC,
+    );
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("cannot decide which action");
+  });
+
+  it("bans logAuditAsync outright in the file that runs wholly under the caller's context", () => {
+    // vault-auto-promote's entire body executes inside the route's
+    // withBypassRls, so ANY async emit there is refused by C2 and writes
+    // nothing — the ban is on the function, not on the action.
     writeBothAtomic();
     write(E1, `await logAuditAsync({ action: AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST });\n` + ATOMIC);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("whole body runs under");
+  });
+
+  it("still permits an other-action logAuditAsync in the approve route", () => {
+    // The allow side of the previous case. Without it, the outright ban would be
+    // indistinguishable from banning the function across both subjects — and an
+    // emit at the approve handler's top level is outside its transaction and
+    // correct there.
+    writeBothAtomic();
+    write(E2, `await logAuditAsync({ action: AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST });\n` + ATOMIC);
     expect(run().code).toBe(0);
+  });
+
+  it("is wired into scripts/pre-pr.sh", () => {
+    // The gate, its self-test and check-gate-selftest-coverage.sh all stay green
+    // if the runner line is deleted — the meta-gate only checks that INLINE
+    // gates carry a debt entry. This is the sibling remedy from
+    // check-rls-read-context.test.mjs.
+    const prePr = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "..", "pre-pr.sh"),
+      "utf8",
+    );
+    expect(prePr).toMatch(/^(queue|run)_step .*check-emergency-activate-atomic\.mjs/m);
   });
 
   it("fails when a subject is missing, distinguishably from clean", () => {

@@ -22,6 +22,7 @@ import {
   afterAll,
   beforeEach,
   afterEach,
+  vi,
 } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
@@ -94,6 +95,12 @@ describe("centralize-state-transitions — integration", () => {
     keyVersion?: number | null;
     waitExpiresAt?: Date | null;
     ownerEphemeralPublicKey?: string | null;
+    // Both added for the post-CAS outcome cells. `revokedAt` produces a state no
+    // transition can reach (the revoke route sets it in the same CAS that sets
+    // status=REVOKED), so it is seeded directly and the cell using it is a
+    // defensive-branch pin, not a reachable-path one.
+    revokedAt?: Date | null;
+    encryptedSecretKey?: string | null;
   }): Promise<void> {
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
@@ -103,12 +110,12 @@ describe("centralize-state-transitions — integration", () => {
            status, wait_days, token_hash, token_expires_at,
            encrypted_secret_key, secret_key_iv, secret_key_auth_tag,
            hkdf_salt, owner_ephemeral_public_key, grantee_public_key,
-           wrap_version, key_version, wait_expires_at, created_at, updated_at
+           wrap_version, key_version, wait_expires_at, revoked_at, created_at, updated_at
          ) VALUES (
            $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
            $6::"EmergencyAccessStatus", 7, $7, now() + interval '30 days',
            $8, $9, $10, $11, $12, $13,
-           1, $14, $15, now(), now()
+           1, $14, $15, $16, now(), now()
          )`,
         opts.id,
         tenantId,
@@ -117,7 +124,7 @@ describe("centralize-state-transitions — integration", () => {
         `grantee-${opts.id.slice(0, 6)}@example.com`,
         opts.status,
         randomBytes(32).toString("hex"),
-        WRAPPING.encryptedSecretKey,
+        opts.encryptedSecretKey === undefined ? WRAPPING.encryptedSecretKey : opts.encryptedSecretKey,
         WRAPPING.secretKeyIv,
         WRAPPING.secretKeyAuthTag,
         WRAPPING.hkdfSalt,
@@ -125,6 +132,7 @@ describe("centralize-state-transitions — integration", () => {
         WRAPPING.granteePublicKey,
         opts.keyVersion ?? null,
         opts.waitExpiresAt ?? null,
+        opts.revokedAt ?? null,
       );
     });
   }
@@ -173,19 +181,26 @@ describe("centralize-state-transitions — integration", () => {
     status: string;
     owner_ephemeral_public_key: string | null;
     revoked_at: Date | null;
+    activated_at: Date | null;
   } | null> {
     const r = await ctx.su.pool.query(
-      `SELECT status, owner_ephemeral_public_key, revoked_at
+      `SELECT status, owner_ephemeral_public_key, revoked_at, activated_at
        FROM emergency_access_grants WHERE id = $1::uuid`,
       [id],
     );
     if (r.rowCount === 0) return null;
-    return r.rows[0] as { status: string; owner_ephemeral_public_key: string | null; revoked_at: Date | null };
+    return r.rows[0] as {
+      status: string;
+      owner_ephemeral_public_key: string | null;
+      revoked_at: Date | null;
+      activated_at: Date | null;
+    };
   }
 
-  // Counts audit emissions by tenant + action. Queries audit_outbox (where
-  // logAuditAsync writes initially) instead of audit_logs (where the
-  // outbox-worker drains rows). CI does not run the worker process, so
+  // Counts audit emissions by tenant + action. Queries audit_outbox — which is
+  // where BOTH emit paths land: logAuditAsync enqueues there, and logAuditInTx
+  // (which the activation now uses) writes there on the caller's transaction.
+  // audit_logs is the outbox-worker's output and CI does not run the worker, so
   // audit_logs would always be empty there. The outbox row is the
   // authoritative "audit was emitted" signal independent of worker liveness.
   async function countAuditRows(action: string): Promise<number> {
@@ -449,22 +464,148 @@ describe("centralize-state-transitions — integration", () => {
     if (loser.ok) throw new Error("unreachable: shape assertion guarantees one loser");
     expect(loser.reason).toBe("not_eligible");
 
-    // Exactly one EMERGENCY_ACCESS_ACTIVATE audit row should exist.
-    // logAuditAsync is async / outbox-based, so we poll audit_logs until the
-    // worker drains the outbox row (CI runners are slower than local dev —
-    // a fixed-duration sleep is flaky; poll-with-timeout is deterministic).
-    let activateCount = 0;
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      activateCount = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
-      if (activateCount >= 1) break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+    // Exactly one EMERGENCY_ACCESS_ACTIVATE row. Read ONCE, after Promise.all
+    // has resolved: the emit is now logAuditInTx, so the row commits with the
+    // promotion and both transactions have settled by this point.
+    //
+    // This used to poll, breaking on `>= 1`. That was correct while the emit was
+    // outbox-drained and asynchronous; after C0 it is a masking device — the
+    // break fires on the first row, so a SECOND row arriving later is never
+    // observed, in the test whose entire point is "exactly one".
+    const activateCount = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
     expect(activateCount).toBe(1);
 
     // The grant must now be ACTIVATED
     expect(await fetchStatus(grantId)).toBe("ACTIVATED");
-  }, 15_000);
+  });
+
+  // ─── C0: the activation row and the state change commit together ──────────
+  //
+  // The three cells below are the plan's [D/C0] criteria. Each asserts the grant
+  // status POSITIVELY before counting rows, so "no row because the fixture never
+  // promoted" cannot read as a pass — the outcome cells in the route tests are
+  // mocked and structurally cannot make that distinction.
+  //
+  // Which mutation reddens which, measured rather than assumed:
+  //   emit moved back below the guard returns  -> the withheld-outcomes cell
+  //   emit on an INDEPENDENT transaction        -> all three
+  //   emit via logAuditAsync                    -> the retryability and
+  //     withheld-outcomes cells, but NOT the rollback cell: C2 refuses an
+  //     in-context async emit, so that variant writes nothing either. The
+  //     rollback cell discriminates "written on the caller's tx" from "written
+  //     on its own tx and committed", which is the independent-transaction
+  //     mutation above.
+
+  async function seedEligible(grantId: string, opts: {
+    revokedAt?: Date | null;
+    encryptedSecretKey?: string | null;
+    withKeyPair?: boolean;
+  } = {}) {
+    await seedGrant({
+      id: grantId,
+      status: "REQUESTED",
+      keyVersion: 1,
+      waitExpiresAt: new Date(Date.now() - 60_000),
+      revokedAt: opts.revokedAt ?? null,
+      encryptedSecretKey: opts.encryptedSecretKey,
+    });
+    if (opts.withKeyPair !== false) await seedGranteeKeyPair(grantId);
+  }
+
+  const auditBaseFor = () => ({
+    scope: AUDIT_SCOPE.PERSONAL,
+    userId: granteeId,
+    ip: "127.0.0.1",
+    userAgent: "test",
+  });
+
+  it.skipIf(SKIP)("C0: a promotion whose transaction fails after the emit leaves no row and no ACTIVATED", async () => {
+    const grantId = randomUUID();
+    await seedEligible(grantId);
+    const before = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
+
+    const boom = new Error("PROBE_ROLLBACK");
+    await expect(
+      withBypassRls(ctx.app.prisma, async (tx) => {
+        await autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() });
+        // The CAS and the audit row are both committed-or-not with THIS throw.
+        throw boom;
+      }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+    ).rejects.toBe(boom);
+
+    // Positive first: the promotion did not survive.
+    const grant = await fetchGrant(grantId);
+    expect(grant?.status).toBe("REQUESTED");
+    expect(grant?.activated_at).toBeNull();
+    // ...and neither did its row. Either alone would pass on the wrong defect:
+    // a status left REQUESTED with a row present is the non-atomic emit.
+    expect(await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE)).toBe(before);
+  });
+
+  it.skipIf(SKIP)("C0: an audit-write failure rolls the CAS back, and the next attempt succeeds", async () => {
+    // I0.6 — logAuditInTx throws where logAuditAsync swallowed, so an audit
+    // failure now fails the vault release. The trade is only acceptable if it is
+    // RETRYABLE: the throw must roll the CAS back so the grant stays REQUESTED.
+    const grantId = randomUUID();
+    await seedEligible(grantId);
+    const before = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
+
+    const outbox = await import("@/lib/audit/audit-outbox");
+    const spy = vi.spyOn(outbox, "enqueueAuditInTx").mockRejectedValueOnce(new Error("outbox down"));
+
+    await expect(
+      withBypassRls(ctx.app.prisma, async (tx) =>
+        autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+    ).rejects.toThrow(/outbox down/);
+
+    const afterFailure = await fetchGrant(grantId);
+    expect(afterFailure?.status).toBe("REQUESTED");
+    expect(afterFailure?.activated_at).toBeNull();
+    expect(await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE)).toBe(before);
+
+    // mockRejectedValueOnce, so the second attempt reaches the real
+    // implementation — the spy delegates by default rather than replacing it,
+    // which is what keeps T17 and the cells above on the real path.
+    const retry = await withBypassRls(ctx.app.prisma, async (tx) =>
+      autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+    expect(retry.ok).toBe(true);
+    expect((await fetchGrant(grantId))?.status).toBe("ACTIVATED");
+    expect(await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE)).toBe(before + 1);
+    spy.mockRestore();
+  });
+
+  it.skipIf(SKIP)("C0: the withheld outcomes still commit ACTIVATED and still write their row", async () => {
+    // I0.2 — the defect this fixes: these two exits return normally, the route
+    // answers 4xx, and the enclosing transaction COMMITS. Before the emit was
+    // hoisted they left ACTIVATED with no audit row at all.
+    //
+    // The revoked state is seeded by direct SQL because no transition produces
+    // `status=REQUESTED AND revoked_at IS NOT NULL` — the revoke route sets both
+    // in one CAS. This cell is a defensive-branch pin, labelled as one.
+    for (const [label, seedOpts] of [
+      ["revoked", { revokedAt: new Date() }],
+      ["no_escrow", { withKeyPair: false }],
+    ] as const) {
+      const grantId = randomUUID();
+      await seedEligible(grantId, seedOpts);
+      const before = await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE);
+
+      const result = await withBypassRls(ctx.app.prisma, async (tx) =>
+        autoPromoteIfElapsed({ db: tx, granteeId, grantId, now: new Date(), auditBase: auditBaseFor() }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+      expect(result.ok, label).toBe(false);
+      // Positive, and FIRST: the CAS did commit, which is what makes the missing
+      // row a defect rather than an absence of anything to record.
+      const grant = await fetchGrant(grantId);
+      expect(grant?.status, label).toBe("ACTIVATED");
+      expect(grant?.activated_at, label).not.toBeNull();
+      expect(await countAuditRows(AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE), label).toBe(before + 1);
+    }
+  });
 
   // ─── T18: bulkTransition mixed-status coverage ────────────────────────────────
 

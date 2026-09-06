@@ -170,3 +170,34 @@ leaves the warm one green, which is what an allow-side companion is for.
 epoch is 0; after one wraparound the inequality assertion would hold
 unconditionally — including under the defect it exists to catch. Now
 `pg_current_xact_id()::xid`, which truncates to the same width.
+
+## Phase 3 Round 1 — checklist departures the review surfaced
+
+### D7 — `src/app/api/emergency-access/[id]/vault/route.ts` needed no change
+
+The Implementation Checklist listed it: "C0/E1: pass the transaction and the
+resolved tenant into `autoPromoteIfElapsed`". It is absent from the diff. The
+route already passed `tx`, and D1/I0.5 moved the tenant resolution *inside* the
+helper — it has to run on the promotion's own transaction, which is the argument
+the route already supplied. The checklist item was discharged by a different
+design, not skipped.
+
+### D8 — `infra/fluent-bit/fluent-bit.conf` was edited, but not for the reason the checklist gave
+
+The checklist listed it for the carve-out; D3 records why the mechanism moved to
+a separate `_logType` instead, which needs no config change. The file **is** now
+edited, for a different reason the review surfaced: its surviving comment
+asserted the exclusion "no longer hides the only copy of an unattributable
+event", which this PR's own runbook correction contradicts for
+`invalid_user_id`; and `audit-refused`'s forwarding was held by the absence of a
+rule, with nothing in the file telling a future editor what an added Exclude
+would silence.
+
+### Correction to the Step 2-1 record
+
+Step 2-1 stated "CF1, CF3, CF4, CF5 are fixed in this phase". That was true of
+CF1 and CF3 and **false of CF4 and CF5** at the time it was written — the
+integration file they name was never touched in Phase 2. Phase 3's Critical
+finding is that gap. Both are now implemented; the earlier sentence is corrected
+here rather than edited in place, so the record shows what was claimed and when
+it became true.

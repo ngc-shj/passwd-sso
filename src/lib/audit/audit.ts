@@ -556,9 +556,12 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
     // refuses it, so enqueuing would cost a poison row instead of a log line.
     if (!assertEnqueueableUserId(params)) return;
 
-    // Refuse before resolving the tenant: `resolveTenantId` opens its own
-    // withBypassRls, which inside a context is a nesting the guard rejects, and
-    // reporting that as a generic failure would bury the reason.
+    // Refuse before the enqueue — and, where `params.tenantId` is absent, before
+    // `resolveTenantId` opens its own withBypassRls, which inside a context the
+    // guard rejects. Roughly half the tree's emit sites supply an explicit
+    // tenantId and never reach that opener, so the placement is not justified by
+    // the nesting alone: reporting a refusal as a generic failure would bury the
+    // reason either way.
     if (refuseIfInsideRlsContext(params)) return;
 
     // No `if (!tenantId)` branch: resolveTenantId never returns null, so every
@@ -644,8 +647,11 @@ export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<v
     const enqueueable = paramsList.filter(assertEnqueueableUserId);
     if (enqueueable.length === 0) return;
 
-    // One line per entry that would have been enqueued, matching the catch arm
-    // below — a batch that vanishes on one line reads as a single lost event.
+    // One line per entry that PASSED assertEnqueueableUserId — a batch that
+    // vanishes on one line reads as a single lost event. Deliberately narrower
+    // than the catch arm below, which iterates the whole `paramsList`: a
+    // transport failure cannot know which entries it touched, whereas a refusal
+    // knows exactly which ones it declined to write.
     if (getTenantRlsContext() !== undefined) {
       for (const params of enqueueable) refuseIfInsideRlsContext(params);
       return;

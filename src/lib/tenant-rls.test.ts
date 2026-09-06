@@ -392,12 +392,21 @@ describe("RLS nesting guards (C1)", () => {
     // so the OUTER defect is what gets reported. Asserted in the combination C3
     // newly covers — the pre-existing case is tenant-in-bypass.
     const { prisma } = makeMockPrisma();
+    // Class AND prefix, separately: C3 rewords both messages, so a
+    // substring-only assertion would drift, and the class is what distinguishes
+    // this from the sentinel refusal the same call would otherwise trigger.
     await expect(
       withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {
         await withTenantRls(prisma, SYSTEM_TENANT_ID, async () => undefined);
         return undefined;
       }),
     ).rejects.toThrow(/INVALID_RLS_NESTING/);
+    await expect(
+      withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {
+        await withTenantRls(prisma, SYSTEM_TENANT_ID, async () => undefined);
+        return undefined;
+      }),
+    ).rejects.not.toBeInstanceOf(RlsSentinelContextRefused);
 
     await expect(
       withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {

@@ -52,16 +52,25 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = process.env.EMERGENCY_ACTIVATE_ATOMIC_ROOT ?? join(__dirname, "..", "..");
 
 const ACTION = "EMERGENCY_ACCESS_ACTIVATE";
+/**
+ * `banAsyncOutright` marks a subject whose ENTIRE body runs inside the caller's
+ * RLS context. After C2 an async emit there is refused and writes no row
+ * anywhere, whatever action it carries — so for that file the ban is on the
+ * function, not on the action. The approve route is not such a file: an emit at
+ * its handler's top level sits outside the `withTenantRls` callback and is
+ * correct there, so only the activation action is constrained.
+ */
 const SUBJECTS = [
-  "src/lib/emergency-access/vault-auto-promote.ts",
-  "src/app/api/emergency-access/[id]/approve/route.ts",
+  { path: "src/lib/emergency-access/vault-auto-promote.ts", banAsyncOutright: true },
+  { path: "src/app/api/emergency-access/[id]/approve/route.ts", banAsyncOutright: false },
 ];
+const SUBJECT_PATHS = SUBJECTS.map((s) => s.path);
 
 console.log(
   `check-emergency-activate-atomic: ROOT=${REPO_ROOT} ACTION=${ACTION} SUBJECTS=${SUBJECTS.length}`,
 );
 
-const missing = SUBJECTS.filter((s) => !existsSync(join(REPO_ROOT, s)));
+const missing = SUBJECT_PATHS.filter((s) => !existsSync(join(REPO_ROOT, s)));
 if (missing.length > 0) {
   console.error(
     `\nFAIL: subject not found under ${REPO_ROOT}:\n` +
@@ -92,7 +101,8 @@ const project = createAstProject();
 const failures = [];
 let scanned = 0;
 
-for (const { rel, sf } of sourceFilesFrom(project, SUBJECTS, REPO_ROOT)) {
+for (const { rel, sf } of sourceFilesFrom(project, SUBJECT_PATHS, REPO_ROOT)) {
+  const subject = SUBJECTS.find((s) => rel.endsWith(s.path)) ?? { banAsyncOutright: false };
   scanned += 1;
   const inTx = [];
   const async = [];
@@ -102,8 +112,33 @@ for (const { rel, sf } of sourceFilesFrom(project, SUBJECTS, REPO_ROOT)) {
     if (callee.getKind() !== SyntaxKind.Identifier) continue;
     const name = callee.getText();
     if (name !== "logAuditInTx" && name !== "logAuditAsync") continue;
-    if (actionOf(call) !== ACTION) continue;
-    (name === "logAuditInTx" ? inTx : async).push(call.getStartLineNumber());
+
+    const line = call.getStartLineNumber();
+    const action = actionOf(call);
+
+    // Fail-CLOSED on an undecidable action. `actionOf` only reads an inline
+    // object literal, so an ordinary "extract the params object" refactor would
+    // otherwise make a `logAuditAsync` invisible here — the negative half would
+    // be silently skipped while the banner still claimed the file was clean.
+    if (action === null) {
+      failures.push(
+        `${rel}:${line}: cannot decide which action this ${name} call carries — ` +
+          `pass the action in an inline object literal so this gate can read it.`,
+      );
+      continue;
+    }
+
+    if (name === "logAuditAsync" && subject.banAsyncOutright) {
+      failures.push(
+        `${rel}:${line}: logAuditAsync in a file whose whole body runs under the ` +
+          `caller's RLS context. C2 refuses an in-context async emit, so this row ` +
+          `is written nowhere — whatever action it carries. Use logAuditInTx.`,
+      );
+      continue;
+    }
+
+    if (action !== ACTION) continue;
+    (name === "logAuditInTx" ? inTx : async).push(line);
   }
 
   if (inTx.length === 0) {
@@ -124,9 +159,9 @@ for (const { rel, sf } of sourceFilesFrom(project, SUBJECTS, REPO_ROOT)) {
 
 // sourceFilesFrom skips anything that is not a scannable source file; the
 // existsSync check above cannot tell that from a present-and-readable one.
-if (scanned !== SUBJECTS.length) {
+if (scanned !== SUBJECT_PATHS.length) {
   console.error(
-    `\nFAIL: expected to scan ${SUBJECTS.length} subjects, scanned ${scanned}.`,
+    `\nFAIL: expected to scan ${SUBJECT_PATHS.length} subjects, scanned ${scanned}.`,
   );
   process.exit(1);
 }
