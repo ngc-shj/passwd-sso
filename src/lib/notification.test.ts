@@ -64,7 +64,13 @@ describe("createNotification", () => {
   });
 
   it("resolves tenantId from user when not provided", async () => {
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "resolved-tenant" });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it. A mock carrying
+    // only the column would still resolve — through the FALLBACK — so it would
+    // read like the ordinary case while exercising the memberless one.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "resolved-tenant",
+      tenantMemberships: [{ tenantId: "resolved-tenant" }],
+    });
     mockPrismaNotification.create.mockResolvedValue({});
 
     createNotification({
@@ -80,7 +86,15 @@ describe("createNotification", () => {
 
     expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      select: { tenantId: true },
+      select: {
+        tenantId: true,
+        tenantMemberships: {
+          where: { deactivatedAt: null },
+          select: { tenantId: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+      },
     });
 
     expect(mockPrismaNotification.create).toHaveBeenCalledWith({

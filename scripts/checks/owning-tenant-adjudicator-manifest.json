@@ -1,0 +1,90 @@
+{
+  "src/lib/tenant-context.ts": {
+    "disposition": "column-intended",
+    "reason": "this IS the adjudicator"
+  },
+  "src/lib/audit/audit.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/lib/emergency-access/vault-auto-promote.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/lib/auth/policy/account-lockout.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/mcp/authorize/route.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/mcp/authorize/consent/route.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/lib/notification.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/lib/auth/session/auth-adapter.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/lib/auth/session/session-timeout.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/[locale]/mcp/authorize/page.tsx": {
+    "disposition": "adjudicator"
+  },
+  "src/auth.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/auth/passkey/verify/route.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/auth/passkey/options/email/route.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/user/passkey-status/route.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/tenant/policy/route.ts": {
+    "disposition": "adjudicator"
+  },
+  "src/app/api/extension/bridge-code/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/passwords/[id]/attachments/[attachmentId]/migrate/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/sends/file/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/sessions/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/travel-mode/disable/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/change-passphrase/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/recovery-key/generate/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/recovery-key/recover/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/rotate-key/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/setup/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/unlock/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/webauthn/register/verify/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/status/route.ts": {
+    "disposition": "tenant-scoped"
+  },
+  "src/app/api/vault/unlock/data/route.ts": {
+    "disposition": "tenant-scoped"
+  }
+}

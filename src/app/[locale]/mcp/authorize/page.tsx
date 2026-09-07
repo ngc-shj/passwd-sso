@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { getTranslations } from "next-intl/server";
 import { ConsentForm } from "./consent-form";
@@ -61,13 +62,13 @@ export default async function McpConsentPage({
 
   // Tenant check for non-DCR (admin-created) clients
   if (client.tenantId) {
-    const userRecord = await withBypassRls(prisma, async (tx) =>
-      tx.user.findUnique({
-        where: { id: session.user.id },
-        select: { tenantId: true },
-      }),
+    // The same adjudicator the consent POST uses. This comparison is an
+    // authorization decision, and against the stale `User.tenantId` column it
+    // admits or refuses on a tenant the user may hold no active membership in.
+    const userTenantId = await withBypassRls(prisma, async (tx) =>
+      resolveOwningTenantIdFromClient(tx, session.user.id),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-    if (client.tenantId !== userRecord?.tenantId) {
+    if (client.tenantId !== userTenantId) {
       return (
         <div className="flex items-center justify-center min-h-screen">
           <p>{t("errors.tenantMismatch")}</p>

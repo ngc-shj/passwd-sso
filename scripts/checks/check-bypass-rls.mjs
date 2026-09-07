@@ -147,8 +147,12 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/auth/tokens/api-key.ts", ["apiKey", "tenantMember"]],
   ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
-  ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
-  ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
+  // `tenant` reads the policy row directly by id. These files used to reach the
+  // same row by traversing `user.tenant`, which follows the stale `User.tenantId`
+  // column; the adjudicator resolves the active membership first, so the tenant
+  // is now loaded by that id. Same row, same bypass scope, named model.
+  ["src/app/api/auth/passkey/verify/route.ts", ["user", "session", "tenant"]],
+  ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential", "tenant"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],
@@ -171,7 +175,7 @@ const ALLOWED_USAGE = new Map([
   // Team member display: cross-tenant user + home-tenant name hydration for guest members
   ["src/lib/team/team-member-display.ts", ["user", "tenantMember"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
-  ["src/lib/auth/session/session-timeout.ts", ["user"]],
+  ["src/lib/auth/session/session-timeout.ts", ["user", "tenant"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check
   ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
   // iOS auth: token row updates (lastUsedIp/UA, replay-detection family revoke)
@@ -197,7 +201,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/health.ts", []],
   ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", []],
   ["src/app/api/maintenance/audit-chain-verify/route.ts", []],
-  ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],
+  ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user", "tenant"]],
   ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
   ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE
   ["src/app/api/share-links/verify-access/route.ts", ["passwordShare"]],

@@ -13,6 +13,8 @@ const {
   mockGenerateAuthenticationOpts,
   mockAssertOrigin,
   mockPrismaUserFindFirst,
+  mockPrismaUserFindUnique,
+  mockPrismaTenantFindUnique,
   mockPrismaWebAuthnFindMany,
   mockWithBypassRls,
 } = vi.hoisted(() => {
@@ -25,6 +27,8 @@ const {
     mockGenerateAuthenticationOpts: vi.fn(),
     mockAssertOrigin: vi.fn(),
     mockPrismaUserFindFirst: vi.fn(),
+    mockPrismaUserFindUnique: vi.fn(),
+    mockPrismaTenantFindUnique: vi.fn(),
     mockPrismaWebAuthnFindMany: vi.fn(),
     mockWithBypassRls: vi.fn(),
   };
@@ -68,7 +72,11 @@ vi.mock("@/lib/auth/session/csrf", () => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    user: { findFirst: mockPrismaUserFindFirst },
+    // findFirst keys by email and yields the id only; findUnique is
+    // `resolveOwningTenantIdFromClient`'s read, and the tenant is then loaded
+    // by that id rather than traversed through `user.tenant`.
+    user: { findFirst: mockPrismaUserFindFirst, findUnique: mockPrismaUserFindUnique },
+    tenant: { findUnique: mockPrismaTenantFindUnique },
     webAuthnCredential: { findMany: mockPrismaWebAuthnFindMany },
   },
 }));
@@ -98,6 +106,20 @@ const mockCredentials = [
   { credentialId: "cred-2-base64url", transports: ["internal"], prfSalt: null },
 ];
 
+// Seeds the three reads the route now makes: email → id, then the tenant id via
+// `resolveOwningTenantIdFromClient`, then the tenant row. The user read carries
+// the active membership as well as the column — column-only would resolve
+// through the FALLBACK, which is exactly the stale value this gate must not use.
+function seedUser(opts: { id: string; tenantId?: string; isBootstrap?: boolean }) {
+  const tenantId = opts.tenantId ?? "tenant-1";
+  mockPrismaUserFindFirst.mockResolvedValue({ id: opts.id });
+  mockPrismaUserFindUnique.mockResolvedValue({
+    tenantId,
+    tenantMemberships: [{ tenantId }],
+  });
+  mockPrismaTenantFindUnique.mockResolvedValue({ isBootstrap: opts.isBootstrap ?? true });
+}
+
 // ── Setup ────────────────────────────────────────────────────
 
 describe("POST /api/auth/passkey/options/email", () => {
@@ -120,10 +142,7 @@ describe("POST /api/auth/passkey/options/email", () => {
       (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma),
     );
     // Default: user found, bootstrap tenant
-    mockPrismaUserFindFirst.mockResolvedValue({
-      id: "user-1",
-      tenant: { isBootstrap: true },
-    });
+    seedUser({ id: "user-1" });
     mockPrismaWebAuthnFindMany.mockResolvedValue(mockCredentials);
   });
 
@@ -184,10 +203,7 @@ describe("POST /api/auth/passkey/options/email", () => {
   });
 
   it("treats SSO tenant user as unknown (returns dummy credentials)", async () => {
-    mockPrismaUserFindFirst.mockResolvedValue({
-      id: "user-sso",
-      tenant: { isBootstrap: false },
-    });
+    seedUser({ id: "user-sso", tenantId: "tenant-sso", isBootstrap: false });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: { email: "sso@corp.com" },
@@ -205,10 +221,10 @@ describe("POST /api/auth/passkey/options/email", () => {
   });
 
   it("allows user without tenant (null tenant)", async () => {
-    mockPrismaUserFindFirst.mockResolvedValue({
-      id: "user-no-tenant",
-      tenant: null,
-    });
+    // The null-tenant arm now hangs off the separate tenant read: the user row
+    // resolves an id (the column is NOT NULL), the tenant row is what is gone.
+    seedUser({ id: "user-no-tenant" });
+    mockPrismaTenantFindUnique.mockResolvedValue(null);
 
     const req = createRequest("POST", ROUTE_URL, {
       body: { email: "notenant@example.com" },

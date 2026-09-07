@@ -1355,6 +1355,25 @@ describe("signIn callback", () => {
   });
 
   describe("nodemailer provider", () => {
+    // The gate makes three user reads now — email → id, the tenant-id resolve
+    // by id, then the userId lookup by email — plus a tenant read by id. Keyed
+    // off the select so each returns only its own fields, as Prisma would; the
+    // membership carries the tenant id, because a column-only mock would resolve
+    // through the FALLBACK and read like the ordinary case.
+    function seedExistingUser(opts: { isBootstrap: boolean; tenantId?: string }) {
+      const tenantId = opts.tenantId ?? "tenant-1";
+      mockPrisma.user.findUnique.mockImplementation(
+        async ({ select }: { select: Record<string, unknown> }) =>
+          "tenantMemberships" in select
+            ? { tenantId, tenantMemberships: [{ tenantId }] }
+            : { id: "real-db-id" },
+      );
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        isBootstrap: opts.isBootstrap,
+        id: tenantId,
+      });
+    }
+
     it("returns true for new user (no existing DB record)", async () => {
       // user.findUnique returns null twice: once for nodemailer check, once for userId lookup
       mockPrisma.user.findUnique.mockResolvedValue(null);
@@ -1371,11 +1390,7 @@ describe("signIn callback", () => {
     });
 
     it("returns true for existing user in bootstrap tenant", async () => {
-      // First findUnique (nodemailer guard): existing user with bootstrap tenant
-      mockPrisma.user.findUnique
-        .mockResolvedValueOnce({ id: "real-db-id", tenant: { isBootstrap: true } })
-        // Second findUnique (userId lookup via email): existing user
-        .mockResolvedValueOnce({ id: "real-db-id" });
+      seedExistingUser({ isBootstrap: true });
       mockPrisma.tenantMember.findMany.mockResolvedValue([]);
       mockPrisma.tenantMember.upsert.mockResolvedValue({});
 
@@ -1389,11 +1404,8 @@ describe("signIn callback", () => {
     });
 
     it("returns false for existing user in SSO (non-bootstrap) tenant", async () => {
-      // nodemailer guard findUnique: user exists in a non-bootstrap (SSO) tenant
-      mockPrisma.user.findUnique.mockResolvedValueOnce({
-        id: "real-db-id",
-        tenant: { isBootstrap: false },
-      });
+      // nodemailer guard: user exists in a non-bootstrap (SSO) tenant
+      seedExistingUser({ isBootstrap: false, tenantId: "tenant-sso" });
 
       const result = await signInCallback({
         user: { id: "pre-gen-id", email: "sso-user@corp.com" },
@@ -1407,11 +1419,8 @@ describe("signIn callback", () => {
     });
 
     it("returns false when ensureTenantMembershipForSignIn throws unexpected error", async () => {
-      // First findUnique (nodemailer guard): bootstrap user — allowed through
-      mockPrisma.user.findUnique
-        .mockResolvedValueOnce({ id: "real-db-id", tenant: { isBootstrap: true } })
-        // Second findUnique (userId lookup): user exists
-        .mockResolvedValueOnce({ id: "real-db-id" });
+      // nodemailer guard: bootstrap user — allowed through
+      seedExistingUser({ isBootstrap: true });
       // tenantMember.findMany throws an unexpected error inside ensureTenantMembershipForSignIn
       mockPrisma.tenantMember.findMany.mockRejectedValueOnce(new Error("unexpected DB failure"));
 
@@ -1571,6 +1580,31 @@ describe("session callback — passkey enforcement fail-closed", () => {
     );
   });
 
+  // The block reads the user row for fetchFavicons, resolves the tenant id via
+  // `resolveOwningTenantIdFromClient`, then loads the tenant by that id. The two
+  // user reads are keyed off the select so each returns only its own fields; the
+  // membership must carry the tenant id, or the resolution rides the FALLBACK
+  // column while the fixture reads like the ordinary case.
+  function seedPasskeyPolicy(opts: {
+    fetchFavicons: boolean;
+    requirePasskey: boolean;
+    requirePasskeyEnabledAt: Date | null;
+    passkeyGracePeriodDays: number | null;
+  }) {
+    const tenantId = "tenant-1";
+    mockPrisma.user.findUnique.mockImplementation(
+      async ({ select }: { select: Record<string, unknown> }) =>
+        "tenantMemberships" in select
+          ? { tenantId, tenantMemberships: [{ tenantId }] }
+          : { fetchFavicons: opts.fetchFavicons },
+    );
+    mockPrisma.tenant.findUnique.mockResolvedValue({
+      requirePasskey: opts.requirePasskey,
+      requirePasskeyEnabledAt: opts.requirePasskeyEnabledAt,
+      passkeyGracePeriodDays: opts.passkeyGracePeriodDays,
+    });
+  }
+
   it("fails closed when the passkey-enforcement fetch throws (blocks, does not fail open)", async () => {
     // Simulate a transient DB/Redis failure inside the withBypassRls fetch.
     mockWithBypassRls.mockRejectedValueOnce(new Error("db down"));
@@ -1608,13 +1642,11 @@ describe("session callback — passkey enforcement fail-closed", () => {
   it("passes the real tenant values through on the happy path (fetch succeeds)", async () => {
     const enabledAt = new Date("2020-01-01T00:00:00.000Z");
     mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
-    mockPrisma.user.findUnique.mockResolvedValueOnce({
+    seedPasskeyPolicy({
       fetchFavicons: true,
-      tenant: {
-        requirePasskey: true,
-        requirePasskeyEnabledAt: enabledAt,
-        passkeyGracePeriodDays: 7,
-      },
+      requirePasskey: true,
+      requirePasskeyEnabledAt: enabledAt,
+      passkeyGracePeriodDays: 7,
     });
 
     const result = await sessionCallback(baseParams);
@@ -1628,13 +1660,11 @@ describe("session callback — passkey enforcement fail-closed", () => {
   it("does not block a passkey-holding user on the happy path (fail-closed, not always-closed)", async () => {
     // requirePasskey tenant, grace expired, but the user HAS a passkey.
     mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(1);
-    mockPrisma.user.findUnique.mockResolvedValueOnce({
+    seedPasskeyPolicy({
       fetchFavicons: false,
-      tenant: {
-        requirePasskey: true,
-        requirePasskeyEnabledAt: null, // immediate enforcement window
-        passkeyGracePeriodDays: null,
-      },
+      requirePasskey: true,
+      requirePasskeyEnabledAt: null, // immediate enforcement window
+      passkeyGracePeriodDays: null,
     });
 
     const result = await sessionCallback(baseParams);

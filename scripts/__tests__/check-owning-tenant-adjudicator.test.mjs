@@ -1,0 +1,229 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = join(HERE, "..", "..");
+const GATE = join(REPO, "scripts", "checks", "check-owning-tenant-adjudicator.mjs");
+const MANIFEST_REL = "scripts/checks/owning-tenant-adjudicator-manifest.json";
+
+let root;
+
+function run() {
+  try {
+    return {
+      code: 0,
+      out: execFileSync("node", [GATE], {
+        encoding: "utf8",
+        env: { ...process.env, OWNING_TENANT_CHECK_ROOT: root },
+        stdio: ["ignore", "pipe", "pipe"],
+      }),
+    };
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout ?? ""}${e.stderr ?? ""}` };
+  }
+}
+
+function write(rel, body) {
+  mkdirSync(join(root, dirname(rel)), { recursive: true });
+  writeFileSync(join(root, rel), body);
+}
+
+function manifest(obj) {
+  write(MANIFEST_REL, JSON.stringify(obj, null, 2));
+}
+
+/** The adjudicator read, as the helper issues it. */
+const HELPER_CALL = `const t = await resolveOwningTenantIdFromClient(tx, userId);\n`;
+
+/** A raw read of a user's tenant identity, unwrapped. */
+const RAW_READ = `const u = await tx.user.findUnique({ where: { id }, select: { tenantId: true } });\n`;
+
+const inBypass = (body) => `await withBypassRls(prisma, async (tx) => {\n${body}});\n`;
+const inTenantScope = (body) => `await withUserTenantRls(userId, async (tx) => {\n${body}});\n`;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "owning-tenant-"));
+  // ts-morph resolves nothing here, but the lib helper still needs the dir.
+  mkdirSync(join(root, "src"), { recursive: true });
+});
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+describe("check-owning-tenant-adjudicator", () => {
+  it("passes when an adjudicator file uses the helper and holds no raw read", () => {
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(0);
+    expect(out).toContain("no unconstrained read");
+  });
+
+  it("fails when an adjudicator file re-inlines a raw read under a bypass", () => {
+    // The regression the gate exists for: the helper call stays, and a raw read
+    // is added beside it. A file-set gate that only asked "does this file mention
+    // the helper" reports clean on exactly this.
+    write("src/lib/thing.ts", inBypass(HELPER_CALL + RAW_READ));
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+    expect(out).toContain("src/lib/thing.ts");
+  });
+
+  it("fails when an adjudicator file stops referencing the helper", () => {
+    write("src/lib/thing.ts", inTenantScope(RAW_READ));
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("never references");
+  });
+
+  // ─── the completeness halves ──────────────────────────────────────────────
+
+  it("fails when a file reads a user's tenant with no manifest entry", () => {
+    // The half that stops the class growing silently. It went 1 -> 2 -> 4 -> 16
+    // by hand before it was derived; a new site must not be able to join quietly.
+    write("src/lib/known.ts", inBypass(HELPER_CALL));
+    write("src/lib/newcomer.ts", inBypass(RAW_READ));
+    manifest({ "src/lib/known.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("no MANIFEST entry");
+    expect(out).toContain("src/lib/newcomer.ts");
+  });
+
+  it("fails when a manifest entry outlives the read it describes", () => {
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    write("src/lib/gone.ts", `export const x = 1;\n`);
+    manifest({
+      "src/lib/thing.ts": { disposition: "adjudicator" },
+      "src/lib/gone.ts": { disposition: "adjudicator" },
+    });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("MANIFEST entry with no user-tenant read");
+    expect(out).toContain("src/lib/gone.ts");
+  });
+
+  // ─── the allow side ───────────────────────────────────────────────────────
+
+  it("does not flag a read inside a tenant-scoped opener", () => {
+    // Without this the gate is indistinguishable from one that bans the column
+    // outright — 13 safe sites in the real tree read it this way, and RLS is what
+    // makes them safe.
+    write("src/lib/scoped.ts", inTenantScope(RAW_READ));
+    manifest({ "src/lib/scoped.ts": { disposition: "tenant-scoped" } });
+    expect(run().code).toBe(0);
+  });
+
+  it("resolves a LOCAL wrapper that delegates to a tenant-scoped opener", () => {
+    // `withVaultTenantRls` in the real tree. A name-matching pass calls this
+    // unconstrained — measured on the discovery pass — and the two files it
+    // affects would then need manifest exceptions they do not deserve.
+    write(
+      "src/lib/local-wrapper.ts",
+      `const withVaultTenantRls = (fn) => tenantId ? withTenantRls(prisma, tenantId, fn) : withUserTenantRls(userId, fn);\n` +
+        `await withVaultTenantRls(async (tx) => {\n${RAW_READ}});\n`,
+    );
+    manifest({ "src/lib/local-wrapper.ts": { disposition: "tenant-scoped" } });
+    expect(run().code).toBe(0);
+  });
+
+  it("does NOT accept a local wrapper that can reach a bypass", () => {
+    // The deny half of the clause above. A wrapper falling back to withBypassRls
+    // leaves the read unconstrained on that arm, so resolving it as safe would
+    // be a fail-open in the resolver itself.
+    write(
+      "src/lib/leaky-wrapper.ts",
+      `const maybeScoped = (fn) => tenantId ? withTenantRls(prisma, tenantId, fn) : withBypassRls(prisma, fn);\n` +
+        `await maybeScoped(async (tx) => {\n${RAW_READ}});\n`,
+    );
+    manifest({ "src/lib/leaky-wrapper.ts": { disposition: "tenant-scoped" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+  });
+
+  // ─── column-intended ──────────────────────────────────────────────────────
+
+  it("permits an unconstrained read only with a stated reason", () => {
+    write("src/lib/deliberate.ts", inBypass(RAW_READ));
+    manifest({ "src/lib/deliberate.ts": { disposition: "column-intended", reason: "this IS the adjudicator" } });
+    expect(run().code).toBe(0);
+  });
+
+  it("fails a column-intended entry with no reason", () => {
+    write("src/lib/deliberate.ts", inBypass(RAW_READ));
+    manifest({ "src/lib/deliberate.ts": { disposition: "column-intended" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("without a reason");
+  });
+
+  // ─── refusals: examined nothing must not read as found nothing ────────────
+
+  it("fails when the manifest is missing", () => {
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("manifest not found");
+  });
+
+  it("fails when the manifest is empty", () => {
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    manifest({});
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("is empty");
+  });
+
+  it("fails when the manifest is not valid JSON", () => {
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    write(MANIFEST_REL, "{ not json");
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("not valid JSON");
+  });
+
+  it("fails when the scan root holds no source files", () => {
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("zero source files");
+  });
+
+  it("fails when the scan root does not exist", () => {
+    rmSync(join(root, "src"), { recursive: true, force: true });
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("does not exist");
+  });
+
+  // ─── wiring ───────────────────────────────────────────────────────────────
+
+  it("is wired into scripts/pre-pr.sh", () => {
+    // The gate, this self-test and check-gate-selftest-coverage.sh all stay green
+    // if the runner line is deleted — an orphaned gate reports PASS by never
+    // running. Same remedy as check-emergency-activate-atomic.test.mjs.
+    const prePr = readFileSync(join(REPO, "scripts", "pre-pr.sh"), "utf8");
+    expect(prePr).toMatch(/^(queue|run)_step .*check-owning-tenant-adjudicator\.mjs/m);
+  });
+
+  it("the shipped manifest carries a reason on every column-intended entry", () => {
+    // Asserted against the REAL manifest, not a synthetic one: the reason is the
+    // only thing standing between "deliberate exception" and "silently exempt",
+    // and the gate can only check the entries a given root happens to exercise.
+    const real = JSON.parse(readFileSync(join(REPO, MANIFEST_REL), "utf8"));
+    const exempt = Object.entries(real).filter(([, v]) => v.disposition === "column-intended");
+    expect(exempt.length).toBeGreaterThan(0);
+    for (const [path, v] of exempt) {
+      expect(v.reason, `${path} is column-intended with no reason`).toBeTruthy();
+    }
+  });
+});

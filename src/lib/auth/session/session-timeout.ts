@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 // Cache scaffold. 60s TTL matches the pattern used by the retired sessionDurationCache.
@@ -66,36 +67,49 @@ export async function resolveEffectiveSessionTimeouts(
   }
   if (cached) cache.delete(userId);
 
-  // Fetch user's tenant policy + team policies in one round trip
+  // The tenant whose session timeouts govern is the user's ACTIVE MEMBERSHIP,
+  // not the `User.tenantId` column — a denormalized copy with no invalidation,
+  // and this read is bypass-scoped so RLS does not correct it. Resolved first
+  // and the tenant row loaded by id, rather than traversed through the relation,
+  // because the relation follows the column by definition.
   const user = await withBypassRls(
     prisma,
-    async (tx) =>
-      tx.user.findUnique({
-        where: { id: userId },
-        select: {
-          tenantId: true,
-          tenant: {
-            select: {
-              sessionIdleTimeoutMinutes: true,
-              sessionAbsoluteTimeoutMinutes: true,
-            },
+    async (tx) => {
+      const tenantId = await resolveOwningTenantIdFromClient(tx, userId);
+      if (!tenantId) return null;
+      const [tenant, memberships] = await Promise.all([
+        tx.tenant.findUnique({
+          where: { id: tenantId },
+          select: {
+            sessionIdleTimeoutMinutes: true,
+            sessionAbsoluteTimeoutMinutes: true,
           },
-          teamMemberships: {
+        }),
+        tx.user.findUnique({
+          where: { id: userId },
+          select: {
+            teamMemberships: {
             select: {
-              team: {
-                select: {
-                  policy: {
-                    select: {
-                      sessionIdleTimeoutMinutes: true,
-                      sessionAbsoluteTimeoutMinutes: true,
+                team: {
+                  select: {
+                    policy: {
+                      select: {
+                        sessionIdleTimeoutMinutes: true,
+                        sessionAbsoluteTimeoutMinutes: true,
+                      },
                     },
                   },
                 },
               },
             },
           },
-        },
-      }),
+        }),
+      ]);
+      // FAIL-CLOSED, same stance as the missing-user arm below: a null tenant row
+      // on a successful query is corruption, not "no policy".
+      if (!tenant || !memberships) return null;
+      return { tenantId, tenant, teamMemberships: memberships.teamMemberships };
+    },
     BYPASS_PURPOSE.AUTH_FLOW,
   );
 

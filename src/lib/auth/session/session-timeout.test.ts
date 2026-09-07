@@ -5,6 +5,11 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findUnique: vi.fn(),
     },
+    // The tenant policy is loaded by id now, not traversed through the
+    // `user.tenant` relation — the relation follows the stale column.
+    tenant: {
+      findUnique: vi.fn(),
+    },
   },
 }));
 
@@ -22,6 +27,7 @@ import {
 } from "./session-timeout";
 
 const mockFindUnique = prisma.user.findUnique as ReturnType<typeof vi.fn>;
+const mockTenantFindUnique = prisma.tenant.findUnique as ReturnType<typeof vi.fn>;
 
 function seedUser(params: {
   tenantId?: string;
@@ -29,25 +35,36 @@ function seedUser(params: {
   tenantAbsolute?: number;
   teams?: Array<{ idle?: number | null; absolute?: number | null }>;
 }) {
-  mockFindUnique.mockResolvedValue({
-    tenantId: params.tenantId ?? "tenant-1",
-    tenant: {
-      sessionIdleTimeoutMinutes: params.tenantIdle ?? 480,
-      sessionAbsoluteTimeoutMinutes: params.tenantAbsolute ?? 43200,
-    },
-    teamMemberships: (params.teams ?? []).map((t) => ({
-      team: {
-        policy: {
-          sessionIdleTimeoutMinutes: t.idle ?? null,
-          sessionAbsoluteTimeoutMinutes: t.absolute ?? null,
-        },
-      },
-    })),
+  const tenantId = params.tenantId ?? "tenant-1";
+  // Two distinct user reads now, keyed off the select so each returns only its
+  // own fields as Prisma would: `resolveOwningTenantIdFromClient`'s
+  // (tenantId + active memberships), then the teamMemberships one. The
+  // membership row must carry the tenant id — a column-only mock would resolve
+  // through the FALLBACK while reading like the ordinary case.
+  mockFindUnique.mockImplementation(
+    async ({ select }: { select: Record<string, unknown> }) =>
+      "tenantMemberships" in select
+        ? { tenantId, tenantMemberships: [{ tenantId }] }
+        : {
+            teamMemberships: (params.teams ?? []).map((t) => ({
+              team: {
+                policy: {
+                  sessionIdleTimeoutMinutes: t.idle ?? null,
+                  sessionAbsoluteTimeoutMinutes: t.absolute ?? null,
+                },
+              },
+            })),
+          },
+  );
+  mockTenantFindUnique.mockResolvedValue({
+    sessionIdleTimeoutMinutes: params.tenantIdle ?? 480,
+    sessionAbsoluteTimeoutMinutes: params.tenantAbsolute ?? 43200,
   });
 }
 
 beforeEach(() => {
   mockFindUnique.mockReset();
+  mockTenantFindUnique.mockReset();
   _internal.clear();
 });
 
@@ -145,7 +162,10 @@ describe("resolveEffectiveSessionTimeouts", () => {
     });
     await resolveEffectiveSessionTimeouts("user-cache", null);
     await resolveEffectiveSessionTimeouts("user-cache", null);
-    expect(mockFindUnique).toHaveBeenCalledTimes(1);
+    // One uncached resolution is TWO user reads now (the tenant-id resolve plus
+    // the teamMemberships read) and one tenant read; the second call adds none.
+    expect(mockFindUnique).toHaveBeenCalledTimes(2);
+    expect(mockTenantFindUnique).toHaveBeenCalledTimes(1);
   });
 
   it("cache entry is per-provider-agnostic and returns the same resolved values", async () => {
@@ -158,7 +178,8 @@ describe("resolveEffectiveSessionTimeouts", () => {
     const webauthn = await resolveEffectiveSessionTimeouts("user-9", "webauthn");
     expect(webauthn.idleMinutes).toBe(480);
     expect(webauthn.absoluteMinutes).toBe(43200);
-    expect(mockFindUnique).toHaveBeenCalledTimes(1);
+    // Two user reads for the single uncached resolution — see above.
+    expect(mockFindUnique).toHaveBeenCalledTimes(2);
   });
 
   it("ignores team values that are <= 0 (defensive)", async () => {
@@ -218,6 +239,7 @@ describe("session timeout cache eviction — TTL sweep before FIFO", () => {
   beforeEach(() => {
     _internal.clear();
     mockFindUnique.mockReset();
+    mockTenantFindUnique.mockReset();
   });
 
   it("evicts expired entries first when the cache fills, preserving fresh entries", async () => {

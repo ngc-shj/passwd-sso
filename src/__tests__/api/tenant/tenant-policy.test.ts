@@ -124,15 +124,20 @@ describe("GET /api/tenant/policy", () => {
   it("returns full policy including access restriction fields", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    // The user read is shaped as `resolveOwningTenantIdFromClient` selects it —
+    // column-only would still resolve, through the FALLBACK, and read like the
+    // ordinary case — and the policy is then loaded by id, not traversed.
     mockUserFindUnique.mockResolvedValue({
-      tenant: {
-        maxConcurrentSessions: 5,
-        sessionIdleTimeoutMinutes: null,
-        vaultAutoLockMinutes: null,
-        allowedCidrs: ["10.0.0.0/8"],
-        tailscaleEnabled: true,
-        tailscaleTailnet: "my-tailnet",
-      },
+      tenantId: "tenant1",
+      tenantMemberships: [{ tenantId: "tenant1" }],
+    });
+    mockTenantFindUnique.mockResolvedValue({
+      maxConcurrentSessions: 5,
+      sessionIdleTimeoutMinutes: null,
+      vaultAutoLockMinutes: null,
+      allowedCidrs: ["10.0.0.0/8"],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
     });
 
     const req = createRequest("GET", "http://localhost/api/tenant/policy");
@@ -149,7 +154,13 @@ describe("GET /api/tenant/policy", () => {
   it("returns defaults when no tenant data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockUserFindUnique.mockResolvedValue({ tenant: null });
+    // Tenant resolves, but its row is gone: the missing-policy arm now lives on
+    // the separate `tenant.findUnique`, not on a null `user.tenant` relation.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "tenant1",
+      tenantMemberships: [{ tenantId: "tenant1" }],
+    });
+    mockTenantFindUnique.mockResolvedValue(null);
 
     const req = createRequest("GET", "http://localhost/api/tenant/policy");
     const res = await GET(req);

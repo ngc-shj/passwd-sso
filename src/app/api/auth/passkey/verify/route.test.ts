@@ -10,6 +10,7 @@ const {
   mockAuthorizeWebAuthn,
   mockLogAudit,
   mockPrismaFindUnique,
+  mockPrismaTenantFindUnique,
   mockPrismaSessionDeleteMany,
   mockPrismaSessionFindMany,
   mockPrismaSessionCreate,
@@ -29,6 +30,7 @@ const {
     mockAuthorizeWebAuthn: vi.fn(),
     mockLogAudit: vi.fn(),
     mockPrismaFindUnique: vi.fn(),
+    mockPrismaTenantFindUnique: vi.fn(),
     mockPrismaSessionDeleteMany: vi.fn(),
     mockPrismaSessionFindMany: vi.fn(),
     mockPrismaSessionCreate: vi.fn(),
@@ -90,6 +92,8 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockPrismaFindUnique },
+    // The tenant is loaded by id now, not traversed through `user.tenant`.
+    tenant: { findUnique: mockPrismaTenantFindUnique },
     $transaction: mockPrismaTransaction,
     session: {
       deleteMany: mockPrismaSessionDeleteMany,
@@ -165,6 +169,22 @@ const mockUser = {
   credentialRowId: "cred-uuid-1",
 };
 
+// Three reads now: email → id, then `resolveOwningTenantIdFromClient`'s select,
+// then the tenant by id. The two user reads are keyed off the select so each
+// returns only its own fields, as Prisma would. The membership must carry the
+// tenant id — a column-only mock resolves through the FALLBACK, which is the
+// stale value this bootstrap gate must never admit on.
+function seedUser(opts: { tenantId?: string; isBootstrap?: boolean } = {}) {
+  const tenantId = opts.tenantId ?? "tenant-1";
+  mockPrismaFindUnique.mockImplementation(
+    async ({ select }: { select: Record<string, unknown> }) =>
+      "tenantMemberships" in select
+        ? { tenantId, tenantMemberships: [{ tenantId }] }
+        : { id: mockUser.id },
+  );
+  mockPrismaTenantFindUnique.mockResolvedValue({ isBootstrap: opts.isBootstrap ?? true });
+}
+
 // ── Setup ────────────────────────────────────────────────────
 
 describe("POST /api/auth/passkey/verify", () => {
@@ -186,10 +206,7 @@ describe("POST /api/auth/passkey/verify", () => {
     );
 
     // SSO tenant guard: user is in bootstrap tenant (allowed)
-    mockPrismaFindUnique.mockResolvedValue({
-      tenantId: "tenant-1",
-      tenant: { isBootstrap: true },
-    });
+    seedUser();
 
     // $transaction: execute callback with a mock tx that has session methods
     mockPrismaTransaction.mockImplementation(
@@ -470,10 +487,7 @@ describe("POST /api/auth/passkey/verify", () => {
   });
 
   it("returns 401 for SSO tenant user (non-bootstrap)", async () => {
-    mockPrismaFindUnique.mockResolvedValue({
-      tenantId: "tenant-sso",
-      tenant: { isBootstrap: false },
-    });
+    seedUser({ tenantId: "tenant-sso", isBootstrap: false });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -486,7 +500,9 @@ describe("POST /api/auth/passkey/verify", () => {
   });
 
   it("returns 401 when tenant relation is null (orphaned FK)", async () => {
-    mockPrismaFindUnique.mockResolvedValue({ tenantId: "tenant-1", tenant: null });
+    // The orphaned-FK arm is the separate tenant read returning null now.
+    seedUser();
+    mockPrismaTenantFindUnique.mockResolvedValue(null);
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
@@ -510,7 +526,12 @@ describe("POST /api/auth/passkey/verify", () => {
   });
 
   it("returns 401 when user has no tenantId", async () => {
-    mockPrismaFindUnique.mockResolvedValue({ tenantId: null, tenant: null });
+    // `User.tenantId` is NOT NULL, so the resolve yields null only when the row
+    // itself is gone — the second read, by id, missing it.
+    mockPrismaFindUnique.mockImplementation(
+      async ({ select }: { select: Record<string, unknown> }) =>
+        "tenantMemberships" in select ? null : { id: mockUser.id },
+    );
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,

@@ -18,6 +18,7 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -84,10 +85,17 @@ async function handleGET(_req: NextRequest) {
     return handleAuthError(e);
   }
 
-  const user = await withBypassRls(prisma, async (tx) =>
-    tx.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenant: { select: {
+  // The policy shown is the ACTIVE MEMBERSHIP's, not the `User.tenantId`
+  // column's. The caller was authorized by `requireTenantPermission`, which
+  // opens the membership tenant — displaying a different tenant's policy here
+  // would contradict the tenant this request was admitted to.
+  const user = await withBypassRls(prisma, async (tx) => {
+    const tenantId = await resolveOwningTenantIdFromClient(tx, session.user.id);
+    if (!tenantId) return null;
+    return {
+      tenant: await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
         maxConcurrentSessions: true,
         sessionIdleTimeoutMinutes: true,
         sessionAbsoluteTimeoutMinutes: true,
@@ -126,9 +134,10 @@ async function handleGET(_req: NextRequest) {
         jitTokenMaxTtlSec: true,
         delegationDefaultTtlSec: true,
         delegationMaxTtlSec: true,
-      } } },
-    }),
-  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+        },
+      }),
+    };
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { checkAuth } from "@/lib/auth/session/check-auth";
 import { errorResponse, rateLimited } from "@/lib/http/api-response";
@@ -30,22 +31,25 @@ async function handleGET(request: NextRequest) {
 
   try {
     const data = await withBypassRls(prisma, async (tx) => {
-      const [credCount, user] = await Promise.all([
+      // Whose passkey enforcement applies is decided by the ACTIVE MEMBERSHIP.
+      // Traversing `user.tenant` follows the `User.tenantId` column instead — a
+      // denormalized copy with no invalidation, uncorrected here because the read
+      // is bypass-scoped.
+      const [credCount, tenantId] = await Promise.all([
         tx.webAuthnCredential.count({ where: { userId } }),
-        tx.user.findUnique({
-          where: { id: userId },
-          select: {
-            tenant: {
-              select: {
-                requirePasskey: true,
-                requirePasskeyEnabledAt: true,
-                passkeyGracePeriodDays: true,
-              },
-            },
-          },
-        }),
+        resolveOwningTenantIdFromClient(tx, userId),
       ]);
-      return { credCount, tenant: user?.tenant ?? null };
+      const tenant = tenantId
+        ? await tx.tenant.findUnique({
+            where: { id: tenantId },
+            select: {
+              requirePasskey: true,
+              requirePasskeyEnabledAt: true,
+              passkeyGracePeriodDays: true,
+            },
+          })
+        : null;
+      return { credCount, tenant };
     }, BYPASS_PURPOSE.AUTH_FLOW);
 
     const hasPasskey = data.credCount > 0;

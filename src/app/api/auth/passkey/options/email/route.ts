@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getRedis } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
@@ -98,15 +99,20 @@ async function handlePOST(req: NextRequest) {
   // Look up user and their credentials (cross-tenant, unauthenticated)
   let allowCredentials: Array<{ credentialId: string; transports: string[] }>;
 
-  const user = await withBypassRls(prisma, async (tx) =>
-    tx.user.findFirst({
-      where: { email },
-      select: {
-        id: true,
-        tenant: { select: { isBootstrap: true } },
-      },
-    }),
-  BYPASS_PURPOSE.AUTH_FLOW);
+  // The bootstrap check has to be against the tenant the user actually belongs
+  // to. Traversing `user.tenant` follows the `User.tenantId` column, which is a
+  // denormalized copy of the active membership with no invalidation — after SCIM
+  // provisions the user into an SSO tenant it still points at the old bootstrap
+  // one, and this gate is what keeps passkey sign-in out of SSO tenants.
+  const user = await withBypassRls(prisma, async (tx) => {
+    const found = await tx.user.findFirst({ where: { email }, select: { id: true } });
+    if (!found) return null;
+    const tenantId = await resolveOwningTenantIdFromClient(tx, found.id);
+    const tenant = tenantId
+      ? await tx.tenant.findUnique({ where: { id: tenantId }, select: { isBootstrap: true } })
+      : null;
+    return { id: found.id, tenant };
+  }, BYPASS_PURPOSE.AUTH_FLOW);
 
   // SSO tenant users are rejected by the verify route's tenant guard,
   // so treat them the same as "not found" to avoid leaking info.

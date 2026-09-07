@@ -173,6 +173,18 @@ const BASE_POLICY = {
   requireMinPinLength: null,
 };
 
+// GET resolves the tenant id through `resolveOwningTenantIdFromClient` and then
+// loads the policy by id, so both reads are seeded. The user read carries the
+// membership as well as the column — a column-only mock would still resolve,
+// through the FALLBACK, and read like the ordinary case.
+function seedGetPolicy(policy: Record<string, unknown>) {
+  mockPrismaUserFindUnique.mockResolvedValue({
+    tenantId: MEMBERSHIP.tenantId,
+    tenantMemberships: [{ tenantId: MEMBERSHIP.tenantId }],
+  });
+  mockPrismaTenantFindUnique.mockResolvedValue(policy);
+}
+
 // ── Setup ────────────────────────────────────────────────────
 
 describe("GET /api/tenant/policy", () => {
@@ -181,9 +193,7 @@ describe("GET /api/tenant/policy", () => {
 
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTenantPermission.mockResolvedValue(MEMBERSHIP);
-    mockPrismaUserFindUnique.mockResolvedValue({
-      tenant: { ...BASE_POLICY },
-    });
+    seedGetPolicy({ ...BASE_POLICY });
     mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
   });
 
@@ -198,9 +208,7 @@ describe("GET /api/tenant/policy", () => {
   });
 
   it("returns requireMinPinLength from tenant policy", async () => {
-    mockPrismaUserFindUnique.mockResolvedValue({
-      tenant: { ...BASE_POLICY, requireMinPinLength: 6 },
-    });
+    seedGetPolicy({ ...BASE_POLICY, requireMinPinLength: 6 });
 
     const req = createRequest("GET", ROUTE_URL);
     const { status, json } = await parseResponse(await GET(req));
@@ -594,9 +602,7 @@ describe("PATCH /api/tenant/policy", () => {
 
     for (const field of FIELDS) {
       it(`GET returns ${field} from tenant policy`, async () => {
-        mockPrismaUserFindUnique.mockResolvedValue({
-          tenant: { ...BASE_POLICY, [field]: 42 },
-        });
+        seedGetPolicy({ ...BASE_POLICY, [field]: 42 });
         const req = createRequest("GET", ROUTE_URL);
         const { status, json } = await parseResponse(await GET(req));
         expect(status).toBe(200);
@@ -604,7 +610,7 @@ describe("PATCH /api/tenant/policy", () => {
       });
 
       it(`GET returns ${field}=null when not set`, async () => {
-        mockPrismaUserFindUnique.mockResolvedValue({ tenant: { ...BASE_POLICY } });
+        seedGetPolicy({ ...BASE_POLICY });
         const req = createRequest("GET", ROUTE_URL);
         const { status, json } = await parseResponse(await GET(req));
         expect(status).toBe(200);

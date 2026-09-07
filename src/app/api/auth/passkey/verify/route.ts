@@ -20,6 +20,7 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { EXTENSION_TOKEN_REVOKE_REASON } from "@/lib/auth/tokens/extension-token";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import {
   getSessionCookieName,
   isSecureCookieFromAuthUrl,
@@ -97,12 +98,24 @@ async function handlePOST(req: NextRequest) {
   // because passkey sign-in is restricted to bootstrap-tenant users only (the sign-in
   // page hides the passkey button when SSO is configured). We don't need tenant claim
   // extraction, cross-tenant migration, or membership upsert here.
-  const existingUser = await withBypassRls(prisma, async (tx) =>
-    tx.user.findUnique({
-      where: { email: user.email },
-      select: { tenantId: true, tenant: { select: { isBootstrap: true } } },
-    }),
-  BYPASS_PURPOSE.AUTH_FLOW);
+  //
+  // The bootstrap check and the tenant stamped on the session below must be the
+  // SAME id, and it must be the active membership's: `User.tenantId` is a
+  // denormalized copy with no invalidation, so against the stale value this gate
+  // reads the old bootstrap tenant and admits a sign-in the user's actual SSO
+  // tenant forbids — and then files the session under a tenant `/api/sessions`
+  // (which opens the membership) cannot list or revoke.
+  const existingUser = await withBypassRls(prisma, async (tx) => {
+    const found = await tx.user.findUnique({ where: { email: user.email }, select: { id: true } });
+    if (!found) return null;
+    const tenantId = await resolveOwningTenantIdFromClient(tx, found.id);
+    if (!tenantId) return null;
+    const tenant = await tx.tenant.findUnique({
+      where: { id: tenantId },
+      select: { isBootstrap: true },
+    });
+    return { tenantId, tenant };
+  }, BYPASS_PURPOSE.AUTH_FLOW);
   if (!existingUser?.tenantId || !existingUser.tenant || !existingUser.tenant.isBootstrap) {
     return errorResponse(API_ERROR.AUTHENTICATION_FAILED);
   }

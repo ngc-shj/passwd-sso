@@ -8,6 +8,7 @@ import { findOrCreateTenantForClaim } from "@/lib/tenant/tenant-management";
 import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { withBypassRls, BYPASS_PURPOSE, advisoryXactLock } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/policy/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, SESSION_IP_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
@@ -98,15 +99,30 @@ export class TenantClaimUnusableError extends Error {
 export function createCustomAdapter(): Adapter {
   const base = PrismaAdapter(prisma);
 
+  /**
+   * The tenant to stamp on this user's Account and Session rows, and the one
+   * whose `maxConcurrentSessions` cap applies.
+   *
+   * The active membership, not the `User.tenantId` column. `/api/sessions` lists
+   * AND revokes under `withUserTenantRls`, so a session filed under the stale
+   * copy is one the revoke path matches zero rows for while reporting success.
+   *
+   * The read runs under the caller's bypass — this happens during sign-in,
+   * before any tenant context exists — which is also why RLS cannot correct the
+   * column here the way it does for the tenant-scoped call sites.
+   */
   async function resolveTenantIdForUser(userId: string): Promise<string> {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true },
-    });
-    if (!user) {
+    // The ambient client, deliberately — every caller already runs inside the
+    // adapter's own `withBypassRls`, so opening another is refused outright by
+    // the nesting guard (measured: the cold/warm session-timeout integration
+    // cells fail with INVALID_RLS_NESTING). Under an active context the Proxy
+    // delegates this to the enclosing transaction, which is the shape the raw
+    // read here always had.
+    const tenantId = await resolveOwningTenantIdFromClient(prisma, userId);
+    if (!tenantId) {
       throw new Error(API_ERROR.USER_NOT_FOUND);
     }
-    return user.tenantId;
+    return tenantId;
   }
 
   return {
