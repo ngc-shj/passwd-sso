@@ -27,7 +27,10 @@ vi.mock("@/lib/prisma", () => ({
     user: { findUnique: mockUserFindUnique },
   },
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+// Real module underneath so `getTenantRlsContext` resolves for audit.ts's
+// load-time assertion; the opener override stays.
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
   BYPASS_PURPOSE: { AUTH_FLOW: "AUTH_FLOW" },
 }));

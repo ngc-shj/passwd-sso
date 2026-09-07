@@ -400,6 +400,34 @@ describe("check-rls-read-context", () => {
     expect(r.stderr).toContain("must not be set in CI");
   });
 
+  it("keeps both src/lib members in the default scan set", () => {
+    // Asserted against the gate's EFFECTIVE default, read from its own banner —
+    // not against the file text. A `toContain` over the source matched the
+    // docblock as well as the assignment, so removing a member from SEARCH_DIRS
+    // left both predicates true: zero delta on the exact mutation the case
+    // exists for. Red-proved after the change by dropping a member and watching
+    // this fail.
+    //
+    // Two src/lib files are here deliberately — health.ts runs outside any ALS
+    // transaction, and audit-outbox.ts opens on the un-proxied client — so
+    // neither is covered by the ambient-Proxy argument that keeps the rest of
+    // src/lib out.
+    // No RLS_READ_CONTEXT_DIRS: the point is the DEFAULT, so runGate (which
+    // always sets an override) cannot answer this one.
+    const env = { ...process.env };
+    // DELETE, not set-to-empty: the gate reads the override with `??`, so an
+    // empty string is a legitimate value meaning "scan nothing".
+    delete env.RLS_READ_CONTEXT_DIRS;
+    delete env.RLS_READ_CONTEXT_ROOT;
+    const r = spawnSync("node", [GATE], { encoding: "utf8", env });
+    const banner = r.stdout
+      .split("\n")
+      .find((l) => l.startsWith("check-rls-read-context: SEARCH_DIRS="));
+    expect(banner, "gate did not print its SEARCH_DIRS banner").toBeTruthy();
+    expect(banner).toContain("src/lib/health.ts");
+    expect(banner).toContain("src/lib/audit/audit-outbox.ts");
+  });
+
   it("is wired into scripts/pre-pr.sh", () => {
     // The gate's only execution path (CI runs PRE_PR_STATIC_ONLY=1 pre-pr.sh).
     // Deleting that line disarms it in both places, and

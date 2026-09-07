@@ -13,6 +13,11 @@ on:
       - 'src/lib/prisma/**'
       - 'src/lib/redis.ts'
       - 'src/lib/tenant-rls.ts'
+      # audit/** writes audit_outbox and is covered only by integration tests for
+      # the invariant that the outbox openers use the un-proxied client — no
+      # static gate can tell the two clients apart, so a PR touching only this
+      # directory must still reach this job.
+      - 'src/lib/audit/**'
       - 'src/lib/tenant-context.ts'
       - 'src/lib/tenant/**'
       - 'src/lib/mcp/**'

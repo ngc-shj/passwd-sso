@@ -1,23 +1,53 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockWithBypassRls, mockLogAuditAsync, mockPersonalAuditBase } = vi.hoisted(() => ({
+// The grantee's tenant, as `autoPromoteIfElapsed` now resolves it from
+// `User.tenantId` inside the promotion transaction.
+const GRANTEE_TENANT_ID = "22222222-2222-4222-8222-222222222222";
+
+const {
+  mockAuth,
+  mockPrismaGrant,
+  mockPrismaUser,
+  mockWithBypassRls,
+  mockLogAuditInTx,
+  mockPersonalAuditBase,
+} = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
     updateMany: vi.fn(),
   },
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockLogAuditAsync: vi.fn(),
+  mockPrismaUser: { findUnique: vi.fn() },
+  // A DISTINCT object, not the module client. `logAuditInTx` must be called
+  // with the client the bypass callback received; handing it `prisma` itself
+  // would make that assertion an identity and pass on a non-atomic emit.
+  mockWithBypassRls: vi.fn(),
+  mockLogAuditInTx: vi.fn(),
   mockPersonalAuditBase: vi.fn((_, userId: string) => ({ scope: "PERSONAL", userId })),
 }));
 
+// Built after the hoisted block so the tx can reference the model spies.
+const bypassTx = {
+  emergencyAccessGrant: mockPrismaGrant,
+  user: mockPrismaUser,
+  $queryRaw: vi.fn(),
+};
+mockWithBypassRls.mockImplementation(async (_p: unknown, fn: (tx: unknown) => unknown) => fn(bypassTx));
+
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+// `user` and `$queryRaw` are here because the promotion now resolves the
+// grantee's tenant and writes its audit row on the same client the bypass
+// callback receives — the mock has to model what the production path touches.
 vi.mock("@/lib/prisma", () => ({
-  prisma: { emergencyAccessGrant: mockPrismaGrant },
+  prisma: {
+    emergencyAccessGrant: mockPrismaGrant,
+    user: mockPrismaUser,
+    $queryRaw: vi.fn(),
+  },
 }));
 vi.mock("@/lib/audit/audit", () => ({
-  logAuditAsync: mockLogAuditAsync,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   personalAuditBase: mockPersonalAuditBase,
 }));
@@ -59,6 +89,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "grantee-1" } });
     mockPrismaGrant.findUnique.mockResolvedValue(activatedGrant);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: GRANTEE_TENANT_ID });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -116,7 +147,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     };
     mockPrismaGrant.findUnique
       .mockResolvedValueOnce(requestedGrant)  // route initial load
-      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1" }) // eligibility check
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1", ownerId: "owner-1" }) // eligibility check
       .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED }); // post-promotion refetch
     mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
 
@@ -130,6 +161,19 @@ describe("GET /api/emergency-access/[id]/vault", () => {
         data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
       })
     );
+    // The activation row is written on the promotion's own client, under the
+    // grantee's tenant, and says the escrow was actually released.
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    const [txArg, tenantArg, params] = mockLogAuditInTx.mock.calls[0];
+    // The client, not just the tenant: this is what separates a row written on
+    // the promotion's own transaction from one written beside it.
+    expect(txArg).toBe(bypassTx);
+    expect(tenantArg).toBe(GRANTEE_TENANT_ID);
+    expect(params).toMatchObject({
+      action: "EMERGENCY_ACCESS_ACTIVATE",
+      targetId: "grant-1",
+      metadata: { ownerId: "owner-1", outcome: "released" },
+    });
   });
 
   it("returns ECDH data when ACTIVATED", async () => {
@@ -151,6 +195,45 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(mockWithBypassRls).toHaveBeenCalled();
   });
 
+  it("returns EMERGENCY_RECOVERY_KEY_MISSING and still records the activation when the promoted grant has no escrow", async () => {
+    // The third outcome. Like `revoked`, the CAS committed ACTIVATED and the
+    // route refuses the payload — so before the emit was hoisted this path
+    // produced no audit row at all. `no_escrow` is reachable through either disjunct; this
+    // fixture uses the missing key pair.
+    const requestedGrant = {
+      ...activatedGrant,
+      status: EA_STATUS.REQUESTED,
+      waitExpiresAt: new Date("2020-01-01"),
+    };
+    mockPrismaGrant.findUnique
+      .mockResolvedValueOnce(requestedGrant)
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1", ownerId: "owner-1" })
+      .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED, granteeKeyPair: null });
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault"),
+      createParams({ id: "grant-1" })
+    );
+    // 400, not 403 — this arm answers EMERGENCY_RECOVERY_KEY_MISSING while the
+    // revoked arm answers GRANT_REVOKED. The status is asserted so a change to
+    // the response shape is visible here, but the row is the point.
+    expect(res.status).toBe(400);
+    // The CAS committed, asserted FIRST — that is what makes a missing row a
+    // defect rather than an absence of anything to record.
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
+      }),
+    );
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][0]).toBe(bypassTx);
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
+      action: "EMERGENCY_ACCESS_ACTIVATE",
+      metadata: { ownerId: "owner-1", outcome: "no_escrow" },
+    });
+  });
+
   it("returns 403 with GRANT_REVOKED when promoted grant was revoked concurrently", async () => {
     const requestedGrant = {
       ...activatedGrant,
@@ -160,7 +243,7 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     // eligibility passes, transition succeeds, but refetch shows revokedAt set
     mockPrismaGrant.findUnique
       .mockResolvedValueOnce(requestedGrant)  // route initial load
-      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1" }) // eligibility check
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1", ownerId: "owner-1" }) // eligibility check
       .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED, revokedAt: new Date() }); // refetch — revoked
     mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
 
@@ -169,5 +252,22 @@ describe("GET /api/emergency-access/[id]/vault", () => {
       createParams({ id: "grant-1" })
     );
     expect(res.status).toBe(403);
+    // The CAS committed ACTIVATED, so the row is written even though the vault
+    // was withheld — this path produced NO audit row before, which is the defect
+    // the emit's placement fixes. `outcome` is what keeps the record honest
+    // about the fact that nothing was released.
+    // The CAS committed, asserted FIRST — that is what makes a missing row a
+    // defect rather than an absence of anything to record.
+    expect(mockPrismaGrant.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: EA_STATUS.ACTIVATED }),
+      }),
+    );
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][0]).toBe(bypassTx);
+    expect(mockLogAuditInTx.mock.calls[0][2]).toMatchObject({
+      action: "EMERGENCY_ACCESS_ACTIVATE",
+      metadata: { ownerId: "owner-1", outcome: "revoked" },
+    });
   });
 });

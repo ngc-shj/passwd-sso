@@ -483,6 +483,19 @@ export function createCustomAdapter(): Adapter {
         evicted: { id: string; sessionToken: string; ipAddress: string | null; userAgent: string | null }[];
       } | null = null;
 
+      // Hoisted above the opener for the same reason the comment above gives
+      // for logAudit/createNotification: on a cache miss this opens its own
+      // withBypassRls, and a bypass inside a bypass is a nesting the guard now
+      // refuses. It reads nothing from the transaction below.
+      // Override Auth.js's default expires with the per-user resolved idle
+      // window. At createSession time `createdAt === now`, so the absolute
+      // bound does not further constrain the first expires; subsequent
+      // updateSession calls enforce `min(now + idle, createdAt + absolute)`.
+      const resolved = await resolveEffectiveSessionTimeouts(
+        session.userId,
+        meta?.provider ?? null,
+      );
+
       const created = await withBypassRls(prisma, async (tx) => {
         const tenantId = await resolveTenantIdForUser(session.userId);
 
@@ -534,14 +547,6 @@ export function createCustomAdapter(): Adapter {
           }
         }
 
-        // Override Auth.js's default expires with the per-user resolved idle
-        // window. At createSession time `createdAt === now`, so the absolute
-        // bound does not further constrain the first expires; subsequent
-        // updateSession calls enforce `min(now + idle, createdAt + absolute)`.
-        const resolved = await resolveEffectiveSessionTimeouts(
-          session.userId,
-          meta?.provider ?? null,
-        );
         const resolvedExpires = new Date(
           Date.now() + resolved.idleMinutes * MS_PER_MINUTE,
         );

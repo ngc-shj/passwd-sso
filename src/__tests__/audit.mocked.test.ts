@@ -9,6 +9,9 @@ const {
   mockAuditInfo,
   mockDeadLetterWarn,
   mockEnqueueAudit,
+  mockEnqueueAuditBulk,
+  mockEnqueueAuditInTx,
+  mockRefusedWarn,
   mockUserFindUnique,
   mockTeamFindUnique,
   mockTransaction,
@@ -17,6 +20,9 @@ const {
   mockAuditInfo: vi.fn(),
   mockDeadLetterWarn: vi.fn(),
   mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
+  mockEnqueueAuditBulk: vi.fn().mockResolvedValue(undefined),
+  mockEnqueueAuditInTx: vi.fn().mockResolvedValue(undefined),
+  mockRefusedWarn: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockTeamFindUnique: vi.fn(),
   mockTransaction: vi.fn(),
@@ -54,7 +60,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 
 vi.mock("@/lib/audit/audit-outbox", () => ({
   enqueueAudit: mockEnqueueAudit,
-  enqueueAuditInTx: vi.fn(),
+  enqueueAuditBulk: mockEnqueueAuditBulk,
+  enqueueAuditInTx: mockEnqueueAuditInTx,
 }));
 
 vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
@@ -63,10 +70,24 @@ vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
     ...actual,
     auditLogger: { info: mockAuditInfo, enabled: true },
     deadLetterLogger: { warn: mockDeadLetterWarn },
+    refusedEmitLogger: { warn: mockRefusedWarn },
   };
 });
 
-import { logAuditAsync, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit/audit";
+import {
+  logAuditAsync,
+  logAuditBulkAsync,
+  logAuditAsyncBothScopes,
+  logAuditInTx,
+  AUDIT_DEAD_LETTER_REASON,
+  sanitizeMetadata,
+  extractRequestMeta,
+  resolveActorType,
+} from "@/lib/audit/audit";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+// The mocked client the openers run against; its $transaction invokes the
+// callback with itself, which is what lets the real openers execute here.
+import { prisma as mockedPrisma } from "@/lib/prisma";
 
 describe("logAuditAsync", () => {
   beforeEach(() => {
@@ -609,5 +630,176 @@ describe("extractRequestMeta", () => {
 
     expect(result.ip).toBeNull();
     expect(result.userAgent).toBeNull();
+  });
+});
+
+// The tenant the RLS context is opened on. Canonical and non-sentinel because
+// the REAL withTenantRls runs here and assertOpenableTenantContext refuses
+// anything else.
+const CTX_TENANT_ID = "33333333-3333-4333-8333-333333333333";
+const ACTOR_ID = "44444444-4444-4444-8444-444444444444";
+
+function emitParams(overrides: Record<string, unknown> = {}) {
+  return {
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.AUTH_LOGIN,
+    userId: ACTOR_ID,
+    ...overrides,
+  } as Parameters<typeof logAuditAsync>[0];
+}
+
+/**
+ * C2 — an audit emit issued while an RLS context is open is refused.
+ *
+ * These run against the REAL withTenantRls / withBypassRls / tenantRlsStorage —
+ * the `@/lib/tenant-rls` mock is a bare `importOriginal` spread with no
+ * overrides, and `@/lib/prisma`'s $transaction invokes its callback — so the
+ * store the refusal reads is the one production creates. (`audit-outbox` and
+ * `audit-logger` are mocked too; they are the observation surface, not the
+ * subject.) A faked context object would make every assertion here an identity.
+ */
+describe("logAuditAsync — refusal inside an RLS context (C2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnqueueAudit.mockResolvedValue(undefined);
+    mockEnqueueAuditBulk.mockResolvedValue(undefined);
+    mockExecuteRaw.mockResolvedValue(0);
+    mockUserFindUnique.mockResolvedValue({ tenantId: CTX_TENANT_ID });
+  });
+
+  it("writes nothing and records one refusal inside a tenant context with an explicit tenantId", async () => {
+    // The cell the fold was reachable in: with tenantId supplied,
+    // resolveTenantId early-returns, so pre-C1 this reached enqueueAudit and the
+    // Proxy folded it into this very transaction.
+    await withTenantRls(mockedPrisma as never, CTX_TENANT_ID, async () => {
+      await logAuditAsync(emitParams({ tenantId: CTX_TENANT_ID }));
+    });
+
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    expect(mockRefusedWarn).toHaveBeenCalledTimes(1);
+    // The literal, not the constant compared to itself: this string is what
+    // docs/operations/alerts.md tells operators to query on, so a value change
+    // has to redden something rather than silently stale the runbook.
+    expect(mockRefusedWarn.mock.calls[0][0]).toMatchObject({
+      reason: "emit_inside_rls_context",
+    });
+    expect(AUDIT_DEAD_LETTER_REASON.EMIT_INSIDE_RLS_CONTEXT).toBe("emit_inside_rls_context");
+    // The structured line still goes out — it runs before the check, and it is
+    // the record meant to survive a database outage.
+    expect(mockAuditInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it("writes nothing and records one refusal inside a bypass context with no tenantId", async () => {
+    // The shape the one live in-context emit had before C0 converted it.
+    await withBypassRls(mockedPrisma as never, async () => {
+      await logAuditAsync(emitParams());
+    }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    expect(mockRefusedWarn).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses the bulk path too, one line per entry that would have been enqueued", async () => {
+    // logAuditBulkAsync is not a delegate: its own prefix, its own
+    // assertEnqueueableUserId filter, its own catch. A check added only to
+    // logAuditAsync satisfies every other cell here and misses this one.
+    await withTenantRls(mockedPrisma as never, CTX_TENANT_ID, async () => {
+      await logAuditBulkAsync([
+        emitParams({ tenantId: CTX_TENANT_ID }),
+        emitParams({ tenantId: CTX_TENANT_ID }),
+      ]);
+    });
+
+    expect(mockEnqueueAuditBulk).not.toHaveBeenCalled();
+    expect(mockRefusedWarn).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses both scopes of the both-scopes fan-out", async () => {
+    await withTenantRls(mockedPrisma as never, CTX_TENANT_ID, async () => {
+      await logAuditAsyncBothScopes({
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: ACTOR_ID,
+        tenantId: CTX_TENANT_ID,
+      });
+    });
+
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    expect(mockRefusedWarn).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a malformed actor id as such, not as a refusal, even inside a context", async () => {
+    // I2.2's ordering: assertEnqueueableUserId runs BEFORE the context check, so
+    // a caller passing a malformed id learns that rather than learning the
+    // emit was in the wrong place. A check hoisted above it would spell both
+    // faults the same.
+    await withTenantRls(mockedPrisma as never, CTX_TENANT_ID, async () => {
+      await logAuditAsync(emitParams({ userId: "not-a-uuid", tenantId: CTX_TENANT_ID }));
+    });
+
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    expect(mockRefusedWarn).not.toHaveBeenCalled();
+    expect(mockDeadLetterWarn).toHaveBeenCalledTimes(1);
+    expect(mockDeadLetterWarn.mock.calls[0][0]).toMatchObject({
+      reason: "invalid_user_id",
+    });
+  });
+
+  it("still enqueues inline when no context is active", async () => {
+    // The allow side. Without it, a refusal that fires unconditionally passes
+    // every assertion above.
+    await logAuditAsync(emitParams({ tenantId: CTX_TENANT_ID }));
+
+    expect(mockEnqueueAudit).toHaveBeenCalledTimes(1);
+    expect(mockRefusedWarn).not.toHaveBeenCalled();
+  });
+
+  it("bulk: with no context, enqueues once with all payloads", async () => {
+    // The allow companion to the bulk refusal cell. Without it, a refusal that
+    // fires unconditionally on the bulk path passes every assertion above —
+    // exactly the argument the singular path's allow cell already carries.
+    // `logAuditBulkAsync`'s real body is exercised nowhere else in the tree.
+    await logAuditBulkAsync([
+      emitParams({ tenantId: CTX_TENANT_ID }),
+      emitParams({ tenantId: CTX_TENANT_ID }),
+    ]);
+
+    expect(mockEnqueueAuditBulk).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueAuditBulk.mock.calls[0][1]).toHaveLength(2);
+    expect(mockRefusedWarn).not.toHaveBeenCalled();
+  });
+
+  it("bulk: a mixed batch enqueues only the well-formed entry", async () => {
+    // Per-entry accounting, no context. Two structured lines (one per entry,
+    // malformed included), exactly one invalid_user_id dead-letter, and exactly
+    // one payload enqueued.
+    await logAuditBulkAsync([
+      emitParams({ userId: "not-a-uuid", tenantId: CTX_TENANT_ID }),
+      emitParams({ tenantId: CTX_TENANT_ID }),
+    ]);
+
+    expect(mockAuditInfo).toHaveBeenCalledTimes(2);
+    expect(mockDeadLetterWarn).toHaveBeenCalledTimes(1);
+    expect(mockDeadLetterWarn.mock.calls[0][0]).toMatchObject({ reason: "invalid_user_id" });
+    expect(mockEnqueueAuditBulk).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueAuditBulk.mock.calls[0][1]).toHaveLength(1);
+  });
+
+  it("bulk: a batch of one malformed entry enqueues nothing at all", async () => {
+    // The empty-batch early return — a different cell from the mixed batch, and
+    // the one that distinguishes "filtered to zero" from "enqueued an empty
+    // array".
+    await logAuditBulkAsync([emitParams({ userId: "not-a-uuid" })]);
+
+    expect(mockDeadLetterWarn).toHaveBeenCalledTimes(1);
+    expect(mockEnqueueAuditBulk).not.toHaveBeenCalled();
+  });
+
+  it("leaves logAuditInTx alone — it is the correct in-context path", async () => {
+    await withTenantRls(mockedPrisma as never, CTX_TENANT_ID, async (tx) => {
+      await logAuditInTx(tx, CTX_TENANT_ID, emitParams());
+    });
+
+    expect(mockEnqueueAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockRefusedWarn).not.toHaveBeenCalled();
   });
 });

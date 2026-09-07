@@ -8,6 +8,7 @@ import {
   RlsSentinelContextRefused,
 } from "@/lib/tenant-rls";
 import type { PrismaClient } from "@prisma/client";
+import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 function makeMockPrisma(overrides?: Partial<{ $executeRaw: ReturnType<typeof vi.fn> }>) {
   const mockTx = {
@@ -287,6 +288,132 @@ describe("RLS nesting guards (C1)", () => {
       const flatArgs = JSON.stringify(call);
       expect(flatArgs).not.toMatch(/bypass_rls.*on/);
     }
+  });
+
+  // ─── The two combinations the guard did not cover ──────────────
+  //
+  // The cross-kind pairs above were already rejected; these two were not, and
+  // the guard's own comment claimed all four. They were benign only because no
+  // live site nested two DIFFERENT tenants — a property of the call sites, not
+  // of the mechanism: a nested set_config persists for the OUTER transaction's
+  // remainder either way.
+  //
+  // Asserted individually rather than as a table, because a single loop over
+  // four rows is satisfied by an implementation that throws unconditionally.
+  // The allow cells below are what exclude that.
+
+  it("rejects withTenantRls inside withTenantRls — INVALID_RLS_NESTING", async () => {
+    const { prisma, mockTx } = makeMockPrisma();
+    const innerTransaction = vi.fn();
+    let outerTxCallsBefore = -1;
+    let outerExecBefore = -1;
+
+    await expect(
+      withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {
+        outerTxCallsBefore = (prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length;
+        outerExecBefore = mockTx.$executeRaw.mock.calls.length;
+        // A DIFFERENT tenant, which is the case with real consequences: the
+        // inner set_config would leave the outer transaction scoped to it.
+        await withTenantRls(prisma, "99999999-9999-4999-8999-999999999999", async () => {
+          innerTransaction();
+          return undefined;
+        });
+        throw new Error("unexpected: inner call did not throw");
+      }),
+    ).rejects.toThrow(/INVALID_RLS_NESTING: withTenantRls inside withTenantRls/);
+
+    expect(innerTransaction).not.toHaveBeenCalled();
+    // The guard fires BEFORE $transaction — a guard throwing from inside the
+    // callback would already have run set_config.
+    expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length).toBe(outerTxCallsBefore);
+    expect(mockTx.$executeRaw.mock.calls.length).toBe(outerExecBefore);
+  });
+
+  it("rejects withBypassRls inside withBypassRls — INVALID_RLS_NESTING", async () => {
+    const { prisma, mockTx } = makeMockPrisma();
+    const innerTransaction = vi.fn();
+    let outerTxCallsBefore = -1;
+    let outerExecBefore = -1;
+
+    await expect(
+      withBypassRls(prisma, async () => {
+        outerTxCallsBefore = (prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length;
+        outerExecBefore = mockTx.$executeRaw.mock.calls.length;
+        await withBypassRls(prisma, async () => {
+          innerTransaction();
+          return undefined;
+        }, BYPASS_PURPOSE.AUDIT_WRITE);
+        throw new Error("unexpected: inner call did not throw");
+      }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+    ).rejects.toThrow(/INVALID_RLS_NESTING: withBypassRls inside withBypassRls/);
+
+    expect(innerTransaction).not.toHaveBeenCalled();
+    expect((prisma.$transaction as ReturnType<typeof vi.fn>).mock.calls.length).toBe(outerTxCallsBefore);
+    expect(mockTx.$executeRaw.mock.calls.length).toBe(outerExecBefore);
+  });
+
+  // The allow cells for the two new denials. The existing sequential test is a
+  // CROSS-kind pair, so it does not cover these: an implementation that
+  // remembered "have we opened a tenant context in this request?" rather than
+  // reading the live store would pass it and fail here.
+
+  it("does NOT reject a sequential withTenantRls pair (same kind)", async () => {
+    const { prisma } = makeMockPrisma();
+    await withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => "first");
+    await expect(
+      withTenantRls(prisma, "99999999-9999-4999-8999-999999999999", async () => "second"),
+    ).resolves.toBe("second");
+  });
+
+  it("does NOT reject a sequential withBypassRls pair (same kind)", async () => {
+    const { prisma } = makeMockPrisma();
+    await withBypassRls(prisma, async () => "first", BYPASS_PURPOSE.AUDIT_WRITE);
+    await expect(
+      withBypassRls(prisma, async () => "second", BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
+    ).resolves.toBe("second");
+  });
+
+  it("does NOT reject concurrent sibling openers started in one async context", async () => {
+    // Both read the store at entry, before either reaches tenantRlsStorage.run,
+    // so both see none and both open. The guard rejects NESTING, not sibling
+    // concurrency — and logAuditAsyncBothScopes is a live Promise.all over two
+    // emits, so this cell is reachable. Deterministic without a sleep.
+    const { prisma } = makeMockPrisma();
+    await expect(
+      Promise.all([
+        withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => "a"),
+        withTenantRls(prisma, "99999999-9999-4999-8999-999999999999", async () => "b"),
+      ]),
+    ).resolves.toEqual(["a", "b"]);
+  });
+
+  it("reports the nesting, not the sentinel, when a nested call also carries a refused tenant", async () => {
+    // Guard order: the nesting check runs BEFORE assertOpenableTenantContext,
+    // so the OUTER defect is what gets reported. Asserted in the combination C3
+    // newly covers — the pre-existing case is tenant-in-bypass.
+    const { prisma } = makeMockPrisma();
+    // Class AND prefix, separately: C3 rewords both messages, so a
+    // substring-only assertion would drift, and the class is what distinguishes
+    // this from the sentinel refusal the same call would otherwise trigger.
+    await expect(
+      withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {
+        await withTenantRls(prisma, SYSTEM_TENANT_ID, async () => undefined);
+        return undefined;
+      }),
+    ).rejects.toThrow(/INVALID_RLS_NESTING/);
+    await expect(
+      withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {
+        await withTenantRls(prisma, SYSTEM_TENANT_ID, async () => undefined);
+        return undefined;
+      }),
+    ).rejects.not.toBeInstanceOf(RlsSentinelContextRefused);
+
+    await expect(
+      withTenantRls(prisma, "88888888-8888-4888-8888-888888888888", async () => {
+        await withTenantRls(prisma, "not-a-canonical-uuid", async () => undefined);
+        return undefined;
+      }),
+    ).rejects.toThrow(/INVALID_RLS_NESTING/);
   });
 
   it("does NOT reject sequential calls — guard only fires on active nesting", async () => {

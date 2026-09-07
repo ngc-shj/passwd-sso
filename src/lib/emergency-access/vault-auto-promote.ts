@@ -2,9 +2,17 @@
  * Vault auto-promote helper — extracted from [id]/vault/route.ts for
  * lib-level testability (T17 — no HTTP harness required).
  *
- * C5: audit is emitted from this function, gated on the post-refetch success
- * path. The concurrent "loser" does not emit (CAS in transition() ensures
- * exactly one caller wins the REQUESTED → ACTIVATED flip).
+ * Audit is emitted from this function on every path the CAS succeeded on, via
+ * `logAuditInTx` on the caller's transaction. The concurrent "loser" does not
+ * emit (CAS in transition() ensures exactly one caller wins the REQUESTED →
+ * ACTIVATED flip).
+ *
+ * This used to say the emit was "gated on the post-refetch success path", and
+ * that was the defect: the `revoked` and `no_escrow` exits return normally, the
+ * route answers 403, and the enclosing transaction commits — so the grant went
+ * to ACTIVATED with no audit row. `metadata.outcome` is what now distinguishes
+ * the three, because a released escrow and a withheld one are the same action
+ * value and this path emits no EMERGENCY_VAULT_ACCESS.
  *
  * Bypass-RLS contract: this lib does NOT call withBypassRls itself. Callers
  * MUST invoke under an active withBypassRls scope (the route does, the
@@ -14,11 +22,40 @@
  * review boundary — see scripts/checks/check-bypass-rls.mjs ALLOWED_USAGE.
  */
 
-import type { TxOrPrisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { transition } from "./emergency-access-state";
-import { logAuditAsync, type AuditLogParams } from "@/lib/audit/audit";
+import { logAuditInTx, type AuditLogParams } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
+
+/**
+ * What the activation did about the owner's escrowed key material.
+ *
+ * `EMERGENCY_ACCESS_ACTIVATE` is written on every path a CAS committed
+ * `ACTIVATED`, and those paths do not mean the same thing. This path emits no
+ * `EMERGENCY_VAULT_ACCESS` — the only emitter of that action is
+ * `/vault/entries` — so without a discriminator an auditor cannot tell a
+ * released escrow from a withheld one.
+ *
+ * `APPROVED` is the owner's early-approval row. That route changes state and
+ * nothing else: it does not read `encryptedSecretKey` or `granteeKeyPair`, and
+ * the release, if it happens, is a LATER request. Labelling it `RELEASED` would
+ * assert something the emitting route never checked, on a grant that may have
+ * no escrow at all.
+ */
+export const EA_ACTIVATE_OUTCOME = {
+  /** The grantee received the escrowed key material in this response. */
+  RELEASED: "released",
+  /** Promoted, then withheld: the grant was revoked concurrently. */
+  REVOKED: "revoked",
+  /** Promoted, then withheld: no escrow to hand over. */
+  NO_ESCROW: "no_escrow",
+  /** Owner-approved. State changed; no release attempted on this request. */
+  APPROVED: "approved",
+} as const;
+
+export type EaActivateOutcome =
+  (typeof EA_ACTIVATE_OUTCOME)[keyof typeof EA_ACTIVATE_OUTCOME];
 
 /**
  * Crypto fields returned to the route on successful promotion.
@@ -59,18 +96,30 @@ export type AutoPromoteResult =
  *  2. If not eligible: returns { ok: false; reason: "not_eligible" }.
  *  3. Calls transition({ to: ACTIVATED, actor: SYSTEM }).
  *     On { ok: false }: returns "not_eligible" (concurrent winner already promoted).
- *  4. Re-fetches the grant under withBypassRls; validates revokedAt: null FIRST.
- *     - revokedAt set → { ok: false; reason: "revoked" }
- *     - encryptedSecretKey null → { ok: false; reason: "no_escrow" }
- *  5. Emits EMERGENCY_ACCESS_ACTIVATE audit ONLY on the success path.
- *  6. Returns { ok: true; grant }.
+ *  4. Re-fetches the grant under withBypassRls.
+ *  5. Classifies the outcome; revokedAt is checked before encryptedSecretKey
+ *     (F5/S15 ordering) — "revoked" | "no_escrow" | "released".
+ *  6. Emits EMERGENCY_ACCESS_ACTIVATE via logAuditInTx on EVERY outcome, because
+ *     all three follow a CAS that committed ACTIVATED. `metadata.outcome` is
+ *     what distinguishes a released escrow from a withheld one.
+ *  7. Returns { ok: false; reason } for the first two, { ok: true; grant } for
+ *     the third.
  *
  * Behavior note: replaces the former non-CAS update() in the route. Concurrent
  * requests now resolve deterministically — exactly one wins, the loser returns
  * "not_eligible" and the route falls through to the NOT_ACTIVATED 403 check.
  */
 export async function autoPromoteIfElapsed(args: {
-  db: TxOrPrisma;
+  // `Prisma.TransactionClient` rather than `TxOrPrisma`. This documents intent
+  // and removes a cast at the emit; it does NOT narrow anything —
+  // `Prisma.TransactionClient` is `Omit<PrismaClient, ITXClientDenyList>`, a
+  // SUPERTYPE, so a bare client is still assignable and `TxOrPrisma` accepted
+  // exactly the same argument set. Measured with a tsc probe, not assumed.
+  //
+  // What actually binds the contract is the route tests, which assert the emit
+  // received the client the bypass callback was handed, and the integration
+  // rollback cell. The prose in the file header is the statement of record.
+  db: Prisma.TransactionClient;
   granteeId: string;
   grantId: string;
   now: Date;
@@ -82,10 +131,13 @@ export async function autoPromoteIfElapsed(args: {
 
   // Caller MUST wrap in withBypassRls and pass its tx as `db` — see file header.
 
-  // Step 1: fetch current grant state to check eligibility
+  // Step 1: fetch current grant state to check eligibility.
+  // `ownerId` is selected here, not read off the post-CAS re-fetch, because the
+  // audit row must cover every path on which the CAS succeeded — including the
+  // one where the re-fetch returns null and there is no object to read it from.
   const current = await db.emergencyAccessGrant.findUnique({
     where: { id: grantId },
-    select: { status: true, waitExpiresAt: true, granteeId: true },
+    select: { status: true, waitExpiresAt: true, granteeId: true, ownerId: true },
   });
 
   // Step 2: eligibility check
@@ -122,26 +174,83 @@ export async function autoPromoteIfElapsed(args: {
     },
   });
 
-  // revokedAt check precedes encryptedSecretKey check (F5/S15 ordering)
-  if (!updated || updated.revokedAt !== null) {
-    return { ok: false, reason: "revoked" };
+  // Step 5: classify the outcome. revokedAt precedes encryptedSecretKey (F5/S15
+  // ordering). The classification happens BEFORE the returns so a single emit
+  // can carry it — see the emit below for why that ordering is load-bearing.
+  const outcome: EaActivateOutcome =
+    !updated || updated.revokedAt !== null
+      ? EA_ACTIVATE_OUTCOME.REVOKED
+      : !updated.encryptedSecretKey || !updated.granteeKeyPair
+        ? EA_ACTIVATE_OUTCOME.NO_ESCROW
+        : EA_ACTIVATE_OUTCOME.RELEASED;
+
+  // Step 6: emit on EVERY path the CAS succeeded on, atomically with it.
+  //
+  // Two things changed here and they depend on each other. The emit used to be
+  // `logAuditAsync` placed after the two guard returns, so the `revoked` and
+  // `no_escrow` exits — which do not throw, and whose 403 still lets the
+  // enclosing transaction COMMIT — left the grant `ACTIVATED` with no audit row
+  // at all. And `logAuditAsync` reached `enqueueAudit`, whose raw
+  // `prisma.$transaction` the Proxy folds into this transaction, forging its
+  // `app.bypass_purpose` on the way past. `logAuditInTx` writes on the caller's
+  // `tx`, so the row and the state change now commit together or not at all.
+  //
+  // The emit sits after the classification rather than immediately after the CAS
+  // because `outcome` is what distinguishes "the grantee received the owner's
+  // escrowed key material" from "the state changed and nothing was released" —
+  // and this path emits no EMERGENCY_VAULT_ACCESS, so this row is the only
+  // record of either. `ownerId` comes from the pre-CAS read, which is what keeps
+  // the `!updated` arm safe.
+  // The grantee's tenant, resolved through `User.tenantId` — the same column
+  // `resolveTenantId` reads, so the row lands where it landed before. Not
+  // `resolveUserTenantId`, which reads `TenantMember` and throws on a
+  // multi-membership user: that would turn a working escrow release into a
+  // rolled-back 500 for a condition this operation does not care about.
+  const grantee = await db.user.findUnique({
+    where: { id: granteeId },
+    select: { tenantId: true },
+  });
+  if (!grantee) {
+    // Unreachable inside the transaction that just locked the grant, whose
+    // granteeId is an FK to this row. Fail rather than file the release under a
+    // tenant nobody owns — a silently unattributable escrow-release record is
+    // the outcome this whole contract exists to prevent.
+    throw new Error(`autoPromoteIfElapsed: grantee ${granteeId} not found`);
   }
 
-  if (!updated.encryptedSecretKey || !updated.granteeKeyPair) {
-    return { ok: false, reason: "no_escrow" };
-  }
-
-  // Step 5: emit audit ONLY on the success path (C5)
-  await logAuditAsync({
+  await logAuditInTx(db, grantee.tenantId, {
     ...auditBase,
     actorType: ACTOR_TYPE.SYSTEM,
     action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: grantId,
-    metadata: { ownerId: updated.ownerId },
+    metadata: { ownerId: current.ownerId, outcome },
   });
 
-  // Step 6: return crypto fields
+  if (outcome === EA_ACTIVATE_OUTCOME.REVOKED) {
+    return { ok: false, reason: "revoked" };
+  }
+
+  if (outcome === EA_ACTIVATE_OUTCOME.NO_ESCROW) {
+    return { ok: false, reason: "no_escrow" };
+  }
+
+  // Narrowing for the success path: `outcome === RELEASED` already implies all
+  // three, but the compiler cannot see it through the ternary chain above.
+  //
+  // THROW rather than return `no_escrow`. This transaction has NOT committed —
+  // `withBypassRls` is itself the `$transaction`, so the CAS and the row above
+  // roll back together with this throw, which is the honest outcome for a state
+  // the classification says cannot exist. Returning a withheld reason instead
+  // would answer the caller one thing while the row it is about to commit says
+  // another, and would do it silently.
+  if (!updated || !updated.encryptedSecretKey || !updated.granteeKeyPair) {
+    throw new Error(
+      `autoPromoteIfElapsed: classified ${EA_ACTIVATE_OUTCOME.RELEASED} but escrow is absent`,
+    );
+  }
+
+  // Step 7: return crypto fields
   return {
     ok: true,
     grant: {

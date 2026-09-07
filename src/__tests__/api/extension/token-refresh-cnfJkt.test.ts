@@ -34,7 +34,10 @@ vi.mock("@/lib/auth/tokens/extension-token", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+// Real module underneath so `getTenantRlsContext` resolves for audit.ts's
+// load-time assertion; the opener override stays.
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
   BYPASS_PURPOSE: { TOKEN_LIFECYCLE: "TOKEN_LIFECYCLE" },
 }));

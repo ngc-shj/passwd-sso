@@ -1,5 +1,13 @@
 import type { Prisma, AuditScope, AuditAction, ActorType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+// `prismaBase`, not `prisma`. The exported `prisma` is a Proxy: while an RLS
+// context is active its `$transaction` arm does not open a transaction, it
+// invokes the callback with the OUTER transaction client. The three
+// `set_config` calls below would then land on the caller's transaction and,
+// because PostgreSQL does not roll a transaction-local GUC back when an
+// AsyncLocalStorage scope exits, leave it running with `app.bypass_rls` on for
+// its remainder. Opening on the un-proxied client makes that structurally
+// impossible rather than conventionally avoided.
+import { prismaBase } from "@/lib/prisma";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID } from "@/lib/constants/app";
 
@@ -50,7 +58,7 @@ export async function enqueueAudit(
   tenantId: string,
   payload: AuditOutboxPayload,
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  await prismaBase.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
     await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
@@ -68,7 +76,7 @@ export async function enqueueAuditBulk(
   payloads: AuditOutboxPayload[],
 ): Promise<void> {
   if (payloads.length === 0) return;
-  await prisma.$transaction(async (tx) => {
+  await prismaBase.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
     await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;

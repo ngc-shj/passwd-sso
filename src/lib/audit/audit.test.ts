@@ -9,7 +9,12 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/tenant-rls", () => ({
+// Spread the real module so `getTenantRlsContext` resolves — audit.ts asserts
+// at load that it does. The `withBypassRls` override STAYS: this file's
+// `@/lib/prisma` mock models no `$transaction`, so a real opener would throw
+// inside resolveTenantId and invert every enqueue assertion below.
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn(async (p: unknown, fn: (tx: unknown) => Promise<unknown>) => fn(p)),
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));

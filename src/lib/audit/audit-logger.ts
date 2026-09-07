@@ -119,3 +119,57 @@ export const deadLetterLogger = pino({
     },
   },
 });
+
+/**
+ * Audit emits refused because an RLS context was open.
+ *
+ * A SEPARATE `_logType` rather than another `audit-dead-letter` reason, because
+ * the forwarder excludes that type wholesale (`infra/fluent-bit/fluent-bit.conf`)
+ * and every OUTPUT there matches `app.*`. A reason added under the excluded type
+ * would be dropped before any output saw it — and re-tagging it to escape the
+ * exclusion produces a record no output matches either, which reads as a working
+ * carve-out and forwards nothing.
+ *
+ * The exclusion's justification is that a dead-letter record carries whatever the
+ * failing caller passed, including error text. That does not apply here: this
+ * payload has no `error` field at all — the refusal is a control decision, not a
+ * failure — so it ships without re-opening the hole the exclusion protects.
+ *
+ * This is the only audit-loss reason that fires with a healthy database AND is
+ * forwarded. `invalid_user_id` also fires healthy, but it is a caller error and
+ * remains under the excluded type — recorded as a known forwarding gap in
+ * docs/operations/alerts.md rather than silently implied away here.
+ *
+ * It writes no row anywhere, so not forwarding it would make it unobservable.
+ * External alerting should monitor `_logType: "audit-refused"`.
+ *
+ * No `redact` paths, and the bound that licenses that is worth stating precisely
+ * because this stream — unlike the sibling — ships by default.
+ *
+ * At THIS call site the actor id has already passed `UUID_RE` (the refusal runs
+ * after `assertEnqueueableUserId` on both emit paths), the reason is a constant,
+ * and no `error` is passed, so no free text enters. `scope` and `action` are
+ * TypeScript-only unions with no runtime check, and `tenantId` is copied verbatim
+ * by the `*AuditBase` helpers — its bound is a property of the current call sites
+ * (swept: none request-derived) rather than something this module enforces.
+ *
+ * So: bounded today, by call-site discipline plus one gate that happens to
+ * precede this one. Adding a free-text field re-opens the hole silently; reduce
+ * it at the call site rather than adding a redact path, which matches a key while
+ * the leak lives in the value.
+ */
+export const refusedEmitLogger = pino({
+  name: DEFAULT_APP_NAME,
+  level: "warn",
+  enabled: true,
+  timestamp: pino.stdTimeFunctions.isoTime,
+  base: {
+    _logType: "audit-refused",
+    _app: DEFAULT_APP_NAME,
+  },
+  formatters: {
+    level(label: string) {
+      return { level: label };
+    },
+  },
+});

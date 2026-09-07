@@ -117,13 +117,27 @@ if (
 // the docblock on why src/lib as a whole is out of scope). sourceFilesFrom
 // takes both; check-null-tenant-fail-closed mixes them the same way.
 //
-// src/lib/health.ts is here because it is the one src/lib member of this class
-// that the ambient-Proxy argument does NOT cover: it runs from a health probe,
-// outside any AsyncLocalStorage transaction, so `prisma` there really is the
-// bare client. Measured: 1 violation before the fix, 0 after, no false
-// positives from the file's other $queryRaw (`SELECT 1` names no RLS table).
+// Two src/lib members are here because the ambient-Proxy argument does NOT
+// cover them:
+//
+//   src/lib/health.ts runs from a health probe, outside any AsyncLocalStorage
+//   transaction, so `prisma` there really is the bare client. Measured: 1
+//   violation before the fix, 0 after, no false positives from the file's other
+//   $queryRaw (`SELECT 1` names no RLS table).
+//
+//   src/lib/audit/audit-outbox.ts opens its transaction on `prismaBase`, the
+//   un-proxied client, deliberately — so the Proxy cannot fold it into a
+//   caller's transaction. That puts it outside the ambient-Proxy argument by
+//   construction rather than by call context.
+//
+// What this gate does NOT decide, stated because it has been mistaken for the
+// enforcement twice: it asks whether a GUC is established on the receiver of an
+// RLS-table statement, not WHICH CLIENT opened the transaction. `prisma` and
+// `prismaBase` are indistinguishable to it. audit-outbox.ts's choice of client
+// is pinned by an integration test that reads txid_current(), not here.
 const SEARCH_DIRS = (
-  process.env.RLS_READ_CONTEXT_DIRS ?? "src/workers,scripts,src/lib/health.ts"
+  process.env.RLS_READ_CONTEXT_DIRS ??
+    "src/workers,scripts,src/lib/health.ts,src/lib/audit/audit-outbox.ts"
 )
   .split(",")
   .map((d) => d.trim())
