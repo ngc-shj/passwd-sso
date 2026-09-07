@@ -42,8 +42,18 @@ export async function resolveUserTenantId(userId: string): Promise<string | null
  * provisioned into B keeps the column pointing at A. A record filed under the
  * stale copy is invisible to every reader, under RLS, permanently.
  *
- * The fallback is still load-bearing: the sentinel tenant is memberless by
- * invariant, so sentinel actors resolve no membership and reach it by design.
+ * The fallback is still load-bearing, for the user whose memberships have ALL
+ * been deactivated: they still have records to file, and the column is the last
+ * tenant that owned them. Without it they would resolve null and their audit
+ * rows would land in the system tenant instead.
+ *
+ * NOT for the sentinel actors — they have no `users` row at all (measured: no
+ * seeder or migration creates one, and `users_not_system_tenant` CHECKs the
+ * column against the sentinel tenant), so they return null here and reach
+ * `SYSTEM_TENANT_ID` through `resolveTenantId`'s own coalesce. Stated because
+ * the first version of this comment credited the fallback with that path, and a
+ * maintainer who checks it, finds it structurally impossible, and concludes the
+ * fallback is dead code would reroute every deactivated user's audit trail.
  *
  * Returns null only when the user row itself is absent.
  */

@@ -363,9 +363,15 @@ export async function recordFailure(
             userAgent: meta.userAgent,
           });
         }
-        if (result.thresholdCrossed) {
+        // Threaded, not re-derived: the alert and the audit row two blocks above
+        // record the same lockout, and a callee that resolves its own tenant is
+        // a second adjudicator that disagrees with this one. Guarded on the same
+        // boundary the audit emits use — with no resolvable tenant there is no
+        // admin set to notify, so it is skipped rather than sent somewhere.
+        if (result.thresholdCrossed && resolvedTenantId) {
           void notifyAdminsOfLockout({
             userId,
+            tenantId: resolvedTenantId,
             attempts: result.attempts,
             lockMinutes: result.lockMinutes!,
             ip: meta.ip,

@@ -142,8 +142,12 @@ const VALID_CLIENT = {
   allowedScopes: "credentials:list,credentials:use,passwords:read",
 };
 
+// Shaped as `resolveOwningTenantIdFromClient` selects it: the active membership
+// is the source and `tenantId` the fallback, so a mock carrying only the column
+// would exercise the fallback while reading like the ordinary case.
 const VALID_USER = {
   tenantId: "tenant-uuid-123",
+  tenantMemberships: [{ tenantId: "tenant-uuid-123" }],
 };
 
 function buildFormBody(fields: Record<string, string>): string {
@@ -344,6 +348,36 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("invalid_request");
   });
 
+  it("binds the token and the passkey gate to the active membership, not the stale User.tenantId", async () => {
+    // This handler is the authoritative MCP issuance boundary — the GET in
+    // ../route.ts only redirects here, and this POST depends on nothing it did.
+    // When the GET resolved the membership tenant and this one still read the
+    // `User.tenantId` column, the two disagreed about whose passkey enforcement
+    // governs the flow, and the minted code carried the stale tenant onward to
+    // the access and refresh tokens.
+    mockFindUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    mockFindFirst.mockResolvedValue({ ...VALID_CLIENT, tenantId: "scim-provisioned-tenant" });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    // Positive first: consent completed. A handler that 403'd would satisfy the
+    // two assertions below by never reaching them.
+    expect(res.status).toBe(302);
+    expect(mockDerivePasskeyState).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "scim-provisioned-tenant" }),
+    );
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "scim-provisioned-tenant" }),
+    );
+  });
+
   it("returns 403 when client belongs to a different tenant", async () => {
     // Client has a different tenantId than the user
     mockFindFirst.mockResolvedValue({
@@ -362,8 +396,11 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(json.error).toBe("access_denied");
   });
 
-  it("returns 403 when user has no tenant", async () => {
-    mockFindUnique.mockResolvedValue({ tenantId: null });
+  it("returns 403 when the user row is absent", async () => {
+    // The adjudicator returns null only when there is no user row; a row always
+    // carries a non-null `tenantId` (FK RESTRICT), so `{ tenantId: null }` was
+    // never a state the database could produce.
+    mockFindUnique.mockResolvedValue(null);
 
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",

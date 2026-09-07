@@ -185,6 +185,35 @@ describe("recordFailure", () => {
     expect(mockPrismaTenant.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
     );
+    // The other half of what the comment above claims. `VAULT_UNLOCK_FAILED` is
+    // emitted on EVERY failure, so this fixture does reach an audit row even
+    // without crossing a threshold — and its tenant is argument 1.
+    expect(mockLogAuditInTx).toHaveBeenCalled();
+    for (const call of mockLogAuditInTx.mock.calls) {
+      expect(call[1]).toBe("scim-provisioned-tenant");
+    }
+  });
+
+  it("files the lockout audit row under the same tenant the thresholds came from", async () => {
+    // The audit consumer of the resolution, at a fixture that actually crosses a
+    // threshold — misfiling this row is the defect class the adjudicator exists
+    // to close, and at this member site it was otherwise unasserted.
+    setupTransaction({
+      failed_unlock_attempts: 4,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+
+    await recordFailure("user-1");
+
+    expect(mockLogAuditInTx).toHaveBeenCalled();
+    for (const call of mockLogAuditInTx.mock.calls) {
+      expect(call[1]).toBe("scim-provisioned-tenant");
+    }
   });
 
   it("increments counter on first failure", async () => {
@@ -430,6 +459,9 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
       userId: "user-1",
+      // Threaded from recordFailure's own resolution — see the tenant-adjudicator
+      // cell above. A callee that re-derived this alerted a different tenant.
+      tenantId: "tenant-default",
       attempts: 5,
       lockMinutes: 15,
       ip: null,
@@ -446,6 +478,9 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
       userId: "user-1",
+      // Threaded from recordFailure's own resolution — see the tenant-adjudicator
+      // cell above. A callee that re-derived this alerted a different tenant.
+      tenantId: "tenant-default",
       attempts: 10,
       lockMinutes: 60,
       ip: null,
@@ -462,6 +497,9 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
       userId: "user-1",
+      // Threaded from recordFailure's own resolution — see the tenant-adjudicator
+      // cell above. A callee that re-derived this alerted a different tenant.
+      tenantId: "tenant-default",
       attempts: 15,
       lockMinutes: 1440,
       ip: null,

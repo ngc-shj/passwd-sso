@@ -18,6 +18,16 @@ import { errorLogFields } from "@/lib/logger/error-fields";
 
 export interface LockoutNotifyParams {
   userId: string;
+  /**
+   * The tenant whose OWNER/ADMINs are notified, resolved by the CALLER.
+   *
+   * Required rather than re-derived here: the caller already resolved this to
+   * file the lockout's audit row, and a second resolution is a second
+   * adjudicator — it re-read `User.tenantId` while the caller read the active
+   * membership, so one lockout sent its audit row to one tenant and the alert
+   * carrying the user's email address to another tenant's admins.
+   */
+  tenantId: string;
   attempts: number;
   lockMinutes: number;
   ip: string | null;
@@ -35,15 +45,16 @@ export async function notifyAdminsOfLockout(
   try {
     // Single transaction to avoid TOCTOU between user lookup and admin lookup
     const data = await withBypassRls(prisma, async (tx) => {
+      // The email only. The tenant comes from the caller — see LockoutNotifyParams.
       const user = await tx.user.findUnique({
         where: { id: params.userId },
-        select: { email: true, tenantId: true },
+        select: { email: true },
       });
-      if (!user?.tenantId) return null;
+      if (!user) return null;
 
       const admins = await tx.tenantMember.findMany({
         where: {
-          tenantId: user.tenantId,
+          tenantId: params.tenantId,
           role: { in: [TENANT_ROLE.OWNER, TENANT_ROLE.ADMIN] },
           deactivatedAt: null,
         },
@@ -55,7 +66,7 @@ export async function notifyAdminsOfLockout(
 
       return {
         userEmail: user.email ?? "unknown",
-        tenantId: user.tenantId,
+        tenantId: params.tenantId,
         admins,
       };
     }, BYPASS_PURPOSE.AUTH_FLOW);
