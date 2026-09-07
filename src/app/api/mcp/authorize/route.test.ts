@@ -126,7 +126,14 @@ describe("GET /api/mcp/authorize", () => {
     _resetPasskeyAuditForTests();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it: the active
+    // membership is the source and `tenantId` the fallback, so a mock carrying
+    // only the column would exercise the fallback while reading like the
+    // ordinary case.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "tenant-1",
+      tenantMemberships: [{ tenantId: "tenant-1" }],
+    });
     mockWithBypassRls.mockImplementation(async (p: unknown, fn: (tx: unknown) => unknown) => fn(p));
     mockCheckRateLimit.mockResolvedValue({ allowed: true });
     mockRequireRecentCurrentAuthMethod.mockResolvedValue(null);
@@ -293,6 +300,29 @@ describe("GET /api/mcp/authorize", () => {
     expect(mockDerivePasskeyState).toHaveBeenCalledTimes(1);
     // Non-vacuity: reached consent redirect (not refused).
     expect(mockFindFirst).toHaveBeenCalled();
+  });
+
+  it("C6 GET: resolves the enforcement tenant from the active membership, not User.tenantId", async () => {
+    // The same id decides whose passkey enforcement applies and where the
+    // PASSKEY_ENFORCEMENT_BLOCKED row is filed. It used to come from
+    // `User.tenantId`, a denormalized copy with no invalidation, read here under
+    // a bypass context where RLS does not correct it.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    mockDerivePasskeyState.mockResolvedValue({
+      requirePasskey: false,
+      hasPasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: 7,
+    });
+
+    await GET(createRequest(VALID_AUTHZ_URL) as unknown as import("next/server").NextRequest);
+
+    expect(mockDerivePasskeyState).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "scim-provisioned-tenant" }),
+    );
   });
 
   it("C6 GET: on + hasPasskey → redirects to consent", async () => {

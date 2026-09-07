@@ -4,6 +4,7 @@ import { detectBestLocaleFromAcceptLanguage } from "@/i18n/locale-utils";
 import { serverAppUrl } from "@/lib/url-helpers";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { requireRecentCurrentAuthMethod } from "@/lib/auth/session/recent-current-auth-method";
@@ -92,24 +93,24 @@ export async function GET(req: NextRequest) {
 
   // Passkey enforcement gate — UX early-reject. Resolve tenantId first (not on
   // session.user), then re-derive state from DB (fail-closed; a throw propagates).
-  const userForPasskey = await withBypassRls(
+  // The active membership, not the `User.tenantId` column: this value picks both
+  // the tenant whose passkey enforcement applies and the tenant the audit row is
+  // filed under, and a bypass context does not constrain the read the way a
+  // tenant-scoped one does.
+  const passkeyTenantId = await withBypassRls(
     prisma,
-    async (tx) =>
-      tx.user.findUnique({
-        where: { id: session.user.id },
-        select: { tenantId: true },
-      }),
+    async (tx) => resolveOwningTenantIdFromClient(tx, session.user.id),
     BYPASS_PURPOSE.AUTH_FLOW,
   );
-  if (userForPasskey?.tenantId) {
+  if (passkeyTenantId) {
     const pkState = await derivePasskeyState({
       userId: session.user.id,
-      tenantId: userForPasskey.tenantId,
+      tenantId: passkeyTenantId,
     });
     if (passkeyEnforcementBlocks(pkState)) {
       if (recordPasskeyAuditEmit(session.user.id, "/api/mcp/authorize", Date.now())) {
         await logAuditAsync({
-          ...tenantAuditBase(req, session.user.id, userForPasskey.tenantId),
+          ...tenantAuditBase(req, session.user.id, passkeyTenantId),
           action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
           metadata: { blockedPath: "/api/mcp/authorize" },
         });

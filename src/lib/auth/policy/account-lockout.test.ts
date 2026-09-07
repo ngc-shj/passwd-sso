@@ -133,7 +133,13 @@ describe("recordFailure", () => {
   // Without a resolvable tenant the code now fails closed to the strictest
   // threshold (lock at 1) — covered by its own dedicated tests below.
   function mockDefaultTenantThresholds() {
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-default" });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it. A mock carrying
+    // only the column would still resolve — through the FALLBACK — so it would
+    // read like the ordinary case while exercising the memberless one.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "tenant-default",
+      tenantMemberships: [{ tenantId: "tenant-default" }],
+    });
     mockPrismaTenant.findUnique.mockResolvedValue({
       lockoutThreshold1: 5,
       lockoutDuration1Minutes: 15,
@@ -154,6 +160,32 @@ describe("recordFailure", () => {
     mockPrismaUser.update.mockResolvedValue(undefined);
     mockDefaultTenantThresholds();
   }
+
+  it("resolves the tenant from the active membership, not the User.tenantId column", async () => {
+    // This value picks the tenant whose lockout thresholds apply AND the tenant
+    // the audit row is filed under. It used to come from `User.tenantId`, a
+    // denormalized copy with no invalidation — after SCIM provisions the user
+    // into another tenant it points at the old one, and the read here runs under
+    // a bypass context, so RLS does not correct it the way it does for the
+    // tenant-scoped call sites.
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+
+    await recordFailure("user-1");
+
+    // The thresholds lookup is where the choice becomes observable: it is keyed
+    // by exactly the id this resolution produced.
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
+  });
 
   it("increments counter on first failure", async () => {
     setupTransaction({

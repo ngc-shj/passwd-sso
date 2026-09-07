@@ -121,7 +121,14 @@ describe("GET /api/mcp/authorize", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockMcpClientFindFirst.mockResolvedValue(VALID_CLIENT);
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-uuid" });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it: the active
+    // membership is the source and `tenantId` the fallback, so a mock carrying
+    // only the column would exercise the fallback while reading like the
+    // ordinary case.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "tenant-uuid",
+      tenantMemberships: [{ tenantId: "tenant-uuid" }],
+    });
     // Default: passkey enforcement off (gate is a no-op for existing tests).
     mockDerivePasskeyState.mockResolvedValue({
       requirePasskey: false,
