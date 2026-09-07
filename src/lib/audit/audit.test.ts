@@ -83,6 +83,8 @@ import { AUDIT_IP_MAX_LENGTH, METADATA_MAX_BYTES } from "@/lib/validations/commo
 import { prisma } from "@/lib/prisma";
 
 const TENANT_A = "550e8400-e29b-41d4-a716-446655440000";
+/** The tenant an active membership points at when `User.tenantId` still says A. */
+const TENANT_B = "550e8400-e29b-41d4-a716-446655440009";
 const USER_A = "660e8400-e29b-41d4-a716-446655440001";
 const TEAM_A = "770e8400-e29b-41d4-a716-446655440002";
 
@@ -529,6 +531,7 @@ describe("logAuditAsync", () => {
   it("resolves tenantId from user when only userId is provided", async () => {
     mockedFindUser.mockResolvedValue({
       tenantId: TENANT_A,
+      tenantMemberships: [],
     } as unknown as Awaited<ReturnType<typeof mockedFindUser>>);
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -537,9 +540,37 @@ describe("logAuditAsync", () => {
     });
     expect(mockedFindUser).toHaveBeenCalledWith({
       where: { id: USER_A },
-      select: { tenantId: true },
+      select: {
+        tenantId: true,
+        tenantMemberships: {
+          where: { deactivatedAt: null },
+          select: { tenantId: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+      },
     });
     expect(mockedEnqueue).toHaveBeenCalledOnce();
+  });
+
+  it("prefers the active membership over the User.tenantId column", async () => {
+    // The readers of these rows scope by the membership, so the writer has to
+    // as well; `User.tenantId` is a copy of that fact with no invalidation and
+    // goes stale when SCIM provisions the user into another tenant. Only the
+    // relationship between the two stores makes this observable, so the
+    // discriminating cell is the integration one — this pins the PRECEDENCE,
+    // which that cell cannot distinguish from a differently-ordered query.
+    mockedFindUser.mockResolvedValue({
+      tenantId: TENANT_A,
+      tenantMemberships: [{ tenantId: TENANT_B }],
+    } as unknown as Awaited<ReturnType<typeof mockedFindUser>>);
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: USER_A,
+    });
+    expect(mockedEnqueue).toHaveBeenCalledOnce();
+    expect(mockedEnqueue.mock.calls[0][0]).toBe(TENANT_B);
   });
 
   it("does not query user table when userId is non-UUID (defense-in-depth)", async () => {
@@ -563,6 +594,7 @@ describe("logAuditAsync", () => {
     // enqueue nor silently ride along inside it.
     mockedFindUser.mockResolvedValue({
       tenantId: TENANT_A,
+      tenantMemberships: [],
     } as unknown as Awaited<ReturnType<typeof mockedFindUser>>);
     await logAuditBulkAsync([
       { scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: USER_A },
@@ -611,6 +643,7 @@ describe("logAuditAsync", () => {
     // every case above.
     mockedFindUser.mockResolvedValue({
       tenantId: TENANT_A,
+      tenantMemberships: [],
     } as unknown as Awaited<ReturnType<typeof mockedFindUser>>);
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,

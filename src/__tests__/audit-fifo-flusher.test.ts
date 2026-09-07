@@ -144,6 +144,7 @@ describe("logAuditAsync", () => {
     mockUserFindUnique.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000042",
       tenantId: "tenant-from-user",
+      tenantMemberships: [],
     });
 
     await logAuditAsync({
@@ -205,6 +206,7 @@ describe("logAuditAsync", () => {
     mockUserFindUnique.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000001",
       tenantId: "tenant-1",
+      tenantMemberships: [],
     });
     mockEnqueueAudit.mockRejectedValueOnce(new Error("outbox write failed"));
 
@@ -255,6 +257,7 @@ describe("logAuditAsync", () => {
     mockUserFindUnique.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000001",
       tenantId: "tenant-1",
+      tenantMemberships: [],
     } as never);
     mockEnqueueAudit.mockRejectedValueOnce(new Error("DB unreachable"));
 

@@ -378,11 +378,32 @@ async function resolveTenantId(params: AuditLogParams): Promise<string> {
     // Defense-in-depth: userId is typed as string, but sentinel UUIDs and
     // real user UUIDs must pass UUID_RE before hitting the DB lookup.
     if (UUID_RE.test(params.userId)) {
+      // The ACTIVE MEMBERSHIP first, `User.tenantId` only as a fallback.
+      //
+      // Every reader of these rows scopes by the membership: personal reads
+      // open `withUserTenantRls` -> `resolveUserTenantId`, tenant-admin reads
+      // open `requireTenantPermission` -> `getTenantMembership`. `User.tenantId`
+      // is a denormalized copy of the same fact with nothing invalidating it —
+      // SCIM provisioning into another tenant leaves the copy pointing at the
+      // old one (Users/route.ts only rejects an ACTIVE membership elsewhere),
+      // and a row filed under the stale copy is invisible to every reader.
+      //
+      // The fallback is what the sentinel actors need: the sentinel tenant is
+      // memberless by invariant, so they resolve no membership and keep landing
+      // in their own tenant exactly as before.
       const user = await tx.user.findUnique({
         where: { id: params.userId },
-        select: { tenantId: true },
+        select: {
+          tenantId: true,
+          tenantMemberships: {
+            where: { deactivatedAt: null },
+            select: { tenantId: true },
+            orderBy: { createdAt: "asc" },
+            take: 1,
+          },
+        },
       });
-      return user?.tenantId ?? SYSTEM_TENANT_ID;
+      return user?.tenantMemberships[0]?.tenantId ?? user?.tenantId ?? SYSTEM_TENANT_ID;
     }
 
     // Unreachable from logAuditAsync / logAuditBulkAsync: both reject a
