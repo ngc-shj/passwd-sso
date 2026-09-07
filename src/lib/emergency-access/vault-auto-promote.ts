@@ -25,6 +25,7 @@
 import type { Prisma } from "@prisma/client";
 import { transition } from "./emergency-access-state";
 import { logAuditInTx, type AuditLogParams } from "@/lib/audit/audit";
+import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, EA_STATUS, EA_ACTOR } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 
@@ -201,16 +202,15 @@ export async function autoPromoteIfElapsed(args: {
   // and this path emits no EMERGENCY_VAULT_ACCESS, so this row is the only
   // record of either. `ownerId` comes from the pre-CAS read, which is what keeps
   // the `!updated` arm safe.
-  // The grantee's tenant, resolved through `User.tenantId` — the same column
-  // `resolveTenantId` reads, so the row lands where it landed before. Not
-  // `resolveUserTenantId`, which reads `TenantMember` and throws on a
-  // multi-membership user: that would turn a working escrow release into a
-  // rolled-back 500 for a condition this operation does not care about.
-  const grantee = await db.user.findUnique({
-    where: { id: granteeId },
-    select: { tenantId: true },
-  });
-  if (!grantee) {
+  // The grantee's tenant, through the same adjudicator `resolveTenantId` uses
+  // and the same one the readers of this row open with. Not `resolveUserTenantId`
+  // — it throws on a multi-membership user, which would turn a working escrow
+  // release into a rolled-back 500 for a condition this operation does not care
+  // about. That constraint is why the helper exists rather than being inlined
+  // here: this row and the ones `logAuditAsync` writes have to agree, and two
+  // copies of the rule would only agree until one of them was edited.
+  const granteeTenantId = await resolveOwningTenantIdFromClient(db, granteeId);
+  if (!granteeTenantId) {
     // Unreachable inside the transaction that just locked the grant, whose
     // granteeId is an FK to this row. Fail rather than file the release under a
     // tenant nobody owns — a silently unattributable escrow-release record is
@@ -218,7 +218,7 @@ export async function autoPromoteIfElapsed(args: {
     throw new Error(`autoPromoteIfElapsed: grantee ${granteeId} not found`);
   }
 
-  await logAuditInTx(db, grantee.tenantId, {
+  await logAuditInTx(db, granteeTenantId, {
     ...auditBase,
     actorType: ACTOR_TYPE.SYSTEM,
     action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,

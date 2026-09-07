@@ -89,7 +89,14 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "grantee-1" } });
     mockPrismaGrant.findUnique.mockResolvedValue(activatedGrant);
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: GRANTEE_TENANT_ID });
+    // Shaped as `resolveOwningTenantIdFromClient` selects it: the active
+    // membership is the source and `tenantId` the fallback, so a mock carrying
+    // only the column would exercise the fallback while reading like the
+    // ordinary case.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: GRANTEE_TENANT_ID,
+      tenantMemberships: [{ tenantId: GRANTEE_TENANT_ID }],
+    });
   });
 
   it("returns 401 when unauthenticated", async () => {

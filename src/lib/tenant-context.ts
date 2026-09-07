@@ -25,6 +25,47 @@ export async function resolveUserTenantId(userId: string): Promise<string | null
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
+/**
+ * The tenant a user's records belong to, for callers that MUST NOT throw.
+ *
+ * Same adjudicator as `resolveUserTenantIdFromClient` — the active membership,
+ * which is what every reader of those records scopes by — but total where that
+ * one is strict: it throws `MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED` on a second
+ * active membership, and on the paths this serves that turns a working
+ * operation into a rolled-back 500 over a condition the operation does not care
+ * about. Audit emits must never throw, and an escrow release must not be undone
+ * by how its record is addressed.
+ *
+ * `User.tenantId` is the FALLBACK, not the source. It is a denormalized copy of
+ * the same fact that nothing invalidates: `api/scim/v2/Users` rejects only an
+ * ACTIVE membership in another tenant, so a user deactivated in A and
+ * provisioned into B keeps the column pointing at A. A record filed under the
+ * stale copy is invisible to every reader, under RLS, permanently.
+ *
+ * The fallback is still load-bearing: the sentinel tenant is memberless by
+ * invariant, so sentinel actors resolve no membership and reach it by design.
+ *
+ * Returns null only when the user row itself is absent.
+ */
+export async function resolveOwningTenantIdFromClient(
+  db: Pick<typeof prisma, "user">,
+  userId: string,
+): Promise<string | null> {
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      tenantId: true,
+      tenantMemberships: {
+        where: { deactivatedAt: null },
+        select: { tenantId: true },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+      },
+    },
+  });
+  return user?.tenantMemberships[0]?.tenantId ?? user?.tenantId ?? null;
+}
+
 export async function resolveTeamTenantId(teamId: string): Promise<string | null> {
   return withBypassRls(prisma, async (tx) => {
     const team = await tx.team.findUnique({
