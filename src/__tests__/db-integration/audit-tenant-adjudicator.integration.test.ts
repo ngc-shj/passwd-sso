@@ -6,10 +6,13 @@
  * MEMBERSHIP — personal reads open `withUserTenantRls` -> `resolveUserTenantId`,
  * tenant-admin reads open `requireTenantPermission` -> `getTenantMembership` —
  * while the writer read `User.tenantId`, a denormalized copy of the same fact
- * with nothing invalidating it. SCIM provisioning into another tenant
- * (`api/scim/v2/Users/route.ts`, which rejects only an ACTIVE membership
- * elsewhere) leaves the copy pointing at the old tenant. A row filed under the
- * stale copy is invisible to every reader, under RLS, permanently.
+ * that nothing writes together with it. A row filed under the stale copy is
+ * invisible to every reader, under RLS, permanently.
+ *
+ * No reachable producer of the divergence was found (see the note in
+ * `src/lib/tenant-context.ts`), so these cells construct the state directly.
+ * That is the honest framing: the property under test is that writer and reader
+ * AGREE, and it must hold whether or not today's code can pull them apart.
  *
  * Why this is an integration cell and not a mocked one. The divergence is a
  * relationship between two tables; a mocked `user.findUnique` returns whatever
@@ -164,10 +167,10 @@ describe("the audit writer and its readers agree on the tenant", () => {
   });
 
   it.skipIf(SKIP)("[R] a memberless actor falls back to User.tenantId", async () => {
-    // This is the sentinel actors' path, exercised WITHOUT touching the sentinel
-    // tenant — it is memberless by invariant, so it resolves no membership and
-    // reaches the same fallback. The sibling file documents why writing under
-    // the real sentinel is not reclaimable on a shared database.
+    // The fallback arm. NOT the sentinel actors' path — they have no `users` row
+    // at all, so they return null here and reach the system tenant through
+    // `resolveTenantId`'s own coalesce. This is the user whose memberships have
+    // all been deactivated, which is the population the fallback exists for.
     const tenantId = await newTenant();
     const userId = await ctx.createUser(tenantId);
     await deactivateAllMemberships(userId);

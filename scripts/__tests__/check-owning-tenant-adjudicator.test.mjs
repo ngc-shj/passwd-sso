@@ -149,6 +149,63 @@ describe("check-owning-tenant-adjudicator", () => {
     expect(out).toContain("OUTSIDE any tenant-scoped context");
   });
 
+  // ─── read shapes the detector must not be blind to ────────────────────────
+  //
+  // Round 2 red-proved the first version blind to every one of these. The cells
+  // below are per-SHAPE, not one loop: each was observed failing on its own, and
+  // a single parameterised cell would let one spelling regress behind another.
+
+  it.each([
+    ["a bare findUnique with no select", `tx.user.findUnique({ where: { id } })`],
+    ["an unprojected findFirst", `tx.user.findFirst({ where: { email } })`],
+    ["include instead of select", `tx.user.findUnique({ where: { id }, include: { tenant: true } })`],
+    ["findMany", `tx.user.findMany({ where: {}, select: { tenantId: true } })`],
+    ["findUniqueOrThrow", `tx.user.findUniqueOrThrow({ where: { id }, select: { tenantId: true } })`],
+    ["findFirstOrThrow", `tx.user.findFirstOrThrow({ where: { id }, select: { tenantId: true } })`],
+    ["a select that is not an inline literal", `tx.user.findUnique({ where: { id }, select: SEL })`],
+  ])("sees %s", (_label, read) => {
+    // A Prisma read with no projection returns every scalar, `tenantId` among
+    // them — so "no select" is the BROADEST shape, not an exempt one.
+    write("src/lib/unlisted.ts", inBypass(`const u = await ${read};\n`));
+    manifest({ "src/lib/other.ts": { disposition: "adjudicator" } });
+    write("src/lib/other.ts", inBypass(HELPER_CALL));
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("no MANIFEST entry");
+    expect(out).toContain("src/lib/unlisted.ts");
+  });
+
+  it("does NOT resolve a wrapper that reaches a bypass through a SECOND wrapper", () => {
+    // Depth 2. The outer wrapper's own text names a tenant opener and never
+    // names withBypassRls, so the one-level version resolved it SAFE — the exact
+    // fail-open the leaky-wrapper cell above exists to prevent, one indirection
+    // away. Measured on the shipped gate before the recursion was added.
+    write(
+      "src/lib/deep-wrapper.ts",
+      `const inner = (fn) => withBypassRls(prisma, fn);\n` +
+        `const outer = (fn) => tenantId ? withTenantRls(prisma, tenantId, fn) : inner(fn);\n` +
+        `await outer(async (tx) => {\n${RAW_READ}});\n`,
+    );
+    manifest({ "src/lib/deep-wrapper.ts": { disposition: "tenant-scoped" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+  });
+
+  it("fails when an adjudicator file only IMPORTS the helper without calling it", () => {
+    // `usesHelper` matched any identifier, so an unused import satisfied the
+    // disposition on its own — while a raw read sat beside it.
+    write(
+      "src/lib/import-only.ts",
+      `import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";\n` +
+        inBypass(RAW_READ),
+    );
+    manifest({ "src/lib/import-only.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("never references");
+  });
+
   // ─── column-intended ──────────────────────────────────────────────────────
 
   it("permits an unconstrained read only with a stated reason", () => {

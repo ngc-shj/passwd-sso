@@ -37,10 +37,23 @@ export async function resolveUserTenantId(userId: string): Promise<string | null
  * by how its record is addressed.
  *
  * `User.tenantId` is the FALLBACK, not the source. It is a denormalized copy of
- * the same fact that nothing invalidates: `api/scim/v2/Users` rejects only an
- * ACTIVE membership in another tenant, so a user deactivated in A and
- * provisioned into B keeps the column pointing at A. A record filed under the
- * stale copy is invisible to every reader, under RLS, permanently.
+ * the same fact, and nothing writes the two together.
+ *
+ * WHAT IS AND IS NOT MEASURED about how they come apart. The SCIM create path is
+ * NOT a producer, though it reads like one: `api/scim/v2/Users` does reject a
+ * user whose column names another tenant, but that arm is unreachable — the
+ * lookup above it runs inside `withTenantRls`, so a user belonging to another
+ * tenant is invisible and control reaches `user.create`, which dies on
+ * `User.email @unique`. `directory-sync/engine.ts` has the same shape. The one
+ * writer that moves the column (`auth.ts`'s SSO tenant claim) moves the
+ * membership in the same transaction. On the development database the divergent
+ * population is 0.
+ *
+ * So this is prophylaxis, not a live-incident fix, and it is worth saying which:
+ * the value of one adjudicator is that writer and reader cannot disagree
+ * REGARDLESS of how a divergence arises, and the class it closes contains
+ * sign-in gates, passkey enforcement, session timeouts and the session-revocation
+ * path. What it does NOT rest on is a reachable producer, because none was found.
  *
  * The fallback is still load-bearing, for the user whose memberships have ALL
  * been deactivated: they still have records to file, and the column is the last

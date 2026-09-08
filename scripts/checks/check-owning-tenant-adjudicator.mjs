@@ -3,10 +3,14 @@
  * CI guard: a user's tenant identity is read through ONE adjudicator — AST,
  * per-read-site, with a disposition manifest.
  *
- * `User.tenantId` is a denormalized copy of "the user's active TenantMember"
- * and nothing invalidates it. `api/scim/v2/Users` rejects only an ACTIVE
- * membership in another tenant, so a user deactivated in tenant A and
- * provisioned into B keeps the column pointing at A. Every reader of the
+ * `User.tenantId` is a denormalized copy of "the user's active TenantMember",
+ * and nothing writes the two together. No reachable producer of a divergence was
+ * found — the SCIM and directory-sync paths look like one but their cross-tenant
+ * arm is unreachable under their own `withTenantRls`, and the divergent
+ * population on the development database is 0 (see the note in
+ * `src/lib/tenant-context.ts`). This gate is therefore prophylactic: its value is
+ * that writer and reader cannot disagree regardless of how a divergence arises.
+ * Every reader of the
  * resulting rows scopes by the membership (`withUserTenantRls` ->
  * `resolveUserTenantId`, `requireTenantPermission` -> `getTenantMembership`),
  * so a record filed under the stale copy is invisible under RLS, permanently —
@@ -74,6 +78,15 @@ const SCAN_ROOT = "src";
 
 const HELPER = "resolveOwningTenantIdFromClient";
 
+/** Every read shape that can return a row's scalars. */
+const READ_METHODS = new Set([
+  "findUnique",
+  "findUniqueOrThrow",
+  "findFirst",
+  "findFirstOrThrow",
+  "findMany",
+]);
+
 /** Openers that establish `app.tenant_id`, so RLS constrains the row. */
 const TENANT_SCOPED = new Set(["withTenantRls", "withUserTenantRls", "withTeamTenantRls"]);
 
@@ -125,27 +138,41 @@ function walk(dir, out = []) {
  * Does `name` resolve, in this file, to something that opens a tenant-scoped
  * context? One level deep, and fail-closed: an unresolvable name is not safe.
  */
-function resolvesToTenantScoped(name, sf, seen = new Set()) {
+function resolvesToTenantScoped(name, sf) {
   if (TENANT_SCOPED.has(name)) return true;
-  if (seen.has(name)) return false;
-  seen.add(name);
+  const reached = openersReachableFrom(name, sf, new Set());
+  // Order matters: a wrapper whose own text names a tenant opener may still
+  // delegate to another wrapper that opens a bypass. Checking "names a tenant
+  // opener" first returns SAFE for exactly that shape — measured, on the
+  // one-level version this replaced.
+  if (reached.has("withBypassRls")) return false;
+  return [...TENANT_SCOPED].some((o) => reached.has(o));
+}
 
-  // Descendants, not `sf.getVariableDeclaration` — that only sees module scope,
-  // and both `withVaultTenantRls` wrappers are declared INSIDE their handler.
-  // Measured: the module-scope-only version reported those two safe files as
-  // unconstrained, which is the false positive that would have pushed them into
-  // the manifest as exceptions they do not need.
+/**
+ * Every opener name reachable from `name`'s declaration in this file, following
+ * local identifier callees transitively. `seen` is the cycle guard.
+ *
+ * Fail-closed: a name that resolves to no local declaration contributes nothing,
+ * so a read wrapped only in unresolvable calls stays UNCONSTRAINED.
+ */
+function openersReachableFrom(name, sf, seen) {
+  if (seen.has(name)) return new Set();
+  seen.add(name);
+  if (TENANT_SCOPED.has(name) || name === "withBypassRls") return new Set([name]);
+
   const decl =
     sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration).find((d) => d.getName() === name) ??
     sf.getFunction(name);
-  if (!decl) return false;
+  if (!decl) return new Set();
 
-  // A local wrapper counts only if it reaches a tenant-scoped opener AND cannot
-  // reach a bypass — `tenantId ? withTenantRls(...) : withUserTenantRls(...)`
-  // qualifies; a wrapper that falls back to withBypassRls does not.
-  const body = decl.getText();
-  if (/\bwithBypassRls\b/.test(body)) return false;
-  return [...TENANT_SCOPED].some((o) => new RegExp(`\\b${o}\\b`).test(body));
+  const out = new Set();
+  for (const call of decl.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const callee = call.getExpression();
+    if (callee.getKind() !== SyntaxKind.Identifier) continue;
+    for (const o of openersReachableFrom(callee.getText(), sf, seen)) out.add(o);
+  }
+  return out;
 }
 
 /** The read is constrained when any enclosing call resolves to a tenant opener. */
@@ -159,13 +186,32 @@ function isConstrained(call, sf) {
   return false;
 }
 
-/** Does this `findUnique`/`findFirst` select a tenant identity? */
+/**
+ * Does this read return a tenant identity?
+ *
+ * FAIL-CLOSED on an absent or unreadable projection. A Prisma read with no
+ * `select` returns every scalar, `tenantId` included — so "no select" is the
+ * BROADEST shape, not an exempt one, and the first version of this function
+ * answered `false` for it. That version was red-proved blind to a bare
+ * `findUnique`, an `include:` and a `findMany`, which is the completeness half
+ * of this gate — the half the header credits with stopping the class growing
+ * silently — never firing.
+ */
 function selectsTenantIdentity(call) {
   const arg = call.getArguments()[0];
-  if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) return false;
-  const sel = arg.getProperty?.("select");
-  if (!sel) return false;
-  const text = sel.getText();
+  // No argument object at all, or one this gate cannot read: assume the broad
+  // shape rather than the narrow one.
+  if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) return true;
+
+  const projection = arg.getProperty?.("select") ?? arg.getProperty?.("include");
+  if (!projection) return true; // unprojected read -> all scalars
+
+  const text = projection.getText();
+  // A projection that is not an inline literal (`select: SEL`, a spread) is
+  // undecidable here, so it counts.
+  const init = projection.getInitializer?.();
+  if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return true;
+
   return /\btenantId\s*:/.test(text) || /\btenant\s*:/.test(text);
 }
 
@@ -201,7 +247,7 @@ for (const { rel, sf } of sourceFilesFrom(project, files, ROOT)) {
     const method = callee.getName();
 
     if (method === HELPER || callee.getText().endsWith(`.${HELPER}`)) continue;
-    if (method !== "findUnique" && method !== "findFirst") continue;
+    if (!READ_METHODS.has(method)) continue;
 
     const recv = callee.getExpression();
     if (recv.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
@@ -213,9 +259,14 @@ for (const { rel, sf } of sourceFilesFrom(project, files, ROOT)) {
     if (!isConstrained(call, sf)) record.unconstrained.push(call.getStartLineNumber());
   }
 
+  // A CALL, not any identifier: an unused `import { resolveOwningTenantIdFromClient }`
+  // satisfied the "adjudicator" disposition on its own.
   const callsHelper = sf
-    .getDescendantsOfKind(SyntaxKind.Identifier)
-    .some((id) => id.getText() === HELPER);
+    .getDescendantsOfKind(SyntaxKind.CallExpression)
+    .some((c) => {
+      const e = c.getExpression();
+      return e.getText() === HELPER || e.getText().endsWith(`.${HELPER}`);
+    });
   if (callsHelper) {
     record ??= { unconstrained: [], usesHelper: false, anyRead: false };
     record.usesHelper = true;
