@@ -153,6 +153,11 @@ const ALLOWED_USAGE = new Map([
   // is now loaded by that id. Same row, same bypass scope, named model.
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session", "tenant"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential", "tenant"]],
+  // The cross-tenant reactivation guard: resolves the SCIM id and reads the
+  // user's ACTIVE membership set, both of which are invisible inside the tenant
+  // context this route mutates in. Read-only, and the tenant it compares against
+  // is the authenticated SCIM token's, not caller-supplied.
+  ["src/app/api/scim/v2/Users/[id]/route.ts", ["tenantMember", "scimExternalMapping"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],

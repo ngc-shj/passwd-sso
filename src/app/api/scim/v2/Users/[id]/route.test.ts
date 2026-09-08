@@ -12,7 +12,8 @@ const {
   mockTeamMemberKey,
   mockTransaction,
   mockWithTenantRls,
-  mockWithBypassRls,
+  mockGuardMember,
+  mockGuardMapping,
   mockInvalidateUserSessions,
   mockLogger,
 } = vi.hoisted(() => ({
@@ -25,7 +26,13 @@ const {
   mockTeamMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
   mockWithTenantRls: vi.fn(async (prisma: unknown, _tenantId: string, fn: (tx: unknown) => unknown) => fn(prisma)),
-  mockWithBypassRls: vi.fn(async (prisma: unknown, fn: (tx: unknown) => unknown) => fn(prisma)),
+  // The reactivation guard's reads live on their OWN client: it resolves the
+  // SCIM id and reads the active-membership set in one bypass, and handing it the
+  // shared prisma mock would consume from the `mockResolvedValueOnce` sequences
+  // the tenant-context cells depend on. `mockGuardMember` is the seam a cell uses
+  // to make the guard fire.
+  mockGuardMember: { findUnique: vi.fn(), findMany: vi.fn() },
+  mockGuardMapping: { findFirst: vi.fn() },
   mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -47,7 +54,10 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls, withBypassRls: mockWithBypassRls }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls, withBypassRls: (
+  _prisma: unknown,
+  fn: (tx: unknown) => unknown,
+) => fn({ tenantMember: mockGuardMember, scimExternalMapping: mockGuardMapping }) }));
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
@@ -84,9 +94,12 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
-    // Default for the reactivation guard: no active membership anywhere, so
-    // nothing is being made a second one. Cells that exercise the guard override.
-    mockTenantMember.findMany.mockResolvedValue([]);
+    // Defaults for the reactivation guard, on its own client: the SCIM id
+    // resolves to `user-1`, and nothing is active anywhere else. Cells that
+    // exercise the guard override `mockGuardMember.findMany`.
+    mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockGuardMember.findMany.mockResolvedValue([]);
+    mockGuardMapping.findFirst.mockResolvedValue(null);
   });
 
   it("returns tenant user resource", async () => {
@@ -145,9 +158,12 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
-    // Default for the reactivation guard: no active membership anywhere, so
-    // nothing is being made a second one. Cells that exercise the guard override.
-    mockTenantMember.findMany.mockResolvedValue([]);
+    // Defaults for the reactivation guard, on its own client: the SCIM id
+    // resolves to `user-1`, and nothing is active anywhere else. Cells that
+    // exercise the guard override `mockGuardMember.findMany`.
+    mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockGuardMember.findMany.mockResolvedValue([]);
+    mockGuardMapping.findFirst.mockResolvedValue(null);
   });
 
   it("deactivates tenant member", async () => {
@@ -197,8 +213,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // memberships makes `resolveUserTenantIdFromClient` throw, and the proxy
     // auth gate calls it on every request, so the effect is that this tenant can
     // invalidate every session of a user who belongs to another.
-    mockTenantMember.findUnique.mockResolvedValueOnce({ userId: "user-1" });
-    mockTenantMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
 
     const res = await PUT(
       makeReq({
@@ -224,7 +239,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() });
-    mockTenantMember.findMany.mockResolvedValue([{ tenantId: "tenant-1" }]);
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "tenant-1" }]);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PUT(
@@ -250,7 +265,7 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
-    mockTenantMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
 
     const res = await PUT(
@@ -662,9 +677,12 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
-    // Default for the reactivation guard: no active membership anywhere, so
-    // nothing is being made a second one. Cells that exercise the guard override.
-    mockTenantMember.findMany.mockResolvedValue([]);
+    // Defaults for the reactivation guard, on its own client: the SCIM id
+    // resolves to `user-1`, and nothing is active anywhere else. Cells that
+    // exercise the guard override `mockGuardMember.findMany`.
+    mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockGuardMember.findMany.mockResolvedValue([]);
+    mockGuardMapping.findFirst.mockResolvedValue(null);
   });
 
   it("returns 400 for unsupported patch operation", async () => {
@@ -910,9 +928,12 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
-    // Default for the reactivation guard: no active membership anywhere, so
-    // nothing is being made a second one. Cells that exercise the guard override.
-    mockTenantMember.findMany.mockResolvedValue([]);
+    // Defaults for the reactivation guard, on its own client: the SCIM id
+    // resolves to `user-1`, and nothing is active anywhere else. Cells that
+    // exercise the guard override `mockGuardMember.findMany`.
+    mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockGuardMember.findMany.mockResolvedValue([]);
+    mockGuardMapping.findFirst.mockResolvedValue(null);
   });
 
   it("removes tenant member and related records", async () => {

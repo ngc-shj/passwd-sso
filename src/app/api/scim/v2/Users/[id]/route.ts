@@ -5,7 +5,7 @@ import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import {
   invalidateUserSessions,
@@ -69,8 +69,15 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   // run BETWEEN two tenant contexts, not inside one: the foreign membership row
   // is what RLS hides inside a tenant context, and opening a bypass inside one is
   // refused by the nesting guard. Sequential contexts are allowed; nested are not.
-  const resolvedUserId = await withTenantRls(prisma, tenantId, (tx) =>
-    resolveUserId(tenantId, id, tx),
+  // The id is resolved inside the guard's OWN bypass, not in a tenant context:
+  // `resolveUserId` is explicitly tenant-scoped by argument, so it is safe there,
+  // and this keeps the guard's reads off the mutation path entirely. The mutation
+  // callback below resolves it again through its own `tx`, which is what keeps
+  // that callback in the `(tx) =>` form `check-bypass-rls` requires.
+  const resolvedUserId = await withBypassRls(
+    prisma,
+    (tx) => resolveUserId(tenantId, id, tx),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
   if (!resolvedUserId) return scimError(404, "User not found");
   if (active !== false && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
@@ -79,8 +86,11 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
 
   let serviceResult;
   try {
-    serviceResult = await withTenantRls(prisma, tenantId, () =>
-      replaceScimUser(tenantId, resolvedUserId, { active, externalId, name }, getScimBaseUrl()),
+    serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
+      resolveUserId(tenantId, id, tx).then((userId) => {
+        if (!userId) throw new ScimUserNotFoundError();
+        return replaceScimUser(tenantId, userId, { active, externalId, name }, getScimBaseUrl());
+      }),
     );
   } catch (e) {
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
@@ -148,8 +158,15 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   // run BETWEEN two tenant contexts, not inside one: the foreign membership row
   // is what RLS hides inside a tenant context, and opening a bypass inside one is
   // refused by the nesting guard. Sequential contexts are allowed; nested are not.
-  const resolvedUserId = await withTenantRls(prisma, tenantId, (tx) =>
-    resolveUserId(tenantId, id, tx),
+  // The id is resolved inside the guard's OWN bypass, not in a tenant context:
+  // `resolveUserId` is explicitly tenant-scoped by argument, so it is safe there,
+  // and this keeps the guard's reads off the mutation path entirely. The mutation
+  // callback below resolves it again through its own `tx`, which is what keeps
+  // that callback in the `(tx) =>` form `check-bypass-rls` requires.
+  const resolvedUserId = await withBypassRls(
+    prisma,
+    (tx) => resolveUserId(tenantId, id, tx),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
   if (!resolvedUserId) return scimError(404, "User not found");
   if (patchOps.active !== false && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
@@ -158,8 +175,11 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
 
   let serviceResult;
   try {
-    serviceResult = await withTenantRls(prisma, tenantId, () =>
-      patchScimUser(tenantId, resolvedUserId, patchOps, getScimBaseUrl()),
+    serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
+      resolveUserId(tenantId, id, tx).then((userId) => {
+        if (!userId) throw new ScimUserNotFoundError();
+        return patchScimUser(tenantId, userId, patchOps, getScimBaseUrl());
+      }),
     );
   } catch (e) {
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
