@@ -267,3 +267,164 @@ before each integration run and restarted after.
   behaviour change requiring its own test matrix.
 - **Why not now:** deferred to a user scope decision, not skipped. Presented with
   the derivation above rather than as a count.
+
+---
+
+# Round 2
+
+Date: 2026-09-08
+
+## Changes from Previous Round
+
+Round 1's twelve-member derivation was closed (commit `8c96f8434`) behind
+`check-owning-tenant-adjudicator.mjs`. Round 2 reviewed that closure — and
+converged on the convergence artifact itself.
+
+## The shape of this round
+
+Round 1's findings were about the code. Round 2's are about **the gate and the
+tests written to prove the code**, plus one about the premise the whole branch
+was justified by. That is the same failure mode PR `#820` named and round 1
+repeated: claims about behaviour held; claims about mechanism did not.
+
+## Findings
+
+### F8 / F1 / Q4 — Major, three-way convergence — the gate was blind to four read shapes
+
+All three experts red-proved it independently on synthetic roots. A Prisma read
+with **no `select`** returns every scalar, `tenantId` included, and
+`selectsTenantIdentity` answered `false` for it — so the completeness half, the
+half the header credits with stopping the class growing silently, never fired.
+`include:`, `findMany` and the `*OrThrow` variants were the same. One of the
+blind shapes was already in the tree (`api/scim/v2/Users/route.ts:133`).
+
+**Resolved.** The predicate now fails CLOSED: an absent or non-inline projection
+is the BROADEST shape, not an exempt one. `usesHelper` requires a call rather
+than any identifier — an unused import satisfied the `adjudicator` disposition
+while a raw read sat beside it. Cost of the widening: one manifest entry.
+Nine new self-test cells, one per shape rather than one loop, so a single
+spelling cannot regress behind another.
+
+### Q5 — Major — the local-wrapper resolver was fail-open at depth two
+
+A wrapper delegating to another wrapper that opens a bypass resolved SAFE: its
+own text named a tenant opener and never named `withBypassRls`. The unused `seen`
+parameter was the tell — the cycle guard existed before the recursion did.
+
+**Resolved.** Reachability is transitive, and bypass-reachability is checked
+BEFORE tenant-reachability, which is the ordering the first attempt got wrong
+(it returned SAFE from the tenant-opener branch before the bypass was seen).
+
+### F7 — Major (R29) — the producer cited throughout the branch is unreachable
+
+The SCIM create path cannot produce the divergence: its cross-tenant arm sits
+below a lookup inside `withTenantRls`, so a user belonging to another tenant is
+invisible and control reaches `user.create`, which dies on `User.email @unique`.
+`directory-sync/engine.ts` has the same shape. The one writer that moves the
+column moves the membership with it. Divergent population on the dev database: 0.
+
+**Resolved as a correction, not as a fix**: every site now states what was
+measured and says plainly that this is prophylaxis. The value of one adjudicator
+is that writer and reader cannot disagree *however* a divergence arises; it does
+not rest on a producer. A second copy of the sentinel claim round 1 had already
+corrected once was found still standing in the integration test, and corrected.
+
+### F2 / S6 — Major — reactivation creates a second active membership, with no guard
+
+`api/scim/v2/Users` guards CREATE against a cross-tenant active membership. The
+REACTIVATION arms did not: `scim-user-service`'s PUT and PATCH, and
+`directory-sync/engine.ts`'s two arms. The principal is a holder of *this*
+tenant's SCIM token or directory-sync config — no authority in the tenant the
+user belongs to. Two active memberships makes `resolveUserTenantIdFromClient`
+throw, and the proxy auth gate calls it on every request, so the effect is that
+one tenant can invalidate every session of another tenant's user.
+
+**Resolved.** `wouldCreateSecondActiveMembership` (single) and
+`usersActiveInAnotherTenant` (batch, for the sync) guard all four arms. Both must
+run OUTSIDE a tenant context — the foreign row is what RLS hides inside one, and
+opening a bypass inside one is refused by the nesting guard — so the SCIM routes
+resolve the user id in one context, guard, then mutate in a second. Sequential
+contexts are permitted; nested are not.
+
+Two design notes worth keeping:
+- The predicate is one `findMany` over the ACTIVE set, not the `findUnique` +
+  `findFirst` pair it reads like. The callers sequence their own
+  `tenantMember.findUnique` mocks, and an extra call shifted every one of them —
+  a query shape chosen so the guard cannot perturb the thing it guards.
+- The guard is on the TRANSITION. A deactivating request is never refused: it
+  cannot add an active membership, and it is the operation that repairs the state.
+
+### F10 — Major — `tenant/policy` GET re-resolved a tenant it was already holding
+
+`requireTenantPermission`'s return value was discarded and the tenant resolved a
+second time, through an adjudicator with different rules (`getTenantMembership`
+is `findFirst` with no `orderBy` and no fallback). PUT already wrote to
+`membership.tenantId`. **Resolved** — GET now reads the tenant the request was
+admitted to. The gate's reverse-direction check then fired correctly: the file no
+longer resolves a user's tenant at all, so its manifest entry was removed.
+
+### F9 — Major — the two passkey routes disagreed on an arm this change made live
+
+Splitting the relation traversal into two reads made `tenant === null` reachable.
+`passkey/verify` rejects it; `passkey/options/email` **allowed** it — returning
+the credential list and PRF salts pre-auth on a state sign-in refuses — while its
+own comment asserted the two agree. **Resolved**: options/email rejects, matching
+its sibling.
+
+The cell that existed for that arm could not see the change: the route has TWO
+`webAuthnCredential.findMany` sites behind one mock (the real list and the dummy
+list), so `toHaveBeenCalled()` passed on either path. Rewritten to assert the
+argument, with an allow half.
+
+### Q2 — Critical — an authorization decision with no test at all
+
+`app/[locale]/mcp/authorize/page.tsx`'s tenant-mismatch check had zero coverage;
+the only test in that directory covers the client component. **Resolved** — four
+cells, including the one that discriminates (client tenant = the STALE column's
+must be refused). Red-proved against `main`.
+
+### Q3 / T2 — Major — the helper had no cell in its own test file
+
+Thirteen call sites depended on `resolveOwningTenantIdFromClient` and its arms
+were pinned nowhere; its query shape was asserted only from a caller's test.
+**Resolved** — eight cells beside its strict sibling, covering precedence, the
+fallback's actual population, the null arm, the not-throwing property that is its
+whole reason to exist beside `resolveUserTenantIdFromClient`, and the query shape.
+
+### Q7 / Q8 — Minor — two defects in round 1's own test fixes
+
+Q7: the lockout-audit cell loops over every `logAuditInTx` call, so it stays green
+if the row it is named for stops being emitted. Q8: the two new lockout cells
+resolve a tenant whose thresholds are never invalidated between cells.
+
+### Q1 — Critical — STILL OPEN at the time of writing
+
+Measured by mutation: reverting the resolver body leaves 15402 of 15415 tests
+green. 28 of 33 reshaped fixtures use the SAME id for the column and the
+membership, so they cannot tell the two sources apart. Being addressed.
+
+### F6 — Critical, conditional — "tenant-scoped = safe" covers misfiling, not denial
+
+The 13 constrained sites are safe against *misfiling* because RLS returns
+nothing — which for a divergent user means their own row is invisible to their
+own request, and each route takes its not-found arm. Inherited, not introduced,
+and live only if the divergence is producible — which F7 measured it is not.
+Recorded rather than fixed, with that dependency stated.
+
+### F3 / F5 — Major/Minor — forward-only, no backfill
+
+Rows already stamped with a stale tenant are not repaired. Divergent population
+on the dev database is 0, so there is nothing to repair there; the check must run
+where it matters. Open.
+
+### F11, F12, F4, Q6, Q9, Q10 — Minor
+
+Allowlist accounting drift; two hot paths reading the same row twice; a stale
+premise in a fail-closed comment; twin drift in two test pairs; the helper's
+select asserted from a caller's test (closed by Q3); a fail-closed stance
+inconsistency between the two `src/auth.ts` blocks. Open.
+
+## Environment Verification Report
+
+N/A — no Phase 1. VC2 (integration tests cannot share a database with the compose
+workers) observed on every integration run.
