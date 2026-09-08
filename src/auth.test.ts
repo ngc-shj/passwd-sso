@@ -1360,12 +1360,21 @@ describe("signIn callback", () => {
     // off the select so each returns only its own fields, as Prisma would; the
     // membership carries the tenant id, because a column-only mock would resolve
     // through the FALLBACK and read like the ordinary case.
-    function seedExistingUser(opts: { isBootstrap: boolean; tenantId?: string }) {
+    //
+    // `membershipTenantId` defaults to `tenantId` so every existing cell keeps
+    // the agreeing fixture it was written against; only the divergent cell below
+    // splits them, and it supplies its own tenant stub keyed by id.
+    function seedExistingUser(opts: {
+      isBootstrap: boolean;
+      tenantId?: string;
+      membershipTenantId?: string;
+    }) {
       const tenantId = opts.tenantId ?? "tenant-1";
+      const membershipTenantId = opts.membershipTenantId ?? tenantId;
       mockPrisma.user.findUnique.mockImplementation(
         async ({ select }: { select: Record<string, unknown> }) =>
           "tenantMemberships" in select
-            ? { tenantId, tenantMemberships: [{ tenantId }] }
+            ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
             : { id: "real-db-id" },
       );
       mockPrisma.tenant.findUnique.mockResolvedValue({
@@ -1416,6 +1425,51 @@ describe("signIn callback", () => {
       expect(result).toBe(false);
       // Should bail out before reaching ensureTenantMembershipForSignIn
       expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("gates magic-link sign-in on the active membership, not the stale User.tenantId", async () => {
+      // Both cells above seed the same id in both places, so the tenant read is
+      // answered identically whichever source the resolver picks and the verdict
+      // is the same either way — neither can see precedence.
+      //
+      // This is the divergence the gate exists for: SCIM moved the user into an
+      // SSO tenant while `User.tenantId` still names the bootstrap one they left.
+      // The stub therefore dispatches on the id it is called with (a blanket
+      // mockResolvedValue would be as blind as the same-id fixture). Reading the
+      // stale column reports a bootstrap tenant and ADMITS a magic-link sign-in
+      // the user's real tenant forbids.
+      seedExistingUser({
+        isBootstrap: true,
+        tenantId: "stale-home-tenant",
+        membershipTenantId: "scim-provisioned-tenant",
+      });
+      mockPrisma.tenant.findUnique.mockImplementation(
+        async ({ where }: { where: { id: string } }) => ({
+          isBootstrap: where.id !== "scim-provisioned-tenant",
+          id: where.id,
+        }),
+      );
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "scim-moved@corp.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(false);
+      // Not just "refused": the refusal must name the membership tenant. A
+      // blanket deny would satisfy the verdict alone while filing the audit
+      // under the tenant the user left — this is where the id is observable.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "scim-moved@corp.com",
+        tenantId: "scim-provisioned-tenant",
+        provider: "nodemailer",
+        reason: "tenant_mismatch",
+        userId: "real-db-id",
+      });
+      expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+      );
     });
 
     it("returns false when ensureTenantMembershipForSignIn throws unexpected error", async () => {
@@ -1585,17 +1639,24 @@ describe("session callback — passkey enforcement fail-closed", () => {
   // user reads are keyed off the select so each returns only its own fields; the
   // membership must carry the tenant id, or the resolution rides the FALLBACK
   // column while the fixture reads like the ordinary case.
+  //
+  // `membershipTenantId` defaults to the column value so every existing cell
+  // keeps the agreeing fixture it was written against; only the divergent cell
+  // below splits them, and it supplies its own tenant stub keyed by id.
   function seedPasskeyPolicy(opts: {
     fetchFavicons: boolean;
     requirePasskey: boolean;
     requirePasskeyEnabledAt: Date | null;
     passkeyGracePeriodDays: number | null;
+    tenantId?: string;
+    membershipTenantId?: string;
   }) {
-    const tenantId = "tenant-1";
+    const tenantId = opts.tenantId ?? "tenant-1";
+    const membershipTenantId = opts.membershipTenantId ?? tenantId;
     mockPrisma.user.findUnique.mockImplementation(
       async ({ select }: { select: Record<string, unknown> }) =>
         "tenantMemberships" in select
-          ? { tenantId, tenantMemberships: [{ tenantId }] }
+          ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
           : { fetchFavicons: opts.fetchFavicons },
     );
     mockPrisma.tenant.findUnique.mockResolvedValue({
@@ -1673,6 +1734,54 @@ describe("session callback — passkey enforcement fail-closed", () => {
     // The real predicate must NOT block a user who has a passkey — proves the
     // fix is fail-CLOSED (blocks the unknown state), not always-closed.
     expect(passkeyEnforcementBlocks(result.user)).toBe(false);
+  });
+
+  it("stamps the session's passkey enforcement from the active membership, not User.tenantId", async () => {
+    // The happy-path cells above seed the same id in both places and a tenant
+    // stub returning one policy for any id, so the four enforcement fields come
+    // out identical whichever source the resolver reads.
+    //
+    // Here the ids carry OPPOSITE enforcement, dispatched by the id the stub is
+    // called with. This is the session callback, so the value decides whether
+    // EVERY subsequent request is blocked: against the stale column a user whose
+    // real tenant mandates passkeys sails through on the old tenant's off switch.
+    mockPrisma.webAuthnCredential.count.mockResolvedValueOnce(0);
+    seedPasskeyPolicy({
+      fetchFavicons: true,
+      // These three are the STALE tenant's policy — enforcement off. They are
+      // what the fixture returns for any id other than the membership one.
+      requirePasskey: false,
+      requirePasskeyEnabledAt: null,
+      passkeyGracePeriodDays: null,
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+    });
+    const enabledAt = new Date("2020-01-01T00:00:00.000Z");
+    mockPrisma.tenant.findUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        where.id === "scim-provisioned-tenant"
+          ? {
+              requirePasskey: true,
+              requirePasskeyEnabledAt: enabledAt,
+              passkeyGracePeriodDays: 7,
+            }
+          : {
+              requirePasskey: false,
+              requirePasskeyEnabledAt: null,
+              passkeyGracePeriodDays: null,
+            },
+    );
+
+    const result = await sessionCallback(baseParams);
+
+    // Positive first: the fetch succeeded, so these are real values and not the
+    // fail-closed bundle, which would pin `requirePasskey: true` for free.
+    expect(result.user.requirePasskeyEnabledAt).toBe(enabledAt.toISOString());
+    expect(result.user.passkeyGracePeriodDays).toBe(7);
+    expect(result.user.requirePasskey).toBe(true);
+    expect(mockPrisma.tenant.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
   });
 
   it("still logs auth.session.passkey_data_fetch_failed on fetch failure (ops visibility)", async () => {

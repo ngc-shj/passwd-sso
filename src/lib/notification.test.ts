@@ -104,6 +104,40 @@ describe("createNotification", () => {
     });
   });
 
+  it("files the row under the active membership when it differs from User.tenantId", async () => {
+    // The divergent half of the cell above, and the only shape that can tell the
+    // two sources apart: with the same id in both, `notification.create` receives
+    // the same `tenantId` whichever one the resolver reads, so the assertion
+    // there passes against a body that ignores the membership entirely.
+    //
+    // The consumer discriminates directly — `tenantId` is written onto the row,
+    // not passed to a stub that answers identically for any id. A notification
+    // filed under the stale column lands in a tenant the user has left, where
+    // `/api/notifications` (which reads under the membership) never lists it.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    mockPrismaNotification.create.mockResolvedValue({});
+
+    createNotification({
+      userId: "user-1",
+      type: "NEW_DEVICE_LOGIN" as never,
+      title: "New login",
+      body: "From Chrome on macOS",
+    });
+
+    await vi.waitFor(() => {
+      expect(mockPrismaNotification.create).toHaveBeenCalled();
+    });
+
+    expect(mockPrismaNotification.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        tenantId: "scim-provisioned-tenant",
+      }),
+    });
+  });
+
   it("skips creation when tenantId cannot be resolved", async () => {
     mockPrismaUser.findUnique.mockResolvedValue(null);
 

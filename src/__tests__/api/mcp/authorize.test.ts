@@ -311,6 +311,33 @@ describe("GET /api/mcp/authorize", () => {
       expect(url.searchParams.get("state")).toBe("forward-me");
     });
 
+    // Twin of the cell in the co-located src/app/api/mcp/authorize/route.test.ts
+    // ("C6 GET: resolves the enforcement tenant from the active membership").
+    // Both files mock this route with different mock sets, so a fixture change in
+    // one leaves the other's `tenant-uuid`-in-both-places seed unable to tell the
+    // membership from the column — the twins have to pin the same thing.
+    it("resolves the enforcement tenant from the active membership, not User.tenantId", async () => {
+      // The same id decides whose passkey enforcement applies and where the
+      // PASSKEY_ENFORCEMENT_BLOCKED row is filed. It used to come from
+      // `User.tenantId`, a denormalized copy with no invalidation, read here
+      // under a bypass context where RLS does not correct it.
+      mockUserFindUnique.mockResolvedValue({
+        tenantId: "stale-home-tenant",
+        tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+      });
+
+      const res = await GET(createRequest("GET", authorizeUrl()));
+
+      // Positive first: the gate passed and the request reached the consent
+      // redirect. A handler that refused everything would satisfy the pin below
+      // by never calling derivePasskeyState with a real tenant at all.
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location") ?? "").toContain("/en/mcp/authorize");
+      expect(mockDerivePasskeyState).toHaveBeenCalledWith(
+        expect.objectContaining({ tenantId: "scim-provisioned-tenant" }),
+      );
+    });
+
     it("uses locale detected from Accept-Language in the consent URL", async () => {
       mockDetectLocale.mockReturnValue("ja");
       const req = createRequest("GET", authorizeUrl(), {

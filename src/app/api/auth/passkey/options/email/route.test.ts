@@ -110,12 +110,21 @@ const mockCredentials = [
 // `resolveOwningTenantIdFromClient`, then the tenant row. The user read carries
 // the active membership as well as the column — column-only would resolve
 // through the FALLBACK, which is exactly the stale value this gate must not use.
-function seedUser(opts: { id: string; tenantId?: string; isBootstrap?: boolean }) {
+//
+// `membershipTenantId` defaults to `tenantId` so every existing cell keeps the
+// agreeing fixture it was written against; only the divergent cell below splits
+// them, and it supplies its own `isBootstrap` per id.
+function seedUser(opts: {
+  id: string;
+  tenantId?: string;
+  membershipTenantId?: string;
+  isBootstrap?: boolean;
+}) {
   const tenantId = opts.tenantId ?? "tenant-1";
   mockPrismaUserFindFirst.mockResolvedValue({ id: opts.id });
   mockPrismaUserFindUnique.mockResolvedValue({
     tenantId,
-    tenantMemberships: [{ tenantId }],
+    tenantMemberships: [{ tenantId: opts.membershipTenantId ?? tenantId }],
   });
   mockPrismaTenantFindUnique.mockResolvedValue({ isBootstrap: opts.isBootstrap ?? true });
 }
@@ -262,6 +271,54 @@ describe("POST /api/auth/passkey/options/email", () => {
     expect(status).toBe(200);
     expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: "user-bootstrap" } }),
+    );
+  });
+
+  it("runs the bootstrap gate against the active membership, not the stale User.tenantId", async () => {
+    // Every other cell seeds the same id in both places, so `tenant.findUnique`
+    // answers identically whichever source the resolver reads and the outcome is
+    // the same on both — the fixture cannot see precedence at all.
+    //
+    // This is the divergence the route's own comment names: SCIM moves the user
+    // into an SSO tenant while `User.tenantId` still points at the bootstrap one
+    // they left. So the two ids get OPPOSITE `isBootstrap` values, dispatched by
+    // the id the stub is called with (a blanket mockResolvedValue would be as
+    // blind as the same-id fixture). Reading the stale column would return the
+    // real credential list and PRF salts PRE-AUTH for a user whose tenant
+    // forbids passkey sign-in; reading the membership refuses.
+    seedUser({
+      id: "user-scim-moved",
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+    });
+    mockPrismaTenantFindUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) => ({
+        isBootstrap: where.id !== "scim-provisioned-tenant",
+      }),
+    );
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: { email: "scim-moved@corp.com" },
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    // Still 200 with a well-formed options payload — the route must not leak
+    // which emails exist, so refusal is expressed only by WHICH list is fetched.
+    expect(status).toBe(200);
+    expect(json.options).toBeDefined();
+    // The discriminator: the dummy list, not this user's real credentials. The
+    // paired allow half is "returns the real credential list for a
+    // bootstrap-tenant user" above — without it, "not called with the user id"
+    // could be a constant rather than a difference.
+    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: NIL_UUID } }),
+    );
+    expect(mockPrismaWebAuthnFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-scim-moved" } }),
+    );
+    expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
     );
   });
 

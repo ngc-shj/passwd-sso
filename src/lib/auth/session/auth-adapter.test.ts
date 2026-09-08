@@ -596,6 +596,59 @@ describe("createCustomAdapter", () => {
       expect(mockTxSession.create).not.toHaveBeenCalled();
     });
 
+    it("caps and files the session under the active membership, not the stale User.tenantId", async () => {
+      // Every other cell in this describe seeds the same id in both places, so
+      // `tenantId: "tenant-1"` on the session row holds whichever source the
+      // resolver reads, and the tenant stub answers one cap for any id — nothing
+      // here could tell the membership from the column.
+      //
+      // Two consumers, and they must agree on ONE id: the cap read
+      // (`maxConcurrentSessions`) and the `tenantId` stamped on the row. The
+      // adapter comment is explicit that a session filed under the stale copy is
+      // one `/api/sessions` matches zero rows for while reporting a successful
+      // revoke. The cap stub dispatches by id so the eviction behaviour differs
+      // too — the stale tenant has no cap, the membership tenant caps at 1.
+      mockSessionMetaGetStore.mockReturnValue({ ip: null, userAgent: null });
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "stale-home-tenant",
+        tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+      });
+      mockTxTenant.findUnique.mockImplementation(
+        async ({ where }: { where: { id: string } }) =>
+          where.id === "scim-provisioned-tenant"
+            ? { maxConcurrentSessions: 1 }
+            : { maxConcurrentSessions: null },
+      );
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "old-s1", sessionToken: "old-tok-1", ipAddress: "1.1.1.1", userAgent: "old-1" },
+      ]);
+      mockTxSession.deleteMany.mockResolvedValue({ count: 1 });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-scim",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-scim",
+        userId: "u-1",
+        expires,
+      });
+
+      expect(mockTxTenant.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+      );
+      expect(mockTxSession.create.mock.calls[0][0].data.tenantId).toBe(
+        "scim-provisioned-tenant",
+      );
+      // Behavioural, not just argument-shaped: the cap of 1 belongs to the
+      // membership tenant alone, so the eviction is unreachable from the column.
+      expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["old-s1"] } },
+      });
+    });
+
     it("records provider from sessionMetaStorage on the session row", async () => {
       mockSessionMetaGetStore.mockReturnValue({
         ip: null,
@@ -852,6 +905,37 @@ describe("createCustomAdapter", () => {
           provider: "google",
           providerAccountId: "google-1",
           session_state: "42",
+        }),
+        select: { id: true },
+      });
+    });
+
+    it("writes the account under the active membership, not the stale User.tenantId", async () => {
+      // The cell above seeds the same id in both places, so `tenantId:
+      // "tenant-1"` on the account row is satisfied by either source. Here the
+      // ids differ and the written value is the discriminator — `Account` is
+      // RLS-scoped by `tenant_id`, so a row stamped with the tenant the user has
+      // left is invisible to `getAccount` under their real one, and the OAuth
+      // refresh path then behaves as if the account were never linked.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "stale-home-tenant",
+        tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+      });
+      mockPrismaAccount.create.mockResolvedValue({ id: "acc-scim" });
+
+      const adapter = createCustomAdapter();
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "google",
+        providerAccountId: "google-scim",
+      });
+
+      expect(mockPrismaAccount.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: "u-1",
+          tenantId: "scim-provisioned-tenant",
+          providerAccountId: "google-scim",
         }),
         select: { id: true },
       });

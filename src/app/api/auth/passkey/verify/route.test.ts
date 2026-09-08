@@ -174,12 +174,19 @@ const mockUser = {
 // returns only its own fields, as Prisma would. The membership must carry the
 // tenant id — a column-only mock resolves through the FALLBACK, which is the
 // stale value this bootstrap gate must never admit on.
-function seedUser(opts: { tenantId?: string; isBootstrap?: boolean } = {}) {
+//
+// `membershipTenantId` defaults to `tenantId` so every existing cell keeps the
+// agreeing fixture it was written against; only the divergent cell below splits
+// them, and it supplies its own `isBootstrap` per id.
+function seedUser(
+  opts: { tenantId?: string; membershipTenantId?: string; isBootstrap?: boolean } = {},
+) {
   const tenantId = opts.tenantId ?? "tenant-1";
+  const membershipTenantId = opts.membershipTenantId ?? tenantId;
   mockPrismaFindUnique.mockImplementation(
     async ({ select }: { select: Record<string, unknown> }) =>
       "tenantMemberships" in select
-        ? { tenantId, tenantMemberships: [{ tenantId }] }
+        ? { tenantId, tenantMemberships: [{ tenantId: membershipTenantId }] }
         : { id: mockUser.id },
   );
   mockPrismaTenantFindUnique.mockResolvedValue({ isBootstrap: opts.isBootstrap ?? true });
@@ -302,6 +309,43 @@ describe("POST /api/auth/passkey/verify", () => {
     // The stored digest must equal hash(excludeSessionToken) — proving the
     // just-created session (stored by digest) is the one excluded from the wipe.
     expect(storedDigest).toBe(`hashed:${excludeArg}`);
+  });
+
+  it("gates on and stamps the active membership, not the stale User.tenantId", async () => {
+    // The cell above seeds the same id in both places, so `tenantId: "tenant-1"`
+    // on the session row is satisfied by either source — it cannot distinguish
+    // the membership from the column, and neither can the tenant read, which is
+    // stubbed to one value for any id.
+    //
+    // Both ids are bootstrap here, deliberately: the point is not that the gate
+    // refuses, but that the id it gated on is the id it then stamps. The route's
+    // comment requires those to be the SAME value and the membership's — a
+    // session filed under the stale tenant is one `/api/sessions` (which opens
+    // the membership) can neither list nor revoke, while reporting success.
+    seedUser({
+      tenantId: "stale-home-tenant",
+      membershipTenantId: "scim-provisioned-tenant",
+      isBootstrap: true,
+    });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const res = await POST(req);
+
+    // Positive first: sign-in completed. A route that rejected everything would
+    // satisfy the two pins below by never reaching the session write.
+    expect(res.status).toBe(200);
+    expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
+    expect(mockPrismaSessionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user-1",
+        tenantId: "scim-provisioned-tenant",
+      }),
+    });
   });
 
   it("calls deleteMany before create", async () => {

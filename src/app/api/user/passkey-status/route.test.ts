@@ -63,14 +63,21 @@ const TENANT_ID = "tenant-1";
 // selects it, then the tenant loaded by id. A user mock carrying only the
 // column would still resolve — through the FALLBACK — so it would read like the
 // ordinary case while exercising the memberless one.
+//
+// `membershipTenantId` defaults to the column value so every existing cell keeps
+// the agreeing fixture it was written against; the divergent cell below is the
+// only caller that separates them.
 function seedTenant(overrides: {
   requirePasskey?: boolean;
   requirePasskeyEnabledAt?: Date | null;
   passkeyGracePeriodDays?: number | null;
+  columnTenantId?: string;
+  membershipTenantId?: string;
 }) {
+  const columnTenantId = overrides.columnTenantId ?? TENANT_ID;
   mockUserFindUnique.mockResolvedValue({
-    tenantId: TENANT_ID,
-    tenantMemberships: [{ tenantId: TENANT_ID }],
+    tenantId: columnTenantId,
+    tenantMemberships: [{ tenantId: overrides.membershipTenantId ?? columnTenantId }],
   });
   mockTenantFindUnique.mockResolvedValue({
     requirePasskey: overrides.requirePasskey ?? false,
@@ -193,6 +200,54 @@ describe("GET /api/user/passkey-status", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.gracePeriodRemaining).toBeNull();
+  });
+
+  it("reads the enforcement policy from the active membership, not User.tenantId", async () => {
+    // Every cell above seeds the same id in both places, so the tenant read is
+    // answered identically whichever source the resolver picks — the response
+    // body cannot see the difference and the fixture proves nothing about
+    // precedence. Here the two ids carry OPPOSITE policies.
+    //
+    // A blanket `mockResolvedValue` would be just as blind, so the tenant stub
+    // dispatches on the id it is called with: the stale column tenant has
+    // enforcement off, the SCIM-provisioned membership tenant has it on. The
+    // response body is then the discriminator — `required: true` is reachable
+    // only by reading the membership.
+    mockWebAuthnCredentialCount.mockResolvedValue(0);
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    mockTenantFindUnique.mockImplementation(
+      async ({ where }: { where: { id: string } }) =>
+        where.id === "scim-provisioned-tenant"
+          ? {
+              requirePasskey: true,
+              requirePasskeyEnabledAt: new Date(Date.now() - 10 * MS_PER_DAY),
+              passkeyGracePeriodDays: 7,
+            }
+          : {
+              requirePasskey: false,
+              requirePasskeyEnabledAt: null,
+              passkeyGracePeriodDays: null,
+            },
+    );
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/user/passkey-status"),
+    );
+
+    // Positive first: the handler completed. A 500 from the catch-all would
+    // otherwise satisfy "not the stale policy" by never producing a body.
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.required).toBe(true);
+    // Grace expired 3 days ago under the membership tenant's policy; the stale
+    // tenant has no grace configured at all, so this value is unreachable from it.
+    expect(json.gracePeriodRemaining).toBe(0);
+    expect(mockTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "scim-provisioned-tenant" } }),
+    );
   });
 
   it("returns 429 when rate limited", async () => {

@@ -117,6 +117,49 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(res.status).toBe(404);
   });
 
+  it("files the activation row under the active membership, not the stale User.tenantId", async () => {
+    // The auto-activation cell below already pins `logAuditInTx`'s tenant
+    // argument, but its fixture carries GRANTEE_TENANT_ID in BOTH the column and
+    // the membership — so that assertion holds whichever source the adjudicator
+    // reads and cannot see precedence at all. Here the two ids differ, which
+    // makes the tenant argument a discriminator rather than an identity.
+    //
+    // An escrow release filed under the tenant the grantee has left is exactly
+    // the "silently unattributable record" the production comment says this
+    // whole contract exists to prevent: the readers of that row open under the
+    // membership, so nobody who is supposed to see it ever does.
+    mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "stale-home-tenant",
+      tenantMemberships: [{ tenantId: "scim-provisioned-tenant" }],
+    });
+    const requestedGrant = {
+      ...activatedGrant,
+      status: EA_STATUS.REQUESTED,
+      waitExpiresAt: new Date("2020-01-01"),
+    };
+    mockPrismaGrant.findUnique
+      .mockResolvedValueOnce(requestedGrant)
+      .mockResolvedValueOnce({ status: EA_STATUS.REQUESTED, waitExpiresAt: new Date("2020-01-01"), granteeId: "grantee-1", ownerId: "owner-1" })
+      .mockResolvedValueOnce({ ...activatedGrant, status: EA_STATUS.ACTIVATED });
+    mockPrismaGrant.updateMany.mockResolvedValue({ count: 1 });
+
+    const res = await GET(
+      createRequest("GET", "http://localhost/api/emergency-access/grant-1/vault"),
+      createParams({ id: "grant-1" })
+    );
+
+    // Positive first: the promotion actually ran and released the escrow. A
+    // route that refused would satisfy "not the stale tenant" by writing no row.
+    expect(res.status).toBe(200);
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    const [, tenantArg, params] = mockLogAuditInTx.mock.calls[0];
+    expect(tenantArg).toBe("scim-provisioned-tenant");
+    expect(params).toMatchObject({
+      action: "EMERGENCY_ACCESS_ACTIVATE",
+      metadata: { outcome: "released" },
+    });
+  });
+
   it("returns 403 when not ACTIVATED", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       ...activatedGrant,
