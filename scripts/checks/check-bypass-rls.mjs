@@ -158,6 +158,11 @@ const ALLOWED_USAGE = new Map([
   // context this route mutates in. Read-only, and the tenant it compares against
   // is the authenticated SCIM token's, not caller-supplied.
   ["src/app/api/scim/v2/Users/[id]/route.ts", ["tenantMember", "scimExternalMapping"]],
+  // The same cross-tenant guard on the CREATE verb: an email lookup that must
+  // see users outside this tenant (the whole point — the old in-context version
+  // could not, so it never fired). Read-only; the tenant compared against is the
+  // authenticated SCIM token's.
+  ["src/app/api/scim/v2/Users/route.ts", ["user", "tenantMember"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],

@@ -18,7 +18,8 @@ import {
 import { scimUserSchema } from "@/lib/scim/validations";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
@@ -128,6 +129,30 @@ async function handlePOST(req: NextRequest) {
   if (!bodyResult.ok) return bodyResult.response;
   const { userName, name, externalId, active } = bodyResult.data;
 
+  // The cross-tenant guard, hoisted OUT of the tenant context because it could
+  // not work inside one. It was doubly vacuous: gated on `user.tenantId !==
+  // tenantId` — the denormalized column this whole class is about — and, even
+  // when entered, querying `tenantId: { not: tenantId }` under
+  // `withTenantRls`, which RLS has already restricted to `tenantId`. The set was
+  // structurally empty, so the 409 its own error mapping exists for could never
+  // be reached. Same placement as the PUT/PATCH arms in `[id]/route.ts`, for the
+  // same reason: the foreign membership row is what RLS hides inside a tenant
+  // context, and a nested bypass is refused by the nesting guard.
+  const existingUserId = await withBypassRls(
+    prisma,
+    async (tx) => {
+      const found = await tx.user.findUnique({
+        where: { email: userName },
+        select: { id: true },
+      });
+      return found?.id ?? null;
+    },
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+  if (existingUserId && (await wouldCreateSecondActiveMembership(existingUserId, tenantId))) {
+    return scimError(409, "User already belongs to another organization", "uniqueness");
+  }
+
   try {
     const created = await withTenantRls(prisma, tenantId, async (tx) => {
       let user = await tx.user.findUnique({ where: { email: userName } });
@@ -139,17 +164,6 @@ async function handlePOST(req: NextRequest) {
             name: name?.formatted ?? null,
           },
         });
-      }
-
-      // Reject if user already belongs to a different tenant (cross-tenant DoS prevention)
-      if (user.tenantId !== tenantId) {
-        const otherMembership = await tx.tenantMember.findFirst({
-          where: { userId: user.id, tenantId: { not: tenantId }, deactivatedAt: null },
-          select: { id: true },
-        });
-        if (otherMembership) {
-          throw new Error("SCIM_USER_BELONGS_TO_OTHER_TENANT");
-        }
       }
 
       const existingMember = await tx.tenantMember.findUnique({
@@ -228,9 +242,6 @@ async function handlePOST(req: NextRequest) {
 
     return scimResponse(resource, 201);
   } catch (e) {
-    if (e instanceof Error && e.message === "SCIM_USER_BELONGS_TO_OTHER_TENANT") {
-      return scimError(409, "User already belongs to another organization", "uniqueness");
-    }
     if (e instanceof Error && e.message === "SCIM_RESOURCE_EXISTS") {
       return scimError(409, "User already exists in this tenant", "uniqueness");
     }

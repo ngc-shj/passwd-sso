@@ -10,6 +10,8 @@ const {
   mockUser,
   mockScimExternalMapping,
   mockWithTenantRls,
+  mockGuardUser,
+  mockGuardMember,
   applyTxHolder,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
@@ -23,6 +25,12 @@ const {
   // constraint violation surfacing from the tx.
   applyTxHolder: { current: null as Record<string, unknown> | null, reject: null as unknown },
   mockWithTenantRls: vi.fn(),
+  // The cross-tenant guard's own reads. It runs BEFORE the tenant context, on
+  // its own client, so handing it the shared prisma mock would consume from the
+  // sequences the POST cells depend on. Defaults: the email resolves to nobody,
+  // and nobody is active anywhere else.
+  mockGuardUser: { findUnique: vi.fn() },
+  mockGuardMember: { findMany: vi.fn() },
 }));
 
 // withTenantRls now runs the POST body directly on its callback tx (the inner
@@ -48,7 +56,11 @@ vi.mock("@/lib/prisma", () => ({
     scimExternalMapping: mockScimExternalMapping,
   },
 }));
-vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withTenantRls: mockWithTenantRls,
+  withBypassRls: (_prisma: unknown, fn: (tx: unknown) => unknown) =>
+    fn({ user: mockGuardUser, tenantMember: mockGuardMember }),
+}));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
@@ -80,6 +92,10 @@ describe("GET /api/scim/v2/Users", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     applyTxHolder.current = null;
+    // Guard defaults: the email resolves to nobody, and nobody is active
+    // elsewhere. Cells that exercise the guard override these.
+    mockGuardUser.findUnique.mockResolvedValue(null);
+    mockGuardMember.findMany.mockResolvedValue([]);
     applyTxHolder.reject = null;
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
@@ -201,9 +217,72 @@ describe("POST /api/scim/v2/Users", () => {
     vi.clearAllMocks();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     applyTxHolder.current = null;
+    // Guard defaults: the email resolves to nobody, and nobody is active
+    // elsewhere. Cells that exercise the guard override these.
+    mockGuardUser.findUnique.mockResolvedValue(null);
+    mockGuardMember.findMany.mockResolvedValue([]);
     applyTxHolder.reject = null;
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
+  });
+
+  it("refuses to provision a user who is already active in another tenant", async () => {
+    // The 409 this route's error mapping existed for and could never reach. The
+    // old check was gated on `user.tenantId !== tenantId` — the denormalized
+    // column — and then queried `tenantId: { not: tenantId }` from inside
+    // `withTenantRls`, which RLS had already restricted to `tenantId`. Both
+    // halves had to be wrong for the guard to be silent; both were.
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-elsewhere" });
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "elsewhere@example.com",
+        },
+      }) as never,
+    );
+
+    expect(res.status).toBe(409);
+    // Nothing was provisioned. The pre-fix path reached `user.create` and died
+    // on the global email unique index instead, which is a different status and
+    // a different story in the log.
+    expect(mockWithTenantRls).not.toHaveBeenCalled();
+  });
+
+  it("provisions a user whose only active membership is this tenant", async () => {
+    // The allow half. Without it the guard is indistinguishable from one that
+    // refuses every already-known user.
+    mockGuardUser.findUnique.mockResolvedValue({ id: "user-here" });
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "tenant-1" }]);
+    applyTxHolder.current = {
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ id: "user-here", tenantId: "tenant-1", email: "here@example.com", name: "Here" }),
+        create: vi.fn(),
+      },
+      tenantMember: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({ id: "tm-here", role: "MEMBER", deactivatedAt: null }),
+        count: vi.fn().mockResolvedValue(1),
+      },
+      scimExternalMapping: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn(),
+        deleteMany: vi.fn(),
+      },
+    };
+
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "here@example.com",
+        },
+      }) as never,
+    );
+
+    expect(res.status).toBe(201);
   });
 
   it("creates tenant member", async () => {
