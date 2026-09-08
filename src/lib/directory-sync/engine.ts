@@ -12,6 +12,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { usersActiveInAnotherTenant } from "@/lib/tenant-context";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
@@ -407,6 +408,23 @@ export async function runDirectorySync(
       };
     }
 
+    // The cross-tenant guard the CREATE path in `api/scim/v2/Users` has and the
+    // reactivation arms below did not. Resolved here, before the tenant context
+    // opens: the foreign membership row is exactly what RLS hides inside one,
+    // and opening a bypass inside one is refused by the nesting guard.
+    //
+    // Two active memberships is not a tolerable state — `resolveUserTenantId`
+    // throws on it and the proxy auth gate calls that on every request, so
+    // reactivating here would let this tenant's sync invalidate every session of
+    // a user who belongs to another tenant.
+    const activeElsewhere = dryRun
+      ? { ids: new Set<string>(), emails: new Set<string>() }
+      : await usersActiveInAnotherTenant(
+          tenantId,
+          toUpdate.map((u) => u.internalId),
+          toCreate.map((pu) => pu.email.toLowerCase()),
+        );
+
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
       await withTenantRls(prisma, tenantId, async (tx) => {
@@ -456,11 +474,20 @@ export async function runDirectorySync(
               },
             });
           } else if (existing.deactivatedAt && pu.active) {
-            // Reactivate
-            await tx.tenantMember.update({
-              where: { id: existing.id },
-              data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
-            });
+            if (activeElsewhere.emails.has(pu.email.toLowerCase())) {
+              // Refused, not silently skipped: the sync still stamps the sync
+              // time so the run is not mistaken for one that never saw this user.
+              await tx.tenantMember.update({
+                where: { id: existing.id },
+                data: { lastScimSyncedAt: new Date() },
+              });
+            } else {
+              // Reactivate
+              await tx.tenantMember.update({
+                where: { id: existing.id },
+                data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
+              });
+            }
           }
 
           // Create or update external mapping
@@ -502,10 +529,19 @@ export async function runDirectorySync(
             continue;
           }
 
+          // A reactivation is refused when it would make a second active
+          // membership; a DEACTIVATION is always applied, because it cannot add
+          // one and it is the operation that repairs the condition.
+          const wouldReactivate = pu.active && member.deactivatedAt !== null;
           await tx.tenantMember.update({
             where: { id: member.id },
             data: {
-              deactivatedAt: pu.active ? null : new Date(),
+              deactivatedAt:
+                wouldReactivate && activeElsewhere.ids.has(internalId)
+                  ? member.deactivatedAt
+                  : pu.active
+                    ? null
+                    : new Date(),
               lastScimSyncedAt: new Date(),
             },
           });

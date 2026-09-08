@@ -61,6 +61,8 @@ vi.mock("@/lib/prisma", () => ({
 // $executeRaw, so every withTenantRls callback — CAS lock ($executeRaw), config
 // load, mapping/member load, log create, AND the apply phase — resolves the
 // methods it calls on tx.
+const mockGuardFindMany = vi.fn().mockResolvedValue([]);
+
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: vi.fn(async (prisma, _tenantId, fn) => {
     if (!applyTxHolder.current) return fn(prisma);
@@ -83,6 +85,16 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
     tx.$executeRaw = mockExecuteRaw;
     return fn(tx);
   }),
+  // The cross-tenant reactivation guard opens its own bypass BEFORE the tenant
+  // context. It gets its OWN client rather than the shared prisma mock: both
+  // query `tenantMember.findMany`, and handing over the shared one made the
+  // guard read the LOAD phase's own-tenant members as "active elsewhere" and
+  // refuse every reactivation. Defaults to [] — nobody active elsewhere, the
+  // state every pre-existing cell assumes; `mockGuardFindMany` is the seam for a
+  // cell that wants the guard to fire.
+  withBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) =>
+    fn({ tenantMember: { findMany: mockGuardFindMany } }),
+  ),
 }));
 
 vi.mock("@/lib/audit/audit", () => ({
@@ -225,6 +237,9 @@ describe("runDirectorySync", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     applyTxHolder.current = null;
+    // `clearAllMocks` clears calls, not implementations, so a cell that makes the
+    // cross-tenant guard fire would leak that state into every cell after it.
+    mockGuardFindMany.mockResolvedValue([]);
     mockDirSyncLog.create.mockResolvedValue({ id: "log-1" });
     mockDirSyncConfig.update.mockResolvedValue({});
     mockDecryptCredentials.mockReturnValue(OKTA_CREDS_JSON);
@@ -605,6 +620,64 @@ describe("runDirectorySync", () => {
   // ── User reactivation ─────────────────────────────────────────
 
   describe("user reactivation", () => {
+    it("refuses to reactivate a user who is active in another tenant", async () => {
+      // The cross-tenant guard the create path in `api/scim/v2/Users` has and
+      // this arm did not. The principal is this tenant's directory-sync config —
+      // no authority in the tenant the user actually belongs to — and two active
+      // memberships makes `resolveUserTenantId` throw on every request through
+      // the proxy auth gate, so reactivating here invalidates that user's
+      // sessions in the tenant they do belong to.
+      setupAcquiredLock();
+
+      let tenantMemberUpdateArgs: unknown;
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockImplementation((args: unknown) => {
+            tenantMemberUpdateArgs = args;
+            return Promise.resolve({});
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+      // The guard's own read: this user IS active somewhere else.
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-1", user: { email: "alice@example.com" } },
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      // Positive first: the run succeeded. A sync that aborted would leave the
+      // membership deactivated too, for an entirely different reason.
+      expect(result.success).toBe(true);
+      // The membership keeps the deactivation it had. The sync time is still
+      // stamped, so a refused reactivation is distinguishable from a run that
+      // never saw this user.
+      expect(tenantMemberUpdateArgs).toMatchObject({
+        where: { id: "member-1" },
+        data: { deactivatedAt: new Date("2025-01-01") },
+      });
+    });
+
     it("reactivates a deactivated user who reappears as active in the provider", async () => {
       setupAcquiredLock();
 

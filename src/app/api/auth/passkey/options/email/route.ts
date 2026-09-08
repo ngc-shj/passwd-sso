@@ -107,10 +107,18 @@ async function handlePOST(req: NextRequest) {
   const user = await withBypassRls(prisma, async (tx) => {
     const found = await tx.user.findFirst({ where: { email }, select: { id: true } });
     if (!found) return null;
+    // An unresolvable tenant is treated as not-found, the same way the verify
+    // route treats it. The comment below promises these two agree; splitting the
+    // relation traversal into two reads made that arm reachable, and it landed on
+    // the ALLOW side here while verify rejects — the credential list and PRF
+    // salts would have been returned pre-auth on a state verify refuses.
     const tenantId = await resolveOwningTenantIdFromClient(tx, found.id);
-    const tenant = tenantId
-      ? await tx.tenant.findUnique({ where: { id: tenantId }, select: { isBootstrap: true } })
-      : null;
+    if (!tenantId) return null;
+    const tenant = await tx.tenant.findUnique({
+      where: { id: tenantId },
+      select: { isBootstrap: true },
+    });
+    if (!tenant) return null;
     return { id: found.id, tenant };
   }, BYPASS_PURPOSE.AUTH_FLOW);
 
@@ -121,7 +129,7 @@ async function handlePOST(req: NextRequest) {
   // credential list so allowCredentials and PRF extension stay in lockstep.
   let credentialsForPrf: Array<{ credentialId: string; prfSalt: string | null }> = [];
 
-  if (user && (user.tenant === null || user.tenant.isBootstrap)) {
+  if (user && user.tenant.isBootstrap) {
     const credentials = await withBypassRls(prisma, async (tx) =>
       tx.webAuthnCredential.findMany({
         where: { userId: user.id },

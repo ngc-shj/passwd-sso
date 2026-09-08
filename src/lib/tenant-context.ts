@@ -145,3 +145,83 @@ export async function withTeamTenantRls<T>(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return withTenantRls(prisma, tenantId, (tx) => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }
+
+/**
+ * Would activating this user's membership in `tenantId` give them a SECOND
+ * active membership?
+ *
+ * The create path already refuses this (`api/scim/v2/Users/route.ts`), but the
+ * REACTIVATION arms did not, and they are reachable by a principal with no
+ * authority in the other tenant: a holder of this tenant's SCIM token, or its
+ * directory-sync config, flipping `deactivatedAt` back to null.
+ *
+ * Two active memberships is not a tolerable state. `resolveUserTenantIdFromClient`
+ * THROWS on it, and the proxy's auth gate calls it on every request — so the
+ * result is that one tenant's SCIM admin can invalidate every session of a user
+ * who belongs to a different tenant.
+ *
+ * MUST be called OUTSIDE a tenant context: the foreign membership row is exactly
+ * what RLS hides inside one, and opening a bypass inside one is refused by the
+ * nesting guard.
+ */
+export async function wouldCreateSecondActiveMembership(
+  userId: string,
+  tenantId: string,
+): Promise<boolean> {
+  return withBypassRls(prisma, async (tx) => {
+    // One read over the ACTIVE set, which answers both halves: if this tenant is
+    // already in it, nothing is being activated; if it is not and the set is
+    // non-empty, activating here makes a second.
+    //
+    // `findMany` rather than the `findUnique` + `findFirst` pair the predicate
+    // reads like, because the callers' own tenantMember.findUnique calls are
+    // sequenced in tests and an extra one shifts them — a query shape chosen so
+    // the guard cannot perturb the thing it guards.
+    const active = await tx.tenantMember.findMany({
+      where: { userId, deactivatedAt: null },
+      select: { tenantId: true },
+      take: 2,
+    });
+    return active.length > 0 && !active.some((m) => m.tenantId === tenantId);
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}
+
+/**
+ * Which of these users already hold an ACTIVE membership in some OTHER tenant.
+ *
+ * The batch form of `wouldCreateSecondActiveMembership`, for directory sync:
+ * that path reactivates many memberships in one run, and the row it must not
+ * step on is invisible inside the tenant context the sync runs in.
+ *
+ * MUST be called OUTSIDE a tenant context, for the same reason as its sibling.
+ * Returns both keys because the sync knows some users by id (already-mapped) and
+ * others only by email (about to be mapped).
+ */
+export async function usersActiveInAnotherTenant(
+  tenantId: string,
+  userIds: readonly string[],
+  emails: readonly string[],
+): Promise<{ ids: Set<string>; emails: Set<string> }> {
+  if (userIds.length === 0 && emails.length === 0) {
+    return { ids: new Set(), emails: new Set() };
+  }
+  return withBypassRls(prisma, async (tx) => {
+    const rows = await tx.tenantMember.findMany({
+      where: {
+        deactivatedAt: null,
+        tenantId: { not: tenantId },
+        OR: [
+          ...(userIds.length > 0 ? [{ userId: { in: [...userIds] } }] : []),
+          ...(emails.length > 0
+            ? [{ user: { email: { in: [...emails], mode: "insensitive" as const } } }]
+            : []),
+        ],
+      },
+      select: { userId: true, user: { select: { email: true } } },
+    });
+    return {
+      ids: new Set(rows.map((r) => r.userId)),
+      emails: new Set(rows.map((r) => r.user.email?.toLowerCase()).filter((e): e is string => !!e)),
+    };
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}

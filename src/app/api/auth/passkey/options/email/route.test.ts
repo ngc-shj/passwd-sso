@@ -220,9 +220,17 @@ describe("POST /api/auth/passkey/options/email", () => {
     );
   });
 
-  it("allows user without tenant (null tenant)", async () => {
-    // The null-tenant arm now hangs off the separate tenant read: the user row
-    // resolves an id (the column is NOT NULL), the tenant row is what is gone.
+  it("treats an unresolvable tenant as not-found, matching the verify route", async () => {
+    // Splitting the relation traversal into two reads made this arm reachable,
+    // and it used to land on the ALLOW side while `passkey/verify` rejects the
+    // same state — so the credential list and PRF salts were returned pre-auth
+    // on a state sign-in refuses.
+    //
+    // `toHaveBeenCalled()` cannot express this: the route has TWO
+    // `webAuthnCredential.findMany` sites behind one mock — the real list
+    // (`userId: user.id`) and the dummy list (`userId: NIL_UUID`) — so the
+    // previous version of this cell passed on either path and could not see the
+    // behaviour change. The argument is the discriminator.
     seedUser({ id: "user-no-tenant" });
     mockPrismaTenantFindUnique.mockResolvedValue(null);
 
@@ -232,8 +240,29 @@ describe("POST /api/auth/passkey/options/email", () => {
     });
     const { status } = await parseResponse(await POST(req));
 
+    // Still 200: the route must not leak which emails exist.
     expect(status).toBe(200);
-    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalled();
+    expect(mockPrismaWebAuthnFindMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-no-tenant" } }),
+    );
+  });
+
+  it("returns the real credential list for a bootstrap-tenant user", async () => {
+    // The allow half of the cell above, and the reason it is not vacuous: with
+    // a resolvable bootstrap tenant the REAL list is fetched, so "not called
+    // with the user id" above is a difference, not a constant.
+    seedUser({ id: "user-bootstrap" });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: { email: "test@example.com" },
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status } = await parseResponse(await POST(req));
+
+    expect(status).toBe(200);
+    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "user-bootstrap" } }),
+    );
   });
 
   it("returns dummy credentials when user has zero credentials", async () => {

@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mocks ──────────────────────────────────────────────────
 
-const { mockFindMany, mockFindUnique, mockWithBypassRls, mockWithTenantRls } =
+const { mockFindMany, mockFindUnique, mockUserFindUnique, mockWithBypassRls, mockWithTenantRls } =
   vi.hoisted(() => ({
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
+    mockUserFindUnique: vi.fn(),
     mockWithBypassRls: vi.fn(),
     mockWithTenantRls: vi.fn(),
   }));
@@ -14,6 +15,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantMember: { findMany: mockFindMany },
     team: { findUnique: mockFindUnique },
+    user: { findUnique: mockUserFindUnique },
   },
 }));
 
@@ -26,6 +28,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 import {
   resolveUserTenantIdFromClient,
+  resolveOwningTenantIdFromClient,
+  wouldCreateSecondActiveMembership,
   resolveUserTenantId,
   resolveTeamTenantId,
   withUserTenantRls,
@@ -81,6 +85,100 @@ describe("resolveUserTenantIdFromClient", () => {
     await expect(
       resolveUserTenantIdFromClient(prisma, "user-1"),
     ).rejects.toThrow("MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED");
+  });
+});
+
+
+// ─── resolveOwningTenantIdFromClient ───────────────────────
+//
+// The total sibling. Thirteen call sites depend on it and its arms were pinned
+// nowhere — its query shape was asserted only from a caller's test, so a mutant
+// flipping `orderBy` or dropping `deactivatedAt` survived the whole suite.
+
+describe("resolveOwningTenantIdFromClient", () => {
+  it("prefers the active membership over the User.tenantId column", async () => {
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "stale-column-tenant",
+      tenantMemberships: [{ tenantId: "active-membership-tenant" }],
+    });
+
+    expect(await resolveOwningTenantIdFromClient(prisma, "user-1")).toBe(
+      "active-membership-tenant",
+    );
+  });
+
+  it("falls back to the column when every membership is deactivated", async () => {
+    // The fallback's actual population — NOT the sentinel actors, who have no
+    // user row at all and return null below.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "last-owning-tenant",
+      tenantMemberships: [],
+    });
+
+    expect(await resolveOwningTenantIdFromClient(prisma, "user-1")).toBe("last-owning-tenant");
+  });
+
+  it("returns null only when the user row is absent", async () => {
+    mockUserFindUnique.mockResolvedValue(null);
+
+    expect(await resolveOwningTenantIdFromClient(prisma, "user-1")).toBeNull();
+  });
+
+  it("does not throw on a second active membership, unlike its strict sibling", async () => {
+    // The entire reason this function exists beside `resolveUserTenantIdFromClient`:
+    // it is on paths that must not throw — an audit emit, an escrow release.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "column",
+      tenantMemberships: [{ tenantId: "oldest" }],
+    });
+
+    await expect(resolveOwningTenantIdFromClient(prisma, "user-1")).resolves.toBe("oldest");
+  });
+
+  it("asks for the active memberships oldest-first, one row", async () => {
+    // The shape three call sites' behaviour rests on. Asserted here rather than
+    // from a caller's test, where it broke on any helper-internal change while
+    // proving nothing about the caller.
+    mockUserFindUnique.mockResolvedValue({ tenantId: "t", tenantMemberships: [] });
+
+    await resolveOwningTenantIdFromClient(prisma, "user-1");
+
+    expect(mockUserFindUnique).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      select: {
+        tenantId: true,
+        tenantMemberships: {
+          where: { deactivatedAt: null },
+          select: { tenantId: true },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+      },
+    });
+  });
+});
+
+// ─── wouldCreateSecondActiveMembership ─────────────────────
+
+describe("wouldCreateSecondActiveMembership", () => {
+  it("is true when the only active membership is another tenant's", async () => {
+    mockFindMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+
+    expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(true);
+  });
+
+  it("is false when this tenant's membership is already active", async () => {
+    // Nothing is being activated, so nothing can become a second.
+    mockFindMany.mockResolvedValue([{ tenantId: "this-tenant" }]);
+
+    expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(false);
+  });
+
+  it("is false when the user has no active membership anywhere", async () => {
+    // The ordinary reactivation, which must keep working.
+    mockFindMany.mockResolvedValue([]);
+
+    expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(false);
   });
 });
 

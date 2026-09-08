@@ -29,9 +29,6 @@
   "src/app/api/sessions/route.ts": {
     "disposition": "tenant-scoped"
   },
-  "src/app/api/tenant/policy/route.ts": {
-    "disposition": "adjudicator"
-  },
   "src/app/api/travel-mode/disable/route.ts": {
     "disposition": "tenant-scoped"
   },

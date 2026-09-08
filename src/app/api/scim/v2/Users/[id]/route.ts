@@ -6,6 +6,7 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import {
   invalidateUserSessions,
   type InvalidateUserSessionsResult,
@@ -64,13 +65,22 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
 
   const { id } = await params;
 
+  // The reactivation guard the create path has and these arms did not. It must
+  // run BETWEEN two tenant contexts, not inside one: the foreign membership row
+  // is what RLS hides inside a tenant context, and opening a bypass inside one is
+  // refused by the nesting guard. Sequential contexts are allowed; nested are not.
+  const resolvedUserId = await withTenantRls(prisma, tenantId, (tx) =>
+    resolveUserId(tenantId, id, tx),
+  );
+  if (!resolvedUserId) return scimError(404, "User not found");
+  if (active !== false && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
+    return scimError(409, "User already belongs to another organization", "uniqueness");
+  }
+
   let serviceResult;
   try {
-    serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
-      resolveUserId(tenantId, id, tx).then((userId) => {
-        if (!userId) throw new ScimUserNotFoundError();
-        return replaceScimUser(tenantId, userId, { active, externalId, name }, getScimBaseUrl());
-      }),
+    serviceResult = await withTenantRls(prisma, tenantId, () =>
+      replaceScimUser(tenantId, resolvedUserId, { active, externalId, name }, getScimBaseUrl()),
     );
   } catch (e) {
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
@@ -134,13 +144,22 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
 
   const { id } = await params;
 
+  // The reactivation guard the create path has and these arms did not. It must
+  // run BETWEEN two tenant contexts, not inside one: the foreign membership row
+  // is what RLS hides inside a tenant context, and opening a bypass inside one is
+  // refused by the nesting guard. Sequential contexts are allowed; nested are not.
+  const resolvedUserId = await withTenantRls(prisma, tenantId, (tx) =>
+    resolveUserId(tenantId, id, tx),
+  );
+  if (!resolvedUserId) return scimError(404, "User not found");
+  if (patchOps.active !== false && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
+    return scimError(409, "User already belongs to another organization", "uniqueness");
+  }
+
   let serviceResult;
   try {
-    serviceResult = await withTenantRls(prisma, tenantId, (tx) =>
-      resolveUserId(tenantId, id, tx).then((userId) => {
-        if (!userId) throw new ScimUserNotFoundError();
-        return patchScimUser(tenantId, userId, patchOps, getScimBaseUrl());
-      }),
+    serviceResult = await withTenantRls(prisma, tenantId, () =>
+      patchScimUser(tenantId, resolvedUserId, patchOps, getScimBaseUrl()),
     );
   } catch (e) {
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");

@@ -18,7 +18,6 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
 import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { readJsonWithCap } from "@/lib/http/parse-body";
 import { MAX_JSON_BODY_BYTES, RATE_WINDOW_MS } from "@/lib/validations/common.server";
@@ -79,22 +78,24 @@ async function handleGET(_req: NextRequest) {
     return unauthorized();
   }
 
+  let membership;
   try {
-    await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
+    membership = await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
   } catch (e) {
     return handleAuthError(e);
   }
 
-  // The policy shown is the ACTIVE MEMBERSHIP's, not the `User.tenantId`
-  // column's. The caller was authorized by `requireTenantPermission`, which
-  // opens the membership tenant — displaying a different tenant's policy here
-  // would contradict the tenant this request was admitted to.
+  // The tenant this request was ADMITTED to, taken from the authorization result
+  // rather than resolved a second time. PUT already writes to
+  // `membership.tenantId`; a GET that re-resolved could render one tenant's
+  // policy while PUT edited another's, because the two adjudicators differ —
+  // `getTenantMembership` is `findFirst` with no `orderBy` and no fallback,
+  // `resolveOwningTenantIdFromClient` takes the oldest and falls back to the
+  // column. One authorization, one tenant.
   const user = await withBypassRls(prisma, async (tx) => {
-    const tenantId = await resolveOwningTenantIdFromClient(tx, session.user.id);
-    if (!tenantId) return null;
     return {
       tenant: await tx.tenant.findUnique({
-        where: { id: tenantId },
+        where: { id: membership.tenantId },
         select: {
         maxConcurrentSessions: true,
         sessionIdleTimeoutMinutes: true,
