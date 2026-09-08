@@ -9,10 +9,11 @@
  * that nothing writes together with it. A row filed under the stale copy is
  * invisible to every reader, under RLS, permanently.
  *
- * No reachable producer of the divergence was found (see the note in
- * `src/lib/tenant-context.ts`), so these cells construct the state directly.
- * That is the honest framing: the property under test is that writer and reader
- * AGREE, and it must hold whether or not today's code can pull them apart.
+ * The state is constructed directly here rather than driven through its
+ * producer — `auth.ts`'s tenant-claim handler on the no-membership branch, see
+ * the note in `src/lib/tenant-context.ts`. The property under test is that
+ * writer and reader AGREE, which is worth pinning independently of which path
+ * pulled them apart.
  *
  * Why this is an integration cell and not a mocked one. The divergence is a
  * relationship between two tables; a mocked `user.findUnique` returns whatever

@@ -158,7 +158,11 @@ describe("check-owning-tenant-adjudicator", () => {
   it.each([
     ["a bare findUnique with no select", `tx.user.findUnique({ where: { id } })`],
     ["an unprojected findFirst", `tx.user.findFirst({ where: { email } })`],
-    ["include instead of select", `tx.user.findUnique({ where: { id }, include: { tenant: true } })`],
+    // `accounts`, not `tenant`: with `include: { tenant: true }` this row passed
+    // through the relation-name regex, so it was green whether or not the gate
+    // handled `include` at all. An include-only read returns every scalar.
+    ["include of an unrelated relation", `tx.user.findUnique({ where: { id }, include: { accounts: true } })`],
+    ["include alongside a tenant-free select", `tx.user.findUnique({ where: { id }, include: { tenant: true } })`],
     ["findMany", `tx.user.findMany({ where: {}, select: { tenantId: true } })`],
     ["findUniqueOrThrow", `tx.user.findUniqueOrThrow({ where: { id }, select: { tenantId: true } })`],
     ["findFirstOrThrow", `tx.user.findFirstOrThrow({ where: { id }, select: { tenantId: true } })`],

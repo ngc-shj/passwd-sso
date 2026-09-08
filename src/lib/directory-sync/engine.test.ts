@@ -620,6 +620,50 @@ describe("runDirectorySync", () => {
   // ── User reactivation ─────────────────────────────────────────
 
   describe("user reactivation", () => {
+    it("creates the membership DEACTIVATED when the user is active in another tenant", async () => {
+      // The create arm consulted no guard, although `activeElsewhere.emails` was
+      // built from exactly `toCreate`'s emails. Creating an ACTIVE membership
+      // here is the same second-active-membership the reactivate arm below
+      // refuses, reached by a different verb. The row is still created — the
+      // mapping has to land, and a later legitimate reactivation needs a row.
+      setupAcquiredLock();
+
+      let createArgs: unknown;
+      setApplyTx(makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({ id: "user-9", email: "carol@example.com" }),
+          update: vi.fn(),
+        },
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockImplementation((args: unknown) => {
+            createArgs = args;
+            return Promise.resolve({});
+          }),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-9", email: "carol@example.com", displayName: "Carol", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-9", user: { email: "carol@example.com" } },
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      expect(createArgs).toMatchObject({
+        data: expect.objectContaining({ deactivatedAt: expect.any(Date) }),
+      });
+    });
+
     it("refuses to reactivate a user who is active in another tenant", async () => {
       // The cross-tenant guard the create path in `api/scim/v2/Users` has and
       // this arm did not. The principal is this tenant's directory-sync config —

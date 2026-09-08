@@ -30,6 +30,7 @@ import {
   resolveUserTenantIdFromClient,
   resolveOwningTenantIdFromClient,
   wouldCreateSecondActiveMembership,
+  usersActiveInAnotherTenant,
   resolveUserTenantId,
   resolveTeamTenantId,
   withUserTenantRls,
@@ -179,6 +180,63 @@ describe("wouldCreateSecondActiveMembership", () => {
     mockFindMany.mockResolvedValue([]);
 
     expect(await wouldCreateSecondActiveMembership("user-1", "this-tenant")).toBe(false);
+  });
+});
+
+
+// ─── usersActiveInAnotherTenant ────────────────────────────
+//
+// The batch sibling, for directory sync. Its `where` clause survived three
+// separate mutations with the suite green — including dropping
+// `tenantId: { not: tenantId }`, which makes every member of the SYNCING tenant
+// read as "active elsewhere" and stops the sync reactivating anyone.
+
+describe("usersActiveInAnotherTenant", () => {
+  it("excludes this tenant's own memberships from the query", async () => {
+    mockFindMany.mockResolvedValue([]);
+
+    await usersActiveInAnotherTenant("this-tenant", ["u1"], ["a@example.com"]);
+
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deactivatedAt: null,
+          tenantId: { not: "this-tenant" },
+        }),
+      }),
+    );
+  });
+
+  it("matches emails case-insensitively, and only supplies the arms it was given", async () => {
+    mockFindMany.mockResolvedValue([]);
+
+    await usersActiveInAnotherTenant("this-tenant", [], ["a@example.com"]);
+
+    const { where } = mockFindMany.mock.calls[0][0];
+    expect(where.OR).toEqual([
+      { user: { email: { in: ["a@example.com"], mode: "insensitive" } } },
+    ]);
+  });
+
+  it("returns both keys, with emails lower-cased and nulls dropped", async () => {
+    mockFindMany.mockResolvedValue([
+      { userId: "u1", user: { email: "A@Example.com" } },
+      { userId: "u2", user: { email: null } },
+    ]);
+
+    const out = await usersActiveInAnotherTenant("this-tenant", ["u1", "u2"], []);
+
+    expect(out.ids).toEqual(new Set(["u1", "u2"]));
+    expect(out.emails).toEqual(new Set(["a@example.com"]));
+  });
+
+  it("opens no bypass when there is nothing to ask about", async () => {
+    // The early return. Without this cell, deleting it is invisible: the query
+    // would simply run with two empty OR arms and return nothing.
+    const out = await usersActiveInAnotherTenant("this-tenant", [], []);
+
+    expect(out.ids.size).toBe(0);
+    expect(mockWithBypassRls).not.toHaveBeenCalled();
   });
 });
 

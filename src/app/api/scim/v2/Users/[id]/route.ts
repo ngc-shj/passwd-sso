@@ -169,7 +169,12 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
   if (!resolvedUserId) return scimError(404, "User not found");
-  if (patchOps.active !== false && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
+  // `=== true`, not `!== false`, because PATCH and PUT reach the transition
+  // differently: `patchScimUser` touches `deactivatedAt` only when
+  // `operations.active !== undefined`, so a name-only PATCH cannot reactivate
+  // and must not be refused. PUT's schema defaults `active` to true and
+  // `replaceScimUser` writes unconditionally, so `!== false` is right there.
+  if (patchOps.active === true && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
     return scimError(409, "User already belongs to another organization", "uniqueness");
   }
 

@@ -39,21 +39,22 @@ export async function resolveUserTenantId(userId: string): Promise<string | null
  * `User.tenantId` is the FALLBACK, not the source. It is a denormalized copy of
  * the same fact, and nothing writes the two together.
  *
- * WHAT IS AND IS NOT MEASURED about how they come apart. The SCIM create path is
- * NOT a producer, though it reads like one: `api/scim/v2/Users` does reject a
- * user whose column names another tenant, but that arm is unreachable — the
- * lookup above it runs inside `withTenantRls`, so a user belonging to another
- * tenant is invisible and control reaches `user.create`, which dies on
- * `User.email @unique`. `directory-sync/engine.ts` has the same shape. The one
- * writer that moves the column (`auth.ts`'s SSO tenant claim) moves the
- * membership in the same transaction. On the development database the divergent
- * population is 0.
+ * THE PRODUCER, verified by reading the path rather than reasoning about it:
+ * `auth.ts`'s tenant-claim handler. Its MIGRATION branch does move both (a
+ * `user.update` alongside the membership write), but its NO-MEMBERSHIP branch
+ * — reached when the user holds no active membership anywhere — writes only
+ * `tenantMember.upsert` into the claimed tenant and leaves the column naming
+ * whichever tenant last owned the row. `auth.ts`'s own comment already
+ * distinguishes those two writers. So: a user deactivated or SCIM-deleted in
+ * tenant B, then signing in through an IdP whose claim resolves to tenant A,
+ * ends with the column on B and the only active membership on A.
  *
- * So this is prophylaxis, not a live-incident fix, and it is worth saying which:
- * the value of one adjudicator is that writer and reader cannot disagree
- * REGARDLESS of how a divergence arises, and the class it closes contains
- * sign-in gates, passkey enforcement, session timeouts and the session-revocation
- * path. What it does NOT rest on is a reachable producer, because none was found.
+ * Two earlier versions of this comment were WRONG about this, in opposite
+ * directions, and both were corrected only after review: the first named the
+ * SCIM create path, whose cross-tenant arm is unreachable under its own
+ * `withTenantRls`; the second concluded from that there was no producer at all.
+ * The claim is recorded here with the path because the two failures cost three
+ * review rounds between them.
  *
  * The fallback is still load-bearing, for the user whose memberships have ALL
  * been deactivated: they still have records to file, and the column is the last

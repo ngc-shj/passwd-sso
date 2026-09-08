@@ -462,12 +462,20 @@ export async function runDirectorySync(
           const existing = tmByUserId.get(user.id);
 
           if (!existing) {
+            // The same `activeElsewhere` answer the reactivation arm below uses.
+            // It was computed over exactly these emails and then not consulted
+            // here: creating an ACTIVE membership for a user already active
+            // elsewhere is the same second-active-membership the reactivation
+            // arm refuses, reached by a different verb. The row is still created,
+            // deactivated, so the mapping lands and a later legitimate
+            // reactivation has a row to flip.
+            const activeInAnother = activeElsewhere.emails.has(pu.email.toLowerCase());
             await tx.tenantMember.create({
               data: {
                 tenantId,
                 userId: user.id,
                 role: TENANT_ROLE.MEMBER,
-                deactivatedAt: pu.active ? null : new Date(),
+                deactivatedAt: pu.active && !activeInAnother ? null : new Date(),
                 scimManaged: true,
                 provisioningSource: "SCIM",
                 lastScimSyncedAt: new Date(),

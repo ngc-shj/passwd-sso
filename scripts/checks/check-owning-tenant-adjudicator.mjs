@@ -4,12 +4,12 @@
  * per-read-site, with a disposition manifest.
  *
  * `User.tenantId` is a denormalized copy of "the user's active TenantMember",
- * and nothing writes the two together. No reachable producer of a divergence was
- * found — the SCIM and directory-sync paths look like one but their cross-tenant
- * arm is unreachable under their own `withTenantRls`, and the divergent
- * population on the development database is 0 (see the note in
- * `src/lib/tenant-context.ts`). This gate is therefore prophylactic: its value is
- * that writer and reader cannot disagree regardless of how a divergence arises.
+ * and nothing writes the two together. There IS a reachable producer —
+ * `auth.ts`'s tenant-claim handler writes the membership without the column on
+ * its no-membership branch, so a user released by one tenant and signed in
+ * through another's IdP ends divergent (the path is written out in
+ * `src/lib/tenant-context.ts`). This gate is not prophylactic; an earlier
+ * version of this header said it was, on a premise review falsified.
  * Every reader of the
  * resulting rows scopes by the membership (`withUserTenantRls` ->
  * `resolveUserTenantId`, `requireTenantPermission` -> `getTenantMembership`),
@@ -203,8 +203,13 @@ function selectsTenantIdentity(call) {
   // shape rather than the narrow one.
   if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) return true;
 
-  const projection = arg.getProperty?.("select") ?? arg.getProperty?.("include");
-  if (!projection) return true; // unprojected read -> all scalars
+  // `select` ONLY. `include` does not restrict scalars — it returns every scalar
+  // PLUS a relation — so reading it here made an `include`-only read look
+  // NARROWER than an unprojected one and exempted it. Red-proved: a
+  // `findUnique({ include: { accounts: true } })` under a bypass passed the gate
+  // whose docstring names `include` as a shape it fails closed on.
+  const projection = arg.getProperty?.("select");
+  if (!projection) return true; // no select (with or without include) -> all scalars
 
   const text = projection.getText();
   // A projection that is not an inline literal (`select: SEL`, a spread) is

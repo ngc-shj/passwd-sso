@@ -91,6 +91,12 @@ function makeReq(options: { method?: string; body?: unknown } = {}) {
 describe("GET /api/scim/v2/Users/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` clears calls, NOT the `mockResolvedValueOnce` queue: a
+    // cell that returns early leaves its unconsumed values to answer the next
+    // cell's reads. Observed as five unrelated cells failing under a mutation
+    // that should have killed one.
+    mockTenantMember.findUnique.mockReset();
+    mockScimExternalMapping.findFirst.mockReset();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
@@ -155,6 +161,12 @@ describe("GET /api/scim/v2/Users/[id]", () => {
 describe("PUT /api/scim/v2/Users/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` clears calls, NOT the `mockResolvedValueOnce` queue: a
+    // cell that returns early leaves its unconsumed values to answer the next
+    // cell's reads. Observed as five unrelated cells failing under a mutation
+    // that should have killed one.
+    mockTenantMember.findUnique.mockReset();
+    mockScimExternalMapping.findFirst.mockReset();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
@@ -241,6 +253,20 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() });
     mockGuardMember.findMany.mockResolvedValue([{ tenantId: "tenant-1" }]);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
+    // Wired here, not inherited: `vi.clearAllMocks()` clears calls, not
+    // implementations, so a cell that relied on a sibling's `$transaction` stub
+    // passed in file order and failed alone. Measured on both of these.
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
 
     const res = await PUT(
       makeReq({
@@ -267,6 +293,20 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null });
     mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
     mockScimExternalMapping.findFirst.mockResolvedValue(null);
+    // Wired here, not inherited: `vi.clearAllMocks()` clears calls, not
+    // implementations, so a cell that relied on a sibling's `$transaction` stub
+    // passed in file order and failed alone. Measured on both of these.
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
 
     const res = await PUT(
       makeReq({
@@ -674,6 +714,12 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 describe("PATCH /api/scim/v2/Users/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` clears calls, NOT the `mockResolvedValueOnce` queue: a
+    // cell that returns early leaves its unconsumed values to answer the next
+    // cell's reads. Observed as five unrelated cells failing under a mutation
+    // that should have killed one.
+    mockTenantMember.findUnique.mockReset();
+    mockScimExternalMapping.findFirst.mockReset();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
@@ -778,6 +824,61 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
       makeParams("missing"),
     );
     expect(res!.status).toBe(404);
+  });
+
+  it("refuses PATCH reactivation when the user is active in another tenant", async () => {
+    // The PUT twin got three cells and this one got none — deleting the whole
+    // PATCH guard block left the entire suite green (measured). Same twin-drift
+    // shape the round itself was reviewing.
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: true }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(409);
+    // Nothing was written. A 409 with the update already applied is the same
+    // status and the opposite outcome.
+    expect(mockTenantMember.update).not.toHaveBeenCalled();
+  });
+
+  it("does not refuse a name-only PATCH, which cannot reactivate", async () => {
+    // The boundary PUT and PATCH do NOT share. `patchScimUser` touches
+    // `deactivatedAt` only when `operations.active !== undefined`, so a
+    // display-name PATCH performs no transition — gating it on `!== false`
+    // (PUT's predicate) 409'd it. PUT's schema defaults `active` to true and
+    // writes unconditionally, so `!== false` is correct there and wrong here.
+    mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date("2024-01-01T00:00:00.000Z") })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: new Date("2024-01-01T00:00:00.000Z"),
+        user: { id: "user-1", email: "u@example.com", name: "Renamed" },
+      });
+    mockTenantMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "name.formatted", value: "Renamed" }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(200);
   });
 
   it("reactivates member via PATCH", async () => {
@@ -925,6 +1026,12 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
 describe("DELETE /api/scim/v2/Users/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // `clearAllMocks` clears calls, NOT the `mockResolvedValueOnce` queue: a
+    // cell that returns early leaves its unconsumed values to answer the next
+    // cell's reads. Observed as five unrelated cells failing under a mutation
+    // that should have killed one.
+    mockTenantMember.findUnique.mockReset();
+    mockScimExternalMapping.findFirst.mockReset();
     vi.stubEnv("AUTH_URL", "http://localhost:3000");
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue({ allowed: true });
