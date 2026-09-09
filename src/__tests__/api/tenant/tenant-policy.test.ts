@@ -121,6 +121,23 @@ describe("GET /api/tenant/policy", () => {
     expect(status).toBe(403);
   });
 
+  it("loads the policy for the tenant the request was ADMITTED to", async () => {
+    // Twin of the cell in src/app/api/tenant/policy/route.test.ts. Neither file
+    // pinned this: the policy stub answers the same for any id, so hardcoding a
+    // wrong tenant in the route left both green.
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "admitted-tenant" });
+    mockTenantFindUnique.mockResolvedValue({});
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/policy"));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(mockTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "admitted-tenant" } }),
+    );
+  });
+
   it("returns full policy including access restriction fields", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });

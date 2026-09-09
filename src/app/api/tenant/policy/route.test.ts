@@ -173,15 +173,11 @@ const BASE_POLICY = {
   requireMinPinLength: null,
 };
 
-// GET resolves the tenant id through `resolveOwningTenantIdFromClient` and then
-// loads the policy by id, so both reads are seeded. The user read carries the
-// membership as well as the column — a column-only mock would still resolve,
-// through the FALLBACK, and read like the ordinary case.
+// GET loads the policy by the tenant `requireTenantPermission` admitted the
+// request to. It no longer resolves the tenant itself — the user read this
+// helper used to seed was dead, and removing it changed nothing, which is what
+// said so.
 function seedGetPolicy(policy: Record<string, unknown>) {
-  mockPrismaUserFindUnique.mockResolvedValue({
-    tenantId: MEMBERSHIP.tenantId,
-    tenantMemberships: [{ tenantId: MEMBERSHIP.tenantId }],
-  });
   mockPrismaTenantFindUnique.mockResolvedValue(policy);
 }
 
@@ -195,6 +191,25 @@ describe("GET /api/tenant/policy", () => {
     mockRequireTenantPermission.mockResolvedValue(MEMBERSHIP);
     seedGetPolicy({ ...BASE_POLICY });
     mockWithBypassRls.mockImplementation((p: unknown, fn: (tx: unknown) => unknown) => fn(p));
+  });
+
+  it("loads the policy for the tenant the request was ADMITTED to", async () => {
+    // The subject nothing pinned: hardcoding a different id in the route left
+    // every cell in both twins green, because the policy stub answers the same
+    // for any id. GET used to resolve the tenant a second time, through an
+    // adjudicator with different rules from the one that authorized the call —
+    // so GET could render one tenant's policy while PUT edited another's.
+    mockRequireTenantPermission.mockResolvedValue({
+      ...MEMBERSHIP,
+      tenantId: "admitted-tenant",
+    });
+
+    const res = await GET(createRequest("GET", "http://localhost/api/tenant/policy"));
+
+    expect(res.status).toBe(200);
+    expect(mockPrismaTenantFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "admitted-tenant" } }),
+    );
   });
 
   it("returns 401 when not authenticated", async () => {

@@ -126,6 +126,11 @@ describe("recordFailure", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateLockoutThresholdCache("tenant-default");
+    // The two adjudicator cells below resolve this one. Without invalidating it
+    // the second is served from the first's cache and never reaches
+    // `tenant.findUnique` — an order dependency, not a failure, until a cell
+    // caches different thresholds under the same key.
+    invalidateLockoutThresholdCache("scim-provisioned-tenant");
   });
 
   // Resolve the user's tenant + its schema-default thresholds so recordFailure
@@ -210,7 +215,16 @@ describe("recordFailure", () => {
 
     await recordFailure("user-1");
 
-    expect(mockLogAuditInTx).toHaveBeenCalled();
+    // The row this cell is NAMED for, pinned by its action. The all-calls loop
+    // below is the companion: on its own it stays green if
+    // VAULT_LOCKOUT_TRIGGERED stops being emitted, because VAULT_UNLOCK_FAILED
+    // is emitted on every failure and satisfies it.
+    const lockoutRow = mockLogAuditInTx.mock.calls.find(
+      (call) => (call[2] as { action?: string })?.action === "VAULT_LOCKOUT_TRIGGERED",
+    );
+    expect(lockoutRow, "no VAULT_LOCKOUT_TRIGGERED row was emitted").toBeDefined();
+    expect(lockoutRow![1]).toBe("scim-provisioned-tenant");
+
     for (const call of mockLogAuditInTx.mock.calls) {
       expect(call[1]).toBe("scim-provisioned-tenant");
     }
