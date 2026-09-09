@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
+import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import {
   invalidateUserSessions,
   type InvalidateUserSessionsResult,
@@ -93,6 +94,13 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       }),
     );
   } catch (e) {
+    // The one-active-membership index, reached only on the race the guard above
+    // cannot close: it runs in its own context a round trip earlier, and another
+    // tenant can activate in between. Mapped to the same 409 the guard returns,
+    // with its own message so the two are distinguishable in the log.
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, "User already belongs to another organization", "uniqueness");
+    }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
     if (e instanceof ScimExternalIdConflictError) {
@@ -187,6 +195,13 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
       }),
     );
   } catch (e) {
+    // The one-active-membership index, reached only on the race the guard above
+    // cannot close: it runs in its own context a round trip earlier, and another
+    // tenant can activate in between. Mapped to the same 409 the guard returns,
+    // with its own message so the two are distinguishable in the log.
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, "User already belongs to another organization", "uniqueness");
+    }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
     throw e;
@@ -240,6 +255,13 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
       }),
     );
   } catch (e) {
+    // The one-active-membership index, reached only on the race the guard above
+    // cannot close: it runs in its own context a round trip earlier, and another
+    // tenant can activate in between. Mapped to the same 409 the guard returns,
+    // with its own message so the two are distinguishable in the log.
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, "User already belongs to another organization", "uniqueness");
+    }
     if (e instanceof ScimUserNotFoundError) return scimError(404, "User not found");
     if (e instanceof ScimOwnerProtectedError) return scimError(403, API_ERROR.SCIM_OWNER_PROTECTED);
     if (e instanceof ScimDeleteConflictError) {

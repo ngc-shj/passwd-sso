@@ -65,12 +65,16 @@ describe.skipIf(!redisAvailable)(
       userId = await ctx.createUser(tenantA);
       sessionTokens.length = 0;
 
-      // Make the user a member of tenantB as well.
+      // A membership in tenantB, DEACTIVATED: `tenant_members_one_active_per_user`
+      // makes a second ACTIVE one unrepresentable, and this fixture never needed
+      // one. What the subject requires is SESSIONS in two tenants, which is
+      // exactly the residue a tenant move leaves behind — the state
+      // `allTenants: true` exists to clean up.
       await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
         await tx.$executeRawUnsafe(
-          `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
-           VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now())`,
+          `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
           randomUUID(),
           tenantB,
           userId,

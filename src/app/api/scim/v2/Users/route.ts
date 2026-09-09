@@ -20,6 +20,7 @@ import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
+import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { scimParseBody } from "@/lib/scim/parse-body";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
@@ -250,6 +251,13 @@ async function handlePOST(req: NextRequest) {
     }
     if (isScimExternalMappingUniqueViolation(e)) {
       return scimError(409, "externalId is already mapped to a different resource", "uniqueness");
+    }
+    // The one-active-membership index, reached only on the race the guard above
+    // cannot close: it runs in its own context a round trip earlier, and another
+    // tenant can activate in between. Mapped to the same 409 the guard returns,
+    // with its own message so the two are distinguishable in the log.
+    if (isUniqueViolationOn(e, ONE_ACTIVE_MEMBERSHIP_INDEX)) {
+      return scimError(409, "User already belongs to another organization", "uniqueness");
     }
     // Cross-tenant email collision: user.email is globally unique
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {

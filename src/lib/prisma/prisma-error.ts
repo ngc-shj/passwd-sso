@@ -180,3 +180,36 @@ export function mapPrismaError(error: unknown): PrismaErrorMapping | null {
   }
   return null;
 }
+
+/** The partial unique index that enforces "one ACTIVE membership per user". */
+export const ONE_ACTIVE_MEMBERSHIP_INDEX = "tenant_members_one_active_per_user";
+
+/**
+ * Did this error come from the named unique index?
+ *
+ * Read here rather than at each call site for the reason this module's header
+ * gives: a P2002 renders its subject in more than one shape, and a caller that
+ * checks only the one it happened to see reports the wrong conflict. `target`
+ * is an array of field names for a Prisma-declared constraint and the index
+ * NAME for a raw one — `tenant_members_one_active_per_user` exists only in a
+ * migration, so it arrives as the name — and the driver's own message carries it
+ * too when the adapter does not surface `meta`.
+ *
+ * Callers use this to distinguish "this user is already active in another
+ * tenant" from the other unique violations the same handler maps, all of which
+ * are 409 but none of which mean the same thing to the operator reading the log.
+ */
+export function isUniqueViolationOn(err: unknown, indexName: string): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== "P2002") {
+    // A raw-SQL writer surfaces the SQLSTATE instead of a Prisma error code.
+    if (pgErrorCode(err) !== "23505") return false;
+    return typeof (err as { message?: unknown }).message === "string"
+      && (err as { message: string }).message.includes(indexName);
+  }
+  const target = (err.meta as { target?: unknown } | undefined)?.target;
+  if (typeof target === "string") return target === indexName;
+  if (Array.isArray(target)) return target.includes(indexName);
+  // No usable `meta.target`: fall back to the rendered message rather than
+  // answering "not this index", which would send the caller to a wrong branch.
+  return typeof err.message === "string" && err.message.includes(indexName);
+}
