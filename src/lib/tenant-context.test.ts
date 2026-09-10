@@ -2,11 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mocks ──────────────────────────────────────────────────
 
-const { mockFindMany, mockFindUnique, mockUserFindUnique, mockWithBypassRls, mockWithTenantRls } =
+const {
+  mockFindMany,
+  mockFindUnique,
+  mockUserFindUnique,
+  mockUserUpdate,
+  mockWithBypassRls,
+  mockWithTenantRls,
+} =
   vi.hoisted(() => ({
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
     mockUserFindUnique: vi.fn(),
+    mockUserUpdate: vi.fn(),
     mockWithBypassRls: vi.fn(),
     mockWithTenantRls: vi.fn(),
   }));
@@ -15,7 +23,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     tenantMember: { findMany: mockFindMany },
     team: { findUnique: mockFindUnique },
-    user: { findUnique: mockUserFindUnique },
+    user: { findUnique: mockUserFindUnique, update: mockUserUpdate },
   },
 }));
 
@@ -29,6 +37,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 import {
   resolveUserTenantIdFromClient,
   resolveOwningTenantIdFromClient,
+  realignOwningTenantColumn,
   wouldCreateSecondActiveMembership,
   usersActiveInAnotherTenant,
   resolveUserTenantId,
@@ -160,6 +169,56 @@ describe("resolveOwningTenantIdFromClient", () => {
 });
 
 // ─── wouldCreateSecondActiveMembership ─────────────────────
+
+describe("realignOwningTenantColumn", () => {
+  // The one writer that moves the column WITHOUT moving the rows it scopes. Its
+  // caller keys both its audit emit and its row counts on the value returned
+  // here, so "wrote nothing" and "wrote, and it used to be X" have to be
+  // distinguishable from the return alone.
+
+  it("writes the new tenant and reports the one it replaced", async () => {
+    mockUserFindUnique.mockResolvedValue({ tenantId: "released-by" });
+
+    const previous = await realignOwningTenantColumn(prisma, "user-1", "joined");
+
+    expect(previous).toBe("released-by");
+    expect(mockUserUpdate).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { tenantId: "joined" },
+    });
+  });
+
+  it("writes nothing and reports null when the column already agrees", async () => {
+    mockUserFindUnique.mockResolvedValue({ tenantId: "joined" });
+
+    expect(await realignOwningTenantColumn(prisma, "user-1", "joined")).toBeNull();
+    expect(mockUserUpdate).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing when there is no user row to realign", async () => {
+    mockUserFindUnique.mockResolvedValue(null);
+
+    expect(await realignOwningTenantColumn(prisma, "user-1", "joined")).toBeNull();
+    expect(mockUserUpdate).not.toHaveBeenCalled();
+  });
+
+  it("reads the column itself, not the resolved owner", async () => {
+    // The distinction this function exists for. `resolveOwningTenantIdFromClient`
+    // would answer "active-membership-tenant" here — the membership the caller
+    // has just created — and comparing THAT against the target would report no
+    // divergence and never write.
+    mockUserFindUnique.mockResolvedValue({
+      tenantId: "released-by",
+      tenantMemberships: [{ tenantId: "joined" }],
+    });
+
+    expect(await realignOwningTenantColumn(prisma, "user-1", "joined")).toBe("released-by");
+    expect(mockUserFindUnique).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      select: { tenantId: true },
+    });
+  });
+});
 
 describe("wouldCreateSecondActiveMembership", () => {
   it("is true when the only active membership is another tenant's", async () => {

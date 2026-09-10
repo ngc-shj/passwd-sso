@@ -87,6 +87,53 @@ sign-in. Option 2 turns a supported flow into an operator ticket. Option 3 is
 silent data loss from the user's point of view. None of them is a defect fix;
 each is a product statement about what "joining a new tenant" means.
 
+### DECIDED: option 3, made loud
+
+Taken 2026-09-11, after checking each option against the code rather than
+against this note. Two of the three descriptions above were wrong:
+
+**Option 1 cannot reuse the migration branch.** Three of its movers —
+`passwordEntryHistory`, `emergencyAccessKeyPair`, `shareAccessLog` — filter by
+`tenantId` alone, and that is sound only because `assertBootstrapSingleMember`
+runs first and a bootstrap tenant has one member. The tenant releasing a user
+here is a real SSO tenant. With two or more active members the assert throws and
+the sign-in dies; with exactly one (somebody else), it PASSES and that person's
+history, emergency key pair and share-access logs move into the joining tenant.
+Option 1 therefore means a new user-scoped mover — `passwordEntryHistory` via
+`entryId -> PasswordEntry.userId`, `shareAccessLog` via `shareId ->
+PasswordShare.createdById` — and `emergencyAccessKeyPair` has no user column at
+all, so it cannot move with a user under any scoping.
+
+**Option 3 does not lock the user out, and destroys nothing.** The key material
+(`accountSalt`, `encryptedSecretKey`, the KDF parameters, `vaultSetupAt`) is all
+on the `users` row, which the column move brings into the joined tenant. So
+`/api/vault/status` reports the vault as set up, unlock succeeds — `VaultKey`
+carries only the verification artifact, and the unlock route already tolerates
+its absence — and what the user sees is an EMPTY vault rather than a broken one.
+Nothing prompts a re-setup, so the `@@unique([userId, version])` collision that
+would follow one never arises. The entries are intact with the wrong
+`tenantId`, which is reversible at any later date.
+
+**Option 2 has no tooling.** `scripts/` has `tenant-domain` (the claim registry)
+and nothing that moves a user between tenants, so "operator resolution" means
+hand-written SQL today.
+
+So: the column follows the membership, the rows stay, and the state is
+REPORTED — `USER_TENANT_REALIGNED`, filed under the tenant the user has joined,
+carrying how many entries, tags and folders were left behind. That is what keeps
+option 3 from being the silent loss this note calls it: an operator who can see
+the number can act on it, and the data is still there to act on.
+
+`realignOwningTenantColumn` lives in `tenant-context.ts` beside the adjudicator,
+because reading the raw column is precisely what
+`check-owning-tenant-adjudicator` refuses everywhere else — correctly, since
+everywhere else the question is "which tenant owns this user" and only here it is
+"what does the denormalized copy currently say".
+
+F6 is closed by this: the divergent user's `users` row is visible to their own
+requests again. F3 (backfill) still needs the production measurements below —
+what it repairs is now bounded to rows written BEFORE this change.
+
 ## Measurements, so the decision rests on numbers
 
 Run on the development database, 2026-09-09 — all three are **0**:

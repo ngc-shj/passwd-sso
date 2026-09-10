@@ -36,12 +36,15 @@ const {
     },
     passwordEntry: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     tag: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     folder: {
       updateMany: vi.fn(),
+      count: vi.fn(),
     },
     session: {
       findMany: vi.fn(),
@@ -325,6 +328,13 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockPrisma.tenantMember.upsert.mockResolvedValue({});
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
     mockPrisma.user.update.mockResolvedValue({});
+    // The column already names the tenant being joined: the ordinary case,
+    // where realignOwningTenantColumn writes nothing. The divergent cells
+    // below override it, and every pre-existing cell keeps its behaviour.
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_CLAIMED });
+    mockPrisma.passwordEntry.count.mockResolvedValue(0);
+    mockPrisma.tag.count.mockResolvedValue(0);
+    mockPrisma.folder.count.mockResolvedValue(0);
     mockPrisma.account.updateMany.mockResolvedValue({ count: 1 });
     mockPrisma.user.count.mockResolvedValue(0);
     mockPrisma.passwordEntry.updateMany.mockResolvedValue({ count: 0 });
@@ -560,6 +570,66 @@ describe("ensureTenantMembershipForSignIn", () => {
       create: { tenantId: TENANT_CLAIMED, userId: "user-1", role: "MEMBER" },
       update: {},
     });
+  });
+
+  // Row 4, the divergent half: the branch that PRODUCES the column/membership
+  // divergence the whole adjudicator exists to survive.
+
+  it("row 4: realigns the column onto the joined tenant and reports what it left behind", async () => {
+    // A user released by TENANT_OTHER, signing in through TENANT_CLAIMED's IdP.
+    // Before this, only the membership moved: `users_tenant_isolation` then hid
+    // their own row from their own requests, which is what left vault unlock
+    // reporting the vault as not set up.
+    mockPrisma.user.findUnique.mockResolvedValue({ tenantId: TENANT_OTHER });
+    mockPrisma.passwordEntry.count.mockResolvedValue(7);
+    mockPrisma.tag.count.mockResolvedValue(3);
+    mockPrisma.folder.count.mockResolvedValue(1);
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({
+      ok: true,
+      realigned: {
+        previousTenantId: TENANT_OTHER,
+        tenantId: TENANT_CLAIMED,
+        leftBehind: { entries: 7, tags: 3, folders: 1 },
+      },
+    });
+    expect(mockPrisma.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: { tenantId: TENANT_CLAIMED },
+    });
+    // The rows are COUNTED where they are, not moved: the sibling
+    // bootstrap-migration path moves three tables by tenant id alone, which is
+    // sound only for a single-member tenant.
+    expect(mockPrisma.passwordEntry.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tag.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.folder.updateMany).not.toHaveBeenCalled();
+    expect(mockPrisma.passwordEntry.count).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: TENANT_OTHER },
+    });
+  });
+
+  it("row 4: writes nothing when the column already names the tenant being joined", async () => {
+    // The zero the cell above is measured against. A realignment that fired on
+    // every join would satisfy that cell and say nothing about divergence — and
+    // it would put a write and three counts on the ordinary sign-in path.
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    expect(mockPrisma.passwordEntry.count).not.toHaveBeenCalled();
+  });
+
+  it("row 4: leaves the column alone when the user row is gone", async () => {
+    // `realignOwningTenantColumn` returns null rather than writing on a user it
+    // cannot read. Reported here because the caller keys its emit on that null.
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+
+    const result = await ensureTenantMembershipForSignIn("user-1", null, {});
+
+    expect(result).toEqual({ ok: true });
+    expect(mockPrisma.user.update).not.toHaveBeenCalled();
   });
 
   // Row 5: claim resolves to the user's existing tenant -> upsert -> allow.
@@ -1000,6 +1070,80 @@ describe("signIn callback", () => {
     mockExtractTenantClaimValue.mockReturnValue(extraction({ kind: "absent" }));
     mockPrisma.user.findUnique.mockResolvedValue(null);
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+  });
+
+  it("emits the realignment under the tenant the user has joined", async () => {
+    // The emit sits at the callback, not inside the resolver: doing it there
+    // would run logAuditAsync -> resolveTenantId -> withBypassRls NESTED inside
+    // the enclosing bypass. So the fact is carried out and emitted here, and
+    // this is the only place that can be observed.
+    const TENANT_JOINED = "00000000-0000-4000-a000-000000000001";
+    const TENANT_LEFT = "00000000-0000-4000-a000-000000000003";
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "claim", value: "tenant-acme" }),
+    );
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockResolvedValue({});
+    mockPrisma.user.update.mockResolvedValue({});
+    mockPrisma.user.findUnique.mockImplementation(
+      async ({ select }: { select?: Record<string, unknown> }) =>
+        select && "tenantId" in select
+          ? { tenantId: TENANT_LEFT }
+          : { id: "real-db-id" },
+    );
+    mockPrisma.passwordEntry.count.mockResolvedValue(7);
+    mockPrisma.tag.count.mockResolvedValue(0);
+    mockPrisma.folder.count.mockResolvedValue(0);
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "moved@corp.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "USER_TENANT_REALIGNED",
+        // Filed under the tenant that now holds the member — the only one whose
+        // operators can act on the rows left behind.
+        tenantId: TENANT_JOINED,
+        metadata: {
+          previousTenantId: TENANT_LEFT,
+          leftBehind: { entries: 7, tags: 0, folders: 0 },
+        },
+      }),
+    );
+  });
+
+  it("emits no realignment when the ordinary join changes nothing", async () => {
+    // The zero arm: without it a callback that emitted on every claim sign-in
+    // would satisfy the cell above.
+    const TENANT_JOINED = "00000000-0000-4000-a000-000000000001";
+    mockExtractTenantClaimValue.mockReturnValue(
+      extraction({ kind: "claim", value: "tenant-acme" }),
+    );
+    mockResolveTenantByClaim.mockResolvedValue(lookup({ kind: "tenant", id: TENANT_JOINED }));
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockResolvedValue({});
+    mockPrisma.user.findUnique.mockImplementation(
+      async ({ select }: { select?: Record<string, unknown> }) =>
+        select && "tenantId" in select
+          ? { tenantId: TENANT_JOINED }
+          : { id: "real-db-id" },
+    );
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "ordinary@corp.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "USER_TENANT_REALIGNED" }),
+    );
   });
 
   it("returns true for new user with pre-generated id not in DB", async () => {

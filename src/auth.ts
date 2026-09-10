@@ -2,7 +2,8 @@ import NextAuth from "next-auth";
 import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { logAuditAsync } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
 import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
@@ -20,8 +21,12 @@ import type { ClaimRefusalDiagnosis } from "@/lib/tenant/claim-refusal";
 import { classifySentinelTenantConstraint } from "@/lib/tenant/sentinel-tenant-constraint";
 import { invalidateCachedSessions } from "@/lib/auth/session/session-cache-helpers";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { resolveOwningTenantIdFromClient } from "@/lib/tenant-context";
-import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
+import {
+  realignOwningTenantColumn,
+  resolveOwningTenantIdFromClient,
+  resolveUserTenantId,
+  resolveUserTenantIdFromClient,
+} from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
 import {
   emitAuthLoginFailure,
@@ -70,7 +75,24 @@ export async function assertBootstrapSingleMember(
 // over the callback's return, src/lib/tenant-rls.ts:54) and
 // emitAuthLoginFailure stays at the signIn callback, post-transaction.
 export type SignInTenantResult =
-  | { ok: true }
+  | {
+      ok: true;
+      /**
+       * Set only when the no-membership branch realigned `User.tenantId` onto
+       * the tenant just joined, leaving the user's data in the tenant that
+       * released them.
+       *
+       * Carried out rather than emitted in place, for the reason the refusal
+       * reasons are (see `claimedTenantMembership`): emitting inside would run
+       * `logAuditAsync` -> `resolveTenantId` -> `withBypassRls` NESTED inside the
+       * enclosing bypass.
+       */
+      realigned?: {
+        previousTenantId: string;
+        tenantId: string;
+        leftBehind: { entries: number; tags: number; folders: number };
+      };
+    }
   | {
       ok: false;
       reason: Extract<
@@ -392,6 +414,39 @@ async function claimedTenantMembership(
         create: { tenantId: target.id, userId, role: TENANT_ROLE.MEMBER },
         update: {},
       });
+
+      // This branch is the producer of the column/membership divergence the
+      // adjudicator exists to survive: the membership moves and, until now, the
+      // column did not. A user released by one tenant and signed in through
+      // another's IdP was left with `User.tenantId` naming the tenant that
+      // released them, and `users_tenant_isolation` then hid their own row from
+      // their own requests — vault unlock reporting the vault as not set up,
+      // vault setup returning unauthorized, and eleven more routes taking their
+      // not-found arm.
+      //
+      // The column follows the membership. The DATA does not, and that is the
+      // decision rather than an oversight: see `realignOwningTenantColumn`. The
+      // counts below are what stop it being a silent one — a member arriving
+      // with rows stranded in a tenant they no longer belong to is a condition
+      // an operator can act on, and nobody can act on a state nothing reports.
+      const previousTenantId = await realignOwningTenantColumn(tx, userId, target.id);
+      if (previousTenantId) {
+        // Only on the divergent path, which is rare; the ordinary join reaches
+        // none of these.
+        const [entries, tags, folders] = await Promise.all([
+          tx.passwordEntry.count({ where: { userId, tenantId: previousTenantId } }),
+          tx.tag.count({ where: { userId, tenantId: previousTenantId } }),
+          tx.folder.count({ where: { userId, tenantId: previousTenantId } }),
+        ]);
+        return {
+          ok: true,
+          realigned: {
+            previousTenantId,
+            tenantId: target.id,
+            leftBehind: { entries, tags, folders },
+          },
+        };
+      }
       return { ok: true };
     }
 
@@ -805,6 +860,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             userId,
             claim: result.claim,
             claimRefusal: result.claimRefusal,
+          });
+        } else if (result.realigned) {
+          // Filed under the tenant the user has JOINED: that is the tenant whose
+          // operators now hold the member, and the only one that can act. The
+          // previous tenant's id rides along because without it the event names
+          // no remedy — and unlike the directory-sync refusal, which withholds
+          // a THIRD party's membership, this is the subject's own former tenant
+          // and the reader is the tenant they now belong to.
+          await logAuditAsync({
+            scope: AUDIT_SCOPE.TENANT,
+            action: AUDIT_ACTION.USER_TENANT_REALIGNED,
+            userId,
+            actorType: ACTOR_TYPE.SYSTEM,
+            tenantId: result.realigned.tenantId,
+            targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
+            targetId: userId,
+            metadata: {
+              previousTenantId: result.realigned.previousTenantId,
+              leftBehind: result.realigned.leftBehind,
+            },
           });
         }
         return result.ok;
