@@ -40,7 +40,11 @@
  *     proves the mapping. Where it cannot, the call is SKIPPED, not reported —
  *     which is this gate's remaining fail-open class, and it is wider than
  *     "the callee is imported":
- *       · an imported callee (38 call sites today; resolving it needs a Program)
+ *       · an imported callee — resolving it needs a Program. The count is
+ *         MEASURED and printed on every run rather than stated here: the
+ *         number this line used to carry was frozen prose about a moving
+ *         subject, and it is the same count the over-breadth check below
+ *         uses to decide which files it must not judge.
  *       · `this` — `query.call(tx)` where the body uses `this.model`. Binding it
  *         would mean adding `this` to a client set that is keyed by NAME with no
  *         per-function scope, so every `this.x` in every analysed function would
@@ -162,7 +166,7 @@ const ALLOWED_USAGE = new Map([
   // see users outside this tenant (the whole point — the old in-context version
   // could not, so it never fired). Read-only; the tenant compared against is the
   // authenticated SCIM token's.
-  ["src/app/api/scim/v2/Users/route.ts", ["user", "tenantMember"]],
+  ["src/app/api/scim/v2/Users/route.ts", ["user"]],
   // C3: also reads the session row to resolve the bound credential.
   ["src/app/api/auth/passkey/reauth/options/route.ts", ["webAuthnCredential", "session"]],
   ["src/app/api/auth/passkey/reauth/verify/route.ts", ["webAuthnCredential", "session"]],
@@ -179,9 +183,9 @@ const ALLOWED_USAGE = new Map([
     "passwordEntry", "attachment", "passwordShare",
     "tenantWebhook", "teamWebhook",
   ]],
-  ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
+  ["src/app/api/tenant/policy/route.ts", ["tenant", "teamPolicy"]],
   ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
-  ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
+  ["src/lib/team/team-policy.ts", ["tenant"]],
   // Team member display: cross-tenant user + home-tenant name hydration for guest members
   ["src/lib/team/team-member-display.ts", ["user", "tenantMember"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
@@ -191,7 +195,7 @@ const ALLOWED_USAGE = new Map([
   // iOS auth: token row updates (lastUsedIp/UA, replay-detection family revoke)
   // happen across tenant boundary because the bearer token's tenantId is
   // resolved from the row, not the request session.
-  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken", "tenant"]],
+  ["src/lib/auth/tokens/mobile-token.ts", ["extensionToken"]],
   // iOS authorize: bridge-code creation atomically counts active bridge codes
   // per user across tenants (parity with extension/bridge-code/route.ts).
   ["src/app/api/mobile/authorize/route.ts", ["mobileBridgeCode"]],
@@ -200,7 +204,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/mobile/token/route.ts", ["mobileBridgeCode"]],
   // iOS token refresh: cross-tenant token row read for family-absolute check.
   // C13: deactivated-user rejection requires tenantMember lookup.
-  ["src/app/api/mobile/token/refresh/route.ts", ["tenant", "extensionToken", "tenantMember"]],
+  ["src/app/api/mobile/token/refresh/route.ts", ["extensionToken", "tenantMember"]],
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
   ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],
@@ -785,7 +789,10 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
   // with an incomplete client set reports "no violations" for a callback it
   // could not read. The caller turns this into a named violation.
   const clientUnresolved = Boolean(clientArg) && !argText;
-  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes };
+  // Call sites that hand the client to a callee outside this file. The header's
+  // fail-open class, counted rather than asserted in prose.
+  const handedOff = [];
+  if (!fn) return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff };
 
   // A destructuring OUTSIDE the callback is not a bypassed access — it only
   // tells us what the bound names carry. Model references are collected from
@@ -1028,13 +1035,20 @@ function clientBindingsIn(fn, flow, clientArg, bindingsFor) {
           .filter((index) => index >= 0);
         if (positions.length === 0) continue;
         const resolved = calleeFunctionOf(inner, bindingsFor);
-        if (!resolved) continue;
+        if (!resolved) {
+          // The client crosses a module boundary this tree cannot open. Recorded
+          // rather than merely skipped: the models it reaches over there are
+          // reached under THIS bypass, so any question of the form "which models
+          // does this file touch" has no answer here.
+          handedOff.push(inner.getStartLineNumber());
+          continue;
+        }
         for (const index of positions) enrol(resolved.fn, index - resolved.argOffset);
       }
     }
   }
 
-  return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes };
+  return { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff };
 }
 
 /**
@@ -1101,6 +1115,15 @@ const astProject = createAstProject();
 const unparseableFiles = [];
 const fileViolations = [];
 const modelViolations = [];
+/**
+ * file -> models actually reached under a bypass, and whether anything in
+ * that file defeated the analysis. The second half is what keeps the
+ * over-breadth check below from reading an undecidable file as an unused
+ * permission.
+ */
+const usedModels = new Map();
+const undecidableFiles = new Set();
+let handedOffSites = 0;
 const purposeViolations = [];
 const txLessViolations = [];
 const indirectCallbacks = [];
@@ -1214,9 +1237,13 @@ for (const file of sourceFiles) {
     // callback is the scan node — which is the call's own subtree for an inline
     // callback, and the resolved declaration for one passed by name.
     if (helper !== "withBypassRls" || !allowedSet) continue;
-    const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes } =
+    const { clients, modelRefs, clientUnresolved, unresolved, callbackNodes, handedOff } =
       clientBindingsIn(fn, flowFor(), call.getArguments()[0], bindingsFor);
-    if (clientUnresolved) unresolvedClients.push({ file, line });
+    if (clientUnresolved) { unresolvedClients.push({ file, line }); undecidableFiles.add(file); }
+    if (handedOff.length > 0) {
+      handedOffSites += handedOff.length;
+      undecidableFiles.add(file);
+    }
     const seen = new Set();
     // The call itself (its other arguments can hold model access) plus every
     // callback the analyser reached, wherever each is declared. Overlap is
@@ -1226,6 +1253,8 @@ for (const file of sourceFiles) {
       const key = `${model}:${line}`;
       if (seen.has(key)) return;
       seen.add(key);
+      if (!usedModels.has(file)) usedModels.set(file, new Set());
+      usedModels.get(file).add(model);
       if (!allowedSet.has(model)) modelViolations.push({ file, line, model });
     };
     // Delegates lifted straight off a client by destructuring, then every
@@ -1233,6 +1262,7 @@ for (const file of sourceFiles) {
     for (const ref of modelRefs) report(ref);
     for (const u of unresolved) {
       unresolvedModels.push({ file, line: u.line, text: u.text });
+      undecidableFiles.add(file);
     }
     for (const node of scanNodes) {
       const { refs, unresolved } = modelRefsIn(node, clients);
@@ -1242,8 +1272,28 @@ for (const file of sourceFiles) {
         if (seen.has(key)) continue;
         seen.add(key);
         unresolvedModels.push({ file, line: u.line, text: u.text });
+        undecidableFiles.add(file);
       }
     }
+  }
+}
+
+/**
+ * The reverse direction: a model this file is permitted to reach under a
+ * bypass and never does. The permission outlives its reason, and the next
+ * reader takes the entry for the file's documented scope — `notification.ts`
+ * carried `user` for a read it had already moved into the adjudicator.
+ *
+ * Skipped for a file whose analysis was defeated anywhere (an unresolved
+ * client or model access): there, "never reached" means "not seen".
+ */
+const staleAllowances = [];
+for (const [file, models] of ALLOWED_USAGE) {
+  if (models.includes("*") || undecidableFiles.has(file)) continue;
+  const reached = usedModels.get(file);
+  if (!reached) continue; // no bypass call at all: Check 1's business, not this one
+  for (const model of models) {
+    if (!reached.has(model)) staleAllowances.push({ file, model });
   }
 }
 
@@ -1294,6 +1344,24 @@ if (modelViolations.length > 0) {
   console.error("");
   for (const { file, line, model } of modelViolations) {
     console.error(`  ${file}:${line}  prisma.${model}`);
+  }
+}
+
+if (staleAllowances.length > 0) {
+  failed = true;
+  if (modelViolations.length > 0) console.error("");
+  console.error(
+    "ALLOWED_USAGE permits a model the file never reaches under a bypass.",
+  );
+  console.error(
+    "Remove it: a permission that outlives its reason reads to the next",
+  );
+  console.error(
+    "reviewer as the scope this file is meant to have.",
+  );
+  console.error("");
+  for (const { file, model } of staleAllowances) {
+    console.error(`  ${file}  prisma.${model}`);
   }
 }
 
@@ -1417,5 +1485,7 @@ const scannableCount = sourceFiles.filter(
   (f) => !f.includes(".test.") && !f.includes("__tests__"),
 ).length;
 console.log(
-  `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files)`,
+  `check-bypass-rls: OK (parsed ${parsedCount} of ${scannableCount} scannable source files; ` +
+    `${handedOffSites} call site(s) hand the client to a callee outside the file, ` +
+    `so those files are exempt from the over-breadth check)`,
 );

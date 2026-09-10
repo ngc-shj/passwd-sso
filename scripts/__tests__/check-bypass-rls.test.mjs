@@ -73,6 +73,12 @@ export async function withTenantContext(tenantId) {
 export async function withTeamContext(tenantId, fn) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) => fn(tenantId));
+}
+// Mirrors resolveTeamTenantId. Present because a fixture at an allowlisted path
+// must reach every model that path permits — see "allowlist over-breadth" below.
+export async function resolveTeamTenantId(teamId) {
+  return withBypassRls(prisma, BYPASS_PURPOSE.CTX, async (tx) =>
+    tx.team.findUnique({ where: { id: teamId } }));
 }`;
 
 // A brand-new (non-allowlisted) file that suppresses an unused tx — trips BOTH
@@ -1606,6 +1612,9 @@ export async function sneaky() {
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 export default async function Page() {
   const row = await withBypassRls(prisma, async (tx) => tx.${model}.findFirst({}), BYPASS_PURPOSE.SHARE);
+  // shareAccessLog is the other model this path permits; a fixture that reached
+  // only one of the two would now trip the over-breadth check below.
+  await withBypassRls(prisma, async (tx) => tx.shareAccessLog.create({}), BYPASS_PURPOSE.SHARE);
   return <div className="p">{row?.id}</div>;
 }`;
     const denied = run("src/app/s/[token]/page.tsx", source("tenantMember"));
@@ -1616,5 +1625,77 @@ export default async function Page() {
     const allowed = run("src/app/s/[token]/page.tsx", source("passwordShare"));
     expect(allowed.code).toBe(0);
     expect(allowed.stdout).toContain("check-bypass-rls: OK");
+  });
+});
+
+// ─── the reverse direction: a permission nothing uses ────────────────────────
+//
+// The allowlist had been read for two rounds as the documented bypass scope of
+// each file, and six entries named models their file had stopped reaching. The
+// forward check cannot see that: it only asks whether what IS reached was
+// permitted.
+
+describe("allowlist over-breadth", () => {
+  it("fails an entry naming a model the file never reaches", () => {
+    // tenant/policy allows tenant + teamPolicy. This fixture reaches only the
+    // first, so the second is a permission with nothing behind it.
+    const { code, stderr } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => tx.tenant.findUnique({ where: { id } }), BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(1);
+    expect(stderr).toContain("permits a model the file never reaches");
+    expect(stderr).toContain("prisma.teamPolicy");
+    // The one it DOES reach must not be reported alongside it, or the message
+    // stops naming what to remove.
+    expect(stderr).not.toContain("prisma.tenant\n");
+  });
+
+  it("passes when every permitted model is reached", () => {
+    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => {
+    await tx.tenant.findUnique({ where: { id } });
+    return tx.teamPolicy.findMany({});
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+  });
+
+  it("exempts a file that hands the client to a callee it cannot open", () => {
+    // The gate's own fail-open class. Over there the callee may reach every
+    // permitted model; "never reached" here would mean "not seen", and acting on
+    // it would delete a true permission. Eight of the fourteen candidates in the
+    // real tree were exactly this — `notification.ts` among them, whose `user`
+    // read had moved into the adjudicator it now hands `tx` to.
+    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { resolveSomething } from "@/lib/elsewhere";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => {
+    await tx.tenant.findUnique({ where: { id } });
+    return resolveSomething(tx, id);
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
+    // The exemption is counted, not silent: a run that exempts everything and a
+    // run that exempts nothing must not print the same line.
+    expect(stdout).toMatch(/[1-9]\d* call site\(s\) hand the client/);
+  });
+
+  it("does not fire on a file whose bypass reaches no model at all", () => {
+    // A raw-SQL bypass touches no model. Reporting every permitted model as
+    // unused there would make the check fire loudest where it knows least.
+    const { code, stdout } = run("src/app/api/tenant/policy/route.ts", `
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+export async function GET() {
+  return withBypassRls(prisma, async (tx) => tx.$executeRaw\`SELECT 1\`, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}`);
+    expect(code).toBe(0);
+    expect(stdout).toContain("check-bypass-rls: OK");
   });
 });
