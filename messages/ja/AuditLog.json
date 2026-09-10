@@ -165,6 +165,7 @@
   "DIRECTORY_SYNC_CONFIG_DELETE": "ディレクトリ同期設定を削除",
   "DIRECTORY_SYNC_RUN": "ディレクトリ同期を実行",
   "DIRECTORY_SYNC_STALE_RESET": "ディレクトリ同期のスタックをリセット",
+  "DIRECTORY_SYNC_ACTIVATION_REFUSED": "ディレクトリ同期の有効化を拒否 (他組織で有効なメンバー)",
   "ACCESS_DENIED": "ネットワークポリシーによりアクセス拒否",
   "TENANT_ROLE_UPDATE": "テナントメンバーのロール変更",
   "TENANT_MEMBER_LOCKOUT_CLEAR": "メンバーの保管庫ロックアウトを解除",

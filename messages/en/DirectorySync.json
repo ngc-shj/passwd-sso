@@ -50,6 +50,7 @@
   "logUsersCreated": "Users Created",
   "logUsersUpdated": "Users Updated",
   "logUsersDeactivated": "Users Deactivated",
+  "logUsersRefused": "Activations Refused",
   "logGroupsUpdated": "Groups Updated",
   "logErrorMessage": "Error",
   "loadMore": "Load more",

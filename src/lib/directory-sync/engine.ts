@@ -13,7 +13,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { usersActiveInAnotherTenant } from "@/lib/tenant-context";
-import { logAuditAsync } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditBulkAsync } from "@/lib/audit/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -46,6 +46,14 @@ export interface SyncResult {
   usersCreated: number;
   usersUpdated: number;
   usersDeactivated: number;
+  /**
+   * Activations the cross-tenant guard declined. Counted apart from the verbs
+   * above, which report the writes that DID happen: a refused reactivation still
+   * stamps `lastScimSyncedAt`, so without this a run that left the user
+   * deactivated reported as `usersUpdated: 1, SUCCESS` and the IdP admin saw a
+   * sync that worked.
+   */
+  usersRefused: number;
   groupsUpdated: number;
   errorMessage?: string;
   abortedSafety?: boolean;
@@ -227,6 +235,7 @@ export async function runDirectorySync(
       usersCreated: 0,
       usersUpdated: 0,
       usersDeactivated: 0,
+      usersRefused: 0,
       groupsUpdated: 0,
       errorMessage: sanitizeSyncError(err),
     };
@@ -239,6 +248,7 @@ export async function runDirectorySync(
       usersCreated: 0,
       usersUpdated: 0,
       usersDeactivated: 0,
+      usersRefused: 0,
       groupsUpdated: 0,
       errorMessage: "Sync already running (locked)",
     };
@@ -247,7 +257,19 @@ export async function runDirectorySync(
   let usersCreated = 0;
   let usersUpdated = 0;
   let usersDeactivated = 0;
+  let usersRefused = 0;
   const groupsUpdated = 0;
+
+  /**
+   * One entry per declined activation, emitted after the transaction commits.
+   * Collected rather than emitted inline because the enqueue is a second
+   * transaction and the sync's own is already long.
+   *
+   * Deliberately carries no identifier of the tenant the user is active in: the
+   * audit trail is readable by THIS tenant's admins, and which other
+   * organization holds the member is not theirs to learn.
+   */
+  const refusals: Array<{ memberId: string; userId: string; email: string | null }> = [];
 
   try {
     // 2. Load config and decrypt credentials
@@ -378,6 +400,7 @@ export async function runDirectorySync(
             usersCreated: 0,
             usersUpdated: 0,
             usersDeactivated: 0,
+            usersRefused: 0,
             groupsUpdated: 0,
             errorMessage: sanitizeSyncError(msg),
           },
@@ -401,6 +424,7 @@ export async function runDirectorySync(
         usersCreated: 0,
         usersUpdated: 0,
         usersDeactivated: 0,
+        usersRefused: 0,
         groupsUpdated: 0,
         errorMessage: msg,
         abortedSafety: true,
@@ -417,13 +441,16 @@ export async function runDirectorySync(
     // throws on it and the proxy auth gate calls that on every request, so
     // reactivating here would let this tenant's sync invalidate every session of
     // a user who belongs to another tenant.
-    const activeElsewhere = dryRun
-      ? { ids: new Set<string>(), emails: new Set<string>() }
-      : await usersActiveInAnotherTenant(
-          tenantId,
-          toUpdate.map((u) => u.internalId),
-          toCreate.map((pu) => pu.email.toLowerCase()),
-        );
+    //
+    // Resolved on a DRY RUN too. Skipping it there cost nothing at the time —
+    // the preview writes nothing either way — but it made the preview predict a
+    // run that would not happen: the operator saw every user reactivated, and
+    // the real run then refused some of them.
+    const activeElsewhere = await usersActiveInAnotherTenant(
+      tenantId,
+      toUpdate.map((u) => u.internalId),
+      toCreate.map((pu) => pu.email.toLowerCase()),
+    );
 
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
@@ -470,7 +497,7 @@ export async function runDirectorySync(
             // deactivated, so the mapping lands and a later legitimate
             // reactivation has a row to flip.
             const activeInAnother = activeElsewhere.emails.has(pu.email.toLowerCase());
-            await tx.tenantMember.create({
+            const created = await tx.tenantMember.create({
               data: {
                 tenantId,
                 userId: user.id,
@@ -481,6 +508,12 @@ export async function runDirectorySync(
                 lastScimSyncedAt: new Date(),
               },
             });
+            // Only when the IdP asked for an ACTIVE member and the guard said no.
+            // A member the IdP itself sent as inactive is not a refusal.
+            if (pu.active && activeInAnother) {
+              usersRefused++;
+              refusals.push({ memberId: created.id, userId: user.id, email: pu.email });
+            }
           } else if (existing.deactivatedAt && pu.active) {
             if (activeElsewhere.emails.has(pu.email.toLowerCase())) {
               // Refused, not silently skipped: the sync still stamps the sync
@@ -489,6 +522,8 @@ export async function runDirectorySync(
                 where: { id: existing.id },
                 data: { lastScimSyncedAt: new Date() },
               });
+              usersRefused++;
+              refusals.push({ memberId: existing.id, userId: user.id, email: pu.email });
             } else {
               // Reactivate
               await tx.tenantMember.update({
@@ -541,20 +576,24 @@ export async function runDirectorySync(
           // membership; a DEACTIVATION is always applied, because it cannot add
           // one and it is the operation that repairs the condition.
           const wouldReactivate = pu.active && member.deactivatedAt !== null;
+          const refused = wouldReactivate && activeElsewhere.ids.has(internalId);
           await tx.tenantMember.update({
             where: { id: member.id },
             data: {
-              deactivatedAt:
-                wouldReactivate && activeElsewhere.ids.has(internalId)
-                  ? member.deactivatedAt
-                  : pu.active
-                    ? null
-                    : new Date(),
+              deactivatedAt: refused
+                ? member.deactivatedAt
+                : pu.active
+                  ? null
+                  : new Date(),
               lastScimSyncedAt: new Date(),
             },
           });
 
           usersUpdated++;
+          if (refused) {
+            usersRefused++;
+            refusals.push({ memberId: member.id, userId: internalId, email: pu.email });
+          }
         }
 
         // Deactivate users no longer in provider (batch, OWNER-safe)
@@ -579,16 +618,50 @@ export async function runDirectorySync(
           }
         }
       });
+      // After the commit, so a rolled-back run cannot leave a refusal in the
+      // trail. Best-effort, like every other emit on this path — the durable
+      // record of the count is the sync log row written below.
+      await logAuditBulkAsync(
+        refusals.map((r) => ({
+          scope: AUDIT_SCOPE.TENANT,
+          action: AUDIT_ACTION.DIRECTORY_SYNC_ACTIVATION_REFUSED,
+          userId: resolveAuditUserId(actorUserId, "system"),
+          actorType: actorUserId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.SYSTEM,
+          tenantId,
+          targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
+          targetId: r.memberId,
+          metadata: { configId, userId: r.userId, email: r.email },
+        })),
+      );
     } else {
       // Dry run: count what would happen
       usersCreated = toCreate.length;
       usersUpdated = toUpdate.length;
       usersDeactivated = toDeactivate.length;
+      // Both apply-phase arms refuse on the same condition — the IdP asked for an
+      // ACTIVE member and the guard found one elsewhere — so the preview can
+      // answer it without replaying the loops. The one case it cannot see is a
+      // toCreate user who already holds an ACTIVE membership HERE: the apply
+      // phase resolves that from the tx and refuses nothing, because there is
+      // nothing to activate. That state is a second active membership already,
+      // which `tenant_members_one_active_per_user` now makes unrepresentable.
+      usersRefused =
+        toCreate.filter((pu) => pu.active && activeElsewhere.emails.has(pu.email.toLowerCase()))
+          .length +
+        toUpdate.filter(({ user: pu, internalId }) => {
+          const member = memberByUserId.get(internalId);
+          return (
+            !!member &&
+            pu.active &&
+            member.deactivatedAt !== null &&
+            activeElsewhere.ids.has(internalId)
+          );
+        }).length;
     }
 
     // 8. Create sync log
     const completedAt = new Date();
-    const stats = { usersCreated, usersUpdated, usersDeactivated, groupsUpdated };
+    const stats = { usersCreated, usersUpdated, usersDeactivated, usersRefused, groupsUpdated };
 
     const log = await withTenantRls(prisma, tenantId, (tx) =>
       tx.directorySyncLog.create({
@@ -602,6 +675,7 @@ export async function runDirectorySync(
           usersCreated,
           usersUpdated,
           usersDeactivated,
+          usersRefused,
           groupsUpdated,
         },
       }),
@@ -631,6 +705,7 @@ export async function runDirectorySync(
       usersCreated,
       usersUpdated,
       usersDeactivated,
+      usersRefused,
       groupsUpdated,
       logId: log.id,
     };
@@ -653,6 +728,7 @@ export async function runDirectorySync(
             usersCreated,
             usersUpdated,
             usersDeactivated,
+            usersRefused,
             groupsUpdated,
             errorMessage: sanitizeSyncError(err),
           },
@@ -669,6 +745,7 @@ export async function runDirectorySync(
       usersCreated,
       usersUpdated,
       usersDeactivated,
+      usersRefused,
       groupsUpdated,
       errorMessage: sanitizeSyncError(err),
       logId,

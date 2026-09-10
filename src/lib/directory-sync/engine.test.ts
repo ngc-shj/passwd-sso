@@ -10,6 +10,7 @@ const {
   mockTenantMember,
   mockDirSyncLog,
   mockLogAudit,
+  mockLogAuditBulk,
   mockDispatchWebhook,
   mockDecryptCredentials,
   mockFetchOktaUsers,
@@ -30,6 +31,7 @@ const {
     mockTenantMember: { findMany: vi.fn() },
     mockDirSyncLog: { create: vi.fn() },
     mockLogAudit: vi.fn(),
+    mockLogAuditBulk: vi.fn(),
     mockDispatchWebhook: vi.fn(),
     mockDecryptCredentials: vi.fn(),
     mockFetchOktaUsers: vi.fn(),
@@ -99,6 +101,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkAsync: mockLogAuditBulk,
 }));
 
 vi.mock("@/lib/webhook-dispatcher", () => ({
@@ -305,6 +308,73 @@ describe("runDirectorySync", () => {
       expect(result.usersDeactivated).toBe(1);
       // dryRun performs no writes: the batch-deactivate updateMany is never run.
       expect(applyTx.tenantMember.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("predicts the refusals the real run will make", async () => {
+      // The preview skipped the cross-tenant guard entirely, so it reported the
+      // reactivation it would not get: the operator approved a run that then
+      // left the user deactivated.
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-1", user: { email: "alice@example.com" } },
+      ]);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
+
+      expect(result.usersRefused).toBe(1);
+      // Still a preview: the guard is a read, and nothing was written.
+      expect(applyTx.tenantMember.update).not.toHaveBeenCalled();
+      expect(mockLogAuditBulk).not.toHaveBeenCalled();
+    });
+
+    it("predicts no refusal when the guard clears everyone", async () => {
+      // The zero the cell above is measured against. Without it, a preview that
+      // reported every reactivation as refused would satisfy it too.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx());
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
+
+      expect(result.usersUpdated).toBe(1);
+      expect(result.usersRefused).toBe(0);
     });
   });
 
@@ -720,6 +790,221 @@ describe("runDirectorySync", () => {
         where: { id: "member-1" },
         data: { deactivatedAt: new Date("2025-01-01") },
       });
+    });
+
+    it("counts a refused reactivation apart from the writes it reports", async () => {
+      // The refusal still stamps `lastScimSyncedAt`, so it lands in usersUpdated
+      // — and with nothing else in the result, the run read as `usersUpdated: 1,
+      // SUCCESS` to the IdP admin while the user stayed deactivated.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-1", user: { email: "alice@example.com" } },
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.usersRefused).toBe(1);
+      // Still 1: the counters above report the writes that DID happen, and the
+      // sync time was stamped. The refusal is what the new counter adds.
+      expect(result.usersUpdated).toBe(1);
+      // Durably, not only in the returned object — the log row is what the
+      // tenant's operators read afterwards.
+      expect(mockDirSyncLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ usersRefused: 1, status: "SUCCESS" }),
+        }),
+      );
+    });
+
+    it("emits an audit event naming the membership it declined", async () => {
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-1", user: { email: "alice@example.com" } },
+      ]);
+
+      await runDirectorySync(BASE_OPTIONS);
+
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          action: "DIRECTORY_SYNC_ACTIVATION_REFUSED",
+          tenantId: BASE_OPTIONS.tenantId,
+          targetType: "TenantMember",
+          targetId: "member-1",
+        }),
+      ]);
+
+      // The trail is readable by THIS tenant's admins, and which other
+      // organization holds the member is not theirs to learn. The guard's own
+      // row carries that tenant id; nothing may carry it through to here.
+      const [[emitted]] = mockLogAuditBulk.mock.calls;
+      expect(JSON.stringify(emitted)).not.toContain("tenant-other");
+    });
+
+    it("reports no refusal when the guard clears the user", async () => {
+      // The counter must be able to read zero: one that incremented on every
+      // reactivation would satisfy the cells above and say nothing.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockResolvedValue({}),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([
+        { externalId: "ext-1", internalId: "user-1" },
+      ]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({
+          id: "member-1",
+          userId: "user-1",
+          role: "MEMBER",
+          deactivatedAt: new Date("2025-01-01"),
+          email: "alice@example.com",
+          name: "Alice",
+        }),
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.usersRefused).toBe(0);
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
+    });
+
+    it("counts the create arm's refusal too", async () => {
+      // Same guard, different verb: the membership is created deactivated, so no
+      // reactivation is refused and yet an activation was.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({ id: "user-9", email: "carol@example.com" }),
+          update: vi.fn(),
+        },
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({ id: "member-9" }),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-9", email: "carol@example.com", displayName: "Carol", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-9", user: { email: "carol@example.com" } },
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.usersRefused).toBe(1);
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          action: "DIRECTORY_SYNC_ACTIVATION_REFUSED",
+          targetId: "member-9",
+        }),
+      ]);
+    });
+
+    it("does not count an IdP-inactive user as a refusal", async () => {
+      // The guard fires on this user, but the IdP itself sent them inactive, so
+      // nothing was declined — the membership would have been created
+      // deactivated either way. A counter keyed on the guard alone reports a
+      // refusal that never happened.
+      setupAcquiredLock();
+      setApplyTx(makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({ id: "user-9", email: "carol@example.com" }),
+          update: vi.fn(),
+        },
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn().mockResolvedValue({ id: "member-9" }),
+          update: vi.fn(),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-9", email: "carol@example.com", displayName: "Carol", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardFindMany.mockResolvedValue([
+        { userId: "user-9", user: { email: "carol@example.com" } },
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      // The create arm ran — without this the cell would pass on a user the diff
+      // never reached, reporting a counter it never exercised as correct.
+      expect(result.usersCreated).toBe(1);
+      expect(result.usersRefused).toBe(0);
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
     });
 
     it("reactivates a deactivated user who reappears as active in the provider", async () => {

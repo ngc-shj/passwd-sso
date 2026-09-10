@@ -80,6 +80,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
           usersCreated: true,
           usersUpdated: true,
           usersDeactivated: true,
+          usersRefused: true,
           groupsUpdated: true,
           errorMessage: true,
         },

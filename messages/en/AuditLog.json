@@ -165,6 +165,7 @@
   "DIRECTORY_SYNC_CONFIG_DELETE": "Directory sync config deleted",
   "DIRECTORY_SYNC_RUN": "Directory sync executed",
   "DIRECTORY_SYNC_STALE_RESET": "Directory sync stale reset",
+  "DIRECTORY_SYNC_ACTIVATION_REFUSED": "Directory sync activation refused (member active in another organization)",
   "ACCESS_DENIED": "Access denied by network policy",
   "TENANT_ROLE_UPDATE": "Changed tenant member role",
   "TENANT_MEMBER_LOCKOUT_CLEAR": "Cleared member vault lockout",
