@@ -528,9 +528,13 @@ export function createCustomAdapter(): Adapter {
           select: { maxConcurrentSessions: true },
         });
 
-        // FAIL-CLOSED: tenantId is User.tenantId (non-null FK RESTRICT), so a
-        // null row here is data corruption, NOT "no limit configured" — an
-        // unconfigured limit is a real row with maxConcurrentSessions=null.
+        // FAIL-CLOSED: tenantId comes from the adjudicator — the active
+        // TenantMember, with User.tenantId as the fallback — and BOTH are
+        // non-null FKs into tenants (TenantMember.tenantId ON DELETE CASCADE,
+        // User.tenantId ON DELETE RESTRICT), so neither path can name a tenant
+        // that is not there. A null row here is data corruption, NOT "no limit
+        // configured" — an unconfigured limit is a real row with
+        // maxConcurrentSessions=null.
         // Silently skipping the cap would let the corrupt-tenant user open
         // unbounded concurrent sessions. Throw so session creation refuses.
         // Matches the null-tenant fail-closed stance across the policy readers

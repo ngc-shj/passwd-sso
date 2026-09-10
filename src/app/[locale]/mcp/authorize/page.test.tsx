@@ -142,9 +142,9 @@ describe("McpConsentPage tenant check", () => {
     expect(out).not.toContain('"clientId"');
   });
 
-  it("skips the tenant check entirely for an unclaimed DCR client", async () => {
+  it("admits an unclaimed DCR client whose user resolves to a tenant", async () => {
     // `client.tenantId === null` means the client has not been claimed yet;
-    // claiming happens on Allow. The guard must not fire here, or dynamic
+    // claiming happens on Allow. The comparison must not fire here, or dynamic
     // registration cannot complete.
     seedClient(null);
     seedUser("stale-home-tenant", "scim-provisioned-tenant");
@@ -152,6 +152,31 @@ describe("McpConsentPage tenant check", () => {
     const out = render(await invoke());
 
     expect(out).toContain('"clientId":"client-1"');
-    expect(mockUserFindUnique).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unclaimed DCR client when the user resolves to no tenant", async () => {
+    // The arm the page used to skip: with no client tenant there was nothing to
+    // compare, so it resolved nothing and rendered the form — while the consent
+    // POST, the authoritative gate, refuses `!userTenantId` with a 403. The
+    // screen promised a consent that the next request would deny.
+    seedClient(null);
+    mockUserFindUnique.mockResolvedValue(null);
+
+    const out = render(await invoke());
+
+    expect(out).toContain("tenantMismatch");
+    expect(out).not.toContain('"clientId"');
+  });
+
+  it("refuses a tenant-bound client when the user resolves to no tenant", async () => {
+    // Same undecidable state on the other arm. It already refused — by
+    // comparing against null — and the cell pins that the two arms now refuse
+    // for the same stated reason rather than by coincidence of the comparison.
+    seedClient("scim-provisioned-tenant");
+    mockUserFindUnique.mockResolvedValue(null);
+
+    const out = render(await invoke());
+
+    expect(out).toContain("tenantMismatch");
   });
 });

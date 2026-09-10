@@ -60,23 +60,27 @@ export default async function McpConsentPage({
     );
   }
 
-  // Tenant check for non-DCR (admin-created) clients
-  if (client.tenantId) {
-    // The same adjudicator the consent POST uses. This comparison is an
-    // authorization decision, and against the stale `User.tenantId` column it
-    // admits or refuses on a tenant the user may hold no active membership in.
-    const userTenantId = await withBypassRls(prisma, async (tx) =>
-      resolveOwningTenantIdFromClient(tx, session.user.id),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-    if (client.tenantId !== userTenantId) {
-      return (
-        <div className="flex items-center justify-center min-h-screen">
-          <p>{t("errors.tenantMismatch")}</p>
-        </div>
-      );
-    }
+  // The same adjudicator the consent POST uses. This comparison is an
+  // authorization decision, and against the stale `User.tenantId` column it
+  // admits or refuses on a tenant the user may hold no active membership in.
+  //
+  // Resolved for EVERY client, not only the tenant-bound ones. The POST refuses
+  // an unresolvable tenant outright (`!userTenantId || …` → 403), and this page
+  // used to resolve nothing on the DCR path — so on that one arm the screen it
+  // rendered promised a consent the authoritative gate would then deny. Two
+  // readers of the same fact must not disagree about it, least of all when one
+  // of them is the one the user sees.
+  const userTenantId = await withBypassRls(prisma, async (tx) =>
+    resolveOwningTenantIdFromClient(tx, session.user.id),
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  if (!userTenantId || (client.tenantId && client.tenantId !== userTenantId)) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>{t("errors.tenantMismatch")}</p>
+      </div>
+    );
   }
-  // DCR unclaimed clients: no tenant check needed here — claiming happens on Allow
+  // DCR unclaimed clients carry no tenantId of their own: claiming happens on Allow
 
   // Calculate granted scopes
   const allowedScopes = client.allowedScopes.split(",").filter(Boolean);

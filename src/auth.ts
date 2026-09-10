@@ -667,6 +667,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             : null;
           return { id: found.id, tenant };
         }, BYPASS_PURPOSE.AUTH_FLOW);
+        // An existing user whose tenant does not resolve, or whose resolved
+        // tenant row is absent, leaves this gate's question — is this an SSO
+        // tenant? — unanswered. The arm below reads "no answer" as "not SSO" and
+        // admits the magic link, so the undecidable case had to be split out:
+        // `createSession` in auth-adapter treats exactly this state as
+        // corruption and refuses, and an authentication gate must not be the one
+        // reader that takes it for a default. `provider_error` is this
+        // deployment's existing reason for "the sign-in machinery failed",
+        // which is what a missing tenant row is.
+        if (existingUser && !existingUser.tenant) {
+          await emitAuthLoginFailure({
+            email: emailForAudit,
+            provider: "nodemailer",
+            reason: "provider_error",
+            userId: existingUser.id,
+          });
+          return false;
+        }
         // Existing user in a non-bootstrap (SSO) tenant → reject
         if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
           await emitAuthLoginFailure({

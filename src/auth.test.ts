@@ -1472,6 +1472,37 @@ describe("signIn callback", () => {
       );
     });
 
+    it("refuses an existing user whose tenant row is absent", async () => {
+      // The undecidable arm. The gate asks "is this an SSO tenant?"; with no
+      // tenant row there is no answer, and the SSO check reads the absence as
+      // "not SSO" and ADMITS. `createSession` treats the same state as
+      // corruption and refuses, so this reader used to be the one that did not.
+      mockPrisma.user.findUnique.mockImplementation(
+        async ({ select }: { select: Record<string, unknown> }) =>
+          "tenantMemberships" in select
+            ? { tenantId: "tenant-1", tenantMemberships: [{ tenantId: "tenant-1" }] }
+            : { id: "real-db-id" },
+      );
+      mockPrisma.tenant.findUnique.mockResolvedValue(null);
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "orphaned@corp.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(false);
+      // Refused as a deployment fault, not as a tenant mismatch: the operator
+      // reading this is looking for a missing row, not a misrouted user.
+      expect(mockEmitAuthLoginFailure).toHaveBeenCalledWith({
+        email: "orphaned@corp.com",
+        provider: "nodemailer",
+        reason: "provider_error",
+        userId: "real-db-id",
+      });
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
     it("returns false when ensureTenantMembershipForSignIn throws unexpected error", async () => {
       // nodemailer guard: bootstrap user — allowed through
       seedExistingUser({ isBootstrap: true });
