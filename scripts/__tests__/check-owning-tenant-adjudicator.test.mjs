@@ -45,10 +45,51 @@ const RAW_READ = `const u = await tx.user.findUnique({ where: { id }, select: { 
 const inBypass = (body) => `await withBypassRls(prisma, async (tx) => {\n${body}});\n`;
 const inTenantScope = (body) => `await withUserTenantRls(userId, async (tx) => {\n${body}});\n`;
 
+/**
+ * The gate resolves every projection key against the schema under its ROOT, so
+ * the fixture supplies one. Written here rather than pointed at the real schema
+ * because two cells below turn on what the schema DECLARES — that a relation is
+ * seen because its type is `User`, not because it is spelled `user`.
+ */
+const SCHEMA = `model User {
+  id        String @id
+  email     String
+  tenantId  String
+  tenant    Tenant @relation(fields: [tenantId], references: [id])
+  tenantMemberships TenantMember[]
+}
+
+model Tenant {
+  id    String @id
+  users User[]
+}
+
+model TenantMember {
+  id       String @id
+  tenantId String
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+}
+
+model Team {
+  id      String @id
+  owner   User   @relation(fields: [ownerId], references: [id])
+  ownerId String
+  members TenantMember[]
+}
+
+model Session {
+  id     String @id
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+}
+`;
+
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "owning-tenant-"));
   // ts-morph resolves nothing here, but the lib helper still needs the dir.
   mkdirSync(join(root, "src"), { recursive: true });
+  write("prisma/schema.prisma", SCHEMA);
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
@@ -177,6 +218,88 @@ describe("check-owning-tenant-adjudicator", () => {
     expect(code).toBe(1);
     expect(out).toContain("no MANIFEST entry");
     expect(out).toContain("src/lib/unlisted.ts");
+  });
+
+  // ─── reached through a RELATION, not through `prisma.user` ────────────────
+  //
+  // The receiver-keyed version of this gate saw none of these: it required the
+  // read to be issued on `.user`, while `User.tenantId` comes back through any
+  // projection that descends into a User-typed relation.
+
+  it.each([
+    ["a user relation selecting tenantId", `tx.tenantMember.findFirst({ select: { user: { select: { tenantId: true } } } })`],
+    ["a user relation taken whole", `tx.session.findUnique({ where: { id }, include: { user: true } })`],
+    ["a user relation with include but no select", `tx.session.findUnique({ where: { id }, select: { user: { include: { tenant: true } } } })`],
+    ["a chain through a second relation", `tx.team.findUnique({ select: { members: { select: { user: { select: { tenantId: true } } } } } })`],
+    ["a relation projected by a non-literal", `tx.session.findUnique({ where: { id }, select: { user: { select: SEL } } })`],
+  ])("sees %s", (_label, read) => {
+    write("src/lib/unlisted.ts", inBypass(`const r = await ${read};\n`));
+    write("src/lib/other.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/other.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("no MANIFEST entry");
+    expect(out).toContain("src/lib/unlisted.ts");
+  });
+
+  it("sees a User relation that is not spelled `user`", () => {
+    // The relation set comes from the schema's TYPES. A pass keyed on the name
+    // `user` would clear this, and this schema declares 15 such names.
+    write(
+      "src/lib/owner-read.ts",
+      inBypass(`const t = await tx.team.findUnique({ select: { owner: { select: { tenantId: true } } } });\n`),
+    );
+    write("src/lib/other.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/other.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("src/lib/owner-read.ts");
+  });
+
+  it.each([
+    ["a user relation projected to other scalars", `tx.tenantMember.findMany({ select: { userId: true, user: { select: { email: true } } } })`],
+    ["a user used only as a WHERE filter", `tx.tenantMember.findMany({ where: { user: { email } }, select: { tenantId: true } })`],
+    ["a sibling relation taken whole", `tx.user.findUnique({ where: { id }, select: { tenantMemberships: { select: { tenantId: true } } } })`],
+  ])("does not flag %s", (_label, read) => {
+    // The third is the authoritative source, not the stale copy: the tenantId on
+    // a TenantMember row IS the membership. Flagging it would push the
+    // adjudicator's own query shape into the manifest.
+    write("src/lib/safe.ts", inBypass(`const r = await ${read};\n`));
+    write("src/lib/other.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/other.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  // ─── the schema the walk resolves against ─────────────────────────────────
+
+  it("fails when the prisma schema is missing", () => {
+    // Without it every key resolves to "unknown". Whichever way that were
+    // defaulted, the walk would report on the default rather than on the code.
+    rmSync(join(root, "prisma", "schema.prisma"));
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("prisma schema not found");
+  });
+
+  it("fails when the prisma schema declares no User model", () => {
+    write("prisma/schema.prisma", `model Tenant {\n  id String @id\n}\n`);
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("no User model");
+  });
+
+  it("fails when the prisma schema declares no models at all", () => {
+    write("prisma/schema.prisma", `datasource db {\n  provider = "postgresql"\n}\n`);
+    write("src/lib/thing.ts", inBypass(HELPER_CALL));
+    manifest({ "src/lib/thing.ts": { disposition: "adjudicator" } });
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("zero models");
   });
 
   it("does NOT resolve a wrapper that reaches a bypass through a SECOND wrapper", () => {

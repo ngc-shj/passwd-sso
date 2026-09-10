@@ -60,10 +60,34 @@
  * enumerated by hand and went 1 -> 2 -> 4 -> 16 before it was derived, which is
  * why "all reviewers found nothing" is not what closes it.
  *
- * KNOWN LIMIT — the callee is matched by NAME (`user.findUnique`), so a read
- * reached through an aliased model handle is not seen. Resolving that needs a
- * Program, which no gate in this tree carries; `check-bypass-rls.mjs` documents
- * the same boundary.
+ * ─── Why the projection is walked against the SCHEMA ───
+ *
+ * `User.tenantId` is reachable through a RELATION, not only through
+ * `prisma.user`: `tenantMember.findFirst({ select: { user: { select: { tenantId:
+ * true } } } })` returns the same stale copy, and an earlier version keyed on the
+ * receiver being `.user` could not see it — it was narrower than the class its own
+ * header describes, which is the third time a gate in this tree has been. So the
+ * projection is walked with the receiver's MODEL in hand, resolving every key
+ * against `prisma/schema.prisma`.
+ *
+ * Resolving by TYPE rather than by field name is what makes that walk sound: 17
+ * field names in this schema are declared `User`, and `createdBy` is one of them
+ * on some models and a plain `String` on another. A name-keyed pass either misses
+ * the relations it does not list or flags the scalar it cannot tell apart.
+ *
+ * Measured when it landed: the walk reports the SAME 16 files as the receiver-only
+ * pass it replaced — it loses nothing — and the tree holds no relation-reached read
+ * today. The widening is preventive, and `usersActiveInAnotherTenant` in
+ * `tenant-context.ts` is the adjudicator's own read already using the shape.
+ *
+ * KNOWN LIMITS, both shared with `check-bypass-rls.mjs`:
+ *   - the receiver is matched by NAME (`tx.user.findUnique`), so a read through an
+ *     aliased model handle is not seen. Resolving that needs a Program, which no
+ *     gate in this tree carries.
+ *   - a COMPUTED projection key (`select: { [col]: true }`) is skipped rather than
+ *     failed closed. `retention-gc-worker/sweep.ts` builds one from a closed union
+ *     of Tenant retention columns; failing closed there would buy a manifest entry
+ *     whose stated reason would have to be false.
  *
  * Env: OWNING_TENANT_CHECK_ROOT overrides the repo root (used by the self-test).
  */
@@ -91,6 +115,60 @@ const READ_METHODS = new Set([
 const TENANT_SCOPED = new Set(["withTenantRls", "withUserTenantRls", "withTeamTenantRls"]);
 
 const MANIFEST_PATH = "scripts/checks/owning-tenant-adjudicator-manifest.json";
+const SCHEMA_PATH = "prisma/schema.prisma";
+
+/** `User`'s own fields that name the tenant the row is filed under. */
+const USER_TENANT_FIELDS = new Set(["tenantId", "tenant"]);
+
+/**
+ * `model -> (field -> declared type)`, plus the Prisma client handle each model
+ * answers to (`TenantMember` -> `tenantMember`), from the schema itself.
+ *
+ * Derived rather than listed because the projection walk needs the owning model
+ * to classify a key at all — see the header. Fail-loud on a schema it cannot
+ * read: a gate that silently resolves every field to "unknown" would flag the
+ * whole tree, and one that resolved them to "not a relation" would flag none.
+ */
+function loadSchema() {
+  const abs = join(ROOT, SCHEMA_PATH);
+  if (!existsSync(abs)) {
+    console.error(`\nFAIL: prisma schema not found at ${abs}. The projection walk resolves every projection key against it.`);
+    process.exit(1);
+  }
+  const models = new Map();
+  let current = null;
+  for (const line of readFileSync(abs, "utf8").split("\n")) {
+    const open = /^model\s+(\w+)\s*\{/.exec(line);
+    if (open) {
+      current = new Map();
+      models.set(open[1], current);
+      continue;
+    }
+    if (/^\}/.test(line)) {
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+    const trimmed = line.trim();
+    if (trimmed.startsWith("@@") || trimmed.startsWith("//")) continue;
+    const field = /^[ \t]+(\w+)[ \t]+([A-Za-z_]\w*)/.exec(line);
+    if (field) current.set(field[1], field[2]);
+  }
+
+  if (models.size === 0) {
+    console.error(`\nFAIL: parsed zero models from ${abs}.`);
+    process.exit(1);
+  }
+  if (!models.has("User")) {
+    console.error(`\nFAIL: ${abs} declares no User model, so no read can be classified.`);
+    process.exit(1);
+  }
+
+  const handles = new Map([...models.keys()].map((m) => [m[0].toLowerCase() + m.slice(1), m]));
+  return { models, handles };
+}
+
+const { models: MODELS, handles: HANDLES } = loadSchema();
 
 /**
  * Dispositions live in a JSON sidecar, not inline, so the self-test can supply
@@ -186,38 +264,89 @@ function isConstrained(call, sf) {
   return false;
 }
 
+const asObject = (node) =>
+  node && node.getKind() === SyntaxKind.ObjectLiteralExpression ? node : null;
+const initializerOf = (prop) => prop?.getInitializer?.() ?? null;
+
 /**
- * Does this read return a tenant identity?
+ * Walk one projection object, whose keys are fields of `model`. Returns the path
+ * taken to a user's tenant identity, or null.
  *
- * FAIL-CLOSED on an absent or unreadable projection. A Prisma read with no
- * `select` returns every scalar, `tenantId` included — so "no select" is the
- * BROADEST shape, not an exempt one, and the first version of this function
- * answered `false` for it. That version was red-proved blind to a bare
- * `findUnique`, an `include:` and a `findMany`, which is the completeness half
- * of this gate — the half the header credits with stopping the class growing
- * silently — never firing.
+ * FAIL-CLOSED throughout: a key this cannot resolve, or a value it cannot read,
+ * counts as reaching one. "Could not decide" must not be spelled like "safe" —
+ * and a Prisma read with no `select` returns every scalar, `tenantId` included,
+ * so the UNPROJECTED shape is the broadest, not an exempt one. An earlier version
+ * answered "no" for it and was red-proved blind to a bare `findUnique`, an
+ * `include:` and a `findMany` — the completeness half of this gate never firing.
  */
-function selectsTenantIdentity(call) {
-  const arg = call.getArguments()[0];
-  // No argument object at all, or one this gate cannot read: assume the broad
-  // shape rather than the narrow one.
-  if (!arg || arg.getKind() !== SyntaxKind.ObjectLiteralExpression) return true;
+function scanProjection(projection, model, trail) {
+  for (const prop of projection.getProperties()) {
+    if (prop.getKind() !== SyntaxKind.PropertyAssignment) return [...trail, "<spread>"];
+    // See the header: a computed key is skipped, not failed closed.
+    if (prop.getNameNode().getKind() === SyntaxKind.ComputedPropertyName) continue;
 
-  // `select` ONLY. `include` does not restrict scalars — it returns every scalar
-  // PLUS a relation — so reading it here made an `include`-only read look
-  // NARROWER than an unprojected one and exempted it. Red-proved: a
-  // `findUnique({ include: { accounts: true } })` under a bypass passed the gate
-  // whose docstring names `include` as a shape it fails closed on.
-  const projection = arg.getProperty?.("select");
-  if (!projection) return true; // no select (with or without include) -> all scalars
+    const key = prop.getName();
+    if (key === "_count") continue;
+    const type = MODELS.get(model)?.get(key);
+    const value = initializerOf(prop);
+    const here = [...trail, key];
+    if (!type) return [...here, "<unresolved-field>"];
 
-  const text = projection.getText();
-  // A projection that is not an inline literal (`select: SEL`, a spread) is
-  // undecidable here, so it counts.
-  const init = projection.getInitializer?.();
-  if (!init || init.getKind() !== SyntaxKind.ObjectLiteralExpression) return true;
+    if (type === "User") {
+      const nested = asObject(value);
+      if (!nested) return [...here, value?.getText() === "true" ? "<all-scalars>" : "<unreadable>"];
+      const select = initializerOf(nested.getProperty("select"));
+      // No `select` on the relation (an `include:`, a bare `where:`) returns
+      // every User scalar.
+      if (!select) return [...here, "<all-scalars>"];
+      if (!asObject(select)) return [...here, "select:<unreadable>"];
+      const reached = scanProjection(asObject(select), "User", here);
+      if (reached) return reached;
+      continue;
+    }
 
-  return /\btenantId\s*:/.test(text) || /\btenant\s*:/.test(text);
+    if (model === "User" && USER_TENANT_FIELDS.has(key)) return here;
+
+    // A relation to some other model: only its own scalars come back unless the
+    // read descends further, so follow the descent and nothing else.
+    if (MODELS.has(type)) {
+      const nested = asObject(value);
+      if (!nested) {
+        if (value?.getText() === "true") continue;
+        return [...here, "<unreadable>"];
+      }
+      for (const root of ["select", "include"]) {
+        const sub = initializerOf(nested.getProperty(root));
+        if (!sub) continue;
+        if (!asObject(sub)) return [...here, `${root}:<unreadable>`];
+        const reached = scanProjection(asObject(sub), type, here);
+        if (reached) return reached;
+      }
+    }
+  }
+  return null;
+}
+
+/** Does this read return a user's tenant identity, directly or through a relation? */
+function readsUserTenantIdentity(call, model) {
+  const args = asObject(call.getArguments()[0]);
+  if (!args) return model === "User" ? [`${model}`, "<all-scalars>"] : null;
+
+  const select = initializerOf(args.getProperty("select"));
+  // `include` does not restrict scalars — it returns every scalar PLUS a
+  // relation — so an `include`-only read of `user` is the broad shape. Reading it
+  // as a projection made it look NARROWER than an unprojected one and exempted
+  // it; red-proved on `findUnique({ include: { accounts: true } })`.
+  if (!select && model === "User") return [`${model}`, "<all-scalars>"];
+
+  for (const root of ["select", "include"]) {
+    const node = initializerOf(args.getProperty(root));
+    if (!node) continue;
+    if (!asObject(node)) return [`${model}`, `${root}:<unreadable>`];
+    const reached = scanProjection(asObject(node), model, [model]);
+    if (reached) return reached;
+  }
+  return null;
 }
 
 if (!existsSync(join(ROOT, SCAN_ROOT))) {
@@ -256,12 +385,19 @@ for (const { rel, sf } of sourceFilesFrom(project, files, ROOT)) {
 
     const recv = callee.getExpression();
     if (recv.getKind() !== SyntaxKind.PropertyAccessExpression) continue;
-    if (recv.getName() !== "user") continue;
-    if (!selectsTenantIdentity(call)) continue;
+    const handle = recv.getName();
+    // An unresolvable handle is not a read this gate can clear. Every one of the
+    // 481 reads in the tree resolved when the walk landed, so this arm costs
+    // nothing today and refuses to guess if that stops being true.
+    const model = HANDLES.get(handle);
+    const path = model ? readsUserTenantIdentity(call, model) : [`${handle}`, "<unresolved-model>"];
+    if (!path) continue;
 
     record ??= { unconstrained: [], usesHelper: false, anyRead: false };
     record.anyRead = true;
-    if (!isConstrained(call, sf)) record.unconstrained.push(call.getStartLineNumber());
+    if (!isConstrained(call, sf)) {
+      record.unconstrained.push({ line: call.getStartLineNumber(), path: path.join(".") });
+    }
   }
 
   // A CALL, not any identifier: an unused `import { resolveOwningTenantIdFromClient }`
@@ -309,13 +445,13 @@ for (const [rel, record] of seen) {
   }
 
   if (disposition === "adjudicator" || disposition === "tenant-scoped") {
-    for (const line of record.unconstrained) {
+    for (const { line, path } of record.unconstrained) {
       failures.push(
-        `${rel}:${line}: reads a user's tenant identity OUTSIDE any tenant-scoped ` +
-          `context, but the MANIFEST says "${disposition}". Under a bypass this ` +
-          `returns \`User.tenantId\` — a denormalized copy with no invalidation — ` +
-          `so the value decides a tenant no reader opens. Resolve it with ` +
-          `${HELPER}, or move the read inside a tenant-scoped opener.`,
+        `${rel}:${line}: reads a user's tenant identity (${path}) OUTSIDE any ` +
+          `tenant-scoped context, but the MANIFEST says "${disposition}". Under a ` +
+          `bypass this returns \`User.tenantId\` — a denormalized copy with no ` +
+          `invalidation — so the value decides a tenant no reader opens. Resolve it ` +
+          `with ${HELPER}, or move the read inside a tenant-scoped opener.`,
       );
     }
   }
