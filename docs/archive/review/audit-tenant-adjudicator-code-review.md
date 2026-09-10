@@ -422,7 +422,74 @@ where it matters. Open.
 Allowlist accounting drift; two hot paths reading the same row twice; a stale
 premise in a fail-closed comment; twin drift in two test pairs; the helper's
 select asserted from a caller's test (closed by Q3); a fail-closed stance
-inconsistency between the two `src/auth.ts` blocks. Open.
+inconsistency between the two `src/auth.ts` blocks. See round 3 below.
+
+## Round 3
+
+Recorded here rather than only in commit messages: a commit message is not the
+artifact a later round reads.
+
+### S5 — Major — the gate was narrower than the class its header describes
+
+`check-owning-tenant-adjudicator` required the read to be issued on
+`prisma.user`, so `tenantMember.findFirst({ select: { user: { select: {
+tenantId: true } } } })` — the same stale copy through a relation — was invisible
+to it. The third time a gate here has been narrower than its own declaration.
+**Resolved**: projection keys resolve against `prisma/schema.prisma` with the
+receiver's model in hand, by declared TYPE (17 field names in this schema are
+`User`, and `createdBy` is one of them on some models and a `String` on another).
+Measured on landing — the same 16 files as the pass it replaced, manifest
+untouched, no relation-reached read in the tree today. Seven mutations.
+
+### F15 — Major — a refusal reported as a successful sync
+
+A refused reactivation still stamps `lastScimSyncedAt`, so it landed in
+`usersUpdated` and the run closed SUCCESS with no audit event: the IdP admin saw
+a working sync and only the user noticed. **Resolved**: `usersRefused` counted
+apart from the writes that happened, carried on the sync log row and on the
+result, plus `DIRECTORY_SYNC_ACTIVATION_REFUSED` per declined membership —
+carrying no identifier of the other tenant, which this tenant's admins must not
+learn from their own audit trail.
+
+### F17 — Minor — the preview predicted a run that would not happen
+
+The dry run resolved no cross-tenant guard, so it promised reactivations the real
+run would refuse. **Resolved**: same guard (a read; the preview still writes
+nothing), same refusal count. The one case it cannot see is a toCreate user
+already ACTIVE here as well as elsewhere — a second active membership
+`tenant_members_one_active_per_user` now forbids.
+
+### F11 / Q6 — Minor — the finding was half wrong, and the other half was a class
+
+F11 said `notification.ts` still permitted a `user` read it had moved into the
+adjudicator. FALSE as stated: it hands `tx` to that adjudicator, so the model IS
+reached under its bypass and the entry is accurate — the gate simply cannot see
+across the module boundary. **Resolved** as a class instead: `check-bypass-rls`
+now fails an entry permitting a model nothing reaches, exempting files whose
+analysis was defeated. Six genuinely stale allowances removed. Q6's "38 call
+sites today" measured 24; the count is printed per run rather than frozen in
+prose.
+
+### F4 / Q10 / the `src/auth.ts` stance inconsistency — Minor
+
+**Resolved together**, all three being one shape: the undecidable tenant read as
+a verdict. The magic-link gate ADMITTED a sign-in when the tenant row was absent
+(`existingUser?.tenant && !isBootstrap` is false either way) while
+`createSession` calls the identical state corruption and throws; the MCP consent
+page resolved nothing on the DCR arm and rendered a consent the authoritative
+POST then 403s; and auth-adapter's fail-closed comment still justified itself by
+`User.tenantId`'s FK, which stopped being where the id comes from.
+
+### F12 — Minor — NOT fixed, deliberately
+
+`src/auth.ts` and `session-timeout.ts` each read the same `users` row twice: once
+inside the adjudicator, once for their own extra fields (`fetchFavicons`,
+`teamMemberships`). The obvious remedy — a `select` parameter on the shared
+adjudicator — trades a single-purpose helper for one whose projection every
+caller can widen, which is the shape this whole branch exists to undo. In
+`auth.ts` the two reads are inside one `Promise.all`, so the cost is a query and
+not a round trip; in `session-timeout.ts` it is one extra round trip on a cached
+path. Left as is, recorded rather than silently dropped.
 
 ## Environment Verification Report
 
