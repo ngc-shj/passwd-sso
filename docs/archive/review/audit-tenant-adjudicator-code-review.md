@@ -495,3 +495,185 @@ path. Left as is, recorded rather than silently dropped.
 
 N/A — no Phase 1. VC2 (integration tests cannot share a database with the compose
 workers) observed on every integration run.
+
+## Round 4
+
+Date: 2026-09-12. Subject: `0f1d75ae9..HEAD` (6 commits) composed with rounds 2-3.
+
+PROCESS DEVIATION, stated rather than hidden: the local LLM was unavailable (HTTP
+400, then a 10-minute timeout on seed generation), so all three experts ran
+full-diff review with no seed, and `merge-findings` could not run — the merge below
+is manual, from the three experts' JSON finding indexes joined on file + line ±5 and
+root cause. No raw per-expert files were kept: they exist to feed `merge-findings`,
+and with it down this section is the artifact.
+
+Every Major below was independently re-verified by the orchestrator before being
+recorded — by opening the cited path or running the cited mutation — because a
+sub-agent's count and a sub-agent's rationale are both retrofittable (R29). Two
+sub-agent sub-claims did NOT survive that check and are corrected in place.
+
+### Converged across experts (severity floored by convergence)
+
+**C1 — Major — the realignment's only record is best-effort, under a rationale that
+is false for this call shape.** (Security + Functionality, independently.)
+`src/auth.ts`'s `SignInTenantResult.realigned` docblock says the fact is carried out
+of the transaction because emitting inside would nest `logAuditAsync` →
+`resolveTenantId` → `withBypassRls`. Verified false: `resolveTenantId` returns on its
+first line when `params.tenantId` is set, and the emit sets it. The real constraint is
+`refuseIfInsideRlsContext`, whose own docstring names `logAuditInTx` as the in-context
+path. Conclusion right, reason wrong — and the wrong reason closed off the option that
+would make the record atomic with the tenancy move it reports. The design decision
+stakes option 3 entirely on that record existing.
+
+**C2 — Major — `USER_TENANT_REALIGNED` files a User id under `targetType: TenantMember`.**
+(Security Minor + Functionality Major; convergence floors it at Major.) Every other
+emitter uses the membership row id, including this same diff's directory-sync refusal
+(`targetId: r.memberId`). An operator joining `audit_logs.target_id` to
+`tenant_members.id` resolves nothing, for the one event the design note makes their
+only handle on the stranded data.
+
+**C3 — Minor (R29) — three numbers for one quantity.** The gate header says 17
+`User`-typed field names; measured with the gate's own parser it is **16** (42
+declarations). The self-test comment says 15, describing a fixture that declares 3.
+The 17 came from a session measurement whose regex matched `model` on the
+`model User {` line through a newline-spanning `\s`, and was then written into the
+gate header, a commit message, and this document. The `createdBy` half of the sentence
+(User on seven models, String on `TenantClaim`) does hold.
+
+### Security findings
+
+**S1 — Major — the realignment makes a cross-tenant destructive path reachable, and
+falsifies the recoverability the decision rests on.** `vault-reset.ts`'s
+`executeVaultReset` deletes `passwordEntry` / `tag` / `folder` / `vaultKey` /
+`attachment` / `passwordShare` by `userId` / `createdById` under `withBypassRls` with
+**no tenant predicate**. Before the realign, `reset-vault/route.ts` could not resolve
+the target (its `include: { user: … }` runs under `withTenantRls(actor)` and the users
+row was invisible), so the admin-reset chain could not start in the joining tenant.
+After it, it can — and it destroys the rows this branch just counted in the releasing
+tenant. `…-design.md`'s "intact … reversible at any later date" and
+`tenant-context.ts`'s docstring hold only until an ordinary authorized operation runs.
+ORCHESTRATOR NOTE on the proposed remedy: scoping `executeVaultReset` by tenant is NOT
+obviously right — it would null the key material on the users row while leaving the
+ciphertext in the other tenant, which is unrecoverable AND undetectable. The expert's
+own alternative (refuse the *initiate* when rows are stranded, surfacing the counts the
+new event already computes) preserves both properties.
+
+**S2 — Major — the RLS blindness moves to the releasing tenant, which is told nothing.**
+`api/tenant/members/route.ts` selects `user` as a required to-one under
+`withTenantRls(actor.tenantId)` with **no `deactivatedAt` filter**, then dereferences
+`m.user.name`. After the realign the releasing tenant keeps a deactivated membership
+whose users row now lives elsewhere, so that tenant's entire member list fails — not
+just that row. The only event emitted is filed under the JOINING tenant. "F6 is closed
+by this" was derived over one reader (the user's own requests); the class has a second,
+the former tenant's admin surface. The tree already owns the remedy for the read half:
+`team-member-display.ts`'s `buildTeamMemberDisplayItems` exists for exactly this shape
+and this route does not use it.
+
+**S3 — Minor — `previousTenantId` reaches the joining tenant's admins under a reason
+that does not hold.** The event is in `AUDIT_ACTION_GROUPS_TENANT` and
+`tenant/audit-logs` returns `metadata` verbatim. "The only one that can act" is false:
+that tenant can read nothing filed under the other, and the design note itself records
+that no tooling to move a user between tenants exists. Question that closes it: is a
+tenant UUID non-sensitive across tenants in this threat model?
+
+**S4 — Minor — the dry run is a non-mutating cross-tenant membership oracle.**
+Pre-existing rather than new: `scim/v2/Users` already returns 409 "User already belongs
+to another organization" without mutating. Both sites are the member set if it is closed.
+
+### Functionality findings
+
+**U1 — Major — the new over-breadth check skips its widest member, under a false
+reason, and three stale entries are live today.** `check-bypass-rls.mjs`'s
+`if (!reached) continue; // no bypass call at all: Check 1's business` — Check 1 fires
+only in the forward direction (a file calling the helper with no entry). An entry whose
+file calls `withBypassRls` **zero** times is checked by nothing. Verified live:
+`api/mcp/token/route.ts`, `workers/audit-anchor-publisher.ts`,
+`api/maintenance/dcr-cleanup/route.ts` — all three contain zero occurrences of the
+helper, and the gate prints OK. The sibling adjudicator gate implements this direction
+correctly. Same defect class the check was written to close, in the check itself.
+
+**U2 — Major — the realignment fires on one branch only, and a second producer is
+uncovered.** `realignOwningTenantColumn` is called only under `existingTenantId === null`.
+A divergent user's NEXT sign-in reaches row 5 (already a member of the claimed tenant),
+which upserts and returns with no column read — the sign-in best placed to repair the
+state passes through it. Separately, `scim-user-service.ts`'s `replaceScimUser` clears
+`deactivatedAt` writing only `tenantMember` and the mapping, never the users row; both
+new guards filter `deactivatedAt: null` and therefore clear a user with no active
+membership anywhere. CORRECTION to the expert's sub-claim: the realign does NOT leave a
+deactivated membership in the joining tenant — it creates an ACTIVE one. The producer is
+reachable without the realign; it is a pre-existing member of the class this branch
+enumerated, not one this commit creates.
+
+**U3 — Major — `leftBehind` counts three of the user-owned tenant-scoped tables, so a
+zero triple reads as "nothing stranded".** Models carrying both `userId` and `tenantId`
+number 21; besides the three counted the realign strands `Account`, `Session`,
+`ExtensionToken`, `VaultKey`, `Notification`, `ApiKey`, `WebAuthnCredential`, the three
+MCP token models, `DelegationSession`, `TeamMemberKey`, `TeamPasswordFavorite`. One has
+a verified user-visible consequence the "empty vault" framing does not cover:
+`api/webauthn/credentials/route.ts` lists passkeys under `withUserTenantRls` (the NEW
+tenant) while `passkey-enforcement.ts` counts them under a bypass by `userId` alone — so
+a realigned user is told they have a passkey, sees none, and cannot manage them. Two
+readers of one fact disagree, the defect this same diff cites as its reason for changing
+the consent page.
+
+### Testing findings
+
+**T1 — Major — the third refusal producer has no cell.** Three sites increment
+`usersRefused`; the `toCreate` loop's `else if (existing.deactivatedAt && pu.active)`
+arm is untested — deleting its two lines leaves `engine.test.ts` at 25 passed. That arm
+is the literal one F15's own narrative describes.
+
+**T2 — Major — the preview's `toCreate` refusal clause is untested.** Replacing the whole
+`toCreate.filter(…).length +` term with `0 +` leaves the suite green: every dry-run
+fixture seeds a SCIM mapping, so all users land in `toUpdate`. With T1, the refusal for
+an unmapped-but-existing deactivated member is unmeasured in both the preview and the run.
+
+**T3 — Major — the reporting chain F15 exists for can be severed at the route and nothing
+reds.** Orchestrator-verified by mutation: deleting `usersRefused: true` from
+`api/directory-sync/[id]/logs/route.ts`'s select leaves the route test and the card test at
+15 passed / 0 failed. The route's `makeLogs()` fixture never carried the field, and the
+card renders on `log.usersRefused > 0` — `undefined > 0` is false, so the counter vanishes
+from the operator's screen silently. `next build` cannot catch it: the fixture is a local
+untyped helper and the response is untyped JSON.
+
+**T4 — Major — the privacy assertion is vacuous and its positive half unpinned.**
+`expect(JSON.stringify(emitted)).not.toContain("tenant-other")` — that literal appears
+exactly once in the file, on that line, and `usersActiveInAnotherTenant` selects only
+`{ userId, user: { email } }`, so no foreign tenant id can enter the engine. The assertion
+is satisfied by the absence of a value the fixture never had. The other half is unmeasured
+too: `metadata: {}` leaves the suite green.
+
+**T5 — Minor — the name-keyed rationale in the self-test is false under a true conclusion.**
+Mutating `type === "User"` to `key === "user"` leaves the self-test at 39 passed — the
+`owner` fixture is still caught by the generic non-User relation descent. The cell only
+reds under a name-keying that ALSO misclassifies the User-typed field as a scalar.
+
+**T6/T7/T8 — Minor** — `actorType` ternary untested (collapsing it leaves 25 passed); the
+card's conditional render untested (flipping the predicate leaves 5 passed); the new
+`DIRECTORY_SYNC_RUN` metadata field untested (deleting it leaves 13 passed).
+
+### Adjacent findings
+
+- [Security → Functionality] the dry-run refusal count re-derives the apply-phase
+  predicate in a second place. The expert's attached claim that
+  `tenant_members_one_active_per_user` "does not exist yet" is WRONG — migration
+  `20260909120000` on this branch creates it. Corrected here.
+- [Testing → Security] the refusal metadata carries the member's email into
+  `audit_logs.metadata`, a tenant-readable sink. The comment block reasons about
+  withholding the other tenant's identity and says nothing about this.
+
+### Recurring Issue Check
+
+#### Functionality expert
+R1 checked · R2 n/a · **R3 → U2** · R4 checked · R5 checked · R6 n/a · R7 n/a · R8 checked · **R9 → C1** · R10 n/a · R11 checked · R12 checked · R13 n/a · R14 n/a · R15 n/a · R16 n/a · R17 checked · **R18 → U1** · R19 checked · R20 checked · R21 n/a · R22 checked · R23 n/a · R24 checked · R25 n/a · R26 n/a · R27 n/a · R28 n/a · **R29 → C1, C3** · R30 n/a · R31 n/a · R32 n/a · R33 n/a · R34 checked · R35 n/a · R36 checked · R37 checked · R38 n/a · R39 n/a · R40 checked · R41 n/a · **R42 → U3, U1** · **R43 checked — no widening found** · R44 n/a · R45 checked · R46 checked · R47 checked · **R48 checked, but see U3** · **R49 → U1** · R50 checked · R51 n/a · R52 checked · R53 n/a · R54 checked · R55 n/a · R56 n/a · R57 checked
+
+#### Security expert
+R1 **fires (S2)** · R2 clean · R3 clean · **R4 fires (S2)** · R5 clean · R6 n/a · R7 n/a · R8 n/a · **R9 fires (C1)** · R10 n/a · R11 clean · R12 clean · R13 n/a · R14 n/a · R15 clean · R16 n/a · R17 clean · R18 checked clean · R19 clean · R20 clean · R21 n/a · R22 clean · R23 n/a · R24 clean · **R25 fires (S2)** · R26 n/a · R27 n/a · R28 n/a · **R29 fires (C1, S3)** · R30 n/a · **R31 fires (S1)** · R32 n/a · R33 n/a · R34 n/a · R35 n/a · R36 clean · R37 clean · R38 clean · R39 n/a · R40 clean · R41 clean · **R42 partial → S2** · **R43 fires (S1)** · R44 clean · R45 clean · R46 clean · R47 clean · **R48 fires (S3, adjacent)** · **R49 fires (S1)** · R50 clean · R51 clean · **R52 fires (S1)** · R53 n/a · R54 clean · R55 clean · R56 n/a · R57 clean · RS1 n/a · RS2 n/a · RS3 clean · RS4 clean · **RS5 fires — folded into S1/S2** · RS6 n/a
+
+#### Testing expert
+R1 not triggered · R2 not triggered · **R3 → T3, T8** · R4 not triggered · R5 not triggered · R6 n/a · R7 n/a · R8 not triggered · R9 not triggered · R10 n/a · R11 clean · R12 clean · R13 n/a · R14 n/a · R15 n/a · R16 clean · R17 n/a · R18 clean · **R19 → T3** · R20 n/a · R21 n/a · R22 n/a · R23 n/a · R24 n/a · R25 n/a · R26 n/a · R27 n/a · R28 n/a · **R29 → C3, T5** · R30 n/a · R31 n/a · R32 n/a · R33 n/a · R34 n/a · R35 n/a · R36 n/a · R37 n/a · R38 n/a · R39 n/a · **R40 adjacent to T3** · R41 n/a · **R42 → T1** · R43 not triggered · R44 clean · R45 n/a · R46 n/a · R47 n/a · R48 clean · R49 n/a · R50 clean · R51 n/a · R52 n/a · R53 n/a · R54 n/a · R55 n/a · R56 n/a · R57 n/a · **RT1 → T3** · RT2 n/a · RT3 n/a · RT4 n/a · RT5 clean · RT6 n/a · **RT7 partial → T1, T2, T7** · **RT8 → T4** · RT9 clean · RT10 clean · RT11 clean
+
+Of the 22 mutation red-proof claims made in round 3's fixes, the Testing expert re-ran
+every one; 21 reproduced exactly and one over-delivered (3 reds where 1 was claimed).
+One claimed 34 measured 33 under a narrower mutation shape; all four target cells were
+red either way.
