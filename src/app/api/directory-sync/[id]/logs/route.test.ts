@@ -54,6 +54,10 @@ const makeLogs = (count: number) =>
     usersCreated: i,
     usersUpdated: 0,
     usersDeactivated: 0,
+    // Non-zero on one row: a fixture that carried only zeroes would satisfy the
+    // body assertion below while the route stopped selecting the field, which is
+    // exactly how the counter disappeared from the operator's screen unnoticed.
+    usersRefused: i === 1 ? 2 : 0,
     groupsUpdated: 0,
     errorMessage: null,
   }));
@@ -110,6 +114,37 @@ describe("GET /api/directory-sync/[id]/logs", () => {
     expect(json.items).toHaveLength(3);
     expect(json.hasMore).toBe(false);
     expect(json.nextCursor).toBeUndefined();
+  });
+
+  it("carries usersRefused through to the response, and selects it", async () => {
+    // The chain F15 exists for ends at the operator's screen. The card renders on
+    // `log.usersRefused > 0`, and `undefined > 0` is false — so a route that
+    // stopped selecting the field made the counter vanish silently, with the
+    // engine still incrementing it. Nothing red-ed: the fixture never had it, and
+    // the response is untyped JSON the build cannot check.
+    const req = createRequest("GET", ROUTE_URL);
+    const { status, json } = await parseResponse(await GET(req, CTX));
+
+    expect(status).toBe(200);
+    expect(json.items[1].usersRefused).toBe(2);
+    // The allow half: a zero row is still RETURNED, not filtered — otherwise a
+    // future "only send refused rows" change reads as satisfying this cell.
+    expect(json.items[0].usersRefused).toBe(0);
+    // Asserted by equality, not objectContaining: the next field added to the
+    // route and not to the fixture must fail here rather than pass silently.
+    expect(mockLogFindMany.mock.calls[0][0].select).toEqual({
+      id: true,
+      status: true,
+      startedAt: true,
+      completedAt: true,
+      dryRun: true,
+      usersCreated: true,
+      usersUpdated: true,
+      usersDeactivated: true,
+      usersRefused: true,
+      groupsUpdated: true,
+      errorMessage: true,
+    });
   });
 
   it("returns hasMore=true and nextCursor when more pages exist", async () => {

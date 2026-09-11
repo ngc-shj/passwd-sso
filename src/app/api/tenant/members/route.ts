@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { fetchUserDisplayMap } from "@/lib/audit/audit-user-lookup";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized } from "@/lib/http/api-response";
@@ -39,14 +40,11 @@ async function handleGET(req: NextRequest) {
           role: true,
           deactivatedAt: true,
           scimManaged: true,
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              image: true,
-            },
-          },
+          // Identity is NOT read through the relation. `users_tenant_isolation`
+          // filters a member whose `users` row lives in another tenant — an
+          // ordinary outcome of a realignment — and because the relation is
+          // REQUIRED, that filtered row took the whole member list down rather
+          // than just its own entry. Hydrated below, outside this context.
         },
         orderBy: { createdAt: "asc" },
       }),
@@ -68,12 +66,19 @@ async function handleGET(req: NextRequest) {
     pendingCounts.map((r) => [r.targetUserId, r._count]),
   );
 
+  const userById = await fetchUserDisplayMap(
+    members.map((m) => m.userId),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+  );
+
   const result = members.map((m) => ({
     id: m.id,
     userId: m.userId,
-    name: m.user.name,
-    email: m.user.email,
-    image: m.user.image,
+    // Explicit nulls, not a silent omission: a member the hydration could not
+    // resolve must be distinguishable from one who simply has no name.
+    name: userById.get(m.userId)?.name ?? null,
+    email: userById.get(m.userId)?.email ?? null,
+    image: userById.get(m.userId)?.image ?? null,
     role: m.role,
     deactivatedAt: m.deactivatedAt,
     scimManaged: m.scimManaged,

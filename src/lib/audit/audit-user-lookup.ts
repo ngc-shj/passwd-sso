@@ -20,6 +20,27 @@ export interface AuditUserInfo {
 export async function fetchAuditUserMap(
   userIds: Array<string | null | undefined>,
 ): Promise<Map<string, AuditUserInfo>> {
+  return fetchUserDisplayMap(userIds, BYPASS_PURPOSE.AUDIT_WRITE);
+}
+
+/**
+ * The same lookup, for a caller that is not writing an audit row.
+ *
+ * Extracted rather than copied when `/api/tenant/members` needed it: that route
+ * read identity through a REQUIRED `user` relation inside `withTenantRls`, so a
+ * member whose `users` row lives in another tenant — which is now an ordinary
+ * outcome of a realignment — made the whole member list fail rather than that one
+ * row. The bypass stays here, in the one file already declared for it, instead of
+ * being opened at each caller.
+ *
+ * It hydrates identity for users the CALLER has already decided it may show. It
+ * is not an authorization boundary and must not be handed an id set the caller
+ * did not derive from rows it can see.
+ */
+export async function fetchUserDisplayMap(
+  userIds: Array<string | null | undefined>,
+  purpose: (typeof BYPASS_PURPOSE)[keyof typeof BYPASS_PURPOSE],
+): Promise<Map<string, AuditUserInfo>> {
   const uniqueIds = [...new Set(userIds.filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id)))];
   if (uniqueIds.length === 0) return new Map();
   const users = await withBypassRls(
@@ -29,7 +50,7 @@ export async function fetchAuditUserMap(
         where: { id: { in: uniqueIds } },
         select: { id: true, name: true, email: true, image: true },
       }),
-    BYPASS_PURPOSE.AUDIT_WRITE,
+    purpose,
   );
   return new Map(users.map((u) => [u.id, u]));
 }
