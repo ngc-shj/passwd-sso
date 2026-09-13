@@ -560,3 +560,155 @@ describe("check-required-user-relation — a disposition excuses only its kind o
   });
 });
 
+describe("check-required-user-relation — a read runs in an opener's context only inside its callback function (round 7 R7-S1/F-R7-1)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+  const EARLY = "prisma.tenantMember.findFirst({ include: { user: true } })";
+
+  it("does not trust a read that IS the callback argument, inside an arrow", () => {
+    // Evaluated while the arguments are built. The walk climbed past the call and
+    // took the enclosing arrow for the callback.
+    write("src/lib/a.ts", `export const f = async () => withBypassRls(prisma, ${EARLY}, PURPOSE);\n`);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("TenantMember.user");
+  });
+
+  it("does not trust a read that IS a local bypass wrapper's argument, inside an arrow", () => {
+    write(
+      "src/lib/a.ts",
+      "const inBypass = (fn) => withBypassRls(prisma, fn, PURPOSE);\n" + `export const f = async () => inBypass(${EARLY});\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust an arrow IIFE in the callback position", () => {
+    // It runs before withBypassRls is even called.
+    write(
+      "src/lib/a.ts",
+      `export const f = () => withBypassRls(prisma, (() => {\n  const early = ${EARLY};\n  return async (tx) => early;\n})(), PURPOSE);\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a function-expression IIFE in the callback position", () => {
+    write(
+      "src/lib/a.ts",
+      `export const f = () => withBypassRls(prisma, (function () {\n  const early = ${EARLY};\n  return async (tx) => early;\n})(), PURPOSE);\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust an awaited IIFE in the callback position", () => {
+    write(
+      "src/lib/a.ts",
+      `export async function f() {\n  return withBypassRls(prisma, await (async () => {\n    const early = await ${EARLY};\n    return async (tx) => early;\n  })(), PURPOSE);\n}\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a function a helper receives inside the callback argument", () => {
+    // Whether `pick` runs it before the bypass opens is not in this file.
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, pick(async (tx) => ${READ}), PURPOSE);\n`);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a function passed in withBypassRls's purpose position", () => {
+    // Pins the callback position itself: the function IS the argument, so only
+    // the opener's position table keeps it out of the bypass.
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, cb, async () => ${EARLY});\n`);
+    expect(run().code).toBe(1);
+  });
+
+  it("passes a callback written with a type assertion", () => {
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, (async (tx) => ${READ}) as Fn, PURPOSE);\n`);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  it("passes a function-expression callback", () => {
+    write("src/lib/a.ts", `export const f = () => withBypassRls(prisma, async function (tx) {\n  return ${READ};\n}, PURPOSE);\n`);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  it("passes a read in a function nested inside the callback", () => {
+    write(
+      "src/lib/a.ts",
+      `export const f = (ids) => withBypassRls(prisma, async (tx) => Promise.all(ids.map(async (id) => ${READ})), PURPOSE);\n`,
+    );
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  it("passes a read a non-opener helper wraps inside the callback", () => {
+    // The helpers open nothing, so when they run their functions says nothing
+    // about the bypass that encloses them.
+    write(
+      "src/lib/a.ts",
+      `export const f = () => withBypassRls(prisma, async (tx) => helper(pick(async () => ${READ})), PURPOSE);\n`,
+    );
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+});
+
+describe("check-required-user-relation — a wrong null cannot hide behind an outer bypass (round 7 R7-T1)", () => {
+  // The round-6 cells for these branches had no outer opener, where a wrong null
+  // and a correct UNKNOWN both end in "reported". Inside a bypass, null walks on
+  // to it and reads as exempt.
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+  const inOuterBypass = (inner) => `export const f = (args) => withBypassRls(prisma, async () => ${inner}, PURPOSE);\n`;
+
+  it("does not defer to an outer bypass for a destructured callback parameter", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = ({ fn }) => withTenantRls(prisma, t, fn);\n" + inOuterBypass(`run({ fn: async (tx) => ${READ} })`),
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not defer to an outer bypass for mutually recursive wrappers", () => {
+    write(
+      "src/lib/a.ts",
+      "function ping(fn) {\n  return pong(fn);\n}\nfunction pong(fn) {\n  return ping(fn);\n}\n" +
+        inOuterBypass(`ping(async (tx) => ${READ})`),
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not defer to an outer bypass for a rest callback parameter", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = (...args) => withTenantRls(prisma, t, args[0]);\n" + inOuterBypass(`run(async (tx) => ${READ})`),
+    );
+    expect(run().code).toBe(1);
+  });
+
+  it("does not defer to an outer bypass when a spread hides which wrapper parameter receives the callback", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = (client, fn) => withTenantRls(client, t, fn);\n" + inOuterBypass(`run(...args, async (tx) => ${READ})`),
+    );
+    expect(run().code).toBe(1);
+  });
+});
+
+describe("check-required-user-relation — spreads that hide nothing (round 7 R7-T4)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+
+  it("passes a spread into a wrapper that reaches no opener", () => {
+    write(
+      "src/lib/a.ts",
+      "const run = (a, fn) => helper(a, fn);\n" +
+        `export const f = (args) => withBypassRls(prisma, async () => run(...args, async (tx) => ${READ}), PURPOSE);\n`,
+    );
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  it("passes a spread after the opener's callback position", () => {
+    write("src/lib/a.ts", `export const f = (rest) => withBypassRls(prisma, async (tx) => ${READ}, ...rest);\n`);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+});

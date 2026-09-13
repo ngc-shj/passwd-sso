@@ -17,8 +17,11 @@
  * The answer is the NEAREST enclosing call that opens a context around the code
  * the node is in:
  *   - an argument is evaluated before its call runs, in the context around the
- *     call. Only a function written inside the argument runs when the callee
- *     decides, so a node outside any such function is stepped over;
+ *     call. Only the function that IS the argument runs when the callee
+ *     decides (round 7: a read that is itself the argument, or sits in a
+ *     function nested inside the argument such as an IIFE, was trusted as
+ *     running inside the context). A node evaluated at the call is stepped
+ *     over; a node in a nested function is UNKNOWN — see `timingIn`;
  *   - an opener opens its context around its CALLBACK argument only — the
  *     position is in OPENERS. The client, tenant id and purpose are evaluated
  *     before the context exists (round 6, R49: a read inside `withBypassRls`'s
@@ -35,10 +38,12 @@
  *     UNKNOWN — the caller decides what runs, and a gate must not read that as
  *     either context.
  * A call that opens nothing this file can see (a `.map`, an imported helper that is
- * not an opener) is stepped over, and the walk continues outward. That includes a
- * helper handed a function inside an opener's callback argument
- * (`withBypassRls(prisma, pick(async (tx) => …), P)`): whether `pick` runs it
- * before the bypass opens is not in this file.
+ * not an opener) is stepped over, and the walk continues outward, whatever
+ * functions the argument holds: when such a helper runs them says nothing about
+ * the context around the call. A helper handed a function inside an OPENER's
+ * callback argument (`withBypassRls(prisma, pick(async (tx) => …), P)`) is the
+ * other way round — whether `pick` runs it before the bypass opens is not in this
+ * file — so that read is UNKNOWN, not trusted.
  */
 import { SyntaxKind } from "ts-morph";
 import { FN_KINDS, resolveLocalFunction, unwrapExpression, visibleBinding } from "./scope-bindings.mjs";
@@ -74,13 +79,38 @@ function importedNameOf(name, sf) {
 
 const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getEnd() === b.getEnd();
 
-/** Is `node` inside a function written within `arg` — code that runs when that function is called? */
-function runsLater(node, arg) {
+/** When a node inside a call's argument runs, relative to the call. */
+const TIMING = Object.freeze({ NOW: "now", LATER: "later", NESTED: "nested" });
+
+/**
+ * When `node`, inside `arg`, runs relative to the call that `arg` is passed to.
+ *
+ * - NOW: evaluated while the arguments are built — `node` is the argument itself,
+ *   or no function lies between them.
+ * - LATER: inside the function that IS the argument, after unwrapping parentheses
+ *   and type assertions. The callee decides when that runs.
+ * - NESTED: inside a function written within the argument that is not the argument
+ *   — an IIFE, which runs BEFORE the callee, or `pick(fn)`, whose timing this file
+ *   cannot see.
+ *
+ * Round 7 (R7-S1 / F-R7-1): the walk used to start at the node's parent and answer
+ * "later" at the first function it met. A node that is the argument never meets
+ * the argument, so it climbed out of the call and took whatever arrow enclosed the
+ * call for the callback; and any function inside the argument counted, IIFEs
+ * included.
+ */
+function timingIn(node, arg) {
+  if (sameNode(node, arg)) return TIMING.NOW;
+  const fn = unwrapExpression(arg);
+  let nested = false;
   for (let p = node.getParent(); p; p = p.getParent()) {
-    if (FN_KINDS.has(p.getKind())) return true;
-    if (sameNode(p, arg)) return false;
+    if (FN_KINDS.has(p.getKind())) {
+      if (sameNode(p, fn)) return TIMING.LATER;
+      nested = true;
+    }
+    if (sameNode(p, arg)) break;
   }
-  return false;
+  return nested ? TIMING.NESTED : TIMING.NOW;
 }
 
 /**
@@ -176,13 +206,16 @@ export function rlsContextOf(node, sf, bindingsFor) {
     const args = n.getArguments();
     const argIndex = args.findIndex((arg) => arg.getStart() <= node.getStart() && node.getEnd() <= arg.getEnd());
     if (argIndex === -1) continue;
-    // Evaluated while the call's arguments are built, so in whatever context
-    // encloses the call — whichever callee this is.
-    if (!runsLater(node, args[argIndex])) continue;
     const callee = unwrapExpression(n.getExpression());
     if (callee?.getKind() !== SyntaxKind.Identifier) continue;
     const context = contextOfCall(callee.getText(), n, argIndex, sf, bindingsFor, new Set());
-    if (context) return context;
+    // A call that opens nothing around this argument says nothing about when the
+    // node runs relative to the context outside it: keep walking.
+    if (!context) continue;
+    const timing = timingIn(node, args[argIndex]);
+    if (timing === TIMING.LATER) return context;
+    if (timing === TIMING.NESTED) return RLS_CONTEXT.UNKNOWN;
+    // NOW: evaluated before this call opens anything, in the context around it.
   }
   return null;
 }

@@ -1486,6 +1486,11 @@ introduced (R6-S1), and a producer path that round 5's rule left open (R6-S2).
   mutation of its own branch. I re-ran this independently in a worktree copy:
   letting an imported opener answer for every argument failed exactly the two
   function-in-non-callback-argument cells, one per gate.
+- **Note from round 7:** after round 7's timing rule, those two cells no longer
+  depend on the position table — a function nested inside a non-callback argument
+  is UNKNOWN in its own right. The position is now pinned by a function passed as
+  the non-callback argument itself (`withBypassRls`'s purpose position and
+  `withTenantRls`'s tenantId position).
 
 #### F2 Minor — nested filter names resolve where they are written
 
@@ -1511,6 +1516,14 @@ introduced (R6-S1), and a producer path that round 5's rule left open (R6-S2).
 - Red proof: each mutation named in the finding now fails its own cell and no
   other, except the rest-parameter mutation, which also fails the rest-past-index
   cell because both go through the same branch.
+- **Corrected in round 7 (R7-T1):** that claim does not hold for four of the
+  branches. The destructured-parameter, rest-parameter, recursion-guard and
+  wrapper-spread cells had no outer opener, and without one a wrong null and a
+  correct UNKNOWN both end in "reported". Re-measured by Testing, the destructured,
+  recursion-guard and wrapper-spread mutations failed none of the self-tests. The
+  rest-parameter mutation failed only the rest-past-index cell, not the cell
+  written for its branch. Round 7 adds a variant of each cell inside an outer
+  opener.
 
 #### T6 Minor — a manifest disposition excuses only its own kind of hit
 
@@ -1529,3 +1542,227 @@ introduced (R6-S1), and a producer path that round 5's rule left open (R6-S2).
   passes. Integration passes with the application client connected as
   `passwd_app` and both workers stopped (113 files / 685 tests). `scripts/pre-pr.sh`
   passes on the committed code slice.
+
+## Round 7
+
+Reviewed range: `5b55f3129..30fc857f7`, the round-6 fix commits. The experts' raw
+outputs, including their full Recurring Issue Checks, are kept in the round's
+working files.
+
+### Changes from Previous Round
+
+Round 6's fixes were verified in their main claims:
+- ownership is now required before any reactivation, and dry run matches apply;
+- the releasing tenant's row carries the system actor;
+- CI runs integration as the application role, and the guard added for that has
+  no fail-open;
+- the gates' callback-position and disposition binding are correct.
+
+Round 7 found three problems:
+- two escapes in the same gate helper that round 6 wrote;
+- four round-6 gate cells that cannot fail for the reason they claim, so part of
+  round 6's red-proof record does not reproduce;
+- a recovery path round 6 promised that does not exist for tenants without a
+  tenant claim.
+
+### Converged across experts (severity floored by convergence)
+
+- **R7-S1 / F-R7-1 — Major, convergent: security+functionality (R49/R47).**
+  `runsLater` in `scripts/checks/lib/rls-context.mjs` treats a read as running
+  inside the opener's context in two shapes where it does not:
+  - The read IS the argument, and the enclosing function is an arrow. The walk
+    never meets the argument, climbs out, and stops at the arrow.
+  - A function is nested inside the callback argument without being that
+    argument: an IIFE, which runs before the opener, or `pick(async …)`.
+  Both tenant gates pass such a read. No call site in `src` has either shape.
+- **R7-S3 / F-R7-4 / R7-A1 — Major (floored from Minor), convergent:
+  security+functionality+testing.** SCIM PUT/PATCH still answer two 409 details:
+  one for a user active in another tenant, one for a user owned but suspended
+  there. That tells a token holder which state another tenant holds the user in.
+  The uniqueness check is subsumed by the ownership check, and POST's uniqueness
+  branch can no longer be reached. The round-6 record said PUT/PATCH return "the
+  same constant".
+
+### Security findings
+
+- **R7-S2 — Major (R3, R6-S4 not propagated).** Directory sync's declined
+  attachment still records `ambiguous_email` or `owned_by_another_tenant` in a
+  row the tenant can read, for an email the tenant has no membership for. The
+  tenant's admin controls the directory's email attribute, so they can still ask
+  exactly the question round 6 stopped SCIM POST from answering.
+
+### Functionality findings
+
+- **F-R7-2 — Major (R41/R49).** Round 6 gave "sign in through this tenant's IdP"
+  as the way back for a departed member, but sign-in row 4 runs only for a
+  tenant-claim sign-in. A tenant without a claim — magic link or passkey members,
+  with SCIM or sync configured — can never take such a member back. The user
+  chose an audited operator command as the remedy.
+- **F-R7-3 — Minor (R4).** A SCIM PUT/PATCH reactivation refusal writes no audit
+  row, while directory sync records the same decision.
+- **F-R7-5 — Minor (R29).** Comments still describe SCIM/sync realignment as a
+  steady-state column move. After round 6 it only fires in a race.
+
+### Testing findings
+
+- **R7-T1 — Major (RT7/R29).** Four round-6 cells have no outer opener, so a
+  wrong null and a correct UNKNOWN both end in "reported", and the cells cannot
+  fail for their own branch. The four branches are the destructured parameter,
+  the rest parameter, the recursion guard, and the wrapper spread. The round-6 T2
+  and R6-S3 red-proof lines claim otherwise.
+- **R7-T2 — Major (RT1/RT10).** The fixtures build "active in another tenant"
+  without also making the user "owned by another tenant", a combination
+  production cannot produce. Swapping either the engine's refusal precedence or
+  the order of `reactivationRefusal` leaves every suite green, and the audit
+  reason and 409 detail are not asserted.
+- **R7-T3 — Minor.** `assertRlsApplies` has no cell. Its `rolbypassrls` arm and
+  its empty-result arm have never run.
+- **R7-T4 — Minor.** Three things have no cell: `withTeamTenantRls`'s callback
+  position, and both allow sides of the spread handling (a spread after the
+  callback, and a wrapper spread that reaches no opener).
+- **R7-T5 — Minor.** `usersOwnedByAnotherTenant`'s "no users row, so absent"
+  contract has no direct cell.
+- **R7-T6 — Minor (R29).** `src/__tests__/db-integration/setup.ts` says the
+  superuser must be the default `DATABASE_URL`, which is false after the CI
+  change.
+
+### Resolution Status — round 7
+
+#### R7-S3 / F-R7-4 / R7-A1 Major (convergent) — one question and one 409 detail for SCIM, with a record (and F-R7-3)
+
+- **Action:** SCIM PUT/PATCH `reactivationRefusal` asks one question: does
+  another tenant own the user?
+  - The second-active-membership check is gone. An active membership in another
+    tenant already makes that tenant the owner, so the check refused nobody the
+    ownership question lets through, and it cost a second bypass transaction.
+  - Every one-active-membership race handler answers
+    `SCIM_USER_NOT_PROVISIONABLE_DETAIL`. That covers POST, PUT, PATCH and DELETE.
+  - POST's uniqueness guard for an owned user could no longer be reached and was
+    removed.
+  - `wouldCreateSecondActiveMembership` had no caller left and was removed with
+    its tests.
+- **F-R7-3:** the refusal is audited as `SCIM_USER_REACTIVATION_REFUSED`.
+  - It is a new `AuditAction` value (migration
+    `20260913120000_scim_user_reactivation_refused`), in the tenant SCIM group and
+    therefore webhook-subscribable, with en/ja labels.
+  - Metadata is `{ reason: "owned_by_another_tenant" }`; nothing of the other
+    tenant is recorded.
+  - The race handlers are not audited: they answer an interleaving, not a decision.
+- **Red proof** (worktree copy):
+  - Removing the audit failed the four PUT/PATCH refusal cells.
+  - Putting POST's uniqueness read back failed the cell that pins its absence.
+
+#### R7-S2 Major — directory sync's decline no longer names the case-variant question for another tenant's user
+
+- **Action:** `resolveExistingUsersForTenant` now reports `ambiguous` with
+  `ownedHere`, which is true only when every match is this tenant's.
+  - Directory sync records `ambiguous_email` only in that case. For every other
+    no-membership decline it records `owned_by_another_tenant`, both live and in
+    the dry run.
+  - The declined row still carries no user id.
+- **Red proof:**
+  - The engine ignoring `ownedHere` failed the new live/dry-run cell.
+  - The classifier always reporting `ownedHere: true` failed its new cell.
+
+#### R7-T2 Major — fixtures now build the state production has
+
+- **Action:** every engine cell that seeds a user as active in another tenant
+  (five mapped cells and the unmapped refusal cell) also seeds that tenant as the
+  owner. The SCIM PUT/PATCH cells do the same through `ownership.active`.
+  - The reasons are asserted: `active_in_another_tenant` on both engine arms,
+    and on SCIM the one detail plus the audit row.
+- **Red proof:**
+  - Swapping the engine's `toUpdate` precedence failed "emits an audit event
+    naming the membership it declined".
+  - Swapping the create-arm precedence failed "counts the refusal on an unmapped
+    user who holds a deactivated membership here".
+  - With a single SCIM question there is no order left to swap.
+
+#### R7-T3, R7-T5, R7-T6 Minor, and F-R7-5 Minor
+
+- **R7-T3:** `assertRlsApplies` has cells for a superuser, BYPASSRLS, an empty
+  probe, a failing probe, and a plain role (allow). Removing each operand of its
+  condition failed exactly its own cell.
+- **R7-T5:** `usersOwnedByAnotherTenant` has a cell for a missing users row.
+  Reporting such a row as foreign failed it.
+- **R7-T6:** `setup.ts` now says its `DATABASE_URL` assignment is only a
+  fallback, and that the harness's superuser comes from `MIGRATION_DATABASE_URL`.
+- **F-R7-5:** the SCIM `realignReactivatedMember` doc, the engine's `activated`
+  comment and the realignment emitter doc now describe the SCIM and sync
+  realignment as a race backstop.
+
+#### Verification — SCIM and sync slice
+
+- Unit: 1033 files / 15652 tests pass. `next build` passes, and eslint passes on
+  every changed file.
+- Integration, with the new migration applied to the dev database by
+  `prisma migrate deploy` and both workers stopped: 113 files / 685 tests pass.
+
+#### R7-S1 / F-R7-1 Major (convergent) — a read runs in an opener's context only inside the function that IS the callback
+
+- **Action:** `runsLater` is replaced by `timingIn` in
+  `scripts/checks/lib/rls-context.mjs`, which reports one of three timings:
+  - **NOW:** the node is the argument itself, or no function lies between them.
+  - **LATER:** the node is inside the function that IS the argument, after
+    unwrapping parentheses and type assertions.
+  - **NESTED:** the node is inside some other function written within the
+    argument, such as an IIFE or `pick(fn)`.
+- `rlsContextOf` now resolves the callee before it asks about timing. A call that
+  opens nothing around the argument is stepped over whatever functions it holds.
+  For a call that does open a context:
+  - LATER returns that context;
+  - NESTED returns UNKNOWN;
+  - NOW continues outward.
+- Round 6 documented a fail-open limit for `pick(async …)`. That limit is now
+  fail-closed.
+- New cells in both gates:
+  - **Deny:** a read that is the argument (directly, and through a local
+    wrapper), arrow, function-expression and awaited IIFEs, a function handed to
+    a helper inside the callback, and a function passed as a non-callback
+    argument. The last pins the position table, which round 6's cells stopped
+    pinning once the timing rule changed.
+  - **Allow:** an `as`-asserted callback, a function-expression callback, a
+    nested `.map(async …)`, and a non-opener helper's function inside the
+    callback.
+
+#### R7-T1 Major — the four fail-closed branches are pinned where a wrong null would pass
+
+- **Action:** the destructured-parameter, recursion-guard, rest-parameter and
+  wrapper-spread shapes each have a variant inside an OUTER opener, in both
+  gates. There, a wrong null would walk on to the outer context and read as
+  exempt. The round-6 cells are kept, and still pin the refusal without an outer
+  opener.
+
+#### R7-T4 Minor — the unpinned positions and spread allow sides have cells
+
+- **Action:** a read inside `withTeamTenantRls`'s callback passes, and a read in
+  a function inside its `teamId` argument is refused. Two spread allow cells are
+  added:
+  - a spread into a wrapper that reaches no opener;
+  - a spread after the opener's callback position.
+
+#### Red proof — gate slice
+
+Run in a worktree copy, over both self-test files (123 cells at baseline). Each
+mutation failed exactly the cells listed.
+
+| Mutation | Cells that failed |
+|---|---|
+| A node that is the argument runs LATER | the three node-is-argument cells (both gates) |
+| A nested function counts as the callback | the three IIFE cells and the `pick` cell, plus the owning gate's IIFE cell |
+| NESTED refused even for a non-opener | the non-opener-helper allow cell |
+| The callback not unwrapped | the `as`-asserted allow cell |
+| An opener answers for every argument | the two non-callback-position cells |
+| Destructured check removed | the two outer-opener destructured cells |
+| Rest check removed | the two outer-opener rest cells, and round 6's rest-past-index cell |
+| Recursion guard answers null | the two outer-opener recursion cells |
+| Wrapper-spread loop fails open | the two outer-opener wrapper-spread cells |
+| Wrapper spread always UNKNOWN | its allow cell |
+| Any spread is UNKNOWN | the spread-after-callback allow cell |
+| `withTeamTenantRls` position 1 → 0 | its allow cell |
+
+#### Verification — gate slice
+
+- The three self-test files pass (224).
+- All three gates exit 0 on the real tree, each run unpiped.
+- eslint passes.
