@@ -159,9 +159,14 @@ function missingUrlResult(): CmdResult {
 // of the ORDER of two statements, which no assertion on the returned
 // CmdResult can distinguish. The integration test spies on `.create` to prove
 // it. Same motivation as the `confirm` seam below.
+//
+// connectionTimeoutMillis, the app pool's default (src/lib/prisma.ts): pg waits
+// for a server that accepts the connection and never answers with no limit, and
+// `$disconnect()` in each command's `finally` waited on that connection, so the
+// command hung after `maxWait` had already failed it (round 9, F-R9-1).
 export const migrationClientFactory = {
   create(connectionString: string): PrismaClient {
-    return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+    return new PrismaClient({ adapter: new PrismaPg({ connectionString, connectionTimeoutMillis: 5 * MS_PER_SECOND }) });
   },
 };
 
@@ -183,18 +188,27 @@ export const confirmationTransaction = {
   },
 };
 
-/** The result for a confirmation that outlived its transaction, or null for any other error. */
+/** The confirmation budget in the unit an operator reads it in. */
+function confirmationBudgetText(): string {
+  const { timeout } = confirmationTransaction.options();
+  return timeout % MS_PER_MINUTE === 0 ? `${timeout / MS_PER_MINUTE} minutes` : `${timeout / MS_PER_SECOND} s`;
+}
+
+/**
+ * The result for a confirmation that outlived its transaction, or null for any other error.
+ *
+ * Matched by Prisma's expiry message, not by P2028: that code covers its whole
+ * transaction-error family, and a transaction that never started (`maxWait`,
+ * an unreachable database) was reported as a slow operator, on every re-run
+ * (audit-tenant-adjudicator round 9, F-R9-1).
+ */
 function confirmationTimeoutResult(error: unknown): CmdResult | null {
-  const expired =
-    (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2028") ||
-    (error instanceof Error && /expired transaction|Transaction already closed/.test(error.message));
-  if (!expired) return null;
-  const seconds = Math.round(confirmationTransaction.options().timeout / MS_PER_SECOND);
+  if (!(error instanceof Error && /cannot be executed on an expired transaction/.test(error.message))) return null;
   return {
     ok: false,
     code: 1,
     message:
-      `The confirmation took longer than this command's transaction allows (${seconds} s); nothing was written. ` +
+      `The confirmation took longer than this command's transaction allows (${confirmationBudgetText()}); nothing was written. ` +
       "Re-run the command: it reads the current state again before asking.",
   };
 }
@@ -1853,7 +1867,9 @@ function printUsage(): void {
       "It refuses the sentinel tenant as the target, and an email that matches more",
       "than one user (case variants of one address; name the user by UUID).",
       "add, remove and realign ask for confirmation inside their transaction:",
-      "answer within 10 minutes, or re-run the command.",
+      `answer within ${confirmationBudgetText()}, or re-run the command. Do not leave a prompt`,
+      "open while migrations deploy: its reads hold table locks a migration waits for,",
+      "and sign-ins queue behind that migration.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",

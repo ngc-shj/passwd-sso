@@ -300,7 +300,17 @@ nearer limit. Prisma's interactive transactions default to a 5 s timeout on ever
 deployment, so reading the warning for longer than that rolled the transaction back
 with a raw error. `add`, `remove` and `realign` now pass an explicit budget
 (`confirmationTransaction` in `scripts/tenant-domain.ts`, 10 minutes) and report an
-expired confirmation by name. The trade-off above is unchanged.
+expired confirmation by name.
+
+**Addendum (round 9, S-R9-2 / F-R9-1)**: the longer budget changes the cost above,
+which "unchanged" understated. No row or advisory lock is taken before the prompt,
+but the preview's reads hold `AccessShareLock` on the tables they read until the
+transaction ends — now up to 10 minutes instead of 5 s. That blocks nothing but
+`ACCESS EXCLUSIVE`; a migration's `ALTER TABLE` does wait for it, and ordinary
+sign-in and SCIM queries then queue behind the waiting migration. The usage text
+and README tell operators not to leave a prompt open while migrations deploy. The
+expired-confirmation result is matched by Prisma's expiry message only: P2028 also
+covers a transaction that never started, which was reported as a slow operator.
 
 Flagged for Phase 3 as a candidate hardening, not as a defect.
 

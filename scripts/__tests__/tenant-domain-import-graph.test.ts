@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import ts from "typescript";
@@ -109,14 +109,19 @@ function walkImports(entry: string, target: string, options: ts.CompilerOptions,
 }
 
 describe("scripts/tenant-domain.ts import graph", () => {
+  const SINGLETON_PATH = join(REPO, "src", "lib", "prisma.ts");
+
   it("never reaches the application's Prisma singleton at runtime, and resolves every local import", () => {
-    const result = walkImports(
-      join(REPO, "scripts", "tenant-domain.ts"),
-      join(REPO, "src", "lib", "prisma.ts"),
-      compilerOptions(REPO),
-      REPO,
-    );
+    const result = walkImports(join(REPO, "scripts", "tenant-domain.ts"), SINGLETON_PATH, compilerOptions(REPO), REPO);
     expect(result).toEqual({ chains: [], unresolved: [] });
+  });
+
+  it("names a target that exists and that a repo module does reach (control)", () => {
+    // Round 9 T-R9-4: a wrong or moved target path would leave the cell above
+    // green with no chain to find.
+    expect(existsSync(SINGLETON_PATH)).toBe(true);
+    const { chains } = walkImports(join(REPO, "src", "lib", "tenant-context.ts"), SINGLETON_PATH, compilerOptions(REPO), REPO);
+    expect(chains.length).toBeGreaterThan(0);
   });
 });
 

@@ -2072,3 +2072,181 @@ Integration (real database, app role, workers stopped):
   nothing on any changed file. The three tenant gates exit 0 on the real tree.
 - **Integration:** 113 files / 701 tests pass, with both workers stopped.
 - **Citation gate:** passes over this document and the SSO deviation log.
+
+## Round 9
+
+Reviewed range: `1aa0e566d..2df065f5c`, the round-8 fix commit. The experts' raw
+outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 8's claims were verified:
+- no insensitive `equals` and no unescaped pattern match on user input remains in
+  `src` or `scripts`;
+- security probed Prisma 7's generated SQL: `in` + insensitive compiles to
+  `LOWER(email) IN (LOWER($1))`, and `escapeLikePattern`'s output reaches `ILIKE`
+  as a bind parameter under the default backslash escape;
+- no commit can be reported as "nothing was written": Prisma serialises commit and
+  timeout on one transaction queue;
+- no row or advisory lock is held across the prompt;
+- testing re-ran six recorded red proofs, and all reproduce.
+
+Round 9 found that the gate's round-8 rule was still an enumeration of deferral
+spellings, and that the timeout mapping caught more than a timeout.
+
+### Converged across experts (severity floored by convergence)
+
+- **F-R9-2 / S-R9-1 — Major, convergent functionality+security (R42/R47/R49).**
+  `runsInline` trusted every function handed to a call that was not one of five
+  scheduler names. `after(fn)`, `emitter.on(…, fn)`, `list.push(fn)`,
+  `map.set(k, fn)`, `setTimeout.call(null, fn)`, `globalThis["setTimeout"](fn)`,
+  a local `register(fn)`, an un-awaited async `map` and `void p.then(fn)` all read
+  as scoped. A stored function called later runs under its caller's context. The
+  module header claimed stored functions were refused.
+- **F-R9-1 / S-R9-3 / T-R9-2 — Major, convergent functionality+security+testing.**
+  `confirmationTimeoutResult` matched any P2028, which is Prisma's whole
+  transaction-error family. A transaction that never started (`maxWait`, an
+  unreachable database) was reported as a slow confirmation, on every re-run. Only
+  `realign`'s timeout arm had a cell, no cell showed a non-timeout error still
+  propagating, and Prisma's expiry error matched both recognition arms.
+- **S-R9-4 / F-R9-3 — Minor, convergent.** A `new Promise` executor and a local
+  helper called on the spot were refused although they run inline.
+
+### Security findings
+
+- **S-R9-2 — Minor (R29).** The preview's reads hold `AccessShareLock` for the
+  whole budget, now 10 minutes. A migration's `ALTER TABLE` waits for it, and
+  sign-in queries queue behind that migration. The D-14 addendum called the
+  trade-off unchanged.
+
+### Testing findings
+
+- **T-R9-1 — Major (RT7/R42).** Only one member of each round-8 set was pinned:
+  four of five scheduler names, the property-access name branch, and the accessor
+  and constructor kinds could each be dropped with every cell green.
+- **T-R9-3 — Minor (RT7).** Removing the team members search's `escapeLikePattern`
+  call left its route test green.
+- **T-R9-4 — Minor (RT7).** The real-CLI import-graph cell's target path was proven
+  by no cell; a wrong or moved path would leave it green with no chain to find.
+
+### Functionality findings
+
+- **F-R9-4 — Minor (R27).** The usage text wrote the budget as a literal
+  "10 minutes" while the timeout message derived "600 s" from the constant.
+
+### Resolution Status — round 9
+
+#### F-R9-2 / S-R9-1 Major (convergent) and T-R9-1 Major — a function runs inline only in a closed list of shapes
+
+- **Action:** `runsInline` in `scripts/checks/lib/rls-context.mjs` no longer
+  enumerates deferral. It trusts only:
+  - an IIFE, or a `new Promise(…)` executor: sync, or its promise settled;
+  - an `ARRAY_ITERATORS` callback: sync, or — for `map`/`flatMap` only — async
+    with the array handed to a settled `Promise.all`/`allSettled`;
+  - a `PROMISE_CHAIN` (`then`/`catch`/`finally`) or `TRANSACTION_RUNNERS`
+    (`$transaction`) callback whose call is settled.
+- **Settled** (`isSettled`): awaited, returned (a `return` or an arrow's
+  expression body), handed to a settled combinator directly or as an array
+  element, or continued by a settled promise chain.
+- Everything else is NESTED, so UNKNOWN: element-access callees, `.call`,
+  imported or local helpers, listeners, `after`, `race`/`any`. The module header
+  and `runsInline`'s doc state the rule and the shapes refused although they run
+  inline (a local helper calling its parameter, a named function passed by
+  reference, `.call`).
+- **Cells (both gates):** one allow cell per member of each exported set, from a
+  member list written out in the test, and a cell asserting each list equals its
+  set. The first version generated the cells from the imported set; the red proof
+  showed dropping a member then drops its cell too, so no cell went red. A
+  Promise-executor, an array-element IIFE and a
+  settled-chain allow cell; deny cells for `after`, a listener, `push`,
+  `setTimeout.call`, an element-access scheduler, `process.nextTick`,
+  `queueMicrotask`, an un-awaited async `map`, `Promise.race`, an awaited async
+  `forEach`, `void then`, a floating async IIFE, `void $transaction`, a
+  non-first executor argument, a getter, a setter, a class constructor and a
+  local helper that keeps its argument.
+- **Round-7 cells changed by design:** the "non-opener helper wraps it" allow cell
+  is now a deny cell. The R7-T4 spread cell passes the read as a value argument, so
+  it still decides only whether the spread reads as opening something.
+- **Real tree:** both gates still pass (29 and 12 files) with no manifest entry.
+
+#### F-R9-1 / S-R9-3 / T-R9-2 Major (convergent) — only an expired confirmation is named, and the command returns
+
+- **Action:** `confirmationTimeoutResult` matches Prisma's expiry message
+  ("cannot be executed on an expired transaction") and nothing else; every other
+  error, P2028 included, propagates.
+- **Found while red-proving the maxWait path:** against a server that accepts the
+  connection and never answers, `maxWait` failed the command at ~0.4 s, and then
+  `$disconnect()` in the command's `finally` waited on that connection with no
+  limit, so the CLI hung. `migrationClientFactory` now passes
+  `connectionTimeoutMillis`, the application pool's default of 5 s.
+- **Cells (integration file):** `add --from` and `remove` each name a confirmation
+  past a shortened budget and write nothing; `add`, `remove` and `realign` each
+  rethrow a confirmation error that is not an expiry; a DB-less cell drives
+  `remove` at a silent server and asserts the raw "Unable to start a transaction"
+  error, with the command returning.
+
+#### S-R9-2 Minor — the lock cost is recorded
+
+- **Action:** a second D-14 addendum records the `AccessShareLock` held for the
+  budget, the migration it blocks, and the queue behind it. The usage text and the
+  README tell operators not to leave a prompt open while migrations deploy.
+
+#### T-R9-3, T-R9-4, F-R9-4, S-R9-4 / F-R9-3 Minor
+
+- **T-R9-3:** the members search route test pins `a_b%\` reaching both
+  `contains` clauses escaped.
+- **T-R9-4:** a control cell asserts the singleton path exists and that
+  `src/lib/tenant-context.ts` does reach it through the same walker and target.
+- **F-R9-4:** the usage text and the timeout message both take the budget from
+  `confirmationBudgetText()`, in one unit. The README cites the constant.
+- **S-R9-4 / F-R9-3:** the Promise executor is on the allowlist. A local helper
+  called on the spot and a named function passed by reference stay refused, stated
+  in the header; no real-tree site uses either.
+
+#### Red proof — round 9, unit and gate
+
+Run in a worktree copy. Each mutation was applied on its own; at baseline every
+cell passes. Each gate row counts the cells across both gates.
+
+| Mutation | Cells that failed |
+|---|---|
+| `ARRAY_ITERATORS` without `sort` | the `sort` allow cells and the membership cells (4) |
+| `PROMISE_COMBINATORS` without `allSettled` | the `allSettled` allow cells and the membership cells (4) |
+| `PROMISE_CHAIN` without `finally` | the `finally` allow cells and the membership cells (4) |
+| `TRANSACTION_RUNNERS` emptied | the `$transaction` allow cells and the membership cells (4) |
+| any property-access callee runs inline (the round-8 default) | listener, `push`, `setTimeout.call`, `process.nextTick` (8) |
+| any other callee runs inline | `setTimeout`, `after`, element-access scheduler, `queueMicrotask`, local helper that keeps its argument, the round-7 non-opener helper cell (11) |
+| everything counts as settled | `void then`, floating async IIFE, `void $transaction` (6) |
+| an awaited async `forEach` counts as settled | the awaited async `forEach` cells (2) |
+| any `Promise.*` combinator settles | the `Promise.race` cells (2) |
+| a Promise executor at any argument position | the non-first-executor cells (2) |
+| no Promise-executor form | the executor allow cells (2) |
+| array elements not followed to a combinator | the array-element IIFE allow cells (2) |
+| a settled chain does not settle its receiver | the awaited-chain allow cells (2) |
+| getter / setter / constructor not function-like (three mutations) | that kind's cells (2 each) |
+| an arrow's expression body is not settled | every returned-form allow cell, including round 8's IIFE and round 7's `Promise.all(map)` cells (14) |
+| an unsettled async IIFE runs inline | the floating async IIFE cells (2) |
+| members search not escaped | the escape cell |
+| import-graph target path wrong | the target control cell |
+
+#### Red proof — round 9, integration
+
+Run in a worktree copy against the real database, workers stopped. Each mutation
+was applied on its own; at baseline the seven filtered cells pass.
+
+| Mutation | Cells that failed |
+|---|---|
+| classifier also matches P2028 | the silent-server `maxWait` cell |
+| no pool connection timeout | the silent-server `maxWait` cell (the command never returns) |
+| `add`'s expired confirmation not named | the `add --from` named-timeout cell |
+| `remove`'s expired confirmation not named | the `remove` named-timeout cell |
+| `realign`'s expired confirmation not named | the `realign` named-timeout cell |
+| every error treated as an expired confirmation | the three rethrow cells and the silent-server cell |
+
+#### Round 9 verification
+
+- **Unit:** 1034 files / 15798 tests pass; `next build` and `tsc --noEmit` pass.
+  eslint reports nothing on any changed file. Both RLS-context gates exit 0 on the
+  real tree.
+- **Integration:** 113 files / 707 tests pass, with both workers stopped.
+- **Citation gate:** passes over this document and the SSO deviation log.

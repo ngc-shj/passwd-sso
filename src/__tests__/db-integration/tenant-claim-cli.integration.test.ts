@@ -14,6 +14,7 @@
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
+import { createServer, type AddressInfo } from "node:net";
 import { AuditScope, AuditAction, ActorType, AuditOutboxStatus } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
@@ -2934,6 +2935,19 @@ describe("tenant-domain CLI (C7)", () => {
       await ctx.deleteTestData(owning);
       await ctx.deleteTestData(former);
     });
+
+    it.skipIf(SKIP)("rethrows an error that is not an expired confirmation (round 9 T-R9-2)", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const confirm = async (): Promise<boolean> => {
+        throw new Error("boom");
+      };
+
+      await expect(cmdRealign({ user: userId, tenant: former, by: "test-op", confirm })).rejects.toThrow("boom");
+      expect(await columnOf(userId)).toBe(owning);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
   });
 
   describe("a confirmation read for longer than Prisma's default transaction timeout (round 8 F-R8-2)", () => {
@@ -2969,6 +2983,91 @@ describe("tenant-domain CLI (C7)", () => {
       expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.revokedAt).not.toBeNull();
 
       await ctx.deleteTestData(tenantId);
+    });
+
+    // Round 9 T-R9-2: the timeout arm was reached only through realign.
+    it.skipIf(SKIP)("add --from names a confirmation that outlived the transaction, and moves nothing", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 2000 });
+      try {
+        const result = await cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: confirmAfter(2500) });
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain("took longer than this command's transaction allows");
+      } finally {
+        options.mockRestore();
+      }
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.tenantId).toBe(losingTenant);
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("remove names a confirmation that outlived the transaction, and revokes nothing", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 2000 });
+      try {
+        const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: confirmAfter(2500) });
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain("took longer than this command's transaction allows");
+      } finally {
+        options.mockRestore();
+      }
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.revokedAt).toBeNull();
+
+      await ctx.deleteTestData(tenantId);
+    });
+  });
+
+  describe("an error that is not an expired confirmation propagates (round 9 T-R9-2/F-R9-1)", () => {
+    const boom = () => async (): Promise<boolean> => {
+      throw new Error("boom");
+    };
+
+    it.skipIf(SKIP)("add rethrows it", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+      await expect(cmdAdd({ tenant: gainingTenant, domain: claim, by: "test-op", from: losingTenant, confirm: boom() })).rejects.toThrow("boom");
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("remove rethrows it", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+      await expect(cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: boom() })).rejects.toThrow("boom");
+
+      await ctx.deleteTestData(tenantId);
+    });
+
+    it("a transaction that never starts is not reported as a slow confirmation, and the command returns", async () => {
+      // F-R9-1: P2028 also covers `maxWait`. A server that accepts the connection
+      // and never answers holds the transaction start past it, before any prompt.
+      // Without the client's connection timeout, `$disconnect()` in the command's
+      // `finally` waited on that connection forever and this cell timed out.
+      const silent = createServer(() => {});
+      await new Promise<void>((resolve) => silent.listen(0, "127.0.0.1", resolve));
+      const { port } = silent.address() as AddressInfo;
+      vi.stubEnv("MIGRATION_DATABASE_URL", `postgresql://u:p@127.0.0.1:${port}/db`);
+      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 300 });
+      try {
+        await expect(
+          cmdRemove({ tenant: randomUUID(), domain: `${runToken()}.example`, by: "test-op", confirm: async () => true }),
+        ).rejects.toThrow("Unable to start a transaction in the given time");
+      } finally {
+        options.mockRestore();
+        silent.close();
+      }
     });
   });
 
