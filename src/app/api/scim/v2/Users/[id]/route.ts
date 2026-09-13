@@ -31,7 +31,7 @@ import {
 } from "@/lib/services/scim-user-service";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { fetchUserContact } from "@/lib/audit/audit-user-lookup";
-import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
+import { REALIGNMENT_SOURCE, realignAfterActivation, type RealignmentCause } from "@/lib/tenant/tenant-realignment";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -41,9 +41,13 @@ type Params = { params: Promise<{ id: string }> };
  * tenant's context cannot write that users row. Logged on failure rather than
  * answered as a failed request whose reactivation already committed.
  */
-async function realignReactivatedMember(userId: string, tenantId: string): Promise<void> {
+async function realignReactivatedMember(
+  userId: string,
+  tenantId: string,
+  actor: Pick<RealignmentCause, "actorUserId" | "actorType">,
+): Promise<void> {
   try {
-    await realignAfterActivation(userId, tenantId);
+    await realignAfterActivation(userId, tenantId, { source: REALIGNMENT_SOURCE.SCIM, ...actor });
   } catch (error) {
     getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.realign-failed");
   }
@@ -126,7 +130,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
 
   const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
   if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
-    await realignReactivatedMember(userId, tenantId);
+    await realignReactivatedMember(userId, tenantId, { actorUserId: auditUserId, actorType: putActorType });
   }
 
   // Session invalidation on deactivation (fail-open)
@@ -229,7 +233,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
 
   const { snapshot, userId, auditAction, needsSessionInvalidation } = serviceResult;
   if (auditAction === AUDIT_ACTION.SCIM_USER_REACTIVATE) {
-    await realignReactivatedMember(userId, tenantId);
+    await realignReactivatedMember(userId, tenantId, { actorUserId: auditUserId, actorType: patchActorType });
   }
 
   // Session invalidation on deactivation (fail-open)
@@ -310,8 +314,15 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   }
 
   // Read after the tenant context closes: the membership read inside it can no
-  // longer reach the email of a member whose users row names another tenant.
-  const contact = await fetchUserContact(userId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  // longer reach the email of a member whose users row names another tenant. A
+  // failure costs the email, not the audit row: the deletion has already committed,
+  // and answering it with a 500 left SCIM_USER_DELETE unwritten (round-5 F2).
+  let contact: Awaited<ReturnType<typeof fetchUserContact>> = null;
+  try {
+    contact = await fetchUserContact(userId, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  } catch (error) {
+    getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.delete-contact-read-failed");
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, auditUserId, tenantId),

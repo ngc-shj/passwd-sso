@@ -140,7 +140,8 @@ vi.mock("./okta", () => ({
   fetchOktaUsers: mockFetchOktaUsers,
 }));
 
-vi.mock("@/lib/tenant/tenant-realignment", () => ({
+vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   realignAfterActivation: mockRealignAfterActivation,
 }));
 
@@ -243,6 +244,7 @@ function makeApplyTx(overrides: Record<string, unknown> = {}) {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
     tenantMember: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -719,9 +721,10 @@ describe("runDirectorySync", () => {
         user: {
           findMany: vi.fn().mockResolvedValue([]),
           create: vi.fn(),
-          update: vi.fn().mockImplementation((args: unknown) => {
+          update: vi.fn(),
+          updateMany: vi.fn().mockImplementation((args: unknown) => {
             userUpdateArgs = args;
-            return Promise.resolve({});
+            return Promise.resolve({ count: 1 });
           }),
         },
         tenantMember: {
@@ -1035,6 +1038,7 @@ describe("runDirectorySync", () => {
           findMany: vi.fn(),
           create: vi.fn(),
           update: vi.fn(),
+          updateMany: vi.fn(),
         },
         tenantMember: {
           findMany: vi.fn(),
@@ -1098,7 +1102,21 @@ describe("runDirectorySync", () => {
         data: { deactivatedAt: null, lastScimSyncedAt: expect.any(Date) },
       });
       expect(mockLogAuditBulk).toHaveBeenCalledWith([]);
-      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-7", TENANT_ID);
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-7", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
+    });
+
+    it("realigns a scheduled run's activation under the system actor", async () => {
+      // The releasing tenant's row says who moved the user; a scheduled run has no
+      // human, and the moved user is not who acted (round-5 S2).
+      seedUnmappedDeactivatedMember(vi.fn().mockResolvedValue({}));
+
+      await runDirectorySync({ ...BASE_OPTIONS, userId: undefined });
+
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-7", TENANT_ID, {
+        source: "directory_sync",
+        actorUserId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
+      });
     });
 
     it("reports no refusal when the guard clears the user", async () => {
@@ -1178,6 +1196,7 @@ describe("runDirectorySync", () => {
           findMany: vi.fn(),
           create: vi.fn().mockResolvedValue({ id: "user-9", email: "carol@example.com" }),
           update: vi.fn(),
+          updateMany: vi.fn(),
         },
         tenantMember: {
           findMany: vi.fn().mockResolvedValue([]),
@@ -1258,7 +1277,7 @@ describe("runDirectorySync", () => {
       });
       // After the commit: the apply ran in this tenant's context, which cannot
       // write a users row filed under another tenant.
-      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", TENANT_ID);
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
     });
 
     it("declines a user another tenant owns although they are active nowhere", async () => {
@@ -1302,7 +1321,7 @@ describe("runDirectorySync", () => {
       expect(applyTx.tenantMember.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ userId: "user-5", deactivatedAt: null }) }),
       );
-      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-5", TENANT_ID);
+      expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-5", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
     });
 
     it("does not fail a sync whose writes committed when the realignment fails", async () => {
@@ -1363,7 +1382,7 @@ describe("runDirectorySync", () => {
       const result = await runDirectorySync(BASE_OPTIONS);
 
       expect(result.success).toBe(true);
-      expect(applyTx.user.update).not.toHaveBeenCalled();
+      expect(applyTx.user.updateMany).not.toHaveBeenCalled();
       expect(applyTx.tenantMember.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: "member-2" },
@@ -1371,6 +1390,48 @@ describe("runDirectorySync", () => {
         }),
       );
       expect(mockTenantMember.findMany.mock.calls[0][0].select).not.toHaveProperty("user");
+    });
+
+    it("does not abort the run when a visible user has moved out before the rename", async () => {
+      // Visibility is read in the load context; the rename runs in the apply
+      // transaction. A user moved to another tenant in between is a row RLS now
+      // hides, and `update` answered that with P2025 and rolled back every write
+      // in the run (round-5 F3).
+      setupAcquiredLock();
+      const applyTx = makeApplyTx({
+        user: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockRejectedValue(
+            Object.assign(new Error("No record was found for an update."), { code: "P2025" }),
+          ),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      });
+      setApplyTx(applyTx);
+
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-3", email: "gone@example.com", displayName: "Renamed", status: "SUSPENDED" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-3", internalId: "user-3" }]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-3", userId: "user-3", name: "Before", email: "gone@example.com" }),
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.success).toBe(true);
+      expect(applyTx.user.updateMany).toHaveBeenCalledWith({
+        where: { id: "user-3" },
+        data: { name: "Renamed" },
+      });
+      expect(applyTx.tenantMember.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "member-3" },
+          data: expect.objectContaining({ deactivatedAt: expect.any(Date) }),
+        }),
+      );
     });
 
     it("leaves a hidden member alone when only the name differs", async () => {
@@ -1391,7 +1452,7 @@ describe("runDirectorySync", () => {
 
       expect(result.success).toBe(true);
       expect(result.usersUpdated).toBe(0);
-      expect(applyTx.user.update).not.toHaveBeenCalled();
+      expect(applyTx.user.updateMany).not.toHaveBeenCalled();
     });
   });
 

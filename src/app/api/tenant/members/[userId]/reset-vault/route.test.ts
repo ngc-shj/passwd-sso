@@ -85,8 +85,9 @@ const {
   };
 });
 
-const { mockUserFindMany } = vi.hoisted(() => ({
+const { mockUserFindMany, mockWithBypassRls } = vi.hoisted(() => ({
   mockUserFindMany: vi.fn().mockResolvedValue([]),
+  mockWithBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -144,7 +145,7 @@ vi.mock("@/lib/auth/access/tenant-role-hierarchy", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
-  withBypassRls: vi.fn((p: unknown, fn: (tx: unknown) => unknown) => fn(p)),
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: mockNotificationTitle,
@@ -158,6 +159,7 @@ vi.mock("@/lib/logger", () => ({
 
 import { POST, GET } from "./route";
 import { MS_PER_DAY } from "@/lib/constants/time";
+import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 // Module-scope snapshot: route.ts:40 `adminResetLimiter = createRateLimiter(...)`
 // then :46 `targetResetLimiter = createRateLimiter(...)` run at import time above,
@@ -830,5 +832,23 @@ describe("GET /api/tenant/members/[userId]/reset-vault", () => {
     const json = await res.json();
     expect(json[0].initiatedBy).toEqual({ id: ACTOR_USER_ID, name: null, email: null });
     expect(mockPrismaAdminVaultResetFindMany.mock.calls[0][0]).not.toHaveProperty("include");
+  });
+
+  it("hydrates initiators under the cross-tenant lookup purpose", async () => {
+    // The bypass is justified by the purpose it records; an AUDIT_WRITE bypass
+    // here would file a read of other tenants' users as an audit write (round-5 T6).
+    const res = await GET(
+      createRequest("GET", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
+      createParams({ userId: TARGET_USER_ID }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockUserFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: [ACTOR_USER_ID] } } }),
+    );
+    expect(mockWithBypassRls).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(Function),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+    );
   });
 });

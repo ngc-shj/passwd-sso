@@ -22,7 +22,7 @@ import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveExistingUsersForTenant, wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
+import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
 import { toScimUserResource } from "@/lib/services/scim-user-service";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
@@ -257,7 +257,11 @@ async function handlePOST(req: NextRequest) {
     // provision whose membership already committed.
     if (existingUserId && created.member.deactivatedAt === null) {
       try {
-        await realignAfterActivation(existingUserId, tenantId);
+        await realignAfterActivation(existingUserId, tenantId, {
+          source: REALIGNMENT_SOURCE.SCIM,
+          actorUserId: auditUserId,
+          actorType,
+        });
       } catch (error) {
         getLogger().error({ tenantId, userId: existingUserId, error: errorLogFields(error) }, "scim.realign-failed");
       }

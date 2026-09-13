@@ -1228,3 +1228,55 @@ RT1 (T4). All other rows checked with no issue or not applicable.
   and a non-User relation), and the WebAuthn verifier, whose `buildWhere` return
   type admits only scalar columns.
 
+#### S2 Minor — a realignment names who caused it, and which producer
+
+- Action: `realignToMembershipInTx` and `realignAfterActivation` take a required
+  `RealignmentCause` — `source` (`sign_in` / `scim` / `directory_sync`), the acting
+  user id and actor type — and both `USER_TENANT_REALIGNED` rows record that actor
+  and `source`. The joined tenant's row also carries `movedUserId`; the releasing
+  tenant's row already targets the user id and still names no tenant. Sign-in passes
+  `realignmentBySignIn(userId)`, which records exactly what was recorded before.
+  SCIM POST, PUT and PATCH pass the token's audit user and actor type; directory
+  sync passes the run's actor, or the system actor for a scheduled run.
+- Red proof, worktree copy: the emitter recording the moved user as actor failed two
+  realignment cells; the engine's actor ternary collapsed to HUMAN failed the
+  scheduled-run cell; PUT/PATCH passing the moved user as actor failed both
+  reactivation cells.
+- Found while fixing: the three producers' test mocks replaced the realignment
+  module with only `realignAfterActivation`, so the new `REALIGNMENT_SOURCE`
+  constant was undefined, building the cause threw, and the producers'
+  realign-failure `catch` logged it — the cells failed only as "called 0 times".
+  The mocks now spread the real module.
+
+#### F2 Minor — a committed SCIM DELETE is always audited
+
+- Action: DELETE's post-commit email read is caught and logged
+  (`scim.delete-contact-read-failed`); the audit records `email: null` and the
+  response stays 204.
+- PUT/PATCH: no change, by decision. Their audit row is written before the resource
+  read, so a failing read costs only the response. A 500 there is answered by the
+  IdP retrying an idempotent PUT/PATCH, which converges on the same state; a null
+  resource means the user row is gone, and 404 is the truthful answer for it.
+- Red proof: the read left unguarded failed the new cell.
+
+#### F3 Minor — the name sync cannot abort a run
+
+- Action: the engine renames through `tx.user.updateMany`. A user moved out of the
+  tenant between the load and the apply is a row RLS hides; `update` threw P2025
+  and rolled back the run, `updateMany` renames nobody and the member's status
+  still applies. The two hidden-member cells now assert on `updateMany`, which the
+  rename actually calls — asserting on `update` could no longer fail.
+- Red proof: `update` restored failed the new moved-out cell and the OWNER rename cell.
+
+#### T1 Major — the SCIM list's mapping read is pinned to the token's tenant
+
+- Action: a cell asserts the whole `scimExternalMapping.findMany` argument,
+  `tenantId` included.
+- Red proof: `tenantId` removed from the read failed it.
+
+#### T6 Minor — the reset-vault history hydration's bypass purpose has a cell
+
+- Action: the test's `withBypassRls` mock is hoisted, and a cell asserts the
+  initiator hydration reads the initiator id under `CROSS_TENANT_LOOKUP`.
+- Red proof: the purpose changed to `AUDIT_WRITE` failed it.
+

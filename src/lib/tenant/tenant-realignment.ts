@@ -23,6 +23,33 @@ import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { countStrandedRows, realignOwningTenantColumn } from "@/lib/tenant-context";
 import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 
+/** Which producer moved the column, recorded on both tenants' rows. */
+export const REALIGNMENT_SOURCE = {
+  SIGN_IN: "sign_in",
+  SCIM: "scim",
+  DIRECTORY_SYNC: "directory_sync",
+} as const;
+
+export type RealignmentSource = (typeof REALIGNMENT_SOURCE)[keyof typeof REALIGNMENT_SOURCE];
+
+/**
+ * Who caused a realignment. The RELEASING tenant's only question about the row it
+ * receives is whether the user signed in through another IdP or another tenant's
+ * provisioning took them (round-5 S2): recording the moved user as the actor for
+ * every producer answered neither. It names no tenant, so the line S3 draws holds.
+ */
+export interface RealignmentCause {
+  source: RealignmentSource;
+  /** The user on sign-in; the SCIM token's audit user; the sync's actor or the system. */
+  actorUserId: string;
+  actorType: (typeof ACTOR_TYPE)[keyof typeof ACTOR_TYPE];
+}
+
+/** A sign-in's own realignment: the user acted, as recorded before causes existed. */
+export function realignmentBySignIn(userId: string): RealignmentCause {
+  return { source: REALIGNMENT_SOURCE.SIGN_IN, actorUserId: userId, actorType: ACTOR_TYPE.SYSTEM };
+}
+
 /**
  * Record a realignment, on the transaction that performed it.
  *
@@ -53,11 +80,12 @@ async function emitRealignment(
     previousTenantId: string;
     tenantId: string;
     leftBehind: Record<string, number>;
+    cause: RealignmentCause;
   },
 ): Promise<void> {
   const base = {
-    userId: r.userId,
-    actorType: ACTOR_TYPE.SYSTEM,
+    userId: r.cause.actorUserId,
+    actorType: r.cause.actorType,
     scope: AUDIT_SCOPE.TENANT,
     // The MEMBERSHIP row, not the user id. Every other emitter of this
     // targetType keys on `tenant_members.id`, and an operator joining
@@ -70,7 +98,12 @@ async function emitRealignment(
     action: AUDIT_ACTION.USER_TENANT_REALIGNED,
     tenantId: r.tenantId,
     targetId: r.memberId,
-    metadata: { previousTenantId: r.previousTenantId, leftBehind: r.leftBehind },
+    metadata: {
+      previousTenantId: r.previousTenantId,
+      leftBehind: r.leftBehind,
+      source: r.cause.source,
+      movedUserId: r.userId,
+    },
   });
   await logAuditInTx(tx as Prisma.TransactionClient, r.previousTenantId, {
     ...base,
@@ -80,7 +113,7 @@ async function emitRealignment(
     // the user id is what that tenant can still resolve against its own
     // deactivated membership.
     targetId: r.userId,
-    metadata: { leftBehind: r.leftBehind },
+    metadata: { leftBehind: r.leftBehind, source: r.cause.source },
   });
 }
 
@@ -94,7 +127,7 @@ async function emitRealignment(
  */
 export async function realignToMembershipInTx(
   tx: TxOrPrisma,
-  r: { userId: string; memberId: string; tenantId: string },
+  r: { userId: string; memberId: string; tenantId: string; cause: RealignmentCause },
 ): Promise<string | null> {
   const previousTenantId = await realignOwningTenantColumn(tx, r.userId, r.tenantId);
   if (!previousTenantId) return null;
@@ -116,6 +149,7 @@ export async function realignToMembershipInTx(
 export async function realignAfterActivation(
   userId: string,
   tenantId: string,
+  cause: RealignmentCause,
 ): Promise<string | null> {
   return withBypassRls(prisma, async (tx) => {
     const member = await tx.tenantMember.findFirst({
@@ -123,6 +157,6 @@ export async function realignAfterActivation(
       select: { id: true },
     });
     if (!member) return null;
-    return realignToMembershipInTx(tx, { userId, memberId: member.id, tenantId });
+    return realignToMembershipInTx(tx, { userId, memberId: member.id, tenantId, cause });
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }

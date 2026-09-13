@@ -26,7 +26,7 @@ import {
   resolveUserTenantIdFromClient,
 } from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
-import { realignToMembershipInTx } from "@/lib/tenant/tenant-realignment";
+import { realignmentBySignIn, realignToMembershipInTx } from "@/lib/tenant/tenant-realignment";
 import {
   emitAuthLoginFailure,
   type AuthLoginFailureReason,
@@ -412,7 +412,12 @@ async function claimedTenantMembership(
       // counts it records are what stop it being a silent one — a member arriving
       // with rows stranded in a tenant they no longer belong to is a condition
       // an operator can act on, and nobody can act on a state nothing reports.
-      await realignToMembershipInTx(tx, { userId, memberId: joined.id, tenantId: target.id });
+      await realignToMembershipInTx(tx, {
+        userId,
+        memberId: joined.id,
+        tenantId: target.id,
+        cause: realignmentBySignIn(userId),
+      });
       return { ok: true };
     }
 
@@ -428,7 +433,12 @@ async function claimedTenantMembership(
       // column can still name another tenant here — a user SCIM or directory sync
       // reactivated before those producers moved it. Row 4's move, for the same
       // reason; a no-op read when the column already agrees.
-      await realignToMembershipInTx(tx, { userId, memberId: member.id, tenantId: lookup.id });
+      await realignToMembershipInTx(tx, {
+        userId,
+        memberId: member.id,
+        tenantId: lookup.id,
+        cause: realignmentBySignIn(userId),
+      });
       return { ok: true };
     }
 

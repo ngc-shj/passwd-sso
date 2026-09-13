@@ -70,7 +70,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/session/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
-vi.mock("@/lib/tenant/tenant-realignment", () => ({
+vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   realignAfterActivation: mockRealignAfterActivation,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
@@ -85,7 +86,7 @@ import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1", actorType: "HUMAN" as const },
 };
 
 function makeParams(id: string) {
@@ -568,7 +569,11 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     });
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_REACTIVATE" }));
     // After the commit: this tenant's context cannot write a users row filed elsewhere.
-    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", "tenant-1");
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", "tenant-1", {
+      source: "scim",
+      actorUserId: "u1",
+      actorType: "HUMAN",
+    });
   });
 
   it("returns 400 for schema validation failures on PUT", async () => {
@@ -983,7 +988,11 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
 
     expect(res!.status).toBe(200);
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "SCIM_USER_REACTIVATE" }));
-    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", "tenant-1");
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", "tenant-1", {
+      source: "scim",
+      actorUserId: "u1",
+      actorType: "HUMAN",
+    });
   });
 
   it("returns 400 for schema validation failures on PATCH", async () => {
@@ -1230,6 +1239,31 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     expect(mockTenantMember.findUnique.mock.calls[1][0].select).toEqual({ id: true, role: true });
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: expect.objectContaining({ email: "moved@example.com" }) }),
+    );
+  });
+
+  it("still records the committed deletion when the email read fails", async () => {
+    // The read runs after the deletion committed. Throwing out of it answered the
+    // IdP with a 500 for a user that was gone and left SCIM_USER_DELETE unwritten
+    // (round-5 F2).
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER" });
+    mockTransaction.mockResolvedValue([]);
+    mockGuardUser.findUnique.mockRejectedValue(new Error("bypass unavailable"));
+
+    const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+
+    expect(res!.status).toBe(204);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "SCIM_USER_DELETE",
+        metadata: expect.objectContaining({ email: null }),
+      }),
+    );
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: "tenant-1", userId: "user-1" }),
+      "scim.delete-contact-read-failed",
     );
   });
 });

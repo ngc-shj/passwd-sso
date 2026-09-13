@@ -13,7 +13,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { resolveExistingUsersForTenant, usersActiveInAnotherTenant } from "@/lib/tenant-context";
-import { realignAfterActivation } from "@/lib/tenant/tenant-realignment";
+import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { logAuditAsync, logAuditBulkAsync } from "@/lib/audit/audit";
@@ -643,7 +643,11 @@ export async function runDirectorySync(
           if (!member) continue;
 
           if (visibleNameByUserId.has(internalId)) {
-            await tx.user.update({
+            // `updateMany`, not `update`: visibility was read in the load context,
+            // and a user moved out of this tenant since then is a row RLS now hides.
+            // `update` threw P2025 for it and rolled back the whole run; this
+            // renames nobody and lets the member's status apply (round-5 F3).
+            await tx.user.updateMany({
               where: { id: internalId },
               data: { name: pu.displayName },
             });
@@ -731,7 +735,11 @@ export async function runDirectorySync(
       // is logged rather than reported as a failed run whose writes committed.
       for (const activatedUserId of activated) {
         try {
-          await realignAfterActivation(activatedUserId, tenantId);
+          await realignAfterActivation(activatedUserId, tenantId, {
+            source: REALIGNMENT_SOURCE.DIRECTORY_SYNC,
+            actorUserId: resolveAuditUserId(actorUserId, "system"),
+            actorType: actorUserId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.SYSTEM,
+          });
         } catch (error) {
           getLogger().error(
             { tenantId, userId: activatedUserId, error: errorLogFields(error) },

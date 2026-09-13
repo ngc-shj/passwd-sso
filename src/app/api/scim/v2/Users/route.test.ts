@@ -75,7 +75,8 @@ vi.mock("@/lib/logger", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
   getLogger: () => ({ error: mockLoggerError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() }),
 }));
-vi.mock("@/lib/tenant/tenant-realignment", () => ({
+vi.mock("@/lib/tenant/tenant-realignment", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
   realignAfterActivation: mockRealignAfterActivation,
 }));
 vi.mock("@/lib/auth/policy/access-restriction", () => ({
@@ -87,7 +88,7 @@ import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1", actorType: "HUMAN" as const },
 };
 
 /** An existing user as the ownership read selects them: column plus relevant memberships. */
@@ -241,6 +242,24 @@ describe("GET /api/scim/v2/Users", () => {
     );
   });
 
+  it("reads externalId mappings of the token's tenant only", async () => {
+    // Under the list's bypass RLS no longer scopes this read: without the pin,
+    // another tenant's mapping for the same user id answered as this tenant's
+    // externalId (round-5 T1).
+    mockGuardMember.findMany.mockResolvedValue([
+      { userId: "user-1", deactivatedAt: null, user: { id: "user-1", email: "m@example.com", name: "M" } },
+    ]);
+    mockGuardMember.count.mockResolvedValue(1);
+    mockScimExternalMapping.findMany.mockResolvedValue([]);
+
+    await GET(makeReq());
+
+    expect(mockScimExternalMapping.findMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", resourceType: "User", internalId: { in: ["user-1"] } },
+      select: { internalId: true, externalId: true },
+    });
+  });
+
   it("lists under a bypass with every condition ANDed under the token's tenant", async () => {
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMember.count.mockResolvedValue(0);
@@ -321,7 +340,11 @@ describe("POST /api/scim/v2/Users", () => {
 
     expect(res.status).toBe(201);
     expect(userCreate).not.toHaveBeenCalled();
-    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-here", "tenant-1");
+    expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-here", "tenant-1", {
+      source: "scim",
+      actorUserId: "u1",
+      actorType: "HUMAN",
+    });
   });
 
   it("refuses a user another tenant owns although they are active nowhere, before any tenant write", async () => {
