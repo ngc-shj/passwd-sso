@@ -433,7 +433,7 @@ None of this fires on Google-`hd`-only deployments, which is the shape of the in
 MIGRATION_DATABASE_URL=<url> npm run tenant-domain -- realign --user <uuid-or-email> --tenant <A-ref> --by <operator-label>
 ```
 
-`realign` refuses a user with an active membership in any tenant, a target where the user holds no membership row, and an email that matches more than one user (name them by UUID). It moves only the owning column: the user's rows stay under the tenant they were filed under, their membership in A stays deactivated until A reactivates it, and both tenants receive a `USER_TENANT_REALIGNED` audit row with source `operator` and the `--by` label.
+`realign` refuses a user with an active membership in any tenant, a target where the user holds no membership row, the sentinel tenant as the target, and an email that matches more than one user. Addresses are compared case-insensitively and literally, so only case variants of one address can match more than one user; name that user by UUID. Its confirmation prompt, like `add`'s and `remove`'s, runs inside the command's transaction: answer within 10 minutes or re-run the command. It moves only the owning column: the user's rows stay under the tenant they were filed under, their membership in A stays deactivated until A reactivates it, and both tenants receive a `USER_TENANT_REALIGNED` audit row with source `operator` and the `--by` label.
 
 ### 3. Start services
 

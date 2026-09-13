@@ -31,6 +31,7 @@ import {
   cmdRemove,
   cmdHistory,
   cmdRealign,
+  confirmationTransaction,
   formatUnmappedMessage,
   migrationClientFactory,
   DEFAULT_UNMAPPED_WINDOW_DAYS,
@@ -71,6 +72,8 @@ function unmappedRow(over: Partial<Parameters<typeof formatUnmappedMessage>[0][n
 
 const alwaysYes = async () => true;
 const alwaysNo = async () => false;
+/** A confirmation that answers yes after `ms` — an operator reading the preview. */
+const confirmAfter = (ms: number) => () => new Promise<boolean>((resolve) => setTimeout(() => resolve(true), ms));
 
 describe("tenant-domain CLI (C7)", () => {
   let ctx: TestContext;
@@ -2823,6 +2826,149 @@ describe("tenant-domain CLI (C7)", () => {
 
       await ctx.deleteTestData(owning);
       await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("matches --user literally: `_` and `%` in the typed address are not wildcards", async () => {
+      // Round-8 R8-S1: an insensitive `equals` was an unescaped ILIKE, so a typed
+      // address that is not the user's still selected them.
+      const { owning, former, userId } = await seedDeparted();
+      const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { email: true } });
+      const address = email as string;
+
+      for (const typed of [`_${address.slice(1)}`, `%${address.slice(address.indexOf("@"))}`]) {
+        const result = await cmdRealign({ user: typed, tenant: former, by: "test-op", yes: true });
+        expect(result.ok, typed).toBe(false);
+        expect(result.message).toContain("User not found");
+      }
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("refuses an email that names two users differing only in case, moving neither", async () => {
+      const first = await seedDeparted();
+      const second = await seedDeparted();
+      const { email } = await ctx.su.prisma.user.findUniqueOrThrow({ where: { id: first.userId }, select: { email: true } });
+      await ctx.su.prisma.$executeRawUnsafe(`UPDATE users SET email = $1 WHERE id = $2::uuid`, (email as string).toUpperCase(), second.userId);
+
+      const result = await cmdRealign({ user: email as string, tenant: first.former, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("More than one user matches");
+      expect(await columnOf(first.userId)).toBe(first.owning);
+      expect(await columnOf(second.userId)).toBe(second.owning);
+      expect(await realignRows([first.owning, first.former, second.owning, second.former])).toEqual([]);
+
+      for (const t of [first.owning, first.former, second.owning, second.former]) await ctx.deleteTestData(t);
+    });
+
+    it.skipIf(SKIP)("refuses the sentinel tenant as the target", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: SYSTEM_TENANT_ID, by: "test-op", yes: true });
+
+      expect(result.ok).toBe(false);
+      expect(result.message).toContain("sentinel tenant");
+      expect(await columnOf(userId)).toBe(owning);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("resolves a target by its claim, and records what stays behind and each row's target", async () => {
+      const { owning, former, userId } = await seedDeparted();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: former, claim, createdBy: "seed" } });
+      await ctx.su.prisma.tag.create({ data: { name: `stranded-${runToken()}`, userId, tenantId: owning } });
+      const { id: memberId } = await ctx.su.prisma.tenantMember.findFirstOrThrow({
+        where: { tenantId: former, userId },
+        select: { id: true },
+      });
+
+      const result = await cmdRealign({ user: userId, tenant: claim, by: "test-op", yes: true });
+
+      expect(result, result.message).toMatchObject({ ok: true, tenantId: former });
+      expect(await columnOf(userId)).toBe(former);
+      const rows = await realignRows([owning, former]);
+      expect(rows.find((r) => r.tenantId === former)?.payload).toMatchObject({
+        targetId: memberId,
+        metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
+      });
+      expect(rows.find((r) => r.tenantId === owning)?.payload).toMatchObject({
+        targetId: userId,
+        metadata: expect.objectContaining({ leftBehind: { tag: 1 } }),
+      });
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("names a confirmation that outlived the transaction, and writes nothing", async () => {
+      // Round-8 F-R8-2: the budget is shortened through its seam; the default is minutes.
+      const { owning, former, userId } = await seedDeparted();
+      const options = vi.spyOn(confirmationTransaction, "options").mockReturnValue({ timeout: 1000, maxWait: 2000 });
+      try {
+        const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(2500) });
+        expect(result.ok).toBe(false);
+        expect(result.message).toContain("took longer than this command's transaction allows");
+      } finally {
+        options.mockRestore();
+      }
+      expect(await columnOf(userId)).toBe(owning);
+      expect(await realignRows([owning, former])).toEqual([]);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+
+    it.skipIf(SKIP)("commits after a confirmation that took six seconds, past Prisma's default transaction timeout", async () => {
+      const { owning, former, userId } = await seedDeparted();
+
+      const result = await cmdRealign({ user: userId, tenant: former, by: "test-op", confirm: confirmAfter(6000) });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect(await columnOf(userId)).toBe(former);
+
+      await ctx.deleteTestData(owning);
+      await ctx.deleteTestData(former);
+    });
+  });
+
+  describe("a confirmation read for longer than Prisma's default transaction timeout (round 8 F-R8-2)", () => {
+    it.skipIf(SKIP)("add --from commits after a confirmation that took six seconds", async () => {
+      const losingTenant = await ctx.createTenant();
+      const gainingTenant = await ctx.createTenant();
+      const claim = `${runToken()}.${ALIAS_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId: losingTenant, claim, createdBy: "signin" } });
+
+      const result = await cmdAdd({
+        tenant: gainingTenant,
+        domain: claim,
+        by: "test-op",
+        from: losingTenant,
+        confirm: confirmAfter(6000),
+      });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.tenantId).toBe(gainingTenant);
+
+      await ctx.deleteTestData(losingTenant);
+      await ctx.deleteTestData(gainingTenant);
+    });
+
+    it.skipIf(SKIP)("remove commits after a confirmation that took six seconds", async () => {
+      const tenantId = await ctx.createTenant();
+      const claim = `${runToken()}.${PRIMARY_CLAIM}`;
+      await ctx.su.prisma.tenantClaim.create({ data: { tenantId, claim, createdBy: "seed" } });
+
+      const result = await cmdRemove({ tenant: tenantId, domain: claim, by: "test-op", confirm: confirmAfter(6000) });
+
+      expect(result, result.message).toMatchObject({ ok: true });
+      expect((await ctx.su.prisma.tenantClaim.findUnique({ where: { claim } }))?.revokedAt).not.toBeNull();
+
+      await ctx.deleteTestData(tenantId);
     });
   });
 

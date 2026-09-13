@@ -108,7 +108,7 @@ import { enqueueAuditInTx } from "@/lib/audit/audit-outbox-in-tx";
 import { countStrandedRows } from "@/lib/tenant/stranded-rows";
 import { realignOwningTenantColumn } from "@/lib/tenant/owning-column";
 import { REALIGNMENT_SOURCE, realignToMembershipInTxWith } from "@/lib/tenant/tenant-realignment-core";
-import { MS_PER_SECOND } from "@/lib/constants/time";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "@/lib/constants/time";
 import {
   asciiPrintable, AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
 import { createPrompter } from "./lib/prompt";
@@ -164,6 +164,40 @@ export const migrationClientFactory = {
     return new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
   },
 };
+
+/**
+ * The interactive-transaction budget for the commands that await an operator's
+ * confirmation INSIDE their transaction (D-14): `add`, `remove`, `realign`.
+ *
+ * Prisma's own default is 5 s. Each of those prompts prints a warning meant to be
+ * read, and an operator who read it for longer than that got a raw
+ * "expired transaction" error with nothing written — which is how a confirmation
+ * becomes `--yes` in practice (audit-tenant-adjudicator round 8, F-R8-2). Long
+ * enough to read; short enough that a forgotten prompt does not hold a bypass
+ * transaction open indefinitely. A seam, like `migrationClientFactory`, so a test
+ * can shorten it and reach the timeout arm.
+ */
+export const confirmationTransaction = {
+  options(): { timeout: number; maxWait: number } {
+    return { timeout: 10 * MS_PER_MINUTE, maxWait: 10 * MS_PER_SECOND };
+  },
+};
+
+/** The result for a confirmation that outlived its transaction, or null for any other error. */
+function confirmationTimeoutResult(error: unknown): CmdResult | null {
+  const expired =
+    (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2028") ||
+    (error instanceof Error && /expired transaction|Transaction already closed/.test(error.message));
+  if (!expired) return null;
+  const seconds = Math.round(confirmationTransaction.options().timeout / MS_PER_SECOND);
+  return {
+    ok: false,
+    code: 1,
+    message:
+      `The confirmation took longer than this command's transaction allows (${seconds} s); nothing was written. ` +
+      "Re-run the command: it reads the current state again before asking.",
+  };
+}
 
 // `--tenant` resolution, in priority order:
 //   1. a literal UUID names the tenant directly;
@@ -1205,7 +1239,12 @@ export async function cmdAdd(args: {
         return { ok: true, code: 0, tenantId: tenant.id, claim };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      confirmationTransaction.options(),
     );
+  } catch (e) {
+    const timedOut = confirmationTimeoutResult(e);
+    if (timedOut) return timedOut;
+    throw e;
   } finally {
     await prisma.$disconnect();
   }
@@ -1333,7 +1372,12 @@ export async function cmdRemove(args: {
         return { ok: true, code: 0, tenantId: tenant.id, claim };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      confirmationTransaction.options(),
     );
+  } catch (e) {
+    const timedOut = confirmationTimeoutResult(e);
+    if (timedOut) return timedOut;
+    throw e;
   } finally {
     await prisma.$disconnect();
   }
@@ -1679,7 +1723,11 @@ export async function cmdRealign(args: {
         const select = { id: true, email: true, tenantId: true } as const;
         const users = UUID_RE.test(args.user)
           ? await tx.user.findMany({ where: { id: args.user }, select })
-          : await tx.user.findMany({ where: { email: { equals: args.user, mode: "insensitive" } }, select });
+          : // `in`, not `equals`: with `mode: "insensitive"` Prisma compiles `equals` to an
+            // unescaped ILIKE, so `_` and `%` in the typed address matched OTHER users, and
+            // realign moved one of them (round-8 R8-S1). `in` compiles to
+            // LOWER(email) IN (LOWER($1)), the comparison the application makes.
+            await tx.user.findMany({ where: { email: { in: [args.user], mode: "insensitive" } }, select });
         if (users.length === 0) {
           return { ok: false, code: 1, message: `User not found: ${escapeUnsafeDisplayChars(args.user)}` };
         }
@@ -1772,7 +1820,12 @@ export async function cmdRealign(args: {
         };
       },
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+      confirmationTransaction.options(),
     );
+  } catch (e) {
+    const timedOut = confirmationTimeoutResult(e);
+    if (timedOut) return timedOut;
+    throw e;
   } finally {
     await prisma.$disconnect();
   }
@@ -1797,6 +1850,10 @@ function printUsage(): void {
       "UUID only, and `add` refuses if it does not match the row's actual owner.",
       "realign moves a user active in no tenant onto a tenant where they hold a",
       "membership row, for the member SCIM and directory sync may not take back.",
+      "It refuses the sentinel tenant as the target, and an email that matches more",
+      "than one user (case variants of one address; name the user by UUID).",
+      "add, remove and realign ask for confirmation inside their transaction:",
+      "answer within 10 minutes, or re-run the command.",
       "",
       "MIGRATION_DATABASE_URL must be set to a privileged connection string.",
       "Example: MIGRATION_DATABASE_URL=postgresql://... npm run tenant-domain -- add --tenant acmecorp --domain alias.example --by ops-oncall",

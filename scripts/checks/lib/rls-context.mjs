@@ -18,10 +18,14 @@
  * the node is in:
  *   - an argument is evaluated before its call runs, in the context around the
  *     call. Only the function that IS the argument runs when the callee
- *     decides (round 7: a read that is itself the argument, or sits in a
- *     function nested inside the argument such as an IIFE, was trusted as
- *     running inside the context). A node evaluated at the call is stepped
- *     over; a node in a nested function is UNKNOWN — see `timingIn`;
+ *     decides, and a read inside it runs in the context only through functions
+ *     that run while it runs: an IIFE, or a function handed straight to a call
+ *     that is not a scheduler. Round 7: a read that is itself the argument, or
+ *     sits in a function nested inside the argument, was trusted. Round 8: a
+ *     closure returned or stored out of the callback, an object method, a
+ *     nested declaration or a `setTimeout` callback was trusted, and runs after
+ *     the context has closed. A node evaluated at the call is stepped over;
+ *     anything else is UNKNOWN — see `timingIn`;
  *   - an opener opens its context around its CALLBACK argument only — the
  *     position is in OPENERS. The client, tenant id and purpose are evaluated
  *     before the context exists (round 6, R49: a read inside `withBypassRls`'s
@@ -83,15 +87,57 @@ const sameNode = (a, b) => !!a && !!b && a.getStart() === b.getStart() && a.getE
 const TIMING = Object.freeze({ NOW: "now", LATER: "later", NESTED: "nested" });
 
 /**
+ * Every node that holds code which runs only when something calls it. FN_KINDS
+ * alone missed an object method and a nested `function` declaration, so a read
+ * in one read as if it ran where it was written (round 8, R8-S2).
+ */
+const FUNCTION_LIKE = new Set([
+  ...FN_KINDS,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.Constructor,
+]);
+
+/** Calls that run their function argument after the current task instead of while the caller waits. */
+const SCHEDULERS = new Set(["setTimeout", "setInterval", "setImmediate", "queueMicrotask", "nextTick"]);
+
+/**
+ * Does a function nested inside a callback run while that callback runs? Yes when
+ * it is called on the spot (an IIFE), or handed straight to a call that is not a
+ * scheduler (`.map(async …)`, `Promise.all(…)`, `.then(…)`, a helper). A function
+ * that is returned, stored, attached to an object, declared, or scheduled runs
+ * whenever something later calls it, which can be after the opener's transaction
+ * has closed (round 8, R8-S2).
+ */
+function runsInline(fnNode) {
+  let child = fnNode;
+  let parent = fnNode.getParent();
+  while (parent?.getKind() === SyntaxKind.ParenthesizedExpression) {
+    child = parent;
+    parent = parent.getParent();
+  }
+  if (parent?.getKind() !== SyntaxKind.CallExpression) return false;
+  if (sameNode(parent.getExpression(), child)) return true;
+  if (!parent.getArguments().some((arg) => sameNode(arg, child))) return false;
+  const callee = unwrapExpression(parent.getExpression());
+  const name = callee?.getKind() === SyntaxKind.PropertyAccessExpression ? callee.getName() : callee?.getText();
+  return !SCHEDULERS.has(name);
+}
+
+/**
  * When `node`, inside `arg`, runs relative to the call that `arg` is passed to.
  *
  * - NOW: evaluated while the arguments are built — `node` is the argument itself,
  *   or no function lies between them.
  * - LATER: inside the function that IS the argument, after unwrapping parentheses
- *   and type assertions. The callee decides when that runs.
- * - NESTED: inside a function written within the argument that is not the argument
- *   — an IIFE, which runs BEFORE the callee, or `pick(fn)`, whose timing this file
- *   cannot see.
+ *   and type assertions, and reached only through functions that run while it
+ *   runs (`runsInline`). The callee decides when that runs.
+ * - NESTED: anything else with a function in between — a function written within
+ *   the argument that is not the argument (an IIFE, which runs BEFORE the callee,
+ *   or `pick(fn)`, whose timing this file cannot see), or a function inside the
+ *   callback that outlives it (round 8, R8-S2).
  *
  * Round 7 (R7-S1 / F-R7-1): the walk used to start at the node's parent and answer
  * "later" at the first function it met. A node that is the argument never meets
@@ -103,10 +149,12 @@ function timingIn(node, arg) {
   if (sameNode(node, arg)) return TIMING.NOW;
   const fn = unwrapExpression(arg);
   let nested = false;
+  let outlives = false;
   for (let p = node.getParent(); p; p = p.getParent()) {
-    if (FN_KINDS.has(p.getKind())) {
-      if (sameNode(p, fn)) return TIMING.LATER;
+    if (FUNCTION_LIKE.has(p.getKind())) {
+      if (sameNode(p, fn)) return outlives ? TIMING.NESTED : TIMING.LATER;
       nested = true;
+      if (!runsInline(p)) outlives = true;
     }
     if (sameNode(p, arg)) break;
   }

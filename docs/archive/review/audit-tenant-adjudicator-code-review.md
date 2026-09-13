@@ -1657,11 +1657,12 @@ Round 7 found three problems:
 - **Action:** `resolveExistingUsersForTenant` now reports `ambiguous` with
   `ownedHere`, which is true only when every match is this tenant's.
   - Directory sync records `ambiguous_email` only in that case. For every other
-    no-membership decline it records `owned_by_another_tenant`, both live and in
-    the dry run.
+    no-membership decline it records `owned_by_another_tenant`. The dry run
+    records no reason; it counts the decline the same way (corrected in round 8,
+    F-R8-4 / T8-5).
   - The declined row still carries no user id.
 - **Red proof:**
-  - The engine ignoring `ownedHere` failed the new live/dry-run cell.
+  - The engine ignoring `ownedHere` failed the new cell, on its live assertion.
   - The classifier always reporting `ownedHere: true` failed its new cell.
 
 #### R7-T2 Major — fixtures now build the state production has
@@ -1826,3 +1827,248 @@ mutation failed exactly the cells listed.
   warning on any changed file. The three tenant gates exit 0 on the real tree.
 - Integration, with both workers stopped: 113 files / 692 tests pass, including
   the seven `realign` cells and the missing-URL cell, which now covers `realign`.
+- `scripts/pre-pr.sh` on the committed round-7 fixes first failed one check,
+  `raw-sql-usage`. The extraction moved `enqueueAuditInTx`'s raw SQL into
+  `src/lib/audit/audit-outbox-in-tx.ts`, and the allowlist names files. With that
+  file listed (commit `1aa0e566d`), every pre-PR check passes.
+
+## Round 8
+
+Reviewed range: `30fc857f7..0f1fedaf0`, the round-7 fix commits. The experts'
+raw outputs and full Recurring Issue Checks are kept in the round's working files.
+
+### Changes from Previous Round
+
+Round 7's main claims were verified. The following hold with no regression and no
+boundary widening:
+- the extraction: the audit composition, the enqueue guard and metadata bounding
+  are unchanged, and no cycle appears;
+- the single SCIM question and detail;
+- the refusal audit;
+- `ownedHere`;
+- `realign`'s refusals.
+
+Testing re-ran eleven recorded red proofs, and all reproduce. Round 8 found:
+- `realign`'s email lookup is an unescaped pattern match;
+- its confirmation prompt, and `add`'s and `remove`'s, cannot survive Prisma's
+  default 5 s transaction timeout;
+- the gate still trusts a closure that escapes the opener;
+- round 7's own NESTED cells repeat the R7-T1 blind spot;
+- the import-graph guard neither proves recursion nor sees every import spelling.
+
+### Converged across experts (severity floored by convergence)
+
+- **R8-S1 / F-R8-1 — Major, convergent security+functionality (R47/R48).**
+  `realign --user <email>` uses `equals` with `mode: "insensitive"`, which Prisma
+  compiles to `ILIKE $1` with the value unescaped. `_` and `%` are wildcards, so a
+  typo can select, and realign, a different user. The application answers the
+  same question with `LOWER(email) IN (LOWER($1))`.
+- **R8-S4 — Major (floored), convergent security+functionality.** The same
+  insensitive-`equals` shape lists another user's pending emergency-access grants
+  under a bypass: `src/app/api/emergency-access/route.ts`, grant list. It also
+  gives a false duplicate refusal and a wrong locale lookup on create, and
+  `userName` filters in `src/lib/scim/filter-parser.ts` treat the value as a
+  wildcard pattern. These predate this branch.
+- **F-R8-2 / R8-S5 — Major, convergent functionality+security.** `add`,
+  `remove` and `realign` await the operator's confirmation inside
+  `withBypassRls` without options. Prisma's default interactive-transaction
+  timeout (5 s) rolls the transaction back and raises a raw error for anyone who
+  reads the preview, which pushes operators to `--yes`. D-14's recorded cost names
+  only `idle_in_transaction_session_timeout`.
+- **R8-S2 / F-R8-5 — Major, convergent security+functionality (R47/R49).**
+  `timingIn` answers LATER for any function inside the callback. That includes a
+  returned or stored closure, an object method, a nested function declaration and
+  a `setTimeout` callback, all of which run after the context has closed. Both
+  gates pass them, and the module header claims otherwise.
+- **T8-1 / R8-S3 — Major, convergent testing+security (RT7/R47).** The
+  import-graph guard's control cell is one hop, so a walker that never recurses
+  passes it. A single-quoted specifier, a `.js` specifier and a template-literal
+  `import()` all escape the regexes; the CLI crashes on boot while the guard stays
+  green. Unresolved specifiers are skipped silently.
+- **F-R8-4 / T8-5 — Major (floored from Minor), convergent
+  functionality+testing (R29).** The round-7 record says sync records the
+  ownership reason "live and in the dry run", but the dry run only counts. The
+  dry-run half of that cell cannot fail for `ownedHere`.
+
+### Testing findings
+
+- **T8-2 — Major (RT7, the R7-T1 class in round 7's new cells).** No NESTED deny
+  cell sits inside an outer opener that would exempt the read. A wrong NOW for a
+  helper-deferred function therefore passes every self-test.
+- **T8-3 — Minor.** The POST "no uniqueness read" cell pins one mock method; a
+  `count`-based read passes it.
+- **T8-4 — Minor (RT10/RT8).** Several of `realign`'s refusals and targets have no
+  integration cell: ambiguous email, sentinel target, not-found, a claim or
+  external-id target. Nor are `leftBehind` and the rows' `targetId` asserted.
+
+### Functionality findings
+
+- **F-R8-3 — Minor (R12/R29).** `SCIM_USER_REACTIVATION_REFUSED` is in the tenant
+  SCIM group but not the team one, and a test comment still says both sides hold
+  the same 8 actions. `docs/operations/audit-log-reference.md` lists none of the
+  branch's three new actions.
+- **F-R8-6 — Minor (R29).** The README and the usage text omit `realign`'s
+  sentinel-tenant refusal.
+
+### Resolution Status — round 8
+
+#### R8-S1 / F-R8-1 Major (convergent) — email matching is exact and case-insensitive, never a pattern (with R8-S4)
+
+- **Action, `realign`:** `tenant-domain realign --user <email>` now resolves with
+  `{ in: [email], mode: "insensitive" }`. Prisma compiles that to
+  `LOWER(email) IN (LOWER($1))`, the application's comparison. `_`, `%` and `\` in
+  the typed address match themselves only. More than one match can now only mean
+  case variants of one address, which the refusal already names.
+- **R8-S4, emergency-access:** all three lookups use the same form:
+  - the duplicate-grant check;
+  - the grantee locale lookup;
+  - the pending-grant list served under a bypass.
+- **R8-S4, SCIM filter:** `userName eq` matches exactly. `co` and `sw` escape the
+  pattern characters through `escapeLikePattern` in
+  `src/lib/prisma/prisma-filters.ts`.
+- **Shared helper:** the team members search, which carried the same escape
+  inline, now uses `escapeLikePattern` too. Its doc records which form to use for
+  which question.
+- **Cross-cutting check:** no insensitive `equals` remains in `src`.
+
+#### F-R8-2 / R8-S5 Major (convergent) — a confirmation can take as long as a human needs
+
+- **Action:** `add`, `remove` and `realign` pass an explicit transaction budget
+  from `confirmationTransaction` in `scripts/tenant-domain.ts`, which allows
+  10 minutes with a 10 s `maxWait`.
+  - It is a seam, like `migrationClientFactory`.
+  - A confirmation that outlives the budget returns a named `CmdResult` rather
+    than a raw Prisma error. The result is recognised by `P2028` or the
+    expired-transaction message, and nothing is written.
+  - The prompt stays inside the transaction, so D-14's TOCTOU argument stands.
+    D-14 has an addendum recording the limit it missed.
+  - The README and the usage text state the budget.
+
+#### R8-S2 / F-R8-5 Major (convergent) and T8-2 Major — only functions that run while the callback runs inherit its context
+
+- **Action:** `timingIn` returns LATER only when every function between the read
+  and the callback runs while the callback runs:
+  - an IIFE; or
+  - a function handed straight to a call that is not a scheduler (`setTimeout`,
+    `setInterval`, `setImmediate`, `queueMicrotask`, `nextTick`).
+- A closure returned or stored out of the callback, an object method, a nested
+  declaration, or a scheduled callback is NESTED, and so UNKNOWN.
+- Methods, function declarations, accessors and constructors now count as
+  function-like.
+- The module header states the rule.
+- **Cells:** deny cells for each shape in both gates, and an IIFE-inside-callback
+  allow cell.
+- **T8-2:** a helper-deferred read now sits inside an OUTER opener that would
+  exempt it, in both gates. A wrong NOW there reads as exempt instead of refused.
+- **Real tree:** all three gates still pass, with no new manifest entry.
+
+#### T8-1 / R8-S3 Major (convergent) — the import guard asks the compiler
+
+- **Action:** `tenant-domain-import-graph.test.ts` now:
+  - reads specifiers from TypeScript's AST (imports that are not type-only,
+    re-exports, import-equals, `require`, dynamic `import()`);
+  - resolves them with `ts.resolveModuleName` under the repo tsconfig;
+  - reports every local specifier that does not resolve, and every `import()` of
+    a non-literal.
+- **Walker cells:** its own fixture project covers:
+  - a three-hop chain;
+  - a single-quoted specifier, a `.js` specifier, `export *`, import-equals,
+    `require`, a template-literal `import()`, two statements on one line, and a
+    multi-line import with an inline type;
+  - a type-only import (not counted);
+  - an unresolved specifier and an opaque dynamic import (both reported).
+- **Real CLI:** the cell for the actual CLI asserts both no chain and nothing
+  unresolved.
+
+#### F-R8-4 / T8-5 Major (floored) — the record says what the dry run does
+
+- **Action:** the R7-S2 entry now says that the dry run records no reason and only
+  counts the decline, and its red-proof line names the live assertion.
+- **Cell name:** the engine cell's name now claims only the dry-run count.
+
+#### F-R8-3, F-R8-6, T8-3, T8-4 Minor
+
+- **F-R8-3:** the SCIM-group test comment no longer claims both sides hold the same
+  eight actions. `SCIM_USER_REACTIVATION_REFUSED` stays tenant-only, because it is
+  a tenant refusal. `docs/operations/audit-log-reference.md` now lists all three
+  of the branch's new actions in their groups.
+- **F-R8-6:** the README and the usage text name the sentinel-tenant refusal.
+- **T8-3:** the POST "no uniqueness read" cell pins both tenant-member methods the
+  bypass client offers, and the number of bypasses per provision.
+- **T8-4:** new `realign` integration cells:
+  - `_` and `%` in `--user` match nobody;
+  - an address naming two case variants is refused, and neither user moves;
+  - the sentinel tenant is refused as a target;
+  - a target given by its claim is realigned, with `leftBehind` (a seeded
+    stranded tag) and both rows' `targetId` asserted;
+  - a confirmation past a shortened budget is named, and nothing is written.
+- **F-R8-2 cells:** `realign`, `add --from` and `remove` each commit after a
+  six-second confirmation.
+
+#### Red proof — round 8
+
+Run in a worktree copy. Each mutation was applied on its own, and the table lists
+every cell that failed under it.
+
+| Mutation | Cells that failed |
+|---|---|
+| SCIM `eq` back to insensitive `equals` | the exact-match cell |
+| SCIM `co` not escaped | the escape cell |
+| emergency-access duplicate check back to `equals` | the POST exact-address cell |
+| emergency-access pending list back to `equals` | the GET exact-address cell |
+| `escapeLikePattern` drops `\\` | its metacharacter cell |
+| every nested function treated as inline (the round-7 rule) | the nine new deny cells across both gates |
+| IIFE form dropped | the two IIFE allow cells |
+| call-argument form dropped | the `.map`, non-opener-helper and wrapper-spread allow cells, which all hand a function straight to a call |
+| no schedulers | the two scheduler cells |
+| NESTED becomes NOW | the two outer-opener helper-deferred cells (T8-2) |
+| methods and declarations not function-like | the four method/declaration cells |
+| walker does not recurse | the three-hop control |
+| type-only imports counted | the type-only cell and the real-CLI cell |
+| unresolved specifiers skipped | the unresolved cell |
+| opaque dynamic imports ignored | the opaque-import cell |
+| `require` not seen | the `require` cell |
+| POST uniqueness read restored as a `count` | the absence cell |
+
+Integration (real database, app role, workers stopped):
+
+| Mutation | Cells that failed |
+|---|---|
+| `realign` email back to ILIKE | the `_`/`%` cell |
+| confirmation budget not passed | the named-timeout cell, and the three six-second cells for `realign`, `add` and `remove` |
+| expired confirmation not caught | the named-timeout cell |
+| sentinel refusal removed | the sentinel cell |
+| SCIM `eq` back to ILIKE | the SCIM literal-filter cell |
+| SCIM `co`/`sw` not escaped | the SCIM literal-filter cell |
+
+#### Found while red-proving — the integration cleanup did not delete tags
+
+- The new claim-target cell passed its assertions but failed in cleanup, at
+  baseline and under every mutation.
+  - It seeds a tag under `owning`, and `realign` then moves the user to `former`.
+  - `deleteTestData(owning)` deletes users by tenant, and that no longer covers
+    the moved user. It never deleted `tags`, which reference `tenants` with
+    `RESTRICT`, so the tenant delete failed with `23503`.
+- This is the stranded-row state `realign` exists to report, so the helper now
+  deletes `tags` by tenant after the personal password entries.
+- The cell passes with the fix.
+- The failing runs left eight test tenants on the dev database, each holding only
+  one `audit_outbox` row. They are identified and have not been removed.
+
+#### Also in a file this round touched — the SSO deviation log's citations
+
+- `docs/archive/review/sso-tenant-domain-alias-deviation.md` received the D-14
+  addendum above.
+- The citation gate run over it reported five partial-path citations that were
+  already MISSING at `1aa0e566d`.
+- Each now gives the full path and names its subject (a function or a test case).
+  The two that point at deleted test cases say they were deleted, so the historical
+  record keeps its meaning.
+- The gate passes over both documents.
+
+#### Round 8 verification
+
+- **Unit:** 1034 files / 15712 tests pass, and `next build` passes. eslint reports
+  nothing on any changed file. The three tenant gates exit 0 on the real tree.
+- **Integration:** 113 files / 701 tests pass, with both workers stopped.
+- **Citation gate:** passes over this document and the SSO deviation log.

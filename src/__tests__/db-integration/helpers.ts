@@ -606,6 +606,14 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM password_entries WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // Tags FK to tenants with RESTRICT. A tag is normally removed with its user,
+      // but a user realigned to another tenant leaves their tags filed under this
+      // one — the stranded rows `realign` reports — and the users delete below no
+      // longer reaches them (audit-tenant-adjudicator round 8).
+      await tx.$executeRawUnsafe(
+        `DELETE FROM tags WHERE tenant_id = $1::uuid`,
+        tenantId,
+      );
       // SCIM mappings FK to tenants with RESTRICT, and directory sync and the SCIM
       // routes write them: without this the tenant delete below fails and the
       // tenant leaks onto the shared database.

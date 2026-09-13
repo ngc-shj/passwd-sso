@@ -47,7 +47,9 @@ async function handlePOST(req: NextRequest) {
     prisma.emergencyAccessGrant.findFirst({
       where: {
         ownerId: session.user.id,
-        granteeEmail: { equals: granteeEmail, mode: "insensitive" },
+        // `in`, not `equals`: insensitive `equals` is an unescaped ILIKE, so `_` or
+        // `%` in the address matched other grants (round-8 R8-S4).
+        granteeEmail: { in: [granteeEmail], mode: "insensitive" },
         status: { notIn: [EA_STATUS.REVOKED, EA_STATUS.REJECTED] },
       },
     }),
@@ -83,7 +85,7 @@ async function handlePOST(req: NextRequest) {
   // Best-effort: look up grantee's locale (bypass RLS — grantee may be in another tenant)
   const granteeUser = await withBypassRls(prisma, async (tx) =>
     tx.user.findFirst({
-      where: { email: { equals: granteeEmail, mode: "insensitive" } },
+      where: { email: { in: [granteeEmail], mode: "insensitive" } },
       select: { locale: true },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -119,7 +121,11 @@ async function handleGET() {
           { ownerId: session.user.id },
           { granteeId: session.user.id },
           {
-            granteeEmail: { equals: sessionEmail, mode: "insensitive" },
+            // Exact address, case-insensitively. Insensitive `equals` is an unescaped
+            // ILIKE: a session email with `_` where another grantee's address has any
+            // character listed that grantee's pending grants, with the owner's
+            // identity, across tenants (round-8 R8-S4).
+            granteeEmail: { in: [sessionEmail], mode: "insensitive" },
             status: EA_STATUS.PENDING,
           },
         ],

@@ -9,6 +9,7 @@ import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, unauthorized, validationError } from "@/lib/http/api-response";
 import { SEARCH_QUERY_MAX_LENGTH } from "@/lib/validations/common";
 import { TEAM_MEMBER_SEARCH_LIMIT } from "@/lib/validations/common.server";
+import { escapeLikePattern } from "@/lib/prisma/prisma-filters";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -36,7 +37,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   // Escape LIKE wildcards to prevent full-table scans
-  const query = parsed.data.replace(/[%_\\]/g, "\\$&");
+  const query = escapeLikePattern(parsed.data);
 
   let results: { id: string; name: string | null; email: string | null; image: string | null }[];
   try {

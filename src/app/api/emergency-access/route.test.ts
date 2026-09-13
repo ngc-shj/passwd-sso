@@ -98,6 +98,23 @@ describe("POST /api/emergency-access", () => {
     expect(res.status).toBe(400);
   });
 
+  it("matches an existing grant and the grantee's locale by exact address, not as a pattern", async () => {
+    // Round-8 R8-S4: insensitive `equals` compiles to an unescaped ILIKE, so `_` and
+    // `%` in an address matched other grants and other users.
+    const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
+      body: { granteeEmail: "gr_ntee@test.com", waitDays: 7 },
+    }));
+    expect(res.status).toBe(201);
+    expect(mockPrismaGrant.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ granteeEmail: { in: ["gr_ntee@test.com"], mode: "insensitive" } }),
+      }),
+    );
+    expect(mockPrismaUser.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { email: { in: ["gr_ntee@test.com"], mode: "insensitive" } } }),
+    );
+  });
+
   it("returns 409 for duplicate grant", async () => {
     mockPrismaGrant.findFirst.mockResolvedValue({ id: "existing" });
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
@@ -177,5 +194,24 @@ describe("GET /api/emergency-access", () => {
     // Token hash is never exposed in GET
     expect(json[0].token).toBeUndefined();
     expect(json[0].tokenHash).toBeUndefined();
+  });
+
+  it("lists pending grants addressed to this user by exact address, not as a pattern", async () => {
+    // Round-8 R8-S4: a session email with `_` matched another grantee's pending
+    // grants, and the owner's identity with them.
+    mockAuth.mockResolvedValue({ user: { id: "user-1", email: "us_r@test.com" } });
+    mockPrismaGrant.findMany.mockResolvedValue([]);
+
+    await GET();
+
+    expect(mockPrismaGrant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: expect.arrayContaining([
+            { granteeEmail: { in: ["us_r@test.com"], mode: "insensitive" }, status: EA_STATUS.PENDING },
+          ]),
+        },
+      }),
+    );
   });
 });

@@ -16,7 +16,8 @@ match the running system.
 
 **Plan (C1 acceptance criteria)**: a CHECK violation is asserted via
 `$executeRawUnsafe` and `P2010` with `meta.code === "23514"`, "the shape
-`audit-outbox-concurrent-delivery.integration.test.ts:36-49` already uses".
+`src/__tests__/db-integration/audit-outbox-concurrent-delivery.integration.test.ts` already uses"
+(lines 36–49 of that file as it stood then; it no longer carries that shape).
 
 **Measured**: under this repo's `@prisma/adapter-pg` driver adapter, the SQLSTATE
 is nested at `meta.driverAdapterError.cause.code`, not `meta.code`.
@@ -101,7 +102,9 @@ maps it to `provider_error` with no write.
 — the first `P2002` leaves the Prisma interactive transaction in `ERROR` and every
 follow-up statement returns `25P02`, so the "return null" branch was unreachable
 in the shape it was written. The plan already deletes the corresponding test
-(`tenant-management.test.ts:111`) as an unreachable path. Propagating is the loud
+(the unit case in `src/lib/tenant/tenant-management.test.ts` that returned null on a
+double P2002 collision, since deleted — the file's own comment records it) as an
+unreachable path. Propagating is the loud
 outcome; swallowing it would re-create a silent deny with no diagnostic.
 
 ### D-5a — a second stale C4 acceptance criterion, same cause
@@ -114,7 +117,8 @@ row is created."*
 That path is unreachable under the implemented control flow, for the same reason
 `:111` was deleted (D-5): the advisory lock plus the `findClaimRow` read **before**
 the create mean an already-registered claim never reaches `tenant.create()` at all
-— it returns at `tenant-management.ts:98-105`. The outcome the criterion cares
+— `findOrCreateTenantForClaim` in `src/lib/tenant/tenant-management.ts` returns the
+owner from its `findClaimRow` read before any create. The outcome the criterion cares
 about (no second tenant row; the caller gets the owning tenant) *is* tested, by
 the first unit case and by the `raceTwoClients` integration proof; only the plan's
 stated *mechanism* (`P2002` → recover → re-resolve) is stale, and it is stale
@@ -237,8 +241,8 @@ resolver through the seam. That is covered instead by
 `src/lib/tenant/tenant-management.test.ts` and
 `src/lib/tenant/resolve-tenant-by-claim.test.ts` (unit) plus
 `src/__tests__/db-integration/tenant-claim.integration.test.ts` (real Postgres,
-including the `raceTwoClients` advisory-lock proof). The old P2002-retry case at
-`auth.test.ts:372-396` was dropped rather than retargeted, because its mechanics
+including the `raceTwoClients` advisory-lock proof). The old P2002-retry case in
+`src/auth.test.ts` was dropped rather than retargeted, because its mechanics
 are now entirely internal to `findOrCreateTenantForClaim`; its equivalent exists
 in C4's own suite.
 
@@ -290,6 +294,13 @@ a slow operator gets the transaction killed mid-flow.
   — reintroduces a TOCTOU window into exactly the revoked-claim ownership logic
   that four review rounds just settled. Trading a loud, recoverable failure for a
   silent race in the D2 path is the wrong direction.
+
+**Addendum (audit-tenant-adjudicator round 8, F-R8-2)**: the recorded cost missed the
+nearer limit. Prisma's interactive transactions default to a 5 s timeout on every
+deployment, so reading the warning for longer than that rolled the transaction back
+with a raw error. `add`, `remove` and `realign` now pass an explicit budget
+(`confirmationTransaction` in `scripts/tenant-domain.ts`, 10 minutes) and report an
+expired confirmation by name. The trade-off above is unchanged.
 
 Flagged for Phase 3 as a candidate hardening, not as a defect.
 
@@ -359,8 +370,9 @@ schema's source of truth. The class, enumerated properly this time, is: the Zod
 schema comment (was stale, fixed), the env sidecar (fixed earlier), `.env.example`
 (generated from the sidecar), `docs/security/audit-log-schema.md` (correct — it
 describes the empty-key HMAC explicitly as *"before C8"*), and
-`auth-failure.test.ts:114` (correct — it asserts the derived hash *differs from*
-an empty-key HMAC). The plan and review documents also mention it and are
+the "unset pepper + AUTH_SECRET set: stable, and differs from the empty-key HMAC of
+the same input" case in `src/lib/audit/auth-failure.test.ts` (correct — it asserts
+the derived hash *differs from* an empty-key HMAC). The plan and review documents also mention it and are
 historical records that must not be rewritten.
 
 **R2 — the printable-ASCII predicate had four copies, one drift-guarded.** The

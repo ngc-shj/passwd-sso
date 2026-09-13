@@ -1,65 +1,183 @@
-import { describe, it, expect } from "vitest";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { describe, it, expect, afterEach } from "vitest";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
+import ts from "typescript";
 
 /**
  * `scripts/tenant-domain.ts` runs on MIGRATION_DATABASE_URL alone. `src/lib/prisma.ts`
  * builds the application pool when it is imported and throws without DATABASE_URL,
  * so a runtime import that reaches it breaks every command on an operator host —
  * and `realign` (round-7 F-R7-2) is the command that most needed the modules which
- * import it. This walks the file's runtime import graph and fails on any path to
- * the singleton.
+ * import it.
+ *
+ * Round 8 (T8-1 / R8-S3): the first version read import text with regexes and
+ * resolved paths by hand. A single-quoted specifier and a `.js` specifier both
+ * crashed the CLI on boot while the guard stayed green, unresolved specifiers were
+ * skipped without a word, and its control cell was one hop deep, so a walker that
+ * never recursed passed it. Specifiers now come from the compiler's own AST and
+ * resolve through `ts.resolveModuleName` under the repo tsconfig; anything local
+ * that does not resolve, and any `import()` of a non-literal, fails the walk.
  */
 const REPO = join(__dirname, "..", "..");
-const SINGLETON = join(REPO, "src", "lib", "prisma.ts");
 
-function resolveSpecifier(spec: string, from: string): string | null {
-  let base: string;
-  if (spec.startsWith("@/")) base = join(REPO, "src", spec.slice(2));
-  else if (spec.startsWith(".")) base = resolve(dirname(from), spec);
-  else return null;
-  for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts")]) {
-    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
-  }
-  return null;
+type Walk = { chains: string[]; unresolved: string[] };
+
+function compilerOptions(root: string): ts.CompilerOptions {
+  const file = ts.findConfigFile(root, ts.sys.fileExists, "tsconfig.json");
+  if (!file) throw new Error(`no tsconfig.json under ${root}`);
+  const { config, error } = ts.readConfigFile(file, ts.sys.readFile);
+  if (error) throw new Error(ts.flattenDiagnosticMessageText(error.messageText, "\n"));
+  return ts.parseJsonConfigFileContent(config, ts.sys, dirname(file)).options;
 }
 
-/** Every runtime import specifier in `source`: static (not `import type`), re-exports, side-effect and dynamic imports. */
-function runtimeSpecifiers(source: string): string[] {
+function isTypeOnlyImport(decl: ts.ImportDeclaration): boolean {
+  const clause = decl.importClause;
+  if (!clause) return false; // side-effect import
+  if (clause.isTypeOnly) return true;
+  const bindings = clause.namedBindings;
+  // `import { type A, type B } from` is elided entirely; one value binding keeps it.
+  return !clause.name && !!bindings && ts.isNamedImports(bindings) && bindings.elements.length > 0 && bindings.elements.every((e) => e.isTypeOnly);
+}
+
+function isTypeOnlyExport(decl: ts.ExportDeclaration): boolean {
+  if (decl.isTypeOnly) return true;
+  const clause = decl.exportClause;
+  return !!clause && ts.isNamedExports(clause) && clause.elements.length > 0 && clause.elements.every((e) => e.isTypeOnly);
+}
+
+/** Every runtime module specifier in `file`, and every dynamic import this cannot read. */
+function runtimeSpecifiers(file: string): { specs: string[]; opaque: string[] } {
+  const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
   const specs: string[] = [];
-  for (const m of source.matchAll(/^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s+"([^"]+)"/gm)) specs.push(m[1]);
-  for (const m of source.matchAll(/^\s*import\s+"([^"]+)"/gm)) specs.push(m[1]);
-  for (const m of source.matchAll(/\bimport\(\s*"([^"]+)"\s*\)/g)) specs.push(m[1]);
-  return specs;
+  const opaque: string[] = [];
+  const literal = (node: ts.Node | undefined) =>
+    node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) ? node.text : null;
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node) && !isTypeOnlyImport(node)) {
+      const s = literal(node.moduleSpecifier);
+      if (s) specs.push(s);
+    } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && !isTypeOnlyExport(node)) {
+      const s = literal(node.moduleSpecifier);
+      if (s) specs.push(s);
+    } else if (ts.isImportEqualsDeclaration(node) && !node.isTypeOnly && ts.isExternalModuleReference(node.moduleReference)) {
+      const s = literal(node.moduleReference.expression);
+      if (s) specs.push(s);
+    } else if (ts.isCallExpression(node)) {
+      const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
+      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
+      if (isDynamicImport || isRequire) {
+        const s = literal(node.arguments[0]);
+        if (s) specs.push(s);
+        else opaque.push(`${relative(REPO, file)}: ${node.getText(source).slice(0, 80)}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return { specs, opaque };
 }
 
-function pathsToSingleton(entry: string): string[] {
-  const found: string[] = [];
+/** Every runtime import chain from `entry` to `target`, and every local specifier that did not resolve. */
+function walkImports(entry: string, target: string, options: ts.CompilerOptions, root: string): Walk {
+  const chains: string[] = [];
+  const unresolved: string[] = [];
   const seen = new Set<string>();
   const walk = (file: string, chain: string[]) => {
     if (seen.has(file)) return;
     seen.add(file);
-    for (const spec of runtimeSpecifiers(readFileSync(file, "utf8"))) {
-      const target = resolveSpecifier(spec, file);
-      if (!target) continue;
-      if (target === SINGLETON) {
-        found.push([...chain, file, target].map((f) => relative(REPO, f)).join(" -> "));
+    const { specs, opaque } = runtimeSpecifiers(file);
+    unresolved.push(...opaque);
+    for (const spec of specs) {
+      const resolved = ts.resolveModuleName(spec, file, options, ts.sys).resolvedModule;
+      const isLocal = spec.startsWith(".") || spec.startsWith("@/");
+      if (!resolved) {
+        if (isLocal) unresolved.push(`${relative(root, file)}: "${spec}"`);
         continue;
       }
-      walk(target, [...chain, file]);
+      if (resolved.isExternalLibraryImport) continue;
+      const next = resolved.resolvedFileName;
+      if (next === target) {
+        chains.push([...chain, file, next].map((f) => relative(root, f)).join(" -> "));
+        continue;
+      }
+      walk(next, [...chain, file]);
     }
   };
   walk(entry, []);
-  return found;
+  return { chains, unresolved };
 }
 
 describe("scripts/tenant-domain.ts import graph", () => {
-  it("never reaches the application's Prisma singleton at runtime", () => {
-    expect(pathsToSingleton(join(REPO, "scripts", "tenant-domain.ts"))).toEqual([]);
+  it("never reaches the application's Prisma singleton at runtime, and resolves every local import", () => {
+    const result = walkImports(
+      join(REPO, "scripts", "tenant-domain.ts"),
+      join(REPO, "src", "lib", "prisma.ts"),
+      compilerOptions(REPO),
+      REPO,
+    );
+    expect(result).toEqual({ chains: [], unresolved: [] });
+  });
+});
+
+describe("the import walker itself (round 8 T8-1)", () => {
+  let root: string;
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  /** A throwaway project whose `@/` maps to `src/`, as the repo's does. */
+  function project(files: Record<string, string>) {
+    root = mkdtempSync(join(tmpdir(), "import-graph-"));
+    writeFileSync(
+      join(root, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { baseUrl: ".", paths: { "@/*": ["./src/*"] }, module: "esnext", moduleResolution: "bundler", allowJs: true } }),
+    );
+    for (const [rel, body] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, rel)), { recursive: true });
+      writeFileSync(join(root, rel), body);
+    }
+    return walkImports(join(root, "entry.ts"), join(root, "src", "lib", "prisma.ts"), compilerOptions(root), root);
+  }
+  const SINGLETON = { "src/lib/prisma.ts": "export const prisma = {};\n" };
+
+  it("follows imports past the first file (control: three hops)", () => {
+    const { chains } = project({
+      ...SINGLETON,
+      "entry.ts": 'import { a } from "./src/a";\nexport const x = a;\n',
+      "src/a.ts": 'import { b } from "@/b";\nexport const a = b;\n',
+      "src/b.ts": 'import { prisma } from "@/lib/prisma";\nexport const b = prisma;\n',
+    });
+    expect(chains).toEqual(["entry.ts -> src/a.ts -> src/b.ts -> src/lib/prisma.ts"]);
   });
 
-  it("does see the singleton through a module that imports it (control)", () => {
-    // Without this, a walker that resolved nothing would pass the cell above.
-    expect(pathsToSingleton(join(REPO, "src", "lib", "tenant", "tenant-realignment.ts"))).not.toEqual([]);
+  it.each([
+    ["a single-quoted specifier", "import { prisma } from '@/lib/prisma';\n"],
+    ["a .js specifier", 'import { prisma } from "./src/lib/prisma.js";\n'],
+    ["a re-export of everything", 'export * from "./src/lib/prisma";\n'],
+    ["an import-equals require", 'import p = require("./src/lib/prisma");\n'],
+    ["a require call", 'const p = require("./src/lib/prisma");\n'],
+    ["a template-literal dynamic import", "export const load = () => import(`@/lib/prisma`);\n"],
+    ["a second import on one line", 'const a = 1; import { prisma } from "@/lib/prisma";\n'],
+    ["a multi-line import with an inline type", 'import {\n  type Unused,\n  prisma,\n} from "@/lib/prisma";\n'],
+  ])("sees %s", (_label, entry) => {
+    expect(project({ ...SINGLETON, "entry.ts": entry }).chains).toHaveLength(1);
+  });
+
+  it("does not count a type-only import, which is erased", () => {
+    const { chains, unresolved } = project({
+      ...SINGLETON,
+      "entry.ts": 'import type { prisma } from "@/lib/prisma";\nimport { type prisma as p2 } from "./src/lib/prisma";\n',
+    });
+    expect({ chains, unresolved }).toEqual({ chains: [], unresolved: [] });
+  });
+
+  it("reports a local specifier it cannot resolve instead of skipping it", () => {
+    expect(project({ ...SINGLETON, "entry.ts": 'import { gone } from "./src/missing";\n' }).unresolved).toEqual([
+      'entry.ts: "./src/missing"',
+    ]);
+  });
+
+  it("reports a dynamic import of something it cannot read", () => {
+    const { unresolved } = project({ ...SINGLETON, "entry.ts": "export const load = (m: string) => import(m);\n" });
+    expect(unresolved).toHaveLength(1);
   });
 });

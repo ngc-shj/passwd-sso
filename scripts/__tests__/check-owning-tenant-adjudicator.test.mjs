@@ -604,3 +604,51 @@ describe("check-owning-tenant-adjudicator — a wrong null cannot hide behind an
     expect(run().code).toBe(1);
   });
 });
+
+describe("check-owning-tenant-adjudicator — a function that outlives the callback does not run in its context (round 8 R8-S2/T8-2)", () => {
+  const TENANT_SCOPED_FILE = { "src/lib/thing.ts": { disposition: "tenant-scoped" } };
+  const inTenant = (body) => `export const f = () => withUserTenantRls(userId, async (tx) => ${body});\n`;
+
+  it("does not treat a closure returned out of the callback as tenant-scoped", () => {
+    write("src/lib/thing.ts", inTenant(`async () => {\n${RAW_READ}}`));
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code).toBe(1);
+    expect(out).toContain("OUTSIDE any tenant-scoped context");
+  });
+
+  it("does not treat an object method built in the callback as tenant-scoped", () => {
+    write("src/lib/thing.ts", inTenant(`({ async load() {\n${RAW_READ}} })`));
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not treat a function declared in the callback as tenant-scoped", () => {
+    write("src/lib/thing.ts", inTenant(`{\n  async function load() {\n${RAW_READ}}\n  return load;\n}`));
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("does not treat a callback handed to a scheduler as tenant-scoped", () => {
+    write("src/lib/thing.ts", inTenant(`{\n  setTimeout(async () => {\n${RAW_READ}}, 0);\n}`));
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+
+  it("passes a read in an IIFE inside the callback", () => {
+    write("src/lib/thing.ts", inTenant(`{\n  await (async () => {\n${RAW_READ}})();\n}`));
+    manifest(TENANT_SCOPED_FILE);
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+    expect(out).toContain("no unconstrained read");
+  });
+
+  it("does not let an outer tenant opener answer for a function a helper receives inside an inner bypass callback", () => {
+    write(
+      "src/lib/thing.ts",
+      `export const f = () => withUserTenantRls(userId, async () => withBypassRls(prisma, pick(async (tx) => {\n${RAW_READ}}), PURPOSE));\n`,
+    );
+    manifest(TENANT_SCOPED_FILE);
+    expect(run().code).toBe(1);
+  });
+});

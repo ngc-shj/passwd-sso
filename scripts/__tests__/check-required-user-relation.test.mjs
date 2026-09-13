@@ -712,3 +712,50 @@ describe("check-required-user-relation — spreads that hide nothing (round 7 R7
     expect(code, out).toBe(0);
   });
 });
+
+describe("check-required-user-relation — a function that outlives the callback does not run in its context (round 8 R8-S2/T8-2)", () => {
+  const READ = "tx.tenantMember.findMany({ include: { user: true } })";
+  const inBypass = (body) => `export const f = (ids) => withBypassRls(prisma, async (tx) => ${body}, PURPOSE);\n`;
+
+  it("does not trust a closure returned out of the callback", () => {
+    // Called after withBypassRls has resolved, with no context at all.
+    write("src/lib/a.ts", inBypass(`() => ${READ}`));
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a closure stored and handed out of the callback", () => {
+    write("src/lib/a.ts", inBypass(`{\n  const later = () => ${READ};\n  return later;\n}`));
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust an object method built in the callback", () => {
+    write("src/lib/a.ts", inBypass(`({ load() {\n  return ${READ};\n} })`));
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a function declared in the callback", () => {
+    write("src/lib/a.ts", inBypass(`{\n  function load() {\n    return ${READ};\n  }\n  return load;\n}`));
+    expect(run().code).toBe(1);
+  });
+
+  it("does not trust a callback handed to a scheduler", () => {
+    write("src/lib/a.ts", inBypass(`{\n  setTimeout(() => ${READ}, 0);\n}`));
+    expect(run().code).toBe(1);
+  });
+
+  it("passes a read in an IIFE inside the callback", () => {
+    write("src/lib/a.ts", inBypass(`(async () => ${READ})()`));
+    const { code, out } = run();
+    expect(code, out).toBe(0);
+  });
+
+  it("does not let an outer bypass answer for a function a helper receives inside an inner tenant callback", () => {
+    // T8-2: with no outer opener, a wrong NOW and a correct UNKNOWN both refuse.
+    // Here a wrong NOW walks on to the bypass and reads as exempt.
+    write(
+      "src/lib/a.ts",
+      `export const f = (t) => withBypassRls(prisma, async () => withTenantRls(prisma, t, pick(async (tx) => ${READ})), PURPOSE);\n`,
+    );
+    expect(run().code).toBe(1);
+  });
+});

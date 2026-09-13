@@ -292,4 +292,20 @@ describe("SCIM — users filed under another tenant (real DB)", () => {
     const { id } = await res.json();
     expect((await userRow(id)).tenant_id).toBe(here);
   });
+
+  it("matches a userName filter literally: `_` and `%` are not wildcards", async () => {
+    // Round-8 R8-S4: insensitive `equals` / `contains` / `startsWith` were unescaped
+    // ILIKE patterns.
+    const member = await ctx.createUser(here);
+    const { email } = await userRow(member);
+    const underscored = `_${email.slice(1)}`;
+    const total = async (filter: string) => (await (await scimGet(filter)).json()).totalResults;
+
+    expect(await total(`userName eq "${underscored}"`)).toBe(0);
+    expect(await total(`userName co "%"`)).toBe(0);
+    expect(await total(`userName sw "${underscored.slice(0, 3)}"`)).toBe(0);
+    // The allow side: the address in another case, and a literal prefix, still match.
+    expect(await total(`userName eq "${email.toUpperCase()}"`)).toBe(1);
+    expect(await total(`userName sw "${email.slice(0, 3)}"`)).toBe(1);
+  });
 });

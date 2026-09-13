@@ -1456,7 +1456,7 @@ describe("runDirectorySync", () => {
       expect(result).toMatchObject({ usersCreated: 0, usersRefused: 1 });
     });
 
-    it("declines case variants that include another tenant's user under the ownership reason, live and on a dry run", async () => {
+    it("declines case variants that include another tenant's user under the ownership reason, and counts the decline on a dry run", async () => {
       // Round-7 R7-S2: "ambiguous_email" for such an email told this tenant that
       // another tenant holds a case variant of it — the distinction SCIM POST no
       // longer gives.
@@ -1487,6 +1487,7 @@ describe("runDirectorySync", () => {
         }),
       ]);
 
+      // The dry run records no reasons; it can only count the decline (round-8 T8-5).
       seed();
       expect(await runDirectorySync({ ...BASE_OPTIONS, dryRun: true })).toMatchObject({ usersCreated: 0, usersRefused: 1 });
     });

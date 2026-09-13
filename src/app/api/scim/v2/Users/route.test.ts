@@ -270,7 +270,7 @@ describe("GET /api/scim/v2/Users", () => {
     const { where } = mockGuardMember.findMany.mock.calls[0][0];
     expect(where.AND[0]).toEqual({ tenantId: "tenant-1" });
     expect(where.AND).toContainEqual({
-      user: { is: { email: { equals: "u@example.com", mode: "insensitive" } } },
+      user: { is: { email: { in: ["u@example.com"], mode: "insensitive" } } },
     });
     expect(mockGuardMember.count).toHaveBeenCalledWith({ where });
     expect(mockWithTenantRls).not.toHaveBeenCalled();
@@ -401,7 +401,12 @@ describe("POST /api/scim/v2/Users", () => {
 
     expect((await POST(postReq("own@example.com", { active: false }))).status).toBe(201);
     expect((await POST(postReq("own@example.com"))).status).toBe(201);
+    // Pinned by every tenant-member read the bypass client offers, and by the
+    // bypasses themselves: the ownership read and the resource read-back, per
+    // provision. One method alone let a `count`-based read back in (round-8 T8-3).
     expect(mockGuardMember.findMany).not.toHaveBeenCalled();
+    expect(mockGuardMember.count).not.toHaveBeenCalled();
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(4);
   });
 
   it("answers 201 and logs when the realignment after a committed provision fails", async () => {
