@@ -1205,9 +1205,13 @@ RT1 (T4). All other rows checked with no issue or not applicable.
   accepts only TENANT.
 - Red proof: the new self-test cells — sibling-scope same-named wrappers, a
   shadowing parameter, a callback run outside the opener, an aliased import in
-  both directions — all fail against the previous commit's gates (sixteen cells
-  across the two files, including the two whose paths were renamed), while the
-  allow cells pass on both.
+  both directions — all fail against the previous commit's gates. Corrected in
+  round 6 (T5): the measured figure is 17 failed of 72 across the two files, not
+  sixteen, and not every failure is a deny cell. Two allow cells fail against the
+  old gates because those gates over-blocked: "trusts the bypass opener imported
+  under another name" and "accepts a dynamic-where exception whose count matches".
+  A third cell, "scans both branches of a conditional where, and passes when both
+  filter on scalars", checks both a deny and an allow.
 
 #### T3 Major — the required-User gate reads a `where` given by name, by conditional, and nested
 
@@ -1291,3 +1295,169 @@ RT1 (T4). All other rows checked with no issue or not applicable.
   citations named lines that this branch's edits moved; they now name their
   subject (function, cell or call) instead of a line.
 
+## Round 6
+
+Reviewed range: `75c4acea5..ccf0cbbc9` (the round-5 fix commits). The three experts'
+raw outputs, including their full Recurring Issue Checks, are kept in the round's
+working files.
+
+### Changes from Previous Round
+
+Round 5's fixes were verified as correct for what they claimed: the ownership rule
+for attachment, scope-aware context resolution, the realignment cause, the SCIM
+DELETE audit, and the name sync. Every red proof in the round-5 entries reproduced
+except the S3/T2 count (T5). Round 6 found one widening that a round-5 fix
+introduced (R6-S1), and a producer path that round 5's rule left open (R6-S2).
+
+### Converged across experts (severity floored by convergence)
+
+- **R6-S3 / F1 — Major, convergent: security+functionality (R49/R47).**
+  `rls-context.mjs` returns an imported opener's context whatever argument the
+  node is in. A read in `withTenantRls`'s tenant argument, or in `withBypassRls`'s
+  client or purpose argument, runs before the context opens but is classified as
+  inside it. Both tenant gates therefore fail open for that shape. The defect
+  predates round 5, and no call site in `src` has this shape today.
+- **R6-S4 / F4 — Major (floored from Minor), convergent: security+functionality.**
+  SCIM POST's refusals give separate 409 details for "another tenant owns this
+  user" and "case-variant duplicate", which makes an email-existence oracle across
+  tenants. Directory sync's declined-attachment rows record the internal id of a
+  user this tenant has no relation to.
+
+### Security findings
+
+- **R6-S1 — Major (R43, introduced by round-5 S2).** The releasing tenant's
+  `USER_TENANT_REALIGNED` row now carries the joining tenant's SCIM-token creator
+  or sync admin as the actor. The tenant audit log, its download and the tenant
+  webhooks all hydrate or deliver that id, so tenant B sees tenant A's admin's name
+  and email. The comment's claim that the cause "names no tenant" is false.
+- **R6-S2 — Major (continuing round-5 S1).** A foreign user who still holds a
+  deactivated membership row here is reactivated, and then realigned, by SCIM
+  PUT/PATCH and by both of directory sync's reactivation arms. The only check on
+  that path is a uniqueness predicate, not ownership. Scenario: a user moves from
+  A to B by signing in; B suspends them; A's sync or a PATCH with `active:true`
+  takes them back to A.
+
+### Functionality findings
+
+- **F2 — Minor (R46, introduced by round-5 T3).** `filterLiterals` resolves the
+  identifiers nested inside a followed `const where` at the call site, not where
+  they are written. A same-named local at the call site therefore hides the real
+  filter, and the gate misses it.
+- **F3 — Minor (R12).** The `USER_TENANT_REALIGNED` label reads "on sign-in"
+  (en and ja), although the row now records `scim` or `directory_sync` as its
+  source, and no reader displays that source.
+
+### Testing findings
+
+- **T1 — Major (R16/RT1).** CI's integration job connects the application
+  singleton as the `postgres` superuser. RLS is therefore off in CI for the cells
+  that claim "the app role, RLS in force"; locally `.env` names `passwd_app`.
+- **T2 — Major (RT7/RT10).** Each of the following fail-open mutations survives
+  the gates' self-tests:
+  - the `rls-context` UNKNOWN branches: destructured or rest parameter, the
+    recursion guard, an unresolvable local binding;
+  - `filterLiterals` ignoring a `delete` or an `Object.assign`, or dropping a
+    conditional's unreadable branch;
+  - `<unreadable-where>` inside a logical operator, a relation filter, or a nested
+    relation.
+- **T3 — Major (RT7).** Directory sync's ambiguous-email decline (apply-phase
+  reason, no attach, dry run) has no engine cell.
+- **T4 — Minor.** The SCIM integration refusal cell cannot tell an ownership
+  refusal apart from a `users_email_key` P2002, which also returns 409.
+- **T5 — Minor (R29).** The S3/T2 red-proof figure is wrong. Against the previous
+  gates, 17 cells fail, and two of them are allow cells.
+- **T6 — Minor.** A required-User manifest disposition is not tied to the kind of
+  hit it excuses: a `dynamic-where` entry also excuses a projection hit.
+
+### Resolution Status — round 6
+
+#### R6-S2 Major — reactivation needs ownership too (with R6-S4 / F4, T3, T4)
+
+- Action: `usersOwnedByAnotherTenant(tenantId, userIds)` in
+  `src/lib/tenant-context.ts` applies the same `owningTenantOf` rule, keyed by user
+  id, under a cross-tenant bypass.
+  - SCIM PUT and PATCH ask it in `reactivationRefusal`, after the existing
+    second-active-membership check and before any tenant write.
+  - Directory sync asks it for the mapped members the IdP would reactivate. For
+    the create arm, `existingUsers` classifying the user as `foreign` is already
+    that answer.
+  - Both arms refuse with reason `owned_by_another_tenant`, stamp the sync time,
+    and do not realign. The dry run counts the same refusals.
+  - Deactivation is never asked: it cannot take a user from anyone.
+- The way back, stated as the cost: a member who left for another tenant returns
+  by signing in through this tenant's IdP (sign-in row 4 moves the column here).
+  After that this tenant owns them and SCIM or sync can reactivate them.
+  Alternatives considered: trusting a membership row older than the other
+  tenant's is the same uniqueness-for-authority substitution S1 named; and a
+  deactivated row carries no evidence of who is entitled to the user.
+- R6-S4 / F4: every existing user SCIM POST may not attach gets one 409 detail,
+  `SCIM_USER_NOT_PROVISIONABLE_DETAIL` — another tenant's user, a departed member
+  another tenant owns, or case-variant duplicates. The detail the PUT/PATCH
+  refusal returns is the same constant. Directory sync's declined-attachment rows
+  record `userId: null`. A refusal on a membership row here keeps the ids, which
+  are this tenant's own data. Whether an email exists at all (201 against 409)
+  remains S4's open question.
+- T3: engine cells for the ambiguous decline, live and dry run. T4: the SCIM
+  integration refusal cell also asserts the detail, so a `users_email_key` 409
+  cannot pass it.
+- Unit red proof, in a worktree copy. Each mutation failed exactly its own cells:
+
+  | Mutation | Cells that failed |
+  |---|---|
+  | SCIM ownership check removed | the PUT and PATCH refusal cells |
+  | refusal applied to deactivation too | both deactivation cells |
+  | engine create-arm ownership refusal removed | its refusal cell |
+  | engine `toUpdate` ownership refusal removed | its refusal cell |
+  | either dry-run clause removed | its preview cell |
+  | POST distinct details restored | the three POST refusal cells |
+  | the declined row keeping the foreign id | the declined-attachment audit cell |
+  | ownership decided by the column alone | the active-membership cell |
+  | an ambiguous resolution attached | the T3 cell |
+  | the ambiguous reason collapsed | the T3 cell |
+
+- Integration (real database, app role): new cells for PATCH refusing a departed
+  member another tenant owns, PATCH reactivating one this tenant owns, and
+  directory sync not reactivating a mapped departed member. With both ownership
+  checks removed, the two refusal cells failed and the other 11 passed.
+
+#### R6-S1 Major — the releasing tenant's row no longer names another tenant's people (with F3)
+
+- Action: `emitRealignment` records the system actor on the releasing tenant's
+  row unless the cause is a sign-in. It keeps `source` there. The joining tenant's
+  row keeps the producer's actor and `movedUserId`. The false "names no tenant"
+  claim was replaced by the reason: every reader of the releasing log hydrates an
+  actor id into name and email.
+- Red proof: restoring the producer's actor on the releasing row failed its cell.
+  The sign-in cell (the user on both rows) passes on both.
+- F3: the label no longer says "on sign-in" (en: "Member's owning organization
+  realigned (data left in the previous one)"; ja: "所属組織を再設定
+  (データは旧組織に残存)").
+- The class, derived over all 257 audit emit call sites (AST, tests excluded): a
+  row filed under tenant X whose actor can have no relation to X.
+  - The realignment's releasing row, fixed above. It was the only member whose
+    actor reaches a screen or download as a name and email.
+  - `AUTH_LOGIN_FAILURE` rows that sign-in files under a claim's owning tenant.
+    These are PERSONAL scope, so no tenant view, download or webhook shows them,
+    but a tenant's audit delivery target receives the raw user id. NOT changed.
+    - Anti-Deferral check: the row's `userId` is what the user's own personal log
+      reads, so replacing it would remove the failure from that log.
+    - Worst case: another tenant's SIEM learns an internal user id for a person
+      whose email its own IdP just authenticated.
+    - Likelihood: needs a revoked or colliding claim.
+    - Cost to fix: a delivery-time actor redaction for PERSONAL rows, a change to
+      the delivery pipeline outside this branch's subject.
+  - Team guests' actions in TEAM rows are an intended relation
+    (`team-guest-cross-tenant-admin-plan`).
+  - Actor ids left behind by a membership deleted later are historical record,
+    not disclosure.
+
+#### T1 Major — CI's integration job runs the application as `passwd_app`
+
+- Action: the "Run integration tests" step sets `DATABASE_URL` to `passwd_app`,
+  and `MIGRATION_DATABASE_URL` stays the superuser for the harness. This is the
+  role every local run has used through `.env`. Both RLS-dependent integration
+  files call a new `assertRlsApplies(prisma)` in `beforeAll`, which fails when the
+  singleton's role is a superuser or has BYPASSRLS, and fails too when the probe
+  itself fails.
+- Red proof: with `DATABASE_URL` pointed at the migration superuser, both files
+  failed in `beforeAll` naming `passwd_user`, and all 13 cells were skipped.

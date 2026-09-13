@@ -1024,12 +1024,12 @@ describe("runDirectorySync", () => {
     });
 
     /** An unmapped provider user whose email matches a DEACTIVATED member here. */
-    function seedUnmappedDeactivatedMember(memberUpdate: ReturnType<typeof vi.fn>) {
+    function seedUnmappedDeactivatedMember(memberUpdate: ReturnType<typeof vi.fn>, owner: string = OTHER_TENANT) {
       setupAcquiredLock();
-      // A user filed under another tenant who already holds a membership row HERE:
-      // the one foreign user this tenant may go on reactivating.
+      // A user who already holds a deactivated membership row HERE, filed under
+      // `owner`: another tenant by default — a departed member — or this one.
       mockGuardUserFindMany.mockResolvedValue([
-        ownershipRow("user-7", "dora@example.com", OTHER_TENANT, [
+        ownershipRow("user-7", "dora@example.com", owner, [
           { tenantId: TENANT_ID, deactivatedAt: new Date("2025-01-01") },
         ]),
       ]);
@@ -1088,11 +1088,11 @@ describe("runDirectorySync", () => {
       ]);
     });
 
-    it("reactivates that same unmapped member when the guard clears them", async () => {
+    it("reactivates an unmapped deactivated member this tenant owns when the guard clears them", async () => {
       // The allow side: a counter or an update that always refused would pass the
-      // cell above.
+      // cells around it.
       const memberUpdate = vi.fn().mockResolvedValue({});
-      seedUnmappedDeactivatedMember(memberUpdate);
+      seedUnmappedDeactivatedMember(memberUpdate, TENANT_ID);
 
       const result = await runDirectorySync(BASE_OPTIONS);
 
@@ -1105,10 +1105,42 @@ describe("runDirectorySync", () => {
       expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-7", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
     });
 
+    it("refuses to reactivate an unmapped member another tenant owns, though they are active nowhere", async () => {
+      // Round-6 R6-S2: the membership row here is what a user leaves behind when they
+      // join another tenant by signing in. Reactivating it and realigning took the
+      // user back from that tenant on this tenant's say-so.
+      const memberUpdate = vi.fn().mockResolvedValue({});
+      seedUnmappedDeactivatedMember(memberUpdate);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result.usersRefused).toBe(1);
+      expect(memberUpdate).toHaveBeenCalledWith({
+        where: { id: "member-7" },
+        data: { lastScimSyncedAt: expect.any(Date) },
+      });
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          targetType: "TenantMember",
+          targetId: "member-7",
+          metadata: expect.objectContaining({ userId: "user-7", reason: "owned_by_another_tenant" }),
+        }),
+      ]);
+      expect(mockRealignAfterActivation).not.toHaveBeenCalled();
+    });
+
+    it("previews the same refusal for that member on a dry run", async () => {
+      seedUnmappedDeactivatedMember(vi.fn());
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
+
+      expect(result).toMatchObject({ usersCreated: 1, usersRefused: 1 });
+    });
+
     it("realigns a scheduled run's activation under the system actor", async () => {
       // The releasing tenant's row says who moved the user; a scheduled run has no
       // human, and the moved user is not who acted (round-5 S2).
-      seedUnmappedDeactivatedMember(vi.fn().mockResolvedValue({}));
+      seedUnmappedDeactivatedMember(vi.fn().mockResolvedValue({}), TENANT_ID);
 
       await runDirectorySync({ ...BASE_OPTIONS, userId: undefined });
 
@@ -1177,9 +1209,10 @@ describe("runDirectorySync", () => {
           action: "DIRECTORY_SYNC_ACTIVATION_REFUSED",
           targetType: "DirectorySyncConfig",
           targetId: CONFIG_ID,
+          // No id for a user this tenant holds no membership for (round-6 R6-S4).
           metadata: {
             configId: CONFIG_ID,
-            userId: "user-9",
+            userId: null,
             email: "carol@example.com",
             reason: "owned_by_another_tenant",
           },
@@ -1264,6 +1297,8 @@ describe("runDirectorySync", () => {
         { externalId: "ext-1", internalId: "user-1" },
       ]);
       mockTenantMember.findMany.mockResolvedValue([deactivatedMember]);
+      // Filed under this tenant and active nowhere: this tenant owns them.
+      mockGuardUserFindMany.mockResolvedValue([ownershipRow("user-1", "alice@example.com", TENANT_ID)]);
 
       const result = await runDirectorySync(BASE_OPTIONS);
 
@@ -1278,6 +1313,118 @@ describe("runDirectorySync", () => {
       // After the commit: the apply ran in this tenant's context, which cannot
       // write a users row filed under another tenant.
       expect(mockRealignAfterActivation).toHaveBeenCalledWith("user-1", TENANT_ID, { source: "directory_sync", actorUserId: USER_ID, actorType: "HUMAN" });
+    });
+
+    /** A mapped, deactivated member the provider now sends as active, filed under `owner`. */
+    function seedMappedDeactivatedMember(owner: string) {
+      setupAcquiredLock();
+      let memberUpdateArgs: unknown;
+      setApplyTx(makeApplyTx({
+        tenantMember: {
+          findMany: vi.fn().mockResolvedValue([]),
+          create: vi.fn(),
+          update: vi.fn().mockImplementation((args: unknown) => {
+            memberUpdateArgs = args;
+            return Promise.resolve({});
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+      }));
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-1", email: "alice@example.com", displayName: "Alice", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([{ externalId: "ext-1", internalId: "user-1" }]);
+      mockTenantMember.findMany.mockResolvedValue([
+        makeMember({ id: "member-1", userId: "user-1", deactivatedAt: new Date("2025-01-01"), name: "Alice" }),
+      ]);
+      mockGuardUserFindMany.mockResolvedValue([ownershipRow("user-1", "alice@example.com", owner)]);
+      return () => memberUpdateArgs;
+    }
+
+    it("refuses to reactivate a mapped member another tenant owns, though they are active nowhere", async () => {
+      // Round-6 R6-S2, the toUpdate arm: the one-active-membership guard clears
+      // this user, because the tenant that owns them has suspended them.
+      const memberUpdateArgs = seedMappedDeactivatedMember(OTHER_TENANT);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result).toMatchObject({ success: true, usersRefused: 1 });
+      expect(memberUpdateArgs()).toMatchObject({
+        where: { id: "member-1" },
+        data: { deactivatedAt: new Date("2025-01-01") },
+      });
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          targetId: "member-1",
+          metadata: expect.objectContaining({ reason: "owned_by_another_tenant" }),
+        }),
+      ]);
+      expect(mockRealignAfterActivation).not.toHaveBeenCalled();
+    });
+
+    it("previews that refusal on a dry run, and reports none for a member this tenant owns", async () => {
+      seedMappedDeactivatedMember(OTHER_TENANT);
+      expect(await runDirectorySync({ ...BASE_OPTIONS, dryRun: true })).toMatchObject({ usersRefused: 1 });
+
+      vi.clearAllMocks();
+      mockGuardFindMany.mockResolvedValue([]);
+      mockDirSyncLog.create.mockResolvedValue({ id: "log-1" });
+      mockDecryptCredentials.mockReturnValue(OKTA_CREDS_JSON);
+      mockLoadUser.findMany.mockImplementation(async ({ where }: { where: { id: { in: string[] } } }) =>
+        where.id.in.filter((id) => memberNames.has(id)).map((id) => ({ id, name: memberNames.get(id) })),
+      );
+      seedMappedDeactivatedMember(TENANT_ID);
+      expect(await runDirectorySync({ ...BASE_OPTIONS, dryRun: true })).toMatchObject({ usersRefused: 0 });
+    });
+
+    it("declines case-variant duplicates without attaching either, and audits the ambiguity without an id", async () => {
+      // T3: the engine side of F1. Only the classifier and SCIM's 409 had cells.
+      setupAcquiredLock();
+      const applyTx = makeApplyTx();
+      setApplyTx(applyTx);
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-8", email: "dup@example.com", displayName: "Dup", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-a", "Dup@example.com", TENANT_ID),
+        ownershipRow("user-b", "dup@EXAMPLE.com", TENANT_ID),
+      ]);
+
+      const result = await runDirectorySync(BASE_OPTIONS);
+
+      expect(result).toMatchObject({ success: true, usersCreated: 0, usersRefused: 1 });
+      expect(applyTx.user.create).not.toHaveBeenCalled();
+      expect(applyTx.tenantMember.create).not.toHaveBeenCalled();
+      expect(applyTx.scimExternalMapping.upsert).not.toHaveBeenCalled();
+      expect(mockLogAuditBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          targetType: "DirectorySyncConfig",
+          targetId: CONFIG_ID,
+          metadata: { configId: CONFIG_ID, userId: null, email: "dup@example.com", reason: "ambiguous_email" },
+        }),
+      ]);
+    });
+
+    it("previews the ambiguous decline on a dry run", async () => {
+      setupAcquiredLock();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([
+        makeOktaUser({ id: "ext-8", email: "dup@example.com", displayName: "Dup", status: "ACTIVE" }),
+      ]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+      mockGuardUserFindMany.mockResolvedValue([
+        ownershipRow("user-a", "Dup@example.com", TENANT_ID),
+        ownershipRow("user-b", "dup@EXAMPLE.com", TENANT_ID),
+      ]);
+
+      const result = await runDirectorySync({ ...BASE_OPTIONS, dryRun: true });
+
+      expect(result).toMatchObject({ usersCreated: 0, usersRefused: 1 });
     });
 
     it("declines a user another tenant owns although they are active nowhere", async () => {

@@ -23,7 +23,7 @@ import { resolveExistingUsersForTenant, wouldCreateSecondActiveMembership } from
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
-import { toScimUserResource } from "@/lib/services/scim-user-service";
+import { SCIM_USER_NOT_PROVISIONABLE_DETAIL, toScimUserResource } from "@/lib/services/scim-user-service";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
 import { scimParseBody } from "@/lib/scim/parse-body";
@@ -156,13 +156,8 @@ async function handlePOST(req: NextRequest) {
   // by signing in through its IdP; SCIM can manage them after that.
   const emailKey = userName.toLowerCase();
   const resolution = (await resolveExistingUsersForTenant(tenantId, [emailKey])).get(emailKey);
-  if (resolution?.kind === "ambiguous") {
-    return scimError(409, "More than one existing user matches this userName", "uniqueness");
-  }
-  if (resolution?.kind === "foreign") {
-    return resolution.memberHere
-      ? scimError(409, "User already exists in this tenant", "uniqueness")
-      : scimError(409, "User is managed by another organization", "uniqueness");
+  if (resolution && resolution.kind !== "owned") {
+    return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
   }
   const existingUserId = resolution?.kind === "owned" ? resolution.userId : null;
   // `active !== false`, as PUT: a membership provisioned inactive cannot become a

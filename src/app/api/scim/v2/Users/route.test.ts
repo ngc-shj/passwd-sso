@@ -356,12 +356,12 @@ describe("POST /api/scim/v2/Users", () => {
     const res = await POST(postReq("moved@example.com"));
 
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain("managed by another organization");
+    expect(JSON.stringify(await res.json())).toContain("cannot be provisioned by this organization");
     expect(mockWithTenantRls).not.toHaveBeenCalled();
     expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
-  it("answers the existing-member 409 for a foreign user who already holds a membership here", async () => {
+  it("gives a foreign user who already holds a membership here the same 409, naming nothing", async () => {
     existingUsers = [
       foreignUser("user-moved", "moved@example.com", [{ tenantId: "tenant-1", deactivatedAt: new Date("2025-01-01") }]),
     ];
@@ -369,7 +369,9 @@ describe("POST /api/scim/v2/Users", () => {
     const res = await POST(postReq("moved@example.com"));
 
     expect(res.status).toBe(409);
-    expect(JSON.stringify(await res.json())).toContain("already exists in this tenant");
+    // One detail for every user this token may not attach: distinct details told
+    // the holder which case any email was (round-6 R6-S4).
+    expect(JSON.stringify(await res.json())).toContain("cannot be provisioned by this organization");
     expect(mockWithTenantRls).not.toHaveBeenCalled();
   });
 
@@ -379,6 +381,7 @@ describe("POST /api/scim/v2/Users", () => {
     const res = await POST(postReq("same@example.com"));
 
     expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("cannot be provisioned by this organization");
     expect(mockWithTenantRls).not.toHaveBeenCalled();
   });
 

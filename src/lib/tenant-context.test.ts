@@ -43,6 +43,7 @@ import {
   wouldCreateSecondActiveMembership,
   usersActiveInAnotherTenant,
   resolveExistingUsersForTenant,
+  usersOwnedByAnotherTenant,
   resolveUserTenantId,
   resolveTeamTenantId,
   withUserTenantRls,
@@ -424,6 +425,59 @@ describe("withTeamTenantRls", () => {
       prisma,
       "tenant-xyz",
       expect.any(Function),
+    );
+  });
+});
+
+// ─── usersOwnedByAnotherTenant ─────────────────────────────
+
+describe("usersOwnedByAnotherTenant", () => {
+  const row = (id: string, column: string, active: string[] = []) => ({
+    id,
+    tenantId: column,
+    tenantMemberships: active.map((tenantId) => ({ tenantId })),
+  });
+
+  it("asks nothing for no users", async () => {
+    expect(await usersOwnedByAnotherTenant("this-tenant", [])).toEqual(new Set());
+    expect(mockWithBypassRls).not.toHaveBeenCalled();
+  });
+
+  it("reads each user's column and active memberships, oldest first, under a cross-tenant bypass", async () => {
+    mockUserFindMany.mockResolvedValue([]);
+
+    await usersOwnedByAnotherTenant("this-tenant", ["u-1"]);
+
+    expect(mockUserFindMany).toHaveBeenCalledWith({
+      where: { id: { in: ["u-1"] } },
+      select: {
+        id: true,
+        tenantId: true,
+        tenantMemberships: {
+          where: { deactivatedAt: null },
+          select: { tenantId: true },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), "cross_tenant_lookup");
+  });
+
+  it("names a user filed under another tenant and active nowhere, and not one filed here", async () => {
+    // The departed member R6-S2 is about: a membership row here, the column elsewhere.
+    mockUserFindMany.mockResolvedValue([row("departed", "other-tenant"), row("own", "this-tenant")]);
+
+    expect(await usersOwnedByAnotherTenant("this-tenant", ["departed", "own"])).toEqual(new Set(["departed"]));
+  });
+
+  it("decides by the active membership before the column, in both directions", async () => {
+    mockUserFindMany.mockResolvedValue([
+      row("active-here", "other-tenant", ["this-tenant"]),
+      row("active-there", "this-tenant", ["other-tenant"]),
+    ]);
+
+    expect(await usersOwnedByAnotherTenant("this-tenant", ["active-here", "active-there"])).toEqual(
+      new Set(["active-there"]),
     );
   });
 });

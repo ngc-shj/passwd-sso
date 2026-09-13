@@ -6,7 +6,7 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
+import { usersOwnedByAnotherTenant, wouldCreateSecondActiveMembership } from "@/lib/tenant-context";
 import { isUniqueViolationOn, ONE_ACTIVE_MEMBERSHIP_INDEX } from "@/lib/prisma/prisma-error";
 import {
   invalidateUserSessions,
@@ -24,6 +24,7 @@ import {
   replaceScimUser,
   patchScimUser,
   deactivateScimUser,
+  SCIM_USER_NOT_PROVISIONABLE_DETAIL,
   ScimUserNotFoundError,
   ScimOwnerProtectedError,
   ScimExternalIdConflictError,
@@ -51,6 +52,22 @@ async function realignReactivatedMember(
   } catch (error) {
     getLogger().error({ tenantId, userId, error: errorLogFields(error) }, "scim.realign-failed");
   }
+}
+
+/**
+ * The response refusing a SCIM token's reactivation of this member, or null when
+ * it may proceed. Two questions, in this order: would it make a second active
+ * membership (uniqueness), and does this tenant own the user at all (authority).
+ * A membership row here answers neither — see `usersOwnedByAnotherTenant`.
+ */
+async function reactivationRefusal(userId: string, tenantId: string): Promise<Response | null> {
+  if (await wouldCreateSecondActiveMembership(userId, tenantId)) {
+    return scimError(409, "User already belongs to another organization", "uniqueness");
+  }
+  if ((await usersOwnedByAnotherTenant(tenantId, [userId])).has(userId)) {
+    return scimError(409, SCIM_USER_NOT_PROVISIONABLE_DETAIL, "uniqueness");
+  }
+  return null;
 }
 
 // GET /api/scim/v2/Users/[id]
@@ -100,8 +117,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
   if (!resolvedUserId) return scimError(404, "User not found");
-  if (active !== false && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
-    return scimError(409, "User already belongs to another organization", "uniqueness");
+  if (active !== false) {
+    const refusal = await reactivationRefusal(resolvedUserId, tenantId);
+    if (refusal) return refusal;
   }
 
   let serviceResult;
@@ -206,8 +224,9 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   // `operations.active !== undefined`, so a name-only PATCH cannot reactivate
   // and must not be refused. PUT's schema defaults `active` to true and
   // `replaceScimUser` writes unconditionally, so `!== false` is right there.
-  if (patchOps.active === true && (await wouldCreateSecondActiveMembership(resolvedUserId, tenantId))) {
-    return scimError(409, "User already belongs to another organization", "uniqueness");
+  if (patchOps.active === true) {
+    const refusal = await reactivationRefusal(resolvedUserId, tenantId);
+    if (refusal) return refusal;
   }
 
   let serviceResult;

@@ -20,6 +20,7 @@ import { prisma, type TxOrPrisma } from "@/lib/prisma";
 import { logAuditInTx } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { countStrandedRows, realignOwningTenantColumn } from "@/lib/tenant-context";
 import { BYPASS_PURPOSE, withBypassRls } from "@/lib/tenant-rls";
 
@@ -33,10 +34,12 @@ export const REALIGNMENT_SOURCE = {
 export type RealignmentSource = (typeof REALIGNMENT_SOURCE)[keyof typeof REALIGNMENT_SOURCE];
 
 /**
- * Who caused a realignment. The RELEASING tenant's only question about the row it
- * receives is whether the user signed in through another IdP or another tenant's
- * provisioning took them (round-5 S2): recording the moved user as the actor for
- * every producer answered neither. It names no tenant, so the line S3 draws holds.
+ * Who caused a realignment, and through which producer (round-5 S2): recording the
+ * moved user as the actor for every producer told neither tenant whether the user
+ * signed in elsewhere or another tenant's provisioning moved them.
+ *
+ * The actor is recorded only where it is a principal of the tenant reading the
+ * row — see `emitRealignment`.
  */
 export interface RealignmentCause {
   source: RealignmentSource;
@@ -71,6 +74,15 @@ export function realignmentBySignIn(userId: string): RealignmentCause {
  * at all while its own member list broke. Their row carries no id of the tenant
  * the user went to — that tenant's identity is not theirs to learn, the same
  * line the directory-sync refusal draws.
+ *
+ * Nor its people. For SCIM and directory sync the actor is the joining tenant's
+ * token creator or sync admin, and every reader of the releasing tenant's log —
+ * the audit-log view and its download hydrate an actor id into name and email
+ * with no tenant check, and webhooks deliver the id — would hand them that
+ * person, whose email names the tenant anyway (round-6 R6-S1). The releasing row
+ * therefore records the system as actor and keeps `source`, which alone answers
+ * its question. A sign-in is the one cause whose actor is the moved user, a
+ * principal the releasing tenant already knows, so it keeps them.
  */
 async function emitRealignment(
   tx: TxOrPrisma,
@@ -84,8 +96,6 @@ async function emitRealignment(
   },
 ): Promise<void> {
   const base = {
-    userId: r.cause.actorUserId,
-    actorType: r.cause.actorType,
     scope: AUDIT_SCOPE.TENANT,
     // The MEMBERSHIP row, not the user id. Every other emitter of this
     // targetType keys on `tenant_members.id`, and an operator joining
@@ -93,8 +103,14 @@ async function emitRealignment(
     // that is their only handle on the stranded rows.
     targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
   } as const;
+  const releasingActor =
+    r.cause.source === REALIGNMENT_SOURCE.SIGN_IN
+      ? { userId: r.cause.actorUserId, actorType: r.cause.actorType }
+      : { userId: SYSTEM_ACTOR_ID, actorType: ACTOR_TYPE.SYSTEM };
   await logAuditInTx(tx as Prisma.TransactionClient, r.tenantId, {
     ...base,
+    userId: r.cause.actorUserId,
+    actorType: r.cause.actorType,
     action: AUDIT_ACTION.USER_TENANT_REALIGNED,
     tenantId: r.tenantId,
     targetId: r.memberId,
@@ -107,6 +123,7 @@ async function emitRealignment(
   });
   await logAuditInTx(tx as Prisma.TransactionClient, r.previousTenantId, {
     ...base,
+    ...releasingActor,
     action: AUDIT_ACTION.USER_TENANT_REALIGNED,
     tenantId: r.previousTenantId,
     // No membership row of ours exists in the releasing tenant to point at —

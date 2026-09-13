@@ -36,6 +36,7 @@ import {
   realignToMembershipInTx,
 } from "./tenant-realignment";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const USER_ID = "user-1";
 const JOINED = "tenant-joined";
@@ -80,7 +81,7 @@ describe("realignToMembershipInTx", () => {
     expect(JSON.stringify(released[2])).not.toContain(JOINED);
   });
 
-  it("names the producer's actor and source on both rows, and the moved user only to the joined tenant", async () => {
+  it("names the producer's actor only to the joined tenant, and the system to the releasing one", async () => {
     mockRealignOwningTenantColumn.mockResolvedValue(RELEASED);
 
     await realignToMembershipInTx({} as never, { userId: USER_ID, memberId: "m-1", tenantId: JOINED, cause: SCIM_CAUSE });
@@ -91,7 +92,10 @@ describe("realignToMembershipInTx", () => {
       actorType: "HUMAN",
       metadata: { source: "scim", movedUserId: USER_ID },
     });
-    expect(released[2]).toMatchObject({ userId: "token-admin", actorType: "HUMAN", targetId: USER_ID });
+    // The joining tenant's admin is not a principal of the releasing tenant, whose
+    // log hydrates an actor id into name and email (round-6 R6-S1).
+    expect(released[2]).toMatchObject({ userId: SYSTEM_ACTOR_ID, actorType: "SYSTEM", targetId: USER_ID });
+    expect(JSON.stringify(released[2])).not.toContain("token-admin");
     expect(released[2].metadata).toEqual({ leftBehind: { passwordEntry: 3 }, source: "scim" });
   });
 

@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { assertRlsApplies, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 
 const { mockFetchOktaUsers } = vi.hoisted(() => ({ mockFetchOktaUsers: vi.fn() }));
 
@@ -25,6 +25,7 @@ vi.mock("@/lib/directory-sync/credentials", () => ({
 vi.mock("@/lib/webhook-dispatcher", () => ({ dispatchTenantWebhook: vi.fn() }));
 
 import { runDirectorySync } from "@/lib/directory-sync/engine";
+import { prisma } from "@/lib/prisma";
 
 function oktaUser(id: string, email: string, displayName: string, active: boolean) {
   return {
@@ -79,6 +80,7 @@ describe("directory sync — users filed under another tenant (real DB)", () => 
   }
 
   beforeAll(async () => {
+    await assertRlsApplies(prisma);
     ctx = await createTestContext();
   });
 
@@ -156,6 +158,41 @@ describe("directory sync — users filed under another tenant (real DB)", () => 
       ),
     );
     expect(n).toBe(0);
+  });
+
+  it("does not reactivate a mapped departed member another tenant now owns", async () => {
+    // Round-6 R6-S2: the member left for the owning tenant, which then suspended
+    // them — so no second active membership stops the reactivation.
+    const userId = await ctx.createUser(owning);
+    await asSuperuser(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        owning,
+        userId,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+        randomUUID(),
+        syncing,
+        userId,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO scim_external_mappings (id, tenant_id, external_id, resource_type, internal_id, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, 'ext-5', 'User', $3, now(), now())`,
+        randomUUID(),
+        syncing,
+        userId,
+      );
+    });
+    const { email } = await userRow(userId);
+    mockFetchOktaUsers.mockResolvedValue([oktaUser("ext-5", email, "Departed", true)]);
+
+    const result = await runDirectorySync({ configId, tenantId: syncing });
+
+    expect(result).toMatchObject({ success: true, usersRefused: 1 });
+    expect(await membershipsIn(syncing, userId)).toEqual([{ deactivated: true }]);
+    expect((await userRow(userId)).tenant_id).toBe(owning);
   });
 
   it("attaches an existing user this tenant owns, active, without creating another", async () => {

@@ -374,7 +374,8 @@ export type ExistingUserResolution =
  * then realigning them moved their tenancy on this tenant's say-so (round-5 S1).
  * Joining a new tenant is the user's own act, through that tenant's IdP (sign-in
  * row 4). `memberHere` marks a foreign user who already holds a membership row
- * in this tenant, which the producer may reactivate as before.
+ * in this tenant: a row the producer keeps in sync, but may not reactivate —
+ * see `usersOwnedByAnotherTenant`.
  *
  * Matched case-insensitively, and every case variant counts: `users_email_key` is
  * case-sensitive and directory sync stores the provider's casing, so two rows can
@@ -425,5 +426,46 @@ export async function resolveExistingUsersForTenant(
       );
     }
     return resolved;
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+}
+
+/**
+ * Which of these users another tenant owns, by the rule `owningTenantOf` applies.
+ *
+ * For REACTIVATION by the producers that do not authenticate the user — SCIM PUT
+ * and PATCH, and both of directory sync's reactivation arms. A membership row in
+ * this tenant is not authority over the user: it is typically what is left after
+ * the user left this tenant and joined another by signing in through its IdP.
+ * Reactivating it, and then realigning the column, took the user back from the
+ * tenant that owns them on this tenant's say-so — and the one-active-membership
+ * guard does not stop it once that tenant has suspended them (round-6 R6-S2).
+ * The way back is the user's own act, as for attachment: signing in through this
+ * tenant's IdP moves the column here, after which this tenant owns them.
+ *
+ * MUST be called OUTSIDE a tenant context: another tenant's membership, and a
+ * users row filed under it, are what RLS hides inside one. A user with no row is
+ * absent from the result.
+ */
+export async function usersOwnedByAnotherTenant(
+  tenantId: string,
+  userIds: readonly string[],
+): Promise<Set<string>> {
+  if (userIds.length === 0) return new Set();
+  return withBypassRls(prisma, async (tx) => {
+    const users = await tx.user.findMany({
+      where: { id: { in: [...userIds] } },
+      select: {
+        id: true,
+        tenantId: true,
+        tenantMemberships: {
+          where: { deactivatedAt: null },
+          select: { tenantId: true },
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+    return new Set(
+      users.filter((u) => owningTenantOf(u.tenantId, u.tenantMemberships) !== tenantId).map((u) => u.id),
+    );
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }

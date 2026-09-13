@@ -13,7 +13,9 @@
  *   - the user list, read under a bypass, shows this tenant's departed member and
  *     no one else's;
  *   - POST refuses a user another tenant owns (round-5 S1) and still attaches a
- *     user this tenant owns.
+ *     user this tenant owns;
+ *   - PATCH refuses to reactivate a departed member another tenant now owns
+ *     (round-6 R6-S2) and still reactivates one this tenant owns.
  *
  * Only token validation is mocked: it is not the subject, and it needs a real
  * token row the cells have no other use for.
@@ -22,7 +24,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } 
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { assertRlsApplies, createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 
 const { scimTenant } = vi.hoisted(() => ({ scimTenant: { id: "" } }));
 
@@ -44,6 +46,7 @@ vi.mock("@/lib/scim/with-scim-auth", async () => {
 });
 
 import { GET, POST } from "@/app/api/scim/v2/Users/route";
+import { PATCH } from "@/app/api/scim/v2/Users/[id]/route";
 import { fetchScimGroup } from "@/lib/services/scim-group-service";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -99,7 +102,22 @@ describe("SCIM — users filed under another tenant (real DB)", () => {
     );
   }
 
+  function scimReactivate(userId: string) {
+    return PATCH(
+      new NextRequest(`http://localhost/api/scim/v2/Users/${userId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: true }],
+        }),
+      }),
+      { params: Promise.resolve({ id: userId }) },
+    );
+  }
+
   beforeAll(async () => {
+    await assertRlsApplies(prisma);
     ctx = await createTestContext();
   });
 
@@ -203,8 +221,53 @@ describe("SCIM — users filed under another tenant (real DB)", () => {
     const res = await scimPost(email);
 
     expect(res.status).toBe(409);
+    // The refusal, not a users_email_key collision, which is also a 409.
+    expect(JSON.stringify(await res.json())).toContain("cannot be provisioned by this organization");
     expect(await membershipsIn(here, released)).toEqual([]);
     expect((await userRow(released)).tenant_id).toBe(elsewhere);
+  });
+
+  it("refuses to reactivate a departed member another tenant now owns, leaving them untouched", async () => {
+    // Round-6 R6-S2: the user left this tenant and joined the other; that tenant
+    // then suspended them, so no second active membership stops a reactivation.
+    const departed = await ctx.createUser(elsewhere);
+    await asSuperuser(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        elsewhere,
+        departed,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO tenant_members (id, tenant_id, user_id, role, deactivated_at, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'MEMBER', now(), now(), now())`,
+        randomUUID(),
+        here,
+        departed,
+      );
+    });
+
+    const res = await scimReactivate(departed);
+
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain("cannot be provisioned by this organization");
+    expect(await membershipsIn(here, departed)).toEqual([{ deactivated: true }]);
+    expect((await userRow(departed)).tenant_id).toBe(elsewhere);
+  });
+
+  it("reactivates a deactivated member this tenant owns", async () => {
+    const own = await ctx.createUser(here);
+    await asSuperuser((tx) =>
+      tx.$executeRawUnsafe(
+        `UPDATE tenant_members SET deactivated_at = now() WHERE tenant_id = $1::uuid AND user_id = $2::uuid`,
+        here,
+        own,
+      ),
+    );
+
+    const res = await scimReactivate(own);
+
+    expect(res.status).toBe(200);
+    expect(await membershipsIn(here, own)).toEqual([{ deactivated: false }]);
   });
 
   it("attaches a user this tenant owns, active, without creating another", async () => {

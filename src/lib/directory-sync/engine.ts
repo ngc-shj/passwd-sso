@@ -12,7 +12,11 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { resolveExistingUsersForTenant, usersActiveInAnotherTenant } from "@/lib/tenant-context";
+import {
+  resolveExistingUsersForTenant,
+  usersActiveInAnotherTenant,
+  usersOwnedByAnotherTenant,
+} from "@/lib/tenant-context";
 import { REALIGNMENT_SOURCE, realignAfterActivation } from "@/lib/tenant/tenant-realignment";
 import { getLogger } from "@/lib/logger";
 import { errorLogFields } from "@/lib/logger/error-fields";
@@ -498,6 +502,17 @@ export async function runDirectorySync(
       return null;
     };
 
+    // Reactivation needs the authority attachment needs (round-6 R6-S2): a
+    // membership row here is not ownership. Asked only for the mapped members the
+    // IdP would reactivate; a toCreate user is already classified above, where
+    // `foreign` is exactly this answer.
+    const ownedElsewhere = await usersOwnedByAnotherTenant(
+      tenantId,
+      toUpdate
+        .filter(({ user: pu, internalId }) => pu.active && !!memberByUserId.get(internalId)?.deactivatedAt)
+        .map(({ internalId }) => internalId),
+    );
+
     // 7. Apply changes (if not dryRun)
     if (!dryRun) {
       // Members this run activated whose users row already existed. Their owning
@@ -546,7 +561,9 @@ export async function runDirectorySync(
             usersRefused++;
             refusals.push({
               memberId: null,
-              userId: resolution?.kind === "foreign" ? resolution.userId : null,
+              // No id: this tenant holds no membership for the user, and another
+              // tenant's internal id is not its to learn (round-6 R6-S4).
+              userId: null,
               email: pu.email,
               reason:
                 resolution?.kind === "ambiguous"
@@ -590,7 +607,12 @@ export async function runDirectorySync(
               activated.push(user.id);
             }
           } else if (existing.deactivatedAt && pu.active) {
-            if (activeElsewhere.emails.has(pu.email.toLowerCase())) {
+            const refusal = activeElsewhere.emails.has(pu.email.toLowerCase())
+              ? REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT
+              : resolution?.kind === "foreign"
+                ? REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT
+                : null;
+            if (refusal) {
               // Refused, not silently skipped: the sync still stamps the sync
               // time so the run is not mistaken for one that never saw this user.
               await tx.tenantMember.update({
@@ -602,7 +624,7 @@ export async function runDirectorySync(
                 memberId: existing.id,
                 userId: user.id,
                 email: pu.email,
-                reason: REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT,
+                reason: refusal,
               });
             } else {
               // Reactivate
@@ -663,11 +685,17 @@ export async function runDirectorySync(
           // membership; a DEACTIVATION is always applied, because it cannot add
           // one and it is the operation that repairs the condition.
           const wouldReactivate = pu.active && member.deactivatedAt !== null;
-          const refused = wouldReactivate && activeElsewhere.ids.has(internalId);
+          const refusal = !wouldReactivate
+            ? null
+            : activeElsewhere.ids.has(internalId)
+              ? REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT
+              : ownedElsewhere.has(internalId)
+                ? REFUSAL_REASON.OWNED_BY_ANOTHER_TENANT
+                : null;
           await tx.tenantMember.update({
             where: { id: member.id },
             data: {
-              deactivatedAt: refused
+              deactivatedAt: refusal
                 ? member.deactivatedAt
                 : pu.active
                   ? null
@@ -677,13 +705,13 @@ export async function runDirectorySync(
           });
 
           usersUpdated++;
-          if (refused) {
+          if (refusal) {
             usersRefused++;
             refusals.push({
               memberId: member.id,
               userId: internalId,
               email: pu.email,
-              reason: REFUSAL_REASON.ACTIVE_IN_ANOTHER_TENANT,
+              reason: refusal,
             });
           } else if (wouldReactivate) {
             activated.push(internalId);
@@ -754,9 +782,12 @@ export async function runDirectorySync(
       usersCreated = toCreate.length - declined.length;
       usersUpdated = toUpdate.length;
       usersDeactivated = toDeactivate.length;
-      // Both apply-phase arms refuse on the same condition — the IdP asked for an
-      // ACTIVE member and the guard found one elsewhere — so the preview can
-      // answer it without replaying the loops. The one case it cannot see is a
+      // Both apply-phase arms refuse on the same conditions — the IdP asked for an
+      // ACTIVE member, and the user is active elsewhere or owned by another tenant
+      // — so the preview can answer them without replaying the loops. A toCreate
+      // user classified `foreign` here holds a membership row (the declined ones
+      // are counted above), and it cannot be active: an active membership here
+      // would make this tenant the owner. The one case it cannot see is a
       // toCreate user who already holds an ACTIVE membership HERE: the apply
       // phase resolves that from the tx and refuses nothing, because there is
       // nothing to activate. That state is a second active membership already,
@@ -767,7 +798,8 @@ export async function runDirectorySync(
           (pu) =>
             declinedAttachment(pu) === null &&
             pu.active &&
-            activeElsewhere.emails.has(pu.email.toLowerCase()),
+            (activeElsewhere.emails.has(pu.email.toLowerCase()) ||
+              existingUsers.get(pu.email.toLowerCase())?.kind === "foreign"),
         ).length +
         toUpdate.filter(({ user: pu, internalId }) => {
           const member = memberByUserId.get(internalId);
@@ -775,7 +807,7 @@ export async function runDirectorySync(
             !!member &&
             pu.active &&
             member.deactivatedAt !== null &&
-            activeElsewhere.ids.has(internalId)
+            (activeElsewhere.ids.has(internalId) || ownedElsewhere.has(internalId))
           );
         }).length;
     }

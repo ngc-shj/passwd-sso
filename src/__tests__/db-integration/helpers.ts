@@ -63,9 +63,9 @@ function getConnectionString(role: TestRole): string {
  *
  * Exported because a test that needs a FRESH connection — one whose session
  * GUCs have never been set — cannot use `ctx.app.prisma`, which is pooled, and
- * the obvious substitute is wrong: `process.env.DATABASE_URL` names the
- * SUPERUSER in CI (`ci-integration.yml` sets it to `postgres`) and `passwd_app`
- * locally. A privilege-denial case built on it therefore asserts nothing in CI,
+ * the obvious substitute is wrong: `process.env.DATABASE_URL` is whatever the
+ * environment says — CI's job-level value is the `postgres` SUPERUSER, and only
+ * its integration step overrides it with `passwd_app`. A privilege-denial case built on it therefore asserts nothing in CI,
  * where the statement simply succeeds — which is exactly how two `42501` cases
  * passed every local run and failed on the branch's first CI run.
  *
@@ -74,6 +74,27 @@ function getConnectionString(role: TestRole): string {
  */
 export function appConnectionString(): string {
   return getConnectionString("app");
+}
+
+/**
+ * Fail unless `client` connects as a role that row-level security applies to.
+ *
+ * For a file that runs PRODUCTION code through the `@/lib/prisma` singleton to
+ * prove behaviour under RLS: that singleton connects with `DATABASE_URL`, and a
+ * superuser or BYPASSRLS role sees every row, so each cell whose subject is a
+ * row RLS hides passes whether or not the code handles it. CI ran exactly that
+ * way until audit-tenant-adjudicator round 6 (T1). A failed probe fails too.
+ */
+export async function assertRlsApplies(client: Pick<PrismaClient, "$queryRawUnsafe">): Promise<void> {
+  const [role] = await client.$queryRawUnsafe<{ name: string; rolsuper: boolean; rolbypassrls: boolean }[]>(
+    `SELECT current_user AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+  );
+  if (!role || role.rolsuper || role.rolbypassrls) {
+    throw new Error(
+      `this file proves behaviour under RLS, but the application client connects as ` +
+        `${role?.name ?? "an unknown role"}, which RLS does not apply to — point DATABASE_URL at passwd_app`,
+    );
+  }
 }
 
 // ─── Prisma client factory ──────────────────────────────────────

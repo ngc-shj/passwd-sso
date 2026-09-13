@@ -84,6 +84,20 @@ vi.mock("@/lib/logger", () => ({
 import { GET, PUT, PATCH, DELETE } from "./route";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
+/**
+ * Who owns `user-1` as the ownership read sees it: filed here and active nowhere
+ * by default. The same bypass `user.findMany` also serves the display read, so
+ * the query tells them apart.
+ */
+const ownership = { column: "tenant-1", active: [] as Array<{ tenantId: string }> };
+function guardUserRows({ select }: { select?: { tenantMemberships?: unknown } }) {
+  return Promise.resolve(
+    select?.tenantMemberships
+      ? [{ id: "user-1", tenantId: ownership.column, tenantMemberships: ownership.active }]
+      : [{ id: "user-1", email: "u@example.com", name: "User", image: null }],
+  );
+}
+
 const SCIM_TOKEN_DATA = {
   ok: true as const,
   data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1", actorType: "HUMAN" as const },
@@ -120,7 +134,9 @@ describe("GET /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
-    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    ownership.column = "tenant-1";
+    ownership.active = [];
+    mockGuardUser.findMany.mockImplementation(guardUserRows);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
     mockRealignAfterActivation.mockResolvedValue(null);
   });
@@ -212,12 +228,17 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
-    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    ownership.column = "tenant-1";
+    ownership.active = [];
+    mockGuardUser.findMany.mockImplementation(guardUserRows);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
     mockRealignAfterActivation.mockResolvedValue(null);
   });
 
   it("deactivates tenant member", async () => {
+    // Filed under another tenant: ownership is asked only of a reactivation, and a
+    // deactivation is the operation that can never take a user from anyone.
+    ownership.column = "other-tenant";
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
@@ -282,6 +303,26 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     // Positive: nothing was written. A 409 with the update already applied would
     // be the same status and the opposite outcome.
     expect(mockTenantMember.update).not.toHaveBeenCalled();
+  });
+
+  it("refuses PUT reactivation of a member another tenant owns, though they are active nowhere", async () => {
+    // Round-6 R6-S2: the uniqueness guard clears this user — the tenant that owns
+    // them suspended them — and uniqueness is not authority.
+    ownership.column = "other-tenant";
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: { schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"], userName: "u@example.com", active: true },
+      }) as never,
+      { params: Promise.resolve({ id: "user-1" }) },
+    );
+
+    expect(res!.status).toBe(409);
+    expect(JSON.stringify(await res!.json())).toContain("cannot be provisioned by this organization");
+    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockTenantMember.update).not.toHaveBeenCalled();
+    expect(mockRealignAfterActivation).not.toHaveBeenCalled();
   });
 
   it("allows PUT reactivation when the user's only active membership is this tenant", async () => {
@@ -809,7 +850,9 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
-    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    ownership.column = "tenant-1";
+    ownership.active = [];
+    mockGuardUser.findMany.mockImplementation(guardUserRows);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
     mockRealignAfterActivation.mockResolvedValue(null);
   });
@@ -931,6 +974,26 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     expect(mockTenantMember.update).not.toHaveBeenCalled();
   });
 
+  it("refuses PATCH reactivation of a member another tenant owns, though they are active nowhere", async () => {
+    ownership.column = "other-tenant";
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: true }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(409);
+    expect(JSON.stringify(await res!.json())).toContain("cannot be provisioned by this organization");
+    expect(mockTenantMember.update).not.toHaveBeenCalled();
+    expect(mockRealignAfterActivation).not.toHaveBeenCalled();
+  });
+
   it("does not refuse a name-only PATCH, which cannot reactivate", async () => {
     // The boundary PUT and PATCH do NOT share. `patchScimUser` touches
     // `deactivatedAt` only when `operations.active !== undefined`, so a
@@ -938,6 +1001,7 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     // (PUT's predicate) 409'd it. PUT's schema defaults `active` to true and
     // writes unconditionally, so `!== false` is correct there and wrong here.
     mockGuardMember.findMany.mockResolvedValue([{ tenantId: "other-tenant" }]);
+    ownership.column = "other-tenant";
     mockTenantMember.findUnique
       .mockResolvedValueOnce({ userId: "user-1" })
       .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date("2024-01-01T00:00:00.000Z") })
@@ -1125,7 +1189,9 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockGuardMember.findUnique.mockResolvedValue({ userId: "user-1" });
     mockGuardMember.findMany.mockResolvedValue([]);
     mockGuardMapping.findFirst.mockResolvedValue(null);
-    mockGuardUser.findMany.mockResolvedValue([{ id: "user-1", email: "u@example.com", name: "User", image: null }]);
+    ownership.column = "tenant-1";
+    ownership.active = [];
+    mockGuardUser.findMany.mockImplementation(guardUserRows);
     mockGuardUser.findUnique.mockResolvedValue({ email: "u@example.com", name: "User", locale: null });
     mockRealignAfterActivation.mockResolvedValue(null);
   });

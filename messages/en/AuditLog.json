@@ -166,7 +166,7 @@
   "DIRECTORY_SYNC_RUN": "Directory sync executed",
   "DIRECTORY_SYNC_STALE_RESET": "Directory sync stale reset",
   "DIRECTORY_SYNC_ACTIVATION_REFUSED": "Directory sync declined to activate or add a member (active in or managed by another organization)",
-  "USER_TENANT_REALIGNED": "Member's owning organization realigned on sign-in (data left in the previous one)",
+  "USER_TENANT_REALIGNED": "Member's owning organization realigned (data left in the previous one)",
   "ACCESS_DENIED": "Access denied by network policy",
   "TENANT_ROLE_UPDATE": "Changed tenant member role",
   "TENANT_MEMBER_LOCKOUT_CLEAR": "Cleared member vault lockout",
